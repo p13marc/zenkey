@@ -6,6 +6,8 @@
 # declared `kind` (RFC 08 §2, v1.32): adding one is additive,
 # changing or removing one is incompatible. An `error` line pins a
 # declared error name (RFC 08 §2, v1.40), which retires like a subject.
+# A `when-subject` / `when-procedure` line pins an entry's gate (v1.35):
+# a gate is not a shape, so its every change is stale, never incompatible.
 error	systemd	unit-not-found
 procedure	catalog	introspect	read	-	RegistrySlice
 procedure	catalog	link	write	-	OperatorAssertion
@@ -534,3 +536,6 @@ subject	systemd	units/failed	telemetry	TelemetryPoint
 subject	systemd	units/inactive	telemetry	TelemetryPoint
 subject	systemd	units/loaded	telemetry	TelemetryPoint
 subject	systemd	units/total	telemetry	TelemetryPoint
+when-subject	netlink	sockets/tcp/connlat_us_p50	feature:ebpf
+when-subject	netlink	sockets/tcp/connlat_us_p95	feature:ebpf
+when-subject	netlink	wireguard/{iface}/peers	capability:wireguard

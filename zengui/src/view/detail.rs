@@ -525,7 +525,15 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             if let Some(e) = &s.encoding {
                 meta.push_str(&format!(" · encoding {e}"));
             }
+            if let Some(w) = &s.when {
+                // RFC 08 §2 (v1.35): the gate, so silence reads as honest.
+                let tokens: Vec<String> = w.iter().map(zenkey::slice::Predicate::token).collect();
+                meta.push_str(&format!(" · when {}", tokens.join(" and ")));
+            }
             col = col.push(kit::muted(meta));
+            if let Some(n) = &s.gate_note {
+                col = col.push(kit::muted(format!("gate: {n}")));
+            }
             if !s.vars.is_empty() {
                 col = col.push(kit::muted(
                     s.vars

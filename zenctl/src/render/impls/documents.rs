@@ -68,12 +68,17 @@ impl Render for TopicInfo {
                 "  (`zenctl interface show {payload} --schema` for the served shape)"
             )]);
         }
+        // `when` (RFC 08 §2, v1.35) rendered as the ANDed list it is, so an
+        // operator reads why a declared subject may be silent.
+        let when = (!self.when.is_empty()).then(|| self.when.join(" and "));
         for (k, v) in [
             ("unit", &self.unit),
             ("kind", &self.kind),
             ("qos", &self.qos),
             ("rate", &self.rate),
             ("encoding", &self.encoding),
+            ("when", &when),
+            ("gate", &self.gate_note),
             ("since", &self.since),
             ("about", &self.description),
         ] {

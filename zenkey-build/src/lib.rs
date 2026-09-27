@@ -191,6 +191,88 @@ impl std::fmt::Display for RegistryWarning {
     }
 }
 
+/// An entry's gate as [`parse_when`] reads it: the `when` predicates as
+/// `(kind, name)` pairs, and the `gate_note` beside them.
+type Gate = (Option<Vec<(String, String)>>, Option<String>);
+
+/// `when` and `gate_note` (RFC 08 §2, v1.35) on a subject or procedure entry:
+/// an ANDed, non-empty list of `<kind>:<name>` tokens in the closed kind
+/// vocabulary, names without whitespace, no duplicates; a `gate_note` only
+/// beside a `when`. Returned as `(kind token, name)` pairs, already canonical.
+fn parse_when(fname: &str, entry: &toml::Value, path: &str) -> Result<Gate, Error> {
+    let gate_note = entry
+        .get("gate_note")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let Some(raw) = entry.get("when") else {
+        if gate_note.is_some() {
+            return Err(lint(
+                fname,
+                format!("{path:?}: gate_note without when — the note explains a gate (RFC 08 §2)"),
+            ));
+        }
+        return Ok((None, None));
+    };
+    let Some(items) = raw.as_array() else {
+        return Err(lint(
+            fname,
+            format!("{path:?}: when must be an array of \"<kind>:<name>\" strings (RFC 08 §2)"),
+        ));
+    };
+    if items.is_empty() {
+        return Err(lint(
+            fname,
+            format!("{path:?}: when = [] gates nothing — omit it, or name a predicate (RFC 08 §2)"),
+        ));
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for item in items {
+        let Some(token) = item.as_str() else {
+            return Err(lint(
+                fname,
+                format!("{path:?}: when carries a non-string predicate (RFC 08 §2)"),
+            ));
+        };
+        let Some((kind, name)) = token.split_once(':') else {
+            return Err(lint(
+                fname,
+                format!("{path:?}: when predicate {token:?} is not \"<kind>:<name>\" (RFC 08 §2)"),
+            ));
+        };
+        let known =
+            <zenkey::slice::PredicateKind as SliceToken>::from_token(kind).ok_or_else(|| {
+                lint(
+                    fname,
+                    format!(
+                        "{path:?}: unknown when kind {kind:?} in {token:?} — one of {} (RFC 08 §2)",
+                        zenkey::slice::PredicateKind::ALL
+                            .iter()
+                            .map(|k| format!("`{}`", k.token()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                )
+            })?;
+        if name.is_empty() || name.chars().any(char::is_whitespace) {
+            return Err(lint(
+                fname,
+                format!(
+                    "{path:?}: when predicate {token:?} needs a name without whitespace after the colon (RFC 08 §2)"
+                ),
+            ));
+        }
+        let pair = (known.token().to_string(), name.to_string());
+        if out.contains(&pair) {
+            return Err(lint(
+                fname,
+                format!("{path:?}: when predicate {token:?} is listed twice"),
+            ));
+        }
+        out.push(pair);
+    }
+    Ok((Some(out), gate_note))
+}
+
 fn lint(file: &str, message: impl Into<String>) -> Error {
     lint_kind(file, message, LintKind::Invalid)
 }
@@ -246,6 +328,11 @@ pub(crate) struct SubjectEntry {
     pub buckets: Option<Vec<f64>>,
     /// `semantic = "..."` — the presentation hint (v1.36), linted closed.
     pub semantic: Option<String>,
+    /// `when = ["<kind>:<name>", …]` (RFC 08 §2, v1.35), linted: the closed
+    /// kind vocabulary, non-empty names without whitespace, no duplicates.
+    pub when: Option<Vec<(String, String)>>,
+    /// `gate_note`, present only with `when`.
+    pub gate_note: Option<String>,
     pub cardinality: Option<u64>,
     pub qos: String,
     pub ttl_s: Option<u64>,
@@ -276,6 +363,12 @@ pub(crate) struct ProcedureEntry {
     pub cardinality: Option<u64>,
     /// Optional declared payload encoding (RFC 08 §2, v1.5).
     pub encoding: Option<String>,
+    /// `when` (RFC 08 §2, v1.35): the procedure is declared regardless and
+    /// answers `error/unsupported` or `error/gated` while a predicate is
+    /// false (§6.1).
+    pub when: Option<Vec<(String, String)>>,
+    /// `gate_note`, present only with `when`.
+    pub gate_note: Option<String>,
 }
 
 /// One `[[error]]` entry (RFC 08 §2, v1.40): a producer's own error name,
@@ -805,13 +898,22 @@ impl Config {
         // that only gained its `kind` column (v1.32) is neither added nor
         // retired.
         let pin = |l: &str| -> String { l.splitn(4, '\t').take(3).collect::<Vec<_>>().join("\t") };
+        // Gate lines (`when-*`, v1.35) are not entries: a gate appearing or
+        // moving is neither an entry added nor one retired.
+        let is_entry = |l: &&str| !l.starts_with("when-");
         let old: std::collections::BTreeSet<String> = existing
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .filter(is_entry)
             .map(pin)
             .collect();
         let new_lines = compat_lock_lines(&files);
-        let new: std::collections::BTreeSet<String> = new_lines.iter().map(|l| pin(l)).collect();
+        let new: std::collections::BTreeSet<String> = new_lines
+            .iter()
+            .map(String::as_str)
+            .filter(is_entry)
+            .map(pin)
+            .collect();
         let added = new.difference(&old).count();
         let retired = old.difference(&new).count();
         std::fs::write(&path, compat_lock_content(&files))
@@ -1376,6 +1478,7 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 }
                 None => variant_name(&chunks),
             };
+            let (when, gate_note) = parse_when(&fname, entry, spath)?;
             subjects.push(SubjectEntry {
                 path: spath.to_string(),
                 variant,
@@ -1386,6 +1489,8 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 kind,
                 buckets,
                 semantic,
+                when,
+                gate_note,
                 cardinality,
                 qos,
                 ttl_s,
@@ -1507,10 +1612,13 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
                 ));
             }
             let refs: Vec<&str> = ppath.split('/').collect();
+            let (when, gate_note) = parse_when(&fname, entry, ppath)?;
             procedures.push(ProcedureEntry {
                 path: ppath.to_string(),
                 variant: camel(&refs),
                 chunks,
+                when,
+                gate_note,
                 kind: kind.to_string(),
                 request: entry
                     .get("request")
@@ -2102,6 +2210,31 @@ fn compat_lock_lines(files: &[RegistryFile]) -> Vec<String> {
         for e in &f.errors {
             lines.push(format!("error\t{}\t{}", f.name, e.name));
         }
+        // A gate is not a shape (RFC 08 §3.1, v1.35): a `when` predicate set
+        // rides its own line kind, so the moment a gate moves stays
+        // reviewable, and adding, changing or removing one is *stale*, never
+        // incompatible — no consumer may rely on a conditional entry's
+        // presence in the first place.
+        let gate = |preds: &[(String, String)]| -> String {
+            let mut items: Vec<String> = preds.iter().map(|(k, n)| format!("{k}:{n}")).collect();
+            items.sort();
+            items.join(",")
+        };
+        for s in &f.subjects {
+            if let Some(w) = &s.when {
+                lines.push(format!("when-subject\t{}\t{}\t{}", f.name, s.path, gate(w)));
+            }
+        }
+        for p in &f.procedures {
+            if let Some(w) = &p.when {
+                lines.push(format!(
+                    "when-procedure\t{}\t{}\t{}",
+                    f.name,
+                    p.path,
+                    gate(w)
+                ));
+            }
+        }
     }
     lines.sort();
     lines
@@ -2117,7 +2250,9 @@ fn compat_lock_content(files: &[RegistryFile]) -> String {
          # instead (RFC 08 §3). A subject line's optional sixth column is its\n\
          # declared `kind` (RFC 08 §2, v1.32): adding one is additive,\n\
          # changing or removing one is incompatible. An `error` line pins a\n\
-         # declared error name (RFC 08 §2, v1.40), which retires like a subject.\n",
+         # declared error name (RFC 08 §2, v1.40), which retires like a subject.\n\
+         # A `when-subject` / `when-procedure` line pins an entry's gate (v1.35):\n\
+         # a gate is not a shape, so its every change is stale, never incompatible.\n",
     );
     for l in compat_lock_lines(files) {
         out.push_str(&l);
@@ -2210,6 +2345,14 @@ fn check_compat_lock(lock_path: &Path, files: &[RegistryFile]) -> Result<(), Err
 
     let mut stale = Vec::new();
     for (key, line) in &old {
+        // A gate line (`when-*`, v1.35) is never incompatible, whichever way
+        // it moved: a gate is not a shape.
+        if key.0.starts_with("when-") {
+            if desired.get(key) != Some(line) {
+                stale.push(line.clone());
+            }
+            continue;
+        }
         match desired.get(key) {
             Some(new_line) if new_line == line => {}
             Some(new_line) => match lock_line_drift(line, new_line) {
@@ -2335,11 +2478,15 @@ pub struct ConditionalSubject {
     pub producer: String,
     /// The subject `path`, exactly as the registry entry spells it.
     pub path: String,
-    /// The gating condition, as **free text** for the human deciding whether
-    /// the gate still exists — deliberately not a machine-readable
-    /// expression (the field-level `feature`/`when` design stays deferred,
-    /// zenkey #171).
+    /// The gating condition for the human deciding whether the gate still
+    /// exists: a ledger line's free text, or a `when` entry's `gate_note` —
+    /// or, when it has none, its predicates spelled out.
     pub condition: String,
+    /// The machine-readable half (RFC 08 §2, v1.35): the entry's `when`
+    /// predicates as `(kind, name)` pairs, ANDed. Empty for a ledger line,
+    /// which carries prose only — the legacy spelling, accepted for one
+    /// cycle (§6.1).
+    pub predicates: Vec<(String, String)>,
 }
 
 /// The RFC 08 §6.1 (v1.25) conditional-subject ledger, checked in the
@@ -2388,7 +2535,21 @@ fn check_conditional_ledger(
             ));
         }
         let file = files.iter().find(|f| f.name == producer);
-        let live = file.is_some_and(|f| f.subjects.iter().any(|s| s.path == spath));
+        let subject = file.and_then(|f| f.subjects.iter().find(|s| s.path == spath));
+        let live = subject.is_some();
+        // One spelling per entry (RFC 08 §6.1, v1.35): a ledger line naming
+        // an entry that carries `when` is an error, with the field as the
+        // source of truth — the line is what leaves.
+        if subject.is_some_and(|s| s.when.is_some()) {
+            return Err(lint(
+                "conditional.lock",
+                format!(
+                    "ledger line {line:?} names an entry that declares `when` — one \
+                     spelling per entry; the field is the source of truth, drop the \
+                     line (RFC 08 §6.1)"
+                ),
+            ));
+        }
         if !live {
             let retired = file.is_some_and(|f| {
                 f.deprecated
@@ -2413,7 +2574,28 @@ fn check_conditional_ledger(
             producer: producer.to_string(),
             path: spath.to_string(),
             condition: condition.to_string(),
+            predicates: Vec::new(),
         });
+    }
+    // The union of the two spellings (RFC 08 §6.1, v1.35): every subject
+    // that declares `when` is conditional, whether or not a ledger exists.
+    for f in files {
+        for s in &f.subjects {
+            if let Some(w) = &s.when {
+                let condition = s.gate_note.clone().unwrap_or_else(|| {
+                    w.iter()
+                        .map(|(k, n)| format!("{k}:{n}"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                });
+                entries.push(ConditionalSubject {
+                    producer: f.name.clone(),
+                    path: s.path.clone(),
+                    condition,
+                    predicates: w.clone(),
+                });
+            }
+        }
     }
     Ok(entries)
 }
@@ -3879,6 +4061,110 @@ mod tests {
         entries
     }
 
+    /// `when` (RFC 08 §2, v1.35) is linted: the closed kind vocabulary, a
+    /// name without whitespace, no duplicates, no empty list, and a
+    /// `gate_note` only beside a `when`.
+    #[test]
+    fn when_predicates_are_linted() {
+        let base = format!("{HEADER}[producer]\nname = \"t\"\n\n");
+        let subject = |fields: &str| {
+            format!(
+                "{base}[[subject]]\npath = \"rtt\"\nclass = \"telemetry\"\ntype = \"T\"\n{fields}since = \"1.0\"\ndescription = \"d\"\n"
+            )
+        };
+        assert!(
+            lint_one(&subject(
+                "when = [\"feature:ebpf\", \"config:collect.ebpf\", \"capability:CAP_BPF\"]\ngate_note = \"n\"\n"
+            ))
+            .is_ok()
+        );
+        let refused = |c: String| lint_one(&c).unwrap_err().to_string();
+        assert!(refused(subject("when = [\"weather:sunny\"]\n")).contains("unknown when kind"));
+        assert!(refused(subject("when = [\"ebpf\"]\n")).contains("<kind>:<name>"));
+        assert!(refused(subject("when = [\"feature:\"]\n")).contains("without whitespace"));
+        assert!(refused(subject("when = [\"feature:a b\"]\n")).contains("without whitespace"));
+        assert!(refused(subject("when = []\n")).contains("gates nothing"));
+        assert!(refused(subject("when = \"feature:ebpf\"\n")).contains("array"));
+        assert!(refused(subject("when = [\"feature:x\", \"feature:x\"]\n")).contains("twice"));
+        assert!(refused(subject("gate_note = \"n\"\n")).contains("gate_note without when"));
+        // Procedures take the same field.
+        let procedure = format!(
+            "{base}[[procedure]]\npath = \"probe\"\nkind = \"read\"\nreply = \"R\"\nwhen = [\"capability:CAP_BPF\"]\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        assert!(lint_one(&procedure).is_ok());
+    }
+
+    /// One spelling per entry (RFC 08 §6.1, v1.35): a ledger line naming an
+    /// entry that declares `when` is refused, and the validated set is the
+    /// union of both spellings with the field carrying its predicates.
+    #[test]
+    fn when_and_the_ledger_are_one_spelling_per_entry_and_one_set() {
+        let dir = lock_dir("conditional-when");
+        let toml = format!(
+            "{HEADER}[producer]\nname = \"t\"\n\n{SUBJECT_V1}\n[[subject]]\npath = \"rssi\"\nclass = \"telemetry\"\ntype = \"T\"\nwhen = [\"capability:rssi\"]\nsince = \"1.0\"\ndescription = \"d\"\n"
+        );
+        std::fs::write(dir.join("t.toml"), &toml).unwrap();
+        Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        // The lock pins the gate on its own line kind.
+        assert!(
+            std::fs::read_to_string(dir.join("registry.lock"))
+                .unwrap()
+                .contains("when-subject\tt\trssi\tcapability:rssi")
+        );
+        // A ledger line for the `when` entry: refused.
+        std::fs::write(dir.join("conditional.lock"), "t\trssi\tneeds a radio\n").unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .conditional_subjects()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("one spelling per entry"), "{err}");
+        // A ledger line for the other entry, plus the field: the union.
+        std::fs::write(dir.join("conditional.lock"), "t\thealth\tfeature x\n").unwrap();
+        let entries = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .conditional_subjects()
+            .unwrap();
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(entries[0].path, "health");
+        assert!(entries[0].predicates.is_empty());
+        assert_eq!(entries[1].path, "rssi");
+        assert_eq!(
+            entries[1].predicates,
+            [("capability".to_string(), "rssi".to_string())]
+        );
+        assert_eq!(entries[1].condition, "capability:rssi");
+        // A gate moving is stale, never incompatible (RFC 08 §3.1).
+        std::fs::write(
+            dir.join("t.toml"),
+            toml.replace("capability:rssi", "capability:dbm"),
+        )
+        .unwrap();
+        let err = Config::new()
+            .registry_dir(&dir)
+            .no_rerun_if_changed()
+            .lint()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("stale lock"), "{err}");
+        let update = Config::new()
+            .registry_dir(&dir)
+            .write_compat_lock(OnIncompatible::Refuse)
+            .unwrap();
+        assert!(update.forced.is_empty());
+        assert_eq!(
+            (update.added, update.retired),
+            (0, 0),
+            "a gate is not an entry"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// An absent ledger is an empty ledger: no subject is conditional
     /// (RFC 08 §6.1 — the file is optional, its absence is a statement).
     #[test]
@@ -3923,6 +4209,7 @@ mod tests {
                 producer: "t".into(),
                 path: "health".into(),
                 condition: "feature wireguard\tand a tab".into(),
+                predicates: vec![],
             }]
         );
     }

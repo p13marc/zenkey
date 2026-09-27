@@ -132,6 +132,12 @@ pub struct SubjectFacts {
     pub buckets: Option<zenkey::slice::Buckets>,
     pub qos: Option<Declared<QosProfile>>,
     pub encoding: Option<WireEncoding>,
+    /// The conditions under which the subject exists, ANDed (RFC 08 §2,
+    /// v1.35), when declared — what an emitted-surface check exempts, and
+    /// what a consumer reads to know silence may be honest (§6.1).
+    pub when: Option<Vec<zenkey::slice::Predicate>>,
+    /// The one-line note beside a `when`.
+    pub gate_note: Option<String>,
     pub ttl_s: Option<i64>,
     /// The declared events rate class (`rare` | `low` | `burst(n/h)`,
     /// RFC 04 §1.3) — carried so observers can judge over-rate (#161).
@@ -240,6 +246,8 @@ impl KeyFacts {
                 buckets: decl.buckets.clone(),
                 qos: decl.qos.clone(),
                 encoding: decl.encoding.clone(),
+                when: decl.when.clone(),
+                gate_note: decl.gate_note.clone(),
                 ttl_s: decl.ttl_s,
                 rate: decl.rate.clone(),
                 cardinality: decl.cardinality,
@@ -699,6 +707,8 @@ mod tests {
             buckets: None,
             qos: qos.map(Declared::parse),
             encoding: None,
+            when: None,
+            gate_note: None,
             ttl_s: None,
             rate: None,
             cardinality: None,

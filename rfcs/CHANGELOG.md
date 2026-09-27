@@ -25,6 +25,39 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.41 (2026-09-27, which conditions hold here)** — the `when` field
+> ships, and the `sensor` document says, per device, which predicates hold.
+>
+> **[04 §5](04-planes.md).** v1.35 gave a registry the words to say a
+> surface is conditional and on what; nothing said which of those
+> conditions hold on a given instance. A consumer reading silence on a
+> `when` subject could not tell honest from broken, and a conformance suite
+> could not judge it. The registration document's `capabilities` member is
+> that instance surface: a map from the producer's device chunks to the
+> `capability:<name>` names that hold for each, the producer's own under
+> `"*"`. Asked for by the second adopter of #171, whose one driver serves
+> three modems with three different capability sets, and whose
+> `capability:rssi` is true for `rf0` and false for `sat0` at the same
+> moment. Optional; absent is *not asked*.
+>
+> **[08 §6.1](08-registry.md).** The legacy-ledger sentence named the
+> release cycle the field would ship in as 0.9; it ships in 0.11, and the
+> number is corrected. Nothing else in 08 moves: v1.35 was the design, and
+> this release is the reference codegen catching up to it — `when` and
+> `gate_note` parsed, linted closed, pinned on their own `when-*` lock lines
+> (stale, never incompatible), generated as `when()`/`gate_note()`
+> accessors, carried by `introspect`, rendered by `topic info` and the GUI,
+> the one-spelling lint against the ledger live, and the validated
+> conditional set the union of both spellings.
+>
+> **What deliberately did not happen.** No condition language: the map's
+> values are names, and a consumer ANDs them against the entry's list as
+> §6.1 already says. No tool evaluates a predicate at runtime — the map is
+> the producer's statement, read as data. No `when` on `[[media]]` or
+> `[[blob]]`, and `slice::diff` stays presence-only.
+>
+> *Amends: 04, 08.*
+
 > **v1.40 (2026-09-27, the errors nobody registered)** — `[[error]]`, an
 > entry kind for a producer's own error names.
 >

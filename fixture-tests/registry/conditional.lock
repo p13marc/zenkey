@@ -3,6 +3,7 @@
 # the gating condition as free text. Unlike deprecated.lock this file is
 # NOT append-only: a line leaves when its condition does, and the subject
 # re-enters the emitted-surface check by deletion.
-netlink	sockets/tcp/connlat_us_p50	feature ebpf
-netlink	sockets/tcp/connlat_us_p95	feature ebpf
-netlink	wireguard/{iface}/peers	host exposes a WireGuard interface
+# Empty since v1.41 (zenkey #171): every gate this registry declares is a
+# `when` field on its entry, and one spelling per entry is the rule — a line
+# here naming a `when` entry is a lint error. The file stays as the record
+# that the legacy spelling was migrated, not forgotten.

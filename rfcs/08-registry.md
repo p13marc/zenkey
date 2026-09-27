@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39 and v1.40 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40 and v1.41 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -894,7 +894,7 @@ conditional subject —
 ```
 
 — `<condition>` being free text for the human. The ledger stays accepted
-by the reference codegen for one release cycle (0.9), under three rules:
+by the reference codegen for one release cycle (0.11, the one the field shipped in — v1.41 corrects the number this text carried), under three rules:
 a ledger line naming an entry that carries `when` is a lint **error** — one
 spelling per entry; the validated conditional set is the union of the two
 spellings with the field as the source of truth; and a ledger line whose

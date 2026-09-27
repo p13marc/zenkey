@@ -304,6 +304,49 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         }
         let _ = writeln!(out, "            }}\n        }}\n");
 
+        // when()/gate_note() — the conditions under which the subject exists
+        // (RFC 08 §2, v1.35): the predicates as `(kind, name)` pairs, empty
+        // when unconditional, and the human note beside them.
+        let _ = writeln!(
+            out,
+            "        /// The conditions under which this subject exists, ANDed (RFC 08 §2,\n        /// v1.35): `(kind, name)` pairs, empty when unconditional. A gated subject\n        /// MAY be silent while any predicate is false (§6.1)."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn when(&self) -> &'static [({zk}::slice::PredicateKind, &'static str)] {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {},",
+                s.variant,
+                when_literal(zk, s.when.as_deref())
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+        let _ = writeln!(
+            out,
+            "        /// The one-line note beside a `when` (RFC 08 §2, v1.35), for the human\n        /// deciding whether the gate still exists."
+        );
+        let _ = writeln!(
+            out,
+            "        pub fn gate_note(&self) -> Option<&'static str> {{"
+        );
+        let _ = writeln!(out, "            match self {{");
+        for s in &f.subjects {
+            let note = match &s.gate_note {
+                Some(n) => format!("Some({n:?})"),
+                None => "None".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "                Self::{} {{ .. }} => {note},",
+                s.variant
+            );
+        }
+        let _ = writeln!(out, "            }}\n        }}\n");
+
         // encoding() — the declared payload framing (RFC 08 §2, v1.5).
         let _ = writeln!(
             out,
@@ -840,6 +883,44 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
                 let _ = writeln!(out, "                Self::{} => {enc},", p.variant);
             }
             let _ = writeln!(out, "            }}\n        }}\n");
+            // when()/gate_note() (RFC 08 §2, v1.35): a gated procedure is declared
+            // regardless and answers `error/unsupported` or `error/gated` while a
+            // predicate is false (§6.1) — `PredicateKind::gated_error` names which.
+            let _ = writeln!(
+                out,
+                "        /// The conditions under which this procedure can do its work, ANDed\n        /// (RFC 08 §2, v1.35). It is declared regardless, and answers the error\n        /// `PredicateKind::gated_error` names while a predicate is false (§6.1)."
+            );
+            let _ = writeln!(
+                out,
+                "        pub fn when(self) -> &'static [({zk}::slice::PredicateKind, &'static str)] {{"
+            );
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let _ = writeln!(
+                    out,
+                    "                Self::{} => {},",
+                    p.variant,
+                    when_literal(zk, p.when.as_deref())
+                );
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
+            let _ = writeln!(
+                out,
+                "        /// The one-line note beside a `when` (RFC 08 §2, v1.35)."
+            );
+            let _ = writeln!(
+                out,
+                "        pub fn gate_note(self) -> Option<&'static str> {{"
+            );
+            let _ = writeln!(out, "            match self {{");
+            for p in &f.procedures {
+                let note = match &p.gate_note {
+                    Some(n) => format!("Some({n:?})"),
+                    None => "None".to_string(),
+                };
+                let _ = writeln!(out, "                Self::{} => {note},", p.variant);
+            }
+            let _ = writeln!(out, "            }}\n        }}\n");
             let _ = writeln!(out, "    }}\n");
 
             // FleetProcedureId — the fanout-allowed subset. A forbidden-fanout
@@ -1191,6 +1272,16 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         ("qos", format!("{zk}::qos::QosProfile"), "s.qos()"),
         ("ttl_s", "Option<u64>".to_string(), "s.ttl_s()"),
         ("rate", "Option<&'static str>".to_string(), "s.rate()"),
+        (
+            "when",
+            format!("&'static [({zk}::slice::PredicateKind, &'static str)]"),
+            "s.when()",
+        ),
+        (
+            "gate_note",
+            "Option<&'static str>".to_string(),
+            "s.gate_note()",
+        ),
     ] {
         let _ = writeln!(out, "    pub fn {method}(&self) -> {ret} {{");
         let _ = writeln!(out, "        match self {{");
@@ -1603,4 +1694,27 @@ fn emit_blob(out: &mut String, files: &[RegistryFile], zk: &str) {
     }
 
     let _ = writeln!(out, "}}\n");
+}
+
+/// A `when` predicate list as a `&'static [(PredicateKind, &str)]` literal
+/// (RFC 08 §2, v1.35); `&[]` when the entry declares none. The kind tokens
+/// were linted closed, so the variant lookup cannot miss.
+fn when_literal(zk: &str, when: Option<&[(String, String)]>) -> String {
+    let Some(preds) = when else {
+        return "&[]".to_string();
+    };
+    let items: Vec<String> = preds
+        .iter()
+        .map(|(kind, name)| {
+            let v = zenkey::slice::PredicateKind::ALL
+                .iter()
+                .find(|k| {
+                    <zenkey::slice::PredicateKind as zenkey::slice::SliceToken>::token(k) == kind
+                })
+                .map(|k| format!("{k:?}"))
+                .expect("the lint admits only the closed vocabulary");
+            format!("({zk}::slice::PredicateKind::{v}, {name:?})")
+        })
+        .collect();
+    format!("&[{}]", items.join(", "))
 }

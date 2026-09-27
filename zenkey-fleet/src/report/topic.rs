@@ -146,6 +146,13 @@ pub struct TopicInfo {
     pub cardinality: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
+    /// The declared `when` predicates (RFC 08 §2, v1.35) as their tokens,
+    /// ANDed; empty when the entry is unconditional.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub when: Vec<String>,
+    /// The one-line note beside a `when`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gate_note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,6 +201,8 @@ impl TopicInfo {
             rate: None,
             cardinality: None,
             encoding: None,
+            when: Vec::new(),
+            gate_note: None,
             since: None,
             description: None,
         };
@@ -228,6 +237,13 @@ impl TopicInfo {
                 info.kind = s.kind.as_ref().map(|k| k.token().to_string());
                 info.qos = s.qos.as_ref().map(|q| q.token().to_string());
                 info.encoding = s.encoding.as_ref().map(|e| e.as_encoding_str().to_string());
+                info.when = s
+                    .when
+                    .iter()
+                    .flatten()
+                    .map(zenkey::slice::Predicate::token)
+                    .collect();
+                info.gate_note = s.gate_note.clone();
                 info.ttl_s = s.ttl_s;
                 // Declared since v1.0, dropped on this path until #221 — the
                 // field existed and was never filled.

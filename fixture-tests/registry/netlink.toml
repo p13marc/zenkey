@@ -269,6 +269,7 @@ description = "receiver RTT p95 (us)"
 path = "sockets/tcp/connlat_us_p50"
 class = "telemetry"
 type = "TelemetryPoint"
+when = ["feature:ebpf"]
 since = "1.1"
 description = "connect latency p50 (us) — feature `ebpf`"
 
@@ -276,6 +277,7 @@ description = "connect latency p50 (us) — feature `ebpf`"
 path = "sockets/tcp/connlat_us_p95"
 class = "telemetry"
 type = "TelemetryPoint"
+when = ["feature:ebpf"]
 since = "1.1"
 description = "connect latency p95 (us) — feature `ebpf`"
 
@@ -771,6 +773,8 @@ path = "wireguard/{iface}/peers"
 class = "telemetry"
 type = "TelemetryPoint"
 cardinality = 64
+when = ["capability:wireguard"]
+gate_note = "host exposes a WireGuard interface"
 since = "1.1"
 description = "configured peers on this WireGuard interface"
 
