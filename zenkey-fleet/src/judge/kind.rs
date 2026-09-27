@@ -14,7 +14,11 @@
 //!   no `alive` cycle of that origin in between. The restart is the one
 //!   sanctioned reset, and it is on the wire (RFC 04 §5): the listen phase
 //!   watches the liveliness planes and reports a down-then-up through
-//!   [`KindObservation::alive_cycled`].
+//!   [`KindObservation::alive_cycled`]. A subject whose first chunk names a
+//!   device the producer tracks has a second sanctioned reset (v1.39): that
+//!   device's own token cycling, reported through
+//!   [`KindObservation::device_alive_cycled`], which excuses the counters
+//!   under that device and no other.
 //! - **Unobservable** when the payload could not be decoded, said with the
 //!   reason — one Warning per key, never folded into a pass.
 //!
@@ -43,6 +47,11 @@ use crate::report::{CheckId, DoctorFinding, DoctorSeverity};
 /// of `v1/@catalog/state/alive`, so a cycle seen on the token plane lands on
 /// the keys it restarted.
 pub type ProducerId = (String, String);
+
+/// A device a producer tracks, as its liveliness token names it:
+/// `(origin, producer, device)` — [`crate::bus::roster::token_device`]'s
+/// reading of `…/state/<producer>/device/<device>/alive` (RFC 04 §5).
+pub type DeviceId = (String, String, String);
 
 /// What one key's series has shown against its declared kind.
 #[derive(Debug)]
@@ -79,6 +88,11 @@ pub struct KindObservation {
     /// rather than as a one-shot mark so every key of a restarted producer
     /// resets, not just the first one to publish (#422).
     cycles: BTreeMap<ProducerId, u64>,
+    /// How many `device/<device>/alive` cycles each device has shown (v1.39).
+    /// A key's generation is its producer's cycles plus its device's, so a
+    /// device that re-enumerated under a producer that never restarted still
+    /// resets the counters under it — and only those.
+    device_cycles: BTreeMap<DeviceId, u64>,
 }
 
 /// The tag a self-describing payload carries, when it does
@@ -178,6 +192,17 @@ impl KindObservation {
             .or_default() += 1;
     }
 
+    /// The device `(origin, producer, device)` went down and came back — the
+    /// sanctioned reset for the counters under that device's subject (RFC
+    /// 08 §2, RFC 04 §5, v1.39). Every other key of the producer keeps its
+    /// baseline.
+    pub fn device_alive_cycled(&mut self, origin: &str, producer: &str, device: &str) {
+        *self
+            .device_cycles
+            .entry((origin.to_string(), producer.to_string(), device.to_string()))
+            .or_default() += 1;
+    }
+
     /// One `Put` sample on a key whose registry entry declares `kind`.
     /// `doc` is the structural document, `None` when the payload could not
     /// be decoded (counted, reported as unobservable, never judged).
@@ -205,8 +230,34 @@ impl KindObservation {
         declared_buckets: Option<&[f64]>,
         doc: Option<&Value>,
     ) {
+        self.observe_under(key, origin, producer, None, declared, declared_buckets, doc);
+    }
+
+    /// [`observe_declared`](Self::observe_declared), naming the device the
+    /// key's first subject chunk is — when the producer tracks devices, and
+    /// the key sits under one (RFC 06 §3). A cycle of that device's own
+    /// token then resets this key's baseline the way the producer's does
+    /// (v1.39); a key under no device passes `None` and is judged as before.
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe_under(
+        &mut self,
+        key: &str,
+        origin: &str,
+        producer: &str,
+        device: Option<&str>,
+        declared: SubjectKind,
+        declared_buckets: Option<&[f64]>,
+        doc: Option<&Value>,
+    ) {
         let producer_id = (origin.to_string(), producer.to_string());
-        let generation = self.cycles.get(&producer_id).copied().unwrap_or(0);
+        let device_cycles = device
+            .and_then(|d| {
+                self.device_cycles
+                    .get(&(origin.to_string(), producer.to_string(), d.to_string()))
+            })
+            .copied()
+            .unwrap_or(0);
+        let generation = self.cycles.get(&producer_id).copied().unwrap_or(0) + device_cycles;
         let entry = self.keys.entry(key.to_string()).or_insert_with(|| KeyKind {
             producer: producer_id,
             declared,
@@ -557,6 +608,48 @@ mod tests {
         obs.alive_cycled("h-aaaaaaaaaaaa", "netring");
         observe(&mut obs, SubjectKind::Counter, json!(0));
         assert_eq!(mismatches(&obs).len(), 1);
+    }
+
+    /// The second sanctioned reset (RFC 08 §2, v1.39): a cycle of a
+    /// *device's* token resets the counters under that device's subject —
+    /// a modem re-enumerating under a driver that never restarted — and no
+    /// other device's, and no key of the producer that sits under none.
+    #[test]
+    fn a_reset_across_a_device_token_cycle_excuses_only_that_device() {
+        let mut obs = KindObservation::new();
+        let rf0 = "v1/h-aaaaaaaaaaaa/telemetry/modem/rf0/if/in_octets";
+        let sat0 = "v1/h-aaaaaaaaaaaa/telemetry/modem/sat0/if/in_octets";
+        let under = |obs: &mut KindObservation, key: &str, device: &str, n: u64| {
+            obs.observe_under(
+                key,
+                "h-aaaaaaaaaaaa",
+                "modem",
+                Some(device),
+                SubjectKind::Counter,
+                None,
+                Some(&json!(n)),
+            );
+        };
+        under(&mut obs, rf0, "rf0", 10);
+        under(&mut obs, sat0, "sat0", 10);
+        // rf0 re-enumerates: its token cycles, sat0's does not.
+        obs.device_alive_cycled("h-aaaaaaaaaaaa", "modem", "rf0");
+        under(&mut obs, rf0, "rf0", 0);
+        under(&mut obs, sat0, "sat0", 0);
+        let found = mismatches(&obs);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let text = format!("{found:?}");
+        assert!(text.contains("sat0") && !text.contains("rf0"), "{text}");
+
+        // And a producer's own cycle still resets every key, devices included.
+        obs.alive_cycled("h-aaaaaaaaaaaa", "modem");
+        under(&mut obs, sat0, "sat0", 0);
+        under(&mut obs, rf0, "rf0", 0);
+        assert_eq!(
+            mismatches(&obs).len(),
+            1,
+            "no new finding after the producer's restart"
+        );
     }
 
     /// A self-describing payload's tag must agree (RFC 08 §2); `boolean` is

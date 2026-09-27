@@ -25,6 +25,43 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.39 (2026-09-27, the device's own restart)** — a counter under a
+> device subject may reset when that device's token cycles.
+>
+> **[08 §2](08-registry.md).** `kind = "counter"` allowed one reset: the
+> producer's restart, visible as its `alive` token cycling. A producer that
+> tracks devices ([06 §3](06-identity.md) — a driver with two modems, an
+> SNMP poller with a rack of switches) restarts none of itself when one of
+> them re-enumerates, and its counters under that device start from zero
+> while its token never moves. A judge applying §2 as written had to call
+> that a violation; a producer that wanted to be honest could only restart
+> itself or publish an offset number the device never reported. The row now
+> names the second reset: a subject whose first chunk names a device the
+> producer tracks may reset across that device's `device/<device>/alive`
+> token cycling — and only the counters under that device do.
+>
+> **[04 §5](04-planes.md).** The device token SHOULD cycle on that device's
+> own discontinuity — re-enumeration, a counter observed to restart, the
+> producer reopening it — because that cycle is the reset 08 §2 sanctions,
+> and it puts a device's restart on the wire the way a producer's is. No new
+> field: consumers already watch presence.
+>
+> **[13 §3](13-observer-conformance.md).** The `kind` judgement admits the
+> second reset, and the reference judge reads the device tokens' own
+> selector, `v1/*/state/*/device/*/alive`, to see it: a device's cycle
+> excuses the keys under that device and no other, and a producer's cycle
+> still excuses every key it has.
+>
+> **What deliberately did not happen.** No key gained a device field, and
+> nothing infers a device from a subject that names none: the second reset
+> applies exactly where a device token exists for the key's first chunk. The
+> roster is unchanged — device tokens have their own arity and were never in
+> it. Asked for by zenoh-modem (#476 here), whose netdev backend
+> (marcpardo/zenoh-modem#130) watches an interface the kernel may recreate
+> under it.
+>
+> *Amends: 04, 08, 13.*
+
 > **v1.38 (2026-09-27, the third refusal)** — a broadcast write is
 > refused at the server, because the ACL never could.
 >

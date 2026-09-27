@@ -529,6 +529,13 @@ async fn observe_traffic(
         fleet.wire(zenkey::selector::all_liveliness(
             zenkey::selector::Scope::fleet(),
         )),
+        // And the devices a producer tracks (v1.39): a counter under a
+        // device subject may reset across *that device's* token cycling, a
+        // modem re-enumerating under a driver that never restarted. A
+        // different arity, so a selector of its own.
+        fleet.wire(zenkey::selector::all_device_liveliness(
+            zenkey::selector::Scope::fleet(),
+        )),
         fleet.wire(zenkey::selector::service_alive(
             &zenkey::ServiceOrigin::catalog(),
         )),
@@ -583,6 +590,7 @@ async fn observe_traffic(
     // simply alive at window start) is not.
     let mut kinds = crate::judge::kind::KindObservation::new();
     let mut alive_down: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut device_down: BTreeSet<(String, String, String)> = BTreeSet::new();
 
     // One timer for the whole window, not one per iteration (#346).
     // `sleep_until` builds a future and registers a timer each time it
@@ -687,10 +695,14 @@ async fn observe_traffic(
                                 .producer
                                 .clone()
                                 .unwrap_or_else(|| v.origin.trim_start_matches('@').to_string());
-                            kinds.observe_declared(
+                            kinds.observe_under(
                                 &s.key,
                                 &v.origin,
                                 &producer,
+                                // The device, if the key sits under one
+                                // (RFC 06 §3): its own token's cycle is the
+                                // second sanctioned reset (v1.39).
+                                v.subject.first().map(String::as_str),
                                 *declared,
                                 sf.buckets.as_ref().map(zenkey::slice::Buckets::as_slice),
                                 doc.as_ref(),
@@ -743,7 +755,12 @@ async fn observe_traffic(
             }
             Some(crate::StreamItem::Dropped(n)) => dropped += n,
             Some(crate::StreamItem::Event(crate::FleetEvent::NodeDown(key))) => {
-                if let Some(id) = crate::bus::roster::token_identity(base, &key) {
+                // A device token first: `token_identity` would read it as
+                // its producer's, and a device's restart must excuse only
+                // the counters under that device (v1.39).
+                if let Some(id) = crate::bus::roster::token_device(base, &key) {
+                    device_down.insert(id);
+                } else if let Some(id) = crate::bus::roster::token_identity(base, &key) {
                     alive_down.insert(id);
                 }
             }
@@ -751,7 +768,14 @@ async fn observe_traffic(
                 // A cycle is down *then* up. History replays the tokens
                 // alive at window start as bare `NodeUp`s; those excuse
                 // nothing.
-                if let Some((origin, producer)) = crate::bus::roster::token_identity(base, &key)
+                if let Some((origin, producer, device)) =
+                    crate::bus::roster::token_device(base, &key)
+                {
+                    if device_down.remove(&(origin.clone(), producer.clone(), device.clone())) {
+                        kinds.device_alive_cycled(&origin, &producer, &device);
+                    }
+                } else if let Some((origin, producer)) =
+                    crate::bus::roster::token_identity(base, &key)
                     && alive_down.remove(&(origin.clone(), producer.clone()))
                 {
                     kinds.alive_cycled(&origin, &producer);

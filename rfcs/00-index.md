@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.38** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.39** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.39** (2026-09-27) — the device's own restart: a counter under a
+  device subject may reset when that device's `device/<device>/alive`
+  token cycles, and a device token SHOULD cycle on the device's own
+  discontinuity (08 §2; 04 §5; 13 §3).
 - **v1.38** (2026-09-27) — the third refusal: a broadcast write is refused
   at the server with `error/fanout-forbidden`, because a deny rule fires
   only when it *includes* the query's key expression and so never stops a
@@ -21,11 +25,6 @@ what changed and what deliberately did not — is
   application's `TelemetryValue::Histogram` shape — declared `buckets`,
   per-bucket `counts` with the overflow last, `count`, `sum`, cumulative
   since the producer started (11 §4).
-- **v1.36** (2026-09-25) — the distribution and the hint: a fifth
-  subject `kind`, `histogram` (fixed-bucket, tag `histogram`), with
-  `buckets` required iff it is declared and stated boundaries required to
-  equal the declared ones; and `semantic`, an optional closed presentation
-  hint no judge reads (08 §2; 13 §3; 11 §4).
 
 ---
 

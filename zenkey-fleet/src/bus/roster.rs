@@ -268,6 +268,26 @@ pub fn token_identity(base: &str, key: &str) -> Option<(String, String)> {
     Some((origin, producer))
 }
 
+/// Who a **device** liveliness token names: `(origin, producer, device)` for
+/// `…/state/<producer>/device/<device>/alive` (RFC 04 §5), and `None` for
+/// any other key — a producer's own token included, which [`token_identity`]
+/// reads. Kept apart from it on purpose: `token_identity` reads a device
+/// token as its producer's, and a device's restart would then excuse every
+/// counter of the producer rather than the ones under that device (RFC 08
+/// §2, v1.39).
+pub fn token_device(base: &str, key: &str) -> Option<(String, String, String)> {
+    let parsed = zenkey::grammar::parse_full(base, key)?;
+    let producer = parsed.producer()?.chunk().to_string();
+    match parsed.subject.as_slice() {
+        ["device", device, "alive"] => Some((
+            parsed.origin.chunk().to_string(),
+            producer,
+            (*device).to_string(),
+        )),
+        _ => None,
+    }
+}
+
 /// Apply one liveliness transition to a roster. Returns whether it changed
 /// anything — a burst of no-op events must not force a re-render.
 ///
