@@ -16,6 +16,10 @@ authors.workspace = true
 # consumers' build scripts, and the promise below about a light dependency
 # graph is the reason `serde_json` is not unconditional.
 export = ["dep:serde_json"]
+# `migrate` (#374): a registry directory respelled TOML → KDL (RFC 08 §5.1),
+# comments kept. Off by default for the same reason — a comment-preserving
+# TOML parser is an authoring tool's dependency, never a build's.
+migrate = ["dep:toml_edit"]
 
 # docs.rs builds once per published version and cannot be re-run for it, so
 # the feature-gated surface has to be right *before* the publish, not after
@@ -33,3 +37,4 @@ rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-def
 zenkey = { version = "0.10.1", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
 serde_json = { workspace = true, optional = true }
+toml_edit = { workspace = true, optional = true, features = ["parse"] }
