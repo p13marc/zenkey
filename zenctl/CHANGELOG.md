@@ -6,7 +6,7 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased
+## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 
 One new judgement and no moved spelling: a script written against 0.9.1
 runs unchanged. **`check conform --producer P [--origin O] [--for SECS]
@@ -51,7 +51,7 @@ slice)" (marcpardo/zenkey#495); `doctor` without `--registry` counts that
 producer as answered and files `slice-parse`; `check conform` holds its
 `procedure/introspect` not met.
 
-| 0.9.1 | Unreleased |
+| 0.9.1 | 0.10.0 |
 |---|---|
 | — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
 | — | `zenctl registry export --registry registry --as kdl` |

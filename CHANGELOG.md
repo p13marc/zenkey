@@ -6,14 +6,146 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 |
-|---|---|---|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 | 0.12.0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** | **0.16.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** | **0.10.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged | **0.5.2** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged | **0.3.0** |
+
+---
+
+## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
+
+**Release commit** on 2026-09-29: `zenkey` 0.11.0, `zenkey-build` 0.11.0
+and `zenkey-fleet` 0.16.0 to crates.io, the `0.12.0` tag for the binaries.
+
+The rest of epic #458, as it was designed on 2026-09-07 and then held back
+while 0.11.0 became the second adopter's release: chunk **DL** (#222, the
+registry run as a conformance suite) and chunks **DM → DN → DO** (#374, the
+KDL spelling, from the RFC text to a producer that serves it). Three RFC
+amendments, **v1.44 → v1.46**. v1.45 and v1.46 were written *from* the
+implementations, stating the cases the text had left to them, so that a
+second tool agrees with the first. And one honesty bug the new spelling made
+likelier (#491, #495): an `introspect` reply that answered but could not be
+read was reported as no reply at all.
+
+`zenkey` is **breaking** (0.11.0): `WireEncoding` gained `Toml` and `Kdl`,
+and `SliceError` gained `Kdl` and `Encoding` and is now `#[non_exhaustive]`,
+so an exhaustive match must add the arms (once, for the last time, in the
+error's case). `kdl` 6.7.1 is a new unconditional dependency: no default
+features and no proc-macro, 66 → 72 crates in zenkey-build's graph.
+`zenkey-build` is **breaking** (0.11.0): a registry directory may hold `.kdl`
+files. The generated `REGISTRY_TOML` and `registry_toml()` are
+`#[deprecated]` aliases of the new `REGISTRY_SOURCE` and `registry_source()`,
+which a `-D warnings` build notices. A new `REGISTRY_ENCODING` /
+`registry_encoding()` names the spelling. The `migrate` feature is new and
+off by default. `zenkey-fleet` is **breaking** (0.16.0): `ServedSlice`,
+`ProducerInfo` and `NodeRow` gained fields that struct literals must add, and
+`SliceSet` carries unreadable replies. `zenctl` 0.10.0 gains a judgement and
+two registry verbs without moving any spelling; `zengui` 0.5.2 names an
+unreadable slice; `zenwatch` 0.3.0 serves its own registry as KDL.
+
+**`zenctl check conform`, and RFC v1.45 — what the suite may assume** (#222,
+PR #490; chunk DL). `check conform --producer P [--origin O] [--for S]
+[--deep] [--junit PATH]` runs one producer's registry against the live
+fleet. It asserts one thing per declared surface, and each assertion is
+*met*, *not met*, or *unknowable* with its reason; the third is never folded
+into the second (RFC 13 §3). It works in two halves:
+
+- Every rostered origin is called: `introspect`, and each `read` procedure
+  with a concrete path, with no arguments. A write is never called.
+- One doctor run scoped to the producer is projected onto the surfaces it
+  judges. `--for` adds presence in a window; `--deep` adds freshness and the
+  declared budget.
+
+The verdicts are Conforms, Violates and Unproven, exiting 0, 1 and 2 on the
+one contract. `--junit` writes unknowable assertions as *skipped*, so a build
+never goes red on one. The generator is the oracle: `gen` clean conforms,
+and each `gen --fault` fails exactly its one assertion. v1.45 (13 §3) states
+the three rules the implementation needed:
+
+- A `when` exemption is held to the device's served `capabilities` claim
+  (04 §5, v1.41). An entry with a `config:` predicate is never held to it.
+- A suite calls only `read` procedures and `introspect`.
+- Any `error/` reply is a reply, whether the slice registers it or not.
+
+**RFC v1.44 — the second spelling** (#374, PR #489; chunk DM). A registry
+file MAY be written in KDL 2.0 (08 §5.1):
+
+- One node per entry, and the identifying column is the node's one argument.
+- Every other column is a property, and the list columns are child nodes.
+- String columns MUST be KDL strings: `since="1.1"`, never a number.
+- Type annotations and repeated properties are refused.
+- `/-` is a deletion that still owes its ledger line.
+- A directory may mix spellings, but one stem may not exist in both.
+
+The `introspect` reply declares `application/toml` or `application/kdl`,
+and an undeclared reply is TOML, the pre-v1.44 wire (08 §6). The rollout
+order is **consumers first**, and this release is that step for every tool
+in this repository.
+
+**Both spellings read, TOML still written, and RFC v1.46 — what the reader
+found** (#374, PR #492; chunk DN). zenkey gains `registry_doc`:
+
+- `RawTable`/`RawValue`, the document with both spellings' front-ends;
+- `SliceFormat`;
+- `negotiate`, §6's table as one function;
+- `write_kdl`.
+
+`parse_slice` sniffs, and `parse_served` honours a declared encoding.
+zenkey-build builds a mixed directory. fixture-tests carries the corpus in
+both spellings: generating code from the two directories differs in exactly
+the `include_str!` path and `REGISTRY_ENCODING` lines. The fleet reads each
+reply in the spelling it declares, and `zenctl registry export --as kdl` is
+new. v1.46 (08) states the cases the text had left to the reader:
+
+- an unknown node's arguments are ignored, and its repeats are rows;
+- a `type` node outside `types.kdl` declares nothing;
+- string-list elements are KDL strings;
+- a reply with nothing to sniff is TOML.
+
+**`zenctl registry migrate --to kdl`, and zenwatch's registry in KDL**
+(#374, PR #493; chunk DO). A directory is converted all or nothing:
+
+- The source is linted, converted, proven to read back to the same tree,
+  linted again, and only then written.
+- `--out` refuses a directory that isn't empty. `--in-place` removes a
+  `.toml` only after every `.kdl` is written.
+- Comments cross onto their nodes. One written on a key is hoisted as
+  `// <key>: …`, and counted.
+
+The converter is zenkey-build's `migrate` feature, and the fixture's KDL
+mirror is its output. zenwatch is the first producer that serves
+`application/kdl`: its registry was migrated by the tool, and
+`registry.lock` did not change a byte. "zenkey-build emits KDL by default",
+phase 3 of #374, turned out to be an empty step: serving is `include_str!`
+of the source file, so migrating a file *is* the flip.
+
+**An unreadable slice is not a missing one** (#491, PR #494; #495, PR
+#496). An origin whose `introspect` reply could not be read (a declared
+spelling this consumer does not know, or a malformed document) was shown as
+"no introspect reply". That is the silence RFC 13 §3 O4 forbids, and it is
+what a KDL slice looks like to a consumer that cannot read one.
+`report::UnreadableSlice` names the encoding and the first line of the
+error, and appears on these surfaces:
+- `node info`;
+- zengui's node detail;
+- `node list --verbose`;
+- the doctor, whose wildcard path now files `slice-parse` instead of
+  calling the producer mute;
+- `check conform`, where it is not met.
+
+A served row and a no-reply row serialize exactly as before.
+
+**Not in this release.** Adopter repositories convert their registries on
+their own schedule, after their consumers have taken this release. The KDL
+spelling is not a deprecation of TOML, and nothing here says a file should
+move. The crates.io lane has failed on every dispatch since 2026-09-28, so
+0.11.0, 0.11.1 and this release were published from a maintainer machine
+with the same `cargo publish` the lane runs.
 
 ---
 

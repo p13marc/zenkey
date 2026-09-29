@@ -53,6 +53,16 @@
     <keyword>iced</keyword>
   </keywords>
   <releases>
+    <release version="0.12.0" date="2026-09-29">
+      <description>
+        <p>zengui 0.5.2: reads registry directories in either spelling, TOML or KDL, and says an introspect reply was unreadable, naming its encoding, instead of drawing it as no reply.</p>
+      </description>
+    </release>
+    <release version="0.11.0" date="2026-09-27">
+      <description>
+        <p>zengui 0.5.1: the registry facts line shows a subject's condition (when) and its exposure.</p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-09-07">
       <description>
         <p>zengui 0.5.0: compare a key against a saved snapshot, an on-demand Consumers section, and pane replay that seeds its state from a version-2 capture and marks the trigger.</p>
