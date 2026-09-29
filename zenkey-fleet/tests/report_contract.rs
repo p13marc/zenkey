@@ -507,6 +507,67 @@ fn the_three_state_verdicts_keep_their_third_state() {
     );
 }
 
+/// The conformance report (#222), whole: each assertion's state flat under
+/// `state`, the reason only where the answer is "could not say", `exempt`
+/// only where an exemption was claimed, and the window's drops carried — a
+/// script keys on `id` and `state`, and CI on the verdict.
+#[test]
+fn a_conform_report_keeps_unknowable_apart_from_not_met() {
+    assert_eq!(
+        serde_json::to_value(fx::conform_report()).unwrap(),
+        json!({
+            "producer": "sysinfo",
+            "slice_source": "dirs",
+            "origins_asked": ["h-3fa9c2d41b7e"],
+            "assertions": [
+                {
+                    "id": "procedure/introspect",
+                    "subject": "@rpc/introspect",
+                    "state": "met",
+                    "evidence": "h-3fa9c2d41b7e: a value reply",
+                    "citation": "RFC 08 §6",
+                },
+                {
+                    "id": "procedure/dns",
+                    "subject": "@rpc/dns",
+                    "state": "met",
+                    "evidence": "h-3fa9c2d41b7e: error/gated — conditional, and said so",
+                    "citation": "RFC 08 §6.1",
+                    "exempt": "when: config:collect.dns",
+                },
+                {
+                    "id": "qos-observed-mismatch/health",
+                    "subject": "state/health",
+                    "state": "not_met",
+                    "evidence": "v1/h-3fa9c2d41b7e/state/sysinfo/health: 4 of 4 sample(s) \
+                                 did not ride the declared transition",
+                    "citation": "RFC 04 §3",
+                },
+                {
+                    "id": "observed/disk/{mount}/used",
+                    "subject": "telemetry/disk/{mount}/used",
+                    "state": "unknowable",
+                    "reason": "a window proves presence, never absence",
+                    "evidence": "not seen in 10s",
+                    "citation": "RFC 13 §3",
+                },
+            ],
+            "summary": {"met": 2, "not_met": 1, "unknowable": 1, "exempt": 1},
+            "verdict": "violates",
+            "observation": {
+                "window_s": 10.0,
+                "scopes": ["v1/*/state/**"],
+                "samples": 40,
+                "keys_seen": 2,
+                "dropped": 3,
+                "synthetic_marked": 40,
+            },
+            "deep": false,
+            "not_asked": ["stale-state/*, budget: not asked without --deep"],
+        })
+    );
+}
+
 /// The `@blob` documents must serialize identically whether or not the binary
 /// was built with the transport — `report.rs`'s own header says so, and this
 /// file is compiled without the `blob` feature, which is the proof.
@@ -721,6 +782,29 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
             ExpectVerdict::Impaired => "impaired",
         }
     }
+    // #222: the conformance suite's two vocabularies — the verdict, and the
+    // per-assertion state it folds (a `state` tag, flattened).
+    fn conform(v: &ConformVerdict) -> &'static str {
+        match v {
+            ConformVerdict::Conforms => "conforms",
+            ConformVerdict::Violates => "violates",
+            ConformVerdict::Unproven => "unproven",
+        }
+    }
+    fn assertion_state(v: &AssertionState) -> &'static str {
+        match v {
+            AssertionState::Met => "met",
+            AssertionState::NotMet => "not_met",
+            AssertionState::Unknowable { .. } => "unknowable",
+        }
+    }
+    fn conform_source(v: &ConformSource) -> &'static str {
+        match v {
+            ConformSource::Bus => "bus",
+            ConformSource::Dirs => "dirs",
+            ConformSource::Union => "union",
+        }
+    }
     // #232: this one was PascalCase, alone in the file.
     fn coverage(v: &Coverage) -> &'static str {
         match v {
@@ -795,6 +879,27 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         ExpectVerdict::Impaired,
     ] {
         assert_eq!(wire(&v, ""), expect(&v));
+    }
+    for v in [
+        ConformVerdict::Conforms,
+        ConformVerdict::Violates,
+        ConformVerdict::Unproven,
+    ] {
+        assert_eq!(wire(&v, ""), conform(&v));
+    }
+    for v in [
+        AssertionState::Met,
+        AssertionState::NotMet,
+        AssertionState::Unknowable { reason: "r".into() },
+    ] {
+        assert_eq!(wire(&v, "state"), assertion_state(&v));
+    }
+    for v in [
+        ConformSource::Bus,
+        ConformSource::Dirs,
+        ConformSource::Union,
+    ] {
+        assert_eq!(wire(&v, ""), conform_source(&v));
     }
     for v in [
         Coverage::Covered("s".into()),

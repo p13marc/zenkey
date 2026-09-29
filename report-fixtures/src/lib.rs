@@ -1167,6 +1167,72 @@ pub fn expect_report() -> ExpectReport {
     }
 }
 
+/// A `check conform` run (#222) with one assertion of every kind: met, met
+/// and exempt, not met, and unknowable with its reason — over a window that
+/// dropped, so the lower-bound caveat has something to say.
+pub fn conform_report() -> ConformReport {
+    let assertions = vec![
+        Assertion {
+            id: "procedure/introspect".into(),
+            subject: "@rpc/introspect".into(),
+            state: AssertionState::Met,
+            evidence: format!("{ORIGIN}: a value reply"),
+            citation: Some("RFC 08 §6".into()),
+            exempt: None,
+        },
+        Assertion {
+            id: "procedure/dns".into(),
+            subject: "@rpc/dns".into(),
+            state: AssertionState::Met,
+            evidence: format!("{ORIGIN}: error/gated — conditional, and said so"),
+            citation: Some("RFC 08 §6.1".into()),
+            exempt: Some("when: config:collect.dns".into()),
+        },
+        Assertion {
+            id: "qos-observed-mismatch/health".into(),
+            subject: "state/health".into(),
+            state: AssertionState::NotMet,
+            evidence: format!(
+                "v1/{ORIGIN}/state/sysinfo/health: 4 of 4 sample(s) did not ride the \
+                 declared transition"
+            ),
+            citation: Some("RFC 04 §3".into()),
+            exempt: None,
+        },
+        Assertion {
+            id: "observed/disk/{mount}/used".into(),
+            subject: "telemetry/disk/{mount}/used".into(),
+            state: AssertionState::Unknowable {
+                reason: "a window proves presence, never absence".into(),
+            },
+            evidence: "not seen in 10s".into(),
+            citation: Some("RFC 13 §3".into()),
+            exempt: None,
+        },
+    ];
+    let summary = ConformSummary::of(&assertions);
+    ConformReport {
+        producer: "sysinfo".into(),
+        slice_source: ConformSource::Dirs,
+        origins_asked: vec![ORIGIN.into()],
+        verdict: ConformVerdict::of(&summary),
+        summary,
+        assertions,
+        observation: Some(ObservationSummary {
+            window_s: 10.0,
+            scopes: vec!["v1/*/state/**".into()],
+            samples: 40,
+            keys_seen: 2,
+            dropped: 3,
+            synthetic_marked: 40,
+            field_paths_dropped: 0,
+            facts_evicted: 0,
+        }),
+        deep: false,
+        not_asked: vec!["stale-state/*, budget: not asked without --deep".into()],
+    }
+}
+
 fn header() -> zenkey_fleet::ZrecHeader {
     zenkey_fleet::ZrecHeader {
         zrec: 1,

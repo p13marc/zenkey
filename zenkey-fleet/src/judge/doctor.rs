@@ -76,7 +76,49 @@ pub async fn run_doctor(
     locals: Option<&crate::model::registry::SliceSet>,
     spec: &DoctorSpec,
 ) -> Result<DoctorReport> {
+    Ok(run_doctor_inner(fleet, locals, spec).await?.0)
+}
+
+/// What one doctor run saw that its [`DoctorReport`] does not carry (#222)
+/// — the conformance suite's inputs beside the findings, never a wire
+/// shape. `check conform` projects a scoped doctor run onto its assertions
+/// ([`crate::judge::conform`]), and a finding says what is *wrong*; what
+/// was *seen* clean is here, so a met assertion names its evidence rather
+/// than inferring it from a silence of findings.
+#[derive(Debug, Default)]
+pub(crate) struct DoctorInternals {
+    /// `(origin, producer)` pairs whose `introspect` answered the
+    /// served-vs-declared GET — what makes an absent `slice-sync` finding a
+    /// met assertion rather than an unasked one.
+    pub(crate) introspected: std::collections::BTreeSet<(String, String)>,
+    /// Producers whose `describe` was served.
+    pub(crate) described: std::collections::BTreeSet<String>,
+    /// `(producer, declared path)` → what the listen window saw of it:
+    /// the origins it rode from and how many samples. Filled beside the
+    /// cardinality refine, from the same resolved facts.
+    pub(crate) seen: std::collections::BTreeMap<(String, String), SeenFamily>,
+    /// `(producer, declared path)` → state samples the `--deep` freshness
+    /// sweep read for it. Absent is "the sweep did not reach it".
+    pub(crate) fresh_read: std::collections::BTreeMap<(String, String), usize>,
+}
+
+/// One declared family, as the listen window saw it.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SeenFamily {
+    pub(crate) origins: std::collections::BTreeSet<String>,
+    pub(crate) samples: u64,
+}
+
+/// [`run_doctor`], with the [`DoctorInternals`] beside the report. One run,
+/// two readers: the public verb keeps its shape, and the conformance suite
+/// reads the same observation instead of a second copy of the checks.
+pub(crate) async fn run_doctor_inner(
+    fleet: &crate::Fleet<'_>,
+    locals: Option<&crate::model::registry::SliceSet>,
+    spec: &DoctorSpec,
+) -> Result<(DoctorReport, DoctorInternals)> {
     let (session, base) = (fleet.session(), fleet.base());
+    let mut internals = DoctorInternals::default();
 
     // A registry that declares nothing answers no question this run asks, so
     // it takes the same path as none at all — normalised once, here, rather
@@ -97,6 +139,9 @@ pub async fn run_doctor(
                 continue;
             };
             answered += 1;
+            internals
+                .introspected
+                .insert((answer.origin.clone(), local.name.clone()));
             let served_toml = bytes.to_bytes();
             let served_toml = String::from_utf8_lossy(&served_toml);
             let served = match zenkey::parse_slice(&served_toml) {
@@ -228,6 +273,9 @@ pub async fn run_doctor(
     // is why the drift check below reads the attributed list instead (#398).
     let described: Vec<(String, zenkey::schema::SchemaSet)> = describes.first_per_producer();
     let undescribed = describes.undescribed.len();
+    internals
+        .described
+        .extend(described.iter().map(|(producer, _)| producer.clone()));
     // Totality through the one engine implementation (`totality_gaps`) —
     // doctor used to carry a parallel referenced-names path.
     for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
@@ -322,6 +370,10 @@ pub async fn run_doctor(
                     ),
                 };
                 let samples = state_snapshot(session, &selector, spec.timeout, spec.sample).await?;
+                *internals
+                    .fresh_read
+                    .entry((slice.name.clone(), subject.path.clone()))
+                    .or_default() += samples.len();
                 let (family_findings, family_unstamped) = judge_state_samples(&samples, ttl, now);
                 findings.extend(family_findings);
                 unstamped += family_unstamped;
@@ -426,15 +478,16 @@ pub async fn run_doctor(
             // GET awaited inside the drain loop, re-asked every time its
             // backoff expires, with nobody attending the broadcast.
             let _sealed = store.seal();
-            let (listen_findings, summary) =
+            let (listen_findings, summary, seen) =
                 observe_traffic(fleet, &slice_set, &store, &described, window).await?;
             findings.extend(listen_findings);
+            internals.seen = seen;
             Some(summary)
         }
         None => None,
     };
 
-    Ok(DoctorReport {
+    let report = DoctorReport {
         findings,
         // `None` when no local registry was given: the served-vs-declared
         // diff never ran, and the report must say so rather than looking
@@ -448,7 +501,8 @@ pub async fn run_doctor(
         router_version,
         deep: spec.deep,
         observation,
-    })
+    };
+    Ok((report, internals))
 }
 
 /// How many decode attempts each key gets during the listen window — the
@@ -508,7 +562,11 @@ async fn observe_traffic(
     store: &crate::model::decode::SchemaStore,
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
-) -> Result<(Vec<DoctorFinding>, crate::report::ObservationSummary)> {
+) -> Result<(
+    Vec<DoctorFinding>,
+    crate::report::ObservationSummary,
+    std::collections::BTreeMap<(String, String), SeenFamily>,
+)> {
     use std::collections::{BTreeMap, BTreeSet};
 
     let (session, base) = (fleet.session(), fleet.base());
@@ -591,6 +649,10 @@ async fn observe_traffic(
     let mut kinds = crate::judge::kind::KindObservation::new();
     let mut alive_down: BTreeSet<(String, String)> = BTreeSet::new();
     let mut device_down: BTreeSet<(String, String, String)> = BTreeSet::new();
+    // Which declared families rode, per producer (#222): a conformance
+    // suite's `observed/<path>` is met by presence, and presence is only
+    // provable from here.
+    let mut seen: BTreeMap<(String, String), SeenFamily> = BTreeMap::new();
 
     // One timer for the whole window, not one per iteration (#346).
     // `sleep_until` builds a future and registers a timer each time it
@@ -651,6 +713,14 @@ async fn observe_traffic(
                         *unregistered.entry(s.key.clone()).or_default() += 1;
                     }
                     crate::model::facts::Registration::Registered(sf) => {
+                        if let (Some(producer), crate::model::facts::KeyShape::V1(v)) = (
+                            crate::judge::common::producer_of(facts, Some(slices)),
+                            &facts.shape,
+                        ) {
+                            let family = seen.entry((producer, sf.path.clone())).or_default();
+                            family.origins.insert(v.origin.clone());
+                            family.samples += 1;
+                        }
                         if let (Some(profile), Some(declared)) = (sf.declared_qos(), &sf.qos) {
                             let entry = qos_bad
                                 .entry(s.key.clone())
@@ -916,6 +986,7 @@ async fn observe_traffic(
             field_paths_dropped: fields.dropped_paths(),
             facts_evicted: facts_cache.evicted(),
         },
+        seen,
     ))
 }
 

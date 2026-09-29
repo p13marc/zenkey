@@ -48,6 +48,8 @@ pub mod why;
 #[cfg(feature = "decode")]
 pub mod condition;
 #[cfg(feature = "decode")]
+pub mod conform;
+#[cfg(feature = "decode")]
 pub mod doctor;
 #[cfg(feature = "decode")]
 pub mod expect;

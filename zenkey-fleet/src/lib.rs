@@ -59,7 +59,7 @@
 //!   `.zrec` through the same projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor`, `expect`,
-//!   `condition`, `field`, `why`, `cutover`, `retired`, `budget`, and
+//!   `condition`, `conform`, `field`, `why`, `cutover`, `retired`, `budget`, and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules
 //!   (RFC 13, v1.24) bite hardest here, so the layer states them once.
 //!
@@ -141,6 +141,9 @@ pub use judge::condition::{
     AlertAsk, AlertFloor, CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState,
     SweepOutcome, WatchdogSpec, watchdog,
 };
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use judge::conform::{ConformSpec, run_conform};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::doctor::{DoctorSpec, run_doctor};
@@ -312,16 +315,16 @@ pub use model::tree::KeyTreeSnapshot;
 /// of it here would make this block a second copy of that module.
 pub use report::{
     AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
-    ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities,
-    DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd,
-    EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, Fault, FieldReport, Freshness,
-    GenPlanEntry, GenReport, HelloView, ImpactReport, InferReport, InferredProducer,
-    InferredSubject, InferredType, Judgement, LatencyReport, LatencySummary, MeshLink, NodeInfo,
-    OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport, RetiredReport,
-    RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot,
-    SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact, TimelineReport,
-    TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport, ValueSource, WhyReport,
-    WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    ConformReport, ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport,
+    DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict,
+    EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, Fault,
+    FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, ImpactReport, InferReport,
+    InferredProducer, InferredSubject, InferredType, Judgement, LatencyReport, LatencySummary,
+    MeshLink, NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
+    RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
+    SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
+    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
+    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 // `CondState` and `Transition` are unconditional since v1.34: a version-2
 // `.zrec` carries the trigger record, and the reader is not decode-gated.

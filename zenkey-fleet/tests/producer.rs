@@ -139,6 +139,13 @@ fn reserved_names_are_the_rfcs() {
             "error/fanout-forbidden",
         ]
     );
+    // And read back by the same enum (#222): every name round-trips, and a
+    // producer's own registered name is not one of the seven.
+    for e in ReservedError::ALL {
+        assert_eq!(ReservedError::parse(e.name()), Some(e));
+    }
+    assert_eq!(ReservedError::parse("error/modem/restart-required"), None);
+    assert_eq!(ReservedError::parse("gated"), None);
 }
 
 const SET: &str = "v1/h-abcdefabcdef/@rpc/mockp/knob/set";
