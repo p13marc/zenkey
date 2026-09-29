@@ -1129,6 +1129,61 @@ fn the_node_detail_says_unreadable_not_no_reply() {
     );
 }
 
+/// The presence row draws the engine's `node_rows` join, and a row whose
+/// origin answered `introspect` with a slice that did not read says so in
+/// the node detail's sentence — not the blank a producer with no slice
+/// gets (#495; RFC 08 §6, v1.44; RFC 13 §3 O4).
+#[test]
+fn the_presence_row_says_unreadable_not_blank() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::presence_section;
+    use zenkey_fleet::report::{NodeList, NodeRow, UnreadableSlice};
+
+    let origin = "h-3fa9c2d41b7e";
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[
+            (format!("v1/{origin}/state/tracker/alive"), true),
+            (format!("v1/{origin}/state/parallax/alive"), true),
+        ],
+        Instant::now(),
+    );
+    let row = |producer: &str, unreadable: Option<UnreadableSlice>| NodeRow {
+        origin: origin.to_string(),
+        producer: producer.to_string(),
+        app: None,
+        registry_version: None,
+        unreadable,
+    };
+    let joined = NodeList {
+        slices_joined: true,
+        nodes: vec![
+            row(
+                "tracker",
+                Some(UnreadableSlice::new(
+                    Some("application/json".into()),
+                    &"unreadable registry slice: the reply declares encoding \"application/json\"\nsecond line",
+                )),
+            ),
+            row("parallax", None),
+        ],
+    };
+    let mut ui = simulator::<Message, _, _>(presence_section(&roster, origin, Some(&joined), sp()));
+    assert!(
+        ui.find(
+            "introspect answered, slice unreadable (`application/json`: unreadable registry \
+             slice: the reply declares encoding \"application/json\")"
+        )
+        .is_ok(),
+        "answered-unreadable is the detail section's sentence, first line only"
+    );
+    assert!(
+        ui.find("parallax: alive").is_ok(),
+        "and the producer with no slice still draws its presence"
+    );
+}
+
 /// The doctor panel (#71): never-run is not "0 findings", findings render
 /// with their check ids and RFC citations, and re-runs show deltas — all
 /// over the exact struct `zenctl doctor --format json` serializes.

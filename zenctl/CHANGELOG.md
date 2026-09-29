@@ -45,9 +45,11 @@ An `introspect` reply that answered and did not read is no longer drawn as
 silence (marcpardo/zenkey#491, RFC 13 §3 O4): `node info` says
 "introspect answered, slice unreadable (`<encoding>`: <first line>)" where
 it said "no introspect reply", and its JSON producer row carries
-`unreadable: {encoding, error}`, present only then; `doctor` without
-`--registry` counts that producer as answered and files `slice-parse`;
-`check conform` holds its `procedure/introspect` not met.
+`unreadable: {encoding, error}`, present only then, as does a
+`node list --verbose` row, which says the same where it said "(no served
+slice)" (marcpardo/zenkey#495); `doctor` without `--registry` counts that
+producer as answered and files `slice-parse`; `check conform` holds its
+`procedure/introspect` not met.
 
 | 0.9.1 | Unreleased |
 |---|---|

@@ -64,6 +64,14 @@ pub struct SliceSet {
     /// which have no origin to collapse (#399). See
     /// [`collapsed`](Self::collapsed).
     collapsed: Asked<Vec<CollapsedProducer>>,
+    /// The sweep's `introspect` replies that answered and did not read
+    /// (#495, #491), beside the slices that did — so a join against this set
+    /// can say *unreadable* where it would otherwise say no slice was served
+    /// (RFC 08 §6, v1.44; RFC 13 §3 O4). Only a bus sweep fills it: a
+    /// registry file that does not read is an error of
+    /// [`from_dirs`](Self::from_dirs), not a reply, and the cache holds only
+    /// slices that read, so a cached set has none to persist.
+    unreadable: Vec<crate::UnreadableReply>,
 }
 
 /// Group one slice's subjects by class, parsing each pattern once. A subject
@@ -116,17 +124,51 @@ impl SliceSet {
     }
 
     /// Discover every live producer's served slice from the bus
-    /// ([`crate::fleet_registry_by_origin`]), collapsed to one slice per
+    /// ([`crate::RepeatingRegistry::sweep`]), collapsed to one slice per
     /// producer.
     ///
     /// The collapse is recorded rather than silent — see
     /// [`collapsed`](Self::collapsed). A caller whose question is *which
     /// host* should not come here at all: go one layer down to
     /// [`crate::fleet_registry_by_origin`], which does not deduplicate.
+    ///
+    /// Both poles of the sweep are kept (#495): an origin whose reply
+    /// answered and did not read is in [`unreadable`](Self::unreadable), not
+    /// dropped as though it had not answered (RFC 13 §3 O4).
     pub async fn from_bus(fleet: &crate::Fleet<'_>, timeout: Duration) -> Result<SliceSet> {
-        Ok(SliceSet::from_served(
-            crate::bus::query::fleet_registry_by_origin(fleet, timeout).await?,
-        ))
+        let registry = crate::RepeatingRegistry::declare(fleet, timeout).await?;
+        let sweep = registry.sweep().await?;
+        registry.undeclare().await?;
+        Ok(SliceSet::from_sweep(sweep))
+    }
+
+    /// [`from_served`](Self::from_served) over a whole sweep: the readable
+    /// half folded, the unreadable half carried beside it (#495).
+    pub fn from_sweep(sweep: crate::RegistrySweep) -> SliceSet {
+        let mut set = SliceSet::from_served(sweep.served);
+        set.unreadable = sweep.unreadable;
+        set
+    }
+
+    /// The `introspect` replies the sweep behind this set got and could not
+    /// read (#495) — per origin, never folded, because the fact is about one
+    /// origin's answer. Empty for a set built from files, bare slices or the
+    /// cache, none of which ever asked an origin.
+    pub fn unreadable(&self) -> &[crate::UnreadableReply] {
+        &self.unreadable
+    }
+
+    /// This origin's unreadable reply for this producer (spelled as its
+    /// `alive` token spells it), if its answer did not read (#495).
+    pub fn unreadable_on(
+        &self,
+        origin: &str,
+        producer: &str,
+    ) -> Option<&crate::report::UnreadableSlice> {
+        self.unreadable
+            .iter()
+            .find(|u| u.origin == origin && u.producer == producer)
+            .map(|u| &u.unreadable)
     }
 
     /// Fold an origin-attributed sweep into one slice per producer, keeping
@@ -300,6 +342,8 @@ impl SliceSet {
             // wins), and that is a different fact from a fleet disagreeing
             // (#385). Not asked, therefore, and not "asked and agreed" (#399).
             collapsed: Asked::NotAsked,
+            // No origin was asked, so none answered unreadably (#495).
+            unreadable: Vec::new(),
         }
     }
 
@@ -344,6 +388,11 @@ impl SliceSet {
 
     /// Read a previously written cache dir. Same forgiving posture as
     /// `from_dirs`, but a missing dir is an empty set, not an error.
+    ///
+    /// A cached set carries no [`unreadable`](Self::unreadable) replies
+    /// (#495): [`write_cache`](Self::write_cache) persists slices that read,
+    /// and an unreadable reply has no slice to write. A listing joined
+    /// against the cache says what the cache knows, and no more.
     pub fn read_cache(dir: &Path) -> SliceSet {
         if !dir.is_dir() {
             return SliceSet::default();
@@ -432,6 +481,10 @@ impl SliceSet {
         // the constructor both explorers actually call. A dirs-only producer
         // adds nothing to it — a file has no origin to disagree with.
         merged.collapsed = bus.collapsed;
+        // And the sweep's unreadable replies (#495), for the same reason: a
+        // dirs slice filling a producer's gap is a checkout's declaration,
+        // not that origin's answer, and does not make the answer read.
+        merged.unreadable = bus.unreadable;
 
         Ok(UnionOutcome {
             set: merged,

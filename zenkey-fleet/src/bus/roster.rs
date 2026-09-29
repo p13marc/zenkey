@@ -327,6 +327,13 @@ pub fn apply_token(
 
 /// Roster → typed rows, joining the slice facts when given (`--verbose`).
 /// Absent slice = `None` fields, never a default (RFC 09 §5.1 O4).
+///
+/// The slice join is by producer name, across origins; the unreadable pole
+/// is by origin (#495). An origin whose own `introspect` answered and did
+/// not read gets `unreadable` and no `app` — lending it another origin's
+/// slice would say it serves what it could not be read to serve, and
+/// leaving the row bare would say it served nothing (RFC 08 §6, v1.44;
+/// RFC 13 §3 O4).
 pub fn node_rows(
     roster: &BTreeMap<String, Vec<String>>,
     slices: Option<&crate::SliceSet>,
@@ -335,7 +342,8 @@ pub fn node_rows(
 
     for (origin, producers) in roster {
         for producer in producers {
-            let joined = slices.and_then(|s| {
+            let unreadable = slices.and_then(|s| s.unreadable_on(origin, producer));
+            let joined = slices.filter(|_| unreadable.is_none()).and_then(|s| {
                 // Instance suffixes share the base slice (RFC 03 §1.5).
                 let base_name = zenkey::grammar::Producer::parse_chunk(producer)
                     .map(|pr| pr.name().to_string())
@@ -347,6 +355,7 @@ pub fn node_rows(
                 producer: producer.clone(),
                 app: joined.map(|s| s.app.clone()),
                 registry_version: joined.map(|s| s.version.clone()),
+                unreadable: unreadable.cloned(),
             });
         }
     }
@@ -756,6 +765,48 @@ mod tests {
         assert_eq!(
             joined.nodes[1].producer, "sysinfo-2",
             "the row keeps the suffix"
+        );
+    }
+
+    /// The unreadable pole is by origin, the slice join by name (#495): an
+    /// origin whose own reply did not read says so, and does not borrow the
+    /// slice another origin served for the same producer.
+    #[test]
+    fn an_unreadable_reply_is_its_own_origins_row() {
+        const READ: &str = "h-aaaaaaaaaaaa";
+        const UNREAD: &str = "h-bbbbbbbbbbbb";
+        let mut roster: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for o in [READ, UNREAD] {
+            roster.insert(o.into(), vec!["sysinfo".into()]);
+        }
+        let raw = "[registry]\nversion = \"1.0\"\napp = \"demo\"\nconvention = 1\n\
+                   [producer]\nname = \"sysinfo\"\n";
+        let unreadable = crate::report::UnreadableSlice::new(
+            Some("application/json".into()),
+            &zenkey::slice::SliceError::Encoding("application/json".into()),
+        );
+        let set = crate::SliceSet::from_sweep(crate::RegistrySweep {
+            served: vec![crate::ServedSlice {
+                origin: READ.into(),
+                slice: zenkey::parse_slice(raw).expect("fixture slice parses"),
+                raw: raw.into(),
+                encoding: None,
+                format: zenkey::SliceFormat::Toml,
+            }],
+            unreadable: vec![crate::UnreadableReply {
+                origin: UNREAD.into(),
+                producer: "sysinfo".into(),
+                unreadable: unreadable.clone(),
+            }],
+        });
+        let rows = node_rows(&roster, Some(&set)).nodes;
+        let row = |o: &str| rows.iter().find(|r| r.origin == o).unwrap();
+        assert_eq!(row(READ).app.as_deref(), Some("demo"));
+        assert!(row(READ).unreadable.is_none());
+        assert_eq!(row(UNREAD).unreadable.as_ref(), Some(&unreadable));
+        assert!(
+            row(UNREAD).app.is_none() && row(UNREAD).registry_version.is_none(),
+            "another origin's slice is not this origin's answer"
         );
     }
 

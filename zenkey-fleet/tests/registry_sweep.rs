@@ -389,4 +389,78 @@ async fn the_sweep_reads_each_reply_in_the_spelling_it_declares() {
     assert_eq!(info.producers.len(), 1, "{info:?}");
     assert!(info.producers[0].unreadable.is_none());
     assert_eq!(info.producers[0].registry_version.as_deref(), Some("2.0"));
+
+    // The listing too (#495): `node list --verbose` joins its rows against a
+    // `SliceSet`, which folds every origin's slice into one per producer and
+    // used to carry nothing else — so the two unreadable origins joined the
+    // readable hosts' `sysinfo` or, alone, read "(no served slice)". Both
+    // sources the explorers load carry the unreadable pole: the bus set, and
+    // the union with a `--registry` checkout declaring the same producer.
+    let roster: std::collections::BTreeMap<String, Vec<String>> =
+        [OLD_HOST, KDL_HOST, LIAR_HOST, JSON_HOST]
+            .into_iter()
+            .map(|o| (o.to_string(), vec!["sysinfo".to_string()]))
+            .collect();
+    let checkout = tempfile::tempdir().expect("tempdir");
+    std::fs::write(checkout.path().join("sysinfo.toml"), slice_toml("1.0", 30)).unwrap();
+    let bus = SliceSet::from_bus(&fleet, Duration::from_secs(5))
+        .await
+        .expect("from_bus");
+    let union = SliceSet::from_union(
+        &fleet,
+        &[checkout.path().to_path_buf()],
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("from_union")
+    .set;
+    for (source, set) in [("bus", &bus), ("union", &union)] {
+        assert_eq!(
+            set.unreadable().len(),
+            2,
+            "{source}: {:?}",
+            set.unreadable()
+        );
+        let list = zenkey_fleet::node_rows(&roster, Some(set));
+        let row = |host: &str| {
+            list.nodes
+                .iter()
+                .find(|r| r.origin == host)
+                .unwrap_or_else(|| panic!("{source}: no {host} row: {list:?}"))
+        };
+        for (host, declared, says) in [
+            (
+                JSON_HOST,
+                "application/json",
+                "neither application/toml nor application/kdl",
+            ),
+            (LIAR_HOST, "application/kdl", "not KDL 2.0"),
+        ] {
+            let r = row(host);
+            let u = r.unreadable.as_ref().unwrap_or_else(|| {
+                panic!("{source}/{host}: answered, so unreadable, not no slice: {r:?}")
+            });
+            assert_eq!(u.encoding.as_deref(), Some(declared), "{source}/{host}");
+            assert!(u.error.contains(says), "{source}/{host}: {}", u.error);
+            assert!(
+                r.app.is_none() && r.registry_version.is_none(),
+                "{source}/{host}: another origin's slice is not this one's answer: {r:?}"
+            );
+            let row_json = serde_json::to_value(r).unwrap();
+            assert_eq!(row_json["unreadable"]["encoding"], declared);
+        }
+        for host in [OLD_HOST, KDL_HOST] {
+            let r = row(host);
+            assert!(r.unreadable.is_none(), "{source}/{host}: {r:?}");
+            assert!(r.app.is_some(), "{source}/{host}: the join still joins");
+            assert!(
+                serde_json::to_value(r).unwrap().get("unreadable").is_none(),
+                "{source}/{host}: a readable row serializes as before"
+            );
+        }
+    }
+    // The cache holds slices that read, and nothing else to persist.
+    let cache = tempfile::tempdir().expect("tempdir");
+    bus.write_cache(cache.path()).expect("write_cache");
+    assert!(SliceSet::read_cache(cache.path()).unreadable().is_empty());
 }

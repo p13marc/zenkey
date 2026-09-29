@@ -178,8 +178,11 @@ impl Render for NodeList {
                 grid.group(&row.origin);
                 last = &row.origin;
             }
-            let detail = match (&row.app, &row.registry_version) {
-                (Some(app), Some(v)) => Cell::text(format!("(app {app}, registry {v})")),
+            let detail = match (&row.app, &row.registry_version, &row.unreadable) {
+                (Some(app), Some(v), _) => Cell::text(format!("(app {app}, registry {v})")),
+                // Answered, and unreadable: not the silence below (#495; RFC 08
+                // §6, v1.44), in `node info`'s words, because it is its claim.
+                (.., Some(u)) => Cell::text(format!("({})", u.sentence())),
                 // Asked and unanswered is a fact; not asked is not (O4), and
                 // these are now two different cells rather than two strings.
                 _ if self.slices_joined => Cell::text("(no served slice)"),
