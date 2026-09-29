@@ -1,0 +1,196 @@
+// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
+// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
+//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+
+registry version="1.1" app="zensight" convention=1
+
+producer "systemd" \
+    description="systemd unit/boot telemetry (D-Bus) + sentinel + gated actions"
+
+subject "unit/{unit}/active" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="unit is active"
+
+subject "unit/{unit}/state" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="active state (text)"
+
+subject "unit/{unit}/restarts_total" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="restarts (NRestarts)"
+
+subject "unit/{unit}/active_since_usec" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="active-enter timestamp"
+
+subject "unit/{unit}/mem_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="MemoryCurrent"
+
+subject "unit/{unit}/cpu_usec" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="CPUUsageNSec, in us"
+
+subject "unit/{unit}/tasks" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="TasksCurrent"
+
+subject "unit/{unit}/exit_code" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="last exit code"
+
+subject "unit/{unit}/ip_ingress_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="IPIngressBytes"
+
+subject "unit/{unit}/ip_egress_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="IPEgressBytes"
+
+subject "unit/{unit}/io_read_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="IOReadBytes"
+
+subject "unit/{unit}/io_write_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="IOWriteBytes"
+
+subject "unit/{unit}/ip_ingress_bps" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="ingress rate derived between reads"
+
+subject "unit/{unit}/ip_egress_bps" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="egress rate derived between reads"
+
+subject "unit/{unit}/ip_accounting" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" \
+    description="IPAccounting is enabled for this unit"
+
+subject "unit/{unit}/n_accepted" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="socket units: connections accepted"
+
+subject "unit/{unit}/n_connections" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="socket units: current connections"
+
+subject "unit/{unit}/n_refused" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="socket units: connections refused"
+
+subject "unit/{unit}/last_trigger_usec" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="timer units: last trigger"
+
+subject "unit/{unit}/next_trigger_usec" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="timer units: next trigger"
+
+subject "manager/n_names" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="known unit names"
+
+subject "manager/n_failed_units" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="failed units"
+
+subject "manager/n_jobs" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="queued jobs"
+
+subject "manager/n_installed_jobs" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="jobs installed since boot"
+
+subject "units/total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="units"
+
+subject "units/active" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="active units"
+
+subject "units/failed" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="failed units"
+
+subject "units/loaded" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="loaded units"
+
+subject "units/inactive" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="inactive units"
+
+subject "boot/{phase}" class=telemetry type="TelemetryPoint" cardinality=16 \
+    since="1.1" \
+    description="boot phase durations; the leaf is `<phase>_usec` (firmware|loader|kernel|initrd|userspace|total)"
+
+subject "mounts/total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="mount units"
+
+subject "mounts/mounted" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="mounted"
+
+subject "mounts/failed" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="failed mounts"
+
+subject "journal/disk_usage_bytes" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="journal on-disk size"
+
+subject "journal/disk_available_bytes" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="free space on the journal filesystem"
+
+subject "other/units_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="units outside the watchlist"
+
+subject "events/{kind}" class=telemetry type="TelemetryPoint" cardinality=16 \
+    since="1.1" \
+    description="unit/job lifecycle counters; the leaf is `<kind>_total` (unit_new|unit_removed|job_new|job_removed)"
+
+subject "health" common=health class=state type="HealthSnapshot" ttl_s=120 \
+    since="1.0" \
+    description="sensor health document (framework; absorbs the legacy @/status running flag)"
+
+subject "errors" common=errors class=state type="ErrorReport" ttl_s=300 \
+    since="1.0" description="rolling error window (framework)"
+
+subject "sensor" common=sensor class=state type="SensorInfo" ttl_s=900 \
+    since="1.0" \
+    description="registration document: identity, version, capabilities (framework, 60 s re-emit)"
+
+subject "evidence/self" common=evidence_self class=state type="HostEvidence" \
+    ttl_s=900 since="1.0" description="self-identity claim (RFC 06 §4)"
+
+subject "alert/{alert_key}" common=alert class=state type="Alert" qos=alert \
+    cardinality=64 ttl_s=900 since="1.0" \
+    description="alerts; firing->resolved on one key, delete = tombstone"
+
+subject "artifact/{kind}" class=state type="ArtifactStatus" cardinality=16 \
+    ttl_s=900 since="1.1" \
+    description="per-kind artifact progress (framework: V1Context::artifact_status_key)"
+
+procedure "introspect" kind=read reply="RegistrySlice" idempotent=#true \
+    since="1.0" description="the registry slice this build serves (RFC 08 §6)"
+
+procedure "artifact/request" kind=write request="ArtifactRequest" \
+    reply="ArtifactAck" since="1.0" \
+    description="initiate artifact generation; replies { id } immediately (RFC 05 §3)"
+
+procedure "artifact/cancel" kind=write reply="Ack" since="1.0" \
+    description="free an in-flight/ready artifact early (?id=<ulid>)"
+
+procedure "artifact/status" kind=read reply="ArtifactStatus" idempotent=#true \
+    since="1.0" \
+    description="advertised artifact kinds + the in-flight/ready state per kind (RFC 05 §3)"
+
+procedure "expectations" kind=read reply="TopicStatus" idempotent=#true \
+    since="1.0" \
+    description="current expectations configuration (sentinel expectations hot-swap)"
+
+procedure "expectations/set" kind=write request="ExpectationsConfig" reply="Ack" \
+    exposure=host since="1.0" \
+    description="apply expectations configuration (sentinel expectations hot-swap)"
+
+procedure "action" kind=read reply="ActionStatus" idempotent=#true since="1.0" \
+    description="gated-action switch state + last action outcome"
+
+procedure "action/set" kind=write request="ServiceAction" reply="Ack" \
+    idempotent=#false since="1.0" \
+    description="gated service control {verb,unit} — default OFF, allowlist + polkit; refuses with error/gated"
+
+procedure "units" kind=read reply="Vec<UnitRecord>" idempotent=#true since="1.0" \
+    description="unit table"
+
+procedure "failed" kind=read reply="Vec<UnitRecord>" idempotent=#true \
+    since="1.0" description="failed units"
+
+procedure "unit" kind=read reply="UnitDetail" idempotent=#true since="1.0" \
+    description="one unit's detail (?name=<u>)"
+
+procedure "timers" kind=read reply="Vec<TimerRecord>" idempotent=#true \
+    since="1.0" description="timer table"
+
+procedure "events" kind=read reply="Vec<EventRecord>" idempotent=#true \
+    since="1.0" description="unit event ring"
+
+procedure "cgroups" kind=read reply="CgroupNode" idempotent=#true since="1.0" \
+    description="cgroup subtree (?path=<rel>)"
+
+error "unit-not-found" since="1.1" \
+    description="the named unit does not exist on this host — distinct from the reserved error/not-found, so a caller can tell a missing unit from a missing procedure" {
+    procedures "action/set"
+}

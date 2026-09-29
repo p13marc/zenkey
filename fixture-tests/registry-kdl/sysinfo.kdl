@@ -1,0 +1,415 @@
+// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
+// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
+//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+
+registry version="1.1" app="zensight" convention=1
+
+producer "sysinfo" description="host CPU/memory/disk/net metrics"
+
+budget rss_mb=32
+
+subject "system/uptime" class=telemetry type="TelemetryPoint" semantic=duration \
+    since="1.1" description="seconds since boot"
+
+subject "system/runqlat" class=telemetry type="TelemetryPoint" kind=histogram \
+    semantic=duration since="1.1" \
+    description="run-queue latency distribution, seconds (RFC 08 §2 v1.36 fixture)" {
+    buckets 1e-6 1e-5 0.0001 0.001 0.01 0.1 1
+}
+
+subject "system/load" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="1-minute load average"
+
+subject "system/boot_time" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="boot timestamp (unix seconds)"
+
+subject "system/processes_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="process count"
+
+subject "system/processes_zombie" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="zombie process count"
+
+subject "process/{rank}/cpu" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" \
+    description="top-N process CPU (percent), by rank; pid/name are labels"
+
+subject "process/{rank}/memory" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" \
+    description="top-N process resident memory (bytes), by rank; pid/name are labels"
+
+subject "system/saturation_score" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="composite saturation score (0-100)"
+
+subject "system/health_state" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="derived host health state"
+
+subject "system/context_switches_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="context switches since boot"
+
+subject "system/forks_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="forks since boot"
+
+subject "system/procs_running" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="run-queue depth"
+
+subject "system/procs_blocked" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="processes blocked on I/O"
+
+subject "system/file_descriptors_used" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="file handles in use"
+
+subject "system/file_descriptors_max" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="file-handle ceiling (fs.file-max)"
+
+subject "system/file_descriptors_used_percent" class=telemetry \
+    type="TelemetryPoint" since="1.1" description="file-handle occupancy"
+
+subject "system/entropy_avail" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="available entropy bits"
+
+subject "cpu/usage" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="host CPU utilisation (percent)"
+
+subject "cpu/{core}/usage" variant="CpuCoreUsage" class=telemetry \
+    type="TelemetryPoint" cardinality=512 since="1.1" \
+    description="per-core utilisation (percent)"
+
+subject "cpu/{core}/frequency" variant="CpuCoreFrequency" class=telemetry \
+    type="TelemetryPoint" cardinality=512 since="1.1" \
+    description="per-core clock (MHz)"
+
+subject "cpu/times/{component}" class=telemetry type="TelemetryPoint" \
+    cardinality=8 since="1.1" \
+    description="host CPU time by component (user|nice|system|idle|iowait|irq|softirq|steal)"
+
+subject "cpu/schedstat/run_delay_ns_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="host runqueue delay (ns, cumulative)"
+
+subject "{cpu}/times/{component}" variant="PerCpuTimes" class=telemetry \
+    type="TelemetryPoint" cardinality=4096 since="1.1" \
+    description="per-CPU time by component; {cpu} is the /proc/stat row name (cpu0, cpu1, ...)"
+
+subject "{cpu}/schedstat/run_delay_ns_total" variant="PerCpuSchedstatRunDelay" \
+    class=telemetry type="TelemetryPoint" cardinality=512 since="1.1" \
+    description="per-CPU runqueue delay (ns, cumulative)"
+
+subject "memory/total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="total RAM (bytes)"
+
+subject "memory/used" class=telemetry type="TelemetryPoint" kind=gauge \
+    exposure=link since="1.1" description="used RAM (bytes)"
+
+subject "memory/available" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="available RAM (bytes)"
+
+subject "memory/usage_percent" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="RAM occupancy"
+
+subject "memory/swap_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="total swap (bytes)"
+
+subject "memory/swap_used" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="used swap (bytes)"
+
+subject "memory/swap_percent" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="swap occupancy"
+
+subject "memory/cached" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="page cache (bytes)"
+
+subject "memory/buffers" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="buffer cache (bytes)"
+
+subject "memory/slab" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="slab allocator (bytes)"
+
+subject "memory/dirty" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="dirty pages (bytes)"
+
+subject "memory/writeback" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="pages under writeback (bytes)"
+
+subject "memory/oom_kills_total" class=telemetry type="TelemetryPoint" \
+    kind=counter since="1.1" description="OOM kills since boot"
+
+subject "memory/page_faults_major_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="major faults since boot"
+
+subject "memory/page_faults_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="all faults since boot"
+
+subject "memory/paging_in_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="pages swapped in"
+
+subject "memory/paging_out_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="pages swapped out"
+
+subject "memory/pgpgin_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="blocks paged in"
+
+subject "memory/pgpgout_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="blocks paged out"
+
+subject "memory/edac/{controller}/correctable_total" class=telemetry \
+    type="TelemetryPoint" cardinality=16 since="1.1" \
+    description="ECC correctable errors per memory controller"
+
+subject "memory/edac/{controller}/uncorrectable_total" class=telemetry \
+    type="TelemetryPoint" cardinality=16 since="1.1" \
+    description="ECC uncorrectable errors per memory controller"
+
+subject "disk/{mount}/total" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="filesystem size (bytes)"
+
+subject "disk/{mount}/used" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="used (bytes)"
+
+subject "disk/{mount}/available" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="available (bytes)"
+
+subject "disk/{mount}/usage_percent" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="occupancy"
+
+subject "disk/{mount}/inodes_total" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="inode count"
+
+subject "disk/{mount}/inodes_used" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="inodes used"
+
+subject "disk/{mount}/inodes_free" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="inodes free"
+
+subject "disk/{mount}/inode_used_percent" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="inode occupancy"
+
+subject "disk/{device}/io/read_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="bytes read"
+
+subject "disk/{device}/io/write_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="bytes written"
+
+subject "disk/{device}/io/read_ops" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="read operations"
+
+subject "disk/{device}/io/write_ops" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="write operations"
+
+subject "disk/{device}/io/time_ms" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="time spent in I/O (ms)"
+
+subject "disk/{device}/io/util_percent" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="device utilisation"
+
+subject "disk/{device}/io/queue_depth" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="average queue depth"
+
+subject "disk/{device}/io/read_rate" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="read throughput (B/s)"
+
+subject "disk/{device}/io/write_rate" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="write throughput (B/s)"
+
+subject "disk/{device}/io/read_iops" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="read IOPS"
+
+subject "disk/{device}/io/write_iops" class=telemetry type="TelemetryPoint" \
+    cardinality=512 since="1.1" description="write IOPS"
+
+subject "disk/md/{array}/state" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" description="array state"
+
+subject "disk/md/{array}/degraded" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" description="array is degraded"
+
+subject "disk/md/{array}/failed_disks" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" description="members flagged failed"
+
+subject "disk/md/{array}/total_disks" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" description="configured members"
+
+subject "disk/md/{array}/active_disks" class=telemetry type="TelemetryPoint" \
+    cardinality=64 since="1.1" description="working members"
+
+subject "network/{iface}/rx_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="bytes received"
+
+subject "network/{iface}/tx_bytes" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="bytes sent"
+
+subject "network/{iface}/rx_packets" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="packets received"
+
+subject "network/{iface}/tx_packets" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="packets sent"
+
+subject "network/{iface}/rx_errors" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="receive errors"
+
+subject "network/{iface}/tx_errors" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="transmit errors"
+
+subject "network/{iface}/rx_rate" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="receive throughput (B/s)"
+
+subject "network/{iface}/tx_rate" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="transmit throughput (B/s)"
+
+subject "network/{iface}/rx_dropped" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="receive drops"
+
+subject "network/{iface}/rx_fifo" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="receive FIFO overruns"
+
+subject "network/{iface}/rx_frame" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="receive framing errors"
+
+subject "network/{iface}/multicast" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="multicast frames"
+
+subject "network/{iface}/tx_dropped" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="transmit drops"
+
+subject "network/{iface}/tx_fifo" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="transmit FIFO underruns"
+
+subject "network/{iface}/tx_colls" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="collisions"
+
+subject "network/{iface}/tx_carrier" class=telemetry type="TelemetryPoint" \
+    cardinality=1024 since="1.1" description="carrier losses"
+
+subject "network/tcp/retrans_segs_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="TCP segments retransmitted"
+
+subject "network/tcp/listen_overflows_total" class=telemetry \
+    type="TelemetryPoint" since="1.1" description="accept-queue overflows"
+
+subject "network/tcp/listen_drops_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="SYN drops"
+
+subject "network/sockets/used" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="sockets in use"
+
+subject "network/sockets/tcp_inuse" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="TCP sockets in use"
+
+subject "network/sockets/tcp_mem_pages" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="TCP memory (kernel pages)"
+
+subject "network/sockets/udp_inuse" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="UDP sockets in use"
+
+subject "network/softnet/processed_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="packets processed"
+
+subject "network/softnet/dropped_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="backlog drops"
+
+subject "network/softnet/squeezed_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="budget exhaustions"
+
+subject "network/conntrack/count" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="conntrack entries"
+
+subject "network/conntrack/max" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="conntrack table size"
+
+subject "network/conntrack/utilization_percent" class=telemetry \
+    type="TelemetryPoint" since="1.1" description="conntrack occupancy"
+
+subject "tcp/{state}" class=telemetry type="TelemetryPoint" cardinality=16 \
+    since="1.1" \
+    description="TCP sockets by state (the 11 kernel states, plus `total`)"
+
+subject "pressure/{resource}/{stat}" class=telemetry type="TelemetryPoint" \
+    cardinality=32 since="1.1" \
+    description="PSI per resource (cpu|memory|io): {some,full}_avg{10,60,300} and {some,full}_total_us — scope and window ride the leaf together"
+
+subject "cgroup/cpu/nr_throttled" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="throttled enforcement periods"
+
+subject "cgroup/cpu/throttled_usec" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="time throttled (us)"
+
+subject "cgroup/memory/current" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="current usage (bytes)"
+
+subject "cgroup/memory/max" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="hard limit (bytes)"
+
+subject "cgroup/memory/used_percent" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="occupancy against the limit"
+
+subject "cgroup/memory/oom_kills_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="processes OOM-killed in this cgroup"
+
+subject "cgroup/memory/oom_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="times the cgroup hit its limit"
+
+subject "cgroup/{resource}/pressure/{stat}" variant="CgroupPressure" \
+    class=telemetry type="TelemetryPoint" cardinality=32 since="1.1" \
+    description="cgroup PSI per resource: {some,full}_avg10 and {some,full}_total_us"
+
+subject "sensors/{chip}/{label}/temp" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="temperature (C)"
+
+subject "sensors/{chip}/{label}/critical" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="critical threshold (C)"
+
+subject "sensors/{chip}/{label}/max" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="max threshold (C)"
+
+subject "sensors/{chip}/{label}/rpm" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="fan speed (RPM)"
+
+subject "power/rapl/{zone}/watts" class=telemetry type="TelemetryPoint" \
+    cardinality=16 since="1.1" \
+    description="RAPL power draw per zone (package-0, core, ...)"
+
+subject "battery/{name}/capacity" class=telemetry type="TelemetryPoint" \
+    cardinality=8 since="1.1" description="charge (percent)"
+
+subject "battery/{name}/status" class=telemetry type="TelemetryPoint" \
+    cardinality=8 since="1.1" description="charging status"
+
+subject "health" common=health class=state type="HealthSnapshot" ttl_s=120 \
+    since="1.0" \
+    description="sensor health document (framework; absorbs the legacy @/status running flag)"
+
+subject "errors" common=errors class=state type="ErrorReport" ttl_s=300 \
+    since="1.0" description="rolling error window (framework)"
+
+subject "sensor" common=sensor class=state type="SensorInfo" ttl_s=900 \
+    since="1.0" \
+    description="registration document: identity, version, capabilities (framework, 60 s re-emit)"
+
+subject "evidence/self" common=evidence_self class=state type="HostEvidence" \
+    ttl_s=900 since="1.0" description="self-identity claim (RFC 06 §4)"
+
+subject "alert/{alert_key}" common=alert class=state type="Alert" qos=alert \
+    cardinality=64 ttl_s=900 since="1.0" \
+    description="alerts; firing->resolved on one key, delete = tombstone"
+
+subject "artifact/{kind}" class=state type="ArtifactStatus" cardinality=16 \
+    ttl_s=900 since="1.1" \
+    description="per-kind artifact progress (framework: V1Context::artifact_status_key)"
+
+procedure "introspect" kind=read reply="RegistrySlice" idempotent=#true \
+    since="1.0" description="the registry slice this build serves (RFC 08 §6)"
+
+procedure "artifact/request" kind=write request="ArtifactRequest" \
+    reply="ArtifactAck" since="1.0" \
+    description="initiate artifact generation; replies { id } immediately (RFC 05 §3)"
+
+procedure "artifact/cancel" kind=write reply="Ack" since="1.0" \
+    description="free an in-flight/ready artifact early (?id=<ulid>)"
+
+procedure "artifact/status" kind=read reply="ArtifactStatus" idempotent=#true \
+    since="1.0" \
+    description="advertised artifact kinds + the in-flight/ready state per kind (RFC 05 §3)"
+
+procedure "processes" kind=read reply="Vec<ProcessRecord>" idempotent=#true \
+    since="1.0" description="top processes (?sort=cpu|mem|io;top=N)"
+
+procedure "latency" kind=read reply="LatencyReport" idempotent=#true since="1.0" \
+    description="eBPF runqlat/biolatency saturation histograms (feature ebpf)"
