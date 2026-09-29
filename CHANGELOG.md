@@ -6,14 +6,39 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 |
-|---|---|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 |
+|---|---|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged |
+
+---
+
+## 0.11.1 — what the adopter hit first (2026-09-29)
+
+Two fixes the second adopter filed the day 0.11.0 shipped, both additive:
+`zenkey` 0.10.1, `zenkey-build` 0.10.1 (the workspace version; no change of
+its own), `zenkey-fleet` 0.15.1, `zenctl` 0.9.1. zengui and zenwatch keep
+their versions.
+
+* **`ConfigChangeEvent` and `Edit` have constructors** (#487). Both are
+  `#[non_exhaustive]`, so a producer outside the crate could not build the
+  RFC 05 §5.1 change event at all — zenoh-modem built it as a
+  `serde_json::Value` and proved the shape in a test. `Edit::of(parameter,
+  old, new)`, `Edit::redacted(parameter)` and `ConfigChangeEvent::new(resource,
+  revision, outcome, edits)` with the `token`/`actor`/`request_id`/
+  `claimed_source` setters, in the style of `ConfigChange::of` and
+  `PendingChange::new`; a test pins the serialized shape.
+* **`acl gen --json5` prints a fragment that pastes** (#486). The
+  `access_control: { … }` and `downsampling: [ … ]` blocks each end in a
+  member comma now — legal JSON5 even before the closing `}` — so the output
+  spliced into a router config parses without two hand-added commas (the
+  constrained-face output, where both blocks appear, was the one that broke).
+  A test pastes both outputs into a router config and has zenoh's own loader
+  read it.
 
 ---
 
