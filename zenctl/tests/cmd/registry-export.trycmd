@@ -27,3 +27,23 @@ rss_mb = 32
 ...
 
 ```
+
+`--as kdl` is the same document in the second spelling (RFC 08 §5.1,
+v1.44), through `zenkey::slice_to_kdl`: one node per entry, the path as its
+argument and every other column a property, closed-vocabulary values bare,
+a list column (`buckets`) as a child node. It reads back through
+`--registry` as `<producer>.kdl`. (A long node continues on the next line
+with a backslash, which this corpus cannot show: trycmd normalizes it to a
+path separator.)
+
+```console
+$ zenctl registry export --registry ../fixture-tests/registry --producer sysinfo --as kdl
+// ── sysinfo.kdl ─────────────────────────────
+registry version="1.1" app="zensight" convention=1
+
+producer "sysinfo" description="host CPU/memory/disk/net metrics"
+
+budget rss_mb=32
+...
+
+```

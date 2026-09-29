@@ -35,10 +35,14 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
         );
         let _ = writeln!(out, "    #[allow(unused_imports)]");
         let _ = writeln!(out, "    use {zk}::qos::QosProfile;");
+        // The two lines a spelling changes, and the only two: the byte-
+        // identical-generation pin in fixture-tests allows exactly these to
+        // differ between a registry dir and its KDL mirror (#374).
         let _ = writeln!(
             out,
-            "\n    /// The raw registry slice — served verbatim by `introspect` (RFC 08 §6).\n    pub const REGISTRY_TOML: &str = include_str!({:?});\n",
-            f.toml_path
+            "\n    /// The raw registry file — served verbatim by `introspect` (RFC 08 §6), in the\n    /// spelling [`REGISTRY_ENCODING`] names (RFC 08 §5.1).\n    pub const REGISTRY_SOURCE: &str = include_str!({:?});\n    /// The `Encoding` an `introspect` reply of [`REGISTRY_SOURCE`] MUST declare (RFC 08 §6, v1.44).\n    pub const REGISTRY_ENCODING: &str = {:?};\n    /// The raw registry slice.\n    #[deprecated(note = \"renamed REGISTRY_SOURCE: since RFC 08 v1.44 the file may be KDL; serve it with REGISTRY_ENCODING\")]\n    pub const REGISTRY_TOML: &str = REGISTRY_SOURCE;\n",
+            f.source_path,
+            f.format.media_type()
         );
         if let Some(origin) = &f.service_origin {
             let _ = writeln!(
@@ -1243,25 +1247,48 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
 
     emit_blob(&mut out, files, zk);
 
-    // Raw registry slice by producer name (introspect, RFC 08 §6).
+    // Raw registry file by producer name (introspect, RFC 08 §6), and the
+    // spelling it is in (§5.1) — the pair an `introspect` reply carries.
     let _ = writeln!(
         out,
-        "/// The raw registry slice for a producer/service, by base name."
+        "/// The raw registry file for a producer/service, by base name — served verbatim\n/// by `introspect`, declared with [`registry_encoding`] (RFC 08 §6)."
     );
     let _ = writeln!(
         out,
-        "pub fn registry_toml(name: &str) -> Option<&'static str> {{"
+        "pub fn registry_source(name: &str) -> Option<&'static str> {{"
     );
     let _ = writeln!(out, "    match name {{");
     for f in files {
         let module = producer_module(&f.name);
         let _ = writeln!(
             out,
-            "        {:?} => Some({module}::REGISTRY_TOML),",
+            "        {:?} => Some({module}::REGISTRY_SOURCE),",
             f.name
         );
     }
     let _ = writeln!(out, "        _ => None,\n    }}\n}}\n");
+    let _ = writeln!(
+        out,
+        "/// The `Encoding` a producer/service's `introspect` reply MUST declare — the\n/// media type of its registry file's spelling (RFC 08 §5.1, §6, v1.44)."
+    );
+    let _ = writeln!(
+        out,
+        "pub fn registry_encoding(name: &str) -> Option<&'static str> {{"
+    );
+    let _ = writeln!(out, "    match name {{");
+    for f in files {
+        let module = producer_module(&f.name);
+        let _ = writeln!(
+            out,
+            "        {:?} => Some({module}::REGISTRY_ENCODING),",
+            f.name
+        );
+    }
+    let _ = writeln!(out, "        _ => None,\n    }}\n}}\n");
+    let _ = writeln!(
+        out,
+        "/// The raw registry slice for a producer/service, by base name.\n#[deprecated(note = \"renamed registry_source: since RFC 08 v1.44 the file may be KDL; declare it with registry_encoding\")]\npub fn registry_toml(name: &str) -> Option<&'static str> {{\n    registry_source(name)\n}}\n"
+    );
 
     // Every registry slice this build was compiled against, by base name. A
     // fleet-capabilities view fans `introspect` out over exactly this list and
@@ -1273,7 +1300,7 @@ pub(crate) fn emit(files: &[RegistryFile], zk: &str) -> String {
     let _ = writeln!(out, "pub const REGISTRIES: &[(&str, &str)] = &[");
     for f in files {
         let module = producer_module(&f.name);
-        let _ = writeln!(out, "    ({:?}, {module}::REGISTRY_TOML),", f.name);
+        let _ = writeln!(out, "    ({:?}, {module}::REGISTRY_SOURCE),", f.name);
     }
     let _ = writeln!(out, "];\n");
 

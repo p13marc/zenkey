@@ -244,3 +244,81 @@ async fn a_diff_against_a_split_fleet_carries_what_the_fold_discarded() {
     );
     assert_eq!(offline.self_disagreeing(), 0);
 }
+
+/// Serve `introspect` with a declared `Encoding` (RFC 08 §6, v1.44).
+async fn serve_declared(
+    session: &zenoh::Session,
+    origin: &str,
+    body: String,
+    encoding: &'static str,
+) -> zenoh::query::Queryable<()> {
+    let key = format!("v1/{origin}/@rpc/sysinfo/introspect");
+    let reply_key = key.clone();
+    session
+        .declare_queryable(&key)
+        .callback(move |query| {
+            let q = query.clone();
+            let reply_key = reply_key.clone();
+            let body = body.clone();
+            tokio::spawn(async move {
+                q.reply(reply_key, body).encoding(encoding).await.unwrap();
+            });
+        })
+        .await
+        .expect("introspect queryable")
+}
+
+/// A mixed fleet (RFC 08 §6, v1.44): a KDL producer declaring
+/// `application/kdl`, a TOML producer that has not caught up and declares
+/// nothing, and two whose declaration the consumer takes at its word — one
+/// declaring KDL over TOML text, one declaring neither spelling. The first
+/// two read; the declared-KDL TOML is read *as KDL* and fails rather than
+/// being sniffed back to TOML; the last is unreadable. Neither failure
+/// passes for a slice (#374).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_sweep_reads_each_reply_in_the_spelling_it_declares() {
+    const KDL_HOST: &str = "h-cccccccccccc";
+    const LIAR_HOST: &str = "h-dddddddddddd";
+    const JSON_HOST: &str = "h-eeeeeeeeeeee";
+    let (a, b) = peer_pair().await;
+    let toml = slice_toml("1.0", 30);
+    let kdl = zenkey::slice_to_kdl(&zenkey::parse_slice(&slice_toml("2.0", 60)).unwrap());
+    let _toml = serve_introspect(&a, OLD_HOST, toml.clone()).await;
+    let _kdl = serve_declared(&a, KDL_HOST, kdl.clone(), "application/kdl").await;
+    let _liar = serve_declared(&a, LIAR_HOST, toml.clone(), "application/kdl").await;
+    let _json = serve_declared(&a, JSON_HOST, toml, "application/json").await;
+
+    let fleet = Fleet::new(&b, "");
+    // Settle on the queryables' routes, then sweep once more: the two
+    // unreadable replies can never be counted, so settle on the readable.
+    let served = tokio::time::timeout(util::SETTLE, async {
+        loop {
+            let served = fleet_registry_by_origin(&fleet, Duration::from_secs(5))
+                .await
+                .expect("sweep");
+            if served.len() >= 2 {
+                break served;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the two readable origins should answer within 5s");
+
+    let mut by_origin: Vec<(&str, &str, zenkey::SliceFormat)> = served
+        .iter()
+        .map(|s| (s.origin.as_str(), s.slice.version.as_str(), s.format))
+        .collect();
+    by_origin.sort_unstable_by_key(|(o, ..)| *o);
+    assert_eq!(
+        by_origin,
+        vec![
+            (OLD_HOST, "1.0", zenkey::SliceFormat::Toml),
+            (KDL_HOST, "2.0", zenkey::SliceFormat::Kdl),
+        ],
+        "the misdeclared and the undeclarable are not slices"
+    );
+    let kdl_served = served.iter().find(|s| s.origin == KDL_HOST).unwrap();
+    assert_eq!(kdl_served.encoding.as_deref(), Some("application/kdl"));
+    assert_eq!(kdl_served.raw, kdl, "served verbatim, cached verbatim");
+}

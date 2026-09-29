@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use crate::{Error, Result};
-use zenkey::{RegistrySlice, parse_slice};
+use zenkey::{RegistrySlice, SliceFormat};
 use zenoh::Session;
 use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
@@ -633,9 +633,17 @@ pub struct ServedSlice {
     /// The parsed slice. Its `name` is the producer, which is a different
     /// question from `origin` and is why both are here.
     pub slice: RegistrySlice,
-    /// The reply's raw TOML — the artifact the slice cache persists, since
-    /// slices do not re-serialize.
+    /// The reply's raw registry file — the artifact the slice cache
+    /// persists, since slices do not re-serialize.
     pub raw: String,
+    /// The `Encoding` the reply declared, verbatim, when it declared one
+    /// (RFC 08 §6, v1.44) — `application/toml`, `application/kdl`, or the
+    /// undeclared `text/plain` / `zenoh/bytes` of a producer that has not
+    /// caught up.
+    pub encoding: Option<String>,
+    /// The spelling `raw` was read as: the declared one, or the sniff's for
+    /// an undeclared reply ([`zenkey::registry_doc::negotiate`]).
+    pub format: SliceFormat,
 }
 
 /// The fleet sweep, **keeping the origin that answered** (#385).
@@ -714,9 +722,12 @@ impl RepeatingRegistry {
     /// One sweep, attributed: every parsed slice with the origin that served
     /// it and its raw TOML (#385).
     ///
-    /// A reply that does not parse is logged and skipped, never fatal — one
-    /// malformed producer must not blind the tool to every other producer's
-    /// slice. Nothing is deduplicated: a fleet mid-rollout serving three
+    /// Each reply is read in the spelling its `Encoding` declares (RFC 08 §6,
+    /// v1.44: `application/toml` or `application/kdl`, never second-guessed;
+    /// an undeclared reply is sniffed). A reply that does not parse — or
+    /// declares an encoding that is neither spelling, which is logged naming
+    /// it — is logged and skipped, never fatal: one malformed producer must
+    /// not blind the tool to every other producer's slice. Nothing is deduplicated: a fleet mid-rollout serving three
     /// versions of one producer yields three entries, and that disagreement
     /// is the finding.
     pub async fn fetch_by_origin(&self) -> Result<Vec<ServedSlice>> {
@@ -727,15 +738,23 @@ impl RepeatingRegistry {
                 let Answer::Value(bytes) = answer.answer else {
                     continue;
                 };
-                let served_toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
-                match parse_slice(&served_toml) {
-                    Ok(slice) => slices.push(ServedSlice {
+                let served = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
+                let encoding = answer.encoding;
+                let parsed = zenkey::registry_doc::negotiate(encoding.as_deref(), &served)
+                    .and_then(|format| {
+                        zenkey::parse_slice_as(&served, format).map(|slice| (slice, format))
+                    });
+                match parsed {
+                    Ok((slice, format)) => slices.push(ServedSlice {
                         origin,
                         slice,
-                        raw: served_toml,
+                        raw: served,
+                        encoding,
+                        format,
                     }),
                     Err(e) => tracing::warn!(
                         origin = %origin,
+                        encoding = encoding.as_deref().unwrap_or("(none)"),
                         "introspect reply did not parse, skipping: {e}"
                     ),
                 }

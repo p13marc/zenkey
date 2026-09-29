@@ -33,4 +33,3 @@ rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-def
 zenkey = { version = "0.10.1", path = "../zenkey", default-features = false }
 thiserror = { workspace = true }
 serde_json = { workspace = true, optional = true }
-toml = "1"

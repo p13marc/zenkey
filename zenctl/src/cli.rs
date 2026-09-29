@@ -91,6 +91,9 @@ pub(crate) enum ScoutWhat {
 pub(crate) enum ExportAs {
     /// Registry TOML — round-trippable through `SliceSet::from_dirs`.
     Toml,
+    /// Registry KDL, the second spelling (RFC 08 §5.1) — the same document,
+    /// round-trippable through `SliceSet::from_dirs` as `<producer>.kdl`.
+    Kdl,
     /// A JSON Schema bundle built from the producers' served `describe`
     /// replies (RFC 08 §7).
     Jsonschema,
@@ -879,7 +882,8 @@ pub(crate) enum SchemaCmd {
 pub(crate) enum RegistryCmd {
     /// Export the loaded slice set as a document.
     ///
-    /// `--as toml` round-trips through `--registry <dir>`; `--as jsonschema`
+    /// `--as toml` and `--as kdl` (RFC 08 §5.1) round-trip through
+    /// `--registry <dir>`; `--as jsonschema`
     /// bundles the producers' served `describe` schemas (RFC 08 §7);
     /// `--as asyncapi` maps subjects to channels and procedures to operations.
     Export(RegistryExportArgs),
@@ -1241,7 +1245,7 @@ pub(crate) struct BusArgs {
     /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
     #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
     pub(crate) context: Option<String>,
-    /// Local registry directory (`registry/*.toml`), repeatable. Joined with
+    /// Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with
     /// the live bus as a union (RFC 08 §6.1): a producer's served slice wins,
     /// these files fill the gaps, and a disagreement is reported — never
     /// silently overwritten. With the bus unreachable they answer alone.

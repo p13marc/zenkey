@@ -239,7 +239,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     col = col.push(kit::caption("registry"));
     col = col.push(input_row(
         "registry dirs",
-        "registry dirs (registry/*.toml), space-separated — empty = the bus's slices",
+        "registry dirs (registry/*.{toml,kdl}), space-separated — empty = the bus's slices",
         &d.form.registry,
         SettingsMsg::RegistryChanged,
     ));

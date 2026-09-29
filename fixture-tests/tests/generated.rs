@@ -289,8 +289,8 @@ fn instance_suffixed_producer_keys() {
 
 #[test]
 fn introspection_slice_is_the_registry_file() {
-    assert!(netring::REGISTRY_TOML.contains("flow/red/{quantile}"));
-    assert!(netring::REGISTRY_TOML.contains("[registry]"));
+    assert!(netring::REGISTRY_SOURCE.contains("flow/red/{quantile}"));
+    assert!(netring::REGISTRY_SOURCE.contains("[registry]"));
 }
 
 #[test]
@@ -352,10 +352,10 @@ fn common_state_refines_from_the_common_field() {
 }
 
 #[test]
-fn registry_toml_and_registries_agree() {
+fn registry_source_and_registries_agree() {
     assert!(!registry::REGISTRIES.is_empty());
     for (name, toml_src) in registry::REGISTRIES {
-        assert_eq!(registry::registry_toml(name), Some(*toml_src));
+        assert_eq!(registry::registry_source(name), Some(*toml_src));
         let slice = zenkey::parse_slice(toml_src)
             .unwrap_or_else(|e| panic!("registry slice {name} does not parse: {e}"));
         assert_eq!(&slice.name, name);
@@ -558,7 +558,7 @@ fn the_probe_form_is_not_a_key() {
 /// reads it, so a codegen change that dropped it would fail here first.
 #[test]
 fn the_introspect_slice_carries_the_budget_verbatim() {
-    let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
+    let slice = zenkey::parse_slice(registry::registry_source("netring").unwrap()).unwrap();
     let budget = slice.budget.as_ref().expect("netring declares a budget");
     assert_eq!(budget.rss_mb, Some(64));
     let names: Vec<&str> = budget.tables.iter().map(|t| t.name.as_str()).collect();
@@ -567,7 +567,7 @@ fn the_introspect_slice_carries_the_budget_verbatim() {
     assert_eq!(budget.tables[0].max_bytes, Some(16_777_216));
     assert_eq!(budget.tables[1].max_bytes, None);
 
-    let none = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
+    let none = zenkey::parse_slice(registry::registry_source("logs").unwrap()).unwrap();
     assert_eq!(none.budget, None, "a file without [budget] is not asked");
 }
 
@@ -576,7 +576,7 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     // The stated point of modelling `@blob`: an explorer reads a producer's
     // slice and learns which tiers it holds, without probing the bus for keys
     // nobody may be serving.
-    let slice = zenkey::parse_slice(registry::registry_toml("netring").unwrap()).unwrap();
+    let slice = zenkey::parse_slice(registry::registry_source("netring").unwrap()).unwrap();
     assert!(slice.serves_blob_tier(BlobTier::Artifact));
     assert!(
         slice.serves_blob_tier(BlobTier::Tree),
@@ -597,7 +597,7 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     // Each producer's slice declares the tiers *it* serves — per-producer
     // truth, even though every declarer names the same app-level key family
     // (shapes agree by lint, codegen dedups).
-    let logs = zenkey::parse_slice(registry::registry_toml("logs").unwrap()).unwrap();
+    let logs = zenkey::parse_slice(registry::registry_source("logs").unwrap()).unwrap();
     assert!(logs.serves_blob_tier(BlobTier::Tree) && logs.serves_blob_tier(BlobTier::Store));
     assert_eq!(
         logs.blob
@@ -627,7 +627,7 @@ fn the_introspect_slice_carries_the_blob_tiers() {
     )));
 
     // A diff against a build that serves no blobs is a finding, not silence.
-    let none = zenkey::parse_slice(registry::registry_toml("sysinfo").unwrap()).unwrap();
+    let none = zenkey::parse_slice(registry::registry_source("sysinfo").unwrap()).unwrap();
     let findings = zenkey::slice::diff(&slice, &none);
     assert!(
         findings.iter().any(|f| matches!(
@@ -729,8 +729,8 @@ fn error_names_are_constants() {
             .contains(&("unit-not-found", "error/systemd/unit-not-found"))
     );
     // And the slice a consumer reads off `introspect` carries the entry.
-    let slice =
-        zenkey::parse_slice(zenkey_fixture_tests::registry::systemd::REGISTRY_TOML).expect("slice");
+    let slice = zenkey::parse_slice(zenkey_fixture_tests::registry::systemd::REGISTRY_SOURCE)
+        .expect("slice");
     assert_eq!(slice.errors.len(), 1);
     assert_eq!(
         slice.errors[0].wire_name("systemd"),
@@ -769,7 +769,7 @@ fn exposure_and_sensitive_are_accessors() {
     assert!(!systemd::ProcedureId::ExpectationsSet.sensitive());
     assert_eq!(systemd::ProcedureId::Introspect.exposure(), None);
     // And the slice a consumer reads carries the same.
-    let slice = zenkey::parse_slice(systemd::REGISTRY_TOML).expect("slice");
+    let slice = zenkey::parse_slice(systemd::REGISTRY_SOURCE).expect("slice");
     let set = slice
         .procedures
         .iter()
@@ -801,7 +801,7 @@ fn when_predicates_are_accessors() {
     assert!(netring::ProcedureId::Introspect.when().is_empty());
     assert_eq!(netring::ProcedureId::Introspect.gate_note(), None);
     // And the slice a consumer reads carries the same.
-    let slice = zenkey::parse_slice(netlink::REGISTRY_TOML).expect("slice");
+    let slice = zenkey::parse_slice(netlink::REGISTRY_SOURCE).expect("slice");
     let peers = slice
         .subjects
         .iter()

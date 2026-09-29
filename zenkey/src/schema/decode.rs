@@ -326,7 +326,13 @@ impl PayloadDecoder for ProtobufDecoder {
             // `Other` is an unlabelled bus, not a contradiction: the schema
             // says protobuf and the sample said nothing.
             WireEncoding::Protobuf | WireEncoding::Other(_) => {}
-            WireEncoding::Json | WireEncoding::Cbor | WireEncoding::Cdr => {
+            // A registry spelling (RFC 08 §5.1) is a document's, not a
+            // payload framing — as much a contradiction as JSON is.
+            WireEncoding::Json
+            | WireEncoding::Cbor
+            | WireEncoding::Cdr
+            | WireEncoding::Toml
+            | WireEncoding::Kdl => {
                 return Err(DecodeError::WrongEncoding(format!("{encoding:?}")));
             }
         }

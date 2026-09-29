@@ -27,7 +27,7 @@ Options:
 $ zenctl registry export --help
 Export the loaded slice set as a document.
 
-`--as toml` round-trips through `--registry <dir>`; `--as jsonschema` bundles the producers' served `describe` schemas (RFC 08 §7); `--as asyncapi` maps subjects to channels and procedures to operations.
+`--as toml` and `--as kdl` (RFC 08 §5.1) round-trip through `--registry <dir>`; `--as jsonschema` bundles the producers' served `describe` schemas (RFC 08 §7); `--as asyncapi` maps subjects to channels and procedures to operations.
 
 Usage: zenctl registry export [OPTIONS]
 
@@ -37,6 +37,7 @@ Options:
 
           Possible values:
           - toml:       Registry TOML — round-trippable through `SliceSet::from_dirs`
+          - kdl:        Registry KDL, the second spelling (RFC 08 §5.1) — the same document, round-trippable through `SliceSet::from_dirs` as `<producer>.kdl`
           - jsonschema: A JSON Schema bundle built from the producers' served `describe` replies (RFC 08 §7)
           - asyncapi:   An AsyncAPI 3.0 document: channels from subjects, operations from procedures
           
@@ -56,7 +57,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -118,7 +119,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -284,7 +285,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)
@@ -348,7 +349,7 @@ Options:
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
       --registry <DIR>
-          Local registry directory (`registry/*.toml`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
+          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`)

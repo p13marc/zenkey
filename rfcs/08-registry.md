@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40, v1.41, v1.43 and v1.44 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40, v1.41, v1.43, v1.44 and v1.46 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -787,7 +787,15 @@ Those names are **reserved**, and so are the list-column names below
 that carry them. A node of any other name is read as a TOML table of that
 name would be: whatever a reader does with an unknown table — skip it, as
 a consumer skips a later amendment's kind (§6), or refuse it — it does with
-the unknown node, and likewise for an unknown property or child.
+the unknown node, and likewise for an unknown property or child. Two
+things TOML cannot say about an unknown table, KDL can, and a reader reads
+them leniently, because the node may be a later amendment's entry kind
+(v1.46): an unknown node's **arguments** belong to no column this reader
+knows and are ignored with it, never refused; and an unknown node **repeated**
+is read as the rows of an array of tables, since KDL spells `[x]` and
+`[[x]]` alike. A `type` node outside `types.kdl` is read as a
+`[types.<Name>]` table in a producer file would be — which is to say it
+declares nothing there.
 
 **The one-argument rule.** A node of the table above carries at most one
 argument, and it is the entry's identifying column: present exactly where
@@ -827,7 +835,9 @@ its KDL spelling in the amendment that adds it.
   on the version columns: `since="1.1"`, never `since=1.1`. A bare `1.1` is
   a KDL number, and `1.10` and `1.1` are one number but two MAJOR.MINOR
   versions (§3); the same holds for `version` on the `registry` node and
-  for `gone`.
+  for `gone`. A list column whose elements §2 types as strings — `when`,
+  `endpoints`, `procedures` — takes KDL strings as its arguments, under the
+  same rule (v1.46).
 - **Type annotations** — `(u8)64`, `(date)"1.1"`, on a value or on a node —
   MUST NOT be written, and a reader refuses one. An annotation is a second
   claim about a value's type where §2's tables already make the one claim;
@@ -974,8 +984,9 @@ Parameters after a `;` are not part of the declaration
 (`text/plain;charset=utf-8` is `text/plain`). Only the undeclared rows may be
 second-guessed: a consumer MAY sniff a `text/plain` or absent reply — the
 first byte that is neither whitespace nor inside a `#` comment line being
-`[` means TOML, anything else is tried as KDL — which rescues a producer
-that broke the MUST above and nothing else. A declared spelling is never
+`[` means TOML, anything else is tried as KDL; a reply with no such byte
+at all — empty, or only comments — is TOML, the undeclared default (v1.46)
+— which rescues a producer that broke the MUST above and nothing else. A declared spelling is never
 sniffed over; that would make the declaration advisory.
 
 This is §7's *sample > registry > sniff* ladder with its middle rung

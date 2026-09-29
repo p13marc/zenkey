@@ -1,0 +1,9 @@
+# Conditional-subject ledger (RFC 08 §6.1, v1.25): one tab-separated line
+# per registered subject whose emission is gated — <producer>, <path>, and
+# the gating condition as free text. Unlike deprecated.lock this file is
+# NOT append-only: a line leaves when its condition does, and the subject
+# re-enters the emitted-surface check by deletion.
+# Empty since v1.41 (zenkey #171): every gate this registry declares is a
+# `when` field on its entry, and one spelling per entry is the rule — a line
+# here naming a `when` entry is a lint error. The file stays as the record
+# that the legacy spelling was migrated, not forgotten.

@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.45** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.46** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.46** (2026-09-29) — what the reader found: errata to v1.44 — an
+  unknown KDL node's arguments are ignored and its repeats are rows, a
+  `type` outside `types.kdl` declares nothing, string-list elements are
+  KDL strings, and an unsniffable undeclared reply is TOML (08 §5.1, §6).
 - **v1.45** (2026-09-29) — what the suite may assume: a `when`
   exemption is held to the device's served `capabilities` claim, a suite
   calls only `read` procedures and `introspect` with no arguments, and an
@@ -23,11 +27,6 @@ what changed and what deliberately did not — is
   staged retirement that still owes its `deprecated` entry (08 §5.1); the
   `introspect` reply declares `application/toml` or `application/kdl`, and
   undeclared is TOML, the pre-v1.44 wire (08 §6).
-- **v1.43** (2026-09-27) — where a value may go: `exposure` on subjects
-  and procedures and `sensitive` on writes (08 §2); per-resource `writes`
-  grants with a carved deny, and the constrained-face profile generated
-  from the markers — a permissive default, the planes by their widest
-  spelling, `downsampling` for what crosses (09 §3, §4).
 
 ---
 

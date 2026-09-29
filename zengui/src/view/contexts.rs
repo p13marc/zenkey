@@ -298,7 +298,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     );
     col = col.push(
         kit::input(
-            "registry dirs (registry/*.toml), space-separated — offline slices, RFC 08 §6",
+            "registry dirs (registry/*.{toml,kdl}), space-separated — offline slices, RFC 08 §6",
             &form.registry,
         )
         .on_input(|t| msg(ContextMsg::RegistryChanged(t)))

@@ -46,7 +46,8 @@ let health = ctx.health_key();     // "v1/h-3fa9c2d41b7e/state/sysinfo/health"
 ```
 
 The subject vocabulary is governed by the registry (RFC 08) and is
-**application-owned**: check `registry/*.toml` into your repo and generate the
+**application-owned**: check `registry/*.toml` (or `*.kdl`, the second
+spelling, RFC 08 §5.1) into your repo and generate the
 typed subject/procedure builders with the
 [`zenkey-build`](https://crates.io/crates/zenkey-build) crate from your build
 script. This crate ships no registry.

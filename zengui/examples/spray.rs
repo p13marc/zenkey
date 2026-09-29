@@ -441,10 +441,13 @@ async fn main() -> anyhow::Result<()> {
     // protobuf leaf decodes with `--registry` pointing anywhere (or nowhere):
     // the union takes served-wins, and this producer is only served.
     let mut described = Vec::new();
-    for (producer, procedure, payload) in [
-        ("probe", "introspect", PROBE_SLICE.to_string()),
-        ("probe", "describe", probe_schema_set()),
-        ("parallax", "introspect", PARALLAX_SLICE.to_string()),
+    // A slice reply declares its spelling (RFC 08 §6, v1.44): one that
+    // declares nothing is only sniffed.
+    let toml = Some(zenkey::SliceFormat::Toml.media_type());
+    for (producer, procedure, payload, encoding) in [
+        ("probe", "introspect", PROBE_SLICE.to_string(), toml),
+        ("probe", "describe", probe_schema_set(), None),
+        ("parallax", "introspect", PARALLAX_SLICE.to_string(), toml),
     ] {
         let key = with_base(&format!("v1/{host}/@rpc/{producer}/{procedure}"));
         println!("serving: {key}");
@@ -457,7 +460,11 @@ async fn main() -> anyhow::Result<()> {
                     let reply_key = reply_key.clone();
                     let payload = payload.clone();
                     tokio::spawn(async move {
-                        let _ = q.reply(reply_key, payload).await;
+                        let reply = q.reply(reply_key, payload);
+                        let _ = match encoding {
+                            Some(e) => reply.encoding(e).await,
+                            None => reply.await,
+                        };
                     });
                 })
                 .await

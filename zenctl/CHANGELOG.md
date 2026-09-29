@@ -18,9 +18,22 @@ procedure; a write is never called), the doctor's checks are projected per
 surface, and `--junit` writes the assertions with unknowable as *skipped*.
 Exit 0 conforms, 1 violates, 2 unproven — on the one contract.
 
+`zenctl` reads a registry file in either spelling RFC 08 v1.44 allows —
+TOML or KDL (§5.1) — wherever it reads one: `--registry <dir>` takes
+`registry/*.{toml,kdl}`, mixed file by file, and a producer's `introspect`
+reply is read in the spelling its `Encoding` declares (`application/toml`
+or `application/kdl`, §6; an undeclared reply is sniffed, anything else is
+unreadable and named as such). **`registry export --as kdl`** is new: the
+same document as `--as toml`, in the second spelling, one
+`// ── <producer>.kdl` block per producer (marcpardo/zenkey#374). The
+completion cache writes each slice as `<producer>.toml` or
+`<producer>.kdl` by its spelling. No spelling moved; the exit contract is
+unchanged.
+
 | 0.9.1 | Unreleased |
 |---|---|
 | — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
+| — | `zenctl registry export --registry registry --as kdl` |
 
 ## 0.9.1 (2026-09-29) — a fragment that pastes
 

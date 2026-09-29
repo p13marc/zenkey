@@ -12,7 +12,9 @@ use std::time::Duration;
 use crate::report::SliceDisagreement;
 use crate::report::{Asked, CollapsedProducer, ProducerDiff, RegistryDiff};
 use crate::{Error, Result};
-use zenkey::{Declared, RegistrySlice, parse_slice};
+#[cfg(test)]
+use zenkey::parse_slice;
+use zenkey::{Declared, RegistrySlice, SliceFormat, parse_slice_as};
 
 /// One slice's subject patterns, parsed once and grouped by class.
 ///
@@ -33,14 +35,17 @@ struct ParsedSubjects {
 #[derive(Debug, Clone, Default)]
 pub struct SliceSet {
     slices: Vec<RegistrySlice>,
-    /// The raw TOML per slice, kept for the disk cache (slices do not
-    /// re-serialize; the served text is the artifact).
+    /// The raw registry file per slice, kept for the disk cache (slices do
+    /// not re-serialize; the served text is the artifact).
     raw: Vec<String>,
+    /// The spelling each raw text is in (RFC 08 §5.1) — what the cache
+    /// file's extension says, and what a mock serving it declares (§6).
+    formats: Vec<SliceFormat>,
     /// Parsed subject patterns per slice, keyed by class. Rebuilt wholesale
     /// with its slice — the two vectors are index-parallel, and `push` is the
     /// only place either grows.
     parsed: Vec<std::collections::BTreeMap<String, ParsedSubjects>>,
-    /// Producer base name → index into the three parallel vectors.
+    /// Producer base name → index into the parallel vectors.
     ///
     /// [`get`](Self::get) and [`refine`](Self::refine) run **per sample** on
     /// the decode path, and both used to scan `slices` by name — a linear
@@ -76,25 +81,35 @@ fn parse_subjects(slice: &RegistrySlice) -> std::collections::BTreeMap<String, P
     out
 }
 
+/// A registry file's spelling, by its extension (RFC 08 §5.1) — `None` for
+/// anything that is not one, and for the type table (`types.*`), which is
+/// not a slice.
+fn slice_file_format(path: &Path) -> Option<SliceFormat> {
+    if path.file_stem()? == "types" {
+        return None;
+    }
+    SliceFormat::from_extension(path.extension()?.to_str()?)
+}
+
 impl SliceSet {
-    /// Load from local `registry/*.toml` dirs — the offline source. What a
-    /// checked-out application *declares*. (`types.toml` is the type table,
-    /// not a slice — skipped.)
+    /// Load from local `registry/*.{toml,kdl}` dirs — the offline source.
+    /// What a checked-out application *declares*, in either spelling, read
+    /// by the one its extension names (RFC 08 §5.1). (`types.*` is the type
+    /// table, not a slice — skipped.)
     pub fn from_dirs(dirs: &[PathBuf]) -> Result<SliceSet> {
         let mut set = SliceSet::default();
         for dir in dirs {
             let mut paths: Vec<_> = std::fs::read_dir(dir)
                 .map_err(|e| Error::io(dir, e))?
                 .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().is_some_and(|e| e == "toml"))
-                .filter(|p| p.file_name().is_none_or(|n| n != "types.toml"))
+                .filter_map(|p| slice_file_format(&p).map(|f| (p, f)))
                 .collect();
-            paths.sort();
-            for path in paths {
+            paths.sort_by(|a, b| a.0.cmp(&b.0));
+            for (path, format) in paths {
                 let text = std::fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
-                let slice = parse_slice(&text)
+                let slice = parse_slice_as(&text, format)
                     .map_err(|e| Error::malformed_from(path.display().to_string(), e))?;
-                set.push(slice, text);
+                set.push_as(slice, text, format);
             }
         }
         Ok(set)
@@ -138,7 +153,7 @@ impl SliceSet {
             if s.raw != entry.2 {
                 entry.3 = false;
             }
-            set.push(s.slice, s.raw);
+            set.push_as(s.slice, s.raw, s.format);
         }
         // `Asked` even when the fold discarded nothing: a bus sweep in which
         // every producer had one origin *has* asked, and must not read like a
@@ -178,7 +193,15 @@ impl SliceSet {
         }
     }
 
+    /// [`push_as`](Self::push_as), the spelling sniffed from the text — for
+    /// a slice whose origin said nothing about it (RFC 08 §6).
+    #[cfg(test)]
     fn push(&mut self, slice: RegistrySlice, raw: String) {
+        let format = SliceFormat::sniff(&raw);
+        self.push_as(slice, raw, format);
+    }
+
+    fn push_as(&mut self, slice: RegistrySlice, raw: String, format: SliceFormat) {
         // One slice per base name; last one wins (a fleet mid-rollout serves
         // several versions — the newest reply is as good a pick as any, and
         // `doctor` is where disagreement is *reported*). The discard is no
@@ -188,11 +211,13 @@ impl SliceSet {
         if let Some(&i) = self.by_name.get(&slice.name) {
             self.slices[i] = slice;
             self.raw[i] = raw;
+            self.formats[i] = format;
             self.parsed[i] = parsed;
         } else {
             self.by_name.insert(slice.name.clone(), self.slices.len());
             self.slices.push(slice);
             self.raw.push(raw);
+            self.formats.push(format);
             self.parsed.push(parsed);
         }
     }
@@ -202,6 +227,16 @@ impl SliceSet {
     /// [`from_slices`](Self::from_slices), which has none to give.
     pub fn entries(&self) -> impl Iterator<Item = (&RegistrySlice, &str)> {
         self.slices.iter().zip(self.raw.iter().map(String::as_str))
+    }
+
+    /// [`entries`](Self::entries) with the spelling each text is in
+    /// (RFC 08 §5.1): what a cache file is named by and what a reply serving
+    /// the text declares (§6). A set built by
+    /// [`from_slices`](Self::from_slices) has no text, and says TOML.
+    pub fn sources(&self) -> impl Iterator<Item = (&RegistrySlice, &str, SliceFormat)> {
+        self.entries()
+            .zip(self.formats.iter().copied())
+            .map(|((s, r), f)| (s, r, f))
     }
 
     pub fn slices(&self) -> &[RegistrySlice] {
@@ -246,6 +281,7 @@ impl SliceSet {
     /// is skipped by `write_cache`).
     pub fn from_slices(slices: Vec<RegistrySlice>) -> SliceSet {
         let raw = vec![String::new(); slices.len()];
+        let formats = vec![SliceFormat::Toml; slices.len()];
         let parsed = slices.iter().map(parse_subjects).collect();
         // `or_insert`, not `insert`: first wins, which is what the linear
         // `find` this replaced did with a duplicated name.
@@ -256,6 +292,7 @@ impl SliceSet {
         SliceSet {
             slices,
             raw,
+            formats,
             parsed,
             by_name,
             // Bare slices carry no origin, so nothing here *could* be
@@ -266,17 +303,41 @@ impl SliceSet {
         }
     }
 
-    /// Write the raw slice TOMLs to a cache dir (one file per producer).
+    /// Write the raw slice files to a cache dir (one file per producer,
+    /// named by its spelling: `<name>.toml` or `<name>.kdl`, RFC 08 §5.1).
     /// Repeated invocations and dynamic shell completion read this instead
     /// of round-tripping the bus.
+    ///
+    /// A producer that changed spelling since the last write leaves its
+    /// other-spelling file behind, which [`read_cache`](Self::read_cache)
+    /// would read as a second, stale authority for one producer — so the
+    /// twin is removed. Only the twin, and only inside `dir`: the path is
+    /// the cache dir joined with the producer's own name and the other
+    /// extension, never anything a slice could steer elsewhere.
     pub fn write_cache(&self, dir: &Path) -> Result<()> {
         std::fs::create_dir_all(dir).map_err(|e| Error::io(dir, e))?;
-        for (slice, raw) in self.slices.iter().zip(&self.raw) {
+        for (slice, raw, format) in self.sources() {
             if raw.is_empty() {
                 continue; // from_slices sets: nothing faithful to persist
             }
-            let path = dir.join(format!("{}.toml", slice.name));
+            // A producer name is a plain chunk (RFC 03 §2) and cannot hold
+            // a separator; one that could would be steering the write.
+            if slice.name.is_empty()
+                || slice.name.contains(['/', '\\'])
+                || slice.name.starts_with('.')
+            {
+                continue;
+            }
+            let path = dir.join(format!("{}.{}", slice.name, format.extension()));
             std::fs::write(&path, raw).map_err(|e| Error::io(&path, e))?;
+            for other in SliceFormat::ALL.into_iter().filter(|f| *f != format) {
+                let twin = dir.join(format!("{}.{}", slice.name, other.extension()));
+                match std::fs::remove_file(&twin) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(Error::io(&twin, e)),
+                }
+            }
         }
         Ok(())
     }
@@ -339,7 +400,7 @@ impl SliceSet {
         let mut dirs_only = Vec::new();
         let mut disagreements = Vec::new();
 
-        for (served, raw) in bus.entries() {
+        for (served, raw, format) in bus.sources() {
             from_bus.push(served.name.clone());
             if let Some(local) = disk.get(&served.name)
                 && (local.version != served.version || local != served)
@@ -358,12 +419,12 @@ impl SliceSet {
                     },
                 });
             }
-            merged.push(served.clone(), raw.to_string());
+            merged.push_as(served.clone(), raw.to_string(), format);
         }
-        for (local, raw) in disk.entries() {
+        for (local, raw, format) in disk.sources() {
             if bus.get(&local.name).is_none() {
                 dirs_only.push(local.name.clone());
-                merged.push(local.clone(), raw.to_string());
+                merged.push_as(local.clone(), raw.to_string(), format);
             }
         }
         // The union is built fresh, so the bus set's receipt has to ride
@@ -546,6 +607,8 @@ mod tests {
             origin: origin.to_string(),
             slice: parse_slice(raw).unwrap(),
             raw: raw.to_string(),
+            encoding: Some("application/toml".to_string()),
+            format: SliceFormat::Toml,
         };
 
         // Two hosts, one producer, disagreeing bodies: a fleet mid-rollout.
@@ -620,6 +683,46 @@ mod tests {
                 .slices()
                 .is_empty()
         );
+    }
+
+    /// The cache names each file by its spelling (RFC 08 §5.1) and removes
+    /// the other-spelling twin a producer that changed spelling left behind
+    /// — that file, in the cache dir, and nothing else (#374).
+    #[test]
+    fn the_cache_writes_by_spelling_and_removes_only_the_twin() {
+        let dir =
+            std::env::temp_dir().join(format!("zenkey-fleet-cache-kdl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Last run, alpha was TOML; a neighbour's file must survive.
+        std::fs::write(dir.join("alpha.toml"), A).unwrap();
+        std::fs::write(dir.join("beta.toml"), A.replace("alpha", "beta")).unwrap();
+        std::fs::write(dir.join("notes.txt"), "keep").unwrap();
+
+        let kdl = zenkey::slice_to_kdl(&parse_slice(A).unwrap());
+        let mut set = SliceSet::default();
+        set.push_as(
+            parse_slice_as(&kdl, SliceFormat::Kdl).unwrap(),
+            kdl.clone(),
+            SliceFormat::Kdl,
+        );
+        set.write_cache(&dir).unwrap();
+
+        assert_eq!(std::fs::read_to_string(dir.join("alpha.kdl")).unwrap(), kdl);
+        assert!(!dir.join("alpha.toml").exists(), "the twin is removed");
+        assert!(
+            dir.join("beta.toml").exists(),
+            "another producer's file is not"
+        );
+        assert!(dir.join("notes.txt").exists());
+
+        // And reads back in its spelling, beside the TOML neighbour.
+        let back = SliceSet::read_cache(&dir);
+        assert_eq!(back.slices().len(), 2);
+        assert_eq!(back.get("alpha"), Some(&parse_slice(A).unwrap()));
+        let formats: Vec<SliceFormat> = back.sources().map(|(_, _, f)| f).collect();
+        assert_eq!(formats, [SliceFormat::Kdl, SliceFormat::Toml]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The name index answers exactly what the linear scan answered.

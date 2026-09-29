@@ -1,0 +1,173 @@
+// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
+// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
+//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+
+registry version="2.0" app="zensight" convention=1
+
+producer "logs" \
+    description="unified logs sensor; per-line detail is pull-only (RFC 04 R3)"
+
+subject "ingest/received_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="lines received"
+
+subject "ingest/parsed_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="lines parsed"
+
+subject "ingest/parse_failed_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="lines that failed to parse"
+
+subject "ingest/dropped_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="lines dropped"
+
+subject "by_severity/{severity}" class=telemetry type="TelemetryPoint" \
+    cardinality=16 since="1.1" \
+    description="lines by syslog severity; the leaf is `<severity>_total`"
+
+subject "errors_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="error-severity lines"
+
+subject "warnings_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="warning-severity lines"
+
+subject "units_in_failure" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="units currently in a failure state per the log stream"
+
+subject "journald/read_total" class=telemetry type="TelemetryPoint" since="1.1" \
+    description="journald entries read"
+
+subject "journald/published_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="entries published"
+
+subject "journald/dropped_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="entries dropped"
+
+subject "journald/sampled_out_total" class=telemetry type="TelemetryPoint" \
+    since="1.1" description="entries sampled out"
+
+subject "by_unit/{unit}/messages_total" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="lines from this unit"
+
+subject "by_unit/{unit}/errors_total" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="error lines from this unit"
+
+subject "by_unit/{unit}/error_ratio" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="error share for this unit"
+
+subject "by_unit/{unit}/burn_rate" class=telemetry type="TelemetryPoint" \
+    cardinality=256 since="1.1" description="error burn rate for this unit"
+
+subject "by_template/{template}/count_total" class=telemetry \
+    type="TelemetryPoint" cardinality=512 since="1.1" \
+    description="lines matching this template"
+
+subject "by_template/{template}/errors_total" class=telemetry \
+    type="TelemetryPoint" cardinality=512 since="1.1" \
+    description="error lines matching this template"
+
+subject "health" common=health class=state type="HealthSnapshot" ttl_s=120 \
+    since="1.0" \
+    description="sensor health document (framework; absorbs the legacy @/status running flag)"
+
+subject "errors" common=errors class=state type="ErrorReport" ttl_s=300 \
+    since="1.0" description="rolling error window (framework)"
+
+subject "sensor" common=sensor class=state type="SensorInfo" ttl_s=900 \
+    since="1.0" \
+    description="registration document: identity, version, capabilities (framework, 60 s re-emit)"
+
+subject "evidence/self" common=evidence_self class=state type="HostEvidence" \
+    ttl_s=900 since="1.0" description="self-identity claim (RFC 06 §4)"
+
+subject "alert/{alert_key}" common=alert class=state type="Alert" qos=alert \
+    cardinality=64 ttl_s=900 since="1.0" \
+    description="alerts; firing->resolved on one key, delete = tombstone"
+
+subject "artifact/{kind}" class=state type="ArtifactStatus" cardinality=16 \
+    ttl_s=900 since="1.1" \
+    description="per-kind artifact progress (framework: V1Context::artifact_status_key)"
+
+procedure "introspect" kind=read reply="RegistrySlice" idempotent=#true \
+    since="1.0" description="the registry slice this build serves (RFC 08 §6)"
+
+procedure "artifact/request" kind=write request="ArtifactRequest" \
+    reply="ArtifactAck" since="1.0" \
+    description="initiate artifact generation; replies { id } immediately (RFC 05 §3)"
+
+procedure "artifact/cancel" kind=write reply="Ack" since="1.0" \
+    description="free an in-flight/ready artifact early (?id=<ulid>)"
+
+procedure "artifact/status" kind=read reply="ArtifactStatus" idempotent=#true \
+    since="1.0" \
+    description="advertised artifact kinds + the in-flight/ready state per kind (RFC 05 §3)"
+
+procedure "events" kind=read reply="Vec<LogRecord>" idempotent=#true since="1.0" \
+    description="bounded log ring, newest first (?since=;max=;source= — source filters the observed device, a central receiver holds many)"
+
+procedure "filter" kind=read reply="TopicStatus" idempotent=#true since="1.0" \
+    description="current filter configuration (dynamic message filters)"
+
+procedure "filter/set" kind=write request="TopicConfig" reply="Ack" since="1.0" \
+    description="apply filter configuration (dynamic message filters)"
+
+deprecated "logs/ingest/received_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/ingest/parsed_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/ingest/parse_failed_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/ingest/dropped_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_severity/{severity}" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/errors_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/warnings_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/units_in_failure" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/journald/read_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/journald/published_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/journald/dropped_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/journald/sampled_out_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_unit/{unit}/messages_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_unit/{unit}/errors_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_unit/{unit}/error_ratio" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_unit/{unit}/burn_rate" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_template/{template}/count_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+deprecated "logs/by_template/{template}/errors_total" since="2.0" \
+    reason="the producer chunk already names the producer (#470)"
+
+blob "tree" reference="BlobReference" since="1.8" \
+    description="log-bundle directory snapshots, keyed by their own root hash"
+
+blob "store" algo="blake3" since="1.8" \
+    description="content-addressed chunks backing the tree tier"
+
+blob "store" algo="sha256" since="1.9" \
+    description="legacy-algo chunks served through the dual-algo migration window"

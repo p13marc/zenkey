@@ -25,6 +25,32 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.46 (2026-09-29, what the reader found)** — errata to v1.44 from
+> the first reader of the KDL spelling (chunk DN, #374), each a case §5.1
+> or §6 left to the implementation, now stated so a second reader agrees
+> with the first.
+>
+> **[08 §5.1](08-registry.md).** An unknown node's arguments are ignored
+> with it, never refused, and an unknown node repeated is read as the rows
+> of an array of tables — both because the node may be a later
+> amendment's entry kind, whose identifying column is its argument and
+> whose rows repeat. A `type` node outside `types.kdl` declares nothing,
+> as `[types.<Name>]` in a producer file declares nothing. The elements of
+> a string-typed list column (`when`, `endpoints`, `procedures`) must be
+> KDL strings, the rule v1.44 stated for columns, extended to their
+> elements.
+>
+> **[08 §6](08-registry.md).** An undeclared reply with no sniffable byte
+> — empty, or only comments — is TOML, the undeclared default.
+>
+> **What deliberately did not change.** Every refusal v1.44 made: the
+> lenient cases are all *unknown* nodes, where refusing would stop an
+> older reader from reading a newer slice; a known node keeps every rule
+> it had. The writer's side — nothing here tells a writer to emit an
+> argument on an unknown node or a `type` outside `types.kdl`.
+>
+> *Amends: 08.*
+
 > **v1.45 (2026-09-29, what the suite may assume)** — the three rules
 > `zenctl check conform` (#222) needed and 13 §3 did not state: how a
 > `when` exemption meets the device's own claim, what a suite may call,

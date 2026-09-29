@@ -67,6 +67,17 @@ pub async fn export(cli: crate::cli::RegistryExportArgs) -> Result<()> {
                 print!("{}", zenkey::slice_to_toml(slice));
             }
         }
+        ExportAs::Kdl => {
+            // The same document in the second spelling (RFC 08 §5.1), one per
+            // producer under the same file-boundary banner, as a `//` comment.
+            for (i, slice) in selected.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                println!("// ── {}.kdl ─────────────────────────────", slice.name);
+                print!("{}", zenkey::slice_to_kdl(slice));
+            }
+        }
         ExportAs::Jsonschema => {
             let session = args.session().await?;
             let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());

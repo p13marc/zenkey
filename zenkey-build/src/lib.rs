@@ -1,7 +1,8 @@
 //! Registry codegen for the keyspace-v2 convention (RFC 08).
 //!
-//! An application owns its subject vocabulary: `registry/*.toml` files checked
-//! into the application's repository (RFC 08 §5). This crate is the build-time
+//! An application owns its subject vocabulary: `registry/*.toml` — or
+//! `*.kdl`, the second spelling (RFC 08 §5.1, v1.44), mixed file by file —
+//! checked into the application's repository (RFC 08 §5). This crate is the build-time
 //! half of that contract — call it from your build script:
 //!
 //! ```no_run
@@ -21,7 +22,9 @@
 //! typed constructors and a precedence-ordered parser, a `ProcedureId` enum
 //! with `@rpc` key builders, and the raw registry slice served by
 //! `introspect` (RFC 08 §6); plus the cross-producer `AnySubject` dispatch,
-//! `REGISTRIES`, `registry_toml()`, and `is_registered_telemetry()`. When the
+//! `REGISTRIES`, `registry_source()`/`registry_encoding()` (the file and the
+//! `Encoding` its `introspect` reply declares, RFC 08 §6), and
+//! `is_registered_telemetry()`. When the
 //! registry declares `[[blob]]` entries (RFC 08 §2, v1.8), an app-level
 //! `blob` module is emitted as well — a deduped `Tier` enum over every
 //! declared tier (blob keys carry no producer chunk, so the surface is
@@ -59,6 +62,7 @@ use zenkey::grammar::{is_valid_plain_chunk, is_valid_verbatim_chunk};
 // One implementation of the registry pattern grammar (#320): the codegen
 // names `zenkey`'s types rather than keeping a second copy of the rules.
 use zenkey::pattern::{PatternChunk as Chunk, PatternError, SubjectPattern};
+use zenkey::registry_doc::{RawTable, RawValue, SliceFormat};
 use zenkey::{Fanout, SliceToken, SubjectKind};
 
 /// A codegen failure. Lint variants carry the registry file they were found
@@ -199,7 +203,7 @@ type Gate = (Option<Vec<(String, String)>>, Option<String>);
 /// an ANDed, non-empty list of `<kind>:<name>` tokens in the closed kind
 /// vocabulary, names without whitespace, no duplicates; a `gate_note` only
 /// beside a `when`. Returned as `(kind token, name)` pairs, already canonical.
-fn parse_when(fname: &str, entry: &toml::Value, path: &str) -> Result<Gate, Error> {
+fn parse_when(fname: &str, entry: &RawValue, path: &str) -> Result<Gate, Error> {
     let gate_note = entry
         .get("gate_note")
         .and_then(|v| v.as_str())
@@ -276,7 +280,7 @@ fn parse_when(fname: &str, entry: &toml::Value, path: &str) -> Result<Gate, Erro
 /// `exposure` (RFC 08 §2, v1.43) on a subject or procedure entry: the
 /// closed vocabulary `host | link | fleet`, returned canonical; absent is
 /// absent (the reader treats it as `fleet`).
-fn parse_exposure(fname: &str, entry: &toml::Value, path: &str) -> Result<Option<String>, Error> {
+fn parse_exposure(fname: &str, entry: &RawValue, path: &str) -> Result<Option<String>, Error> {
     match entry.get("exposure") {
         None => Ok(None),
         Some(v) => {
@@ -337,12 +341,7 @@ fn lint_kind(file: &str, message: impl Into<String>, kind: LintKind) -> Error {
 /// code the consumer never wrote and cannot fix (issue #313). The message
 /// names the file, the entry's path and the field, so the reader is pointed at
 /// the line responsible.
-fn opt_count(
-    file: &str,
-    entry: &toml::Value,
-    path: &str,
-    field: &str,
-) -> Result<Option<u64>, Error> {
+fn opt_count(file: &str, entry: &RawValue, path: &str, field: &str) -> Result<Option<u64>, Error> {
     match entry.get(field).and_then(|v| v.as_integer()) {
         None => Ok(None),
         Some(n) => u64::try_from(n).map(Some).map_err(|_| {
@@ -479,12 +478,12 @@ pub(crate) const BLOB_TIERS: &[&str] = &["artifact", "tree", "store"];
 ///
 /// Linted here — non-negative bounds, a required and unique `name` per
 /// `[[budget.tables]]` row — and then **not generated**: the block rides the
-/// slice verbatim in `REGISTRY_TOML` and reaches `introspect` unchanged, which
+/// slice verbatim in `REGISTRY_SOURCE` and reaches `introspect` unchanged, which
 /// is where an observer reads it (RFC 13 §3). It is the first per-producer
 /// table that is not a subject, procedure, tier or stream, and the first that
 /// yields no key and no builder — so no accessor is emitted for it, and the
 /// lock does not pin it (a budget is a claim about cost, not about shape).
-#[allow(dead_code)] // linted, carried verbatim in REGISTRY_TOML; nothing is generated from it
+#[allow(dead_code)] // linted, carried verbatim in REGISTRY_SOURCE; nothing is generated from it
 pub(crate) struct BudgetEntry {
     pub rss_mb: Option<u64>,
     pub tables: Vec<TableBudgetEntry>,
@@ -503,7 +502,11 @@ pub(crate) struct RegistryFile {
     pub name: String,
     /// `Some("@catalog")`-style origin for services, `None` for producers.
     pub service_origin: Option<String>,
-    pub toml_path: String,
+    /// The registry file, canonical — what `REGISTRY_SOURCE` is
+    /// `include_str!` of (RFC 08 §6: served verbatim).
+    pub source_path: String,
+    /// Its spelling (RFC 08 §5.1), which `REGISTRY_ENCODING` declares.
+    pub format: SliceFormat,
     pub subjects: Vec<SubjectEntry>,
     pub procedures: Vec<ProcedureEntry>,
     pub media: Vec<MediaEntry>,
@@ -680,7 +683,8 @@ impl Config {
         }
     }
 
-    /// The directory holding `*.toml` registry files (default `registry`,
+    /// The directory holding the `*.toml` / `*.kdl` registry files (RFC 08
+    /// §5.1; default `registry`,
     /// relative to the consuming crate's manifest).
     #[must_use]
     pub fn registry_dir(mut self, dir: impl AsRef<Path>) -> Self {
@@ -1067,1063 +1071,1165 @@ pub(crate) fn producer_module(name: &str) -> String {
     snake(name)
 }
 
-fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
-    let mut files = Vec::new();
-    let mut paths: Vec<_> = std::fs::read_dir(dir)
-        .map_err(|e| Error::Io(dir.to_path_buf(), e))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
-        .filter(|p| p.file_name().is_none_or(|n| n != "types.toml"))
-        .collect();
-    paths.sort();
-    for path in paths {
-        let fname = path.file_name().unwrap().to_string_lossy().to_string();
-        let text = std::fs::read_to_string(&path).map_err(|e| Error::Io(path.to_path_buf(), e))?;
-        let doc: toml::Value =
-            toml::from_str(&text).map_err(|e| lint(&fname, format!("TOML parse error: {e}")))?;
+/// Read and lint one registry file, in the spelling its extension names
+/// (RFC 08 §5.1). The lints are stated over entries and columns, not over a
+/// syntax (§5), so this body never asks which spelling it is reading: the
+/// neutral tree is all it sees.
+fn load_file(path: &Path, format: SliceFormat) -> Result<RegistryFile, Error> {
+    let fname = path.file_name().unwrap().to_string_lossy().to_string();
+    let text = std::fs::read_to_string(path).map_err(|e| Error::Io(path.to_path_buf(), e))?;
+    let doc = zenkey::registry_doc::parse_raw(&text, format).map_err(|e| {
+        lint(
+            &fname,
+            match e {
+                // The TOML sentence is the one every build before v1.44 said.
+                zenkey::slice::SliceError::Toml(e) => format!("TOML parse error: {e}"),
+                zenkey::slice::SliceError::Shape(m) => m,
+                other => other.to_string(),
+            },
+        )
+    })?;
 
-        // [registry] header (RFC 08 §2).
-        let header = doc
-            .get("registry")
-            .ok_or_else(|| lint(&fname, "missing [registry] header"))?;
-        for field in ["version", "app"] {
-            if header.get(field).and_then(|v| v.as_str()).is_none() {
-                return Err(lint(
-                    &fname,
-                    format!("[registry] missing string field {field:?}"),
-                ));
-            }
-        }
-        if header.get("convention").and_then(|v| v.as_integer()) != Some(1) {
+    // [registry] header (RFC 08 §2).
+    let header = doc
+        .get("registry")
+        .ok_or_else(|| lint(&fname, "missing [registry] header"))?;
+    for field in ["version", "app"] {
+        if header.get(field).and_then(|v| v.as_str()).is_none() {
             return Err(lint(
                 &fname,
-                "[registry] convention must be 1 for this crate",
+                format!("[registry] missing string field {field:?}"),
             ));
         }
-        let compat = match header.get("compat").and_then(|v| v.as_str()) {
-            None | Some("backward") => Compat::Backward,
-            Some("none") => Compat::None,
-            Some(other) => {
+    }
+    if header.get("convention").and_then(|v| v.as_integer()) != Some(1) {
+        return Err(lint(
+            &fname,
+            "[registry] convention must be 1 for this crate",
+        ));
+    }
+    let compat = match header.get("compat").and_then(|v| v.as_str()) {
+        None | Some("backward") => Compat::Backward,
+        Some("none") => Compat::None,
+        Some(other) => {
+            return Err(lint(
+                &fname,
+                format!(
+                    "[registry] compat must be \"backward\" (default) or \"none\" \
+                     (RFC 08 §3.1), got {other:?}"
+                ),
+            ));
+        }
+    };
+    // `draft = true` (RFC 08 §6.1, v1.34): read here so the `since`
+    // waiver below can see it; whether a draft is *admitted* is
+    // `Config::checked`'s question. A draft MUST be `compat = "none"` —
+    // pinning entries nobody has reviewed would lock guesses in.
+    let draft = match header.get("draft") {
+        None => false,
+        Some(v) => v
+            .as_bool()
+            .ok_or_else(|| lint(&fname, "[registry] draft must be a boolean (RFC 08 §6.1)"))?,
+    };
+    if draft && compat != Compat::None {
+        return Err(lint(
+            &fname,
+            "declares draft = true with compat pinned — a draft cannot be pinned; \
+             it MUST carry compat = \"none\" (RFC 08 §6.1)",
+        ));
+    }
+
+    let (name, service_origin) = if let Some(svc) = doc.get("service") {
+        let name = svc
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, "[service] missing name"))?;
+        let origin = svc
+            .get("origin")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, "[service] missing origin"))?;
+        if !is_valid_verbatim_chunk(origin) {
+            return Err(lint(
+                &fname,
+                format!("[service] origin {origin:?} is not a verbatim chunk"),
+            ));
+        }
+        (name.to_string(), Some(origin.to_string()))
+    } else {
+        let prod = doc
+            .get("producer")
+            .ok_or_else(|| lint(&fname, "missing [producer] or [service]"))?;
+        let name = prod
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, "[producer] missing name"))?;
+        if !is_valid_plain_chunk(name) {
+            return Err(lint(
+                &fname,
+                format!("producer name {name:?} violates RFC 03 §2"),
+            ));
+        }
+        if name.rsplit_once('-').is_some_and(|(b, t)| {
+            !b.is_empty() && t.bytes().all(|c| c.is_ascii_digit()) && !t.is_empty()
+        }) {
+            return Err(lint(
+                &fname,
+                format!("producer name {name:?} ends in -<int> (RFC 03 §1.5)"),
+            ));
+        }
+        if ["artifact", "tree", "store"].contains(&name) {
+            return Err(lint(
+                &fname,
+                format!("producer name {name:?} is a reserved blob tier token"),
+            ));
+        }
+        (name.to_string(), None)
+    };
+
+    // [budget] (RFC 08 §2, v1.32). Every bound is an optional count and
+    // takes the same sign check as `ttl_s` and `cardinality` (#313: a
+    // negative fails here, where the TOML was authored); each table row
+    // must name itself, uniquely, or `self_stats.tables[]` has nothing
+    // to match it against (RFC 04 §1.2). Unknown keys are tolerated, as
+    // everywhere else in this file.
+    let budget = match doc.get("budget") {
+        None => None,
+        Some(b) => {
+            let rss_mb = opt_count(&fname, b, "[budget]", "rss_mb")?;
+            let mut tables = Vec::new();
+            let mut names_seen = std::collections::BTreeSet::new();
+            for row in b
+                .get("tables")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let tname = row
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| lint(&fname, "[[budget.tables]] missing name (RFC 08 §2)"))?;
+                if !names_seen.insert(tname) {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "[[budget.tables]] name {tname:?} declared twice — a table \
+                             name is unique within the file (RFC 08 §2)"
+                        ),
+                    ));
+                }
+                let path = format!("[[budget.tables]] {tname}");
+                tables.push(TableBudgetEntry {
+                    name: tname.to_string(),
+                    max_entries: opt_count(&fname, row, &path, "max_entries")?,
+                    max_bytes: opt_count(&fname, row, &path, "max_bytes")?,
+                });
+            }
+            Some(BudgetEntry { rss_mb, tables })
+        }
+    };
+
+    let empty = Vec::new();
+    let subject_entries = doc
+        .get("subject")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let mut subjects = Vec::new();
+    for entry in subject_entries {
+        let spath = entry
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, "[[subject]] missing path"))?;
+        let chunks = parse_pattern(&fname, spath)?;
+        let class = entry
+            .get("class")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, format!("{spath:?}: missing class")))?;
+        if !["telemetry", "state", "events"].contains(&class) {
+            return Err(lint(&fname, format!("{spath:?}: unknown class {class:?}")));
+        }
+        let default_qos = match class {
+            "telemetry" => "sampled",
+            "state" => "refreshed",
+            _ => "transition",
+        };
+        let qos = entry
+            .get("qos")
+            .and_then(|v| v.as_str())
+            .unwrap_or(default_qos)
+            .to_string();
+        if !["sampled", "refreshed", "transition", "alert", "frame"].contains(&qos.as_str()) {
+            return Err(lint(
+                &fname,
+                format!("{spath:?}: unknown qos profile {qos:?} (RFC 04 §3)"),
+            ));
+        }
+        // RFC 08 §2: `type` is required — it is what binds one payload type
+        // to every expansion of the pattern (P5), and what lets a consumer
+        // decode a wildcard result set without sniffing.
+        let payload_type = entry
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, format!("{spath:?}: missing type (RFC 08 §2)")))?
+            .to_string();
+        let unit = entry
+            .get("unit")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        // RFC 08 §2 (v1.32): `kind` is a closed vocabulary — the token a
+        // judge compares the wire against, so a typo here is a lint,
+        // never a silent "unchecked".
+        let kind = match entry.get("kind").and_then(|v| v.as_str()) {
+            None => None,
+            Some(k) => match <SubjectKind as SliceToken>::from_token(k) {
+                Some(known) => Some(known.token().to_string()),
+                None => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: unknown kind {k:?} — one of {} (RFC 08 §2)",
+                            SubjectKind::ALL
+                                .iter()
+                                .map(|k| format!("`{}`", k.token()))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                }
+            },
+        };
+        // RFC 08 §2 (v1.36): `buckets` is required iff `kind =
+        // "histogram"`, and refused otherwise — two producers of one
+        // subject are comparable only if their boundaries are.
+        let buckets = match entry.get("buckets") {
+            None => None,
+            Some(v) => {
+                let Some(items) = v.as_array() else {
+                    return Err(lint(
+                        &fname,
+                        format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
+                    ));
+                };
+                let bounds: Option<Vec<f64>> = items
+                    .iter()
+                    .map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+                    .collect();
+                let Some(bounds) = bounds else {
+                    return Err(lint(
+                        &fname,
+                        format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
+                    ));
+                };
+                if !zenkey::slice::Buckets::new(bounds.clone()).is_well_formed() {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: buckets must be non-empty, finite and strictly \
+                             ascending, `+Inf` implicit (RFC 08 §2)"
+                        ),
+                    ));
+                }
+                Some(bounds)
+            }
+        };
+        match (kind.as_deref(), &buckets) {
+            (Some("histogram"), None) => {
                 return Err(lint(
                     &fname,
                     format!(
-                        "[registry] compat must be \"backward\" (default) or \"none\" \
-                         (RFC 08 §3.1), got {other:?}"
+                        "{spath:?}: kind = \"histogram\" needs buckets — its declared \
+                         upper bounds (RFC 08 §2)"
                     ),
                 ));
             }
+            (k, Some(_)) if k != Some("histogram") => {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "{spath:?}: buckets is declared only with kind = \"histogram\" \
+                         (RFC 08 §2)"
+                    ),
+                ));
+            }
+            _ => {}
+        }
+        // RFC 08 §2 (v1.36): `semantic` is a closed presentation hint.
+        let semantic = match entry.get("semantic").and_then(|v| v.as_str()) {
+            None => None,
+            Some(k) => match <zenkey::slice::Semantic as SliceToken>::from_token(k) {
+                Some(known) => Some(known.token().to_string()),
+                None => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: unknown semantic {k:?} — one of {} (RFC 08 §2)",
+                            zenkey::slice::Semantic::ALL
+                                .iter()
+                                .map(|k| format!("`{}`", k.token()))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    ));
+                }
+            },
         };
-        // `draft = true` (RFC 08 §6.1, v1.34): read here so the `since`
-        // waiver below can see it; whether a draft is *admitted* is
-        // `Config::checked`'s question. A draft MUST be `compat = "none"` —
-        // pinning entries nobody has reviewed would lock guesses in.
-        let draft = match header.get("draft") {
-            None => false,
-            Some(v) => v
-                .as_bool()
-                .ok_or_else(|| lint(&fname, "[registry] draft must be a boolean (RFC 08 §6.1)"))?,
-        };
-        if draft && compat != Compat::None {
+        let cardinality = opt_count(&fname, entry, spath, "cardinality")?;
+        let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
+        if has_var && cardinality.is_none() {
             return Err(lint(
                 &fname,
-                "declares draft = true with compat pinned — a draft cannot be pinned; \
-                 it MUST carry compat = \"none\" (RFC 08 §6.1)",
+                format!("{spath:?}: {{var}} pattern needs integer cardinality (RFC 08 §5)"),
             ));
         }
-
-        let (name, service_origin) = if let Some(svc) = doc.get("service") {
-            let name = svc
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, "[service] missing name"))?;
-            let origin = svc
-                .get("origin")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, "[service] missing origin"))?;
-            if !is_valid_verbatim_chunk(origin) {
-                return Err(lint(
-                    &fname,
-                    format!("[service] origin {origin:?} is not a verbatim chunk"),
-                ));
-            }
-            (name.to_string(), Some(origin.to_string()))
-        } else {
-            let prod = doc
-                .get("producer")
-                .ok_or_else(|| lint(&fname, "missing [producer] or [service]"))?;
-            let name = prod
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, "[producer] missing name"))?;
-            if !is_valid_plain_chunk(name) {
-                return Err(lint(
-                    &fname,
-                    format!("producer name {name:?} violates RFC 03 §2"),
-                ));
-            }
-            if name.rsplit_once('-').is_some_and(|(b, t)| {
-                !b.is_empty() && t.bytes().all(|c| c.is_ascii_digit()) && !t.is_empty()
-            }) {
-                return Err(lint(
-                    &fname,
-                    format!("producer name {name:?} ends in -<int> (RFC 03 §1.5)"),
-                ));
-            }
-            if ["artifact", "tree", "store"].contains(&name) {
-                return Err(lint(
-                    &fname,
-                    format!("producer name {name:?} is a reserved blob tier token"),
-                ));
-            }
-            (name.to_string(), None)
-        };
-
-        // [budget] (RFC 08 §2, v1.32). Every bound is an optional count and
-        // takes the same sign check as `ttl_s` and `cardinality` (#313: a
-        // negative fails here, where the TOML was authored); each table row
-        // must name itself, uniquely, or `self_stats.tables[]` has nothing
-        // to match it against (RFC 04 §1.2). Unknown keys are tolerated, as
-        // everywhere else in this file.
-        let budget = match doc.get("budget") {
-            None => None,
-            Some(b) => {
-                let rss_mb = opt_count(&fname, b, "[budget]", "rss_mb")?;
-                let mut tables = Vec::new();
-                let mut names_seen = std::collections::BTreeSet::new();
-                for row in b
-                    .get("tables")
-                    .and_then(|v| v.as_array())
-                    .into_iter()
-                    .flatten()
-                {
-                    let tname = row.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
-                        lint(&fname, "[[budget.tables]] missing name (RFC 08 §2)")
-                    })?;
-                    if !names_seen.insert(tname) {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "[[budget.tables]] name {tname:?} declared twice — a table \
-                                 name is unique within the file (RFC 08 §2)"
-                            ),
-                        ));
-                    }
-                    let path = format!("[[budget.tables]] {tname}");
-                    tables.push(TableBudgetEntry {
-                        name: tname.to_string(),
-                        max_entries: opt_count(&fname, row, &path, "max_entries")?,
-                        max_bytes: opt_count(&fname, row, &path, "max_bytes")?,
-                    });
+        let ttl_s = opt_count(&fname, entry, spath, "ttl_s")?;
+        if class == "state" && ttl_s.is_none() {
+            return Err(lint(
+                &fname,
+                format!("{spath:?}: state subject needs ttl_s (RFC 08 §5)"),
+            ));
+        }
+        let rate = entry
+            .get("rate")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if class == "events" {
+            match rate.as_deref() {
+                Some("rare") | Some("low") => {}
+                Some(r) if r.starts_with("burst(") && r.ends_with("/h)") => {}
+                _ => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: events subject needs rate rare|low|burst(n/h) (RFC 08 §5)"
+                        ),
+                    ));
                 }
-                Some(BudgetEntry { rss_mb, tables })
+            }
+        }
+        // A draft has no version stream, so `since` is waived for it —
+        // and MUST be absent: a draft carrying one would be claiming a
+        // lifecycle it does not have (RFC 08 §6.1). `description` is
+        // still required; the draft emitter writes one that says
+        // "inferred".
+        if entry.get("description").and_then(|v| v.as_str()).is_none()
+            || (!draft && entry.get("since").and_then(|v| v.as_str()).is_none())
+        {
+            return Err(lint(
+                &fname,
+                format!("{spath:?}: missing description/since"),
+            ));
+        }
+        if draft && entry.get("since").is_some() {
+            return Err(lint(
+                &fname,
+                format!(
+                    "{spath:?}: a draft entry carries `since` — a draft has no version \
+                     stream (RFC 08 §6.1); promote the file instead"
+                ),
+            ));
+        }
+        // `common = "..."` (RFC 04/06): declares this entry as one of the
+        // framework state subjects; drives AnySubject::common_state().
+        let common = entry
+            .get("common")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if let Some(c) = &common {
+            let Some((_, _, canonical)) = COMMON_STATE.iter().find(|(n, _, _)| n == c) else {
+                let known: Vec<&str> = COMMON_STATE.iter().map(|(n, _, _)| *n).collect();
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "{spath:?}: unknown common state {c:?} (known: {})",
+                        known.join(", ")
+                    ),
+                ));
+            };
+            if class != "state" {
+                return Err(lint(
+                    &fname,
+                    format!("{spath:?}: common = {c:?} is only valid on class = \"state\""),
+                ));
+            }
+            // RFC 04 §1.4 (v1.25): the `@catalog` trio is one service's
+            // state, not a family across producers — an ordinary
+            // producer file cannot claim a service token.
+            if COMMON_SERVICE_TOKENS.contains(&c.as_str()) && service_origin.is_none() {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "{spath:?}: common = {c:?} is a service subject (RFC 04 §1.4, \
+                         RFC 06 §5) — only a [service] registry may claim it"
+                    ),
+                ));
+            }
+            // RFC 04 §1.4 (v1.25): "the spelling is the table's" — the
+            // entry's path must be the token's canonical pattern, chunk
+            // for chunk: same literals, same variable names.
+            let canonical_chunks =
+                parse_pattern(&fname, canonical).expect("COMMON_STATE canonical patterns parse");
+            let matches = chunks.len() == canonical_chunks.len()
+                && chunks
+                    .iter()
+                    .zip(&canonical_chunks)
+                    .all(|(a, b)| match (a, b) {
+                        (Chunk::Literal(x), Chunk::Literal(y)) => x == y,
+                        (Chunk::Var(x), Chunk::Var(y)) | (Chunk::Rest(x), Chunk::Rest(y)) => {
+                            snake(x) == snake(y)
+                        }
+                        _ => false,
+                    });
+            if !matches {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "{spath:?}: common = {c:?} claims the framework subject \
+                         {canonical:?} and must spell it exactly (RFC 04 §1.4: the \
+                         spelling is the table's)"
+                    ),
+                ));
+            }
+        }
+        // RFC 04 §3: the alert family (`state/*/alert/*`) rides the
+        // `alert` profile — reliable, blocking, interactive-high,
+        // **express**; alerts are the one family the express axis exists
+        // for. The class default above is per *class* and cannot see the
+        // family, so an undeclared alert subject would silently compile
+        // to `refreshed` — a drop-eligible firing flank. An alert-family
+        // subject therefore declares its profile, and of the five only
+        // `alert` is alert-or-stronger (v1.23; RFC 08 §2/§5).
+        let alert_family = common.as_deref() == Some("alert")
+            || (class == "state"
+                && matches!(chunks.first(), Some(Chunk::Literal(l)) if l == "alert"));
+        if alert_family {
+            match entry.get("qos").and_then(|v| v.as_str()) {
+                Some("alert") => {}
+                Some(weaker) => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: alert state must use the alert profile or \
+                             stronger, not {weaker:?} (RFC 04 §3)"
+                        ),
+                    ));
+                }
+                None => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "{spath:?}: alert state must not fall to the class \
+                             default — declare qos = \"alert\" (RFC 04 §3, v1.23)"
+                        ),
+                    ));
+                }
+            }
+        }
+        // `variant` overrides the derived name. Two patterns with the same
+        // literal chunks but different arity (`cpu/usage` vs
+        // `cpu/{core}/usage`) derive the same name and would otherwise trip
+        // the collision lint below with no way out.
+        let variant = match entry.get("variant").and_then(|v| v.as_str()) {
+            Some(v) if is_valid_variant(v) => v.to_string(),
+            Some(v) => {
+                return Err(lint(
+                    &fname,
+                    format!("{spath:?}: variant {v:?} is not a CamelCase identifier"),
+                ));
+            }
+            None => variant_name(&chunks),
+        };
+        let (when, gate_note) = parse_when(&fname, entry, spath)?;
+        let exposure = parse_exposure(&fname, entry, spath)?;
+        subjects.push(SubjectEntry {
+            path: spath.to_string(),
+            variant,
+            chunks,
+            class: class.to_string(),
+            payload_type,
+            unit,
+            kind,
+            buckets,
+            semantic,
+            when,
+            gate_note,
+            exposure,
+            cardinality,
+            qos,
+            ttl_s,
+            rate,
+            common,
+            encoding: entry
+                .get("encoding")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        });
+    }
+
+    // Variant-name and exact-path collisions.
+    let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+    for s in &subjects {
+        if let Some(other) = seen.insert(s.variant.as_str(), s.path.as_str()) {
+            return Err(lint(
+                &fname,
+                format!(
+                    "subjects {other:?} and {:?} collide on variant {:?}",
+                    s.path, s.variant
+                ),
+            ));
+        }
+    }
+    let mut paths_seen = BTreeSet::new();
+    for s in &subjects {
+        if !paths_seen.insert(&s.path) {
+            return Err(lint(&fname, format!("duplicate subject path {:?}", s.path)));
+        }
+    }
+
+    let procedure_entries = doc
+        .get("procedure")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    let mut procedures = Vec::new();
+    for entry in procedure_entries {
+        let ppath = entry
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, "[[procedure]] missing path"))?;
+        // Literal and `{var}` chunks: RFC 09 (v1.4, amendment G6) requires
+        // the actuated resource as a path chunk, so parameterized write
+        // procedures are legal. Rest-vars are not — a procedure names one
+        // operation, never an open family.
+        let chunks = parse_pattern(&fname, ppath)?;
+        if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
+            return Err(lint(
+                &fname,
+                format!(
+                    "procedure {ppath:?}: {{var...}} rest-variables are not allowed in procedure paths"
+                ),
+            ));
+        }
+        let kind = entry
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| lint(&fname, format!("procedure {ppath:?}: missing kind")))?;
+        if !["read", "write", "long-running"].contains(&kind) {
+            return Err(lint(
+                &fname,
+                format!("procedure {ppath:?}: unknown kind {kind:?}"),
+            ));
+        }
+        // fanout (RFC 08 §2, v1.4 G2): default Forbidden for writes,
+        // Allowed for read/long-running; an explicit value must be one of
+        // the two. Parsed since v1.5 (#9) — the builder-level refusal.
+        let fanout = match entry.get("fanout").and_then(|v| v.as_str()) {
+            // One parse, in the pattern. This was a match guard calling
+            // `from_token` and an arm body calling it again behind
+            // `.expect("checked by the guard")` — the invariant written
+            // out by hand across the guard/body boundary, where the
+            // pattern can just carry it.
+            Some(token) => match Fanout::from_token(token) {
+                Some(f) => f,
+                None => {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "procedure {ppath:?}: unknown fanout {token:?} (allowed|forbidden)"
+                        ),
+                    ));
+                }
+            },
+            None => {
+                if kind == "write" {
+                    Fanout::Forbidden
+                } else {
+                    Fanout::Allowed
+                }
             }
         };
+        let idempotent = entry
+            .get("idempotent")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // `reply` is required (RFC 08 §2's field table): errors ride
+        // `reply_err`, but a *success* reply always has a declared type —
+        // a procedure whose reply nobody can decode is not registered.
+        let reply = entry.get("reply").and_then(|v| v.as_str());
+        if reply.is_none() {
+            return Err(lint(
+                &fname,
+                format!("procedure {ppath:?}: missing reply type (RFC 08 §2)"),
+            ));
+        }
+        // `{var}`-bearing procedure paths carry the same key-population
+        // budget as subjects and media (RFC 08 §2/§5): the expansions are
+        // real keys, and the budget review needs the bound declared.
+        let cardinality = opt_count(&fname, entry, ppath, "cardinality")?;
+        let has_var = chunks.iter().any(|c| matches!(c, Chunk::Var(_)));
+        if has_var && cardinality.is_none() {
+            return Err(lint(
+                &fname,
+                format!(
+                    "procedure {ppath:?}: {{var}} pattern needs integer cardinality (RFC 08 §2)"
+                ),
+            ));
+        }
+        let refs: Vec<&str> = ppath.split('/').collect();
+        let (when, gate_note) = parse_when(&fname, entry, ppath)?;
+        let exposure = parse_exposure(&fname, entry, ppath)?;
+        // `sensitive` (RFC 08 §2, v1.43): a write whose request carries a
+        // secret. A read cannot be sensitive — a procedure that reads a
+        // secret back contradicts 05 §5.1, which makes the value write-only.
+        let sensitive = match entry.get("sensitive") {
+            None => false,
+            Some(v) => {
+                let Some(b) = v.as_bool() else {
+                    return Err(lint(
+                        &fname,
+                        format!("procedure {ppath:?}: sensitive must be a boolean (RFC 08 §2)"),
+                    ));
+                };
+                if b && kind != "write" {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "procedure {ppath:?}: sensitive = true on a {kind:?} — only a write \
+                             carries a secret; a read that returned one would contradict \
+                             RFC 05 §5.1"
+                        ),
+                    ));
+                }
+                b
+            }
+        };
+        procedures.push(ProcedureEntry {
+            path: ppath.to_string(),
+            variant: camel(&refs),
+            chunks,
+            when,
+            gate_note,
+            exposure,
+            sensitive,
+            kind: kind.to_string(),
+            request: entry
+                .get("request")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            reply: reply.map(str::to_string),
+            fanout,
+            idempotent,
+            cardinality,
+            encoding: entry
+                .get("encoding")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        });
+    }
 
-        let empty = Vec::new();
-        let subject_entries = doc
-            .get("subject")
-            .and_then(|v| v.as_array())
-            .unwrap_or(&empty);
-        let mut subjects = Vec::new();
-        for entry in subject_entries {
-            let spath = entry
+    // [[error]] entries (RFC 08 §2, v1.40): the producer's own error
+    // names. Linted like a subject — a plain-chunk name, no collision with
+    // the reserved vocabulary, no duplicate, `procedures` naming declared
+    // paths — because RFC 05 §3 said they were "registered like subjects"
+    // and, until this, nothing registered them.
+    let mut errors: Vec<ErrorEntry> = Vec::new();
+    if let Some(arr) = doc.get("error").and_then(|v| v.as_array()) {
+        for entry in arr {
+            let ename = entry
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| lint(&fname, "[[error]] missing name"))?;
+            if !zenkey::rpc_error::is_valid_error_name(ename) {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "error {ename:?}: a name is one or more of [a-z0-9-], neither \
+                         starting nor ending with `-` — it is spelled on the wire as \
+                         `error/{name}/{ename}` (RFC 05 §3)"
+                    ),
+                ));
+            }
+            let wire = zenkey::rpc_error::producer_error(&name, ename);
+            if zenkey::rpc_error::is_reserved(&format!("error/{ename}")) {
+                return Err(lint(
+                    &fname,
+                    format!(
+                        "error {ename:?} spells a reserved name — `error/{ename}` is the \
+                         convention's own (RFC 05 §3); a producer's names live under \
+                         `error/{name}/…` and this one would be read as that"
+                    ),
+                ));
+            }
+            if errors.iter().any(|e| e.name == ename) {
+                return Err(lint(&fname, format!("error {ename:?} declared twice")));
+            }
+            if entry.get("description").and_then(|v| v.as_str()).is_none() {
+                return Err(lint(
+                    &fname,
+                    format!("error {ename:?}: missing description"),
+                ));
+            }
+            if !draft && entry.get("since").and_then(|v| v.as_str()).is_none() {
+                return Err(lint(
+                    &fname,
+                    format!("error {ename:?}: missing since (RFC 08 §3)"),
+                ));
+            }
+            let answered_by: Vec<String> = entry
+                .get("procedures")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for p in &answered_by {
+                if !procedures.iter().any(|d| &d.path == p) {
+                    return Err(lint(
+                        &fname,
+                        format!(
+                            "error {ename:?} ({wire}) names procedure {p:?}, which this \
+                             file does not declare"
+                        ),
+                    ));
+                }
+            }
+            errors.push(ErrorEntry {
+                name: ename.to_string(),
+                constant: ename.to_uppercase().replace('-', "_"),
+                procedures: answered_by,
+            });
+        }
+    }
+
+    // [[media]] entries (RFC 08 §2): patterns validated; a `{var}`-bearing
+    // media path MUST declare a `cardinality` (the highest-bandwidth plane
+    // must bound its fan-out — the `{tier}` chunk multiplies it), and every
+    // entry MUST name an `attachment` type. Modeled since v1.5 (H2) so
+    // builders can be generated.
+    let mut media_entries = Vec::new();
+    if let Some(media) = doc.get("media").and_then(|v| v.as_array()) {
+        for entry in media {
+            let mpath = entry
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, "[[subject]] missing path"))?;
-            let chunks = parse_pattern(&fname, spath)?;
-            let class = entry
-                .get("class")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, format!("{spath:?}: missing class")))?;
-            if !["telemetry", "state", "events"].contains(&class) {
-                return Err(lint(&fname, format!("{spath:?}: unknown class {class:?}")));
-            }
-            let default_qos = match class {
-                "telemetry" => "sampled",
-                "state" => "refreshed",
-                _ => "transition",
-            };
-            let qos = entry
-                .get("qos")
-                .and_then(|v| v.as_str())
-                .unwrap_or(default_qos)
-                .to_string();
-            if !["sampled", "refreshed", "transition", "alert", "frame"].contains(&qos.as_str()) {
+                .ok_or_else(|| lint(&fname, "[[media]] missing path"))?;
+            let chunks = parse_pattern(&fname, mpath)?;
+            if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
                 return Err(lint(
                     &fname,
-                    format!("{spath:?}: unknown qos profile {qos:?} (RFC 04 §3)"),
+                    format!("[[media]] {mpath:?}: {{var...}} rest-variables are not allowed"),
                 ));
             }
-            // RFC 08 §2: `type` is required — it is what binds one payload type
-            // to every expansion of the pattern (P5), and what lets a consumer
-            // decode a wildcard result set without sniffing.
-            let payload_type = entry
-                .get("type")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, format!("{spath:?}: missing type (RFC 08 §2)")))?
-                .to_string();
-            let unit = entry
-                .get("unit")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            // RFC 08 §2 (v1.32): `kind` is a closed vocabulary — the token a
-            // judge compares the wire against, so a typo here is a lint,
-            // never a silent "unchecked".
-            let kind = match entry.get("kind").and_then(|v| v.as_str()) {
-                None => None,
-                Some(k) => match <SubjectKind as SliceToken>::from_token(k) {
-                    Some(known) => Some(known.token().to_string()),
-                    None => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: unknown kind {k:?} — one of {} (RFC 08 §2)",
-                                SubjectKind::ALL
-                                    .iter()
-                                    .map(|k| format!("`{}`", k.token()))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        ));
-                    }
-                },
-            };
-            // RFC 08 §2 (v1.36): `buckets` is required iff `kind =
-            // "histogram"`, and refused otherwise — two producers of one
-            // subject are comparable only if their boundaries are.
-            let buckets = match entry.get("buckets") {
-                None => None,
-                Some(v) => {
-                    let Some(items) = v.as_array() else {
-                        return Err(lint(
-                            &fname,
-                            format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
-                        ));
-                    };
-                    let bounds: Option<Vec<f64>> = items
-                        .iter()
-                        .map(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                        .collect();
-                    let Some(bounds) = bounds else {
-                        return Err(lint(
-                            &fname,
-                            format!("{spath:?}: buckets must be an array of numbers (RFC 08 §2)"),
-                        ));
-                    };
-                    if !zenkey::slice::Buckets::new(bounds.clone()).is_well_formed() {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: buckets must be non-empty, finite and strictly \
-                                 ascending, `+Inf` implicit (RFC 08 §2)"
-                            ),
-                        ));
-                    }
-                    Some(bounds)
-                }
-            };
-            match (kind.as_deref(), &buckets) {
-                (Some("histogram"), None) => {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "{spath:?}: kind = \"histogram\" needs buckets — its declared \
-                             upper bounds (RFC 08 §2)"
-                        ),
-                    ));
-                }
-                (k, Some(_)) if k != Some("histogram") => {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "{spath:?}: buckets is declared only with kind = \"histogram\" \
-                             (RFC 08 §2)"
-                        ),
-                    ));
-                }
-                _ => {}
-            }
-            // RFC 08 §2 (v1.36): `semantic` is a closed presentation hint.
-            let semantic = match entry.get("semantic").and_then(|v| v.as_str()) {
-                None => None,
-                Some(k) => match <zenkey::slice::Semantic as SliceToken>::from_token(k) {
-                    Some(known) => Some(known.token().to_string()),
-                    None => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: unknown semantic {k:?} — one of {} (RFC 08 §2)",
-                                zenkey::slice::Semantic::ALL
-                                    .iter()
-                                    .map(|k| format!("`{}`", k.token()))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            ),
-                        ));
-                    }
-                },
-            };
-            let cardinality = opt_count(&fname, entry, spath, "cardinality")?;
             let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
+            let cardinality = opt_count(&fname, entry, mpath, "cardinality")?;
             if has_var && cardinality.is_none() {
                 return Err(lint(
                     &fname,
-                    format!("{spath:?}: {{var}} pattern needs integer cardinality (RFC 08 §5)"),
-                ));
-            }
-            let ttl_s = opt_count(&fname, entry, spath, "ttl_s")?;
-            if class == "state" && ttl_s.is_none() {
-                return Err(lint(
-                    &fname,
-                    format!("{spath:?}: state subject needs ttl_s (RFC 08 §5)"),
-                ));
-            }
-            let rate = entry
-                .get("rate")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            if class == "events" {
-                match rate.as_deref() {
-                    Some("rare") | Some("low") => {}
-                    Some(r) if r.starts_with("burst(") && r.ends_with("/h)") => {}
-                    _ => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: events subject needs rate rare|low|burst(n/h) (RFC 08 §5)"
-                            ),
-                        ));
-                    }
-                }
-            }
-            // A draft has no version stream, so `since` is waived for it —
-            // and MUST be absent: a draft carrying one would be claiming a
-            // lifecycle it does not have (RFC 08 §6.1). `description` is
-            // still required; the draft emitter writes one that says
-            // "inferred".
-            if entry.get("description").and_then(|v| v.as_str()).is_none()
-                || (!draft && entry.get("since").and_then(|v| v.as_str()).is_none())
-            {
-                return Err(lint(
-                    &fname,
-                    format!("{spath:?}: missing description/since"),
-                ));
-            }
-            if draft && entry.get("since").is_some() {
-                return Err(lint(
-                    &fname,
                     format!(
-                        "{spath:?}: a draft entry carries `since` — a draft has no version \
-                         stream (RFC 08 §6.1); promote the file instead"
+                        "[[media]] {mpath:?}: {{var}} pattern needs integer cardinality \
+                         (RFC 08 §2)"
                     ),
                 ));
             }
-            // `common = "..."` (RFC 04/06): declares this entry as one of the
-            // framework state subjects; drives AnySubject::common_state().
-            let common = entry
-                .get("common")
+            let attachment = entry
+                .get("attachment")
                 .and_then(|v| v.as_str())
-                .map(str::to_string);
-            if let Some(c) = &common {
-                let Some((_, _, canonical)) = COMMON_STATE.iter().find(|(n, _, _)| n == c) else {
-                    let known: Vec<&str> = COMMON_STATE.iter().map(|(n, _, _)| *n).collect();
-                    return Err(lint(
+                .ok_or_else(|| {
+                    lint(
                         &fname,
-                        format!(
-                            "{spath:?}: unknown common state {c:?} (known: {})",
-                            known.join(", ")
-                        ),
-                    ));
-                };
-                if class != "state" {
-                    return Err(lint(
+                        format!("[[media]] {mpath:?}: missing attachment type (RFC 08 §2)"),
+                    )
+                })?;
+            let encoding = entry
+                .get("encoding")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    lint(
                         &fname,
-                        format!("{spath:?}: common = {c:?} is only valid on class = \"state\""),
-                    ));
-                }
-                // RFC 04 §1.4 (v1.25): the `@catalog` trio is one service's
-                // state, not a family across producers — an ordinary
-                // producer file cannot claim a service token.
-                if COMMON_SERVICE_TOKENS.contains(&c.as_str()) && service_origin.is_none() {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "{spath:?}: common = {c:?} is a service subject (RFC 04 §1.4, \
-                             RFC 06 §5) — only a [service] registry may claim it"
-                        ),
-                    ));
-                }
-                // RFC 04 §1.4 (v1.25): "the spelling is the table's" — the
-                // entry's path must be the token's canonical pattern, chunk
-                // for chunk: same literals, same variable names.
-                let canonical_chunks = parse_pattern(&fname, canonical)
-                    .expect("COMMON_STATE canonical patterns parse");
-                let matches = chunks.len() == canonical_chunks.len()
-                    && chunks
-                        .iter()
-                        .zip(&canonical_chunks)
-                        .all(|(a, b)| match (a, b) {
-                            (Chunk::Literal(x), Chunk::Literal(y)) => x == y,
-                            (Chunk::Var(x), Chunk::Var(y)) | (Chunk::Rest(x), Chunk::Rest(y)) => {
-                                snake(x) == snake(y)
-                            }
-                            _ => false,
-                        });
-                if !matches {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "{spath:?}: common = {c:?} claims the framework subject \
-                             {canonical:?} and must spell it exactly (RFC 04 §1.4: the \
-                             spelling is the table's)"
-                        ),
-                    ));
-                }
-            }
-            // RFC 04 §3: the alert family (`state/*/alert/*`) rides the
-            // `alert` profile — reliable, blocking, interactive-high,
-            // **express**; alerts are the one family the express axis exists
-            // for. The class default above is per *class* and cannot see the
-            // family, so an undeclared alert subject would silently compile
-            // to `refreshed` — a drop-eligible firing flank. An alert-family
-            // subject therefore declares its profile, and of the five only
-            // `alert` is alert-or-stronger (v1.23; RFC 08 §2/§5).
-            let alert_family = common.as_deref() == Some("alert")
-                || (class == "state"
-                    && matches!(chunks.first(), Some(Chunk::Literal(l)) if l == "alert"));
-            if alert_family {
-                match entry.get("qos").and_then(|v| v.as_str()) {
-                    Some("alert") => {}
-                    Some(weaker) => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: alert state must use the alert profile or \
-                                 stronger, not {weaker:?} (RFC 04 §3)"
-                            ),
-                        ));
-                    }
-                    None => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "{spath:?}: alert state must not fall to the class \
-                                 default — declare qos = \"alert\" (RFC 04 §3, v1.23)"
-                            ),
-                        ));
-                    }
-                }
-            }
-            // `variant` overrides the derived name. Two patterns with the same
-            // literal chunks but different arity (`cpu/usage` vs
-            // `cpu/{core}/usage`) derive the same name and would otherwise trip
-            // the collision lint below with no way out.
+                        format!("[[media]] {mpath:?}: missing encoding (RFC 08 §2)"),
+                    )
+                })?;
             let variant = match entry.get("variant").and_then(|v| v.as_str()) {
                 Some(v) if is_valid_variant(v) => v.to_string(),
                 Some(v) => {
                     return Err(lint(
                         &fname,
-                        format!("{spath:?}: variant {v:?} is not a CamelCase identifier"),
+                        format!("[[media]] {mpath:?}: variant {v:?} is not CamelCase"),
                     ));
                 }
                 None => variant_name(&chunks),
             };
-            let (when, gate_note) = parse_when(&fname, entry, spath)?;
-            let exposure = parse_exposure(&fname, entry, spath)?;
-            subjects.push(SubjectEntry {
-                path: spath.to_string(),
+            media_entries.push(MediaEntry {
+                path: mpath.to_string(),
+                chunks,
+                encoding: encoding.to_string(),
+                attachment: attachment.to_string(),
+                cardinality,
                 variant,
-                chunks,
-                class: class.to_string(),
-                payload_type,
-                unit,
-                kind,
-                buckets,
-                semantic,
-                when,
-                gate_note,
-                exposure,
-                cardinality,
-                qos,
-                ttl_s,
-                rate,
-                common,
-                encoding: entry
-                    .get("encoding")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
             });
         }
-
-        // Variant-name and exact-path collisions.
+    }
+    // Media variant collisions (same rule as subjects).
+    {
         let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
-        for s in &subjects {
-            if let Some(other) = seen.insert(s.variant.as_str(), s.path.as_str()) {
+        for m in &media_entries {
+            if let Some(other) = seen.insert(m.variant.as_str(), m.path.as_str()) {
                 return Err(lint(
                     &fname,
                     format!(
-                        "subjects {other:?} and {:?} collide on variant {:?}",
-                        s.path, s.variant
+                        "media {other:?} and {:?} collide on variant {:?}",
+                        m.path, m.variant
                     ),
                 ));
             }
         }
-        let mut paths_seen = BTreeSet::new();
-        for s in &subjects {
-            if !paths_seen.insert(&s.path) {
-                return Err(lint(&fname, format!("duplicate subject path {:?}", s.path)));
-            }
-        }
+    }
 
-        let procedure_entries = doc
-            .get("procedure")
-            .and_then(|v| v.as_array())
-            .unwrap_or(&empty);
-        let mut procedures = Vec::new();
-        for entry in procedure_entries {
-            let ppath = entry
-                .get("path")
+    // [[blob]] entries (RFC 08 §2/§5, v1.8). Every vocabulary here is
+    // closed by RFC 07 §2, so every lint is decidable and none is a
+    // matter of taste. There is no `path` to validate: blob key shapes
+    // are fixed by the chapter and their variable chunks are content
+    // addresses, so what an entry declares is which tier and endpoints
+    // this origin serves.
+    let mut blob_entries: Vec<BlobEntry> = Vec::new();
+    if let Some(blobs) = doc.get("blob").and_then(|v| v.as_array()) {
+        for entry in blobs {
+            if entry.get("path").is_some() {
+                return Err(lint(
+                    &fname,
+                    "[[blob]] takes no path — blob key shapes are fixed by RFC 07 §2 and \
+                     their variable chunks are content addresses (RFC 08 §2)",
+                ));
+            }
+            if entry.get("cardinality").is_some() {
+                return Err(lint(
+                    &fname,
+                    "[[blob]] takes no cardinality — RFC 03 §3 already carves blob ids and \
+                     tree roots out of the budget as unbounded families (RFC 08 §2)",
+                ));
+            }
+            let tier = entry
+                .get("tier")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, "[[procedure]] missing path"))?;
-            // Literal and `{var}` chunks: RFC 09 (v1.4, amendment G6) requires
-            // the actuated resource as a path chunk, so parameterized write
-            // procedures are legal. Rest-vars are not — a procedure names one
-            // operation, never an open family.
-            let chunks = parse_pattern(&fname, ppath)?;
-            if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
+                .ok_or_else(|| lint(&fname, "[[blob]] missing tier (RFC 08 §2)"))?;
+            if !BLOB_TIERS.contains(&tier) {
                 return Err(lint(
                     &fname,
                     format!(
-                        "procedure {ppath:?}: {{var...}} rest-variables are not allowed in procedure paths"
+                        "[[blob]] tier {tier:?} is not a reserved tier token ({}) — RFC 07 §2",
+                        BLOB_TIERS.join(" | ")
                     ),
                 ));
             }
-            let kind = entry
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| lint(&fname, format!("procedure {ppath:?}: missing kind")))?;
-            if !["read", "write", "long-running"].contains(&kind) {
-                return Err(lint(
-                    &fname,
-                    format!("procedure {ppath:?}: unknown kind {kind:?}"),
-                ));
-            }
-            // fanout (RFC 08 §2, v1.4 G2): default Forbidden for writes,
-            // Allowed for read/long-running; an explicit value must be one of
-            // the two. Parsed since v1.5 (#9) — the builder-level refusal.
-            let fanout = match entry.get("fanout").and_then(|v| v.as_str()) {
-                // One parse, in the pattern. This was a match guard calling
-                // `from_token` and an arm body calling it again behind
-                // `.expect("checked by the guard")` — the invariant written
-                // out by hand across the guard/body boundary, where the
-                // pattern can just carry it.
-                Some(token) => match Fanout::from_token(token) {
-                    Some(f) => f,
-                    None => {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "procedure {ppath:?}: unknown fanout {token:?} (allowed|forbidden)"
-                            ),
-                        ));
-                    }
-                },
-                None => {
-                    if kind == "write" {
-                        Fanout::Forbidden
-                    } else {
-                        Fanout::Allowed
-                    }
-                }
-            };
-            let idempotent = entry
-                .get("idempotent")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            // `reply` is required (RFC 08 §2's field table): errors ride
-            // `reply_err`, but a *success* reply always has a declared type —
-            // a procedure whose reply nobody can decode is not registered.
-            let reply = entry.get("reply").and_then(|v| v.as_str());
-            if reply.is_none() {
-                return Err(lint(
-                    &fname,
-                    format!("procedure {ppath:?}: missing reply type (RFC 08 §2)"),
-                ));
-            }
-            // `{var}`-bearing procedure paths carry the same key-population
-            // budget as subjects and media (RFC 08 §2/§5): the expansions are
-            // real keys, and the budget review needs the bound declared.
-            let cardinality = opt_count(&fname, entry, ppath, "cardinality")?;
-            let has_var = chunks.iter().any(|c| matches!(c, Chunk::Var(_)));
-            if has_var && cardinality.is_none() {
-                return Err(lint(
-                    &fname,
-                    format!(
-                        "procedure {ppath:?}: {{var}} pattern needs integer cardinality (RFC 08 §2)"
-                    ),
-                ));
-            }
-            let refs: Vec<&str> = ppath.split('/').collect();
-            let (when, gate_note) = parse_when(&fname, entry, ppath)?;
-            let exposure = parse_exposure(&fname, entry, ppath)?;
-            // `sensitive` (RFC 08 §2, v1.43): a write whose request carries a
-            // secret. A read cannot be sensitive — a procedure that reads a
-            // secret back contradicts 05 §5.1, which makes the value write-only.
-            let sensitive = match entry.get("sensitive") {
-                None => false,
+            let is_artifact = tier == "artifact";
+            let is_store = tier == "store";
+
+            // `endpoints` present exactly on `artifact`: the Tier-2 keys
+            // *are* the endpoint, so naming one there is a category error
+            // rather than a harmless extra.
+            let endpoints: Vec<String> = match entry.get("endpoints") {
                 Some(v) => {
-                    let Some(b) = v.as_bool() else {
-                        return Err(lint(
-                            &fname,
-                            format!("procedure {ppath:?}: sensitive must be a boolean (RFC 08 §2)"),
-                        ));
-                    };
-                    if b && kind != "write" {
+                    if !is_artifact {
                         return Err(lint(
                             &fname,
                             format!(
-                                "procedure {ppath:?}: sensitive = true on a {kind:?} — only a write \
-                                 carries a secret; a read that returned one would contradict \
-                                 RFC 05 §5.1"
+                                "[[blob]] tier {tier:?} takes no endpoints — the key is the \
+                                 endpoint (RFC 07 §2.3/§2.4)"
                             ),
                         ));
                     }
-                    b
-                }
-            };
-            procedures.push(ProcedureEntry {
-                path: ppath.to_string(),
-                variant: camel(&refs),
-                chunks,
-                when,
-                gate_note,
-                exposure,
-                sensitive,
-                kind: kind.to_string(),
-                request: entry
-                    .get("request")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-                reply: reply.map(str::to_string),
-                fanout,
-                idempotent,
-                cardinality,
-                encoding: entry
-                    .get("encoding")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
-            });
-        }
-
-        // [[error]] entries (RFC 08 §2, v1.40): the producer's own error
-        // names. Linted like a subject — a plain-chunk name, no collision with
-        // the reserved vocabulary, no duplicate, `procedures` naming declared
-        // paths — because RFC 05 §3 said they were "registered like subjects"
-        // and, until this, nothing registered them.
-        let mut errors: Vec<ErrorEntry> = Vec::new();
-        if let Some(arr) = doc.get("error").and_then(|v| v.as_array()) {
-            for entry in arr {
-                let ename = entry
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| lint(&fname, "[[error]] missing name"))?;
-                if !zenkey::rpc_error::is_valid_error_name(ename) {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "error {ename:?}: a name is one or more of [a-z0-9-], neither \
-                             starting nor ending with `-` — it is spelled on the wire as \
-                             `error/{name}/{ename}` (RFC 05 §3)"
-                        ),
-                    ));
-                }
-                let wire = zenkey::rpc_error::producer_error(&name, ename);
-                if zenkey::rpc_error::is_reserved(&format!("error/{ename}")) {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "error {ename:?} spells a reserved name — `error/{ename}` is the \
-                             convention's own (RFC 05 §3); a producer's names live under \
-                             `error/{name}/…` and this one would be read as that"
-                        ),
-                    ));
-                }
-                if errors.iter().any(|e| e.name == ename) {
-                    return Err(lint(&fname, format!("error {ename:?} declared twice")));
-                }
-                if entry.get("description").and_then(|v| v.as_str()).is_none() {
-                    return Err(lint(
-                        &fname,
-                        format!("error {ename:?}: missing description"),
-                    ));
-                }
-                if !draft && entry.get("since").and_then(|v| v.as_str()).is_none() {
-                    return Err(lint(
-                        &fname,
-                        format!("error {ename:?}: missing since (RFC 08 §3)"),
-                    ));
-                }
-                let answered_by: Vec<String> = entry
-                    .get("procedures")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for p in &answered_by {
-                    if !procedures.iter().any(|d| &d.path == p) {
-                        return Err(lint(
-                            &fname,
-                            format!(
-                                "error {ename:?} ({wire}) names procedure {p:?}, which this \
-                                 file does not declare"
-                            ),
-                        ));
-                    }
-                }
-                errors.push(ErrorEntry {
-                    name: ename.to_string(),
-                    constant: ename.to_uppercase().replace('-', "_"),
-                    procedures: answered_by,
-                });
-            }
-        }
-
-        // [[media]] entries (RFC 08 §2): patterns validated; a `{var}`-bearing
-        // media path MUST declare a `cardinality` (the highest-bandwidth plane
-        // must bound its fan-out — the `{tier}` chunk multiplies it), and every
-        // entry MUST name an `attachment` type. Modeled since v1.5 (H2) so
-        // builders can be generated.
-        let mut media_entries = Vec::new();
-        if let Some(media) = doc.get("media").and_then(|v| v.as_array()) {
-            for entry in media {
-                let mpath = entry
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| lint(&fname, "[[media]] missing path"))?;
-                let chunks = parse_pattern(&fname, mpath)?;
-                if chunks.iter().any(|c| matches!(c, Chunk::Rest(_))) {
-                    return Err(lint(
-                        &fname,
-                        format!("[[media]] {mpath:?}: {{var...}} rest-variables are not allowed"),
-                    ));
-                }
-                let has_var = chunks.iter().any(|c| !matches!(c, Chunk::Literal(_)));
-                let cardinality = opt_count(&fname, entry, mpath, "cardinality")?;
-                if has_var && cardinality.is_none() {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "[[media]] {mpath:?}: {{var}} pattern needs integer cardinality \
-                             (RFC 08 §2)"
-                        ),
-                    ));
-                }
-                let attachment = entry
-                    .get("attachment")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        lint(
-                            &fname,
-                            format!("[[media]] {mpath:?}: missing attachment type (RFC 08 §2)"),
-                        )
+                    let arr = v.as_array().ok_or_else(|| {
+                        lint(&fname, "[[blob]] endpoints must be an array of names")
                     })?;
-                let encoding = entry
-                    .get("encoding")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        lint(
-                            &fname,
-                            format!("[[media]] {mpath:?}: missing encoding (RFC 08 §2)"),
-                        )
-                    })?;
-                let variant = match entry.get("variant").and_then(|v| v.as_str()) {
-                    Some(v) if is_valid_variant(v) => v.to_string(),
-                    Some(v) => {
-                        return Err(lint(
-                            &fname,
-                            format!("[[media]] {mpath:?}: variant {v:?} is not CamelCase"),
-                        ));
-                    }
-                    None => variant_name(&chunks),
-                };
-                media_entries.push(MediaEntry {
-                    path: mpath.to_string(),
-                    chunks,
-                    encoding: encoding.to_string(),
-                    attachment: attachment.to_string(),
-                    cardinality,
-                    variant,
-                });
-            }
-        }
-        // Media variant collisions (same rule as subjects).
-        {
-            let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
-            for m in &media_entries {
-                if let Some(other) = seen.insert(m.variant.as_str(), m.path.as_str()) {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "media {other:?} and {:?} collide on variant {:?}",
-                            m.path, m.variant
-                        ),
-                    ));
-                }
-            }
-        }
-
-        // [[blob]] entries (RFC 08 §2/§5, v1.8). Every vocabulary here is
-        // closed by RFC 07 §2, so every lint is decidable and none is a
-        // matter of taste. There is no `path` to validate: blob key shapes
-        // are fixed by the chapter and their variable chunks are content
-        // addresses, so what an entry declares is which tier and endpoints
-        // this origin serves.
-        let mut blob_entries: Vec<BlobEntry> = Vec::new();
-        if let Some(blobs) = doc.get("blob").and_then(|v| v.as_array()) {
-            for entry in blobs {
-                if entry.get("path").is_some() {
-                    return Err(lint(
-                        &fname,
-                        "[[blob]] takes no path — blob key shapes are fixed by RFC 07 §2 and \
-                         their variable chunks are content addresses (RFC 08 §2)",
-                    ));
-                }
-                if entry.get("cardinality").is_some() {
-                    return Err(lint(
-                        &fname,
-                        "[[blob]] takes no cardinality — RFC 03 §3 already carves blob ids and \
-                         tree roots out of the budget as unbounded families (RFC 08 §2)",
-                    ));
-                }
-                let tier = entry
-                    .get("tier")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| lint(&fname, "[[blob]] missing tier (RFC 08 §2)"))?;
-                if !BLOB_TIERS.contains(&tier) {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "[[blob]] tier {tier:?} is not a reserved tier token ({}) — RFC 07 §2",
-                            BLOB_TIERS.join(" | ")
-                        ),
-                    ));
-                }
-                let is_artifact = tier == "artifact";
-                let is_store = tier == "store";
-
-                // `endpoints` present exactly on `artifact`: the Tier-2 keys
-                // *are* the endpoint, so naming one there is a category error
-                // rather than a harmless extra.
-                let endpoints: Vec<String> = match entry.get("endpoints") {
-                    Some(v) => {
-                        if !is_artifact {
+                    let mut names: Vec<String> = Vec::with_capacity(arr.len());
+                    for e in arr {
+                        let n = e.as_str().ok_or_else(|| {
+                            lint(&fname, "[[blob]] endpoints must be an array of names")
+                        })?;
+                        if !BLOB_ENDPOINTS.contains(&n) {
                             return Err(lint(
                                 &fname,
                                 format!(
-                                    "[[blob]] tier {tier:?} takes no endpoints — the key is the \
-                                     endpoint (RFC 07 §2.3/§2.4)"
+                                    "[[blob]] endpoint {n:?} is not reserved by RFC 07 §2.2 \
+                                     ({})",
+                                    BLOB_ENDPOINTS.join(", ")
                                 ),
                             ));
                         }
-                        let arr = v.as_array().ok_or_else(|| {
-                            lint(&fname, "[[blob]] endpoints must be an array of names")
-                        })?;
-                        let mut names: Vec<String> = Vec::with_capacity(arr.len());
-                        for e in arr {
-                            let n = e.as_str().ok_or_else(|| {
-                                lint(&fname, "[[blob]] endpoints must be an array of names")
-                            })?;
-                            if !BLOB_ENDPOINTS.contains(&n) {
-                                return Err(lint(
-                                    &fname,
-                                    format!(
-                                        "[[blob]] endpoint {n:?} is not reserved by RFC 07 §2.2 \
-                                         ({})",
-                                        BLOB_ENDPOINTS.join(", ")
-                                    ),
-                                ));
-                            }
-                            if names.iter().any(|k| k == n) {
-                                return Err(lint(
-                                    &fname,
-                                    format!("[[blob]] endpoint {n:?} listed twice"),
-                                ));
-                            }
-                            names.push(n.to_string());
+                        if names.iter().any(|k| k == n) {
+                            return Err(lint(
+                                &fname,
+                                format!("[[blob]] endpoint {n:?} listed twice"),
+                            ));
                         }
-                        names
+                        names.push(n.to_string());
                     }
-                    None if is_artifact => {
-                        return Err(lint(
-                            &fname,
-                            "[[blob]] tier \"artifact\" must declare its endpoints (RFC 07 §2.2)",
-                        ));
-                    }
-                    None => Vec::new(),
-                };
-
-                let algo = match entry.get("algo").and_then(|v| v.as_str()) {
-                    Some(_) if !is_store => {
-                        return Err(lint(
-                            &fname,
-                            format!("[[blob]] tier {tier:?} takes no algo (RFC 07 §2.4)"),
-                        ));
-                    }
-                    Some(a) if !is_valid_plain_chunk(a) => {
-                        return Err(lint(
-                            &fname,
-                            format!("[[blob]] algo {a:?} violates RFC 03 §2"),
-                        ));
-                    }
-                    Some(a) => Some(a.to_string()),
-                    None if is_store => {
-                        return Err(lint(
-                            &fname,
-                            "[[blob]] tier \"store\" must declare its hash algo (RFC 07 §2.4)",
-                        ));
-                    }
-                    None => None,
-                };
-
-                // Required metadata, same rule as every other entry kind
-                // (RFC 08 §2). Prose is per-declaration — each declarer says
-                // why *it* serves the tier — but it must exist.
-                if entry.get("description").and_then(|v| v.as_str()).is_none()
-                    || entry.get("since").and_then(|v| v.as_str()).is_none()
-                {
+                    names
+                }
+                None if is_artifact => {
                     return Err(lint(
                         &fname,
-                        format!("[[blob]] tier {tier:?}: missing description/since"),
+                        "[[blob]] tier \"artifact\" must declare its endpoints (RFC 07 §2.2)",
                     ));
                 }
-
-                blob_entries.push(BlobEntry {
-                    tier: tier.to_string(),
-                    endpoints,
-                    algo,
-                    reference: entry
-                        .get("reference")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    encoding: entry
-                        .get("encoding")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    description: entry
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                });
-            }
-        }
-
-        // The same `(tier, algo)` twice in *one* file is a copy-paste error.
-        // Cross-file repetition is legitimate — each producer declares the
-        // tiers it serves — and is shape-checked app-wide after all files
-        // are read.
-        {
-            let mut seen: BTreeSet<(&str, Option<&str>)> = BTreeSet::new();
-            for b in &blob_entries {
-                if !seen.insert((b.tier.as_str(), b.algo.as_deref())) {
-                    return Err(lint(
-                        &fname,
-                        format!("[[blob]] tier {:?} declared twice in one file", b.tier),
-                    ));
-                }
-            }
-        }
-
-        // H4 (RFC 08 §5, v1.5): in a service registry, a subject pattern
-        // containing the variable `{host}` must lead with it — the G1
-        // desired-state proxy rule (the target host is addressing, and
-        // addressing lives where ACL prefix rules can reach it).
-        if service_origin.is_some() {
-            for s in &subjects {
-                let host_pos = s
-                    .chunks
-                    .iter()
-                    .position(|c| matches!(c, Chunk::Var(v) | Chunk::Rest(v) if v == "host"));
-                if let Some(pos) = host_pos
-                    && pos != 0
-                {
-                    return Err(lint(
-                        &fname,
-                        format!(
-                            "service subject {:?}: {{host}} must be the FIRST chunk \
-                             (RFC 08 §5 H4, 07 §3)",
-                            s.path
-                        ),
-                    ));
-                }
-            }
-        }
-
-        let mut deprecated: Vec<Deprecated> = Vec::new();
-        if let Some(arr) = doc.get("deprecated").and_then(|v| v.as_array()) {
-            for entry in arr {
-                let path = entry
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| lint(&fname, "[[deprecated]] missing path"))?
-                    .to_string();
-                // `kind` defaults to `subject`, so every registry written
-                // before v1.26 means exactly what it did (RFC 08 §3).
-                let kind = match entry.get("kind").and_then(|v| v.as_str()) {
-                    None => EntryKind::Subject,
-                    Some(k) => EntryKind::parse(k).ok_or_else(|| {
-                        lint(
-                            &fname,
-                            format!(
-                                "[[deprecated]] {path:?} has kind = {k:?} — it is \
-                                 `subject` (the default), `procedure` or `error` (RFC 08 §3)"
-                            ),
-                        )
-                    })?,
-                };
-                deprecated.push(Deprecated { kind, path });
-            }
-        }
-        // A deprecated path is never re-registered — per kind, because a
-        // subject and a procedure of the same name are two declarations.
-        for d in &deprecated {
-            let live = match d.kind {
-                EntryKind::Subject => subjects.iter().any(|s| s.path == d.path),
-                EntryKind::Procedure => procedures.iter().any(|p| p.path == d.path),
-                EntryKind::Error => errors.iter().any(|e| e.name == d.path),
+                None => Vec::new(),
             };
-            if live {
+
+            let algo = match entry.get("algo").and_then(|v| v.as_str()) {
+                Some(_) if !is_store => {
+                    return Err(lint(
+                        &fname,
+                        format!("[[blob]] tier {tier:?} takes no algo (RFC 07 §2.4)"),
+                    ));
+                }
+                Some(a) if !is_valid_plain_chunk(a) => {
+                    return Err(lint(
+                        &fname,
+                        format!("[[blob]] algo {a:?} violates RFC 03 §2"),
+                    ));
+                }
+                Some(a) => Some(a.to_string()),
+                None if is_store => {
+                    return Err(lint(
+                        &fname,
+                        "[[blob]] tier \"store\" must declare its hash algo (RFC 07 §2.4)",
+                    ));
+                }
+                None => None,
+            };
+
+            // Required metadata, same rule as every other entry kind
+            // (RFC 08 §2). Prose is per-declaration — each declarer says
+            // why *it* serves the tier — but it must exist.
+            if entry.get("description").and_then(|v| v.as_str()).is_none()
+                || entry.get("since").and_then(|v| v.as_str()).is_none()
+            {
+                return Err(lint(
+                    &fname,
+                    format!("[[blob]] tier {tier:?}: missing description/since"),
+                ));
+            }
+
+            blob_entries.push(BlobEntry {
+                tier: tier.to_string(),
+                endpoints,
+                algo,
+                reference: entry
+                    .get("reference")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                encoding: entry
+                    .get("encoding")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                description: entry
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+            });
+        }
+    }
+
+    // The same `(tier, algo)` twice in *one* file is a copy-paste error.
+    // Cross-file repetition is legitimate — each producer declares the
+    // tiers it serves — and is shape-checked app-wide after all files
+    // are read.
+    {
+        let mut seen: BTreeSet<(&str, Option<&str>)> = BTreeSet::new();
+        for b in &blob_entries {
+            if !seen.insert((b.tier.as_str(), b.algo.as_deref())) {
+                return Err(lint(
+                    &fname,
+                    format!("[[blob]] tier {:?} declared twice in one file", b.tier),
+                ));
+            }
+        }
+    }
+
+    // H4 (RFC 08 §5, v1.5): in a service registry, a subject pattern
+    // containing the variable `{host}` must lead with it — the G1
+    // desired-state proxy rule (the target host is addressing, and
+    // addressing lives where ACL prefix rules can reach it).
+    if service_origin.is_some() {
+        for s in &subjects {
+            let host_pos = s
+                .chunks
+                .iter()
+                .position(|c| matches!(c, Chunk::Var(v) | Chunk::Rest(v) if v == "host"));
+            if let Some(pos) = host_pos
+                && pos != 0
+            {
                 return Err(lint(
                     &fname,
                     format!(
-                        "deprecated path {:?} re-registered as a live {} (RFC 08 §3)",
-                        d.path,
-                        d.kind.token()
+                        "service subject {:?}: {{host}} must be the FIRST chunk \
+                         (RFC 08 §5 H4, 07 §3)",
+                        s.path
                     ),
                 ));
             }
         }
+    }
 
-        files.push(RegistryFile {
-            name,
-            service_origin,
-            toml_path: path
-                .canonicalize()
-                .map_err(|e| Error::Io(path.clone(), e))?
-                .to_string_lossy()
-                .to_string(),
-            subjects,
-            procedures,
-            media: media_entries,
-            blob: blob_entries,
-            errors,
-            deprecated,
-            compat,
-            budget,
-            draft,
-        });
+    let mut deprecated: Vec<Deprecated> = Vec::new();
+    if let Some(arr) = doc.get("deprecated").and_then(|v| v.as_array()) {
+        for entry in arr {
+            let path = entry
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| lint(&fname, "[[deprecated]] missing path"))?
+                .to_string();
+            // `kind` defaults to `subject`, so every registry written
+            // before v1.26 means exactly what it did (RFC 08 §3).
+            let kind = match entry.get("kind").and_then(|v| v.as_str()) {
+                None => EntryKind::Subject,
+                Some(k) => EntryKind::parse(k).ok_or_else(|| {
+                    lint(
+                        &fname,
+                        format!(
+                            "[[deprecated]] {path:?} has kind = {k:?} — it is \
+                             `subject` (the default), `procedure` or `error` (RFC 08 §3)"
+                        ),
+                    )
+                })?,
+            };
+            deprecated.push(Deprecated { kind, path });
+        }
+    }
+    // A deprecated path is never re-registered — per kind, because a
+    // subject and a procedure of the same name are two declarations.
+    for d in &deprecated {
+        let live = match d.kind {
+            EntryKind::Subject => subjects.iter().any(|s| s.path == d.path),
+            EntryKind::Procedure => procedures.iter().any(|p| p.path == d.path),
+            EntryKind::Error => errors.iter().any(|e| e.name == d.path),
+        };
+        if live {
+            return Err(lint(
+                &fname,
+                format!(
+                    "deprecated path {:?} re-registered as a live {} (RFC 08 §3)",
+                    d.path,
+                    d.kind.token()
+                ),
+            ));
+        }
+    }
+
+    Ok(RegistryFile {
+        name,
+        service_origin,
+        source_path: path
+            .canonicalize()
+            .map_err(|e| Error::Io(path.to_path_buf(), e))?
+            .to_string_lossy()
+            .to_string(),
+        format,
+        subjects,
+        procedures,
+        media: media_entries,
+        blob: blob_entries,
+        errors,
+        deprecated,
+        compat,
+        budget,
+        draft,
+    })
+}
+
+/// Every registry file of a directory, with the spelling its extension
+/// names (RFC 08 §5.1): `<stem>.toml` and `<stem>.kdl`, mixed file by file,
+/// the type table (`types.*`) aside. Sorted by file name, so a build does
+/// not depend on the directory's order.
+///
+/// One stem spelled twice is refused: two files for one stem are two
+/// authorities for one producer, and no rule could say which a build means.
+fn registry_paths(dir: &Path) -> Result<Vec<(PathBuf, SliceFormat)>, Error> {
+    let mut paths: Vec<(PathBuf, SliceFormat)> = std::fs::read_dir(dir)
+        .map_err(|e| Error::Io(dir.to_path_buf(), e))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter_map(|p| {
+            let format = SliceFormat::from_extension(p.extension()?.to_str()?)?;
+            (p.file_stem()? != TYPE_TABLE_STEM).then_some((p, format))
+        })
+        .collect();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut stems: BTreeMap<String, &Path> = BTreeMap::new();
+    for (p, _) in &paths {
+        let stem = p
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if let Some(first) = stems.insert(stem.clone(), p) {
+            return Err(lint(
+                &stem,
+                format!(
+                    "{} and {} are one stem in two spellings — two authorities for one \
+                     producer; keep one (RFC 08 §5.1)",
+                    display_name(first),
+                    display_name(p)
+                ),
+            ));
+        }
+    }
+    Ok(paths)
+}
+
+/// The type table's stem: `types.toml` or `types.kdl`, never both (§5.1).
+const TYPE_TABLE_STEM: &str = "types";
+
+fn display_name(p: &Path) -> String {
+    p.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
+}
+
+/// A lint from a KDL file names entries as KDL spells them (RFC 08 §5.1):
+/// `[[subject]]` is a `subject` node there. One rewrite, of this crate's own
+/// messages, so no lint needs writing twice — and a TOML file's messages
+/// are exactly what every build before v1.44 said.
+fn respell_for(format: SliceFormat, e: Error) -> Error {
+    match (format, e) {
+        (
+            SliceFormat::Kdl,
+            Error::Lint {
+                file,
+                message,
+                kind,
+            },
+        ) => Error::Lint {
+            file,
+            message: respell_kdl(&message),
+            kind,
+        },
+        (_, e) => e,
+    }
+}
+
+fn respell_kdl(message: &str) -> String {
+    let mut out = message.replace("[[budget.tables]]", "`budget` `table`");
+    for kind in [
+        "subject",
+        "procedure",
+        "media",
+        "blob",
+        "error",
+        "deprecated",
+    ] {
+        out = out.replace(&format!("[[{kind}]]"), &format!("`{kind}`"));
+    }
+    for table in ["registry", "producer", "service", "budget"] {
+        out = out.replace(&format!("[{table}]"), &format!("`{table}`"));
+    }
+    out
+}
+
+fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
+    let mut files = Vec::new();
+    for (path, format) in registry_paths(dir)? {
+        let file = load_file(&path, format).map_err(|e| respell_for(format, e))?;
+        files.push(file);
     }
 
     // Blob shape agreement is **app-wide** — the one cross-file rule here,
@@ -2195,23 +2301,60 @@ fn load_registry(dir: &Path) -> Result<Vec<RegistryFile>, Error> {
 /// name — and, since v1.8, every `[[blob]]` `reference` — across the registry
 /// set must resolve in it. Absent file = lint
 /// inactive (activation-on-existence, so adoption is incremental).
+///
+/// The table is `types.toml` or `types.kdl` (one `type "<Name>" kind=…` node
+/// per name, RFC 08 §5.1) — never both, for the reason one stem is never
+/// spelled twice.
 fn check_type_table(dir: &Path, files: &[RegistryFile]) -> Result<(), Error> {
-    let path = dir.join("types.toml");
-    let Ok(src) = std::fs::read_to_string(&path) else {
-        return Ok(());
+    let present: Vec<SliceFormat> = SliceFormat::ALL
+        .into_iter()
+        .filter(|f| {
+            dir.join(format!("{TYPE_TABLE_STEM}.{}", f.extension()))
+                .is_file()
+        })
+        .collect();
+    let format = match present.as_slice() {
+        [] => return Ok(()),
+        [one] => *one,
+        _ => {
+            return Err(lint(
+                "types",
+                "types.toml and types.kdl are one type table in two spellings — two \
+                 authorities for one table; keep one (RFC 08 §5.1)",
+            ));
+        }
     };
-    let fname = "types.toml";
-    // `toml::from_str`, not `str::parse`: since toml 0.9, `Value: FromStr`
-    // parses a single TOML *value*, and only `from_str` parses a document.
-    let doc: toml::Value =
-        toml::from_str(&src).map_err(|e| lint(fname, format!("does not parse: {e}")))?;
+    let fname = format!("{TYPE_TABLE_STEM}.{}", format.extension());
+    let fname = fname.as_str();
+    let path = dir.join(fname);
+    let src = std::fs::read_to_string(&path).map_err(|e| Error::Io(path.clone(), e))?;
+    let doc: RawTable = zenkey::registry_doc::parse_raw(&src, format).map_err(|e| {
+        lint(
+            fname,
+            match e {
+                zenkey::slice::SliceError::Toml(e) => format!("does not parse: {e}"),
+                zenkey::slice::SliceError::Shape(m) => m,
+                other => other.to_string(),
+            },
+        )
+    })?;
+    let missing_table = match format {
+        SliceFormat::Toml => "missing [types.*] table",
+        SliceFormat::Kdl => "no `type` node",
+    };
     let table = doc
         .get("types")
         .and_then(|v| v.as_table())
-        .ok_or_else(|| lint(fname, "missing [types.*] table"))?;
-    for (name, entry) in table {
+        .ok_or_else(|| lint(fname, missing_table))?;
+    for (name, entry) in table.iter() {
         if entry.get("kind").and_then(|v| v.as_str()).is_none() {
-            return Err(lint(fname, format!("[types.{name}] missing kind")));
+            return Err(lint(
+                fname,
+                match format {
+                    SliceFormat::Toml => format!("[types.{name}] missing kind"),
+                    SliceFormat::Kdl => format!("type {name:?} missing kind"),
+                },
+            ));
         }
     }
     let mut missing = std::collections::BTreeSet::new();
@@ -2784,17 +2927,67 @@ fn check_deprecation_ledger(ledger_path: &Path, files: &[RegistryFile]) -> Resul
 mod tests {
     use super::*;
 
-    /// Write `content` as `registry/<name>.toml` in a fresh temp dir and run
-    /// the linter via `generate_string`.
+    /// Write `content` as `registry/t.toml` in a fresh temp dir and run the
+    /// linter via `generate_string` — and then again over its KDL twin
+    /// (`t.kdl`, RFC 08 §5.1), so every lint test here is a test of both
+    /// spellings: "a reader accepts a KDL file exactly when it would accept
+    /// that TOML and refuses it exactly when it would refuse it" (#374).
+    ///
+    /// The two must agree on the verdict; on a pass, on the generated code
+    /// but for the two lines a spelling changes; on a refusal, on the
+    /// message as the KDL file spells its entries — unless the twin is
+    /// refused by one of the §5.1 rules the spelling adds (a TOML `when` that
+    /// is not an array becomes a list column spelled as a property).
     fn lint_one(content: &str) -> Result<String, Error> {
+        let toml = lint_as(content, SliceFormat::Toml);
+        let twin = zenkey::registry_doc::parse_raw(content, SliceFormat::Toml)
+            .ok()
+            .and_then(|raw| zenkey::registry_doc::write_kdl(&raw).ok());
+        if let Some(kdl) = twin {
+            let kdl_out = lint_as(&kdl, SliceFormat::Kdl);
+            match (&toml, &kdl_out) {
+                (Ok(a), Ok(b)) => assert_eq!(
+                    spelling_neutral(a),
+                    spelling_neutral(b),
+                    "the KDL twin generates other code:\n{kdl}"
+                ),
+                (Err(a), Err(b)) => {
+                    let b = b.to_string();
+                    if !b.contains("RFC 08 §5.1") {
+                        assert_eq!(
+                            respell_kdl(&a.to_string()).replace("t.toml", "t.kdl"),
+                            b.replace("t.toml", "t.kdl"),
+                            "{kdl}"
+                        );
+                    }
+                }
+                (a, b) => {
+                    panic!("the spellings disagree — TOML {a:?}, KDL {b:?}, for the twin:\n{kdl}")
+                }
+            }
+        }
+        toml
+    }
+
+    /// Generated code without the two lines a spelling changes.
+    fn spelling_neutral(generated: &str) -> String {
+        generated
+            .lines()
+            .filter(|l| !l.contains("include_str!(") && !l.contains("REGISTRY_ENCODING: &str ="))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn lint_as(content: &str, format: SliceFormat) -> Result<String, Error> {
         let dir = std::env::temp_dir().join(format!(
-            "zenkey-build-test-{}-{:?}",
+            "zenkey-build-test-{}-{:?}-{}",
             std::process::id(),
-            std::thread::current().id()
+            std::thread::current().id(),
+            format.extension()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("t.toml"), content).unwrap();
+        std::fs::write(dir.join(format!("t.{}", format.extension())), content).unwrap();
         // Bootstrap the §3.1 lock so lint tests exercise *their* lint, not
         // the missing-snapshot bootstrap (which has its own tests below). An
         // unloadable registry fails identically with or without this.
@@ -3125,7 +3318,7 @@ mod tests {
         .unwrap();
         assert!(
             !out.contains("rss_mb") && !out.contains("fn budget"),
-            "nothing is generated from [budget]; it rides REGISTRY_TOML verbatim:\n{out}"
+            "nothing is generated from [budget]; it rides REGISTRY_SOURCE verbatim:\n{out}"
         );
     }
 
@@ -3210,6 +3403,82 @@ mod tests {
         )
         .unwrap();
         Config::new().registry_dir(&dir).generate_string().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A registry dir in KDL (RFC 08 §5.1, #374): it builds, declares its
+    /// spelling in `REGISTRY_ENCODING`, names its entries as KDL does in a
+    /// lint, and holds its type table as `types.kdl` — never beside a
+    /// `types.toml`, and never one stem in both spellings.
+    #[test]
+    fn a_kdl_registry_dir_builds_and_is_held_to_one_spelling_per_stem() {
+        let dir = std::env::temp_dir().join(format!(
+            "zenkey-build-kdl-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let kdl = "registry version=\"1.0\" app=\"t\" convention=1\nproducer \"t\"\n\
+                   subject \"health\" class=state type=\"HealthSnapshot\" ttl_s=60 \\\n    \
+                   since=\"1.0\" description=\"d\"\n";
+        std::fs::write(dir.join("t.kdl"), kdl).unwrap();
+        let cfg = || Config::new().registry_dir(&dir).no_rerun_if_changed();
+        cfg().write_compat_lock(OnIncompatible::Refuse).unwrap();
+        let generated = cfg().generate_string().unwrap();
+        assert!(
+            generated.contains("pub const REGISTRY_ENCODING: &str = \"application/kdl\";"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("t.kdl\");"),
+            "include_str! of the .kdl file"
+        );
+        assert!(generated.contains("pub fn registry_encoding(name: &str)"));
+
+        // The type table in KDL resolves, and fails, as the TOML one does.
+        std::fs::write(
+            dir.join("types.kdl"),
+            "type \"Other\" kind=\"json-schema\"\n",
+        )
+        .unwrap();
+        let err = cfg().generate_string().unwrap_err().to_string();
+        assert!(
+            err.contains("types.kdl") && err.contains("HealthSnapshot"),
+            "{err}"
+        );
+        std::fs::write(
+            dir.join("types.kdl"),
+            "type \"HealthSnapshot\" kind=\"json-schema\"\n",
+        )
+        .unwrap();
+        cfg().generate_string().unwrap();
+
+        // Both type tables: two authorities.
+        std::fs::write(
+            dir.join("types.toml"),
+            "[types.HealthSnapshot]\nkind = \"x\"\n",
+        )
+        .unwrap();
+        let err = cfg().generate_string().unwrap_err().to_string();
+        assert!(err.contains("types.toml and types.kdl"), "{err}");
+        std::fs::remove_file(dir.join("types.toml")).unwrap();
+
+        // One stem, two spellings: refused, naming both files.
+        std::fs::write(dir.join("t.toml"), "[registry]\n").unwrap();
+        let err = cfg().generate_string().unwrap_err().to_string();
+        assert!(err.contains("t.kdl and t.toml"), "{err}");
+        std::fs::remove_file(dir.join("t.toml")).unwrap();
+
+        // A lint in a KDL file names the entry as KDL spells it.
+        std::fs::write(
+            dir.join("t.kdl"),
+            "registry version=\"1.0\" app=\"t\" convention=1\nproducer \"t\"\n\
+             subject class=state\nbudget {\n    table max_entries=1\n}\n",
+        )
+        .unwrap();
+        let err = cfg().generate_string().unwrap_err().to_string();
+        assert!(err.contains("`budget` `table` missing name"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
