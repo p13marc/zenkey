@@ -1613,7 +1613,9 @@ aabbccdd  1.9.0  tcp/10.0.0.1:7447
 
 /// #198's headline example: `node info --format ndjson` was a pretty
 /// multi-line document, so the one command whose answer *is* a list of
-/// producers could not be read a producer at a time.
+/// producers could not be read a producer at a time. And a producer that
+/// answered `introspect` with a slice that did not read says *that*, not
+/// "no introspect reply" (#491).
 #[test]
 fn a_node_info_has_two_row_kinds_and_never_says_zero_for_never_seen() {
     let out = ndjson(&fx::node_info());
@@ -1624,7 +1626,14 @@ fn a_node_info_has_two_row_kinds_and_never_says_zero_for_never_seen() {
         .collect();
     assert_eq!(
         kinds,
-        ["producer", "producer", "producer", "freshness", "freshness"]
+        [
+            "producer",
+            "producer",
+            "producer",
+            "producer",
+            "freshness",
+            "freshness"
+        ]
     );
     assert_data_eq!(
         table(&fx::node_info()),
@@ -1632,6 +1641,7 @@ fn a_node_info_has_two_row_kinds_and_never_says_zero_for_never_seen() {
 origin    h-3fa9c2d41b7e
   sysinfo   [alive]     app zensight · registry v1.0 · 41 subject(s) · 3 procedure(s) · blob: store · 2 DEPRECATED still served
   parallax  [alive]     (no introspect reply — capabilities unknown, not absent)
+  tracker   [alive]     (introspect answered, slice unreadable (`application/kdl`: malformed registry slice: not KDL 2.0 (RFC 08 §5.1): line 2:1: Expected a node name))
   probe     [no token]  app zensight · registry v1.0 · 2 subject(s) · 1 procedure(s)
 state freshness (declared ttl_s):
   sysinfo/health  240s old  (ttl 120s)  STALE

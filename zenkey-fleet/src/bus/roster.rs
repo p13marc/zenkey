@@ -474,28 +474,30 @@ pub async fn node_info(
     )
     .await
     .unwrap_or_default();
-    let served: Vec<zenkey::slice::RegistrySlice> = answers
-        .into_iter()
-        .filter(|a| a.origin == origin)
-        .filter_map(|a| {
-            let crate::bus::query::Answer::Value(bytes) = a.answer else {
-                return None;
-            };
-            let served = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
-            // Read in the spelling the reply declares (RFC 08 §6, v1.44).
-            match zenkey::parse_served(a.encoding.as_deref(), &served) {
-                Ok(slice) => Some(slice),
-                Err(e) => {
-                    tracing::warn!(origin, "introspect reply did not parse, skipping: {e}");
-                    None
-                }
+    // Both poles of an answer (#491): a slice that read, and a reply that
+    // answered and did not — which lands on its producer's row as
+    // *unreadable*, never as "no introspect reply" (RFC 08 §6, v1.44; RFC 13
+    // §3 O4).
+    let mut served: Vec<zenkey::slice::RegistrySlice> = Vec::new();
+    let mut unreadable: Vec<(String, crate::report::UnreadableSlice)> = Vec::new();
+    for a in answers.into_iter().filter(|a| a.origin == origin) {
+        let crate::bus::query::Answer::Value(bytes) = a.answer else {
+            continue;
+        };
+        // Read in the spelling the reply declares (RFC 08 §6, v1.44).
+        match crate::bus::query::read_introspect(a.encoding.as_deref(), &bytes.to_bytes()) {
+            Ok((slice, ..)) => served.push(slice),
+            Err(u) => {
+                tracing::warn!(origin, "introspect reply did not parse: {}", u.error);
+                unreadable.push((crate::bus::query::introspect_producer(base, &a.key), u));
             }
-        })
-        .collect();
+        }
+    }
     let mine: Vec<&zenkey::slice::RegistrySlice> = served.iter().collect();
 
     let mut names: Vec<String> = alive.clone();
     names.extend(mine.iter().map(|s| s.name.clone()));
+    names.extend(unreadable.iter().map(|(name, _)| name.clone()));
     names.sort();
     names.dedup();
 
@@ -525,6 +527,13 @@ pub async fn node_info(
                     })
                     .unwrap_or_default(),
                 deprecated_served: slice.map(|s| s.deprecated.len()).unwrap_or(0),
+                // A slice that read wins: the unreadable pole is for a row
+                // that has nothing else to say about its introspect.
+                unreadable: slice
+                    .is_none()
+                    .then(|| unreadable.iter().find(|(n, _)| n == name))
+                    .flatten()
+                    .map(|(_, u)| u.clone()),
             }
         })
         .collect();

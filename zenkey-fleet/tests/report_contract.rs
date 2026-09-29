@@ -203,6 +203,56 @@ fn a_node_list_says_whether_the_slice_join_was_even_attempted() {
     );
 }
 
+/// A node's producer rows spell three introspect outcomes (#491): served
+/// (`app` + `registry_version`), no reply (neither, and no `unreadable`),
+/// and answered-but-unreadable (`unreadable`, with what the reply declared
+/// and one line of why). The third is present only when it happened, so the
+/// first two documents are byte-identical to the shape before it.
+#[test]
+fn a_producer_row_tells_an_unreadable_slice_from_no_reply() {
+    let info = fx::node_info();
+    let rows = serde_json::to_value(&info).unwrap()["producers"].clone();
+    let row = |name: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {name} in {rows}"))
+    };
+    assert_eq!(
+        row("parallax"),
+        json!({
+            "name": "parallax",
+            "alive": true,
+            "subjects": 0,
+            "procedures": 0,
+            "deprecated_served": 0,
+        }),
+        "no reply: nothing that could be mistaken for an answer"
+    );
+    assert_eq!(
+        row("tracker"),
+        json!({
+            "name": "tracker",
+            "alive": true,
+            "subjects": 0,
+            "procedures": 0,
+            "deprecated_served": 0,
+            "unreadable": {
+                "encoding": "application/kdl",
+                "error": "malformed registry slice: not KDL 2.0 (RFC 08 §5.1): line 2:1: \
+                          Expected a node name",
+            },
+        }),
+        "answered, unreadable: the declaration and the first line, and no app"
+    );
+    assert!(
+        row("sysinfo").get("unreadable").is_none(),
+        "a served slice carries no unreadable pole"
+    );
+}
+
 /// Three states in one `Option<Vec<_>>`: absent = the roster was never asked
 /// (O4), `[]` = asked and nobody answered (RFC 05 §3.1), non-empty = alive.
 /// Collapsing the first two is the single easiest way to make this document

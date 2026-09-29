@@ -646,6 +646,68 @@ pub struct ServedSlice {
     pub format: SliceFormat,
 }
 
+/// One `introspect` reply that **arrived and could not be read** (#491) —
+/// the pole beside a [`ServedSlice`] and no reply at all.
+///
+/// Kept, never dropped: RFC 08 §6 (v1.44) says a consumer that cannot read
+/// what a reply declares "reports that producer's slice as unreadable and
+/// names the encoding", and does not let it pass for one that serves no
+/// slice (RFC 13 §3 O4). Before this, the sweep logged the failure and
+/// returned nothing, and every reader above it drew "no introspect reply".
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct UnreadableReply {
+    /// The origin that answered, attributed as [`ServedSlice::origin`] is.
+    pub origin: String,
+    /// The producer the reply key names — its producer chunk on a host, the
+    /// service name on a service origin, spelled as the roster spells its
+    /// token. There is no slice to take a `name` from; `"?"` when the reply
+    /// key did not parse under this base.
+    pub producer: String,
+    /// What it declared and why it did not read.
+    pub unreadable: crate::report::UnreadableSlice,
+}
+
+/// One registry sweep with nothing dropped (#491): every slice that read,
+/// and every reply that answered and did not.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct RegistrySweep {
+    pub served: Vec<ServedSlice>,
+    pub unreadable: Vec<UnreadableReply>,
+}
+
+/// The producer an `introspect` reply key names, spelled as the roster
+/// spells the same producer's `alive` token — so an unreadable reply lands
+/// on the row its token already made (#491).
+pub(crate) fn introspect_producer(base: &str, key: &str) -> String {
+    zenkey::grammar::parse_full(base, key)
+        .map(|k| {
+            k.producer()
+                .map(|p| p.chunk())
+                .unwrap_or_else(|| k.origin.chunk().trim_start_matches('@').to_string())
+        })
+        .unwrap_or_else(|| "?".to_string())
+}
+
+/// Read one `introspect` value reply in the spelling it declares (RFC 08 §6,
+/// v1.44: never second-guessed; an undeclared reply is sniffed) — the one
+/// reader every introspect consumer shares, so a sweep, a node's story and
+/// the conformance suite cannot disagree about which reply was a slice.
+///
+/// `Err` is the unreadable pole (#491), carrying the declaration and the
+/// first line of the refusal.
+pub(crate) fn read_introspect(
+    encoding: Option<&str>,
+    bytes: &[u8],
+) -> std::result::Result<(RegistrySlice, SliceFormat, String), crate::report::UnreadableSlice> {
+    let served = String::from_utf8_lossy(bytes).to_string();
+    zenkey::registry_doc::negotiate(encoding, &served)
+        .and_then(|format| zenkey::parse_slice_as(&served, format).map(|slice| (slice, format)))
+        .map(|(slice, format)| (slice, format, served))
+        .map_err(|e| crate::report::UnreadableSlice::new(encoding.map(str::to_string), &e))
+}
+
 /// The fleet sweep, **keeping the origin that answered** (#385).
 ///
 /// [`fleet_registry`] and [`fleet_registry_raw`] answer "what does this
@@ -722,45 +784,60 @@ impl RepeatingRegistry {
     /// One sweep, attributed: every parsed slice with the origin that served
     /// it and its raw TOML (#385).
     ///
+    /// The readable half of [`sweep`](Self::sweep): an unreadable reply is
+    /// logged and left out here, which is right for a caller whose question
+    /// is *what does this fleet declare*. A caller that renders or judges
+    /// who answered — a roster, the doctor — asks [`sweep`](Self::sweep),
+    /// or it will draw an answer as silence (#491).
+    pub async fn fetch_by_origin(&self) -> Result<Vec<ServedSlice>> {
+        Ok(self.sweep().await?.served)
+    }
+
+    /// One sweep with both poles kept (#491).
+    ///
     /// Each reply is read in the spelling its `Encoding` declares (RFC 08 §6,
     /// v1.44: `application/toml` or `application/kdl`, never second-guessed;
     /// an undeclared reply is sniffed). A reply that does not parse — or
-    /// declares an encoding that is neither spelling, which is logged naming
-    /// it — is logged and skipped, never fatal: one malformed producer must
-    /// not blind the tool to every other producer's slice. Nothing is deduplicated: a fleet mid-rollout serving three
-    /// versions of one producer yields three entries, and that disagreement
-    /// is the finding.
-    pub async fn fetch_by_origin(&self) -> Result<Vec<ServedSlice>> {
-        let mut slices = Vec::new();
+    /// declares an encoding that is neither spelling — is an
+    /// [`UnreadableReply`], logged naming the encoding and never fatal: one
+    /// malformed producer must not blind the tool to every other producer's
+    /// slice, and must not vanish either. Nothing is deduplicated: a fleet
+    /// mid-rollout serving three versions of one producer yields three
+    /// entries, and that disagreement is the finding.
+    pub async fn sweep(&self) -> Result<RegistrySweep> {
+        let mut out = RegistrySweep::default();
         for q in [&self.wildcard, &self.catalog] {
             for answer in q.fetch().await? {
                 let origin = answer.origin;
                 let Answer::Value(bytes) = answer.answer else {
                     continue;
                 };
-                let served = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
                 let encoding = answer.encoding;
-                let parsed = zenkey::registry_doc::negotiate(encoding.as_deref(), &served)
-                    .and_then(|format| {
-                        zenkey::parse_slice_as(&served, format).map(|slice| (slice, format))
-                    });
-                match parsed {
-                    Ok((slice, format)) => slices.push(ServedSlice {
+                match read_introspect(encoding.as_deref(), &bytes.to_bytes()) {
+                    Ok((slice, format, raw)) => out.served.push(ServedSlice {
                         origin,
                         slice,
-                        raw: served,
+                        raw,
                         encoding,
                         format,
                     }),
-                    Err(e) => tracing::warn!(
-                        origin = %origin,
-                        encoding = encoding.as_deref().unwrap_or("(none)"),
-                        "introspect reply did not parse, skipping: {e}"
-                    ),
+                    Err(unreadable) => {
+                        tracing::warn!(
+                            origin = %origin,
+                            encoding = encoding.as_deref().unwrap_or("(none)"),
+                            "introspect reply did not parse: {}",
+                            unreadable.error
+                        );
+                        out.unreadable.push(UnreadableReply {
+                            producer: introspect_producer(&q.base, &answer.key),
+                            origin,
+                            unreadable,
+                        });
+                    }
                 }
             }
         }
-        Ok(slices)
+        Ok(out)
     }
 
     /// Undeclare both queriers, acknowledged.

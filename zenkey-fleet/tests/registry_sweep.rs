@@ -321,4 +321,72 @@ async fn the_sweep_reads_each_reply_in_the_spelling_it_declares() {
     let kdl_served = served.iter().find(|s| s.origin == KDL_HOST).unwrap();
     assert_eq!(kdl_served.encoding.as_deref(), Some("application/kdl"));
     assert_eq!(kdl_served.raw, kdl, "served verbatim, cached verbatim");
+
+    // Not slices — and not silence either (#491). The sweep keeps both
+    // replies as the unreadable pole, on the producer their key names, with
+    // what each declared.
+    let registry = zenkey_fleet::RepeatingRegistry::declare(&fleet, Duration::from_secs(5))
+        .await
+        .expect("declare");
+    let swept = registry.sweep().await.expect("sweep");
+    registry.undeclare().await.expect("undeclare");
+    let mut unreadable: Vec<(&str, &str, Option<&str>)> = swept
+        .unreadable
+        .iter()
+        .map(|u| {
+            (
+                u.origin.as_str(),
+                u.producer.as_str(),
+                u.unreadable.encoding.as_deref(),
+            )
+        })
+        .collect();
+    unreadable.sort_unstable();
+    assert_eq!(
+        unreadable,
+        vec![
+            (LIAR_HOST, "sysinfo", Some("application/kdl")),
+            (JSON_HOST, "sysinfo", Some("application/json")),
+        ],
+        "an answer that did not read is kept, never dropped as no reply"
+    );
+
+    // And the roster's per-origin record says so: the producer's row on the
+    // `application/json` origin is *unreadable*, naming the encoding — not
+    // "no introspect reply" (RFC 08 §6, v1.44; RFC 13 §3 O4).
+    for (host, declared, says) in [
+        (
+            JSON_HOST,
+            "application/json",
+            "neither application/toml nor application/kdl",
+        ),
+        (LIAR_HOST, "application/kdl", "not KDL 2.0"),
+    ] {
+        let info = zenkey_fleet::node_info(&fleet, host, Duration::from_secs(5), false)
+            .await
+            .expect("node_info");
+        let row = info
+            .producers
+            .iter()
+            .find(|p| p.name == "sysinfo")
+            .unwrap_or_else(|| panic!("{host}: the answering producer has a row: {info:?}"));
+        assert!(
+            row.app.is_none() && row.registry_version.is_none(),
+            "{row:?}"
+        );
+        let u = row
+            .unreadable
+            .as_ref()
+            .unwrap_or_else(|| panic!("{host}: answered, so unreadable, not no reply: {row:?}"));
+        assert_eq!(u.encoding.as_deref(), Some(declared));
+        assert!(u.error.contains(says), "{host}: {}", u.error);
+        assert!(!u.error.contains('\n'), "one line: {:?}", u.error);
+    }
+    // A readable origin's row carries no unreadable pole.
+    let info = zenkey_fleet::node_info(&fleet, KDL_HOST, Duration::from_secs(5), false)
+        .await
+        .expect("node_info");
+    assert_eq!(info.producers.len(), 1, "{info:?}");
+    assert!(info.producers[0].unreadable.is_none());
+    assert_eq!(info.producers[0].registry_version.as_deref(), Some("2.0"));
 }

@@ -1038,6 +1038,7 @@ fn the_node_detail_reports_freshness_honestly() {
             blob_tiers: vec![],
             media: vec![],
             deprecated_served: 0,
+            unreadable: None,
         }],
         freshness: vec![Freshness {
             producer: "sysinfo".to_string(),
@@ -1059,6 +1060,72 @@ fn the_node_detail_reports_freshness_honestly() {
         ui.find("sysinfo/health  no sample answered — stale  (ttl 30s)  STALE")
             .is_ok(),
         "an unanswered ttl'd subject reads stale with its evidence"
+    );
+}
+
+/// A producer that answered `introspect` with a slice that did not read is
+/// drawn as that — the declared encoding and the error's first line — and
+/// never as "no introspect reply" (#491; RFC 08 §6, v1.44; RFC 13 §3 O4).
+#[test]
+fn the_node_detail_says_unreadable_not_no_reply() {
+    use std::sync::Arc;
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+    use zenkey_fleet::report::UnreadableSlice;
+    use zenkey_fleet::{NodeInfo, ProducerInfo};
+
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[("v1/h-3fa9c2d41b7e/state/tracker/alive".to_string(), true)],
+        Instant::now(),
+    );
+    let row = |name: &str, unreadable: Option<UnreadableSlice>| ProducerInfo {
+        name: name.to_string(),
+        alive: true,
+        app: None,
+        registry_version: None,
+        subjects: 0,
+        procedures: 0,
+        blob_tiers: vec![],
+        media: vec![],
+        deprecated_served: 0,
+        unreadable,
+    };
+    let info = NodeInfo {
+        origin: "h-3fa9c2d41b7e".to_string(),
+        producers: vec![
+            row(
+                "tracker",
+                Some(UnreadableSlice::new(
+                    Some("application/json".into()),
+                    &"unreadable registry slice: the reply declares encoding \"application/json\"\nsecond line",
+                )),
+            ),
+            row("parallax", None),
+        ],
+        freshness: vec![],
+    };
+    let detail = DetailState::Loaded("h-3fa9c2d41b7e".to_string(), Ok(Arc::new(info)));
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
+        roster: &roster,
+        selected: Some("h-3fa9c2d41b7e"),
+        detail: &detail,
+        slices: None,
+    }));
+    assert!(
+        ui.find(
+            "tracker: introspect answered, slice unreadable (`application/json`: unreadable \
+             registry slice: the reply declares encoding \"application/json\")"
+        )
+        .is_ok(),
+        "answered-unreadable is its own sentence, first line only"
+    );
+    assert!(
+        ui.find("parallax: no introspect reply — capabilities unknown, not absent")
+            .is_ok(),
+        "and no reply keeps its own"
     );
 }
 

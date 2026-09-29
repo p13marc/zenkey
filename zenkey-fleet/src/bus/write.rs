@@ -394,7 +394,7 @@ pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallRe
 /// [`FleetAnswer`]s, which carry what the [`CallReport`] projection drops
 /// (the reply's HLC, for one). [`call_traced`] needs those; [`call`] does
 /// not, so the split keeps the report shape untouched.
-async fn call_answers(
+pub(crate) async fn call_answers(
     fleet: &crate::Fleet<'_>,
     spec: CallSpec<'_>,
 ) -> Result<(String, Duration, Vec<FleetAnswer>)> {

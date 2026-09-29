@@ -203,9 +203,10 @@ pub use bus::monitor::{
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
     Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
-    RepeatingQuery, RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample,
-    declare_repeating, declare_repeating_any, fetch_stored, fetch_value, fleet_get, fleet_registry,
-    fleet_registry_by_origin, fleet_registry_raw, snapshot_get, state_snapshot,
+    RegistrySweep, RepeatingQuery, RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample,
+    UnreadableReply, declare_repeating, declare_repeating_any, fetch_stored, fetch_value,
+    fleet_get, fleet_registry, fleet_registry_by_origin, fleet_registry_raw, snapshot_get,
+    state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,

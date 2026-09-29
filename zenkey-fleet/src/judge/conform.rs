@@ -15,7 +15,10 @@
 //!    A write or a `long-running` procedure — or one that does not say it
 //!    is a read — is never called, because a judge does not act; it is met
 //!    when the origin's served slice declares it (RFC 13 §3, v1.45). The reply is read through
-//!    the RFC 05 §3 vocabulary ([`ReservedError::parse`]): a value is met;
+//!    the RFC 05 §3 vocabulary ([`ReservedError::parse`]): a value is met —
+//!    save an `introspect` value that is not a readable slice in the
+//!    spelling it declares, which answered and so is not silence, and is
+//!    not met (RFC 08 §6, v1.44; #491);
 //!    `invalid-args` is met (the procedure answered, and wants what this
 //!    suite does not invent); `unsupported`/`gated` from a `when` procedure
 //!    is met and **exempt**, with the kind binding judged, and from any
@@ -50,6 +53,7 @@ use zenkey::slice::{Predicate, PredicateKind, ProcedureKind};
 use zenkey::{Declared, RegistrySlice};
 
 use crate::bus::producer::ReservedError;
+use crate::bus::query::{Answer, read_introspect};
 use crate::bus::write::{CallSpec, CallTarget};
 use crate::judge::doctor::{DoctorInternals, DoctorSpec, run_doctor_inner};
 use crate::model::facts::{KeyFacts, KeyShape, Registration};
@@ -113,14 +117,8 @@ pub async fn run_conform(
     let mut served: BTreeMap<String, Option<RegistrySlice>> = BTreeMap::new();
     let mut answers = Vec::new();
     for inst in &instances {
-        let probe = probe(fleet, inst, "introspect", spec.timeout).await;
-        served.insert(
-            inst.origin.clone(),
-            probe.iter().find_map(|p| match p {
-                Probe::Value(Some(text)) => zenkey::parse_slice(text).ok(),
-                _ => None,
-            }),
-        );
+        let (probe, slice_read) = probe_introspect(fleet, inst, spec.timeout).await;
+        served.insert(inst.origin.clone(), slice_read);
         answers.push((
             inst,
             judge_probe(
@@ -338,12 +336,64 @@ fn instances_of(
 /// What one call came back with.
 #[derive(Debug, Clone)]
 enum Probe {
-    /// A value reply — its text when it was not JSON (an introspect TOML).
-    Value(Option<String>),
+    /// A value reply. What it says is not the procedure's contract — except
+    /// `introspect`'s, which [`probe_introspect`] reads.
+    Value,
+    /// An `introspect` value reply that is not a readable slice (#491): it
+    /// answered, so this is not silence, and it is not a slice either.
+    Unreadable(crate::report::UnreadableSlice),
     /// An RFC 05 §3 error envelope.
     Error { name: String, message: String },
     /// The call itself failed before any answer could come back.
     Failed(String),
+}
+
+/// Call `introspect` on one instance, reading each value reply in the
+/// spelling it declares (RFC 08 §6, v1.44) through the reader every
+/// introspect consumer shares — so the suite, the roster and the sweep
+/// cannot disagree about which reply was a slice (#491). This used to sniff
+/// the text whatever the reply declared, which is the second-guessing §6
+/// forbids. The first slice that read is the origin's served slice.
+async fn probe_introspect(
+    fleet: &crate::Fleet<'_>,
+    inst: &Instance,
+    timeout: Duration,
+) -> (Vec<Probe>, Option<RegistrySlice>) {
+    let target = match CallTarget::parse(&inst.origin) {
+        Ok(t) => t,
+        Err(e) => return (vec![Probe::Failed(crate::one_line(&e))], None),
+    };
+    let spec = CallSpec {
+        target: &target,
+        producer: &inst.chunk,
+        procedure: "introspect",
+        params: &[],
+        body: None,
+        attachment: None,
+        timeout,
+        slices: None,
+    };
+    let answers = match crate::bus::write::call_answers(fleet, spec).await {
+        Ok((_, _, answers)) => answers,
+        Err(e) => return (vec![Probe::Failed(crate::one_line(&e))], None),
+    };
+    let mut slice = None;
+    let probes = answers
+        .into_iter()
+        .map(|a| match a.answer {
+            Answer::Value(bytes) => {
+                match read_introspect(a.encoding.as_deref(), &bytes.to_bytes()) {
+                    Ok((s, ..)) => {
+                        slice.get_or_insert(s);
+                        Probe::Value
+                    }
+                    Err(u) => Probe::Unreadable(u),
+                }
+            }
+            Answer::Error { name, message } => Probe::Error { name, message },
+        })
+        .collect();
+    (probes, slice)
 }
 
 /// Call one procedure on one instance, with no parameters and no body.
@@ -373,7 +423,7 @@ async fn probe(
             .answers
             .into_iter()
             .map(|a| match a.outcome {
-                CallOutcome::Ok { text, .. } => Probe::Value(text),
+                CallOutcome::Ok { .. } => Probe::Value,
                 CallOutcome::Err(e) => Probe::Error {
                     name: e.name,
                     message: e.message,
@@ -543,7 +593,18 @@ fn judge_reply(
     slice: &RegistrySlice,
 ) -> OriginAnswer {
     let (name, message) = match reply {
-        Probe::Value(_) => return OriginAnswer::met("a value reply"),
+        Probe::Value => return OriginAnswer::met("a value reply"),
+        // Not unknowable: this build reads both spellings, so what failed is
+        // the reply — a declaration that is neither (§6's MUST), or a
+        // document malformed in the one it declared. The doctor files the
+        // same reply as `slice-parse`, and the suite finds only what the
+        // observer does (RFC 13 §3).
+        Probe::Unreadable(u) => {
+            return OriginAnswer::not_met(format!(
+                "{} — §6 requires a slice in a declared spelling (RFC 08 §6, v1.44)",
+                u.sentence()
+            ));
+        }
         Probe::Failed(e) => {
             return OriginAnswer::unknowable(
                 format!("the call could not be made: {e}"),
@@ -1562,7 +1623,7 @@ name = "restart-required"
         let s = slice();
         let c = Capabilities::Unconsulted;
         for reply in [
-            Probe::Value(None),
+            Probe::Value,
             Probe::Error {
                 name: "error/invalid-args".into(),
                 message: "".into(),
@@ -1597,6 +1658,36 @@ name = "restart-required"
         assert!(a.evidence.contains("registered"), "{}", a.evidence);
         let a = judge_reply(None, None, &Probe::Failed("boom".into()), &c, &s);
         assert!(a.state.is_unknowable());
+    }
+
+    /// An `introspect` that answered unreadably is neither silence nor a
+    /// slice (#491): not met — the reply broke RFC 08 §6 — and the evidence
+    /// names what it declared. Folded beside a readable origin, it is the
+    /// worse of the two.
+    #[test]
+    fn an_unreadable_introspect_is_not_met_and_names_its_encoding() {
+        let s = slice();
+        let c = Capabilities::Unconsulted;
+        let u = Probe::Unreadable(crate::report::UnreadableSlice::new(
+            Some("application/json".into()),
+            &"unreadable registry slice: the reply declares encoding \"application/json\"",
+        ));
+        let a = judge_reply(None, None, &u, &c, &s);
+        assert!(a.state.is_not_met(), "{a:?}");
+        assert!(
+            a.evidence
+                .starts_with("introspect answered, slice unreadable (`application/json`: "),
+            "{}",
+            a.evidence
+        );
+        let inst = Instance {
+            origin: "h-3fa9c2d41b7e".into(),
+            chunk: "demo".into(),
+            rostered: true,
+        };
+        let t = Duration::from_millis(500);
+        let both = judge_probe(None, None, &[Probe::Value, u], &c, &inst, t, &s);
+        assert!(both.state.is_not_met(), "{both:?}");
     }
 
     /// Silence is judged against the roster (RFC 13 §2).

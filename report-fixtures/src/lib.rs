@@ -1359,8 +1359,9 @@ pub fn router_list() -> RouterList {
 }
 
 /// A node inventory where one producer answered `introspect` and another did
-/// not — "capabilities unknown, not absent" — plus a stale state family and
-/// one that has never been seen at all.
+/// not — "capabilities unknown, not absent" — a third answered with a slice
+/// that did not read (#491), plus a stale state family and one that has
+/// never been seen at all.
 pub fn node_info() -> zenkey_fleet::NodeInfo {
     zenkey_fleet::NodeInfo {
         origin: ORIGIN.into(),
@@ -1375,6 +1376,7 @@ pub fn node_info() -> zenkey_fleet::NodeInfo {
                 blob_tiers: vec!["store".into()],
                 media: vec![],
                 deprecated_served: 2,
+                unreadable: None,
             },
             zenkey_fleet::ProducerInfo {
                 name: "parallax".into(),
@@ -1386,6 +1388,25 @@ pub fn node_info() -> zenkey_fleet::NodeInfo {
                 blob_tiers: vec![],
                 media: vec![],
                 deprecated_served: 0,
+                unreadable: None,
+            },
+            // Answered, and the slice did not read (#491): not "no reply".
+            zenkey_fleet::ProducerInfo {
+                name: "tracker".into(),
+                alive: true,
+                app: None,
+                registry_version: None,
+                subjects: 0,
+                procedures: 0,
+                blob_tiers: vec![],
+                media: vec![],
+                deprecated_served: 0,
+                unreadable: Some(zenkey_fleet::report::UnreadableSlice {
+                    encoding: Some("application/kdl".into()),
+                    error: "malformed registry slice: not KDL 2.0 (RFC 08 §5.1): line 2:1: \
+                            Expected a node name"
+                        .into(),
+                }),
             },
             zenkey_fleet::ProducerInfo {
                 name: "probe".into(),
@@ -1397,6 +1418,7 @@ pub fn node_info() -> zenkey_fleet::NodeInfo {
                 blob_tiers: vec![],
                 media: vec![],
                 deprecated_served: 0,
+                unreadable: None,
             },
         ],
         freshness: vec![

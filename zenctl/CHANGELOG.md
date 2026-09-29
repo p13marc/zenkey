@@ -41,6 +41,14 @@ removes each `.toml` only after every `.kdl` is written. A refusal exits 2;
 a migration attempted and failed exits 1, as an act does. No spelling
 moved; the exit contract is unchanged.
 
+An `introspect` reply that answered and did not read is no longer drawn as
+silence (marcpardo/zenkey#491, RFC 13 §3 O4): `node info` says
+"introspect answered, slice unreadable (`<encoding>`: <first line>)" where
+it said "no introspect reply", and its JSON producer row carries
+`unreadable: {encoding, error}`, present only then; `doctor` without
+`--registry` counts that producer as answered and files `slice-parse`;
+`check conform` holds its `procedure/introspect` not met.
+
 | 0.9.1 | Unreleased |
 |---|---|
 | — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
