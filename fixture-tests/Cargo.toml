@@ -19,7 +19,9 @@ zenkey-build = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 serde_json = { workspace = true }
-zenkey-build = { workspace = true }
+# `migrate` is what writes `registry-kdl/` (#374): the mirror is pinned as the
+# migrator's output, so the test calls the library rather than the CLI.
+zenkey-build = { workspace = true, features = ["migrate"] }
 
 [[bench]]
 name = "generated"

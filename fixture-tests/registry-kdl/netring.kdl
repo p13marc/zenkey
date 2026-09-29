@@ -1,11 +1,15 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: netring (wire-level flow/L7/NDR). RFC 08 §2; migration epic #453.
+// Telemetry is registered as real subjects, not a `{metric...}` catch-all
+// (issue #468) — see registry/sysinfo.toml for the rule and why.
+// Source: src/map.rs (every metric name).
 
 registry version="1.1" app="zensight" convention=1
 
 producer "netring" description="wire-level flow/L7/NDR sensor"
 
+// What this producer may cost the host (RFC 08 §2, v1.32): judged against
+// the `self_stats` object on its health document (RFC 04 §1.2) by
+// `zenctl doctor --deep`. Generates nothing; rides the slice verbatim.
 budget rss_mb=64 {
     table "flows" max_entries=65536 max_bytes=16777216
     table "names" max_entries=16384
@@ -353,11 +357,20 @@ procedure "captures" kind=read reply="Vec<CaptureRecord>" idempotent=#true \
 procedure "bandwidth" kind=read reply="Vec<BandwidthRecord>" idempotent=#true \
     since="1.0" description="wire-level bandwidth-by-process (?top=N)"
 
+// The `@blob` plane (RFC 07 §2, RFC 08 §2 v1.8). No `path`: the key shapes are
+// fixed by the chapter and their variable chunks are content addresses. What
+// varies is which tier and endpoints this origin serves.
+//
+// `push` is declared, so the capability exists — RFC 07 §2.2 still requires the
+// receiving origin to gate it and leave it off by default.
 blob "artifact" reference="BlobReference" \
     encoding="application/vnd.tcpdump.pcap" since="1.8" \
     description="packet captures and debug bundles minted by @rpc/netring/artifact" {
     endpoints "manifest" "slice" "have" "push" "fanout"
 }
 
+// Multi-declarer tier (shape-identical with logs.toml): netring snapshots ride
+// the same app-level tree family. Exercises the shape-agreement lint and the
+// codegen dedup.
 blob "tree" reference="BlobReference" since="1.8" \
     description="capture-bundle directory snapshots, keyed by their own root hash"

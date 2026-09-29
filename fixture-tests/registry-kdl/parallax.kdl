@@ -1,6 +1,13 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: parallax (live video). RFC 08 §2; migration epic #453.
+// Telemetry is registered as real subjects, not a `{metric...}` catch-all
+// (issue #468) — see registry/sysinfo.toml for the rule and why.
+// Source: src/stats.rs.
+//
+// `{stream}/stats/{metric}` has a *variable* head chunk — there is no literal
+// prefix — so it structurally matches anything whose 2nd chunk is `stats`. A
+// stream named `streams` would shadow `streams/advertised`; literal-first
+// precedence keeps the literal winning, so the shadow costs the stream, not the
+// gauge.
 
 registry version="1.3" app="zensight" convention=1
 
@@ -73,6 +80,9 @@ procedure "stream/set" kind=write request="Command<StreamControl>" reply="Ack" \
     idempotent=#false since="1.0" \
     description="stream control: open_stream / close_stream / request_keyframe"
 
+// `{tier}` is a named bandwidth rung (low/medium/high) the viewer subscribes to
+// exactly (RFC 07 §1, keyspace v1.3). It replaced the undefined `{profile}` chunk.
+// cardinality: ~streams(16) × codecs(2) × tiers(3), rounded up.
 media "{stream}/video/{codec}/{tier}" encoding="video/*" attachment="FrameMeta" \
     cardinality=128 since="1.3"
 
