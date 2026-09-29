@@ -11,7 +11,7 @@
 //!
 //! * **the live bus** (the default): each producer's served `introspect`
 //!   slice — what the fleet *actually* serves;
-//! * **`--registry <dir>`** (repeatable): local `registry/*.toml` files — what
+//! * **`--registry <dir>`** (repeatable): local `registry/*.{toml,kdl}` files — what
 //!   a checked-out application *declares*. Works with the fleet down.
 //!
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
