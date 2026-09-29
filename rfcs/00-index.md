@@ -6,13 +6,19 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.43** (2026-09-27; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.44** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.44** (2026-09-29) — the second spelling: a registry file MAY be
+  KDL 2.0 — one node per entry, the identifying column its one argument,
+  every other column a property, list columns as child nodes, `/-` as a
+  staged retirement that still owes its `deprecated` entry (08 §5.1); the
+  `introspect` reply declares `application/toml` or `application/kdl`, and
+  undeclared is TOML, the pre-v1.44 wire (08 §6).
 - **v1.43** (2026-09-27) — where a value may go: `exposure` on subjects
   and procedures and `sensitive` on writes (08 §2); per-resource `writes`
   grants with a carved deny, and the constrained-face profile generated
@@ -24,10 +30,6 @@ what changed and what deliberately did not — is
   revision and idempotency, confirmed commit, a deniable `persist`, the
   change event, and the actor defined as a caller-claimed label (05 §5.1);
   the convention worked as a registry slice with its grant table (09 §3).
-- **v1.41** (2026-09-27) — which conditions hold here: the `when` field
-  ships in the reference codegen, and the `sensor` document's
-  `capabilities` map says, per device, which `capability:` predicates hold
-  on this instance (04 §5; 08 §6.1).
 
 ---
 
@@ -110,7 +112,7 @@ Chapters are numbered for reference, not reading. Suggested paths:
 | 05 | [05-control-rpc.md](05-control-rpc.md) | the `@rpc` plane: targeting, read/write/long-running idioms, the incumbent-channel mapping pattern (row-by-row table: 11 §5, since v1.25) |
 | 06 | [06-identity.md](06-identity.md) | origin minting, observed devices, evidence, the `@catalog` contract |
 | 07 | [07-bulk-planes.md](07-bulk-planes.md) | `@media` (live frames) and `@blob` (bulk/content-addressed transfer) |
-| 08 | [08-registry.md](08-registry.md) | the subject registry: format, versioning policy + compatibility lock (§3.1), naming rules, ownership |
+| 08 | [08-registry.md](08-registry.md) | the subject registry: format (TOML or KDL, §5.1), versioning policy + compatibility lock (§3.1), naming rules, ownership |
 | 09 | [09-operations.md](09-operations.md) | cookbook: session/namespace config, selectors, storage (volumes, replication, GC), ACL recipes (rules/subjects/policies, per-plane), constrained-link policy, base discovery; tombstones for the tool material moved to 13 (v1.24) |
 | 10 | [10-prior-art.md](10-prior-art.md) | Keelson, uProtocol/automotive, rmw_zenoh, Sparkplug, OTel, NATS, Zenoh guidance, D-Bus, Homie, OPC UA — took/rejected per system |
 | 11 | [11-zensight-profile.md](11-zensight-profile.md) | the reference application: profile constants, worked keys per sensor, the byte-precise alert key (§3.1, v1.25), full shipped-family and incumbent-channel mapping (§5, v1.25) |

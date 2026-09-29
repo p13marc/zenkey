@@ -1,6 +1,6 @@
 # 08 — The Subject Registry
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40, v1.41 and v1.43 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.3, v1.4, v1.5, v1.8, v1.10, v1.15, v1.16, v1.17, v1.20, v1.23, v1.25, v1.26, v1.32, v1.34, v1.35, v1.36, v1.39, v1.40, v1.41, v1.43 and v1.44 — see [CHANGELOG.md](CHANGELOG.md)*
 
 The grammar fixes positions 1–5 of every key; the registry governs the rest.
 It is the single, machine-readable inventory of every subject, procedure,
@@ -122,8 +122,13 @@ the enforcement crate realizes it, so implementations stop re-deriving it.*
 
 ## 2. Entry format
 
-One TOML document per producer (or service), checked into the repository
-that owns the producer — the application repo, not the convention repo.
+One registry document per producer (or service), checked into the
+repository that owns the producer — the application repo, not the
+convention repo. The document is written in **TOML**, the form every example
+in this chapter uses, or — since v1.44 — in **KDL** (§5.1): two spellings of
+one document, whose columns are named identically in both, so the tables
+below name columns rather than TOML keys, and where this chapter says "the
+TOML" it means the registry file in either spelling.
 The `zenkey-build` crate compiles a `registry/` directory into typed
 builders/parsers from the owning application's build script; the `zenkey`
 runtime crate ships no registry. Example (fields annotated inline,
@@ -627,9 +632,12 @@ job and is diagnosed from the wire, not from TOML.
 
 ## 5. Ownership and process
 
+The lints below, and §3.1's lock, are stated over entries and columns, not
+over a syntax: each applies unchanged to a file in either spelling (§5.1).
+
 - Each producer's registry file lives with the producer's code; the
   application's registry directory holds the **type table** —
-  `registry/types.toml`, mapping each `type` name to its kind and schema
+  `registry/types.toml` (or `types.kdl`, §5.1), mapping each `type` name to its kind and schema
   location (v1.5: this materializes what earlier text placed as "a
   document in the convention repository", which never existed as an
   artifact; the table lives where the types live) — and the convention
@@ -725,6 +733,205 @@ job and is diagnosed from the wire, not from TOML.
   asserts nothing. A registry that leans on catch-alls has bought neither
   direction.
 
+### 5.1 The KDL form (v1.44)
+
+*The second spelling. The registry is the densest, most-edited surface of
+the convention — one reference producer file runs past 800 lines — and it
+was written entirely in TOML's most error-prone construct, the array of
+tables. KDL's node-with-properties shape fits an entry directly: the entry's
+path is the node's argument and each column a property, so a simple subject
+is one line instead of six. It is a second **spelling** of the same
+document, not a second schema, and nothing in §2's tables, §3's versioning
+or §5's lints is restated for it, because nothing in them changes.*
+
+A registry file MAY be written in **KDL 2.0.0** ([kdl.dev](https://kdl.dev))
+instead of TOML. The extension names the format — `<stem>.toml` or
+`<stem>.kdl` — and one directory MAY mix the two, file by file. A directory
+MUST NOT hold both `<stem>.toml` and `<stem>.kdl` for one stem, nor both
+`types.toml` and `types.kdl`: two files for one stem are two authorities
+for one producer, and no rule could say which of them a build means. KDL
+1.0 is a different language rather than an older version of this one
+(`true` against `#true`, different string and number syntax), so a document
+that parses only as KDL 1.0 is refused, never converted. A document MAY
+open with the KDL 2.0 version marker `/- kdl-version 2`; it is a slashdashed
+node, and therefore a comment to every reader.
+
+**One document, two spellings.** A KDL registry file means exactly the TOML
+document the mapping below produces from it, and everything this RFC says
+of a registry file — every §2 requirement, §3's rules, §3.1's lock, every
+§5 lint, §6.1's `draft` marker — applies to that document as written. A
+reader accepts a KDL file exactly when it would accept that TOML and
+refuses it exactly when it would refuse it; the rules below are the only
+refusals the spelling adds.
+
+**Nodes.** Each TOML table is a node, named as its table is named — the
+`[[…]]` kinds keep TOML's singular:
+
+| TOML | KDL node | Argument — the identifying column | Where |
+|---|---|---|---|
+| `[registry]` | `registry` | none | top level, at most once |
+| `[producer]` | `producer` | `name` | top level, at most once |
+| `[service]` | `service` | `name` | top level, at most once |
+| `[budget]` | `budget` | none | top level, at most once |
+| `[[budget.tables]]` | `table`, one per row | `name` | child of `budget` |
+| `[[subject]]` | `subject` | `path` | top level |
+| `[[procedure]]` | `procedure` | `path` | top level |
+| `[[media]]` | `media` | `path` | top level |
+| `[[blob]]` | `blob` | `tier` | top level |
+| `[[error]]` | `error` | `name` | top level |
+| `[[deprecated]]` | `deprecated` | `path` (the name, for `kind = "error"`) | top level |
+| `[types.<Name>]` | `type` | the type name | top level of `types.kdl`, and only there |
+
+Those names are **reserved**, and so are the list-column names below
+(`when`, `buckets`, `endpoints`, `procedures`) as children of the entries
+that carry them. A node of any other name is read as a TOML table of that
+name would be: whatever a reader does with an unknown table — skip it, as
+a consumer skips a later amendment's kind (§6), or refuse it — it does with
+the unknown node, and likewise for an unknown property or child.
+
+**The one-argument rule.** A node of the table above carries at most one
+argument, and it is the entry's identifying column: present exactly where
+the table says, and never spelled as a property as well — `subject
+path="…"` is refused, one column having one spelling. Every other column is
+a **property** named exactly as §2 names it (`class=telemetry`,
+`ttl_s=900`). A second argument is an error, and so is a property repeated
+on one node: KDL's own data model keeps the rightmost of a repeated
+property, TOML refuses a repeated key, and the registry sides with TOML,
+because on an entry a repetition is a copy-paste error, not an override.
+
+**List columns are child nodes.** KDL has no array value. A column whose
+TOML value is an array of scalars — `when` and `buckets` on a
+`[[subject]]`, `when` on a `[[procedure]]`, `endpoints` on a `[[blob]]`,
+`procedures` on an `[[error]]` — is a **child node** named for the column,
+whose arguments are the array's elements in order; it has no properties and
+no children, appears at most once per entry, and is refused when spelled as
+a property. An empty array is the child node with no arguments. The one
+array of tables, `[[budget.tables]]`, is one `table` child per row, as the
+node table says. A column a later amendment adds takes its spelling from
+its TOML shape by these rules; one whose shape fits none of them MUST state
+its KDL spelling in the amendment that adds it.
+
+**Values.**
+
+| TOML value | KDL value |
+|---|---|
+| string | a KDL string — quoted, raw (`#"…"#`), multi-line, or a bare identifier where KDL admits one; every spelling is one value |
+| integer | a KDL integer, in any radix KDL admits |
+| float | a KDL number: only `buckets` takes one, and each element MAY be spelled as an integer, as in TOML |
+| boolean | `#true` / `#false` |
+| `inf`, `-inf`, `nan` | `#inf`, `#-inf`, `#nan` — refused wherever §2 refuses TOML's (a `buckets` bound is finite) |
+| absent | the property or child omitted; a property whose value is `#null` is the column absent, and a writer SHOULD omit it instead |
+
+- A column §2 types as a string MUST be a KDL string, and a reader refuses
+  a number where one belongs rather than converting it. This binds hardest
+  on the version columns: `since="1.1"`, never `since=1.1`. A bare `1.1` is
+  a KDL number, and `1.10` and `1.1` are one number but two MAJOR.MINOR
+  versions (§3); the same holds for `version` on the `registry` node and
+  for `gone`.
+- **Type annotations** — `(u8)64`, `(date)"1.1"`, on a value or on a node —
+  MUST NOT be written, and a reader refuses one. An annotation is a second
+  claim about a value's type where §2's tables already make the one claim;
+  a second claim can only repeat the first or contradict it.
+
+**Slashdash.** A `/-` comments out what follows it — a node with its
+children, a property, an argument, a child — and means exactly what deleting
+that text would mean. Its use is the **staged retirement**: a retired
+entry's text stays in the file beside its `deprecated` node, where a
+reviewer reads what was retired. It is still a deletion to every reader —
+the build, the lock, `introspect` — and owes everything a deletion owes: the
+`deprecated` node, its `deprecated.lock` line, and whatever §3.1 demands of
+a pinned path. A slashdashed entry is not declared; §6.1 has no state
+"declared but not served", and a comment cannot create one.
+
+**Comments and order.** Comments (`//`, `/* … */`) and layout carry no
+meaning, as TOML's `#` comments carry none; a producer serving its file
+verbatim (§6) serves them too. Entry nodes of one kind are read in document
+order, as the rows of a TOML array of tables are; the interleaving of
+different kinds, and the position of the at-most-once nodes, carry none.
+
+**Style, not rule.** The examples quote every argument and every value
+outside a closed vocabulary, write closed-vocabulary values bare
+(`class=telemetry`, `kind=write`), and continue a long node with `\`.
+
+The §2 example, respelled, with a conditional histogram, a conditional
+write, an error name and a staged retirement added:
+
+```kdl
+// registry/netring.kdl
+registry version="1.2" app="zensight" convention=1
+
+producer "netring" description="wire-level flow/L7/NDR sensor"
+
+budget rss_mb=64 {
+    table "flows" max_entries=65536 max_bytes=16777216
+    table "names" max_entries=16384
+}
+
+subject "flow/red/{quantile}" class=telemetry type="TelemetryPoint" qos=sampled \
+    unit="ms" cardinality=5 since="1.0" \
+    description="flow-lifetime RED quantiles from the capture path"
+
+subject "alert/{alert_key}" class=state type="Alert" qos=alert cardinality=64 \
+    ttl_s=900 since="1.0" \
+    description="detector alerts; firing→resolved on one key, delete = tombstone"
+
+subject "sockets/tcp/connlat_us" class=telemetry type="TelemetryPoint" \
+    kind=histogram exposure=host since="1.2" \
+    description="connect latency distribution, seconds; eBPF path only" {
+    buckets 0.0001 0.001 0.01 0.1 1
+    when "feature:ebpf" "capability:CAP_BPF"
+}
+
+procedure "capture/trigger" kind=write request="CaptureTrigger" reply="Ack" \
+    idempotent=#false fanout=forbidden since="1.0" \
+    gate_note="off unless the operator enables capture on this host" \
+    description="fire the pre-trigger ring / rotate the spool" {
+    when "config:capture.enabled"
+}
+
+error "spool-full" since="1.2" \
+    description="the spool has no room: cancel an artifact and retry" {
+    procedures "capture/trigger"
+}
+
+media "{stream}/video/{codec}/{tier}" encoding="video/*" attachment="FrameMeta" \
+    cardinality=12 since="1.0"
+
+blob "artifact" reference="ArtifactDelivery" encoding="application/vnd.tcpdump.pcap" \
+    since="1.8" \
+    description="packet captures and debug bundles minted by @rpc/netring/artifact" {
+    endpoints "manifest" "slice" "have"
+}
+
+blob "store" algo="blake3" since="1.8" \
+    description="content-addressed chunks backing the tree tier"
+
+// Retired in 1.2. The slashdash keeps the text for the reviewer and is a
+// comment to every reader: the build, the lock and introspect see a
+// deletion, so it owes the `deprecated` node below and its lock line.
+/-subject "flow/duration_p50_ms" class=telemetry type="TelemetryPoint" unit="ms" \
+    since="1.0" description="flow-lifetime p50, the pre-RED spelling"
+deprecated "flow/duration_p50_ms" class=telemetry since="1.0" gone="1.2" \
+    replaced_by="flow/red/p50_ms"
+
+deprecated "flow/reset" kind=procedure since="1.0" gone="1.2"
+```
+
+The type table is one `type` node per name. KDL admits `<` and `>` in a
+bare identifier, but a generic type name reads better quoted:
+
+```kdl
+// registry/types.kdl
+type "TelemetryPoint" kind="json-schema" rust="zensight_common::telemetry::TelemetryPoint"
+type "Vec<FlowRecord>" kind="json-schema"
+```
+
+**What stays a line file.** The three `.lock` ledgers
+(`deprecated.lock`, `conditional.lock`, `registry.lock`) keep their
+tab-separated line form beside a `.kdl` file as beside a `.toml` one: they
+are line-per-fact files diffed by humans in review, and a node syntax would
+buy them nothing and cost them that.
+
 ## 6. Runtime introspection
 
 The static TOML is the *authority*; a running fleet additionally serves
@@ -745,6 +952,43 @@ capability-and-version inventory in one round trip (which hosts still
 serve a deprecated subject; which run last month's registry); generic
 explorer tooling — the `busctl`/`d-feet` equivalent — needs no compiled-in
 registry.
+
+**The reply declares its spelling (v1.44).** The slice is served as the
+producer's registry file, verbatim, and since v1.44 that file may be either
+spelling (§5.1) — so the reply says which. A producer's `introspect` reply
+MUST carry the middleware `Encoding` `application/toml` or
+`application/kdl`, naming the spelling of the file it serves. A consumer
+reads a reply that declares neither as the pre-v1.44 wire, TOML — so a TOML
+producer that has not caught up is merely late, while a KDL producer that
+does not declare `application/kdl` is misread by rule, and is the one
+omission with a victim. A consumer dispatches on the declaration:
+
+| Reply `Encoding` | The consumer reads |
+|---|---|
+| `application/toml` | TOML |
+| `application/kdl` | KDL (§5.1) |
+| `text/plain`, or absent — which on Zenoh includes the `zenoh/bytes` default of a replier that set nothing | TOML: the pre-v1.44 wire, which every producer before this amendment speaks |
+| anything else | nothing — the slice is unreadable, and is reported as such |
+
+Parameters after a `;` are not part of the declaration
+(`text/plain;charset=utf-8` is `text/plain`). Only the undeclared rows may be
+second-guessed: a consumer MAY sniff a `text/plain` or absent reply — the
+first byte that is neither whitespace nor inside a `#` comment line being
+`[` means TOML, anything else is tried as KDL — which rescues a producer
+that broke the MUST above and nothing else. A declared spelling is never
+sniffed over; that would make the declaration advisory.
+
+This is §7's *sample > registry > sniff* ladder with its middle rung
+missing by necessity, not by accident: the `introspect` entry's own
+`encoding` column (§2) lives inside the document being decoded, so it
+cannot choose the decoder. The reply's `Encoding` is therefore the whole of
+the declaration. A consumer SHOULD read both spellings, and one that cannot
+read what a reply declares — a TOML-only reader meeting `application/kdl`
+is the case a mixed fleet will produce — reports that producer's slice as
+unreadable and names the encoding; it does
+not let the producer pass for one that serves no slice, because "could not
+read what it said" and "it said nothing" are two answers
+([13 §3](13-observer-conformance.md) O4).
 
 ### 6.1 The registry MUST NOT lie (normative)
 
