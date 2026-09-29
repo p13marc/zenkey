@@ -184,8 +184,16 @@ fn presence_rows<'a>(
                         .iter()
                         .find(|r| r.origin == origin && &r.producer == producer)
                 })
-                .and_then(|r| r.app.as_deref().zip(r.registry_version.as_deref()))
-                .map(|(app, v)| format!("app {app} · registry v{v} (declared)"));
+                .and_then(|r| match (&r.app, &r.registry_version, &r.unreadable) {
+                    (Some(app), Some(v), _) => {
+                        Some(format!("app {app} · registry v{v} (declared)"))
+                    }
+                    // This origin answered and its slice did not read: the
+                    // detail section's sentence, not a blank (#495; RFC 08
+                    // §6, v1.44).
+                    (.., Some(u)) => Some(u.sentence()),
+                    _ => None,
+                });
             let (tone, presence_label) = if p.alive {
                 (PresenceTone::Alive, "alive".to_string())
             } else {

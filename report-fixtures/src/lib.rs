@@ -127,7 +127,8 @@ pub fn topic_list_budget() -> TopicList {
 }
 
 /// A roster where the slice join **was** attempted and one producer answered
-/// nothing — the O4 case the table used to render as a blank.
+/// nothing — the O4 case the table used to render as a blank — and another
+/// answered with a slice that did not read (#495), which is neither.
 pub fn node_list() -> NodeList {
     NodeList {
         slices_joined: true,
@@ -137,18 +138,35 @@ pub fn node_list() -> NodeList {
                 producer: "sysinfo".into(),
                 app: Some("zensight".into()),
                 registry_version: Some("1.0".into()),
+                unreadable: None,
             },
             NodeRow {
                 origin: ORIGIN.into(),
                 producer: "parallax".into(),
                 app: None,
                 registry_version: None,
+                unreadable: None,
+            },
+            // Answered, and the slice did not read (#495): not "no served slice".
+            NodeRow {
+                origin: ORIGIN.into(),
+                producer: "tracker".into(),
+                app: None,
+                registry_version: None,
+                unreadable: Some(zenkey_fleet::report::UnreadableSlice {
+                    encoding: Some("application/json".into()),
+                    error: "unreadable registry slice: the reply declares encoding \
+                            \"application/json\", which is neither application/toml nor \
+                            application/kdl (RFC 08 §6)"
+                        .into(),
+                }),
             },
             NodeRow {
                 origin: "@catalog".into(),
                 producer: "catalog".into(),
                 app: Some("zensight".into()),
                 registry_version: Some("1.1".into()),
+                unreadable: None,
             },
         ],
     }
@@ -164,6 +182,7 @@ pub fn node_list_unjoined() -> NodeList {
             producer: "sysinfo".into(),
             app: None,
             registry_version: None,
+            unreadable: None,
         }],
     }
 }

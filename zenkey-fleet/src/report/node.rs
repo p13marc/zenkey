@@ -17,6 +17,19 @@ pub struct NodeRow {
     /// Registry version from the joined slice, same provenance rule.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_version: Option<String>,
+    /// This origin answered `introspect` for this producer, and the slice
+    /// could not be read (#495) — [`ProducerInfo::unreadable`]'s pole, on
+    /// the listing.
+    ///
+    /// Without it a joined row with no `app` said "no slice served", which
+    /// RFC 08 §6 (v1.44) forbids of an answer that did not read: "could not
+    /// read what it said" and "it said nothing" are two answers (RFC 13 §3
+    /// O4). When present, `app` and `registry_version` are absent even if
+    /// another origin's slice for the same producer read — that answer is
+    /// not this origin's. Absent in every other case, so a row without it is
+    /// byte-identical to the one before.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub unreadable: Option<UnreadableSlice>,
 }
 
 #[derive(Debug, Clone, Serialize)]

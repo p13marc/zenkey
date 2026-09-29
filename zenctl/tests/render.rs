@@ -141,7 +141,8 @@ fn a_budgeted_topic_list_ndjson_carries_the_window_in_the_envelope() {
 
 /// The O4 distinction, drawn: a producer whose slice was read and said nothing
 /// reads "(no served slice)"; one nobody asked about reads `—`. The two used
-/// to be the same blank.
+/// to be the same blank. And one whose origin answered with a slice that did
+/// not read says *that*, in `node info`'s words (#495).
 #[test]
 fn a_node_list_draws_no_slice_served_differently_from_never_asked() {
     assert_data_eq!(
@@ -150,6 +151,7 @@ fn a_node_list_draws_no_slice_served_differently_from_never_asked() {
 h-3fa9c2d41b7e
   sysinfo   (app zensight, registry 1.0)
   parallax  (no served slice)
+  tracker   (introspect answered, slice unreadable (`application/json`: unreadable registry slice: the reply declares encoding "application/json", which is neither application/toml nor application/kdl (RFC 08 §6)))
 
 @catalog
   catalog   (app zensight, registry 1.1)

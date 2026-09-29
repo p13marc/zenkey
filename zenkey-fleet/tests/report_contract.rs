@@ -203,6 +203,45 @@ fn a_node_list_says_whether_the_slice_join_was_even_attempted() {
     );
 }
 
+/// A node list row spells the same three introspect outcomes a node's
+/// producer rows do (#495): joined (`app` + `registry_version`), no slice
+/// served (neither, and no `unreadable`), and this origin answered with a
+/// slice that did not read (`unreadable`). The third is present only then,
+/// so the other rows are byte-identical to the shape before it.
+#[test]
+fn a_node_list_row_tells_an_unreadable_slice_from_none_served() {
+    let rows = serde_json::to_value(fx::node_list()).unwrap()["nodes"].clone();
+    assert_eq!(
+        rows,
+        json!([
+            {
+                "origin": "h-3fa9c2d41b7e",
+                "producer": "sysinfo",
+                "app": "zensight",
+                "registry_version": "1.0",
+            },
+            {"origin": "h-3fa9c2d41b7e", "producer": "parallax"},
+            {
+                "origin": "h-3fa9c2d41b7e",
+                "producer": "tracker",
+                "unreadable": {
+                    "encoding": "application/json",
+                    "error": "unreadable registry slice: the reply declares encoding \
+                              \"application/json\", which is neither application/toml \
+                              nor application/kdl (RFC 08 §6)",
+                },
+            },
+            {
+                "origin": "@catalog",
+                "producer": "catalog",
+                "app": "zensight",
+                "registry_version": "1.1",
+            },
+        ]),
+        "answered-unreadable carries the declaration and one line, and no app"
+    );
+}
+
 /// A node's producer rows spell three introspect outcomes (#491): served
 /// (`app` + `registry_version`), no reply (neither, and no `unreadable`),
 /// and answered-but-unreadable (`unreadable`, with what the reply declared
