@@ -37,6 +37,21 @@ check expect: the question could not be asked — exit 2, the reserved non-verdi
 
 ```
 
+`check conform` loads its suite before it calls anything, and with no
+`--registry` the suite *is* what the bus serves — so a dead bus is a suite
+that could not be loaded: the reserved 2, never the 1 of "violates".
+
+```console
+$ zenctl check conform --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
 A context that names nothing is a 2 everywhere now (`session-config-error`
 pins the listing half), and here it is a 2 for a second, older reason as well:
 `why`'s 1 is the claim "a cause was established", and a config file that does

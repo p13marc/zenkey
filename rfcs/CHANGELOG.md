@@ -25,6 +25,37 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.45 (2026-09-29, what the suite may assume)** — the three rules
+> `zenctl check conform` (#222) needed and 13 §3 did not state: how a
+> `when` exemption meets the device's own claim, what a suite may call,
+> and what an unregistered error reply is. Written from the implementation,
+> which is the first executable conformance suite the set has had.
+>
+> **[13 §3](13-observer-conformance.md), `when`.** A new bullet: where the
+> producer serves v1.41's `capabilities`, an entry's device is its path's
+> first chunk when literal (else only `"*"` applies), and when the device's
+> claims with `"*"` cover every `capability:` predicate of an entry whose
+> other predicates are all `feature:`, `error/gated` from it is
+> Established(no), and its unobserved subject is unknowable rather than
+> exempt. An entry with a `config:` predicate is never held to the
+> document — `gated` may be the knob. A document not served, or without
+> `capabilities`, is not asked, and the exemption stands and says so.
+>
+> **[13 §3](13-observer-conformance.md), the conformance suite.** A suite
+> invokes only `read` procedures and `introspect`, with no arguments
+> (`invalid-args` is an answer); `write`, `long-running` and unknown kinds
+> are met by their served declaration and never called; a variable in the
+> path is unknowable. A reply in `error/` is a reply, registered or not —
+> an unregistered one MAY be noted and is not a finding.
+>
+> **What deliberately did not change.** 04 §5's document, its keys and
+> its optionality: the rule reads the map, it adds nothing to it. 08 §6.1's
+> binding (`unsupported` for `feature:`, `gated` for `config:` and
+> `capability:`) and the three states of a suite's assertion. No producer
+> owes anything new: every sentence binds the judge.
+>
+> *Amends: 13.*
+
 > **v1.44 (2026-09-29, the second spelling)** — a registry file MAY be
 > written in KDL, and the `introspect` reply says which spelling it
 > carries. Phases 1 and 2 of #374 as one entry: the text lands before the

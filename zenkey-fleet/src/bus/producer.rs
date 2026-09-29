@@ -107,6 +107,15 @@ impl ReservedError {
         }
     }
 
+    /// Read a wire error name back into the vocabulary: `Some` for one of
+    /// the seven, `None` for anything else — a producer's own
+    /// `error/<producer>/…` name (RFC 08 §2, v1.40) as much as a stranger's.
+    /// What a judge that *receives* an envelope branches on (#222), so the
+    /// spelling it compares against is this enum's and nobody's copy.
+    pub fn parse(name: &str) -> Option<ReservedError> {
+        ReservedError::ALL.into_iter().find(|e| e.name() == name)
+    }
+
     /// The RFC 05 §3 error envelope, `{ "error": <name>, "message": … }`,
     /// serialized as JSON (the RFC shows the envelope as JSON for
     /// readability; a deployment whose payload default differs encodes the

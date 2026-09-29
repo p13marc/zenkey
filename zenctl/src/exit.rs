@@ -38,11 +38,11 @@
 //!    [`code_for`], and rendered like any other error. This is the seam that
 //!    moved `--context`/`--qos`/class/`--fault`/`$*` from 1 to 2.
 //! 2. [`asked`] — the verdict verbs' pre-run guard. `check expect`, `check
-//!    cutover`, `check retired`, `check probe`, `check schema` and `why` give
-//!    their 0 **and their 1** meanings, so a `?` on their setup path would
-//!    *claim a verdict the run never reached*. Every pre-run failure of
-//!    theirs — resolution, session, registry, the observation itself — lands
-//!    on the reserved 2 instead.
+//!    cutover`, `check retired`, `check probe`, `check conform`, `check
+//!    schema` and `why` give their 0 **and their 1** meanings, so a `?` on
+//!    their setup path would *claim a verdict the run never reached*. Every
+//!    pre-run failure of theirs — resolution, session, registry, the
+//!    observation itself — lands on the reserved 2 instead.
 //! 3. [`verdict`] — the engine's own projection,
 //!    [`zenkey_fleet::judgement_exit_code`] over the RFC 13 §1.2 [`Judgement`]
 //!    shape. A verb that has a verdict does **not** hand-roll a `match`: it

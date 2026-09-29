@@ -1154,6 +1154,44 @@ IMPAIRED — the observation cannot carry the claim:
     assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
 }
 
+/// The conformance suite (#222): the state word leads every row, an
+/// exemption is named beside its evidence, unknowable carries its reason —
+/// and the verdict closes the table. The notes carry what was not asked,
+/// and the drop, in every format.
+#[test]
+fn a_conform_report_keeps_three_states_and_names_the_exemption() {
+    assert_data_eq!(
+        table(&fx::conform_report()),
+        str![[r#"
+✓ met         procedure/introspect          h-3fa9c2d41b7e: a value reply  [RFC 08 §6]
+✓ exempt      procedure/dns                 when: config:collect.dns — h-3fa9c2d41b7e: error/gated — conditional, and said so  [RFC 08 §6.1]
+✗ not met     qos-observed-mismatch/health  v1/h-3fa9c2d41b7e/state/sysinfo/health: 4 of 4 sample(s) did not ride the declared transition  [RFC 04 §3]
+? unknowable  observed/disk/{mount}/used    a window proves presence, never absence — not seen in 10s  [RFC 13 §3]
+VIOLATES
+
+"#]]
+    );
+    let notes = notes(&fx::conform_report());
+    assert!(notes.contains("not asked: stale-state"), "{notes}");
+    assert!(notes.contains("3 sample(s) dropped"), "{notes}");
+    assert!(notes.contains("synthetic marker"), "{notes}");
+    let lines: Vec<serde_json::Value> = ndjson(&fx::conform_report())
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["report"], "conform");
+    assert_eq!(lines[0]["verdict"], "violates");
+    assert!(lines[0].get("assertions").is_none(), "rows are rows");
+    let states: Vec<&str> = lines[1..]
+        .iter()
+        .map(|l| {
+            assert_eq!(l["row"], "assertion");
+            l["state"].as_str().unwrap()
+        })
+        .collect();
+    assert_eq!(states, ["met", "met", "not_met", "unknowable"]);
+}
+
 /// The fleet timeline (#216), arrival axis: lanes per origin/producer with
 /// the stamper in the heading, the unstamped lane beside them, `pos` from
 /// the merged ordering, and the drop as a break at its arrival position.
@@ -2195,6 +2233,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cache-action",
         "call",
         "config",
+        "conform",
         "context",
         "context-action",
         "context-list",
@@ -2323,6 +2362,11 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::export_snapshot());
     assert_eq!(s.asked, ["acme/v1/*/**"]);
     assert_eq!(s.window_s, Some(120.0));
+    // The conformance suite's scope is every origin it called, plus its
+    // listen window's selectors.
+    let s = scoped(&fx::conform_report());
+    assert_eq!(s.asked, ["h-3fa9c2d41b7e/@rpc/sysinfo", "v1/*/state/**"]);
+    assert_eq!(s.window_s, Some(10.0));
     // The doctor's scope is its listen phase; the fixture ran one.
     let s = scoped(&fx::doctor_report());
     assert_eq!(s.asked, ["v1/**"]);

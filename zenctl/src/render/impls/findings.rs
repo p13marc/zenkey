@@ -7,8 +7,8 @@
 //! which is not the same as having none.
 
 use zenkey_fleet::report::{
-    CutoverVerdict, DoctorReport, DoctorSeverity, RegistryDiff, RetiredEntry, RetiredReport,
-    SchemaDump,
+    AssertionState, ConformReport, ConformVerdict, CutoverVerdict, DoctorReport, DoctorSeverity,
+    RegistryDiff, RetiredEntry, RetiredReport, SchemaDump,
 };
 
 use crate::render::{
@@ -152,6 +152,152 @@ impl Render for DoctorReport {
         self.observation.as_ref().map(|obs| ObservedScope {
             asked: obs.scopes.clone(),
             window_s: Some(obs.window_s),
+        })
+    }
+}
+
+/// The conformance suite (#222): one row per assertion, three states and
+/// the exemption kept apart in every medium — the word carries the state,
+/// the mark repeats it, and `unknowable` is dim rather than red because it
+/// is the absence of a verdict, not a milder failure (RFC 13 §3).
+impl Render for ConformReport {
+    const FAMILY: &'static str = "conform";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        // Everything but the assertions: who was asked, the summary, the
+        // verdict and what was not asked survive a truncated pipe.
+        envelope_without(self, &["assertions"])
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for a in &self.assertions {
+            out(Row::of("assertion", a));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        let mut grid = Grid::unheaded(3);
+        for a in &self.assertions {
+            let state = match (&a.state, a.exempt.is_some()) {
+                (AssertionState::Met, false) => Cell::styled("✓ met", crate::render::style::PASS),
+                (AssertionState::Met, true) => Cell::styled("✓ exempt", crate::render::style::PASS),
+                (AssertionState::NotMet, _) => {
+                    Cell::styled("✗ not met", crate::render::style::ERROR)
+                }
+                (AssertionState::Unknowable { .. }, _) => {
+                    Cell::styled("? unknowable", crate::render::style::UNPROVEN)
+                }
+            };
+            let mut evidence = a.evidence.clone();
+            if let AssertionState::Unknowable { reason } = &a.state {
+                evidence = format!("{reason} — {evidence}");
+            }
+            if let Some(e) = &a.exempt {
+                evidence = format!("{e} — {evidence}");
+            }
+            if let Some(c) = &a.citation {
+                evidence.push_str(&format!("  [{c}]"));
+            }
+            grid.row([state, Cell::text(a.id.clone()), Cell::text(evidence)]);
+        }
+        t.grid(grid);
+        let (word, style) = match self.verdict {
+            ConformVerdict::Conforms => ("CONFORMS", crate::render::style::PASS),
+            ConformVerdict::Violates => ("VIOLATES", crate::render::style::ERROR),
+            ConformVerdict::Unproven => ("UNPROVEN", crate::render::style::UNPROVEN),
+        };
+        t.line_styled(word, style);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        notes.push(
+            Note::coverage(if self.origins_asked.is_empty() {
+                format!(
+                    "no origin of {} was on the roster, and no --origin named one — \
+                     nothing was called, and every run-time assertion says so",
+                    self.producer
+                )
+            } else {
+                format!(
+                    "called {} on {} origin(s): {}",
+                    self.producer,
+                    self.origins_asked.len(),
+                    self.origins_asked.join(", ")
+                )
+            })
+            .cite("RFC 13 §2"),
+        );
+        if let Some(obs) = &self.observation {
+            notes.push(
+                Note::coverage(format!(
+                    "listened {:.0}s over {} scope(s): {} sample(s) on {} key(s) — a \
+                     window proves presence, never absence",
+                    obs.window_s,
+                    obs.scopes.len(),
+                    obs.samples,
+                    obs.keys_seen
+                ))
+                .cite("RFC 09 §5.1 O5"),
+            );
+            if obs.synthetic_marked > 0 {
+                notes.push(Note::caveat(format!(
+                    "{} sample(s) carried the synthetic marker — generated traffic, \
+                     judged like any other (RFC 09 §5.3)",
+                    obs.synthetic_marked
+                )));
+            }
+        }
+        for n in &self.not_asked {
+            notes.push(Note::coverage(format!("not asked: {n}")).cite("RFC 09 §5.1 O4"));
+        }
+        let s = &self.summary;
+        notes.push(Note::summary(format!(
+            "{} assertion(s): {} met ({} exempt), {} not met, {} unknowable — \
+             unknowable is skipped, never failed",
+            self.assertions.len(),
+            s.met,
+            s.exempt,
+            s.not_met,
+            s.unknowable
+        )));
+        notes
+    }
+
+    fn bounds(&self) -> Vec<BoundCost> {
+        let Some(obs) = &self.observation else {
+            return Vec::new();
+        };
+        vec![
+            BoundCost::new(
+                BoundKind::Missed,
+                obs.dropped,
+                "sample(s) dropped while behind during the window — every observed \
+                 count is a lower bound",
+            ),
+            BoundCost::new(
+                BoundKind::Retired,
+                obs.facts_evicted,
+                "key projection(s) retired by the bounded facts cache — presence is \
+                 judged over the retained keys only",
+            ),
+        ]
+    }
+
+    /// The probes and the window: every origin's `@rpc` plane that was
+    /// called, and the listen phase's selectors when one ran.
+    fn scope(&self) -> Option<ObservedScope> {
+        let mut asked: Vec<String> = self
+            .origins_asked
+            .iter()
+            .map(|o| format!("{o}/@rpc/{}", self.producer))
+            .collect();
+        if let Some(obs) = &self.observation {
+            asked.extend(obs.scopes.iter().cloned());
+        }
+        Some(ObservedScope {
+            asked,
+            window_s: self.observation.as_ref().map(|o| o.window_s),
         })
     }
 }

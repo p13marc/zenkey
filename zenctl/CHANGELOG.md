@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased
+
+One new judgement and no moved spelling: a script written against 0.9.1
+runs unchanged. **`check conform --producer P [--origin O] [--for SECS]
+[--deep] [--junit PATH]`** (marcpardo/zenkey#222, RFC 13 §3) runs a
+producer's registry as a conformance suite — one assertion per declared
+surface, met / not met / unknowable, never folding the third into the
+second. Every rostered origin is called (introspect and each concrete read
+procedure; a write is never called), the doctor's checks are projected per
+surface, and `--junit` writes the assertions with unknowable as *skipped*.
+Exit 0 conforms, 1 violates, 2 unproven — on the one contract.
+
+| 0.9.1 | Unreleased |
+|---|---|
+| — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
+
 ## 0.9.1 (2026-09-29) — a fragment that pastes
 
 `acl gen --json5` ends the `access_control` and `downsampling` blocks with a
