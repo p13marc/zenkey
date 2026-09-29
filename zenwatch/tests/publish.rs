@@ -40,6 +40,22 @@ async fn ask(fleet: &Fleet<'_>, selector: &str) -> Vec<String> {
         .collect()
 }
 
+/// Every reply to `selector`, with the encoding it declared.
+async fn ask_declared(fleet: &Fleet<'_>, selector: &str) -> Vec<(String, Option<String>)> {
+    fleet_get(fleet, selector, &GetOpts::new(Duration::from_secs(3)))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|a| match a.answer {
+            Answer::Value(bytes) => (
+                String::from_utf8(bytes.to_bytes().to_vec()).unwrap(),
+                a.encoding,
+            ),
+            Answer::Error { name, message } => panic!("{name}: {message}"),
+        })
+        .collect()
+}
+
 /// Until `pred` holds over the samples seen so far (or SETTLE).
 async fn until(seen: &Seen, what: &str, pred: impl Fn(&[(String, SampleKind, Vec<u8>)]) -> bool) {
     let deadline = tokio::time::Instant::now() + util::SETTLE;
@@ -152,10 +168,16 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
     };
     assert!(zenkey::grammar::is_valid_host_origin(&origin), "{origin}");
 
-    // introspect: the registry slice, verbatim, naming the three subjects.
-    let slices = ask(&fleet, &format!("v1/{origin}/@rpc/zenwatch/introspect")).await;
+    // introspect: the registry slice, verbatim, naming the three subjects —
+    // the KDL file (RFC 08 §5.1, #374), declared as such (§6), and read in
+    // the spelling the declaration names, never sniffed.
+    let slices = ask_declared(&fleet, &format!("v1/{origin}/@rpc/zenwatch/introspect")).await;
     assert_eq!(slices.len(), 1, "one producer, one slice");
-    let slice = zenkey::parse_slice(&slices[0]).unwrap();
+    let (body, encoding) = &slices[0];
+    assert_eq!(encoding.as_deref(), Some("application/kdl"));
+    let format = zenkey::registry_doc::negotiate(encoding.as_deref(), body).unwrap();
+    assert_eq!(format, zenkey::SliceFormat::Kdl);
+    let slice = zenkey::parse_slice_as(body, format).unwrap();
     assert_eq!(slice.name, "zenwatch");
     let paths: Vec<&str> = slice.subjects.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(paths, vec!["health", "firing/{rule_id}", "doctor"]);

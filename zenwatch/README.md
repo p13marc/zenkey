@@ -208,7 +208,7 @@ under.
 ## What it publishes
 
 A real daemon, explicitly launched, publishes its own state like every
-producer (`registry/zenwatch.toml`), so `zengui` and `zenctl` see the
+producer (`registry/zenwatch.kdl`, RFC 08 §5.1), so `zengui` and `zenctl` see the
 notifier without SSH and something else can watch the watcher:
 
 - **`…/@rpc/zenwatch/introspect`** and **`describe`** are served first

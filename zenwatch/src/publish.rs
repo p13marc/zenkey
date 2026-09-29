@@ -470,6 +470,22 @@ mod tests {
         }
     }
 
+    /// The notifier's registry is KDL (RFC 08 §5.1, #374 — migrated with
+    /// `zenctl registry migrate`), and `introspect` declares what the build
+    /// generated rather than a literal: the file served verbatim, read in
+    /// the spelling its `Encoding` names, is the slice.
+    #[test]
+    fn introspect_serves_the_kdl_file_and_declares_it() {
+        use crate::registry::zenwatch::{REGISTRY_ENCODING, REGISTRY_SOURCE};
+        assert_eq!(REGISTRY_ENCODING, "application/kdl");
+        let format = zenkey::registry_doc::negotiate(Some(REGISTRY_ENCODING), REGISTRY_SOURCE)
+            .expect("a declared spelling");
+        assert_eq!(format, zenkey::SliceFormat::Kdl);
+        let slice = zenkey::parse_slice_as(REGISTRY_SOURCE, format).expect("the served slice");
+        assert_eq!(slice.name, "zenwatch");
+        assert_eq!(slice.subjects.len(), 3);
+    }
+
     /// The doctor document's wire shape (#390): the report rides verbatim,
     /// `not asked` as absence inside it, and the whole thing round-trips
     /// through the served schema's type — what an explorer parses.
