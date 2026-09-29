@@ -1,0 +1,8 @@
+# The type table.
+
+[types.Status]
+kind = "json-schema"
+
+# The load point.
+[types.Load]
+kind = "json-schema"

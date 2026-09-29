@@ -19,6 +19,7 @@ Commands:
   consumers  Who declares a reader of a subject (#224): every declared subscriber and querier the admin space serves, related to the target by key algebra and ranked, one row per session, joined to the origin its alive token attaches
   impact     The blast radius of changing one declared subject (#224): its consumers, its storage coverage, what else declares on its family, and its `[[deprecated]]` entry — in one document
   infer      Draft a registry from the wire, marked as a draft (#225, RFC 08 §6.1): one `<producer>.toml` per producer seen, a `types.toml` with inferred JSON Schemas, `compat = "none"`, `draft = true`, no `since`
+  migrate    Respell a registry directory in KDL (RFC 08 §5.1, #374): every `<stem>.toml` — producers, services, the type table — becomes `<stem>.kdl` meaning the same document, and every other file (the `.lock` ledgers, which stay line files) is kept beside unchanged
   help       Print this message or the help of the given subcommand(s)
 
 Options:

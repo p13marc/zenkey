@@ -36,7 +36,9 @@ zenkey-explorer-config = { workspace = true }
 # default features off.
 # `export` adds the AsyncAPI document exporter (#208), which moved here from
 # this crate — registry in, document out is codegen's shape, not a CLI's.
-zenkey-build = { workspace = true, features = ["export"] }
+# `migrate` is `registry migrate --to kdl` (#374): the conversion and its
+# proof live with the lints they end in, and this crate stages and commits.
+zenkey-build = { workspace = true, features = ["export", "migrate"] }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }
@@ -51,6 +53,9 @@ ciborium = { workspace = true }
 tracing-subscriber = { workspace = true }
 anstyle = { workspace = true }
 anstyle-query = { workspace = true }
+# `registry migrate` stages into a directory of its own before it writes
+# anything a user can see (#374).
+tempfile = { workspace = true }
 
 [dev-dependencies]
 # #201: 9,272 LOC with no `tests/` directory at all. The corpus lands *before*
