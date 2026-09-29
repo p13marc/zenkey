@@ -55,8 +55,9 @@ pub struct Cli {
     #[arg(long)]
     pub scouting: bool,
 
-    /// Directory of registry TOMLs, repeatable. When given, registry slices are
-    /// read from disk instead of from the bus (RFC 08 §6 introspection).
+    /// Directory of registry files (`*.toml` or `*.kdl`, RFC 08 §5.1),
+    /// repeatable. When given, registry slices are read from disk instead of
+    /// from the bus (RFC 08 §6 introspection).
     #[arg(long, value_name = "DIR")]
     pub registry: Vec<PathBuf>,
 
