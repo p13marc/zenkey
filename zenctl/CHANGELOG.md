@@ -45,6 +45,7 @@ moved; the exit contract is unchanged.
 |---|---|
 | — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
 | — | `zenctl registry export --registry registry --as kdl` |
+| — | `zenctl registry migrate --to kdl registry --in-place` |
 
 ## 0.9.1 (2026-09-29) — a fragment that pastes
 
