@@ -71,7 +71,7 @@ pub enum MigrateError {
     /// not be read. A registry that does not build is not respelled: the
     /// lint's message names the source's files, which a lint of the staged
     /// result would not.
-    #[error("the source registry does not build, so it is not migrated: {0}")]
+    #[error("the source registry does not build, so it is not migrated")]
     Source(#[source] Error),
     /// A staged file does not read back to the document it was converted
     /// from — a defect of this module, never of the input.
@@ -79,7 +79,7 @@ pub enum MigrateError {
     Unfaithful { file: String, message: String },
     /// The staged directory fails a lint the source passed — the same kind
     /// of defect, caught by the build's own checks.
-    #[error("the migrated registry fails a lint its source passes: {0}")]
+    #[error("the migrated registry fails a lint its source passes")]
     Staged(#[source] Error),
     /// Writing the staging directory failed.
     #[error("{0:?}")]
@@ -598,7 +598,13 @@ subject \"health\" common=health class=state type=\"Health\" since=\"0.1\" \\
         std::fs::write(src.join("t.kdl"), "registry\n").unwrap();
         let e = stage_kdl(&src, &out).unwrap_err();
         assert!(matches!(e, MigrateError::Source(_)), "{e}");
-        assert!(e.to_string().contains("one stem in two spellings"), "{e}");
+        let cause = std::error::Error::source(&e).map(ToString::to_string);
+        assert!(
+            cause
+                .as_deref()
+                .is_some_and(|c| c.contains("one stem in two spellings")),
+            "{cause:?}"
+        );
         assert!(e.is_unaskable());
 
         let empty = scratch("empty");
