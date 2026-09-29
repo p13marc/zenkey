@@ -1560,7 +1560,10 @@ pub fn to_json5(plan: &AclPlan) -> String {
         );
     }
     let _ = writeln!(out, "  ],");
-    let _ = writeln!(out, "}}");
+    // Each block ends in a member comma (#486): the output is a fragment
+    // pasted into a router config's top-level object, and a trailing comma
+    // is legal JSON5 even before the closing `}`.
+    let _ = writeln!(out, "}},");
     if !plan.downsampling.is_empty() {
         // The face's second block (RFC 09 §4): egress puts only — dropping
         // on ingress saves no airtime, it has already been spent.
@@ -1598,7 +1601,7 @@ pub fn to_json5(plan: &AclPlan) -> String {
             );
         }
         let _ = writeln!(out, "    ] }},");
-        let _ = writeln!(out, "]");
+        let _ = writeln!(out, "],");
     }
     out
 }
@@ -2526,9 +2529,19 @@ mod tests {
         );
     }
 
+    /// #486: the output is a fragment for a router config's top-level
+    /// object, so pasted into one it must parse — as zenoh itself reads it.
+    fn assert_pastes_into_a_router_config(text: &str) {
+        let config = format!("{{\n  mode: \"router\",\n{text}}}\n");
+        if let Err(e) = zenoh::Config::from_json5(&config) {
+            panic!("the pasted fragment does not parse: {e}\n{config}");
+        }
+    }
+
     #[test]
     fn the_json5_names_zenohs_fields_and_every_matrix_row() {
         let text = to_json5(&plan());
+        assert_pastes_into_a_router_config(&text);
         assert!(text.starts_with("// zenohd access_control block"));
         assert!(text.contains("access_control: {"));
         assert!(text.contains("  enabled: true,"));
@@ -2905,6 +2918,7 @@ mod tests {
 
         // The block, as zenohd reads it: the face's subject, both blocks.
         let text = to_json5(&p);
+        assert_pastes_into_a_router_config(&text);
         assert!(text.contains("default_permission: \"allow\""));
         assert!(text.contains("link_protocols: [\"unixsock-stream\"] },  // link"));
         assert!(text.contains("downsampling: ["));

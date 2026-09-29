@@ -690,6 +690,84 @@ pub struct ConfigChangeEvent {
     pub claimed_source: Option<String>,
 }
 
+impl Edit {
+    /// An edit of a parameter from `old` to `new`; `None` is a value the
+    /// producer could not read back, never a guessed one.
+    #[must_use]
+    pub fn of(
+        parameter: impl Into<String>,
+        old: Option<ParamValue>,
+        new: Option<ParamValue>,
+    ) -> Self {
+        Edit {
+            parameter: parameter.into(),
+            old,
+            new,
+            redacted: false,
+        }
+    }
+
+    /// An edit of a sensitive parameter: `old` and `new` absent by rule.
+    #[must_use]
+    pub fn redacted(parameter: impl Into<String>) -> Self {
+        Edit {
+            redacted: true,
+            ..Edit::of(parameter, None, None)
+        }
+    }
+}
+
+impl ConfigChangeEvent {
+    /// An event for `resource` at `revision`, with no token and no
+    /// attribution — the claimed fields are added by the setters below.
+    #[must_use]
+    pub fn new(
+        resource: impl Into<String>,
+        revision: u64,
+        outcome: ChangeOutcome,
+        edits: impl IntoIterator<Item = Edit>,
+    ) -> Self {
+        ConfigChangeEvent {
+            resource: resource.into(),
+            revision,
+            token: None,
+            outcome,
+            edits: edits.into_iter().collect(),
+            actor: None,
+            request_id: None,
+            claimed_source: None,
+        }
+    }
+
+    /// With the pending change's token.
+    #[must_use]
+    pub fn token(mut self, token: impl Into<String>) -> Self {
+        self.token = Some(token.into());
+        self
+    }
+
+    /// With the actor the caller claimed (RFC 06 §5.5).
+    #[must_use]
+    pub fn actor(mut self, actor: impl Into<String>) -> Self {
+        self.actor = Some(actor.into());
+        self
+    }
+
+    /// With the request id the caller claimed.
+    #[must_use]
+    pub fn request_id(mut self, id: impl Into<String>) -> Self {
+        self.request_id = Some(id.into());
+        self
+    }
+
+    /// With the source the transport reported.
+    #[must_use]
+    pub fn claimed_source(mut self, source: impl Into<String>) -> Self {
+        self.claimed_source = Some(source.into());
+        self
+    }
+}
+
 /// Why a change was refused (RFC 05 §5.1).
 ///
 /// `#[non_exhaustive]`: matched from outside this crate, and a producer will
@@ -1045,5 +1123,59 @@ mod tests {
         assert_eq!(serde_json::to_string(&pin).unwrap(), "\"<redacted>\"");
         let back: Sensitive<String> = serde_json::from_str("\"1234\"").unwrap();
         assert_eq!(back.expose(), "1234");
+    }
+
+    /// #487: a producer outside the crate builds the event through the
+    /// constructors, and the wire shape is RFC 05 §5.1's.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn a_change_event_built_from_outside_serializes_to_the_convention_shape() {
+        let event = ConfigChangeEvent::new(
+            "wwan0",
+            7,
+            ChangeOutcome::Applied,
+            [
+                Edit::of(
+                    "tx_queue_len",
+                    Some(ParamValue::Integer(100)),
+                    Some(ParamValue::Integer(200)),
+                ),
+                Edit::redacted("pin"),
+            ],
+        )
+        .token("chg-1")
+        .actor("ops")
+        .request_id("r-9")
+        .claimed_source("tcp/10.0.0.2:7447");
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "resource": "wwan0",
+                "revision": 7,
+                "token": "chg-1",
+                "outcome": "applied",
+                "edits": [
+                    {"parameter": "tx_queue_len", "old": 100, "new": 200},
+                    {"parameter": "pin", "redacted": true},
+                ],
+                "actor": "ops",
+                "request_id": "r-9",
+                "claimed_source": "tcp/10.0.0.2:7447",
+            })
+        );
+        let back: ConfigChangeEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(back, event);
+        let bare = serde_json::to_value(ConfigChangeEvent::new(
+            "wwan0",
+            8,
+            ChangeOutcome::RolledBack,
+            [],
+        ))
+        .unwrap();
+        assert_eq!(
+            bare,
+            serde_json::json!({"resource": "wwan0", "revision": 8, "outcome": "rolled-back", "edits": []})
+        );
     }
 }

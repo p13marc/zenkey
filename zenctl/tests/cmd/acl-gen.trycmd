@@ -278,7 +278,7 @@ access_control: {
     { id: "zensight-watch", rules: ["watch-sub", "watch-recv", "no-remote-actions"],
       subjects: ["zensight-watch"] },
   ],
-}
+},
 no registry asked: the planes are as the enrollment claims, and no-remote-actions denies the convention's write leaf zensight/v1/*/@rpc/*/**/set rather than the declared write procedures — pass --registry <dir> to narrow both to what the fleet actually declares (RFC 13 §3 O4)
 
 ```
@@ -460,7 +460,7 @@ access_control: {
     { id: "constrained-link-mgmt", rules: ["deny-telemetry-netlink-detail", "deny-telemetry-sysinfo-detail", "deny-rpc", "deny-media", "deny-blob", "deny-adminspace"],
       subjects: ["constrained-link"] },
   ],
-}
+},
 catalog: 8 subject(s) cross this face as `fleet` (declared, or unmarked — the default): state/entity/{entity_id}, state/alias/{old_id}, state/pdns/{ip_slug}, state/incident/{incident_id}, state/ack/{alert_ref}, state/silence/{id}, state/edge/{edge_id}, state/assertion/{id} (RFC 08 §2)
 gnmi: 6 subject(s) cross this face as `fleet` (declared, or unmarked — the default): state/health, state/errors, state/sensor, state/evidence/self, state/artifact/{kind}, telemetry/{device}/{path...} (RFC 08 §2)
 logs: 24 subject(s) cross this face as `fleet` (declared, or unmarked — the default): state/health, state/errors, state/sensor, state/evidence/self, state/alert/{alert_key}, state/artifact/{kind}, telemetry/ingest/received_total, telemetry/ingest/parsed_total, telemetry/ingest/parse_failed_total, telemetry/ingest/dropped_total, telemetry/by_severity/{severity}, telemetry/errors_total, telemetry/warnings_total, telemetry/units_in_failure, telemetry/journald/read_total, telemetry/journald/published_total, telemetry/journald/dropped_total, telemetry/journald/sampled_out_total, telemetry/by_unit/{unit}/messages_total, telemetry/by_unit/{unit}/errors_total, telemetry/by_unit/{unit}/error_ratio, telemetry/by_unit/{unit}/burn_rate, telemetry/by_template/{template}/count_total, telemetry/by_template/{template}/errors_total (RFC 08 §2)

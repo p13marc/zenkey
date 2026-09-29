@@ -6,6 +6,12 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## 0.9.1 (2026-09-29) — a fragment that pastes
+
+`acl gen --json5` ends the `access_control` and `downsampling` blocks with a
+member comma, so the printed fragment merges into a `zenohd` config as is
+(marcpardo/zenkey#486). No spelling moved; the exit contract is unchanged.
+
 ## 0.9.0 (2026-09-27) — a noun for configuration, a face for a link
 
 One new noun and one new flag family, and no moved spelling: a script
