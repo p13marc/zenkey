@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
 **Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
-amended in v1.32, v1.34, v1.35, v1.36 and v1.39 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+amended in v1.32, v1.34, v1.35, v1.36, v1.39 and v1.45 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -425,6 +425,20 @@ is a declaration a judge can hold a producer to, on the same four poles:
   `gated` from one with only `feature:` predicates, is a finding.
 - A `when` subject unobserved in a window is exempt and says so; observed,
   it is judged like any other subject.
+- **The device's own claim (v1.45).** Where the producer serves the
+  registration document's `capabilities` member ([04 §5](04-planes.md),
+  v1.41), the exemption above is held to it. An entry's *device* is its
+  path's first chunk when that chunk is literal; an entry whose first chunk
+  is a variable has none, and only the producer's `"*"` claims apply to
+  it. When the claims for that device, together with `"*"`, include every
+  `capability:` predicate of an entry whose other predicates are all
+  `feature:`, then `error/gated` from that entry is *Established(no)* — the
+  device says it can, the procedure says it cannot — and the same entry's
+  subject unobserved in a window is no longer exempt but *unknowable*. An
+  entry with a `config:` predicate is never so held: `gated` may be the
+  knob, which no document claims. A document not served, or served without
+  `capabilities`, is *not asked* (O4), and the exemption stands and says
+  that it was not checked.
 - A predicate kind this build does not know makes the entry conditional
   all the same, and its binding is *not asked*.
 
@@ -438,6 +452,17 @@ and a build MUST NOT go red on one. The suite is a projection of the
 observer's own checks — it can find nothing the observer cannot — and
 silence from a procedure whose origin the roster shows alive is a finding
 under §2 (*alive ⇒ callable*), not an unknowable.
+
+*What a suite may call (v1.45).* A suite is an observer (§3), and it
+invokes only what observing may: a `kind = "read"` procedure and
+`introspect`, with no arguments, where `error/invalid-args` is a reply and
+so an answer. A `write` or `long-running` procedure — or one whose kind the
+suite does not know — is never invoked, and is met by its declaration in
+the served slice alone; a procedure whose path holds a variable cannot be
+called without inventing a value, and is unknowable. Any reply in the
+reserved `error/` namespace is a reply: one the slice does not register as
+an `[[error]]` ([08 §2](08-registry.md), v1.40) MAY be noted in the
+assertion's evidence, and is not a finding against the procedure.
 
 **Exporter obligations (v1.34).** A tool that re-publishes its
 observations as a metrics surface — a Prometheus exposition, a status page

@@ -14,7 +14,7 @@
 //!    `kind = "read"` procedure with a concrete path, with no parameters.
 //!    A write or a `long-running` procedure — or one that does not say it
 //!    is a read — is never called, because a judge does not act; it is met
-//!    when the origin's served slice declares it. The reply is read through
+//!    when the origin's served slice declares it (RFC 13 §3, v1.45). The reply is read through
 //!    the RFC 05 §3 vocabulary ([`ReservedError::parse`]): a value is met;
 //!    `invalid-args` is met (the procedure answered, and wants what this
 //!    suite does not invent); `unsupported`/`gated` from a `when` procedure
@@ -33,7 +33,7 @@
 //!    storage and admin checks are not the producer's contract and are
 //!    skipped.
 //!
-//! **Capabilities (RFC 04 §5, v1.41).** A `gated` reply says a `config:` or
+//! **Capabilities (RFC 04 §5, v1.41; the rule is RFC 13 §3, v1.45).** A `gated` reply says a `config:` or
 //! `capability:` predicate is false *here*. The producer's registration
 //! document (`state/<producer>/sensor`) may say, per device, which
 //! capabilities hold — and when it claims every `capability:` predicate of

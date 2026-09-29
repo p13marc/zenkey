@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.44** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.45** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.45** (2026-09-29) — what the suite may assume: a `when`
+  exemption is held to the device's served `capabilities` claim, a suite
+  calls only `read` procedures and `introspect` with no arguments, and an
+  unregistered `error/` reply is a reply, not a finding (13 §3).
 - **v1.44** (2026-09-29) — the second spelling: a registry file MAY be
   KDL 2.0 — one node per entry, the identifying column its one argument,
   every other column a property, list columns as child nodes, `/-` as a
@@ -24,12 +28,6 @@ what changed and what deliberately did not — is
   grants with a carved deny, and the constrained-face profile generated
   from the markers — a permissive default, the planes by their widest
   spelling, `downsampling` for what crosses (09 §3, §4).
-- **v1.42** (2026-09-27) — the rest of the config pattern: §5's skeleton
-  grows into a configuration convention — a served schema, groups as the
-  resource of a write, hot/reach/contract classes, sensitive parameters,
-  revision and idempotency, confirmed commit, a deniable `persist`, the
-  change event, and the actor defined as a caller-claimed label (05 §5.1);
-  the convention worked as a registry slice with its grant table (09 §3).
 
 ---
 
