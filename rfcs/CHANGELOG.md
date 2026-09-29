@@ -25,6 +25,78 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.44 (2026-09-29, the second spelling)** — a registry file MAY be
+> written in KDL, and the `introspect` reply says which spelling it
+> carries. Phases 1 and 2 of #374 as one entry: the text lands before the
+> reader, and the reader before any file flips.
+>
+> **The governing rule.** The registry format is a wire contract before it
+> is a file format: `introspect` serves the file verbatim (§6), so a
+> producer compiled from a `.kdl` file puts KDL on the wire, and every
+> consumer's slice parser is its reader. A change of spelling is therefore
+> a rollout, not an edit, and this amendment is written so that a fleet is
+> legal at every point of it.
+>
+> **[08 §5.1](08-registry.md), new.** The KDL form, KDL 2.0.0 only: one
+> node per entry, named as its TOML table (`subject`, `procedure`,
+> `media`, `blob`, `error`, `deprecated`; `registry`, `producer`,
+> `service`, `budget` at most once; `table` per `[[budget.tables]]` row;
+> `type` in `types.kdl`), those names reserved along with the list-column
+> children. The **one-argument rule**: the identifying column (`path`,
+> `name`, `tier`) is the node's single argument and never a property as
+> well; every other column is a property with §2's name. The list columns
+> (`when` on subjects and procedures, `buckets`, `endpoints`,
+> `procedures`) are child nodes whose arguments are the elements — KDL has
+> no array value, and a list spelled as a property is refused. String
+> columns MUST be KDL strings (`since="1.1"`: a bare `1.1` is a number, and
+> `1.10` is the same number and a different version); `#true`/`#false`;
+> `#null` is absent; type annotations are refused; a repeated property is
+> refused, siding with TOML against KDL's rightmost-wins. `/-` means what
+> deleting the text means, and its use is the staged retirement: the text
+> stays for the reviewer, and the entry still owes its `deprecated` node
+> and ledger line. The extension names the format, a directory may mix
+> them, and one stem MUST NOT have both. A worked example covers every
+> entry kind.
+>
+> **[08 §6](08-registry.md).** The negotiation: the reply MUST declare
+> `application/toml` or `application/kdl`; `text/plain` or absent (on
+> Zenoh, `zenoh/bytes`) is TOML, the pre-v1.44 wire; a consumer dispatches
+> on the declaration and MAY sniff only an undeclared reply; a producer
+> serving KDL that does not declare is misread by rule. §7's middle rung
+> cannot apply — the `introspect` entry's `encoding` column is inside the
+> document being decoded — so the reply's `Encoding` is the whole
+> declaration. A consumer that cannot read a declared spelling says the
+> slice was unreadable, never that there was none (13 §3 O4).
+>
+> **[08 §2](08-registry.md), [§5](08-registry.md).** §2's opening says the
+> document is one of two spellings whose columns share their names, and
+> that "the TOML" in this chapter means the file in either; §5's opening
+> says its lints and §3.1's lock are stated over entries and columns and
+> apply to both.
+>
+> **Mixed fleets, and the order of the rollout.** Every pairing but one is
+> legal: a TOML producer meets a KDL-reading consumer through the
+> undeclared row, and a KDL producer meets one through the declaration.
+> The pair that fails is a KDL producer and a consumer built before this
+> amendment, which is why the order is **consumers first** — every slice
+> reader a fleet runs (its explorers, its notifier, anything calling
+> `introspect`) takes a release that reads both — and nobody flips a file
+> before that has happened for the fleet it serves. Until then producers
+> keep serving TOML, and the TOML reader stays for good afterwards,
+> because slices from older fleets never stop existing.
+>
+> **What deliberately did not change.** Every column, every vocabulary,
+> every lint: the form is a second spelling of one document, not a second
+> schema. Keys, QoS profiles and payloads — none of them is in the file.
+> The three `.lock` ledgers stay tab-separated line files beside a `.kdl`
+> file as beside a `.toml` one. `introspect` still serves the file
+> verbatim, comments included; no producer translates. TOML is not
+> deprecated, and nothing here says a file should move. Chapter 13 is not
+> amended: an unreadable slice is already a slice the observer does not
+> have, and O4 already forbids reporting it as an answer.
+>
+> *Amends: 08.*
+
 > **v1.43 (2026-09-27, where a value may go)** — the two markers a
 > constrained link needs, and the grant the sub-host paragraph promised.
 >
