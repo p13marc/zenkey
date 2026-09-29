@@ -144,7 +144,9 @@ pub(crate) async fn run_doctor_inner(
                 .insert((answer.origin.clone(), local.name.clone()));
             let served_toml = bytes.to_bytes();
             let served_toml = String::from_utf8_lossy(&served_toml);
-            let served = match zenkey::parse_slice(&served_toml) {
+            // Read in the spelling the reply declares (RFC 08 §6, v1.44); a
+            // declaration that is neither spelling is a finding naming it.
+            let served = match zenkey::parse_served(answer.encoding.as_deref(), &served_toml) {
                 Ok(s) => s,
                 Err(e) => {
                     findings.push(finding(

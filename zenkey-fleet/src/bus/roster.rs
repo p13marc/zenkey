@@ -481,8 +481,9 @@ pub async fn node_info(
             let crate::bus::query::Answer::Value(bytes) = a.answer else {
                 return None;
             };
-            let toml = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
-            match zenkey::parse_slice(&toml) {
+            let served = String::from_utf8_lossy(&bytes.to_bytes()).to_string();
+            // Read in the spelling the reply declares (RFC 08 §6, v1.44).
+            match zenkey::parse_served(a.encoding.as_deref(), &served) {
                 Ok(slice) => Some(slice),
                 Err(e) => {
                     tracing::warn!(origin, "introspect reply did not parse, skipping: {e}");

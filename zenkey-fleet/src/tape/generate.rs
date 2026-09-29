@@ -480,7 +480,7 @@ pub async fn serve_describe(
     // also claim its presence (RFC 13 §5).
     let mut up = crate::bus::producer::BringUp::new(session);
     let mut bodies: Vec<(Vec<u8>, &'static str)> = Vec::new();
-    for (slice, raw) in slices.entries() {
+    for (slice, raw, format) in slices.sources() {
         if slice.service_origin.is_some() {
             continue;
         }
@@ -494,7 +494,8 @@ pub async fn serve_describe(
         }
         let introspect = with_base(base, format!("v1/{origin}/@rpc/{}/introspect", slice.name));
         up.serve(&introspect).await?;
-        bodies.push((raw.as_bytes().to_vec(), "text/plain"));
+        // The spelling declared, as a producer MUST (RFC 08 §6, v1.44).
+        bodies.push((raw.as_bytes().to_vec(), format.media_type()));
         if let Some(set) = schema_set {
             let describe = with_base(base, format!("v1/{origin}/@rpc/{}/describe", slice.name));
             up.serve(&describe).await?;

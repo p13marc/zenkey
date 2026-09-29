@@ -256,7 +256,9 @@ impl SelfProducer {
         let live = up.alive(&alive).await?;
 
         let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-        let introspect_body = crate::registry::zenwatch::REGISTRY_TOML.as_bytes().to_vec();
+        let introspect_body = crate::registry::zenwatch::REGISTRY_SOURCE
+            .as_bytes()
+            .to_vec();
         let describe_body = schema_set().to_json().into_bytes();
         let task = tokio::spawn(async move {
             let (intro, desc) = (&live.responders[0], &live.responders[1]);
@@ -265,7 +267,8 @@ impl SelfProducer {
                     _ = &mut stop_rx => break,
                     q = intro.next() => match q {
                         Some(q) => {
-                            if let Err(e) = intro.reply(&q, introspect_body.clone(), Some("text/plain")).await {
+                            // The spelling the file is in, declared (RFC 08 §6, v1.44).
+                            if let Err(e) = intro.reply(&q, introspect_body.clone(), Some(crate::registry::zenwatch::REGISTRY_ENCODING)).await {
                                 tracing::warn!(key = %intro.key(), "introspect reply failed: {e}");
                             }
                         }
@@ -431,7 +434,7 @@ mod tests {
         }
         let parsed = SchemaSet::parse(&set.to_json()).unwrap();
         assert_eq!(parsed.len(), 3);
-        assert!(crate::registry::zenwatch::REGISTRY_TOML.contains("firing/{rule_id}"));
+        assert!(crate::registry::zenwatch::REGISTRY_SOURCE.contains("firing/{rule_id}"));
         let h = ZenwatchHealth {
             status: HealthStatus::Degraded,
             host_id: "h-3fa9c2d41b7e".into(),
