@@ -21,6 +21,7 @@ use crate::encoding::WireEncoding;
 use crate::grammar::{BlobTier, Class};
 use crate::origin::ServiceOrigin;
 use crate::qos::QosProfile;
+use crate::registry_doc::{RawTable, RawValue, SliceFormat, negotiate, parse_raw, write_kdl};
 
 // ─── the closed vocabularies, and the tolerance around them ─────────────────
 //
@@ -1309,37 +1310,114 @@ impl RegistrySlice {
 /// stringified `toml::de::Error` behind an empty `impl std::error::Error`, so
 /// a caller who wanted the span, or just to tell a syntax error from a
 /// missing header, had nothing to match on but the sentence.
+///
+/// `#[non_exhaustive]` since the KDL spelling (RFC 08 §5.1, v1.44; #374)
+/// added two variants: the next one must not be a break.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SliceError {
     /// The reply is not well-formed TOML. The `toml` error is the source.
     #[error("malformed registry slice: {0}")]
     Toml(#[from] toml::de::Error),
-    /// The reply parses as TOML but is not a registry slice — a missing
-    /// header, a required field absent. There is no underlying error here:
-    /// this crate is the one saying so.
+    /// The reply is not well-formed KDL 2.0 (RFC 08 §5.1) — a document that
+    /// parses only as KDL 1.0 included, which is refused, never converted.
+    /// The `kdl` error is the source; the message carries its diagnostics,
+    /// since the error's own sentence says only that parsing failed.
+    #[error("malformed registry slice: not KDL 2.0 (RFC 08 §5.1): {}", kdl_detail(.0))]
+    Kdl(#[from] kdl::KdlError),
+    /// The reply parses but is not a registry slice — a missing header, a
+    /// required field absent, or one of the refusals the KDL spelling adds
+    /// (a second argument, a repeated property, `since=1.1`, RFC 08 §5.1).
+    /// There is no underlying error here: this crate is the one saying so.
     #[error("malformed registry slice: {0}")]
     Shape(String),
+    /// The `introspect` reply declares an `Encoding` that is neither
+    /// spelling (RFC 08 §6, v1.44) — the slice is unreadable, and this names
+    /// what was declared, because "could not read what it said" and "it
+    /// said nothing" are two answers (RFC 13 §3 O4).
+    #[error(
+        "unreadable registry slice: the reply declares encoding {0:?}, which is neither \
+         application/toml nor application/kdl (RFC 08 §6)"
+    )]
+    Encoding(String),
 }
 
-/// Parse an `introspect` reply — the raw registry TOML a build serves.
+/// A `kdl` error's diagnostics, one line: `line L:C: message (help)`.
+fn kdl_detail(e: &kdl::KdlError) -> String {
+    let mut parts = Vec::new();
+    for d in &e.diagnostics {
+        let offset = d.span.offset().min(e.input.len());
+        let before = &e.input.as_bytes()[..offset];
+        let line = before.iter().filter(|&&b| b == b'\n').count() + 1;
+        let col = offset
+            - before
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(0, |p| p + 1)
+            + 1;
+        let mut part = format!(
+            "line {line}:{col}: {}",
+            d.message.as_deref().unwrap_or("unexpected input")
+        );
+        if let Some(label) = &d.label {
+            part.push_str(&format!(" ({label})"));
+        }
+        if let Some(help) = &d.help {
+            part.push_str(&format!(" — {help}"));
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() {
+        "the document does not parse".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+/// Parse an `introspect` reply — the registry file a build serves, in
+/// either spelling (RFC 08 §5.1), when nothing says which.
+///
+/// The spelling is sniffed ([`SliceFormat::sniff`], RFC 08 §6): the only
+/// right reading of a reply whose `Encoding` declares nothing. A caller that
+/// *has* the declaration goes through [`parse_served`], so a declared
+/// spelling is never second-guessed; one that knows the spelling from a
+/// file extension uses [`parse_slice_as`].
 ///
 /// Deliberately tolerant of *unknown* keys (a newer fleet member may declare
 /// fields this build has never heard of, and refusing to read the rest of its
 /// slice would turn a forward-compatible addition into an outage of the very
 /// view that exists to spot skew) and intolerant of *missing* ones (a slice
 /// without a version cannot be diffed, which is the whole point).
-pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
-    let doc: toml::Value = toml::from_str(toml_src)?;
+pub fn parse_slice(src: &str) -> Result<RegistrySlice, SliceError> {
+    parse_slice_as(src, SliceFormat::sniff(src))
+}
 
+/// Parse a registry slice in a known spelling — the extension named it, or
+/// the reply declared it (RFC 08 §5.1, §6).
+pub fn parse_slice_as(src: &str, format: SliceFormat) -> Result<RegistrySlice, SliceError> {
+    slice_from_raw(&parse_raw(src, format)?)
+}
+
+/// Parse an `introspect` reply by its declared `Encoding` — RFC 08 §6's
+/// negotiation ([`negotiate`]) and then the parse, as one call: the path
+/// every consumer of a live reply takes.
+pub fn parse_served(declared: Option<&str>, src: &str) -> Result<RegistrySlice, SliceError> {
+    parse_slice_as(src, negotiate(declared, src)?)
+}
+
+/// Read a slice out of a registry document already in the neutral tree
+/// ([`parse_raw`]) — the one walk both spellings share, so neither can mean
+/// anything the other does not.
+pub fn slice_from_raw(doc: &RawTable) -> Result<RegistrySlice, SliceError> {
     let err = |m: &str| SliceError::Shape(m.to_string());
-    let s = |v: Option<&toml::Value>| v.and_then(|v| v.as_str()).map(str::to_string);
+    let s = |v: Option<&RawValue>| v.and_then(|v| v.as_str()).map(str::to_string);
     // A closed-vocabulary column: recognised where this build knows the token,
     // carried verbatim where it does not (RFC 08 §6 — skew is a finding, and a
     // column normalised to "unknown" cannot be diffed into one).
-    fn tok<T: SliceToken>(v: Option<&toml::Value>) -> Option<Declared<T>> {
+    fn tok<T: SliceToken>(v: Option<&RawValue>) -> Option<Declared<T>> {
         v.and_then(|v| v.as_str()).map(Declared::parse)
     }
-    fn enc(v: Option<&toml::Value>) -> Option<WireEncoding> {
+    fn enc(v: Option<&RawValue>) -> Option<WireEncoding> {
         v.and_then(|v| v.as_str())
             .map(WireEncoding::from_encoding_str)
     }
@@ -1398,7 +1476,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
         }
     };
 
-    let array = |key: &str| -> Vec<&toml::Value> {
+    let array = |key: &str| -> Vec<&RawValue> {
         doc.get(key)
             .and_then(|v| v.as_array())
             .map(|a| a.iter().collect())
@@ -1408,7 +1486,7 @@ pub fn parse_slice(toml_src: &str) -> Result<RegistrySlice, SliceError> {
     // `when` (RFC 08 §2, v1.35): an ANDed list of `<kind>:<name>` tokens,
     // read leniently — a foreign kind is carried, not refused; the closed
     // vocabulary is the declaring build's lint.
-    let when_of = |e: &toml::Value| -> Option<Vec<Predicate>> {
+    let when_of = |e: &RawValue| -> Option<Vec<Predicate>> {
         e.get("when").and_then(|v| v.as_array()).map(|a| {
             a.iter()
                 .filter_map(|v| v.as_str())
@@ -1772,6 +1850,221 @@ pub fn to_toml(slice: &RegistrySlice) -> String {
     }
 
     out
+}
+
+/// Render a slice as registry KDL (RFC 08 §5.1, v1.44; #374) — the KDL
+/// sibling of [`to_toml`], for `zenctl registry export --as kdl`.
+///
+/// The same document column for column, in the same order, and lossy in
+/// the same one direction: a column this build never carried cannot be
+/// re-emitted. `parse_slice_as(&to_kdl(s), SliceFormat::Kdl)` is `s` for
+/// every slice — pinned as a test, as the TOML round trip is.
+#[must_use]
+pub fn to_kdl(slice: &RegistrySlice) -> String {
+    write_kdl(&slice_to_raw(slice))
+        .expect("every column a slice carries has a KDL spelling (RFC 08 §5.1)")
+}
+
+/// A slice as the neutral document tree, columns in [`to_toml`]'s order.
+#[must_use]
+pub fn slice_to_raw(slice: &RegistrySlice) -> RawTable {
+    fn str_(t: &mut RawTable, key: &str, v: Option<&str>) {
+        if let Some(v) = v {
+            t.fields
+                .push((key.to_string(), RawValue::Str(v.to_string())));
+        }
+    }
+    fn tok<T: SliceToken>(t: &mut RawTable, key: &str, v: Option<&Declared<T>>) {
+        str_(t, key, v.map(Declared::token));
+    }
+    fn enc(t: &mut RawTable, key: &str, v: Option<&WireEncoding>) {
+        str_(t, key, v.map(WireEncoding::as_encoding_str));
+    }
+    fn int(t: &mut RawTable, key: &str, v: Option<i64>) {
+        if let Some(v) = v {
+            t.fields.push((key.to_string(), RawValue::Int(v)));
+        }
+    }
+    fn boolean(t: &mut RawTable, key: &str, v: Option<bool>) {
+        if let Some(v) = v {
+            t.fields.push((key.to_string(), RawValue::Bool(v)));
+        }
+    }
+    fn list(t: &mut RawTable, key: &str, v: Vec<RawValue>) {
+        t.fields.push((key.to_string(), RawValue::List(v)));
+    }
+    fn when(t: &mut RawTable, v: Option<&[Predicate]>) {
+        if let Some(preds) = v {
+            list(
+                t,
+                "when",
+                preds.iter().map(|p| RawValue::Str(p.token())).collect(),
+            );
+        }
+    }
+    fn strs(v: &[String]) -> Vec<RawValue> {
+        v.iter().map(|s| RawValue::Str(s.clone())).collect()
+    }
+
+    let mut doc = RawTable::new();
+    let mut header = RawTable::new();
+    str_(&mut header, "version", Some(&slice.version));
+    str_(&mut header, "app", Some(&slice.app));
+    int(&mut header, "convention", Some(slice.convention));
+    doc.insert("registry", RawValue::Table(header));
+
+    let mut owner = RawTable::new();
+    str_(&mut owner, "name", Some(&slice.name));
+    let owner_key = match &slice.service_origin {
+        Some(origin) => {
+            tok(&mut owner, "origin", Some(origin));
+            "service"
+        }
+        None => "producer",
+    };
+    str_(&mut owner, "description", slice.description.as_deref());
+    doc.insert(owner_key, RawValue::Table(owner));
+
+    if let Some(b) = &slice.budget {
+        let mut budget = RawTable::new();
+        int(&mut budget, "rss_mb", b.rss_mb);
+        if !b.tables.is_empty() {
+            let rows = b
+                .tables
+                .iter()
+                .map(|t| {
+                    let mut row = RawTable::new();
+                    str_(&mut row, "name", Some(&t.name));
+                    int(&mut row, "max_entries", t.max_entries);
+                    int(&mut row, "max_bytes", t.max_bytes);
+                    RawValue::Table(row)
+                })
+                .collect();
+            list(&mut budget, "tables", rows);
+        }
+        doc.insert("budget", RawValue::Table(budget));
+    }
+
+    let mut rows = Vec::new();
+    for d in &slice.subjects {
+        let mut t = RawTable::new();
+        str_(&mut t, "path", Some(&d.path));
+        str_(&mut t, "class", Some(d.class.token()));
+        if !d.type_name.is_empty() {
+            str_(&mut t, "type", Some(&d.type_name));
+        }
+        tok(&mut t, "kind", d.kind.as_ref());
+        tok(&mut t, "common", d.common.as_ref());
+        tok(&mut t, "qos", d.qos.as_ref());
+        int(&mut t, "ttl_s", d.ttl_s);
+        str_(&mut t, "unit", d.unit.as_deref());
+        str_(
+            &mut t,
+            "rate",
+            d.rate.as_ref().map(RateClass::token).as_deref(),
+        );
+        int(&mut t, "cardinality", d.cardinality);
+        enc(&mut t, "encoding", d.encoding.as_ref());
+        if let Some(b) = &d.buckets {
+            list(
+                &mut t,
+                "buckets",
+                b.as_slice().iter().map(|v| RawValue::Float(*v)).collect(),
+            );
+        }
+        tok(&mut t, "semantic", d.semantic.as_ref());
+        when(&mut t, d.when.as_deref());
+        str_(&mut t, "gate_note", d.gate_note.as_deref());
+        tok(&mut t, "exposure", d.exposure.as_ref());
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "description", d.description.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("subject", RawValue::List(std::mem::take(&mut rows)));
+    }
+
+    for d in &slice.procedures {
+        let mut t = RawTable::new();
+        str_(&mut t, "path", Some(&d.path));
+        tok(&mut t, "kind", d.kind.as_ref());
+        str_(&mut t, "request", d.request.as_deref());
+        str_(&mut t, "reply", d.reply.as_deref());
+        enc(&mut t, "encoding", d.encoding.as_ref());
+        tok(&mut t, "fanout", d.fanout.as_ref());
+        boolean(&mut t, "idempotent", d.idempotent);
+        int(&mut t, "cardinality", d.cardinality);
+        when(&mut t, d.when.as_deref());
+        str_(&mut t, "gate_note", d.gate_note.as_deref());
+        tok(&mut t, "exposure", d.exposure.as_ref());
+        boolean(&mut t, "sensitive", d.sensitive);
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "description", d.description.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("procedure", RawValue::List(std::mem::take(&mut rows)));
+    }
+
+    for d in &slice.blob {
+        let mut t = RawTable::new();
+        str_(&mut t, "tier", Some(d.tier.token()));
+        if !d.endpoints.is_empty() {
+            list(&mut t, "endpoints", strs(&d.endpoints));
+        }
+        str_(&mut t, "algo", d.algo.as_deref());
+        str_(&mut t, "reference", d.reference.as_deref());
+        enc(&mut t, "encoding", d.encoding.as_ref());
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "description", d.description.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("blob", RawValue::List(std::mem::take(&mut rows)));
+    }
+
+    for d in &slice.media {
+        let mut t = RawTable::new();
+        str_(&mut t, "path", Some(&d.path));
+        str_(&mut t, "encoding", Some(d.encoding.as_encoding_str()));
+        str_(&mut t, "attachment", d.attachment.as_deref());
+        int(&mut t, "cardinality", d.cardinality);
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "description", d.description.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("media", RawValue::List(std::mem::take(&mut rows)));
+    }
+
+    for d in &slice.errors {
+        let mut t = RawTable::new();
+        str_(&mut t, "name", Some(&d.name));
+        if !d.procedures.is_empty() {
+            list(&mut t, "procedures", strs(&d.procedures));
+        }
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "description", d.description.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("error", RawValue::List(std::mem::take(&mut rows)));
+    }
+
+    for d in &slice.deprecated {
+        let mut t = RawTable::new();
+        str_(&mut t, "path", Some(&d.path));
+        if d.kind != DeprecatedKind::Subject {
+            str_(&mut t, "kind", Some(d.kind.as_str()));
+        }
+        str_(&mut t, "since", d.since.as_deref());
+        str_(&mut t, "replaced_by", d.replaced_by.as_deref());
+        rows.push(RawValue::Table(t));
+    }
+    if !rows.is_empty() {
+        doc.insert("deprecated", RawValue::List(rows));
+    }
+    doc
 }
 
 /// A disagreement between a served slice and the slice this build compiled in.
@@ -2487,7 +2780,8 @@ description = "reachable"
     fn a_malformed_slice_keeps_the_toml_error_as_its_source() {
         use std::error::Error as _;
 
-        let err = parse_slice("this is not = = toml").unwrap_err();
+        // Leading `[`: the sniff reads it as TOML (RFC 08 §6).
+        let err = parse_slice("[registry\nthis is not = = toml").unwrap_err();
         assert!(matches!(err, SliceError::Toml(_)), "{err:?}");
 
         // The chain reaches the real error, and it is a `toml` one — the

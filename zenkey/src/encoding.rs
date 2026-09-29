@@ -20,6 +20,13 @@ pub enum WireEncoding {
     Protobuf,
     /// OMG CDR, the DDS / ROS 2 framing (v1.10).
     Cdr,
+    /// `application/toml` — a registry file in its first spelling, the
+    /// `Encoding` an `introspect` reply declares for one (RFC 08 §6, v1.44).
+    Toml,
+    /// `application/kdl` — a registry file in its second spelling
+    /// (RFC 08 §5.1, §6, v1.44). A spelling of a document, not a payload
+    /// framing any schema kind decodes.
+    Kdl,
     /// Anything else — carried verbatim, decoded only by sniff.
     Other(String),
 }
@@ -37,6 +44,10 @@ impl WireEncoding {
             "application/cbor" => WireEncoding::Cbor,
             "application/protobuf" | "application/x-protobuf" => WireEncoding::Protobuf,
             "application/cdr" | "application/x-cdr" => WireEncoding::Cdr,
+            // Exact, and only these two: the RFC 08 §6 negotiation names
+            // them, and an alias nobody declares is a guess (#374).
+            "application/toml" => WireEncoding::Toml,
+            "application/kdl" => WireEncoding::Kdl,
             other => WireEncoding::Other(other.to_string()),
         }
     }
@@ -56,6 +67,8 @@ impl WireEncoding {
             WireEncoding::Cbor => "application/cbor",
             WireEncoding::Protobuf => "application/protobuf",
             WireEncoding::Cdr => "application/cdr",
+            WireEncoding::Toml => "application/toml",
+            WireEncoding::Kdl => "application/kdl",
             WireEncoding::Other(s) => s,
         }
     }

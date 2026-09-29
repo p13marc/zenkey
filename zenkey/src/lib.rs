@@ -31,6 +31,9 @@
 //!   where a fetch prefix is expected (RFC 07 §2.5/§3).
 //! - [`mod@slice`] — [`RegistrySlice`], the `introspect` reply type + diff
 //!   (RFC 08 §6).
+//! - [`registry_doc`] — the registry file as a document in either spelling,
+//!   TOML or KDL ([`SliceFormat`], RFC 08 §5.1, v1.44), and the §6
+//!   negotiation on a reply's declared `Encoding` ([`registry_doc::negotiate`]).
 //! - [`config`] — the configuration convention's wire shapes and validator
 //!   (RFC 05 §5.1, v1.42): schema, groups, classes, the change request, the
 //!   read-back, the change event, [`Sensitive`](config::Sensitive).
@@ -81,6 +84,7 @@ pub mod origin;
 pub mod pattern;
 pub mod profile;
 pub mod qos;
+pub mod registry_doc;
 pub mod rpc_error;
 #[cfg(feature = "schema")]
 #[cfg_attr(docsrs, doc(cfg(feature = "schema")))]
@@ -104,10 +108,11 @@ pub use key::{Chunk, ExactKeyError, Key, Selector, require_exact};
 pub use origin::{ConcreteOrigin, Fleet, HostId, LocalOrigin, RemoteOrigin, ServiceOrigin};
 pub use profile::{AppName, AppProfile, OriginSalt};
 pub use qos::QosProfile;
+pub use registry_doc::SliceFormat;
 pub use slice::{
     Bound, Buckets, Declared, ErrorDecl, Exposure, Fanout, Predicate, PredicateKind, ProcedureKind,
-    RateClass, RegistrySlice, Semantic, SliceFinding, SliceToken, SubjectKind, parse_slice,
-    to_toml as slice_to_toml, toml_quote,
+    RateClass, RegistrySlice, Semantic, SliceFinding, SliceToken, SubjectKind, parse_served,
+    parse_slice, parse_slice_as, to_kdl as slice_to_kdl, to_toml as slice_to_toml, toml_quote,
 };
 
 /// The crate README's first snippet, compiled (#324's aftermath).

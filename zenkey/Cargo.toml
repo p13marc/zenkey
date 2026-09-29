@@ -68,6 +68,13 @@ tracing = { workspace = true }
 # Runtime, not just build-time: `introspect` replies with a registry slice, so a
 # consumer needs the TOML parser to read one (RFC 08 §6, issue #469).
 toml = "1"
+# The registry's second spelling (RFC 08 §5.1, v1.44; #374): unconditional for
+# the same reason as `toml` — a consumer reading `introspect` cannot choose
+# which spelling a producer serves. KDL 2.0 only: never the `v1`/`v1-fallback`
+# features, because KDL 1.0 is a different language, refused rather than read.
+# `span` for the line numbers a refusal names; no `serde`, and miette with no
+# features — the build-script graph stays pure Rust with no proc-macro.
+kdl = { version = "6.7", default-features = false, features = ["span"] }
 
 [dev-dependencies]
 criterion = { workspace = true }
