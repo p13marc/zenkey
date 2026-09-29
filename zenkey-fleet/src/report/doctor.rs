@@ -202,7 +202,9 @@ pub struct DoctorReport {
     /// now [`Asked`], wire-identically (#246 / P1).
     #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
     pub synced: Asked<Vec<String>>,
-    /// Introspect replies received across the fleet.
+    /// Introspect replies received across the fleet — readable or not: an
+    /// unreadable one was received, and is a `slice-parse` finding, never
+    /// counted as silence (#491, RFC 13 §3 O4).
     pub introspect_answered: usize,
     /// Producers on the liveliness roster.
     pub live_producers: usize,

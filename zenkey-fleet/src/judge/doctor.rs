@@ -183,23 +183,32 @@ pub(crate) async fn run_doctor_inner(
     // doctor used to fan the identical wildcard GETs twice per run.
     let sweep = if locals.is_none() {
         let repeating = RepeatingRegistry::declare(fleet, spec.timeout).await?;
-        let slices: Vec<RegistrySlice> = repeating
-            .fetch()
-            .await?
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect();
+        let swept = repeating.sweep().await?;
         repeating.undeclare().await?;
+        // An answer that did not read is still an answer (#491): it counts
+        // toward coverage below — it was not silence — and is the same
+        // `slice-parse` finding the served-vs-declared diff files, naming
+        // the encoding (RFC 08 §6, v1.44; RFC 13 §3 O4). Before, this path
+        // dropped it, and `introspect-coverage` called the producer silent.
+        answered = swept.served.len() + swept.unreadable.len();
+        for u in &swept.unreadable {
+            findings.push(finding(
+                DoctorSeverity::Error,
+                CheckId::SliceParse,
+                format!("{}/{}", u.origin, u.producer),
+                format!(
+                    "served slice does not parse (encoding {}): {}",
+                    u.unreadable.encoding.as_deref().unwrap_or("undeclared"),
+                    u.unreadable.error
+                ),
+                Some("RFC 08 §6"),
+            ));
+        }
+        let slices: Vec<RegistrySlice> = swept.served.into_iter().map(|s| s.slice).collect();
         Some(slices)
     } else {
         None
     };
-
-    // With no local registry the only introspect coverage we can count is
-    // the fleet-wide wildcard.
-    if let Some(slices) = &sweep {
-        answered = slices.len();
-    }
 
     // The roster is what makes silence legible (RFC 05 §3.1): a producer
     // that holds an `alive` token but did not answer `introspect` is a bug,

@@ -320,8 +320,8 @@ impl Render for zenkey_fleet::NodeInfo {
         let mut g = Grid::unheaded(3).max(0, 16);
         for p in &self.producers {
             let alive = if p.alive { "alive" } else { "no token" };
-            let detail = match (&p.app, &p.registry_version) {
-                (Some(app), Some(v)) => {
+            let detail = match (&p.app, &p.registry_version, &p.unreadable) {
+                (Some(app), Some(v), _) => {
                     let mut d = format!(
                         "app {app} · registry v{v} · {} subject(s) · {} procedure(s)",
                         p.subjects, p.procedures
@@ -347,6 +347,9 @@ impl Render for zenkey_fleet::NodeInfo {
                     }
                     d
                 }
+                // Answered, and unreadable: not the silence below (#491; RFC 08
+                // §6, v1.44 — "could not read what it said" is its own answer).
+                (.., Some(u)) => format!("({})", u.sentence()),
                 // Unknown, not absent: no introspect reply is a fact about the
                 // fetch, never about the producer's capabilities (O4).
                 _ => "(no introspect reply — capabilities unknown, not absent)".to_string(),

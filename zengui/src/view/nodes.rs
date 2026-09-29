@@ -262,8 +262,8 @@ pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message>
                 ));
             }
             for p in &info.producers {
-                let caps = match (&p.app, &p.registry_version) {
-                    (Some(app), Some(v)) => format!(
+                let caps = match (&p.app, &p.registry_version, &p.unreadable) {
+                    (Some(app), Some(v), _) => format!(
                         "app {app} · registry v{v} · {} subject(s) · {} procedure(s){}{}{}",
                         p.subjects,
                         p.procedures,
@@ -290,6 +290,9 @@ pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message>
                             String::new()
                         },
                     ),
+                    // Answered, and the slice did not read: zenctl's sentence,
+                    // because it is the same claim (#491; RFC 08 §6, v1.44).
+                    (.., Some(u)) => u.sentence(),
                     _ => "no introspect reply — capabilities unknown, not absent".to_string(),
                 };
                 col = col.push(kit::muted(format!("{}: {caps}", p.name)));

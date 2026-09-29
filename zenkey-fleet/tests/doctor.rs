@@ -153,3 +153,68 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
         report.findings
     );
 }
+
+/// A live producer that *answers* introspect with a slice this build cannot
+/// read is not mute (#491): with no `--registry`, the wildcard sweep counts
+/// it as answered — no `introspect-coverage` finding — and files the same
+/// `slice-parse` the served-vs-declared diff would, naming the encoding
+/// (RFC 08 §6, v1.44; RFC 13 §3 O4).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unreadable_introspect_is_a_parse_finding_not_silence() {
+    let (a, b) = peer_pair().await;
+
+    let _token = a
+        .liveliness()
+        .declare_token("v1/h-ffffffffffff/state/sysinfo/alive")
+        .await
+        .expect("token");
+    let _queryable = a
+        .declare_queryable("v1/h-ffffffffffff/@rpc/sysinfo/introspect")
+        .callback(|query| {
+            let q = query.clone();
+            tokio::spawn(async move {
+                q.reply("v1/h-ffffffffffff/@rpc/sysinfo/introspect", SERVED_SLICE)
+                    .encoding("application/json")
+                    .await
+                    .unwrap();
+            });
+        })
+        .await
+        .expect("queryable");
+
+    let report = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
+                .await
+                .expect("run_doctor");
+            if report.live_producers >= 1 && report.introspect_answered >= 1 {
+                break report;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the token and the reply should become visible within 10s");
+
+    use zenkey_fleet::report::CheckId;
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|f| f.check == CheckId::IntrospectCoverage),
+        "it answered, so it is not a coverage finding: {:?}",
+        report.findings
+    );
+    let parse: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.check == CheckId::SliceParse)
+        .collect();
+    assert_eq!(parse.len(), 1, "{:?}", report.findings);
+    assert_eq!(parse[0].subject, "h-ffffffffffff/sysinfo");
+    assert!(
+        parse[0].evidence.contains("application/json"),
+        "{}",
+        parse[0].evidence
+    );
+}
