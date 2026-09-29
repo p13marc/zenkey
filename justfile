@@ -179,3 +179,4 @@ features:
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked
     cargo check -p zenkey-build --locked
     cargo test -p zenkey-build --features export --locked
+    cargo test -p zenkey-build --features migrate --locked
