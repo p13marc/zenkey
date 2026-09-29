@@ -2260,6 +2260,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "registry-infer",
         "registry-lint",
         "registry-lock",
+        "registry-migrate",
         "registry-retired",
         "replay",
         "schema-check",
@@ -2668,6 +2669,56 @@ fn a_forced_lock_break_is_a_row_and_a_note() {
         .collect();
     assert_eq!(lines[1]["row"], "forced-break");
     assert_eq!(lines[1]["detail"], "sysinfo/health: Health -> HealthV2");
+}
+
+/// `registry migrate` (#374): one row per respelled file with its comment
+/// count, the hoisted ones a caveat in every format — the honest bound is
+/// said, not only counted.
+#[test]
+fn a_registry_migrate_counts_what_it_hoisted_and_says_so() {
+    let report = zenctl::render::MigrateReport {
+        dir: "registry".into(),
+        out: "registry-kdl".into(),
+        in_place: false,
+        files: vec![
+            zenctl::render::MigratedFile {
+                from: "demo.toml".into(),
+                to: "demo.kdl".into(),
+                comments: 7,
+                hoisted: 2,
+            },
+            zenctl::render::MigratedFile {
+                from: "types.toml".into(),
+                to: "types.kdl".into(),
+                comments: 0,
+                hoisted: 0,
+            },
+        ],
+        kept: vec!["registry.lock".into()],
+        warnings: Vec::new(),
+    };
+    assert_eq!(
+        table(&report),
+        concat!(
+            "  demo.toml   → demo.kdl   7 comment line(s), 2 hoisted\n",
+            "  types.toml  → types.kdl  0 comment line(s), 0 hoisted\n",
+        )
+    );
+    let n = notes(&report);
+    assert!(
+        n.contains("2 file(s) respelled in KDL into registry-kdl, 1 kept beside unchanged"),
+        "{n}"
+    );
+    assert!(n.contains("hoisted into their node's leading block"), "{n}");
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["report"], "registry-migrate");
+    assert_eq!(lines[0]["kept"], serde_json::json!(["registry.lock"]));
+    assert_eq!(lines[1]["row"], "migrated");
+    assert_eq!(lines[1]["hoisted"], 2);
+    assert_eq!(lines.len(), 3);
 }
 
 /// `cache clear` has two outcomes that used to differ only in prose. `existed`
