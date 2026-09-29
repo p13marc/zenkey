@@ -102,6 +102,15 @@ pub(crate) enum ExportAs {
     Asyncapi,
 }
 
+/// The spelling `registry migrate` respells into (RFC 08 §5.1). Closed, and
+/// one value for now: TOML → KDL is the direction the epic needs (#374), and
+/// a flag that must be typed keeps the command line stating it.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum MigrateTo {
+    /// KDL 2.0: each `<stem>.toml` becomes `<stem>.kdl`.
+    Kdl,
+}
+
 /// Which clock `timeline` orders on (#216).
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum OrderArg {
@@ -929,6 +938,25 @@ pub(crate) enum RegistryCmd {
     /// zenkey-build REFUSES the draft until a review drops the marker;
     /// `registry lint --allow-drafts <dir>` checks it meanwhile.
     Infer(RegistryInferArgs),
+    /// Respell a registry directory in KDL (RFC 08 §5.1, #374): every
+    /// `<stem>.toml` — producers, services, the type table — becomes
+    /// `<stem>.kdl` meaning the same document, and every other file (the
+    /// `.lock` ledgers, which stay line files) is kept beside unchanged.
+    ///
+    /// The document crosses whole, columns this build does not read
+    /// included. Comments cross too: a table's comment block becomes its
+    /// node's, and the file's header and trailer stay where they were. The
+    /// honest bound: a KDL node has no place for a comment *on* one
+    /// property, so a comment written on or above a key is hoisted into its
+    /// node's leading block as `// <key>: …` — kept and named, not placed.
+    ///
+    /// All or nothing: the source must lint as its build would; the
+    /// conversion is staged, proven to read back to the same tree, and
+    /// linted again before anything is written. `--out` writes a new
+    /// directory and refuses a non-empty one; `--in-place` writes each
+    /// `.kdl` and then removes each `.toml`. A refusal exits 2 and a
+    /// migration that failed exits 1; either way the source is as it was.
+    Migrate(RegistryMigrateArgs),
 }
 
 #[derive(Subcommand)]
@@ -2075,6 +2103,30 @@ pub(crate) struct RegistryInferArgs {
     pub(crate) max_paths: usize,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
+}
+
+/// The `registry migrate` verb's flags — one struct the dispatcher hands
+/// over whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+// The group is not named `target`: `refuse_foreign_format` reads that id
+// as `registry export --as`.
+#[command(group = clap::ArgGroup::new("destination").required(true).args(["in_place", "out"]))]
+pub(crate) struct RegistryMigrateArgs {
+    /// The spelling to migrate into.
+    #[arg(long, value_enum)]
+    pub(crate) to: MigrateTo,
+    /// The registry directory (the one a build script points at).
+    pub(crate) dir: PathBuf,
+    /// Rewrite the directory itself: each `.kdl` written, then each `.toml`
+    /// removed.
+    #[arg(long)]
+    pub(crate) in_place: bool,
+    /// Write the migrated directory here instead, leaving the source as it
+    /// is. Created if missing; refused if it holds anything.
+    #[arg(long, value_name = "DIR")]
+    pub(crate) out: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) output: OutputArgs,
 }
 
 /// The `registry lock` verb's flags — one struct the dispatcher hands over whole,

@@ -1,6 +1,25 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: sysinfo (host metrics). RFC 08 §2; migration epic #453.
+//
+// Telemetry is registered as real subjects, not a `{metric...}` catch-all
+// (issue #468). The catch-all made RFC 08 §5's lint vacuous — every conceivable
+// subject was "buildable from a registry entry" — and left `introspect` unable
+// to say anything about what a producer emits.
+//
+// The registration rule, applied across all six self-describing producers:
+//
+//   * a leaf that names a distinct **measurement** is a literal
+//     (`memory/used`, `disk/{mount}/used`, `iface/{iface}/rx_bytes`), so a
+//     typo'd or renamed metric fails to parse and the sensor's conformance
+//     test fails with it;
+//   * a leaf that is a **value of a dimension** stays a `{var}`
+//     (`tcp/{state}`, `cpu/times/{component}`, `pressure/{resource}/{stat}`) —
+//     the ratified `flow/red/{quantile}` precedent.
+//
+// Consumers get typed variables out of this (`Subject::DiskUsed { mount }`,
+// not `parts[1]`), which is what issue #475 spends.
+//
+// This is the reference file; the other five follow the same shape.
+// Sources: src/collector.rs (the `publish` helper) and src/map.rs.
 
 registry version="1.1" app="zensight" convention=1
 
@@ -29,6 +48,15 @@ subject "system/processes_total" class=telemetry type="TelemetryPoint" \
 subject "system/processes_zombie" class=telemetry type="TelemetryPoint" \
     since="1.1" description="zombie process count"
 
+// The `collect.processes` top-N stream (gated, off by default). Keyed by RANK,
+// not pid — `process/1/*` is whoever is burning the most CPU this tick, and the
+// pid/name ride along as labels. That keeps the series count bounded by
+// `collect.top_processes` and stable across restarts, where a pid-keyed series
+// would churn forever. The GUI's process panel reads exactly these.
+//
+// `{rank}` is a dimension value, so it stays a `{var}` (the `tcp/{state}`
+// precedent). The per-pid firehose is a different thing entirely and stays on the
+// `processes` query channel below.
 subject "process/{rank}/cpu" class=telemetry type="TelemetryPoint" \
     cardinality=64 since="1.1" \
     description="top-N process CPU (percent), by rank; pid/name are labels"
@@ -372,6 +400,7 @@ subject "battery/{name}/capacity" class=telemetry type="TelemetryPoint" \
 subject "battery/{name}/status" class=telemetry type="TelemetryPoint" \
     cardinality=8 since="1.1" description="charging status"
 
+// ── state ───────────────────────────────────────────────────────────────────
 subject "health" common=health class=state type="HealthSnapshot" ttl_s=120 \
     since="1.0" \
     description="sensor health document (framework; absorbs the legacy @/status running flag)"

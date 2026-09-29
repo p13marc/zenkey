@@ -738,6 +738,98 @@ impl Render for LockReport {
     }
 }
 
+/// One file `registry migrate` respelled.
+#[derive(Debug, Clone, Serialize)]
+pub struct MigratedFile {
+    pub from: String,
+    pub to: String,
+    /// Comment lines carried across.
+    pub comments: usize,
+    /// Of those, the ones hoisted from a key onto their node's leading
+    /// block as `// <key>: …` — the honest bound, counted rather than hidden.
+    pub hoisted: usize,
+}
+
+/// `registry migrate --to kdl` (#374) — what was respelled, and where it
+/// went.
+#[derive(Debug, Clone, Serialize)]
+pub struct MigrateReport {
+    pub dir: String,
+    /// The directory written: `--out`, or `dir` itself under `--in-place`.
+    pub out: String,
+    pub in_place: bool,
+    pub files: Vec<MigratedFile>,
+    /// Every other entry, kept beside unchanged — the ledgers first among
+    /// them.
+    pub kept: Vec<String>,
+    /// The migrated directory's build warnings, verbatim, as `registry
+    /// lint` would print them.
+    pub warnings: Vec<String>,
+}
+
+impl Render for MigrateReport {
+    const FAMILY: &'static str = "registry-migrate";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = serde_json::Map::new();
+        e.insert("dir".into(), self.dir.clone().into());
+        e.insert("out".into(), self.out.clone().into());
+        e.insert("in_place".into(), self.in_place.into());
+        e.insert("kept".into(), self.kept.clone().into());
+        e.insert("warnings".into(), self.warnings.clone().into());
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for f in &self.files {
+            out(Row::of("migrated", f));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        let mut g = Grid::unheaded(3);
+        for f in &self.files {
+            g.row([
+                Cell::text(format!("  {}", f.from)),
+                Cell::text(format!("→ {}", f.to)),
+                Cell::text(format!(
+                    "{} comment line(s), {} hoisted",
+                    f.comments, f.hoisted
+                )),
+            ]);
+        }
+        t.grid(g);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let hoisted: usize = self.files.iter().map(|f| f.hoisted).sum();
+        let mut notes = vec![
+            Note::summary(format!(
+                "{}: {} file(s) respelled in KDL {}, {} kept beside unchanged; the \
+                 migrated registry lints as its build will",
+                self.dir,
+                self.files.len(),
+                if self.in_place {
+                    "in place (each .toml removed)".to_string()
+                } else {
+                    format!("into {}", self.out)
+                },
+                self.kept.len(),
+            ))
+            .cite("RFC 08 §5.1"),
+        ];
+        if hoisted > 0 {
+            notes.push(Note::caveat(format!(
+                "{hoisted} comment line(s) written on or above a key were hoisted into \
+                 their node's leading block as `// <key>: …` — a KDL node has no place \
+                 for a comment on one property"
+            )));
+        }
+        notes.extend(self.warnings.iter().map(|w| Note::caveat(w.clone())));
+        notes
+    }
+}
+
 /// `zenctl cache refresh|clear` — what happened to this tool's own disk
 /// footprint.
 #[derive(Debug, Clone, Serialize)]

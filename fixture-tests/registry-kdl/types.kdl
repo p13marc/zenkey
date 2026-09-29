@@ -1,6 +1,7 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// The RFC 08 §5 type table (v1.5, H6): every type/request/reply/attachment
+// name in the registry set must resolve here — the zenkey-build lint fails
+// the build otherwise. `kind` names the schema-document kind a describe
+// reply serves for the type (RFC 08 §7).
 
 type "Ack" kind="json-schema"
 type "ActionStatus" kind="json-schema"

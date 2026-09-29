@@ -1,25 +1,28 @@
 //! The corpus in both spellings (RFC 08 §5.1, v1.44; #374).
 //!
-//! `registry-kdl/` is the KDL mirror of `registry/`: every file respelled by
-//! `write_kdl(parse_raw(toml))` — at the level of the document tree, so a
-//! column this build never reads (logs' `reason`) crosses too — and the
-//! three `.lock` ledgers copied unchanged, because they stay line files
-//! beside a `.kdl` file as beside a `.toml` one.
+//! `registry-kdl/` is the KDL mirror of `registry/`, and it is exactly what
+//! `zenctl registry migrate --to kdl --out` writes from it — the migrator
+//! (`zenkey_build::migrate`) is called here as a library: every file
+//! respelled at the level of the document tree, so a column this build
+//! never reads (logs' `reason`) crosses too, its comments carried onto the
+//! nodes they stood before, and the three `.lock` ledgers copied unchanged,
+//! because they stay line files beside a `.kdl` file as beside a `.toml`
+//! one.
 //!
 //! What this pins is §5.1's central sentence, "a KDL registry file means
 //! exactly the TOML document the mapping produces from it", three ways:
 //! every twin reads to the same document and the same slice; the mirror is
-//! byte-for-byte what the writer produces today (regenerate with
-//! `REGENERATE_KDL_MIRROR=1`); and the whole mirror **generates the same
-//! code** as the TOML dir, byte for byte, but for the two lines per
-//! producer a spelling is allowed to change — the `include_str!` path and
-//! `REGISTRY_ENCODING`. A reader that let a spelling mean something else
-//! would show up in that diff.
+//! byte-for-byte what the migrator produces today (regenerate with
+//! `REGENERATE_KDL_MIRROR=1`, never by hand); and the whole mirror
+//! **generates the same code** as the TOML dir, byte for byte, but for the
+//! two lines per producer a spelling is allowed to change — the
+//! `include_str!` path and `REGISTRY_ENCODING`. A reader that let a spelling
+//! mean something else would show up in that diff.
 
 use std::path::{Path, PathBuf};
 
 use zenkey::SliceFormat;
-use zenkey::registry_doc::{parse_raw, write_kdl};
+use zenkey::registry_doc::parse_raw;
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -52,78 +55,69 @@ fn stem(p: &Path) -> String {
     p.file_stem().unwrap().to_string_lossy().to_string()
 }
 
-/// The KDL twin of a TOML registry file, as the mirror holds it.
-fn twin(toml: &str) -> String {
-    let raw = parse_raw(toml, SliceFormat::Toml).expect("the corpus parses");
-    let body = write_kdl(&raw).expect("every corpus file has a KDL spelling");
-    format!(
-        "// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL\n\
-         // mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:\n\
-         //   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats\n\n\
-         {body}"
-    )
+/// Every file name of a dir, sorted.
+fn names(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    v.sort();
+    v
 }
 
-/// The mirror is exactly what the writer produces today, and its ledgers
-/// are the TOML dir's, byte for byte. `REGENERATE_KDL_MIRROR=1` rewrites it
+/// The mirror is exactly what the migrator stages from `registry/` today —
+/// every `.kdl` file and every ledger, byte for byte, and nothing else.
+/// `REGENERATE_KDL_MIRROR=1` copies the staged directory over the mirror
 /// instead of comparing — the one sanctioned way to move it.
 #[test]
-fn the_kdl_mirror_is_the_writers_output_byte_for_byte() {
+fn the_kdl_mirror_is_the_migrators_output_byte_for_byte() {
     let regenerate = std::env::var_os("REGENERATE_KDL_MIRROR").is_some_and(|v| v == "1");
-    let (from, to) = (toml_dir(), kdl_dir());
+    let staged = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("registry-kdl-staged");
+    let _ = std::fs::remove_dir_all(&staged);
+    std::fs::create_dir_all(&staged).unwrap();
+    let migration = zenkey_build::migrate::stage_kdl(&toml_dir(), &staged)
+        .unwrap_or_else(|e| panic!("the corpus migrates: {e}"));
+    assert_eq!(
+        migration.files.len(),
+        files(&toml_dir(), "toml").len(),
+        "every TOML file respelled"
+    );
+    assert!(
+        migration.files.iter().any(|(_, _, c)| c.comments > 0),
+        "the corpus' comments cross"
+    );
+    let to = kdl_dir();
+    let want = names(&staged);
     if regenerate {
         // Written in place, never removed and recreated: the other tests in
         // this binary read the mirror concurrently.
         std::fs::create_dir_all(&to).unwrap();
-    }
-    let mut expected: Vec<String> = Vec::new();
-    for toml in files(&from, "toml") {
-        let name = format!("{}.kdl", stem(&toml));
-        let want = twin(&read(&toml));
-        let path = to.join(&name);
-        if regenerate {
-            std::fs::write(&path, &want).unwrap();
-        } else {
-            assert!(
-                read(&path) == want,
-                "{} is not the writer's output for {} — regenerate with \
-                 REGENERATE_KDL_MIRROR=1, never edit",
-                path.display(),
-                toml.display()
-            );
+        for name in &want {
+            std::fs::copy(staged.join(name), to.join(name)).unwrap();
         }
-        expected.push(name);
-    }
-    for lock in files(&from, "lock") {
-        let name = lock.file_name().unwrap().to_string_lossy().to_string();
-        let path = to.join(&name);
-        if regenerate {
-            std::fs::copy(&lock, &path).unwrap();
-        } else {
-            assert_eq!(
-                read(&path),
-                read(&lock),
-                "{name}: the ledgers stay line files, unchanged"
-            );
-        }
-        expected.push(name);
-    }
-    // Nothing else lives there: a stray file would be a stem the TOML dir
-    // does not have.
-    let mut present: Vec<String> = std::fs::read_dir(&to)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .collect();
-    present.sort();
-    expected.sort();
-    if regenerate {
-        for stray in present.iter().filter(|p| !expected.contains(p)) {
+        for stray in names(&to).iter().filter(|p| !want.contains(p)) {
             std::fs::remove_file(to.join(stray)).unwrap();
         }
-        return;
+    } else {
+        for name in &want {
+            assert!(
+                read(&to.join(name)) == read(&staged.join(name)),
+                "registry-kdl/{name} is not the migrator's output — regenerate with \
+                 REGENERATE_KDL_MIRROR=1, never edit"
+            );
+        }
+        // Nothing else lives there: a stray file would be a stem the TOML
+        // dir does not have.
+        assert_eq!(names(&to), want);
     }
-    assert_eq!(present, expected);
+    // The ledgers are the TOML dir's, byte for byte — the lock's pins name
+    // entries, not spellings.
+    for lock in files(&toml_dir(), "lock") {
+        let name = lock.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(read(&to.join(&name)), read(&lock), "{name}: unchanged");
+    }
+    let _ = std::fs::remove_dir_all(&staged);
 }
 
 /// Every twin reads to the same document — the whole tree, unknown columns
@@ -164,8 +158,9 @@ fn every_twin_reads_to_the_same_document_and_slice() {
 }
 
 /// The shapes outside the corpus: the dogfooded notifier's own registry and
-/// the inferred draft zenctl's corpus pins. No committed mirror — just the
-/// same reading, twice.
+/// the inferred draft zenctl's corpus pins. No committed mirror — each TOML
+/// file migrates to a KDL file reading the same, and each KDL file (the
+/// notifier's, migrated for real) reads as a slice.
 #[test]
 fn the_other_registries_in_the_workspace_read_the_same_in_kdl() {
     let root = crate_dir().join("..");
@@ -176,7 +171,9 @@ fn the_other_registries_in_the_workspace_read_the_same_in_kdl() {
         for toml in files(&root.join(dir), "toml") {
             let t = read(&toml);
             let raw = parse_raw(&t, SliceFormat::Toml).unwrap();
-            let k = twin(&t);
+            let k = zenkey_build::migrate::toml_to_kdl(&t)
+                .unwrap_or_else(|e| panic!("{}: {e}", toml.display()))
+                .kdl;
             assert_eq!(
                 parse_raw(&k, SliceFormat::Kdl).unwrap(),
                 raw,
@@ -190,6 +187,14 @@ fn the_other_registries_in_the_workspace_read_the_same_in_kdl() {
                     "{}",
                     toml.display()
                 );
+            }
+        }
+        for kdl in files(&root.join(dir), "kdl") {
+            let k = read(&kdl);
+            parse_raw(&k, SliceFormat::Kdl).unwrap_or_else(|e| panic!("{}: {e}", kdl.display()));
+            if stem(&kdl) != "types" {
+                zenkey::parse_slice_as(&k, SliceFormat::Kdl)
+                    .unwrap_or_else(|e| panic!("{}: {e}", kdl.display()));
             }
         }
     }

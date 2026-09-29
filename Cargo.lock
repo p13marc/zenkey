@@ -8381,6 +8381,7 @@ dependencies = [
  "serde",
  "serde_json",
  "snapbox",
+ "tempfile",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tracing-subscriber",
@@ -8445,6 +8446,7 @@ version = "0.10.1"
 dependencies = [
  "serde_json",
  "thiserror 2.0.20",
+ "toml_edit",
  "zenkey",
 ]
 

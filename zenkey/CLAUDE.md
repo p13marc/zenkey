@@ -20,6 +20,14 @@
   (v1.32, carried verbatim — no key, no builder). Optional metadata fields
   (qos/ttl/unit/rate/cardinality) must stay **optional** — forward-compat is
   pinned by zenctl's foreign-slice tests (blob and media both).
+- `registry_doc` — the registry file as a format-neutral document (RFC 08
+  §5.1, v1.44): `RawTable`/`RawValue` shaped as the TOML document, the two
+  front-ends (`parse_raw`, TOML and KDL 2.0 — the KDL one owns the only
+  refusals the spelling adds), `write_kdl`, and `SliceFormat` + `negotiate`,
+  the §6 dispatch on an `introspect` reply's declared `Encoding`. The slice
+  walk and every zenkey-build lint read the tree, so neither can tell the
+  spellings apart; `RawTable::leading` is the comment block a converter
+  (zenkey-build's `migrate`) carries across.
 - `tests/guard.rs` — RFC 03 §4 design properties D1–D6 pinned as executable
   tests. If a grammar change breaks these, the change is wrong (or needs an RFC
   amendment).

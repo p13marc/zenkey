@@ -52,7 +52,8 @@
 //!
 //! ## Acts keep their 1
 //!
-//! `pub`, `retire`, `replay`, `gen` and `blob fetch` *do* something. "Could
+//! `pub`, `retire`, `replay`, `gen`, `blob fetch` and `registry migrate` *do*
+//! something. "Could
 //! not be proven" has no meaning for an act — either it went out or it did
 //! not — so their failures are 1, and only an input **they** refuse is a 2.
 
@@ -116,6 +117,10 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
                 .is_some_and(zenkey_fleet::Error::is_unaskable)
             || c.downcast_ref::<zenkey_build::Error>()
                 .is_some_and(zenkey_build::Error::is_unaskable)
+            // …and a migration's (#374): a refused input is a 2, a
+            // migration attempted and failed keeps an act's 1.
+            || c.downcast_ref::<zenkey_build::migrate::MigrateError>()
+                .is_some_and(zenkey_build::migrate::MigrateError::is_unaskable)
     });
     if unaskable { NO_VERDICT } else { FINDING }
 }
@@ -228,6 +233,23 @@ mod tests {
         // Wrapped by a caller's context, the way `.with_context` leaves it.
         let wrapped = refused.context("loading the selector");
         assert_eq!(code_for(&wrapped), NO_VERDICT);
+    }
+
+    /// A migration is an act (#374): its refused input is a 2, and a
+    /// migration attempted and failed keeps the 1.
+    #[test]
+    fn a_migration_refusal_is_a_two_and_its_failure_a_one() {
+        use zenkey_build::migrate::MigrateError;
+        let refused = anyhow::Error::new(MigrateError::Refused {
+            file: "t.toml".into(),
+            message: "no KDL spelling".into(),
+        });
+        assert_eq!(code_for(&refused), NO_VERDICT);
+        let failed = anyhow::Error::new(MigrateError::Unfaithful {
+            file: "t.toml".into(),
+            message: "the two trees differ".into(),
+        });
+        assert_eq!(code_for(&failed), FINDING);
     }
 
     /// The projection is the engine's, not a copy: assert the three poles

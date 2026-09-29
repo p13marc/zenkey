@@ -1,0 +1,5 @@
+// The type table.
+
+type "Status" kind="json-schema"
+// The load point.
+type "Load" kind="json-schema"

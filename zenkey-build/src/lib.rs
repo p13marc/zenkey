@@ -54,6 +54,9 @@ mod emit;
 #[cfg(feature = "export")]
 #[cfg_attr(docsrs, doc(cfg(feature = "export")))]
 pub mod export;
+#[cfg(feature = "migrate")]
+#[cfg_attr(docsrs, doc(cfg(feature = "migrate")))]
+pub mod migrate;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

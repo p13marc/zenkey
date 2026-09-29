@@ -1,0 +1,8 @@
+// The RFC 08 §5 type table for the zenwatch registry: every type and reply
+// name in zenwatch.kdl resolves here, or the build fails.
+
+type "ZenwatchHealth" kind="json-schema"
+type "FiringRule" kind="json-schema"
+type "ZenwatchDoctor" kind="json-schema"
+type "RegistrySlice" kind="json-schema"
+type "SchemaSet" kind="json-schema"

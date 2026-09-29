@@ -1,6 +1,7 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: netlink (kernel networking). RFC 08 §2; migration epic #453.
+// Telemetry is registered as real subjects, not a `{metric...}` catch-all
+// (issue #468) — see registry/sysinfo.toml for the rule and why. Sources:
+// src/map.rs (every metric name), src/events.rs, src/route_history.rs.
 
 registry version="1.2" app="zensight" convention=1
 

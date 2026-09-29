@@ -1,6 +1,7 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: systemd (unit/boot telemetry). RFC 08 §2; migration epic #453.
+// Telemetry is registered as real subjects, not a `{metric...}` catch-all
+// (issue #468) — see registry/sysinfo.toml for the rule and why.
+// Source: src/map.rs, src/collector.rs (boot/manager/units), src/events.rs.
 
 registry version="1.1" app="zensight" convention=1
 
@@ -190,6 +191,9 @@ procedure "events" kind=read reply="Vec<EventRecord>" idempotent=#true \
 procedure "cgroups" kind=read reply="CgroupNode" idempotent=#true since="1.0" \
     description="cgroup subtree (?path=<rel>)"
 
+// An `[[error]]` entry (RFC 08 §2, v1.40): the producer's own error name,
+// `error/systemd/unit-not-found` on the wire, declared so it is linted, pinned
+// and introspected like a subject. `procedures` names what may answer with it.
 error "unit-not-found" since="1.1" \
     description="the named unit does not exist on this host — distinct from the reserved error/not-found, so a caller can tell a missing unit from a missing procedure" {
     procedures "action/set"

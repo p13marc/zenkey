@@ -263,6 +263,156 @@ pub fn lock(cli: crate::cli::RegistryLockArgs) -> Result<()> {
     )
 }
 
+/// `registry migrate --to kdl <dir> (--in-place | --out <dir>)` (#374) — the
+/// directory respelled (RFC 08 §5.1), all or nothing.
+///
+/// The conversion and its proof are `zenkey_build::migrate::stage_kdl`'s —
+/// registry in, directory out, ending in the build's own lint, the shape
+/// `export` moved there for (#208). What only a CLI has is here: the target
+/// checks, the staging directory, the commit, and the exit code.
+///
+/// The exit split is `crate::exit`'s act rule. A **refusal** — a non-empty
+/// or non-directory `--out`, a source that does not build (one stem in both
+/// spellings is one of those), a file with no KDL spelling — is a 2:
+/// nothing was attempted. A migration that was attempted and failed — its
+/// staged result unfaithful or unlinted, a write that did not land — keeps
+/// an act's 1. In every case the source is as it was: the staged directory
+/// is written first, and `--in-place` removes a `.toml` only after every
+/// `.kdl` has landed.
+pub fn migrate(cli: crate::cli::RegistryMigrateArgs) -> Result<()> {
+    use std::path::Path;
+
+    let crate::cli::RegistryMigrateArgs {
+        to: crate::cli::MigrateTo::Kdl,
+        dir,
+        in_place,
+        out,
+        output,
+    } = cli;
+    // Checked before a byte is staged: the refusal is cheap and the work
+    // is not.
+    if let Some(out) = &out {
+        if out.exists() && !out.is_dir() {
+            return Err(crate::exit::unaskable!(
+                "--out {} exists and is not a directory",
+                out.display()
+            ));
+        }
+        if out.is_dir() {
+            let held = std::fs::read_dir(out)
+                .with_context(|| format!("read {}", out.display()))?
+                .count();
+            if held > 0 {
+                return Err(crate::exit::unaskable!(
+                    "--out {} already holds {held} entr{} — a migration never writes over \
+                     anything; pick an empty directory",
+                    out.display(),
+                    if held == 1 { "y" } else { "ies" }
+                ));
+            }
+        }
+    }
+
+    let staging = tempfile::tempdir().context("create a staging directory")?;
+    let migration = zenkey_build::migrate::stage_kdl(&dir, staging.path())?;
+
+    /// A file, or a directory and everything under it.
+    fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            std::fs::create_dir_all(to)?;
+            for entry in std::fs::read_dir(from)? {
+                let entry = entry?;
+                copy_all(&entry.path(), &to.join(entry.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(from, to).map(|_| ())
+        }
+    }
+
+    let target = match &out {
+        Some(out) => {
+            // Everything staged, landed; on a failure, what this run wrote
+            // is taken back so the target is as empty as it was found.
+            let created = !out.exists();
+            let landed = std::fs::create_dir_all(out).and_then(|()| {
+                std::fs::read_dir(staging.path())?.try_for_each(|entry| {
+                    let entry = entry?;
+                    copy_all(&entry.path(), &out.join(entry.file_name()))
+                })
+            });
+            if let Err(e) = landed {
+                if created {
+                    let _ = std::fs::remove_dir_all(out);
+                } else if let Ok(entries) = std::fs::read_dir(out) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        let _ = if p.is_dir() {
+                            std::fs::remove_dir_all(&p)
+                        } else {
+                            std::fs::remove_file(&p)
+                        };
+                    }
+                }
+                return Err(anyhow::Error::new(e).context(format!(
+                    "write the migrated registry into {}",
+                    out.display()
+                )));
+            }
+            out.clone()
+        }
+        None => {
+            debug_assert!(in_place, "clap requires --in-place or --out");
+            // Every `.kdl` lands before any `.toml` goes: a failure while
+            // landing takes the new files back and leaves the source whole.
+            let mut landed = Vec::new();
+            for (_, to, _) in &migration.files {
+                let dest = dir.join(to);
+                if let Err(e) = std::fs::copy(staging.path().join(to), &dest) {
+                    for p in &landed {
+                        let _ = std::fs::remove_file(p);
+                    }
+                    return Err(anyhow::Error::new(e).context(format!(
+                        "write {} — the source is unchanged",
+                        dest.display()
+                    )));
+                }
+                landed.push(dest);
+            }
+            for (from, _, _) in &migration.files {
+                let p = dir.join(from);
+                std::fs::remove_file(&p).with_context(|| {
+                    format!(
+                        "remove {} — every .kdl is written, so the directory now holds \
+                         this stem in both spellings until it goes",
+                        p.display()
+                    )
+                })?;
+            }
+            dir.clone()
+        }
+    };
+
+    let report = crate::render::MigrateReport {
+        dir: dir.display().to_string(),
+        out: target.display().to_string(),
+        in_place,
+        files: migration
+            .files
+            .iter()
+            .map(|(from, to, c)| crate::render::MigratedFile {
+                from: from.clone(),
+                to: to.clone(),
+                comments: c.comments,
+                hoisted: c.hoisted,
+            })
+            .collect(),
+        kept: migration.copied,
+        warnings: migration.warnings.iter().map(ToString::to_string).collect(),
+    };
+    crate::render::emit_with(&mut std::io::stdout(), &report, output.format, output.color)
+}
+
 /// `registry infer` (#225, RFC 08 §6.1) — draft a registry from the wire,
 /// marked as a draft.
 ///

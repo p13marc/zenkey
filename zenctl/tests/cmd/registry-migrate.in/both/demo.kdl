@@ -1,0 +1,2 @@
+registry version="0.1" app="demo" convention=1
+producer "demo"

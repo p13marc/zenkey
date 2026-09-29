@@ -1,6 +1,6 @@
-// Generated from ../registry/ by fixture-tests/tests/formats.rs — the KDL
-// mirror of the corpus (RFC 08 §5.1). Regenerate, never edit:
-//   REGENERATE_KDL_MIRROR=1 cargo test -p zenkey-fixture-tests --test formats
+// Subject registry: gnmi (subscription collector). RFC 08 §2; migration epic #453.
+// Telemetry metric trees register as {metric...} families (one payload type,
+// TelemetryPoint) — typed per-metric refinement is additive (registry MINOR).
 
 registry version="1.0" app="zensight" convention=1
 

@@ -27,13 +27,25 @@ unreadable and named as such). **`registry export --as kdl`** is new: the
 same document as `--as toml`, in the second spelling, one
 `// ── <producer>.kdl` block per producer (marcpardo/zenkey#374). The
 completion cache writes each slice as `<producer>.toml` or
-`<producer>.kdl` by its spelling. No spelling moved; the exit contract is
-unchanged.
+`<producer>.kdl` by its spelling.
+
+**`registry migrate --to kdl <dir> (--in-place | --out <dir>)`** is new
+too (marcpardo/zenkey#374): the directory respelled, every `<stem>.toml` a
+`<stem>.kdl` meaning the same document — unknown columns included — and
+the `.lock` ledgers kept beside unchanged. Comments cross onto the nodes
+they stood before; one written on or above a key is hoisted into its
+node's leading block as `// <key>: …`, and the report counts them. All or
+nothing: the source must lint, the result is staged, proven and linted
+before it lands; `--out` refuses a non-empty directory and `--in-place`
+removes each `.toml` only after every `.kdl` is written. A refusal exits 2;
+a migration attempted and failed exits 1, as an act does. No spelling
+moved; the exit contract is unchanged.
 
 | 0.9.1 | Unreleased |
 |---|---|
 | — | `zenctl check conform --producer sysinfo --registry registry --for 10 --junit conform.xml` |
 | — | `zenctl registry export --registry registry --as kdl` |
+| — | `zenctl registry migrate --to kdl registry --in-place` |
 
 ## 0.9.1 (2026-09-29) — a fragment that pastes
 

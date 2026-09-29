@@ -35,6 +35,10 @@ serde_json = "1"
 sha2 = "0.11"
 thiserror = "2"
 toml = "1"
+# Comments, for `registry migrate` alone (#374; zenkey-build's `migrate`
+# feature). Already in the tree through trycmd, pinned at the version it
+# brought; default features off — parsing is all a migration reads.
+toml_edit = { version = "0.25.13", default-features = false }
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 # `unstable-dynamic` is what makes cache-backed completion possible (#54);
