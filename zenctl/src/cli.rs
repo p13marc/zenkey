@@ -777,6 +777,26 @@ pub(crate) enum CheckCmd {
     /// bridge first, and the probe FAILS if the bridge yields nothing.
     /// Fanning out is what `blob locate` does; this verb refuses to.
     Probe(CheckProbeArgs),
+    /// Run a producer's registry as a conformance suite (#222): 0 = conforms,
+    /// 1 = an assertion is not met, 2 = unproven.
+    ///
+    /// One assertion per declared surface, three states each — met, not
+    /// met, unknowable with its reason (RFC 13 §3) — and unknowable is never
+    /// folded into not met. Every origin the roster shows running the
+    /// producer is CALLED: introspect and each concrete `read` procedure,
+    /// with no arguments (`error/invalid-args` is a reply, and met). A write
+    /// is never called; it is met when the origin's served slice declares
+    /// it. `error/unsupported` or `error/gated` from a `when` procedure is
+    /// exempt and says so — unless the device's registration document
+    /// claims the capability (RFC 04 §5) — and from any other procedure it
+    /// is not met (RFC 08 §6.1). Silence from a rostered origin is not met:
+    /// alive ⇒ callable (RFC 13 §2). Then the doctor's checks, scoped to the
+    /// producer: slice sync, describe totality, schema drift; with `--for`,
+    /// each declared subject — a window proves presence, never absence, so a
+    /// subject that did not speak is unknowable. With `--registry` the suite
+    /// is those files (the contract the build ships); without, what the
+    /// fleet serves.
+    Conform(CheckConformArgs),
     /// Validate one payload against its schema — no bus write, exit-coded
     /// for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
     ///
@@ -1846,6 +1866,35 @@ pub(crate) struct CheckCutoverArgs {
     /// Listening window, seconds.
     #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
     pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `check conform` verb's flags — one struct the dispatcher hands over
+/// whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckConformArgs {
+    /// The producer whose registry slice is the suite.
+    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// Call this origin only (`h-…` or `@service`), not every origin the
+    /// roster shows. Off the roster, its silence is unknowable, not a
+    /// failure.
+    #[arg(long, value_name = "ORIGIN")]
+    pub(crate) origin: Option<String>,
+    /// Listen passively for this many seconds and judge each declared
+    /// subject: presence, QoS, payload, kind, rate, cardinality. No window =
+    /// the subject assertions are not asked.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// Also judge freshness against `ttl_s` and the declared `[budget]` —
+    /// a state snapshot and a health fetch, real query load.
+    #[arg(long)]
+    pub(crate) deep: bool,
+    /// Write the assertions as JUnit XML: not met is a failure, unknowable
+    /// is SKIPPED (never failed), an exemption rides system-out.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) junit: Option<std::path::PathBuf>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

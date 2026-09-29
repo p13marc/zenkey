@@ -122,7 +122,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
   `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`); a **judgement**
   is exit-coded (`check
-  expect|cutover|retired|probe|schema`, `doctor`, `why`, `watchdog`).
+  expect|cutover|retired|probe|conform|schema`, `doctor`, `why`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
