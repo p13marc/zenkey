@@ -133,6 +133,11 @@ pub struct Extras {
     /// A second producer that holds `alive` and answers nothing — the
     /// RFC 04 §5 violation `doctor` files as `introspect-coverage`.
     pub mute: bool,
+    /// No producer at all (#510): the router listens and nothing on the bus
+    /// holds a token, serves a procedure or publishes — a reachable bus with
+    /// nothing to judge. The session's admin space is zenoh's default (off),
+    /// so no router answers `@/*/router` either. `mute` is ignored.
+    pub bare: bool,
 }
 
 /// One case's bus.
@@ -142,7 +147,7 @@ pub struct Bus {
     /// The config double the producer serves (RFC 05 §5.1, #500).
     pub config: ConfigServer,
     session: Session,
-    _live: LiveProducer,
+    _live: Option<LiveProducer>,
     _mute: Option<zenoh::liveliness::LivelinessToken>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
     home: PathBuf,
@@ -195,6 +200,23 @@ impl Bus {
         cfg.insert_json5("listen/endpoints", &format!("[\"{endpoint}\"]"))
             .expect("listen");
         let session = zenoh::open(cfg).await.expect("the producer's session");
+        let config = ConfigServer::fixture(PRODUCER);
+        let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+            .join("live-home")
+            .join(&base);
+        std::fs::create_dir_all(&home).expect("a config root of its own");
+        if extras.bare {
+            return Bus {
+                endpoint,
+                base,
+                config,
+                session,
+                _live: None,
+                _mute: None,
+                tasks: Vec::new(),
+                home,
+            };
+        }
 
         let key = |rel: &str| zenkey::grammar::with_base(&base, rel);
         let rpc = key(&format!("v1/{HOST}/@rpc/{PRODUCER}"));
@@ -203,7 +225,6 @@ impl Bus {
         let ping = format!("{rpc}/ping");
 
         // RFC 04 §5: every queryable first…
-        let config = ConfigServer::fixture(PRODUCER);
         let mut up = BringUp::new(&session);
         up.serve(&introspect).await.expect("introspect");
         up.serve(&describe).await.expect("describe");
@@ -290,17 +311,12 @@ impl Bus {
             None
         };
 
-        let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join("live-home")
-            .join(&base);
-        std::fs::create_dir_all(&home).expect("a config root of its own");
-
         Bus {
             endpoint,
             base,
             config,
             session,
-            _live: live,
+            _live: Some(live),
             _mute: mute,
             tasks,
             home,

@@ -515,7 +515,11 @@ async fn doctor_fail_on_error_is_0_on_a_healthy_producer() {
 /// callable (RFC 04 §5) broken, filed as `introspect-coverage`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn doctor_fail_on_error_is_1_on_a_mute_producer() {
-    let bus = Bus::with(Extras { mute: true }).await;
+    let bus = Bus::with(Extras {
+        mute: true,
+        ..Extras::default()
+    })
+    .await;
     let run = bus
         .until(
             &["doctor", "--fail-on", "error", "--format", "ndjson"],
@@ -535,6 +539,47 @@ async fn doctor_fail_on_error_is_1_on_a_mute_producer() {
         !errors.is_empty() && errors.iter().all(|f| f["check"] == "introspect-coverage"),
         "{run}"
     );
+}
+
+/// … and 2 on a reachable bus with nothing on it (#510): no producer holds
+/// a token and no router answers the admin space, so the run judged nothing
+/// — under `--fail-on` and without it. Each runs once: there is nothing on a
+/// bare bus for a later run to find, and a report on stdout is the proof the
+/// session opened (a session that never opened is #503's 2, with no report).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn doctor_is_2_on_a_bus_with_nothing_to_judge() {
+    let bus = Bus::with(Extras {
+        bare: true,
+        ..Extras::default()
+    })
+    .await;
+    for args in [
+        &["doctor", "--fail-on", "error", "--format", "json"][..],
+        &["doctor", "--format", "json"][..],
+    ] {
+        let run = bus.zenctl(args).await;
+        exits(&run, 2);
+        let doc = run.json();
+        assert_eq!(doc["live_producers"], json!(0), "{run}");
+        assert_eq!(doc["routers"], json!(0), "{run}");
+        assert!(
+            doc["unobservable"]
+                .as_str()
+                .is_some_and(|why| why.contains("nothing in scope") && why.contains(&bus.base)),
+            "{run}"
+        );
+        assert!(run.stderr.contains("nothing was judged — exit 2"), "{run}");
+    }
+
+    // `--transitions` reads the same run as unobservable for every check —
+    // never a clean baseline (the stream itself exits 0: it is not a verdict).
+    let run = bus
+        .zenctl(&["doctor", "--transitions", "--count", "1", "--every", "1"])
+        .await;
+    exits(&run, 0);
+    let rows = run.rows("transition");
+    assert!(!rows.is_empty(), "{run}");
+    assert!(rows.iter().all(|t| t["to"] == "unobservable"), "{run}");
 }
 
 // ── config (RFC 05 §5.1, #500) ──────────────────────────────────────────

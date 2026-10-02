@@ -438,7 +438,10 @@ pub(crate) struct DoctorArgs {
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// Exit 1 when a finding at (or above) this severity exists.
-    /// Default: always exit 0 — findings are output, not verdicts.
+    /// Default: exit 0 whatever was found — findings are output, not
+    /// verdicts. Either way, a run that judged nothing (no producer holds
+    /// an alive token, no router answered) exits 2: an empty bus is not a
+    /// healthy fleet.
     #[arg(long, value_enum, value_name = "SEVERITY")]
     pub(crate) fail_on: Option<FailOn>,
     /// Re-run the checks on an interval and report CHECK-ID TRANSITIONS as

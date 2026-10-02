@@ -116,6 +116,26 @@ change that carries no window.
 | `config set … --confirm S --no-validate`, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
 | `config set … --confirm S`, read-back unanswered, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
 
+### Exit honesty (chunk DS)
+
+**Exits that said less than the run knew** (epic marcpardo/zenkey#498) now
+say it, on the one contract in `src/exit.rs`.
+
+`doctor` on a reachable bus with **nothing on it** — no producer holding an
+alive token, no router answering the admin space — judged nothing, and
+exited 0 even under `--fail-on error`: the coverage check compared 0 with 0.
+It now exits **2**, under every `--fail-on` and without one, with the reason
+in the report (`"unobservable"` in `--format json`, a silence note in the
+table) and on stderr (marcpardo/zenkey#510). `doctor --transitions` reads
+such a run as `unobservable` for every check. A run with anything in scope
+is unchanged: findings are still output by default.
+
+| before | now |
+|---|---|
+| `doctor --fail-on error` on a bus with no producer and no router answering → exit 0 | exit 2, `unobservable: "nothing in scope: …"` |
+| `doctor` (no `--fail-on`) on the same → exit 0 | exit 2 |
+| `doctor --transitions` on the same → every check `ok` | every check `unobservable` |
+
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 
 One new judgement and no moved spelling: a script written against 0.9.1
