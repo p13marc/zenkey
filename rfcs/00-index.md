@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.46** (2026-09-29; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.47** (2026-10-02; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.47** (2026-10-02) — what production found: an explorer opens its
+  session as a Zenoh client with multicast off unless its user's config
+  *states* otherwise, and refuses an endpoint that does not parse (09 §5);
+  `confirm`/`cancel`/`extend`/`persist` answer the read-back (05 §5.1).
 - **v1.46** (2026-09-29) — what the reader found: errata to v1.44 — an
   unknown KDL node's arguments are ignored and its repeats are rows, a
   `type` outside `types.kdl` declares nothing, string-list elements are
@@ -21,12 +25,6 @@ what changed and what deliberately did not — is
   exemption is held to the device's served `capabilities` claim, a suite
   calls only `read` procedures and `introspect` with no arguments, and an
   unregistered `error/` reply is a reply, not a finding (13 §3).
-- **v1.44** (2026-09-29) — the second spelling: a registry file MAY be
-  KDL 2.0 — one node per entry, the identifying column its one argument,
-  every other column a property, list columns as child nodes, `/-` as a
-  staged retirement that still owes its `deprecated` entry (08 §5.1); the
-  `introspect` reply declares `application/toml` or `application/kdl`, and
-  undeclared is TOML, the pre-v1.44 wire (08 §6).
 
 ---
 

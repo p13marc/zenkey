@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40 and v1.42 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40, v1.42 and v1.47 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -415,6 +415,11 @@ read-back is the truth. This is
 Safe Mode and airOS's test mode, and it is the whole reason a reach change
 is survivable. A restart during a pending change is a rollback by
 construction, because a runtime change is not persisted.
+`confirm`, `cancel`, `extend` and `persist` each answer with the
+read-back document as it stands after the act (v1.47), so the caller sees
+the outcome without a second call; a token that names no pending change
+— for `persist`, no pending or last confirmed change — is
+`error/not-found`.
 
 **One pending change per resource.** A second writer is answered
 `error/busy` naming the pending token, unless it carries that token.
