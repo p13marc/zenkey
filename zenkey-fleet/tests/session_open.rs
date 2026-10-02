@@ -55,10 +55,10 @@ mod util;
 async fn a_client_explorer_holds_no_listener_and_still_sees_everything() {
     use zenoh::config::WhatAmI;
 
-    let endpoint = util::endpoint();
-    let serving = zenkey_fleet::open(&[], std::slice::from_ref(&endpoint), false)
+    let serving = zenkey_fleet::open(&[], &[util::ANY_PORT.to_string()], false)
         .await
         .expect("a listening peer");
+    let endpoint = util::bound(&serving).await;
     let asking = zenkey_fleet::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("the explorer session");

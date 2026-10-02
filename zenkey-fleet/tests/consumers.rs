@@ -3,13 +3,13 @@
 //! admin space answers at all.
 //!
 //! Same adminspace-config fixture as origin_attach.rs and topology.rs
-//! (#122's passthrough). Ports are ephemeral (`util::endpoint`), so two
+//! (#122's passthrough). Ports are ephemeral (`util::ANY_PORT`), so two
 //! test runs at once cannot collide.
 
 use std::time::Duration;
 
 mod util;
-use util::{admin_config, endpoint, peer_pair};
+use util::{admin_config, peer_pair};
 
 use zenkey_fleet::report::{AdminAnswer, Relation};
 
@@ -24,15 +24,15 @@ const TARGET: &str = "v1/h-cccccccccccc/state/demo/**";
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_narrow_and_a_total_subscriber_rank_by_relation() {
     let file = admin_config();
-    let endpoint = endpoint();
     let serving = zenkey_fleet::open_with_config(
         Some(&file),
         &[],
-        std::slice::from_ref(&endpoint),
+        &[util::ANY_PORT.to_string()],
         Some(false),
     )
     .await
     .expect("serving session");
+    let endpoint = util::bound(&serving).await;
     let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");

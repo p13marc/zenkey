@@ -3,9 +3,9 @@
 //!
 //! ## The producer
 //!
-//! A zenoh session listening on a port the OS has just handed out (the
-//! `endpoint()` pattern of `zenkey-fleet/tests/util/mod.rs`, which is not
-//! exported), with no scouting and no external router, brought up the way
+//! A zenoh session listening on loopback port 0 and reading back the port it
+//! was given (the `ANY_PORT`/`bound` pattern of `zenkey-fleet/tests/util/mod.rs`,
+//! which is not exported; #527), with no scouting and no external router, brought up the way
 //! RFC 04 §5 says a producer is: `introspect` (a real slice), `describe`
 //! (a schema for every type the slice names), a read procedure and the
 //! config double's procedures, all declared through [`BringUp`] — and only
@@ -164,15 +164,6 @@ impl Drop for Bus {
     }
 }
 
-/// A loopback endpoint on a port the OS has just told us is free — released
-/// the instant its number is known, because zenoh binds next.
-fn endpoint() -> String {
-    let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-    let port = held.local_addr().expect("local addr").port();
-    drop(held);
-    format!("tcp/127.0.0.1:{port}")
-}
-
 /// A base no other bus — in this run or a concurrent one — has used.
 fn unique_base() -> String {
     static NTH: AtomicU64 = AtomicU64::new(0);
@@ -190,16 +181,26 @@ impl Bus {
     }
 
     pub async fn with(extras: Extras) -> Bus {
-        let endpoint = endpoint();
         let base = unique_base();
 
         let mut cfg = zenoh::Config::default();
         cfg.insert_json5("mode", "\"router\"").expect("mode");
         cfg.insert_json5("scouting/multicast/enabled", "false")
             .expect("scouting");
-        cfg.insert_json5("listen/endpoints", &format!("[\"{endpoint}\"]"))
+        // Port 0, read back after the bind: a port learned from one socket and
+        // handed to zenoh after it is released can be taken in between — by
+        // a concurrent run's outgoing connection, as often as not (#527).
+        cfg.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
             .expect("listen");
         let session = zenoh::open(cfg).await.expect("the producer's session");
+        let endpoint = session
+            .info()
+            .locators()
+            .await
+            .into_iter()
+            .map(|l| l.to_string())
+            .find(|l| l.starts_with("tcp/127.0.0.1:"))
+            .expect("the producer listens on loopback");
         let config = ConfigServer::fixture(PRODUCER);
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-home")

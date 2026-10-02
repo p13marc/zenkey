@@ -18,7 +18,7 @@
 use std::time::Duration;
 
 mod util;
-use util::{admin_config, endpoint};
+use util::admin_config;
 
 /// A mesh where one peer serves its admin space: the join names the server
 /// as answered, the other peer as an edge — and as a heard-of node, since
@@ -26,15 +26,15 @@ use util::{admin_config, endpoint};
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
     let file = admin_config();
-    let endpoint = endpoint();
     let serving = zenkey_fleet::open_with_config(
         Some(&file),
         &[],
-        std::slice::from_ref(&endpoint),
+        &[util::ANY_PORT.to_string()],
         Some(false),
     )
     .await
     .expect("serving session");
+    let endpoint = util::bound(&serving).await;
     let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
@@ -118,10 +118,10 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
 /// reachability, never an error and never an invented mesh.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_admin_less_mesh_is_a_reading_not_a_mesh() {
-    let endpoint = endpoint();
-    let _listen = zenkey_fleet::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
+    let _listen = zenkey_fleet::bus::session::open(&[], &[util::ANY_PORT.to_string()], false)
         .await
         .expect("listener");
+    let endpoint = util::bound(&_listen).await;
     let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asker");
