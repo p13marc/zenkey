@@ -122,6 +122,67 @@ pub fn compose_selector(
     args.wire(rel)
 }
 
+/// How an output file is opened — decided before any session opens (#514).
+///
+/// `record -o` and `snapshot -o` used to `File::create`, which truncates:
+/// re-running yesterday's command line during an incident destroyed
+/// yesterday's capture, the one artifact either verb exists to keep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputMode {
+    /// Nothing is there: create it, refusing one that appears meanwhile
+    /// (`create_new` — the check and the create are one syscall).
+    New,
+    /// `--overwrite`: create or truncate, as asked.
+    Replace,
+    /// Something that is not a regular file — `/dev/null`, a fifo. There is
+    /// no capture to destroy, so it is written to as it stands.
+    Device,
+}
+
+/// Decide how `out` will be opened, refusing an existing regular file
+/// unless `overwrite` — exit 2 through [`Unaskable`](crate::exit::Unaskable),
+/// because it is this tool refusing what you typed, and before the session
+/// opens because nothing about the bus can change the answer.
+pub fn output_mode(out: &str, overwrite: bool) -> Result<OutputMode> {
+    if overwrite {
+        return Ok(OutputMode::Replace);
+    }
+    match std::fs::metadata(out) {
+        Ok(m) if m.is_file() => Err(refuse_existing(out)),
+        Ok(_) => Ok(OutputMode::Device),
+        // Absent — or a dangling link, which `create_new` refuses at open.
+        Err(_) => Ok(OutputMode::New),
+    }
+}
+
+/// The refusal [`output_mode`] and a lost `create_new` race share.
+pub fn refuse_existing(out: &str) -> anyhow::Error {
+    unaskable!("--out {out}: the file already exists — pass --overwrite to replace it")
+}
+
+/// Open `out` the way [`output_mode`] decided, off the runtime (#332).
+pub async fn open_output(out: &str, mode: OutputMode) -> std::io::Result<std::fs::File> {
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.write(true);
+    match mode {
+        OutputMode::New => opts.create_new(true),
+        OutputMode::Replace => opts.create(true).truncate(true),
+        OutputMode::Device => &mut opts,
+    };
+    Ok(opts.open(out).await?.into_std().await)
+}
+
+/// [`open_output`] with the refusal and the path in the error.
+pub async fn open_output_or_refuse(out: &str, mode: OutputMode) -> Result<std::fs::File> {
+    open_output(out, mode).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            refuse_existing(out)
+        } else {
+            anyhow::Error::new(e).context(format!("create {out}"))
+        }
+    })
+}
+
 /// A positive number of seconds, or the refusal — the one spelling of the
 /// check every `--for`/`--every` shares (#307).
 ///

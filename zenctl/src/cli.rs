@@ -1654,9 +1654,13 @@ pub(crate) struct FieldArgs {
 pub(crate) struct RecordArgs {
     #[command(flatten)]
     pub(crate) selector: SelectorArgs,
-    /// Output file.
+    /// Output file. An existing file is refused (exit 2) unless
+    /// --overwrite: a capture is the one artifact this verb exists to keep.
     #[arg(long, short = 'o', value_name = "FILE")]
     pub(crate) out: String,
+    /// Replace an existing --out file instead of refusing it.
+    #[arg(long)]
+    pub(crate) overwrite: bool,
     /// Stop after this many seconds. With --on: give up waiting for a
     /// rule after this long (nothing is written; a rule not firing is
     /// not a finding).
@@ -1803,9 +1807,13 @@ pub(crate) struct SnapshotArgs {
     #[command(flatten)]
     pub(crate) selector: SelectorArgs,
     /// Output file. Refused (exit 2) when nobody answered: a file of
-    /// silence would read as an empty fleet (RFC 05 §3.1).
+    /// silence would read as an empty fleet (RFC 05 §3.1). An existing file
+    /// is refused too (exit 2), before any session, unless --overwrite.
     #[arg(long, short = 'o', value_name = "FILE", required = true)]
     pub(crate) out: Option<String>,
+    /// Replace an existing --out file instead of refusing it.
+    #[arg(long)]
+    pub(crate) overwrite: bool,
     /// Replies kept per selector; past it they are drained, counted, and
     /// the header says how many (RFC 09 §5.1 O6).
     #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_MAX_REPLIES)]

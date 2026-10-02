@@ -613,7 +613,10 @@ Options:
           Only this producer
 
   -o, --out <FILE>
-          Output file
+          Output file. An existing file is refused (exit 2) unless --overwrite: a capture is the one artifact this verb exists to keep
+
+      --overwrite
+          Replace an existing --out file instead of refusing it
 
       --for <SECS>
           Stop after this many seconds. With --on: give up waiting for a rule after this long (nothing is written; a rule not firing is not a finding)
@@ -917,7 +920,10 @@ Options:
           Only this producer
 
   -o, --out <FILE>
-          Output file. Refused (exit 2) when nobody answered: a file of silence would read as an empty fleet (RFC 05 §3.1)
+          Output file. Refused (exit 2) when nobody answered: a file of silence would read as an empty fleet (RFC 05 §3.1). An existing file is refused too (exit 2), before any session, unless --overwrite
+
+      --overwrite
+          Replace an existing --out file instead of refusing it
 
       --max-replies <N>
           Replies kept per selector; past it they are drained, counted, and the header says how many (RFC 09 §5.1 O6)

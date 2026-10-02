@@ -46,6 +46,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
         out,
         max_replies,
         no_roster,
+        overwrite,
         cmd: _,
         bus: _,
     } = cli;
@@ -57,6 +58,9 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
             "--out <FILE> is required to take a snapshot"
         ));
     };
+    // An existing snapshot is refused unless --overwrite (#514) — here,
+    // before the session, because nothing the fleet answers changes it.
+    let mode = super::output_mode(&out, overwrite)?;
     let selector = super::selector_of(&selector, args)?;
 
     let session = args.session().await?;
@@ -98,11 +102,9 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
 
     // The create through `tokio::fs`, like `record` (#332); the rows are
     // bounded and already in hand, so the write itself is one buffered pass.
-    let file = tokio::fs::File::create(&out)
-        .await
-        .with_context(|| format!("create {out}"))?
-        .into_std()
-        .await;
+    // `create_new` (#514): a file that appeared during the collection is
+    // refused like one that was there before it.
+    let file = super::open_output_or_refuse(&out, mode).await?;
     let mut writer = ZsnapWriter::new(BufWriter::new(file), &taken.snapshot.header)?;
     for row in &taken.snapshot.rows {
         writer.write_row(row)?;

@@ -16,7 +16,7 @@
 
 use std::io::BufWriter;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use zenkey_fleet::judge::condition::Condition;
 use zenkey_fleet::report::PreambleSemantics;
 use zenkey_fleet::{
@@ -40,10 +40,14 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         post,
         every,
         preamble,
+        overwrite,
         bus: _,
     } = cli;
+    // Before anything else that could take time: an existing capture is
+    // refused unless --overwrite (#514), and no session opens to find out.
+    let mode = super::output_mode(&out, overwrite)?;
     if on.is_empty() {
-        return run_inner(&selector, &out, for_secs, count, args).await;
+        return run_inner(&selector, &out, mode, for_secs, count, args).await;
     }
     // `requires = "on"` on `--pre`, and `requires = "pre"` on `--on`: clap
     // has already refused one without the other, so this is the type's
@@ -69,12 +73,13 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             PreambleMode::None => None,
         },
     };
-    run_triggered(&selector, &out, triggered, args).await
+    run_triggered(&selector, &out, mode, triggered, args).await
 }
 
 async fn run_inner(
     sel: &SelectorArgs,
     out: &str,
+    mode: super::OutputMode,
     for_secs: Option<f64>,
     count: u64,
     args: &Bus,
@@ -92,17 +97,17 @@ async fn run_inner(
         preamble: None,
         pre_roll: None,
     };
+    // The session first (#514): a bus that never answered leaves no file
+    // behind — a header-only capture would only be refused by the re-run.
+    let session = args.session().await?;
     // Both halves off the runtime (#332): the create through `tokio::fs`,
     // and every row after it on the blocking pool behind the sink's queue.
     // A capture that stalls its own drain records drops it caused itself.
-    let file = tokio::fs::File::create(out)
-        .await
-        .with_context(|| format!("create {out}"))?
-        .into_std()
-        .await;
+    // Never over an existing capture (#514): `output_mode` refused one
+    // before the session, and `create_new` refuses one that appeared since.
+    let file = super::open_output_or_refuse(out, mode).await?;
     let sink = ZrecSink::spawn(BufWriter::new(file), &header).await?;
 
-    let session = args.session().await?;
     let monitor =
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
@@ -173,7 +178,13 @@ struct Triggered {
     preamble: Option<PreambleSemantics>,
 }
 
-async fn run_triggered(sel: &SelectorArgs, out: &str, t: Triggered, args: &Bus) -> Result<()> {
+async fn run_triggered(
+    sel: &SelectorArgs,
+    out: &str,
+    mode: super::OutputMode,
+    t: Triggered,
+    args: &Bus,
+) -> Result<()> {
     let selector = super::selector_of(sel, args)?;
     // The rules, the `watchdog` way: parsed before a session exists, so a
     // rule outside the closed vocabulary is a refusal and not a connect.
@@ -228,16 +239,17 @@ async fn run_triggered(sel: &SelectorArgs, out: &str, t: Triggered, args: &Bus) 
         &store,
         &spec,
         // The create through `tokio::fs` (#332), and only once something
-        // fired: a run that gives up leaves no file behind.
+        // fired: a run that gives up leaves no file behind. The existing-file
+        // refusal ran before the arm (#514); `create_new` here still refuses
+        // one that appeared while armed.
         || async {
-            let file = tokio::fs::File::create(out)
-                .await
-                .map_err(|e| zenkey_fleet::Error::Io {
-                    path: std::path::PathBuf::from(out),
-                    source: e,
-                })?
-                .into_std()
-                .await;
+            let file =
+                super::open_output(out, mode)
+                    .await
+                    .map_err(|e| zenkey_fleet::Error::Io {
+                        path: std::path::PathBuf::from(out),
+                        source: e,
+                    })?;
             Ok(BufWriter::new(file))
         },
         |ev| match ev {
