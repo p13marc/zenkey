@@ -214,8 +214,10 @@ zenctl why 'prod/v1/h-3fa9c2d41b7e/state/sysinfo/health' --for 10
 
 `watchdog` and `doctor --transitions` print **changes**: the first evaluation
 states each baseline once, and an unchanged tick prints nothing. Read the
-stream (`jq 'select(.to == "firing")'`) rather than waiting for an exit. A
-drop under a completeness claim is `unobservable`, never `ok`. For alerting
+stream (`jq 'select(.to == "firing")'`) while it runs; a bounded run
+(`--count N`) also ends on how its rules ended — 1 if one is firing, else 2
+if one is unobservable, else 0. A drop under a completeness claim is
+`unobservable`, never `ok`. For alerting
 while nobody is watching a terminal, [`zenwatch`](../zenwatch/) is the daemon
 over the same vocabulary, with sinks.
 
