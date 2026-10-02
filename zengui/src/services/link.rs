@@ -70,3 +70,36 @@ pub fn discover_bases(session: &zenoh::Session, timeout: Duration) -> Task<Messa
         |r| Message::Bus(BusMsg::BasesDiscovered(r)),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #501/#503: the session is a client, so a router that does not answer
+    /// fails the open — promptly, as a link error the status strip renders —
+    /// where the old peer session opened onto nothing and drew an empty tree.
+    /// Port 1 on loopback: privileged, so nothing a test run holds.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dead_router_is_a_link_error_not_a_hang() {
+        let opened = tokio::time::timeout(
+            Duration::from_secs(5),
+            session(None, vec!["tcp/127.0.0.1:1".into()], vec![], None),
+        )
+        .await
+        .expect("a dead router answers at once — never a hang");
+        let Err(e) = opened else {
+            panic!("a session opened against an endpoint nothing answers")
+        };
+        assert!(e.to_string().contains("tcp/127.0.0.1:1"), "{e}");
+    }
+
+    /// #503: an endpoint that does not parse is refused by name, not dropped
+    /// into a session that reaches nothing.
+    #[tokio::test]
+    async fn a_malformed_endpoint_is_a_link_error_by_name() {
+        let Err(e) = session(None, vec!["127.0.0.1:7449".into()], vec![], None).await else {
+            panic!("a session opened on an endpoint that does not parse")
+        };
+        assert!(e.to_string().contains("tcp/127.0.0.1:7449"), "{e}");
+    }
+}
