@@ -726,7 +726,7 @@ Options:
           List every would-be put and publish nothing (no session is even opened). Preview pacing is not simulated
 
       --force-base
-          Replay even though the resolved base differs from the capture header's
+          Replay even though the resolved base differs from the capture header's — or both are empty, which cannot tell two deployments apart
 
       --i-know
           Replay recorded deletes that fall off the state class — the same operator price as `retire` (RFC 04 §1.2, v1.12)

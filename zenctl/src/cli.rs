@@ -1765,7 +1765,8 @@ pub(crate) struct ReplayArgs {
     #[arg(long)]
     pub(crate) dry_run: bool,
     /// Replay even though the resolved base differs from the capture
-    /// header's.
+    /// header's — or both are empty, which cannot tell two deployments
+    /// apart.
     #[arg(long)]
     pub(crate) force_base: bool,
     /// Replay recorded deletes that fall off the state class — the

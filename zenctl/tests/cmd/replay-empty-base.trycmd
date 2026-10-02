@@ -1,0 +1,68 @@
+`replay` from the empty base onto the empty base is refused without
+`--force-base` (#506).
+
+`replay` republishes by default, and its one guard was "capture base ≠
+target base" (RFC 09 §5.2: same keys, different deployment, presumed a
+mistake). The empty base is the RFC v1.6 default — so a capture taken on a
+base-less staging bus and replayed against a base-less production bus
+compared *equal*, and every row went out under its original origin,
+re-stamped to win last-writer-wins over the live state. Two empty bases are
+not evidence of one deployment; they are the absence of the evidence the
+guard relies on. This corpus exports `ZENCTL_BASE=`, so the target here is
+the empty base too.
+
+The refusal reads only the header — no session opens — and exits **2**:
+
+```console
+$ zenctl replay tests/cmd/fixtures/baseless.zrec
+? 2
+tests/cmd/fixtures/baseless.zrec: captured v1/h-3fa9c2d41b7e/state/demo/** under base "" (2026-09-06T00:00:00Z)
+Error: capture and target are both on the empty base — and the empty base cannot tell two deployments apart, so nothing here says this bus is the one the capture came from. Replaying republishes every row under its original origin, re-stamped to win over live state (RFC 09 §5.2). Pass --force-base to mean this bus, or --dry-run to look first.
+
+```
+
+Its sibling is the mismatch, and it is a 2 now as well — a refusal of the
+command line, where it used to be a bare 1 that read "the act failed":
+
+```console
+$ zenctl replay --base acme tests/cmd/fixtures/baseless.zrec
+? 2
+tests/cmd/fixtures/baseless.zrec: captured v1/h-3fa9c2d41b7e/state/demo/** under base "" (2026-09-06T00:00:00Z)
+Error: capture base "" != target base "acme" — recorded keys spell the capture's deployment, and "same keys, different deployment" is presumed a mistake (RFC 09 §5.2). Pass --force-base to mean it.
+
+```
+
+`--force-base` is the same flag with the same meaning — *I mean this
+target* — and gets past the guard to the session (the dead-bus fixture, so
+the act stops there with its 1):
+
+```console
+$ zenctl replay --force-base --zenoh-config tests/cmd/fixtures/dead-bus.json5 tests/cmd/fixtures/baseless.zrec
+? 1
+tests/cmd/fixtures/baseless.zrec: captured v1/h-3fa9c2d41b7e/state/demo/** under base "" (2026-09-06T00:00:00Z)
+replaying onto base "" at speed 1
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
+
+A dry run writes nothing, so it asks nothing:
+
+```console
+$ zenctl replay --dry-run --format table --color never tests/cmd/fixtures/baseless.zrec
+tests/cmd/fixtures/baseless.zrec: captured v1/h-3fa9c2d41b7e/state/demo/** under base "" (2026-09-06T00:00:00Z)
+would skip v1/h-3fa9c2d41b7e/state/demo/config  (preamble — state at capture start; re-stamping it republishes a snapshot over live state (RFC 13 §4.2) — pass --seed-state to mean it)
+would put v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+would put v1/h-3fa9c2d41b7e/state/demo/health  (11 B, application/json)
+-- trigger: silent-for v1/h-3fa9c2d41b7e/state/demo/health 0.7 ok → firing at 2026-09-06T00:00:32Z — no sample for 0.7s, on a drop-free observer --
+would put v1/h-3fa9c2d41b7e/state/demo/health  (12 B, application/json)
+would replay 5 put(s) and 0 tombstone(s) from v1/h-3fa9c2d41b7e/state/demo/** (captured 2026-09-06T00:00:00Z)
+preamble rows skipped: 1 (--seed-state to publish them)
+trigger record(s) met: 1 — markers, never published
+1 preamble row(s) not published — state at capture start, re-stamped, would overwrite live state; --seed-state to mean it (RFC 13 §4.2)
+
+```
