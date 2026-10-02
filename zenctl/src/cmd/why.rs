@@ -43,7 +43,9 @@ pub async fn run(args: WhyArgs) -> Result<()> {
     // has no standing to claim. A `$*` selector is the same kind of failure:
     // a question that cannot be asked (RFC 03 §2).
     let bus = ASKING.ask(Bus::resolve(&args.bus));
-    let selector = ASKING.ask(super::selector_of(&args.selector, &bus));
+    // Unhinted (#512): an off-base selector is the `key-parse` rung's
+    // finding here, cited — the wire verbs' stderr hint would say it twice.
+    let selector = ASKING.ask(super::selector_unhinted(&args.selector, &bus));
     // The registry through the one degradation door (#210): unavailable is
     // `None` — announced once, and rendered as "not asked" by the rung.
     let slices = ASKING.ask(bus.slices_optional().await);

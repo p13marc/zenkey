@@ -155,6 +155,9 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
     // A wildcard key is a blast radius, not a publication (#504) — refused
     // first, before the body or the bus, and no flag moves it.
     zenkey_fleet::check_concrete(key, zenkey_fleet::WriteAct::Put)?;
+    // A key is a wire key too: `v1/…` under a non-empty base publishes
+    // where none of the deployment listens (#512). Said, not rewritten.
+    super::hint_off_base(key, args);
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
     let typed = body.read()?;
@@ -263,6 +266,9 @@ pub async fn retire(cli: crate::cli::RetireArgs) -> Result<()> {
     } = cli;
     let (key, qos) = (key.as_str(), qos.as_str());
     let qos = parse_qos(qos)?;
+    // The tombstone lands where the key says, which is not this deployment
+    // when `v1/…` is typed under a non-empty base (#512).
+    super::hint_off_base(key, args);
     // Slices enrich the guard rather than deciding it — a state key still
     // passes with none, because the class is in the key.
     let slices = args.slices_optional().await?;

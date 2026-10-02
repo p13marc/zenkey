@@ -45,6 +45,8 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     let (selector, body, fmt) = (selector.as_str(), body.as_ref(), fmt.as_deref());
     // The raw seam: `$*` never reaches the session (RFC 03 §2).
     let selector = super::raw_selector(selector)?;
+    // `v1/…` under a non-empty base answers nothing; say so once (#512).
+    super::hint_off_base(selector, args);
     let base = args.base().to_string();
     // Slices enrich: they name each key's payload type, and without them the
     // decode ladder falls to its structural rung — which is exactly what

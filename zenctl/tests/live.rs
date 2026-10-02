@@ -162,6 +162,51 @@ async fn rate_counts_a_window() {
     assert!(doc["total_count"].as_u64().unwrap() > 0, "{run}");
 }
 
+/// A base-relative selector under `--base` is a subscription to nothing: the
+/// wire verbs take wire keys (RFC 09 §5). The run carries on — the window is
+/// still measured, and stdout is still one clean JSON document — but stderr
+/// says once what `why` would have said, with the wire key it meant (#512).
+/// The wire-key form says nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_base_relative_selector_is_hinted_on_stderr() {
+    let bus = Bus::up().await;
+    let wire = bus.key("v1/**");
+    let hint = format!(
+        r#"hint: "v1/**" does not sit under base "{}" — selectors are wire keys (RFC 09 §5); did you mean "{wire}"?"#,
+        bus.base
+    );
+
+    let run = bus
+        .zenctl(&["rate", "v1/**", "--for", "1", "--format", "json"])
+        .await;
+    exits(&run, 0);
+    assert_eq!(
+        run.json()["total_count"],
+        json!(0),
+        "nothing under v1/**\n{run}"
+    );
+    assert_eq!(
+        run.stderr.matches(&hint).count(),
+        1,
+        "exactly one hint, on stderr\n{run}"
+    );
+    assert!(
+        !run.stdout.contains("hint:"),
+        "stdout stays the document\n{run}"
+    );
+
+    let run = bus
+        .until(&["rate", &wire, "--for", "1", "--format", "json"], |r| {
+            r.code == 0 && r.json()["total_count"].as_u64().is_some_and(|n| n > 0)
+        })
+        .await;
+    exits(&run, 0);
+    assert!(
+        !run.stderr.contains("hint:"),
+        "the wire key is not hinted\n{run}"
+    );
+}
+
 /// `service call` reaches a procedure the producer serves, typed by the
 /// served slice, and prints its reply.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
