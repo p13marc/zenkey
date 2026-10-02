@@ -156,6 +156,59 @@ refusals of input (marcpardo/zenkey#509).
 | `service call h-… - introspect` → panic, exit 101 | ``Error: producer `-` stands for no producer chunk, …``, exit 2 |
 | `node info myhost` → exit 1 | exit 2 |
 
+### The operator surface (chunk DT)
+
+What an operator meets first — the version line, the command list, the
+README, a mistyped selector, an output file — said in their terms (epic
+marcpardo/zenkey#498, chunk DT).
+
+**`record -o` and `snapshot -o` refuse an existing file**
+(marcpardo/zenkey#514). Both truncated it, so re-running yesterday's
+command line during an incident destroyed yesterday's capture. An existing
+regular file is now refused by name, exit 2, before any session opens —
+`record --on` included, though its file is only written when a rule
+fires. `--overwrite` replaces it; `/dev/null` and other non-regular paths
+are written as they stand. The create is `create_new`, so a file that
+appears meanwhile is refused too. `record` now opens its session before its
+file, so a dead bus leaves no header-only capture behind.
+
+**A base-relative selector under `--base` is hinted** (marcpardo/zenkey#512).
+Wire verbs take wire keys (RFC 09 §5), so `echo 'v1/**' --base prod` was a
+subscription to nothing, in silence. A typed selector or key whose first
+chunk is `v1` and that does not sit under a non-empty base now gets one
+stderr line naming the wire key it probably meant — `get`, `echo`, `rate`,
+`field`, `record`, `snapshot`, `export`, `timeline`, `check expect`, `pub`,
+`retire`. Nothing is rewritten, stdout is untouched, and `why` stays quiet
+because its `key-parse` rung already says it.
+
+**`--version` names the build** (marcpardo/zenkey#513): `zenctl <crate
+version> (<git describe --tags --always --dirty>)`. The release tarball
+carries its description through `git archive` (`export-subst`); a build
+with neither git nor an archive behind it says `unknown`.
+
+**The command lists speak to an operator** (marcpardo/zenkey#515). Every
+short help line — `zenctl --help` and each noun's list — is one plain
+sentence: no issue numbers, rule codes, RFC sections or capitals for
+emphasis, at most 80 columns, checked by walking the clap tree. The
+citations moved into the long help, where `<verb> --help` still prints
+them.
+
+**The README is an operator document** (marcpardo/zenkey#516): install,
+the tested zenohd line, a secured-router quickstart
+(`examples/prod.json5`, which a test opens a session through), the session
+posture, the exit contract with a Nagios mapping, monitoring recipes, the
+write guards, and every command — a test fails when a top-level verb goes
+unnamed.
+
+| 0.10.0 | Unreleased | to mean it |
+|---|---|---|
+| `record -o cap.zrec`, `cap.zrec` exists — truncated, exit per the run | exit 2, the file untouched | `--overwrite` |
+| `record -o cap.zrec --on <rule> --pre S`, `cap.zrec` exists — truncated when the rule fired | exit 2 before arming | `--overwrite` |
+| `snapshot -o fleet.zsnap`, `fleet.zsnap` exists — truncated | exit 2, the file untouched | `--overwrite` |
+| `record -o new.zrec` against a dead bus — exit 2, a header-only `new.zrec` left behind | exit 2, no file | — |
+| `echo 'v1/**' --base prod` — silence | the same silence, plus one `hint:` line on stderr | type the wire key, `prod/v1/**` |
+| `zenctl --version` → `zenctl 0.10.0` | `zenctl 0.10.0 (0.12.0-…-g<commit>)` | — |
+
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 
 One new judgement and no moved spelling: a script written against 0.9.1

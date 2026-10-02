@@ -102,6 +102,16 @@ unobservable → `Unobservable`, else `NotEstablished`. `RuleSet::standing()`
 is the same split for a second driver. `WatchdogSummary` is no longer
 `Copy` (it holds the two lists); its serialized shape is now pinned.
 
+### The operator surface (epic #498, chunk DT)
+
+zenctl's half — the existing-output refusal, the off-base selector hint,
+the build in `--version`, the short help, the operator README — is in
+[`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md) (#512, #513, #514, #515,
+#516). One file outside the crate: `.gitattributes` marks
+`zenctl/describe.txt` `export-subst`, so the release tarball `release.yml`
+cuts with `git archive` carries the tag's description, and a `zenctl`
+built from it names its release where it would otherwise say `unknown`.
+
 ---
 
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
