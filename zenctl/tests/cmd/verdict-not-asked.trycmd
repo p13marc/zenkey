@@ -110,12 +110,12 @@ carries it (RFC 13's convention — the judged claim is the finding) and
 `zenkey_fleet::judgement_exit_code` projects it, so the two frontends cannot
 drift apart on what a `why` verdict means.
 
-## An unreachable bus is not a healthy fleet (#510)
+## An unreachable bus is not a healthy fleet (#510, #511)
 
-`doctor` is a verdict too, and a dead endpoint is the case a monitoring job
-pointed at the wrong place is in. Since #503 a session that never opened is a
-2 for every verb, so it cannot read as green — under `--fail-on` or without
-it. A *reachable* bus with nothing on it is the other
+`doctor` and a bounded `watchdog` are verdicts too, and a dead endpoint is the
+case a monitoring job pointed at the wrong place is in. Since #503 a session
+that never opened is a 2 for every verb, so neither can read as green — under
+`--fail-on` or without it. A *reachable* bus with nothing on it is the other
 half of #510, judged by the engine and pinned in `tests/live.rs`.
 
 ```console
@@ -130,6 +130,16 @@ Caused by:
 
 ```console
 $ zenctl doctor --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
+
+```console
+$ zenctl watchdog --rule dropped --count 1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open the Zenoh session
 

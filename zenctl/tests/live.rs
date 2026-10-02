@@ -582,6 +582,50 @@ async fn doctor_is_2_on_a_bus_with_nothing_to_judge() {
     assert!(rows.iter().all(|t| t["to"] == "unobservable"), "{run}");
 }
 
+/// `watchdog --count` exits on how its rules ended (#511): a `rate-above`
+/// under the 20 Hz telemetry is still firing at the last tick — 1; one far
+/// above it ends ok — 0; a silence claim longer than the run could watch
+/// ends unobservable — 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn watchdog_count_exits_on_how_its_rules_ended() {
+    let bus = Bus::up().await;
+    let key = cpu(&bus);
+    let bounded = |rule: String| {
+        vec![
+            "watchdog".to_string(),
+            "--rule".into(),
+            rule,
+            "--every".into(),
+            "1".into(),
+            "--count".into(),
+            "2".into(),
+        ]
+    };
+
+    let firing = bounded(format!("rate-above {key} 5"));
+    let firing: Vec<&str> = firing.iter().map(String::as_str).collect();
+    let run = bus.until(&firing, |r| r.code == 1).await;
+    exits(&run, 1);
+    assert_eq!(
+        run.rows("transition").last().map(|t| t["to"].clone()),
+        Some(json!("firing")),
+        "{run}"
+    );
+    assert!(run.stderr.contains("1 rule(s) ended firing"), "{run}");
+
+    let ok = bounded(format!("rate-above {key} 1000"));
+    let ok: Vec<&str> = ok.iter().map(String::as_str).collect();
+    let run = bus.until(&ok, |r| r.code == 0).await;
+    exits(&run, 0);
+
+    let quiet = bus.key(&format!("v1/{HOST}/telemetry/{PRODUCER}/nothere"));
+    let blind = bounded(format!("silent-for {quiet} 600"));
+    let blind: Vec<&str> = blind.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&blind).await;
+    exits(&run, 2);
+    assert!(run.stderr.contains("ended unobservable"), "{run}");
+}
+
 // ── config (RFC 05 §5.1, #500) ──────────────────────────────────────────
 
 /// The `parameter` row for one name.

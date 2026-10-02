@@ -305,6 +305,8 @@ zenctl doctor --base acme -c tcp/router:7447 --fail-on error
 is no verdict**: the session never opened, or it opened onto a bus where no
 producer holds an `alive` token and no router answers — a wrong endpoint or a
 wrong `--base` looks exactly like that, and it is never green (#510).
+`watchdog --count N` follows the same contract on how its rules ended:
+1 firing, 2 unobservable, 0 ok (#511).
 
 ## Things it will not do, on purpose
 

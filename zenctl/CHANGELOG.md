@@ -130,11 +130,18 @@ table) and on stderr (marcpardo/zenkey#510). `doctor --transitions` reads
 such a run as `unobservable` for every check. A run with anything in scope
 is unchanged: findings are still output by default.
 
+`watchdog --count N` exited 0 whatever its rules ended on. A bounded run now
+exits **1** if any rule ended firing, else **2** if any ended unobservable,
+else 0 — the transition stream is unchanged, and an unbounded run still
+exits 0 (marcpardo/zenkey#511).
+
 | before | now |
 |---|---|
 | `doctor --fail-on error` on a bus with no producer and no router answering → exit 0 | exit 2, `unobservable: "nothing in scope: …"` |
 | `doctor` (no `--fail-on`) on the same → exit 0 | exit 2 |
 | `doctor --transitions` on the same → every check `ok` | every check `unobservable` |
+| `watchdog --rule … --count N`, a rule still firing at the end → exit 0 | exit 1 |
+| `watchdog --rule … --count N`, a rule ending unobservable → exit 0 | exit 2 |
 
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 

@@ -1876,7 +1876,9 @@ pub(crate) struct WatchdogArgs {
     /// Seconds between evaluations — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 5.0)]
     pub(crate) every: f64,
-    /// Stop after N evaluations (default: run until interrupted).
+    /// Stop after N evaluations (default: run until interrupted). A bounded
+    /// run exits on how its rules ended: 1 if any is firing, else 2 if any
+    /// is unobservable, else 0.
     #[arg(long, value_name = "N")]
     pub(crate) count: Option<u64>,
     #[command(flatten)]

@@ -10,6 +10,10 @@
 //! Output is ndjson regardless of `--format`: a stream of transitions has
 //! one honest encoding — a table redraw would be a state display, which is
 //! exactly what this verb exists not to be.
+//!
+//! A run bounded by `--count` exits on how its rules *ended* (#511): 1 if any
+//! is firing, else 2 if any is unobservable, else 0 — through
+//! [`crate::exit::verdict`]. An unbounded run has no end to judge and exits 0.
 
 use std::io::Write as _;
 
@@ -112,5 +116,25 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
             String::new()
         }
     );
-    Ok(())
+    // A bounded run is a question with an answer (#511): how did its rules
+    // end? Any firing is the 1, else any unobservable the 2, else 0 —
+    // projected from the summary's own judgement, never a match here. It
+    // used to exit 0 whatever they ended on, so a cron job had to parse the
+    // stream to learn what `$?` should have told it. An unbounded run ends
+    // on Ctrl-C or a closed stream, and keeps its 0.
+    if count.is_none() {
+        return Ok(());
+    }
+    if !summary.firing.is_empty() {
+        eprintln!(
+            "watchdog: {} rule(s) ended firing: {}",
+            summary.firing.len(),
+            summary.firing.join("; ")
+        );
+    }
+    let judgement = summary.judgement();
+    if let zenkey_fleet::Judgement::Unobservable { reason } = &judgement {
+        eprintln!("watchdog: {reason} — exit 2, the reserved non-verdict");
+    }
+    crate::exit::verdict(&judgement)
 }
