@@ -13,13 +13,13 @@ that tooling: nothing application-specific is compiled in.
 zenctl node list --base acme -c tcp/127.0.0.1:7447
 ```
 
-> **The command tree moved (#307).** `topic echo` → `echo`, `topic pub` →
-> `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
-> retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
-> observation window is `--for <SECS>`; `why` exits 1 on a finding, and a
-> refused input exits 2 everywhere. No aliases, no shims — the old spellings
-> are gone. [`CHANGELOG.md`](CHANGELOG.md) has the full old→new table and the
-> exit-code contract.
+**For an operator**, in order: [Install](#install) ·
+[Production quickstart](#production-quickstart) ·
+[Session posture](#session-posture) · [Exit codes](#exit-codes) ·
+[Monitoring recipes](#monitoring-recipes) · [Write guards](#write-guards) ·
+[Every command](#every-command). The rest of this page is the reasoning behind
+the surface: what `--format` promises, where registry knowledge comes from, and
+what the tool will not do.
 
 `--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
 every key on the wire. Applications set it as their session namespace and never
@@ -29,11 +29,309 @@ base-less bus-root deployment whose keys start at `v1/`, the RFC v1.6 default �
 so against a default-configured fleet `zenctl` works with no `--base` at all.
 Don't know the base? `zenctl base list` discovers the bases actually in use.
 
+**Selectors are wire keys.** `--base` is for discovery and for the selectors
+zenctl composes itself; a selector you type is used exactly as typed. Under
+`--base prod`, `zenctl echo 'v1/**'` listens to a keyspace nobody publishes on
+— so zenctl says so on stderr (`hint: "v1/**" does not sit under base "prod" …
+did you mean "prod/v1/**"?`) and carries on. Leave the selector out and the
+verb watches `<base>/v1/**` for you.
+
+## Install
+
+Each release (bare tags, `X.Y.Z`) attaches a **linux x86_64** binary,
+`zenctl-X.Y.Z-linux-x86_64`, beside `SHA256SUMS` and the source tarball. Every
+other platform builds from source — and building from source is the install
+everywhere else:
+
+```bash
+cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --tag 0.12.0 --locked
+```
+
+`--locked` builds against the release's own `Cargo.lock`, the dependency set
+that release was tested with; leave it out and cargo resolves fresh versions.
+The toolchain is **Rust 1.98** (the workspace `rust-version`, pinned by
+`rust-toolchain.toml`). From a checkout or the release tarball, `cargo build
+--release -p zenctl --locked` does the same.
+
+`zenctl --version` names the build as well as the crate:
+
+```console
+$ zenctl --version
+zenctl 0.10.0 (0.12.0)
+```
+
+The first number is the crate's own version; the parenthesis is `git describe
+--tags --always --dirty` of the tree it was built from — the release tag, or
+`<tag>-<n>-g<commit>` between releases, `-dirty` for local edits. The release
+tarball carries its description through `git archive`; a build with neither
+git nor an archive behind it says `unknown`. Put that line in a bug report: it
+is the one fact that tells two builds apart.
+
+**Supported routers.** zenctl is built on zenoh **1.10** (the workspace pins
+`zenoh = "1.10"` with the `unstable` feature; the lock file holds 1.10.0), and
+its test suites — the live suite included — run that same zenoh on both ends
+of every session. That makes **zenohd 1.10.x** the tested line. Other zenohd
+versions are zenoh's own wire-compatibility question, and nothing here tests
+them.
+
+## Production quickstart
+
+Three steps: a zenoh config that reaches the secured router, a named context
+that remembers it, and a first question.
+
+**1. The zenoh config.** zenctl takes zenoh's own JSON5 (`--zenoh-config`) as
+its base layer, so TLS, mutual TLS, QUIC and usrpwd are all reachable without a
+flag of zenctl's own. [`examples/prod.json5`](examples/prod.json5) is a
+complete one — client mode, a `tls/` endpoint, a CA, a client certificate,
+usrpwd, multicast off — and a test opens a session through that very file, so
+it cannot drift from what zenctl parses:
+
+```json5
+{
+  mode: "client",
+  connect: { endpoints: ["tls/zenoh-router.example.net:7447"] },
+  scouting: { multicast: { enabled: false } },
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/zenctl/prod/ca.pem",
+        enable_mtls: true,
+        connect_certificate: "/etc/zenctl/prod/zenctl.pem",
+        connect_private_key: "/etc/zenctl/prod/zenctl-key.pem",
+        verify_name_on_connect: true,
+      },
+    },
+    auth: { usrpwd: { user: "zenctl-ops", password: "change-me" } },
+  },
+}
+```
+
+Keep it `0600` — it can hold a password. A file that sets a session
+`namespace` is refused: an explorer that stripped keys would be lying about the
+wire (RFC 09 §5). The router's side of the same certificates — its
+`access_control` block, keyed on the client certificate's CN — is what
+`zenctl acl gen` writes.
+
+**2. A named context**, so no command line has to carry the base and the file:
+
+```bash
+zenctl context create prod --base prod --zenoh-config /etc/zenctl/prod.json5 --select
+zenctl context show --format json | jq -r .base      # → prod
+```
+
+A context holds `--base`, `-c`/`-l` endpoints, `--registry` dirs, `--timeout`,
+`--scouting` and `--zenoh-config`; `zenctl context list|select|rm|edit` manage
+the file (`~/.config/zenkey-explorer/config.toml`, shared with zengui). Every
+value resolves flag > environment (`ZENCTL_BASE`, `ZENCTL_CONTEXT`,
+`ZENCTL_ZENOH_CONFIG`) > the context > the zenoh file, so `--context staging`
+or `-c tls/other:7447` overrides it for one invocation.
+
+**3. Ask.**
+
+```bash
+zenctl node list                                   # who is alive (liveliness roster)
+zenctl doctor --registry path/to/registry          # does the fleet match what we ship?
+zenctl echo --class state                          # current state traffic, decoded
+```
+
+## Session posture
+
+What the session every verb opens is, and is not (RFC 09 §5):
+
+* **A client.** No listener, no gossip, nothing the mesh can open a link to or
+  route through. `-l`/`--listen` (or a context that listens, or a config file
+  that states `mode`) is how you ask for a **peer**, and you should mean it.
+* **No multicast scouting**, with `--zenoh-config` too, unless the file itself
+  states `scouting.multicast.enabled` or you pass `--scouting`. A scouting
+  explorer joins whatever mesh answers. `zenctl scout` is the one verb where
+  multicast is on by default — it only listens for Hellos and opens no
+  session.
+* **No silent empty bus.** A router that does not answer fails the session,
+  and an endpoint that does not parse (`-c 127.0.0.1:7447`, no `tcp/`) is
+  refused by name: both exit **2** for every verb, `pub` and `retire`
+  included. A verb holding `--registry` dirs still answers from them, and says
+  so.
+* **Un-namespaced**, so it sees the wire as it is — including traffic from
+  outside the deployment, which is how a leak is spotted.
+
+## Exit codes
+
+One contract for the whole tool, written once in
+[`src/exit.rs`](src/exit.rs):
+
+| code | means | for example |
+|---|---|---|
+| **0** | asked, and the answer is clean | values came back; the assertion held; the act completed; a listing that found nothing is still an answer |
+| **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; `why` established a cause; an act (`pub`, `replay`, `gen`, `blob fetch`, `registry migrate`) failed |
+| **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
+
+Verdict verbs (`check *`, `why`) land **any** failure before the question was
+put on 2, so a dead bus never reads as a pass or as a finding.
+
+**Nagios and friends.** Their convention is 0 OK, 1 WARNING, 2 CRITICAL,
+3 UNKNOWN, and zenctl's 2 is the UNKNOWN, not the CRITICAL. Map it:
+
+```bash
+#!/bin/sh
+# check_zenkey_doctor — a Nagios/Icinga plugin over zenctl's exit contract.
+out=$(zenctl doctor --context prod --registry /srv/registry --fail-on error 2>&1)
+case $? in
+  0) echo "OK - fleet matches its contracts"; exit 0 ;;
+  1) echo "CRITICAL - $out" | head -n 5; exit 2 ;;
+  *) echo "UNKNOWN - no verdict: $out" | head -n 5; exit 3 ;;
+esac
+```
+
+## Monitoring recipes
+
+```bash
+# The fleet against what we ship: exit 1 on an error-severity finding.
+zenctl doctor --registry /srv/registry --fail-on error
+zenctl doctor --deep --sample 10 --for 30 --fail-on warning   # + freshness, coverage, live traffic
+
+# One expectation, for CI or a cron job: at least one health sample in 60 s.
+zenctl check expect 'prod/v1/*/state/sysinfo/health' --for 60 --at-least 1
+zenctl check expect 'prod/v1/*/telemetry/**' --for 30 --rate-min 1 --valid-payload
+zenctl check expect 'legacy/**' --for 60 --absent      # silence, asserted (2 if unprovable)
+
+# A producer against its own registry, as a JUnit report CI can read.
+zenctl check conform --producer sysinfo --registry /srv/registry --junit conform.xml
+
+# Prometheus: a scrape target (loopback by default; another address needs --i-know)…
+zenctl export --bind 127.0.0.1:9184 --validate --doctor-every 300
+# …or one fold for the node_exporter textfile collector.
+zenctl export --once --prom --for 10 > /var/lib/node_exporter/zenkey.prom.$$ \
+  && mv /var/lib/node_exporter/zenkey.prom.$$ /var/lib/node_exporter/zenkey.prom
+
+# Conditions, as ndjson transitions (ok / firing / unobservable); --count bounds a run.
+zenctl watchdog --rule 'silent-for prod/v1/*/state/sysinfo/health 120' \
+                --rule 'origin-down h-3fa9c2d41b7e' --rule dropped --count 12
+zenctl doctor --transitions --every 60                 # check-id changes, not states
+
+# Why is this key silent? Each rung established, not established, or not asked.
+zenctl why 'prod/v1/h-3fa9c2d41b7e/state/sysinfo/health' --for 10
+```
+
+`watchdog` and `doctor --transitions` print **changes**: the first evaluation
+states each baseline once, and an unchanged tick prints nothing. Read the
+stream (`jq 'select(.to == "firing")'`) rather than waiting for an exit. A
+drop under a completeness claim is `unobservable`, never `ok`. For alerting
+while nobody is watching a terminal, [`zenwatch`](../zenwatch/) is the daemon
+over the same vocabulary, with sinks.
+
+## Write guards
+
+zenctl can publish, call and serve, so the verbs that write ask before they
+reach further than one concrete thing:
+
+| verb | refused (exit 2) | to mean it |
+|---|---|---|
+| `pub` | a wildcard key (a blast radius, not a publication) | not overridable — name the key |
+| `pub --from ndjson`, `replay` | a put row on a wildcard key (refused and counted, exit 1) | not overridable |
+| `retire` | a wildcard; a key that is not state-shaped | `--i-know` for the non-state key |
+| `service call` | a `*` fan-out to a procedure nobody could establish as fan-out-safe | `--i-know`; a declared forbidden fan-out is never overridable |
+| `config set` | a windowed (`--confirm`) change with no read-back, from a script | `--yes` |
+| `replay` | a capture whose base differs from the target's, or empty onto empty | `--force-base` (always `--dry-run` first) |
+| `serve` | a wildcard key expression; `--complete` | `--i-know` |
+| `gen` | `--origin <host>` (publishing as a real host); `--fault`; more than 10 subjects | `--i-know` (faults also need an endpoint or base typed on the line); `--wide` |
+| `export` | a non-loopback `--bind` | `--i-know` |
+| `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
+| `bench rpc` | a procedure not declared `idempotent` | `--i-know` |
+
+Each refusal names its reason and comes before a session opens wherever the
+command line alone decides it. [`CHANGELOG.md`](CHANGELOG.md) has the
+before/after of every one.
+
+## Every command
+
+`zenctl --help` lists the tree; `zenctl <verb> --help` gives the long form, with
+the RFC sections behind each behaviour. Grouped the way the tree is built
+(nouns get verbs under them; acts and observations on traffic hang off the
+root; judgements are exit-coded):
+
+**Discover — what exists.**
+`zenctl base list` (the deployment bases in use; needs no `--base`) ·
+`zenctl node list|info` (the liveliness roster; one node's producers, versions,
+capabilities) · `zenctl topic list|info` (subjects the registry declares; one
+key refined against it) · `zenctl service list|info` (procedures) ·
+`zenctl interface list|show` (payload types) · `zenctl schema show <producer>`
+(the served `describe` shapes) · `zenctl admin routers|graph` (zenoh's admin
+space: routers and peers with version and locators; the mesh, `--dot` for
+Graphviz) · `zenctl scout` (raw scouting Hellos) · `zenctl key
+includes|intersects|canon` (key-expression algebra, offline).
+
+**Watch — live traffic.**
+`zenctl get <selector>` (a fan-in GET, every reply attributed to its key;
+`@/**` browses the admin space) · `zenctl echo` (subscribe and decode; `--seed`
+pulls current state first) · `zenctl rate` (per-key rates, `--bytes` for
+bandwidth) · `zenctl field --for 60` (per-field statistics: the stuck sensor,
+the vanished field, the field the schema never declared) · `zenctl timeline
+--for 10` (one merged ordering, a lane per origin, the clock stated; `--from`
+a capture).
+
+**Capture — keep what happened.**
+`zenctl record -o bus.zrec --for 30` (a capture, drops recorded where they
+fell) · `zenctl record -o incident.zrec --on 'silent-for prod/v1/** 30' --pre
+30` (armed: written only when a rule fires, with the thirty seconds before it
+and a state preamble) · `zenctl replay bus.zrec --dry-run` (replay is
+publishing: preview first) · `zenctl snapshot -o fleet.zsnap` (the fleet's
+current values, collected over a span) and `zenctl snapshot diff a.zsnap
+b.zsnap` (`--normalize-origins` across two deployments).
+
+**Act — write to the bus.**
+`zenctl pub <key> <body>` (through a declared publisher, encoded against the
+served schema; `--from ndjson` reads `echo`'s rows back) · `zenctl retire <key>`
+(an authoritative tombstone) · `zenctl service call <origin> <producer>
+<procedure>` (`--trace` subscribes first, then calls) · `zenctl config
+get|set|confirm|cancel|extend|persist` (a producer's live configuration, typed
+against its served schema, with confirmed changes driven to their end) ·
+`zenctl serve <keyexpr> <reply>` (a mock queryable that logs every ask) ·
+`zenctl gen --producer sysinfo` (registry-driven test traffic, every sample
+marked synthetic) · `zenctl blob locate|fetch` (bulk content: who holds it,
+and a verified fetch from one origin; `zenctl blob list` reads only the
+registry).
+
+**Judge — exit-coded.**
+`zenctl check expect` (an expectation over a window) · `zenctl check cutover`
+and `zenctl check probe` (the two halves of cutover acceptance: the old family
+silent while the new one speaks; a consumer-shaped probe with concrete keys) ·
+`zenctl check retired` (which `[[deprecated]]` subjects are actually gone) ·
+`zenctl check conform` (a producer's registry as a conformance suite) ·
+`zenctl check schema` (one payload against its schema) · `zenctl doctor` (the
+fleet against the contracts it claims) · `zenctl why <key>` (why it is silent)
+· `zenctl watchdog --rule …` (conditions, as transitions) · `zenctl export`
+(the bus and its contract as Prometheus metrics, the observer's own blind spots
+included).
+
+**The registry — as a document.** See [below](#registry--the-registry-as-a-document):
+`zenctl registry export|diff|lint|lock|consumers|impact|infer|migrate`.
+
+**Router configuration — generated, then checked.**
+`zenctl storage list` (configured storages, and which declared state they
+cover) · `zenctl storage gen --deployment storages.toml --json5` (the
+`plugins.storage_manager` block, lifespans derived from the registry's
+`ttl_s`; `--check` compares a live router) · `zenctl acl gen --enrollment
+enroll.toml --json5` (the `access_control` block, one principal per
+certificate CN; `--check` likewise).
+
+**The tool itself.**
+`zenctl context …` (named connection contexts, above) · `zenctl cache
+show|refresh|clear` (the slice cache behind completion) · `zenctl completions
+<shell>` · `zenctl bench rpc` (procedure latency, per origin).
+
+> **The command tree moved (#307).** `topic echo` → `echo`, `topic pub` →
+> `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
+> retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
+> observation window is `--for <SECS>`; `why` exits 1 on a finding, and a
+> refused input exits 2 everywhere. No aliases, no shims — the old spellings
+> are gone. [`CHANGELOG.md`](CHANGELOG.md) has the full old→new table and the
+> exit-code contract.
+
 ## Two registry sources, kept visibly apart
 
 | | Answers from | Works when the fleet is down | Tells you |
 |---|---|---|---|
-| **`--registry <dir>`** | local `registry/*.toml` files | yes | what *should* exist (declared) |
+| **`--registry <dir>`** | local registry files — `*.toml`, or `*.kdl` (RFC 08 §5.1) | yes | what *should* exist (declared) |
 | **the bus** (default) | each producer's served introspect slice | no | what *does* exist (served) |
 
 The gap between those two is where drift lives, and `doctor` is the command
@@ -73,7 +371,7 @@ register that way by design, because their metric tree belongs to the polled
 device. `topic list` flags those `[open-ended]`; `echo` is what
 enumerates them.
 
-## On-bus commands
+## A cheat sheet
 
 ```bash
 zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
@@ -225,12 +523,27 @@ producer serving no `describe` says so — undescribed is not shapeless.
 ## `registry` — the registry as a document
 
 ```bash
-zenctl registry export --as toml       # round-trips back through --registry
+zenctl registry export --as toml       # round-trips back through --registry (--as kdl too)
 zenctl registry export --as jsonschema # bundled from the served describe sets
 zenctl registry export --as asyncapi   # channels from subjects, ops from procedures
 zenctl registry diff                   # local --registry dirs vs what the fleet serves
 zenctl registry lint <dir>             # the consumer build's own RFC 08 §5 lints
+zenctl registry lock <dir>             # write/update registry.lock; an incompatible edit is refused
+zenctl registry consumers sysinfo/health  # who declares a reader of it, one row per session
+zenctl registry impact sysinfo/health  # its readers, storage coverage, family, deprecation — one document
+zenctl registry infer --out draft/ --for 60   # a draft registry from the wire, marked draft
+zenctl registry migrate --to kdl registry --out registry-kdl  # TOML → KDL, all or nothing
 ```
+
+A registry directory may be written in TOML or in KDL — the same document in
+two spellings (RFC 08 §5.1) — and every `--registry <dir>` reads either.
+`lock` keeps the compatibility pins (RFC 08 §3.1): additive evolution and
+`[[deprecated]]` retirement regenerate cleanly, an incompatible change to an
+existing path is refused, and `--force` overrides out loud. `consumers` and
+`impact` are what to run *before* changing a subject: a declaration is not
+proof of use, and an admin space that does not answer reads "not asked",
+never "nobody". `infer`'s draft is refused by `zenkey-build` until a review
+removes the marker; `registry lint --allow-drafts` checks it meanwhile.
 
 `lint` runs `zenkey-build`'s lints, not a second copy of them — the diagnostic
 is byte-for-byte what the application's `build.rs` would print, which is the
@@ -318,16 +631,10 @@ wrong `--base` looks exactly like that, and it is never green (#510).
   stderr with its `error/...` name.
 - **No namespace.** RFC 09 §5: debug tools run *without* the session namespace
   and spell full keys — "the honest view of what is on the wire".
-- **Scouting is off by default** — with `--zenoh-config` too, unless the file
-  itself states `scouting.multicast.enabled`. A scouting explorer joins
-  whatever mesh it can find, which is how a throwaway session ends up talking
-  to a production fleet. `--scouting` is opt-in, and you should mean it.
-- **Not a peer.** The session is a zenoh *client* of the endpoints you name: no
-  listener, no gossip, nothing the mesh can open links to or route through
-  (RFC 09 §5). `--listen` (or a config file that states `mode`) is how you ask
-  for a peer. A client also fails when its router does not answer, so a dead
-  or typo'd endpoint exits 2 instead of reading as an empty bus — and one that
-  does not parse (`-c 127.0.0.1:7447`, no `tcp/`) is refused by name.
+- **No scouting, and not a peer**, unless you ask — see
+  [Session posture](#session-posture). A scouting explorer joins whatever mesh
+  it can find, which is how a throwaway session ends up talking to a
+  production fleet.
 - **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
   *definitions* with the owning applications, and this tool has no opinion
   about their contents. But since RFC 08 §7, a producer **serves** its shapes
