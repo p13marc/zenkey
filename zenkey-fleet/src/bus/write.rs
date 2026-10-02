@@ -971,7 +971,7 @@ mod tests {
     /// … and the only publish path asks it, so no frontend can forget to.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_wildcard_publication_is_never_declared() {
-        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
+        let session = crate::bus::session::standalone().await;
         let err = declare_publication(&session, "prod/v1/**", QosProfile::Sampled, None)
             .await
             .unwrap_err();
