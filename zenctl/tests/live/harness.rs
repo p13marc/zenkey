@@ -152,6 +152,9 @@ impl Drop for Bus {
         for t in &self.tasks {
             t.abort();
         }
+        // The base names this run's pid, so a home left behind is never
+        // reused — only accumulated.
+        let _ = std::fs::remove_dir_all(&self.home);
     }
 }
 
