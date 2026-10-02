@@ -561,9 +561,10 @@ pub(crate) enum Command {
     Interface(InterfaceCmd),
     /// Payload schemas as producers serve them.
     ///
-    /// The `describe` procedure (RFC 08 §7). The shapes are served data, not registry data: the TOMLs carry type
-    /// *names*. A producer that serves no `describe` degrades honestly — it
-    /// is not an error. Validating a payload against one is `check schema`.
+    /// The `describe` procedure (RFC 08 §7). The shapes are served data, not
+    /// registry data: the TOMLs carry type *names*. A producer that serves no
+    /// `describe` degrades honestly — it is not an error. Validating a payload
+    /// against one is `check schema`.
     #[command(subcommand)]
     Schema(SchemaCmd),
     /// The registry as a document: export it, diff it, lint it, lock it.
@@ -602,11 +603,12 @@ pub(crate) enum Command {
     // ── Wire verbs: acts and observations on live traffic ─────────────────
     /// Query any selector and print every reply, attributed to its key.
     ///
-    /// The fleet discipline (RFC 05 §2.1): target All, consolidation None, every reply attributed by its own
-    /// key; error envelopes render as errors (RFC 05 §3), and payloads ride
-    /// the same rendering ladder as `echo` (served-schema decode →
-    /// structural → text → hex). `@/**` browses the zenoh admin space.
-    /// Exit codes: 0 values only, 1 an error reply, 2 silence.
+    /// The fleet discipline (RFC 05 §2.1): target All, consolidation None,
+    /// every reply attributed by its own key; error envelopes render as errors
+    /// (RFC 05 §3), and payloads ride the same rendering ladder as `echo`
+    /// (served-schema decode → structural → text → hex). `@/**` browses the
+    /// zenoh admin space. Exit codes: 0 values only, 1 an error reply, 2
+    /// silence.
     Get(GetArgs),
     /// Subscribe and print decoded samples (on-bus).
     ///
@@ -654,11 +656,11 @@ pub(crate) enum Command {
     Field(FieldArgs),
     /// Capture a selector's traffic to a .zrec file.
     ///
-    /// A capture (RFC 09 §5.2), taken through the Monitor: a bus that outruns the disk surfaces as drop
-    /// records *in the file*, where the gaps happened (RFC 09 §5.1 O6) —
-    /// a capture is a bounded observer and says what it cost. Replay with
-    /// `zenctl replay`; the file is ndjson (one row per line, payloads
-    /// lossless as base64 `bytes`), so `jq` reads it too.
+    /// A capture (RFC 09 §5.2), taken through the Monitor: a bus that outruns
+    /// the disk surfaces as drop records *in the file*, where the gaps happened
+    /// (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it
+    /// cost. Replay with `zenctl replay`; the file is ndjson (one row per line,
+    /// payloads lossless as base64 `bytes`), so `jq` reads it too.
     Record(RecordArgs),
     /// Replay a .zrec capture onto the bus (this publishes).
     ///
@@ -685,59 +687,59 @@ pub(crate) enum Command {
     Timeline(TimelineArgs),
     /// Take a fleet snapshot to a .zsnap file, or compare two with `diff`.
     ///
-    /// The snapshot of RFC 13 §4.4: one fan-in GET per selector, folded last-writer-wins per key, each
-    /// row carrying what the observer could establish: the exact payload,
-    /// whose clock stamped it (O7), the registry rung (O2), the three-valued
-    /// verdict, and who HOLDS it — `live` (its origin held an alive token
-    /// during the collection, and whether the replier was the stamper),
-    /// `storage_only` (a value answered, nobody is saying it now), or
-    /// `unattributed` (the roster was not asked, or the key names no
-    /// origin). A snapshot is collected OVER a span, never at an instant,
-    /// and every rendering says so. Read, never replayed: seeding a fleet
-    /// from a file is `replay --seed-state`. Exit 0 wrote the file, 2
+    /// The snapshot of RFC 13 §4.4: one fan-in GET per selector, folded
+    /// last-writer-wins per key, each row carrying what the observer could
+    /// establish: the exact payload, whose clock stamped it (O7), the registry
+    /// rung (O2), the three-valued verdict, and who HOLDS it — `live` (its
+    /// origin held an alive token during the collection, and whether the
+    /// replier was the stamper), `storage_only` (a value answered, nobody is
+    /// saying it now), or `unattributed` (the roster was not asked, or the key
+    /// names no origin). A snapshot is collected OVER a span, never at an
+    /// instant, and every rendering says so. Read, never replayed: seeding a
+    /// fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2
     /// nobody answered (silence is not a snapshot).
     Snapshot(SnapshotArgs),
     /// Serve the bus and its contract as Prometheus metrics.
     ///
     /// Key series named and united by the registry, and the observer's own
-    /// blind spots as first-class series beside them (#228).
-    /// `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
-    /// series exists only where the registry declares the subject (names
-    /// and units from `unit`/`kind`, never sniffed from the leaf; every
-    /// `{var}` a label; the declared `cardinality` bounds the population
-    /// and what it refuses is counted). What every other exporter hides is
-    /// exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the
-    /// four evicted populations (never summed), coalesced and unstamped
+    /// blind spots as first-class series beside them (#228). `zenctl export
+    /// --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a
+    /// general exporter: a series exists only where the registry declares the
+    /// subject (names and units from `unit`/`kind`, never sniffed from the
+    /// leaf; every `{var}` a label; the declared `cardinality` bounds the
+    /// population and what it refuses is counted). What every other exporter
+    /// hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`,
+    /// the four evicted populations (never summed), coalesced and unstamped
     /// samples; a series that stopped keeps its labels and state — evicted,
-    /// origin_down, retired — and loses its value, so absence and silence
-    /// are different bytes; payload verdicts are three populations, the
-    /// third `not_validated`; the selectors watched and the planes `**`
-    /// cannot reach ride `zenkey_scope_info`. Killing a producer turns its
-    /// series `origin_down`; forcing drops moves the counter and marks the
-    /// series fed meanwhile; scraping twice with no traffic is
-    /// byte-identical. A foreground observer, explicitly launched, one
-    /// process per invocation, sharing nothing, caching no discovery,
-    /// serving nothing another zenctl reads — the permitted second kind
-    /// (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP,
-    /// histograms and summaries, push gateways and remote write —
-    /// `/metrics` over plain HTTP is the whole surface.
+    /// origin_down, retired — and loses its value, so absence and silence are
+    /// different bytes; payload verdicts are three populations, the third
+    /// `not_validated`; the selectors watched and the planes `**` cannot reach
+    /// ride `zenkey_scope_info`. Killing a producer turns its series
+    /// `origin_down`; forcing drops moves the counter and marks the series fed
+    /// meanwhile; scraping twice with no traffic is byte-identical. A
+    /// foreground observer, explicitly launched, one process per invocation,
+    /// sharing nothing, caching no discovery, serving nothing another zenctl
+    /// reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1).
+    /// REFUSED up front: OTLP, histograms and summaries, push gateways and
+    /// remote write — `/metrics` over plain HTTP is the whole surface.
     Export(ExportArgs),
     /// Stand up a mock queryable that answers one keyexpr and logs every ask.
     ///
-    /// Every query on the keyexpr gets one static body (#121). The log doubles as a "who is querying this key" probe. Deliberately
-    /// no reply scripting — static and file bodies cover the dev-loop case;
-    /// the shell covers dynamic replies by restarting serve. (nuze and zsak
-    /// own the embedded-language lane, at the cost of a Nushell dependency
-    /// and a linked libpython respectively.)
+    /// Every query on the keyexpr gets one static body (#121). The log doubles
+    /// as a "who is querying this key" probe. Deliberately no reply scripting —
+    /// static and file bodies cover the dev-loop case; the shell covers dynamic
+    /// replies by restarting serve. (nuze and zsak own the embedded-language
+    /// lane, at the cost of a Nushell dependency and a linked libpython
+    /// respectively.)
     Serve(ServeArgs),
     /// Generate test traffic from the registry: a mock producer.
     ///
     /// Registry-driven (#162): every declared subject of a producer,
     /// schema-synthesized payloads, declared QoS, class-conscious rates — a
-    /// mock producer for testing consumers. The full plan prints BEFORE anything is published; every sample
-    /// carries the RFC 09 §5.3 synthetic marker
-    /// ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window
-    /// or a capture can tell this traffic from real. Events stay inside
+    /// mock producer for testing consumers. The full plan prints BEFORE
+    /// anything is published; every sample carries the RFC 09 §5.3 synthetic
+    /// marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen
+    /// window or a capture can tell this traffic from real. Events stay inside
     /// their declared rate budget on write-once keys. A run wider than 10
     /// subjects needs --wide; faults need --i-know.
     Gen(GenArgs),
@@ -754,34 +756,35 @@ pub(crate) enum Command {
     /// Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict.
     ///
     /// All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the
-    /// question could not be asked or proven). Everything under here reserves its 2 — which is what makes `check
-    /// expect --absent` legitimate at all, and what stops a dead bus reading
-    /// as a pass. CI recipes should run isolated per RFC 09 §0: multicast
-    /// scouting off, gossip on, explicit endpoints — a test that scouts is
-    /// not isolated, and the contamination flows both ways.
+    /// question could not be asked or proven). Everything under here reserves
+    /// its 2 — which is what makes `check expect --absent` legitimate at all,
+    /// and what stops a dead bus reading as a pass. CI recipes should run
+    /// isolated per RFC 09 §0: multicast scouting off, gossip on, explicit
+    /// endpoints — a test that scouts is not isolated, and the contamination
+    /// flows both ways.
     #[command(subcommand)]
     Check(CheckCmd),
     /// Check the fleet against the contracts it claims: drift, freshness, QoS.
     ///
-    /// Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between introspection and the checked-in TOML
-    /// is a finding, not an ambiguity." This prints the findings — `registry
-    /// diff` shows the two registries side by side; doctor *judges* the
-    /// deployment. The local truth comes from `--registry <dir>`; without it
-    /// only the roster-vs-introspect check runs.
+    /// Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between
+    /// introspection and the checked-in TOML is a finding, not an ambiguity."
+    /// This prints the findings — `registry diff` shows the two registries side
+    /// by side; doctor *judges* the deployment. The local truth comes from
+    /// `--registry <dir>`; without it only the roster-vs-introspect check runs.
     Doctor(DoctorArgs),
     /// Explain why a key is silent, one established fact at a time.
     ///
-    /// The non-verdict, itemised (#214): a rung ladder over facts the engine already holds: scope reach,
-    /// grammar, registry declaration, the liveliness roster, declared
-    /// publishers, storage coverage, a stored value, freshness, admin
-    /// reachability. Every rung answers established / not-established (with
-    /// its reason) / NOT ASKED — "not asked" is never rendered as "no"
-    /// (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1).
-    /// "No publisher declared" never reads as a bug: publishers declare
-    /// lazily, on the first publication (RFC 08 §6.1). The default run costs
-    /// the control plane only; `--for` adds the one data-plane rung.
-    /// Exit 0 = nothing found and everything checked looks healthy; 1 = a
-    /// cause was established — the finding; 2 = the observation was impaired.
+    /// The non-verdict, itemised (#214): a rung ladder over facts the engine
+    /// already holds: scope reach, grammar, registry declaration, the
+    /// liveliness roster, declared publishers, storage coverage, a stored
+    /// value, freshness, admin reachability. Every rung answers established /
+    /// not-established (with its reason) / NOT ASKED — "not asked" is never
+    /// rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict
+    /// (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers
+    /// declare lazily, on the first publication (RFC 08 §6.1). The default run
+    /// costs the control plane only; `--for` adds the one data-plane rung. Exit
+    /// 0 = nothing found and everything checked looks healthy; 1 = a cause was
+    /// established — the finding; 2 = the observation was impaired.
     Why(WhyArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
@@ -864,11 +867,12 @@ pub(crate) enum CheckCmd {
     },
     /// Cutover acceptance: probe one origin with concrete keys, as a consumer.
     ///
-    /// Half two of RFC 09 §6: a consumer-shaped, CONCRETE-KEY probe. "A probe MUST build its keys the way the product builds them" — a
-    /// `*`-origin probe cannot catch a broken origin path. An origin id is
-    /// called directly; a hostname resolves through the RFC 06 §6 identity
-    /// bridge first, and the probe FAILS if the bridge yields nothing.
-    /// Fanning out is what `blob locate` does; this verb refuses to.
+    /// Half two of RFC 09 §6: a consumer-shaped, CONCRETE-KEY probe. "A probe
+    /// MUST build its keys the way the product builds them" — a `*`-origin
+    /// probe cannot catch a broken origin path. An origin id is called
+    /// directly; a hostname resolves through the RFC 06 §6 identity bridge
+    /// first, and the probe FAILS if the bridge yields nothing. Fanning out is
+    /// what `blob locate` does; this verb refuses to.
     Probe(CheckProbeArgs),
     /// Run a producer's registry as a conformance suite against the bus.
     ///
@@ -1061,9 +1065,10 @@ pub(crate) enum AdminCmd {
     },
     /// The mesh as the admin space answers it: nodes, edges, mentions.
     ///
-    /// #118: nodes, edges, and who only got mentioned. Their pictures are unlabeled circles; ours says which of admin space
-    /// and liveliness backs each element. Nodes whose admin space is off
-    /// render "heard of, not queryable" — never omitted.
+    /// #118: nodes, edges, and who only got mentioned. Their pictures are
+    /// unlabeled circles; ours says which of admin space and liveliness backs
+    /// each element. Nodes whose admin space is off render "heard of, not
+    /// queryable" — never omitted.
     Graph(AdminGraphArgs),
 }
 
@@ -1832,9 +1837,10 @@ pub(crate) struct SnapshotArgs {
 pub(crate) enum SnapshotSub {
     /// Compare two .zsnap files, offline.
     ///
-    /// No bus. Both spans are stated, the facets (value, verdict, registration, holder) stay apart, and an
-    /// origin an alignment could not pair is listed, never dropped.
-    /// Exit 0 identical, 1 they differ, 2 a file could not be read.
+    /// No bus. Both spans are stated, the facets (value, verdict, registration,
+    /// holder) stay apart, and an origin an alignment could not pair is listed,
+    /// never dropped. Exit 0 identical, 1 they differ, 2 a file could not be
+    /// read.
     Diff(SnapshotDiffArgs),
 }
 
