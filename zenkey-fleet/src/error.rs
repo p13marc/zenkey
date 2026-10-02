@@ -27,7 +27,7 @@
 //! | Variant | The caller should | `zenctl` exits |
 //! |---|---|---|
 //! | [`Unaskable`](Error::Unaskable) | fix the input | 2 — no verdict |
-//! | [`Bus`](Error::Bus) | retry, or check the fleet | 1, or 2 on a verdict verb |
+//! | [`Bus`](Error::Bus) | retry, or check the fleet | 1, or 2 on a verdict verb or when the session never opened (#503) |
 //! | [`Io`](Error::Io) | check the path | 1, or 2 on a verdict verb |
 //! | [`Malformed`](Error::Malformed) | distrust the peer | 1 |
 //! | [`Internal`](Error::Internal) | file a bug against this crate | 1 |

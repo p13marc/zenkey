@@ -1531,9 +1531,7 @@ mod tests {
     /// the failing row's own error is what comes back.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_row_the_bus_refuses_tears_down_and_still_reports_itself() {
-        let session = crate::bus::session::open(&[], &[], false)
-            .await
-            .expect("a standalone peer");
+        let session = crate::bus::session::standalone().await;
         let good = SampleRow {
             key: "v1/h-aaaaaaaaaaaa/state/demo/health".into(),
             ..SampleRow::default()

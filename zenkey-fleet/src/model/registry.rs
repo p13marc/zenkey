@@ -833,7 +833,7 @@ mod tests {
     /// from the bus, no invented disagreements.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn union_degrades_to_dirs_when_the_bus_is_silent() {
-        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
+        let session = crate::bus::session::standalone().await;
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
         let out = SliceSet::from_union(

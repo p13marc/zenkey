@@ -13,10 +13,17 @@ use zenoh::config::WhatAmIMatcher;
 
 /// A peer session with multicast on should be heard by a scout on the same
 /// segment within a generous deadline.
+///
+/// A peer **because it listens** (#501): with no endpoint of its own the
+/// explorer session is a client, and a client neither answers scouts nor
+/// opens without something to connect to.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "multicast is unreliable/absent on CI runners; run locally with --ignored"]
 async fn a_scout_hears_a_multicasting_peer() {
-    let _peer = zenkey_fleet::bus::session::open(&[], &[], true)
+    let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+    let endpoint = format!("tcp/127.0.0.1:{}", held.local_addr().unwrap().port());
+    drop(held);
+    let _peer = zenkey_fleet::bus::session::open(&[], &[endpoint], true)
         .await
         .unwrap();
     let stream = zenkey_fleet::scout(WhatAmIMatcher::empty().router().peer().client(), &[], &[])

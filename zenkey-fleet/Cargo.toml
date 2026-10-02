@@ -61,6 +61,13 @@ sipper = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# A `--zenoh-config` file is read twice: by zenoh, which fills every key the
+# file left out with its default, and raw, to learn which keys the file
+# actually *states* — the explorer's posture (client, multicast off) yields to
+# a stated choice and to nothing else (#501, #502). JSON5 and YAML because
+# those are the dialects `zenoh::Config::from_file` accepts.
+json5 = { workspace = true }
+serde_yaml = { workspace = true }
 # The `.zrec` row dialect carries wire payloads lossless (RFC 09 §5.2) —
 # `"value"` is a rendering; `"bytes"` is the payload.
 base64 = { workspace = true }

@@ -895,7 +895,7 @@ mod tests {
     /// declared forbidden-fanout write never leaves the process.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fleet_calls_to_forbidden_fanout_are_refused() {
-        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
+        let session = crate::bus::session::standalone().await;
         let slices = slice_with_proc("write", Some("forbidden"));
         let err = call(
             &crate::Fleet::new(&session, ""),

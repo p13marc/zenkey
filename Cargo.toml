@@ -147,7 +147,14 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "rustls-tls"] }
 # zenwatch's config dialect (#388): comments and trailing commas in a file an
 # operator edits by hand. Already in the lock — zenoh's own config is JSON5.
+# zenkey-fleet reads it too (#501, #502): which keys a `--zenoh-config` file
+# *states*, which `zenoh::Config::from_file` cannot say once it has filled the
+# defaults in.
 json5 = "1.0"
+# The other half of that question: zenoh also reads `.yaml`/`.yml` config
+# files, through exactly this crate. Already in the lock (zenoh-config's own
+# YAML reader), so the explorer reads a YAML file with the parser zenoh did.
+serde_yaml = "0.9"
 
 # Internal
 zenkey = { version = "0.11.0", path = "zenkey" }
