@@ -6,7 +6,13 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased
+## 0.11.0 (2026-10-02) — zenctl in production
+
+Built for a production bus (marcpardo/zenkey#498). **Scripts should read
+the tables below before upgrading**: no spelling moved, but several
+invocations that used to write, or exit 0, now refuse with exit 2 or exit
+on a judgement — that is the point of the release. The session is a Zenoh
+client by default; `--version` names the commit it was built from.
 
 ### The session stops being a peer (chunk DQ)
 
@@ -99,7 +105,7 @@ so it now needs `--yes` from a script (or a terminal's yes). Without
 `--confirm` nothing changed: RFC 05 §5.1 has the producer refuse a reach
 change that carries no window.
 
-| 0.10.0 | Unreleased | to mean it |
+| 0.10.0 | 0.11.0 | to mean it |
 |---|---|---|
 | `pub 'prod/v1/**' x` — exit 0, delivered | exit 2 | not overridable: name the concrete key |
 | `pub --from ndjson` put row on a wildcard — published | refused and counted, exit 1 | not overridable |
@@ -200,7 +206,7 @@ posture, the exit contract with a Nagios mapping, monitoring recipes, the
 write guards, and every command — a test fails when a top-level verb goes
 unnamed.
 
-| 0.10.0 | Unreleased | to mean it |
+| 0.10.0 | 0.11.0 | to mean it |
 |---|---|---|
 | `record -o cap.zrec`, `cap.zrec` exists — truncated, exit per the run | exit 2, the file untouched | `--overwrite` |
 | `record -o cap.zrec --on <rule> --pre S`, `cap.zrec` exists — truncated when the rule fired | exit 2 before arming | `--overwrite` |
