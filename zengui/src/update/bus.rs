@@ -191,8 +191,19 @@ pub(crate) fn update(
             Task::batch([discover, contexts, start_monitor(dep), load_slices(dep)])
         }
         BusMsg::SessionOpened(Err(e)) => {
+            // A transport that would not come up leaves the `--registry` dirs
+            // answerable (#196): they load alone, and the link still says it
+            // failed. A config the user named stays their error — no
+            // answering past it. Before #501 a dead router opened a peer
+            // session onto nothing, and the union loaded the dirs by accident.
+            let dirs = &dep.settings.registry;
+            let load = if !dirs.is_empty() && services::link::never_opened(&e) {
+                services::sweep::slices_from_dirs(dirs.clone())
+            } else {
+                Task::none()
+            };
             obs.link = LinkState::Failed(e);
-            Task::none()
+            load
         }
         BusMsg::MonitorStarted(Ok(monitor)) => {
             obs.monitor = Some(Arc::clone(&monitor));
