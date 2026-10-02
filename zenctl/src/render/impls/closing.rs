@@ -214,7 +214,7 @@ impl Render for ReplayReport {
         let mut notes = Vec::new();
         if self.malformed > 0 || self.refused > 0 {
             notes.push(Note::coverage(format!(
-                "{} malformed row(s), {} refused delete row(s) — counted, not silently \
+                "{} malformed row(s), {} refused row(s) — counted, not silently \
                  skipped",
                 self.malformed, self.refused
             )));

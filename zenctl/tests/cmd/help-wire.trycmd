@@ -211,7 +211,7 @@ Usage: zenctl pub [OPTIONS] <--from <FROM>|KEY> [BODY]
 
 Arguments:
   [KEY]
-          Full wire key to publish on (omit with --from ndjson)
+          Full wire key to publish on (concrete — wildcards are refused; omit with --from ndjson)
 
   [BODY]
           Payload: inline text, `@file`, or `-` for stdin (omit with --from)
@@ -224,7 +224,7 @@ Options:
           - ndjson: The echo/export row shape, one JSON object per stdin line
 
       --i-know
-          With --from: delete rows on keys that are not state-shaped are refused (and counted) unless this is passed — RFC 04 §1.2 (v1.12) prices the off-state tombstone even in a pipe
+          With --from: delete rows on keys that are not state-shaped are refused (and counted) unless this is passed — RFC 04 §1.2 (v1.12) prices the off-state tombstone even in a pipe. A row on a wildcard key is refused either way
 
       --qos <QOS>
           QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame. Defaults to the subject's declared profile when the key refines against a loaded registry, else `sampled` — either way the choice and its source are printed (#158)

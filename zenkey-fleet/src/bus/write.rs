@@ -51,12 +51,18 @@ impl std::fmt::Debug for Publication {
 /// The profile maps to the wire in one place: reliability, congestion
 /// control, priority, and the express bit (RFC 04 §3 — `alert` and `frame`
 /// are the express profiles; nothing in the workspace ever set it before).
+///
+/// A wildcard key is refused, never declared ([`check_concrete`], #504).
 pub async fn declare_publication(
     session: &Session,
     key: &str,
     qos: QosProfile,
     encoding: Option<&str>,
 ) -> Result<Publication> {
+    // The only publish path refuses the blast radius itself (#504), so no
+    // frontend can forget to: a caller that wants the refusal before a
+    // session opens asks `check_concrete` first, as `zenctl pub` does.
+    check_concrete(key, WriteAct::Put)?;
     let publisher = session
         .declare_publisher(key.to_string())
         .reliability(qos.reliability())
@@ -154,6 +160,46 @@ impl Publication {
     }
 }
 
+/// The two acts a key is written with — what [`check_concrete`] names in
+/// its refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteAct {
+    /// A put: a sample on a declared publisher.
+    Put,
+    /// A tombstone (RFC 04 §1.2).
+    Retire,
+}
+
+/// Refuse a write addressed to a wildcard — the one refusal every write
+/// path shares, and the one no `force` overrides (#504).
+///
+/// A tombstone was the first act to carry it (RFC 04 §1.2, v1.12); a put
+/// is the same blast radius with a payload attached: it is delivered to
+/// every subscriber whose subscription intersects it, across every
+/// producer's keys, and RFC 07 §3 makes a publisher's key concrete by rule.
+/// `zenctl pub 'prod/v1/**' x` used to exit 0 with "published". `$` counts:
+/// the only place it may stand in a key expression is `$*`.
+pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
+    if !key.contains('*') && !key.contains('$') {
+        return Ok(());
+    }
+    let why = match act {
+        WriteAct::Retire => {
+            "a tombstone is addressed to one concrete key; a wildcard delete is not \
+             an operator act, it is a blast radius (RFC 04 §1.2, v1.12)"
+        }
+        WriteAct::Put => {
+            "a put is addressed to one concrete key (RFC 07 §3: a publisher always \
+             names its own); a wildcard put reaches every subscriber it intersects, \
+             across every producer's keys — not an operator act, a blast radius"
+        }
+    };
+    Err(Error::unaskable(
+        key,
+        format!("is a wildcard — {why}. Not overridable."),
+    ))
+}
+
 /// What a key is, for the purpose of retiring it — the guard's positive
 /// verdict, so callers print facts instead of re-deriving them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,14 +236,7 @@ pub fn check_retire(
     slices: Option<&SliceSet>,
     force: bool,
 ) -> Result<RetireClass> {
-    if key.contains('*') || key.contains('$') {
-        return Err(Error::unaskable(
-            key,
-            "is a wildcard — a tombstone is addressed to one concrete key; a \
-             wildcard delete is not an operator act, it is a blast radius \
-             (RFC 04 §1.2, v1.12). Not overridable.",
-        ));
-    }
+    check_concrete(key, WriteAct::Retire)?;
     let facts = crate::model::facts::describe_key(base, key, slices).facts;
     use crate::model::facts::{ClassKind, KeyShape, Registration};
     match &facts.shape {
@@ -788,6 +827,43 @@ mod tests {
                 .to_string();
             assert!(err.contains("blast radius"), "{err}");
         }
+    }
+
+    /// #504: the wildcard refusal is one function, and a put meets it as
+    /// a tombstone does — `$*` included, a concrete key untouched.
+    #[test]
+    fn a_wildcard_write_is_refused_whatever_the_act() {
+        for key in [
+            "prod/v1/**",
+            "v1/*/state/sysinfo/health",
+            "v1/h-3fa9c2d41b7e/$*",
+        ] {
+            for act in [WriteAct::Put, WriteAct::Retire] {
+                let err = check_concrete(key, act).unwrap_err();
+                assert!(err.is_unaskable(), "a refused input, exit 2: {err}");
+                let err = err.to_string();
+                assert!(err.contains("is a wildcard"), "{err}");
+                assert!(err.contains("blast radius"), "{err}");
+                assert!(err.contains("Not overridable"), "{err}");
+            }
+        }
+        let put = check_concrete("prod/v1/**", WriteAct::Put)
+            .unwrap_err()
+            .to_string();
+        assert!(put.contains("RFC 07 §3"), "{put}");
+        assert!(put.contains("every subscriber"), "{put}");
+        assert!(check_concrete("v1/h-3fa9c2d41b7e/state/sysinfo/health", WriteAct::Put).is_ok());
+    }
+
+    /// … and the only publish path asks it, so no frontend can forget to.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_wildcard_publication_is_never_declared() {
+        let session = crate::bus::session::open(&[], &[], false).await.unwrap();
+        let err = declare_publication(&session, "prod/v1/**", QosProfile::Sampled, None)
+            .await
+            .unwrap_err();
+        assert!(err.is_unaskable(), "{err}");
+        assert!(err.to_string().contains("blast radius"), "{err}");
     }
 
     #[test]

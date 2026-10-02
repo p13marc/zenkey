@@ -278,6 +278,98 @@ async fn retire_refuses_a_wildcard() {
     }
 }
 
+/// Everything `sub` hears within `window` whose payload is `body`.
+async fn heard_body(sub: &Sub, body: &str, window: Duration) -> usize {
+    let mut n = 0;
+    let _ = tokio::time::timeout(window, async {
+        while let Ok(s) = sub.recv_async().await {
+            if s.payload().to_bytes().as_ref() == body.as_bytes() {
+                n += 1;
+            }
+        }
+    })
+    .await;
+    n
+}
+
+/// A wildcard put is refused — 2, before a session opens, `--raw` or not —
+/// and a subscriber on everything under the base hears none of it (#504).
+/// The same subscriber hears a concrete `pub` first, so its silence is
+/// about the refusal and not about a route that never formed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pub_refuses_a_wildcard_and_nothing_is_delivered() {
+    let bus = Bus::up().await;
+    let everything = bus.key("v1/**");
+    let sub = bus.subscribe(&everything).await;
+    let control = r#"{"status":"control"}"#;
+    let (run, _) = act_until_heard(&bus, &["pub", &health(&bus), control], &sub, |s| {
+        s.payload().to_bytes().as_ref() == control.as_bytes()
+    })
+    .await;
+    exits(&run, 0);
+
+    let wild = r#"{"status":"wild"}"#;
+    for args in [
+        vec!["pub", &everything, wild],
+        vec!["pub", &everything, wild, "--raw"],
+    ] {
+        let run = bus.zenctl(&args).await;
+        exits(&run, 2);
+        assert!(
+            run.stderr.contains("is a wildcard") && run.stderr.contains("Not overridable"),
+            "{run}"
+        );
+    }
+    assert_eq!(
+        heard_body(&sub, wild, Duration::from_secs(2)).await,
+        0,
+        "a refused put was delivered"
+    );
+}
+
+/// A `pub --from ndjson` put row on a wildcard is refused and counted — the
+/// pipe's 1 — while the concrete row beside it is published (#504).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pub_from_ndjson_refuses_a_wildcard_row() {
+    let bus = Bus::up().await;
+    let everything = bus.key("v1/**");
+    let sub = bus.subscribe(&everything).await;
+    let rows = format!(
+        "{}\n{}\n",
+        json!({ "key": everything, "value": "wild-row" }),
+        json!({ "key": health(&bus), "value": "concrete-row" }),
+    );
+    let deadline = Instant::now() + SETTLE;
+    let mut wild = 0;
+    loop {
+        let run = bus
+            .zenctl_with_stdin(&["pub", "--from", "ndjson"], &rows)
+            .await;
+        exits(&run, 1);
+        assert!(run.stderr.contains("1 refused row(s)"), "{run}");
+        assert!(run.stderr.contains("is a wildcard"), "{run}");
+        let mut concrete = false;
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Ok(s) = sub.recv_async().await {
+                match s.payload().to_bytes().as_ref() {
+                    b"wild-row" => wild += 1,
+                    b"concrete-row" => concrete = true,
+                    _ => {}
+                }
+            }
+        })
+        .await;
+        if concrete {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the concrete row never arrived\n{run}"
+        );
+    }
+    assert_eq!(wild, 0, "a refused row was delivered");
+}
+
 // ── verdicts ────────────────────────────────────────────────────────────
 
 /// `check expect`: 0 when the expectation is met, 1 when a clean
@@ -694,3 +786,4 @@ async fn config_a_contract_set_is_refused_before_it_is_sent() {
     let run = refused_unsent(&bus, "transport", "mtu=9000", "startup configuration").await;
     assert!(run.stderr.contains("restart"), "{run}");
 }
+

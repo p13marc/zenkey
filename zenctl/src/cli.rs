@@ -346,7 +346,8 @@ pub(crate) struct EchoArgs {
 #[derive(clap::Args)]
 #[command(group(clap::ArgGroup::new("source").required(true).args(["from", "key"])))]
 pub(crate) struct PubArgs {
-    /// Full wire key to publish on (omit with --from ndjson).
+    /// Full wire key to publish on (concrete — wildcards are refused; omit
+    /// with --from ndjson).
     #[arg(requires = "body", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) key: Option<String>,
     /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
@@ -362,7 +363,8 @@ pub(crate) struct PubArgs {
     pub(crate) from: Option<PubSource>,
     /// With --from: delete rows on keys that are not state-shaped are
     /// refused (and counted) unless this is passed — RFC 04 §1.2
-    /// (v1.12) prices the off-state tombstone even in a pipe.
+    /// (v1.12) prices the off-state tombstone even in a pipe. A row on a
+    /// wildcard key is refused either way.
     // `conflicts_with = "key"`, not `requires = "from"`: on the
     // positional-key shape there is nothing this flag can acknowledge,
     // and an accepted-but-inert flag is a mis-shape — refused at exit 2
