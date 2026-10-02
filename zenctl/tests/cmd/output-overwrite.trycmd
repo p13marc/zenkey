@@ -1,0 +1,51 @@
+`record -o` and `snapshot -o` keep what they wrote (#514). They used to open
+their output with a truncating create, so re-running yesterday's command line
+during an incident destroyed yesterday's capture — the one artifact either
+verb exists to keep. An existing file is now refused, by name, **before any
+session opens**: exit 2, this tool refusing what was typed (`exit.rs`). The
+bus here is the dead one, so a refusal that came after the session would show
+as a session error instead.
+
+```console
+$ zenctl record 'v1/**' -o yesterday.zrec --zenoh-config dead-bus.json5
+? 2
+Error: --out yesterday.zrec: the file already exists — pass --overwrite to replace it
+
+$ zenctl record 'v1/**' -o yesterday.zrec --on dropped --pre 5 --zenoh-config dead-bus.json5
+? 2
+Error: --out yesterday.zrec: the file already exists — pass --overwrite to replace it
+
+$ zenctl snapshot 'v1/**' -o yesterday.zsnap --zenoh-config dead-bus.json5
+? 2
+Error: --out yesterday.zsnap: the file already exists — pass --overwrite to replace it
+
+```
+
+`--overwrite` gets past the refusal, and the run goes on to the bus — which
+here is dead, so it stops at the session (exit 2, nothing asked). The file is
+created only once a session is open, so a dead bus leaves both captures as
+they were: `output-overwrite.out` pins them byte for byte.
+
+```console
+$ zenctl record 'v1/**' -o yesterday.zrec --overwrite --zenoh-config dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+...
+
+$ zenctl snapshot 'v1/**' -o yesterday.zsnap --overwrite --zenoh-config dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+...
+
+```
+
+Something that is not a regular file has no capture to destroy: `/dev/null`
+is written to as it stands, without `--overwrite`.
+
+```console
+$ zenctl record 'v1/**' -o /dev/null --zenoh-config dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+...
+
+```

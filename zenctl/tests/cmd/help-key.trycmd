@@ -4,7 +4,9 @@ just its help) is pinned — see `key-algebra.trycmd`.
 
 ```console
 $ zenctl key --help
-Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed)
+Key-expression algebra, offline: inclusion, intersection, canon.
+
+No session is opened. RFC 03 §4's footguns, diagnosed.
 
 Usage: zenctl key <COMMAND>
 
@@ -15,7 +17,8 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl key includes --help
 Does `a` include every key `b` can name? Exit 0 yes / 1 no / 2 invalid

@@ -63,6 +63,10 @@ async fn live(selectors: &[String], for_secs: f64, args: &Bus) -> Result<Window>
         .iter()
         .map(|s| super::raw_selector(s).map(str::to_string))
         .collect::<Result<_>>()?;
+    // One hint per base-relative selector under a non-empty base (#512).
+    for selector in &selectors {
+        super::hint_off_base(selector, args);
+    }
 
     let session = args.session().await?;
     let monitor =

@@ -81,13 +81,62 @@ pub fn raw_selector(sel: &str) -> Result<&str> {
     Ok(sel)
 }
 
+/// The hint for a base-relative selector typed under a non-empty base, or
+/// `None` when there is nothing to say (#512).
+///
+/// Wire verbs take **wire keys**: an explorer runs un-namespaced and `--base`
+/// is for discovery (RFC 09 §5), so `v1/**` under `--base prod` is a
+/// subscription to a keyspace nobody publishes on — silence, with no error to
+/// say why. Not rewritten: the wire is what you typed, and this only says so.
+///
+/// Only a selector whose first chunk is the grammar's root `v1` is the
+/// mistake. The rest that do not start with the base are deliberate and stay
+/// quiet: `@/…` (the admin space, under no base), a leading wildcard (`**/v1/…`
+/// spans every base, which is how a leak is found), and another deployment's
+/// own wire keys (`staging/v1/…`) — those *are* wire keys, which is the thing
+/// the hint would ask for.
+pub fn off_base_hint(sel: &str, base: &str) -> Option<String> {
+    if base.is_empty() || zenkey::grammar::strip_base(base, sel).is_some() {
+        return None;
+    }
+    let first = sel.split(['/', '?']).next().unwrap_or_default();
+    (first == "v1").then(|| {
+        let wire = zenkey::grammar::with_base(base, sel);
+        format!(
+            "hint: {sel:?} does not sit under base {base:?} — selectors are wire \
+             keys (RFC 09 §5); did you mean {wire:?}?"
+        )
+    })
+}
+
+/// [`off_base_hint`] onto stderr — never stdout, which `--format json|ndjson`
+/// keeps for the document. One line, and the run carries on.
+pub fn hint_off_base(sel: &str, args: &Bus) {
+    if let Some(hint) = off_base_hint(sel, args.base()) {
+        eprintln!("{hint}");
+    }
+}
+
 /// Where a wire watcher looks: the typed selector, or the composed positions,
 /// or the base's whole `v1` subtree (#307).
 ///
 /// The one resolution of [`SelectorArgs`], so that `echo`, `rate`, `record`,
 /// `field`, `check expect` and `why` cannot disagree about what "no selector"
-/// means. Clap has already refused the both-at-once shape.
+/// means. Clap has already refused the both-at-once shape. A typed selector
+/// that reads base-relative under a non-empty base gets the one-line
+/// [`off_base_hint`] (#512); composed ones are under the base by
+/// construction.
 pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
+    let selector = selector_unhinted(sel, args)?;
+    if sel.selector.is_some() {
+        hint_off_base(&selector, args);
+    }
+    Ok(selector)
+}
+
+/// [`selector_of`] without the hint — for `why`, whose `key-parse` rung
+/// already says the same thing as a finding, with its citation.
+pub fn selector_unhinted(sel: &SelectorArgs, args: &Bus) -> Result<String> {
     match sel.selector.as_deref() {
         // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
         // composed ones cannot spell it.
@@ -120,6 +169,67 @@ pub fn compose_selector(
         None => format!("v1/{origin}/{class}/**"),
     };
     args.wire(rel)
+}
+
+/// How an output file is opened — decided before any session opens (#514).
+///
+/// `record -o` and `snapshot -o` used to `File::create`, which truncates:
+/// re-running yesterday's command line during an incident destroyed
+/// yesterday's capture, the one artifact either verb exists to keep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputMode {
+    /// Nothing is there: create it, refusing one that appears meanwhile
+    /// (`create_new` — the check and the create are one syscall).
+    New,
+    /// `--overwrite`: create or truncate, as asked.
+    Replace,
+    /// Something that is not a regular file — `/dev/null`, a fifo. There is
+    /// no capture to destroy, so it is written to as it stands.
+    Device,
+}
+
+/// Decide how `out` will be opened, refusing an existing regular file
+/// unless `overwrite` — exit 2 through [`Unaskable`](crate::exit::Unaskable),
+/// because it is this tool refusing what you typed, and before the session
+/// opens because nothing about the bus can change the answer.
+pub fn output_mode(out: &str, overwrite: bool) -> Result<OutputMode> {
+    if overwrite {
+        return Ok(OutputMode::Replace);
+    }
+    match std::fs::metadata(out) {
+        Ok(m) if m.is_file() => Err(refuse_existing(out)),
+        Ok(_) => Ok(OutputMode::Device),
+        // Absent — or a dangling link, which `create_new` refuses at open.
+        Err(_) => Ok(OutputMode::New),
+    }
+}
+
+/// The refusal [`output_mode`] and a lost `create_new` race share.
+pub fn refuse_existing(out: &str) -> anyhow::Error {
+    unaskable!("--out {out}: the file already exists — pass --overwrite to replace it")
+}
+
+/// Open `out` the way [`output_mode`] decided, off the runtime (#332).
+pub async fn open_output(out: &str, mode: OutputMode) -> std::io::Result<std::fs::File> {
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.write(true);
+    match mode {
+        OutputMode::New => opts.create_new(true),
+        OutputMode::Replace => opts.create(true).truncate(true),
+        OutputMode::Device => &mut opts,
+    };
+    Ok(opts.open(out).await?.into_std().await)
+}
+
+/// [`open_output`] with the refusal and the path in the error.
+pub async fn open_output_or_refuse(out: &str, mode: OutputMode) -> Result<std::fs::File> {
+    open_output(out, mode).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            refuse_existing(out)
+        } else {
+            anyhow::Error::new(e).context(format!("create {out}"))
+        }
+    })
 }
 
 /// A positive number of seconds, or the refusal — the one spelling of the
@@ -156,6 +266,37 @@ pub fn producer_slot(target: &zenkey_fleet::CallTarget, producer: &str) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_base_relative_selector_under_a_base_is_hinted_and_nothing_else_is() {
+        let hint = off_base_hint("v1/**", "prod").expect("the mistake is hinted");
+        assert!(
+            hint.contains(r#""v1/**" does not sit under base "prod""#),
+            "{hint}"
+        );
+        assert!(hint.contains(r#"did you mean "prod/v1/**"?"#), "{hint}");
+        assert!(off_base_hint("v1/*/state/sysinfo/health", "site/prod").is_some());
+        // A GET's parameters ride along into the suggestion.
+        assert!(
+            off_base_hint("v1/**?_time=[now(-1h)..]", "prod")
+                .unwrap()
+                .contains(r#""prod/v1/**?_time=[now(-1h)..]""#)
+        );
+        // Quiet: the wire-key form, the empty base, the admin space, a
+        // leading wildcard, another deployment's wire keys, a bare `v1x`.
+        for (sel, base) in [
+            ("prod/v1/**", "prod"),
+            ("v1/**", ""),
+            ("@/**", "prod"),
+            ("**/v1/**", "prod"),
+            ("*/v1/*/state/**", "prod"),
+            ("staging/v1/**", "prod"),
+            ("v1x/**", "prod"),
+            ("prod/@catalog/**", "prod"),
+        ] {
+            assert_eq!(off_base_hint(sel, base), None, "{sel} under {base:?}");
+        }
+    }
 
     #[test]
     fn compose_selector_places_positions() {

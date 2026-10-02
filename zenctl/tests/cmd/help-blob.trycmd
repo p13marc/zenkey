@@ -9,21 +9,26 @@ fan-out; and `--from` names an input source everywhere else in the tool
 
 ```console
 $ zenctl blob --help
-The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2)
+Bulk content: who serves it, and fetching it.
+
+The `@blob` plane (RFC 07 §2).
 
 Usage: zenctl blob <COMMAND>
 
 Commands:
-  list    Which producers declare which `@blob` tiers (registry only, no bus traffic). A declaration is a capability, never possession
-  locate  Ask every origin who holds an object, with a *tiny* reply (RFC 07 §2.5, total across tiers since v1.17): `have`/`manifest` for an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for a snapshot — at data-low, never the bytes
-  fetch   Fetch from **one** origin's concrete key, at data-low, verifying every reply against the content root before it reaches disk (RFC 07 §2.1)
+  list    Which producers declare which blob tiers (registry only, no bus traffic)
+  locate  Ask every origin who holds a blob — a tiny reply, never the bytes
+  fetch   Fetch a blob from one origin, verified before it reaches disk
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl blob list --help
-Which producers declare which `@blob` tiers (registry only, no bus traffic). A declaration is a capability, never possession
+Which producers declare which blob tiers (registry only, no bus traffic).
+
+A declaration of an `@blob` tier is a capability, never possession.
 
 Usage: zenctl blob list [OPTIONS]
 
@@ -95,7 +100,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl blob locate --help
-Ask every origin who holds an object, with a *tiny* reply (RFC 07 §2.5, total across tiers since v1.17): `have`/`manifest` for an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for a snapshot — at data-low, never the bytes.
+Ask every origin who holds a blob — a tiny reply, never the bytes.
+
+RFC 07 §2.5, total across tiers since v1.17: `have`/`manifest` for an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for a snapshot — at data-low, never the bytes.
 
 There is no `--origin`: fanning out is what finding a holder *is*.
 
@@ -167,7 +174,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl blob fetch --help
-Fetch from **one** origin's concrete key, at data-low, verifying every reply against the content root before it reaches disk (RFC 07 §2.1)
+Fetch a blob from one origin, verified before it reaches disk.
+
+From **one** origin's concrete key, at data-low, verifying every reply against the content root before it reaches disk (RFC 07 §2.1).
 
 Usage: zenctl blob fetch [OPTIONS] --origin <ORIGIN> <TARGET>
 

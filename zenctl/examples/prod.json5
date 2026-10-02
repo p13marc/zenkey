@@ -1,0 +1,50 @@
+// zenctl against a secured production router — the file README.md's
+// production quickstart points a named context at:
+//
+//   zenctl context create prod --base prod \
+//       --zenoh-config /etc/zenctl/prod.json5 --select
+//
+// zenctl reads it as zenoh's own config (zenoh 1.10's field names), then
+// applies its explorer knobs on top: a flag beats the environment, which
+// beats the context, which beats this file. `zenctl/tests/readme.rs` opens a
+// session through this very file, so it cannot drift from what zenctl parses.
+// Keep it 0600: it can hold a password.
+{
+  // A client of the router: no listener, no gossip, nothing the mesh can
+  // open a link to or route through (RFC 09 §5). It is zenctl's default
+  // anyway; stating it here means the file says what the session is.
+  mode: "client",
+
+  connect: {
+    // The router's TLS endpoint. Several are tried in order; `-c` on the
+    // command line replaces this list for one invocation.
+    endpoints: ["tls/zenoh-router.example.net:7447"],
+  },
+
+  // Never multicast-scout from an operator's machine onto a production
+  // segment: a scouting session joins whatever mesh answers. zenctl keeps
+  // multicast off unless a file states it, and this one states it off.
+  scouting: {
+    multicast: { enabled: false },
+  },
+
+  transport: {
+    link: {
+      tls: {
+        // The CA that signed the router's certificate.
+        root_ca_certificate: "/etc/zenctl/prod/ca.pem",
+        // Mutual TLS: the router's access control keys on this
+        // certificate's CN (`zenctl acl gen` writes that block).
+        enable_mtls: true,
+        connect_certificate: "/etc/zenctl/prod/zenctl.pem",
+        connect_private_key: "/etc/zenctl/prod/zenctl-key.pem",
+        verify_name_on_connect: true,
+      },
+    },
+    auth: {
+      // Username and password, checked against the router's usrpwd
+      // dictionary — beside mTLS here; either works alone.
+      usrpwd: { user: "zenctl-ops", password: "change-me" },
+    },
+  },
+}

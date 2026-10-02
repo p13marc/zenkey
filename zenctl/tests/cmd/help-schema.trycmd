@@ -8,9 +8,9 @@ rest of the exit-coded assertions live — one home each.
 
 ```console
 $ zenctl schema --help
-Payload schemas as producers serve them (RFC 08 §7).
+Payload schemas as producers serve them.
 
-The shapes are served data, not registry data: the TOMLs carry type *names*. A producer that serves no `describe` degrades honestly — it is not an error. Validating a payload against one is `check schema`.
+The `describe` procedure (RFC 08 §7). The shapes are served data, not registry data: the TOMLs carry type *names*. A producer that serves no `describe` degrades honestly — it is not an error. Validating a payload against one is `check schema`.
 
 Usage: zenctl schema <COMMAND>
 

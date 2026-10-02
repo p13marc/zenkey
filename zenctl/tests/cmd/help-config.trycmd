@@ -3,19 +3,19 @@ typed against it, and a confirmed change driven to its end (RFC 05 §5.1).
 
 ```console
 $ zenctl config --help
-Configuration resources on the `@rpc` plane (RFC 05 §5.1).
+Read and change a producer's live configuration.
 
-Read the served schema beside every running value, change one group typed against it, and drive a confirmed change to its end.
+Configuration resources on the `@rpc` plane (RFC 05 §5.1): read the served schema beside every running value, change one group typed against it, and drive a confirmed change to its end.
 
 Usage: zenctl config <COMMAND>
 
 Commands:
-  get      Read a resource's configuration: the served schema beside every running value, its source, and any pending change (on-bus)
+  get      Read a resource's running configuration and any pending change
   set      Change one group of a resource, typed against the served schema (on-bus)
   confirm  Make a pending change permanent (on-bus)
   cancel   Undo a pending change now (on-bus)
   extend   Move a pending change's deadline (on-bus)
-  persist  Write a confirmed change into the producer's persisted layer — its own key, so an ACL grants it apart from the change (on-bus)
+  persist  Write a confirmed change into the producer's persisted configuration
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -23,7 +23,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl config get --help
-Read a resource's configuration: the served schema beside every running value, its source, and any pending change (on-bus)
+Read a resource's running configuration and any pending change.
+
+The served schema beside every running value, its source, and any pending change (on-bus).
 
 Usage: zenctl config get [OPTIONS] <ORIGIN> <PRODUCER> <RESOURCE>
 
@@ -447,7 +449,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl config persist --help
-Write a confirmed change into the producer's persisted layer — its own key, so an ACL grants it apart from the change (on-bus)
+Write a confirmed change into the producer's persisted configuration.
+
+Its own key, so an ACL grants it apart from the change (on-bus).
 
 Usage: zenctl config persist [OPTIONS] <ORIGIN> <PRODUCER> <RESOURCE> <TOKEN>
 

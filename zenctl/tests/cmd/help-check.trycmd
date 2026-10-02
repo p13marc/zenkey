@@ -13,19 +13,19 @@ bus would pass a silence assertion for free.
 
 ```console
 $ zenctl check --help
-Exit-coded assertions, all on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven).
+Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict.
 
-Everything under here reserves its 2 — which is what makes `check expect --absent` legitimate at all, and what stops a dead bus reading as a pass. CI recipes should run isolated per RFC 09 §0: multicast scouting off, gossip on, explicit endpoints — a test that scouts is not isolated, and the contamination flows both ways.
+All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question could not be asked or proven). Everything under here reserves its 2 — which is what makes `check expect --absent` legitimate at all, and what stops a dead bus reading as a pass. CI recipes should run isolated per RFC 09 §0: multicast scouting off, gossip on, explicit endpoints — a test that scouts is not isolated, and the contamination flows both ways.
 
 Usage: zenctl check <COMMAND>
 
 Commands:
-  expect   Await an expectation on the bus, exit-coded for CI (#160)
-  cutover  Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic
-  retired  The deprecation burn-down: which `[[deprecated]]` entries are actually finished. Exit 0 = every entry passes, 1 = a retired subject still speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1)
-  probe    Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe
-  conform  Run a producer's registry as a conformance suite (#222): 0 = conforms, 1 = an assertion is not met, 2 = unproven
-  schema   Validate one payload against its schema — no bus write, exit-coded for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check
+  expect   Wait for an expectation on the bus, exit-coded for CI
+  cutover  Cutover acceptance: the old key family is silent and the new one speaks
+  retired  Which deprecated subjects are actually gone from the bus
+  probe    Cutover acceptance: probe one origin with concrete keys, as a consumer
+  conform  Run a producer's registry as a conformance suite against the bus
+  schema   Validate one payload against its schema, exit-coded for CI
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -33,9 +33,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check expect --help
-Await an expectation on the bus, exit-coded for CI (#160).
+Wait for an expectation on the bus, exit-coded for CI.
 
-The subscriber is declared BEFORE the window opens (not-asked is not "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean observation; 2 = the observation cannot carry the claim (drops under a completeness claim, session failure). `--absent` is legitimate ONLY because of that 2.
+An await (#160). The subscriber is declared BEFORE the window opens (not-asked is not "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean observation; 2 = the observation cannot carry the claim (drops under a completeness claim, session failure). `--absent` is legitimate ONLY because of that 2.
 
 Usage: zenctl check expect [OPTIONS] [SELECTOR]
 
@@ -137,9 +137,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check cutover --help
-Cutover acceptance, half one (RFC 09 §6): assert a retired key family SILENT while the new plane carries traffic.
+Cutover acceptance: the old key family is silent and the new one speaks.
 
-Three verdicts, three exits: 0 = old silent AND new speaking; 1 = the old family still speaks; 2 = everything was quiet — a non-verdict, because a dead fleet passes the silence half for free. The leak check's meaning is stated, not inferred: anything outside `<base>/v1/` that is not the old root.
+Half one of RFC 09 §6: assert a retired key family SILENT while the new plane carries traffic. Three verdicts, three exits: 0 = old silent AND new speaking; 1 = the old family still speaks; 2 = everything was quiet — a non-verdict, because a dead fleet passes the silence half for free. The leak check's meaning is stated, not inferred: anything outside `<base>/v1/` that is not the old root.
 
 Usage: zenctl check cutover [OPTIONS] --old-root <KEYEXPR>
 
@@ -213,6 +213,8 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check retired --help
+Which deprecated subjects are actually gone from the bus.
+
 The deprecation burn-down: which `[[deprecated]]` entries are actually finished. Exit 0 = every entry passes, 1 = a retired subject still speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1).
 
 For each ledger entry of the `--registry` dirs, four facts: still on the wire (`--for`), still declared active by a served introspect slice (the RFC 08 §6.1 lie), still subscribed to by any session (admin space), and whether `replaced_by` carries traffic — the cutover pair, per entry. Without `--for`, wire facts read "not listened", never "absent" (RFC 09 §5.1 O4).
@@ -284,9 +286,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check probe --help
-Cutover acceptance, half two (RFC 09 §6): a consumer-shaped, CONCRETE-KEY probe.
+Cutover acceptance: probe one origin with concrete keys, as a consumer.
 
-"A probe MUST build its keys the way the product builds them" — a `*`-origin probe cannot catch a broken origin path. An origin id is called directly; a hostname resolves through the RFC 06 §6 identity bridge first, and the probe FAILS if the bridge yields nothing. Fanning out is what `blob locate` does; this verb refuses to.
+Half two of RFC 09 §6: a consumer-shaped, CONCRETE-KEY probe. "A probe MUST build its keys the way the product builds them" — a `*`-origin probe cannot catch a broken origin path. An origin id is called directly; a hostname resolves through the RFC 06 §6 identity bridge first, and the probe FAILS if the bridge yields nothing. Fanning out is what `blob locate` does; this verb refuses to.
 
 Usage: zenctl check probe [OPTIONS] <TARGET> <PRODUCER> <PROCEDURE>
 
@@ -362,9 +364,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check conform --help
-Run a producer's registry as a conformance suite (#222): 0 = conforms, 1 = an assertion is not met, 2 = unproven.
+Run a producer's registry as a conformance suite against the bus.
 
-One assertion per declared surface, three states each — met, not met, unknowable with its reason (RFC 13 §3) — and unknowable is never folded into not met. Every origin the roster shows running the producer is CALLED: introspect and each concrete `read` procedure, with no arguments (`error/invalid-args` is a reply, and met). A write is never called; it is met when the origin's served slice declares it. `error/unsupported` or `error/gated` from a `when` procedure is exempt and says so — unless the device's registration document claims the capability (RFC 04 §5) — and from any other procedure it is not met (RFC 08 §6.1). Silence from a rostered origin is not met: alive ⇒ callable (RFC 13 §2). Then the doctor's checks, scoped to the producer: slice sync, describe totality, schema drift; with `--for`, each declared subject — a window proves presence, never absence, so a subject that did not speak is unknowable. With `--registry` the suite is those files (the contract the build ships); without, what the fleet serves.
+#222: 0 = conforms, 1 = an assertion is not met, 2 = unproven. One assertion per declared surface, three states each — met, not met, unknowable with its reason (RFC 13 §3) — and unknowable is never folded into not met. Every origin the roster shows running the producer is CALLED: introspect and each concrete `read` procedure, with no arguments (`error/invalid-args` is a reply, and met). A write is never called; it is met when the origin's served slice declares it. `error/unsupported` or `error/gated` from a `when` procedure is exempt and says so — unless the device's registration document claims the capability (RFC 04 §5) — and from any other procedure it is not met (RFC 08 §6.1). Silence from a rostered origin is not met: alive ⇒ callable (RFC 13 §2). Then the doctor's checks, scoped to the producer: slice sync, describe totality, schema drift; with `--for`, each declared subject — a window proves presence, never absence, so a subject that did not speak is unknowable. With `--registry` the suite is those files (the contract the build ships); without, what the fleet serves.
 
 Usage: zenctl check conform [OPTIONS] --producer <PRODUCER>
 
@@ -445,9 +447,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl check schema --help
-Validate one payload against its schema — no bus write, exit-coded for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
+Validate one payload against its schema, exit-coded for CI.
 
-The schema comes from a live `describe` (give --producer) or an offline SchemaSet JSON document (--schema-set; the registry TOMLs carry type *names*, not shapes, so a directory alone cannot check).
+No bus write (#159): 0 = valid, 1 = does not conform, 2 = could not check. The schema comes from a live `describe` (give --producer) or an offline SchemaSet JSON document (--schema-set; the registry TOMLs carry type *names*, not shapes, so a directory alone cannot check).
 
 Usage: zenctl check schema [OPTIONS] --type <TYPE> --from <TEXT|@FILE|->
 

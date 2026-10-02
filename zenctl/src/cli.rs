@@ -249,8 +249,11 @@ pub(crate) struct SelectorArgs {
 #[derive(Parser)]
 #[command(
     name = "zenctl",
-    about = "Explore a keyspace-v2 Zenoh bus (RFC 08 §6)",
-    version
+    about = "Explore, query and check a keyspace-v2 Zenoh bus",
+    // The crate version, then the build (#513): `git describe` from
+    // `build.rs`, or `unknown` where that is not a fact — releases are
+    // source-only, so the commit is what names a production binary.
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ZENCTL_GIT_DESCRIBE"), ")")
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -541,43 +544,56 @@ pub(crate) enum Command {
     /// Deployment bases discovered from the wire (needs no --base).
     #[command(subcommand)]
     Base(BaseCmd),
-    /// Procedures on the `@rpc` plane.
+    /// Procedures producers offer: list them, describe them, call them.
+    ///
+    /// The `@rpc` plane.
     #[command(subcommand)]
     Service(ServiceCmd),
-    /// Configuration resources on the `@rpc` plane (RFC 05 §5.1).
+    /// Read and change a producer's live configuration.
     ///
-    /// Read the served schema beside every running value, change one group
-    /// typed against it, and drive a confirmed change to its end.
+    /// Configuration resources on the `@rpc` plane (RFC 05 §5.1): read the
+    /// served schema beside every running value, change one group typed
+    /// against it, and drive a confirmed change to its end.
     #[command(subcommand)]
     Config(ConfigCmd),
     /// Payload types declared by the registry slices.
     #[command(subcommand)]
     Interface(InterfaceCmd),
-    /// Payload schemas as producers serve them (RFC 08 §7).
+    /// Payload schemas as producers serve them.
     ///
-    /// The shapes are served data, not registry data: the TOMLs carry type
-    /// *names*. A producer that serves no `describe` degrades honestly — it
-    /// is not an error. Validating a payload against one is `check schema`.
+    /// The `describe` procedure (RFC 08 §7). The shapes are served data, not
+    /// registry data: the TOMLs carry type *names*. A producer that serves no
+    /// `describe` degrades honestly — it is not an error. Validating a payload
+    /// against one is `check schema`.
     #[command(subcommand)]
     Schema(SchemaCmd),
     /// The registry as a document: export it, diff it, lint it, lock it.
     #[command(subcommand)]
     Registry(RegistryCmd),
-    /// Storages: what the mesh persists, joined against declared state —
-    /// and the router block that makes it persist (RFC 09 §2).
+    /// Storages: what the mesh persists, and the router config behind it.
+    ///
+    /// What the mesh persists, joined against declared state — and the
+    /// router block that makes it persist (RFC 09 §2).
     #[command(subcommand)]
     Storage(StorageCmd),
-    /// Router access control: RFC 09 §3's grant matrix, generated from an
-    /// enrollment file (#392).
+    /// Router access control, generated from an enrollment file.
+    ///
+    /// RFC 09 §3's grant matrix, generated from an enrollment file (#392).
     #[command(subcommand)]
     Acl(AclCmd),
-    /// The `@blob` plane: who serves bulk content, and fetching it (RFC 07 §2).
+    /// Bulk content: who serves it, and fetching it.
+    ///
+    /// The `@blob` plane (RFC 07 §2).
     #[command(subcommand)]
     Blob(BlobCmd),
-    /// Zenoh admin space (`@/**`) — the middleware's own introspection.
+    /// Zenoh's own introspection: routers, peers and the mesh graph.
+    ///
+    /// The admin space (`@/**`) — the middleware's own introspection.
     #[command(subcommand)]
     Admin(AdminCmd),
-    /// Keyexpr algebra, no session (RFC 03 §4's footguns, diagnosed).
+    /// Key-expression algebra, offline: inclusion, intersection, canon.
+    ///
+    /// No session is opened. RFC 03 §4's footguns, diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
     /// Measure the fleet.
@@ -585,13 +601,14 @@ pub(crate) enum Command {
     Bench(BenchCmd),
 
     // ── Wire verbs: acts and observations on live traffic ─────────────────
-    /// GET any selector with the fleet discipline (RFC 05 §2.1).
+    /// Query any selector and print every reply, attributed to its key.
     ///
-    /// Target All, consolidation None, every reply attributed by its own
-    /// key; error envelopes render as errors (RFC 05 §3), and payloads ride
-    /// the same rendering ladder as `echo` (served-schema decode →
-    /// structural → text → hex). `@/**` browses the zenoh admin space.
-    /// Exit codes: 0 values only, 1 an error reply, 2 silence.
+    /// The fleet discipline (RFC 05 §2.1): target All, consolidation None,
+    /// every reply attributed by its own key; error envelopes render as errors
+    /// (RFC 05 §3), and payloads ride the same rendering ladder as `echo`
+    /// (served-schema decode → structural → text → hex). `@/**` browses the
+    /// zenoh admin space. Exit codes: 0 values only, 1 an error reply, 2
+    /// silence.
     Get(GetArgs),
     /// Subscribe and print decoded samples (on-bus).
     ///
@@ -601,12 +618,13 @@ pub(crate) enum Command {
     /// selector server-side — never client-side filtering the grammar can
     /// express by position.
     Echo(EchoArgs),
-    /// Publish to a key (issue #47) — a declared publisher, never an ad-hoc
-    /// put (P7).
-    Pub(PubArgs),
-    /// Retire a key with a tombstone — an authoritative delete
-    /// (RFC 04 §1.2), riding a declared publisher like `pub` (P7).
+    /// Publish a value to a key.
     ///
+    /// Through a declared publisher, never an ad-hoc put (P7, issue #47).
+    Pub(PubArgs),
+    /// Retire a key with a tombstone, an authoritative delete.
+    ///
+    /// RFC 04 §1.2's tombstone, riding a declared publisher like `pub` (P7).
     /// State keys retire freely (retirement is the class's own semantics);
     /// anything else is an operator cleanup (v1.12) and needs --i-know.
     /// Wildcards are refused outright.
@@ -617,9 +635,11 @@ pub(crate) enum Command {
     /// watched the same window through the same Monitor and differed only in
     /// which column the table led with (#307).
     Rate(RateArgs),
-    /// Field intelligence over a window (#223): per-dotted-path statistics —
-    /// presence, type stability, change count, numeric range, small-domain
-    /// values — plus the three findings per-sample validation cannot see.
+    /// Per-field statistics over a window: stuck, vanished and new fields.
+    ///
+    /// Field intelligence (#223): per-dotted-path statistics — presence,
+    /// type stability, change count, numeric range, small-domain values —
+    /// plus the three findings per-sample validation cannot see.
     ///
     /// The stuck sensor that passes every check: a key publishing at its
     /// declared rate with a perfectly valid payload whose temperature_c has
@@ -634,27 +654,27 @@ pub(crate) enum Command {
     /// report says so (O4). Findings are output, not verdicts — exit 0
     /// unless you opt in with `--fail-on`.
     Field(FieldArgs),
-    /// Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
+    /// Capture a selector's traffic to a .zrec file.
     ///
-    /// Through the Monitor: a bus that outruns the disk surfaces as drop
-    /// records *in the file*, where the gaps happened (RFC 09 §5.1 O6) —
-    /// a capture is a bounded observer and says what it cost. Replay with
-    /// `zenctl replay`; the file is ndjson (one row per line, payloads
-    /// lossless as base64 `bytes`), so `jq` reads it too.
+    /// A capture (RFC 09 §5.2), taken through the Monitor: a bus that outruns
+    /// the disk surfaces as drop records *in the file*, where the gaps happened
+    /// (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it
+    /// cost. Replay with `zenctl replay`; the file is ndjson (one row per line,
+    /// payloads lossless as base64 `bytes`), so `jq` reads it too.
     Record(RecordArgs),
-    /// Replay a .zrec capture onto the bus — replay is PUBLISHING.
+    /// Replay a .zrec capture onto the bus (this publishes).
     ///
-    /// Real puts through declared publishers, at the capture's own pacing
+    /// Replay is PUBLISHING: real puts through declared publishers, at the capture's own pacing
     /// (scaled by --speed), re-stamped with this session's HLC: re-stamped
     /// old data WINS last-writer-wins against a live fleet, which is why
     /// the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the
     /// capture header's base is a contract (`--force-base` to override).
     Replay(ReplayArgs),
-    /// The fleet timeline (#216): one merged ordering of a window's samples,
-    /// lanes per origin/producer, the clock stated per report and the
-    /// stamper per lane — and DELIBERATELY NO EDGES.
+    /// One merged ordering of a window's samples, a lane per origin.
     ///
-    /// A line between two lanes would claim a causality no observer on this
+    /// The fleet timeline (#216): lanes per origin/producer, the clock
+    /// stated per report and the stamper per lane — and DELIBERATELY NO
+    /// EDGES. A line between two lanes would claim a causality no observer on this
     /// bus can establish. What it can say: on the arrival axis, when each
     /// sample was seen here; on the HLC axis (`--order hlc`), the
     /// happened-before of ONE stamping node, or a comparison of skewed wall
@@ -665,63 +685,61 @@ pub(crate) enum Command {
     /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
     /// projection, so live and replay render identically.
     Timeline(TimelineArgs),
-    /// Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with
-    /// `diff`, compare two.
+    /// Take a fleet snapshot to a .zsnap file, or compare two with `diff`.
     ///
-    /// One fan-in GET per selector, folded last-writer-wins per key, each
-    /// row carrying what the observer could establish: the exact payload,
-    /// whose clock stamped it (O7), the registry rung (O2), the three-valued
-    /// verdict, and who HOLDS it — `live` (its origin held an alive token
-    /// during the collection, and whether the replier was the stamper),
-    /// `storage_only` (a value answered, nobody is saying it now), or
-    /// `unattributed` (the roster was not asked, or the key names no
-    /// origin). A snapshot is collected OVER a span, never at an instant,
-    /// and every rendering says so. Read, never replayed: seeding a fleet
-    /// from a file is `replay --seed-state`. Exit 0 wrote the file, 2
+    /// The snapshot of RFC 13 §4.4: one fan-in GET per selector, folded
+    /// last-writer-wins per key, each row carrying what the observer could
+    /// establish: the exact payload, whose clock stamped it (O7), the registry
+    /// rung (O2), the three-valued verdict, and who HOLDS it — `live` (its
+    /// origin held an alive token during the collection, and whether the
+    /// replier was the stamper), `storage_only` (a value answered, nobody is
+    /// saying it now), or `unattributed` (the roster was not asked, or the key
+    /// names no origin). A snapshot is collected OVER a span, never at an
+    /// instant, and every rendering says so. Read, never replayed: seeding a
+    /// fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2
     /// nobody answered (silence is not a snapshot).
     Snapshot(SnapshotArgs),
-    /// Serve the bus and its contract as Prometheus metrics (#228): key
-    /// series named and united by the registry, and the observer's own
-    /// blind spots as first-class series beside them.
+    /// Serve the bus and its contract as Prometheus metrics.
     ///
-    /// `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a
-    /// series exists only where the registry declares the subject (names
-    /// and units from `unit`/`kind`, never sniffed from the leaf; every
-    /// `{var}` a label; the declared `cardinality` bounds the population
-    /// and what it refuses is counted). What every other exporter hides is
-    /// exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the
-    /// four evicted populations (never summed), coalesced and unstamped
+    /// Key series named and united by the registry, and the observer's own
+    /// blind spots as first-class series beside them (#228). `zenctl export
+    /// --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a
+    /// general exporter: a series exists only where the registry declares the
+    /// subject (names and units from `unit`/`kind`, never sniffed from the
+    /// leaf; every `{var}` a label; the declared `cardinality` bounds the
+    /// population and what it refuses is counted). What every other exporter
+    /// hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`,
+    /// the four evicted populations (never summed), coalesced and unstamped
     /// samples; a series that stopped keeps its labels and state — evicted,
-    /// origin_down, retired — and loses its value, so absence and silence
-    /// are different bytes; payload verdicts are three populations, the
-    /// third `not_validated`; the selectors watched and the planes `**`
-    /// cannot reach ride `zenkey_scope_info`. Killing a producer turns its
-    /// series `origin_down`; forcing drops moves the counter and marks the
-    /// series fed meanwhile; scraping twice with no traffic is
-    /// byte-identical. A foreground observer, explicitly launched, one
-    /// process per invocation, sharing nothing, caching no discovery,
-    /// serving nothing another zenctl reads — the permitted second kind
-    /// (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP,
-    /// histograms and summaries, push gateways and remote write —
-    /// `/metrics` over plain HTTP is the whole surface.
+    /// origin_down, retired — and loses its value, so absence and silence are
+    /// different bytes; payload verdicts are three populations, the third
+    /// `not_validated`; the selectors watched and the planes `**` cannot reach
+    /// ride `zenkey_scope_info`. Killing a producer turns its series
+    /// `origin_down`; forcing drops moves the counter and marks the series fed
+    /// meanwhile; scraping twice with no traffic is byte-identical. A
+    /// foreground observer, explicitly launched, one process per invocation,
+    /// sharing nothing, caching no discovery, serving nothing another zenctl
+    /// reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1).
+    /// REFUSED up front: OTLP, histograms and summaries, push gateways and
+    /// remote write — `/metrics` over plain HTTP is the whole surface.
     Export(ExportArgs),
-    /// Stand up a mock queryable: answer every query on a keyexpr with one
-    /// static body, and log every ask (#121).
+    /// Stand up a mock queryable that answers one keyexpr and logs every ask.
     ///
-    /// The log doubles as a "who is querying this key" probe. Deliberately
-    /// no reply scripting — static and file bodies cover the dev-loop case;
-    /// the shell covers dynamic replies by restarting serve. (nuze and zsak
-    /// own the embedded-language lane, at the cost of a Nushell dependency
-    /// and a linked libpython respectively.)
+    /// Every query on the keyexpr gets one static body (#121). The log doubles
+    /// as a "who is querying this key" probe. Deliberately no reply scripting —
+    /// static and file bodies cover the dev-loop case; the shell covers dynamic
+    /// replies by restarting serve. (nuze and zsak own the embedded-language
+    /// lane, at the cost of a Nushell dependency and a linked libpython
+    /// respectively.)
     Serve(ServeArgs),
-    /// Generate registry-driven test traffic (#162): every declared subject
-    /// of a producer, schema-synthesized payloads, declared QoS,
-    /// class-conscious rates — a mock producer for testing consumers.
+    /// Generate test traffic from the registry: a mock producer.
     ///
-    /// The full plan prints BEFORE anything is published; every sample
-    /// carries the RFC 09 §5.3 synthetic marker
-    /// ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window
-    /// or a capture can tell this traffic from real. Events stay inside
+    /// Registry-driven (#162): every declared subject of a producer,
+    /// schema-synthesized payloads, declared QoS, class-conscious rates — a
+    /// mock producer for testing consumers. The full plan prints BEFORE
+    /// anything is published; every sample carries the RFC 09 §5.3 synthetic
+    /// marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen
+    /// window or a capture can tell this traffic from real. Events stay inside
     /// their declared rate budget on write-once keys. A run wider than 10
     /// subjects needs --wide; faults need --i-know.
     Gen(GenArgs),
@@ -735,42 +753,42 @@ pub(crate) enum Command {
     Scout(ScoutArgs),
 
     // ── Judgement: exit-coded, under one contract (`crate::exit`) ─────────
-    /// Exit-coded assertions, all on one contract: 0 = clean, 1 = a finding,
-    /// 2 = no verdict (the question could not be asked or proven).
+    /// Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict.
     ///
-    /// Everything under here reserves its 2 — which is what makes `check
-    /// expect --absent` legitimate at all, and what stops a dead bus reading
-    /// as a pass. CI recipes should run isolated per RFC 09 §0: multicast
-    /// scouting off, gossip on, explicit endpoints — a test that scouts is
-    /// not isolated, and the contamination flows both ways.
+    /// All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the
+    /// question could not be asked or proven). Everything under here reserves
+    /// its 2 — which is what makes `check expect --absent` legitimate at all,
+    /// and what stops a dead bus reading as a pass. CI recipes should run
+    /// isolated per RFC 09 §0: multicast scouting off, gossip on, explicit
+    /// endpoints — a test that scouts is not isolated, and the contamination
+    /// flows both ways.
     #[command(subcommand)]
     Check(CheckCmd),
-    /// Check the fleet against the contracts it claims (RFC 08 §6): drift,
-    /// freshness, QoS, coverage.
+    /// Check the fleet against the contracts it claims: drift, freshness, QoS.
     ///
-    /// RFC 08 §6: "A disagreement between introspection and the checked-in TOML
-    /// is a finding, not an ambiguity." This prints the findings — `registry
-    /// diff` shows the two registries side by side; doctor *judges* the
-    /// deployment. The local truth comes from `--registry <dir>`; without it
-    /// only the roster-vs-introspect check runs.
+    /// Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between
+    /// introspection and the checked-in TOML is a finding, not an ambiguity."
+    /// This prints the findings — `registry diff` shows the two registries side
+    /// by side; doctor *judges* the deployment. The local truth comes from
+    /// `--registry <dir>`; without it only the roster-vs-introspect check runs.
     Doctor(DoctorArgs),
-    /// Why is this key silent — the non-verdict, itemised (#214).
+    /// Explain why a key is silent, one established fact at a time.
     ///
-    /// A rung ladder over facts the engine already holds: scope reach,
-    /// grammar, registry declaration, the liveliness roster, declared
-    /// publishers, storage coverage, a stored value, freshness, admin
-    /// reachability. Every rung answers established / not-established (with
-    /// its reason) / NOT ASKED — "not asked" is never rendered as "no"
-    /// (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1).
-    /// "No publisher declared" never reads as a bug: publishers declare
-    /// lazily, on the first publication (RFC 08 §6.1). The default run costs
-    /// the control plane only; `--for` adds the one data-plane rung.
-    /// Exit 0 = nothing found and everything checked looks healthy; 1 = a
-    /// cause was established — the finding; 2 = the observation was impaired.
+    /// The non-verdict, itemised (#214): a rung ladder over facts the engine
+    /// already holds: scope reach, grammar, registry declaration, the
+    /// liveliness roster, declared publishers, storage coverage, a stored
+    /// value, freshness, admin reachability. Every rung answers established /
+    /// not-established (with its reason) / NOT ASKED — "not asked" is never
+    /// rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict
+    /// (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers
+    /// declare lazily, on the first publication (RFC 08 §6.1). The default run
+    /// costs the control plane only; `--for` adds the one data-plane rung. Exit
+    /// 0 = nothing found and everything checked looks healthy; 1 = a cause was
+    /// established — the finding; 2 = the observation was impaired.
     Why(WhyArgs),
-    /// Watch conditions on the bus and emit TRANSITIONS as ndjson (#227).
+    /// Watch conditions on the bus and print each state change as ndjson.
     ///
-    /// A foreground observer — explicitly launched, one process per
+    /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
     /// invocation, no shared state; not a daemon. Each --rule is one
     /// condition from a CLOSED vocabulary (no expressions, no templating);
     /// every genuine state change prints one line
@@ -810,23 +828,25 @@ pub(crate) enum Command {
 /// `crate::exit`.
 #[derive(Subcommand)]
 pub(crate) enum CheckCmd {
-    /// Await an expectation on the bus, exit-coded for CI (#160).
+    /// Wait for an expectation on the bus, exit-coded for CI.
     ///
-    /// The subscriber is declared BEFORE the window opens (not-asked is not
+    /// An await (#160). The subscriber is declared BEFORE the window opens (not-asked is not
     /// "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean
     /// observation; 2 = the observation cannot carry the claim (drops under
     /// a completeness claim, session failure). `--absent` is legitimate
     /// ONLY because of that 2.
     Expect(CheckExpectArgs),
-    /// Cutover acceptance, half one (RFC 09 §6): assert a retired key
-    /// family SILENT while the new plane carries traffic.
+    /// Cutover acceptance: the old key family is silent and the new one speaks.
     ///
-    /// Three verdicts, three exits: 0 = old silent AND new speaking; 1 =
+    /// Half one of RFC 09 §6: assert a retired key family SILENT while the
+    /// new plane carries traffic. Three verdicts, three exits: 0 = old silent AND new speaking; 1 =
     /// the old family still speaks; 2 = everything was quiet — a
     /// non-verdict, because a dead fleet passes the silence half for free.
     /// The leak check's meaning is stated, not inferred: anything outside
     /// `<base>/v1/` that is not the old root.
     Cutover(CheckCutoverArgs),
+    /// Which deprecated subjects are actually gone from the bus.
+    ///
     /// The deprecation burn-down: which `[[deprecated]]` entries are actually
     /// finished. Exit 0 = every entry passes, 1 = a retired subject still
     /// speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1).
@@ -845,19 +865,19 @@ pub(crate) enum CheckCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// Cutover acceptance, half two (RFC 09 §6): a consumer-shaped,
-    /// CONCRETE-KEY probe.
+    /// Cutover acceptance: probe one origin with concrete keys, as a consumer.
     ///
-    /// "A probe MUST build its keys the way the product builds them" — a
-    /// `*`-origin probe cannot catch a broken origin path. An origin id is
-    /// called directly; a hostname resolves through the RFC 06 §6 identity
-    /// bridge first, and the probe FAILS if the bridge yields nothing.
-    /// Fanning out is what `blob locate` does; this verb refuses to.
+    /// Half two of RFC 09 §6: a consumer-shaped, CONCRETE-KEY probe. "A probe
+    /// MUST build its keys the way the product builds them" — a `*`-origin
+    /// probe cannot catch a broken origin path. An origin id is called
+    /// directly; a hostname resolves through the RFC 06 §6 identity bridge
+    /// first, and the probe FAILS if the bridge yields nothing. Fanning out is
+    /// what `blob locate` does; this verb refuses to.
     Probe(CheckProbeArgs),
-    /// Run a producer's registry as a conformance suite (#222): 0 = conforms,
-    /// 1 = an assertion is not met, 2 = unproven.
+    /// Run a producer's registry as a conformance suite against the bus.
     ///
-    /// One assertion per declared surface, three states each — met, not
+    /// #222: 0 = conforms, 1 = an assertion is not met, 2 = unproven. One
+    /// assertion per declared surface, three states each — met, not
     /// met, unknowable with its reason (RFC 13 §3) — and unknowable is never
     /// folded into not met. Every origin the roster shows running the
     /// producer is CALLED: introspect and each concrete `read` procedure,
@@ -874,10 +894,10 @@ pub(crate) enum CheckCmd {
     /// is those files (the contract the build ships); without, what the
     /// fleet serves.
     Conform(CheckConformArgs),
-    /// Validate one payload against its schema — no bus write, exit-coded
-    /// for CI (#159): 0 = valid, 1 = does not conform, 2 = could not check.
+    /// Validate one payload against its schema, exit-coded for CI.
     ///
-    /// The schema comes from a live `describe` (give --producer) or an
+    /// No bus write (#159): 0 = valid, 1 = does not conform, 2 = could not
+    /// check. The schema comes from a live `describe` (give --producer) or an
     /// offline SchemaSet JSON document (--schema-set; the registry TOMLs
     /// carry type *names*, not shapes, so a directory alone cannot check).
     Schema(CheckSchemaArgs),
@@ -969,32 +989,39 @@ pub(crate) enum RegistryCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// Run the RFC 08 §5 registry lints on a directory, as a build would.
-    Lint(RegistryLintArgs),
-    /// Write or update the RFC 08 §3.1 compatibility lock (registry.lock).
+    /// Run the registry lints on a directory, as a build would.
     ///
-    /// Additive evolution and `[[deprecated]]` retirement regenerate cleanly;
+    /// The RFC 08 §5 lints, the very ones `zenkey-build` fails a consumer's
+    /// build with.
+    Lint(RegistryLintArgs),
+    /// Write or update the registry's compatibility lock (registry.lock).
+    ///
+    /// The RFC 08 §3.1 lock. Additive evolution and `[[deprecated]]` retirement regenerate cleanly;
     /// an INCOMPATIBLE edit (changed type/class/kind/shape on an existing
     /// path) is refused — retire and add a sibling instead. `--force`
     /// overrides, and prints every broken pin: the escape hatch is legal,
     /// silent it is not.
     Lock(RegistryLockArgs),
-    /// Who declares a reader of a subject (#224): every declared subscriber
-    /// and querier the admin space serves, related to the target by key
-    /// algebra and ranked, one row per session, joined to the origin its
-    /// alive token attaches.
+    /// Who declares a reader of a subject: subscribers and queriers, per session.
+    ///
+    /// Every declared subscriber and querier the admin space serves (#224),
+    /// related to the target by key algebra and ranked, one row per session,
+    /// joined to the origin its alive token attaches.
     ///
     /// A declaration is not proof of use, a `**` declaration intersects
     /// everything and is shown as such, and an admin space that does not
     /// answer is *not asked* — never an empty consumer set (RFC 13 §3 O4).
     Consumers(RegistryConsumersArgs),
-    /// The blast radius of changing one declared subject (#224): its
-    /// consumers, its storage coverage, what else declares on its family,
-    /// and its `[[deprecated]]` entry — in one document.
+    /// The blast radius of changing one subject: readers, storage, deprecation.
+    ///
+    /// One document (#224): its consumers, its storage coverage, what else
+    /// declares on its family, and its `[[deprecated]]` entry.
     Impact(RegistryImpactArgs),
-    /// Draft a registry from the wire, marked as a draft (#225, RFC 08
-    /// §6.1): one `<producer>.toml` per producer seen, a `types.toml` with
-    /// inferred JSON Schemas, `compat = "none"`, `draft = true`, no `since`.
+    /// Draft a registry from observed traffic, marked as a draft for review.
+    ///
+    /// #225, RFC 08 §6.1: one `<producer>.toml` per producer seen, a
+    /// `types.toml` with inferred JSON Schemas, `compat = "none"`,
+    /// `draft = true`, no `since`.
     ///
     /// Every field is a guess — `{var}`s from sibling structure and
     /// per-origin populations, units from RFC 08 §4's suffixes, rates and
@@ -1003,8 +1030,9 @@ pub(crate) enum RegistryCmd {
     /// zenkey-build REFUSES the draft until a review drops the marker;
     /// `registry lint --allow-drafts <dir>` checks it meanwhile.
     Infer(RegistryInferArgs),
-    /// Respell a registry directory in KDL (RFC 08 §5.1, #374): every
-    /// `<stem>.toml` — producers, services, the type table — becomes
+    /// Rewrite a registry directory from TOML into KDL, all or nothing.
+    ///
+    /// RFC 08 §5.1, #374: every `<stem>.toml` — producers, services, the type table — becomes
     /// `<stem>.kdl` meaning the same document, and every other file (the
     /// `.lock` ledgers, which stay line files) is kept beside unchanged.
     ///
@@ -1035,19 +1063,20 @@ pub(crate) enum AdminCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// The mesh as the admin space answers it (#118): nodes, edges, and
-    /// who only got mentioned.
+    /// The mesh as the admin space answers it: nodes, edges, mentions.
     ///
-    /// Their pictures are unlabeled circles; ours says which of admin space
-    /// and liveliness backs each element. Nodes whose admin space is off
-    /// render "heard of, not queryable" — never omitted.
+    /// #118: nodes, edges, and who only got mentioned. Their pictures are
+    /// unlabeled circles; ours says which of admin space and liveliness backs
+    /// each element. Nodes whose admin space is off render "heard of, not
+    /// queryable" — never omitted.
     Graph(AdminGraphArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum AclCmd {
-    /// Generate the router's `access_control` block from an enrollment
-    /// file — CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+    /// Generate the router's `access_control` block from an enrollment file
+    ///
+    /// CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
     ///
     /// Four facts of zenoh ACL shape every rule, and each is a way a
     /// hand-written block fails silently: matching is keyexpr INCLUSION and
@@ -1089,10 +1118,16 @@ pub(crate) enum AclCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum StorageCmd {
-    /// List configured storages and judge declared state families against
-    /// them (covered / partial / uncovered — RFC 04 §4, issue #14).
+    /// List configured storages and which declared state they cover.
+    ///
+    /// Each declared state family is judged covered, partial or uncovered
+    /// (RFC 04 §4, issue #14).
     List(StorageListArgs),
-    /// Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
+    /// Generate the router's storage config from the registry and a deployment file
+    ///
+    /// Plan the router's storages from the registry and a small deployment
+    /// file, and emit the `plugins.storage_manager` block with
+    /// `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393).
     ///
     /// RFC 09 §2 specifies class-driven storages, each with a selector, a
     /// literal `strip_prefix` and a `garbage_collection.lifespan` that must be
@@ -1147,11 +1182,13 @@ pub(crate) enum StorageCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum BlobCmd {
-    /// Which producers declare which `@blob` tiers (registry only, no bus
-    /// traffic). A declaration is a capability, never possession.
+    /// Which producers declare which blob tiers (registry only, no bus traffic).
+    ///
+    /// A declaration of an `@blob` tier is a capability, never possession.
     List(BlobListArgs),
-    /// Ask every origin who holds an object, with a *tiny* reply
-    /// (RFC 07 §2.5, total across tiers since v1.17): `have`/`manifest` for
+    /// Ask every origin who holds a blob — a tiny reply, never the bytes.
+    ///
+    /// RFC 07 §2.5, total across tiers since v1.17: `have`/`manifest` for
     /// an artifact, `store/<algo>/have` for a chunk, `tree/<root>/have` for
     /// a snapshot — at data-low, never the bytes.
     ///
@@ -1166,8 +1203,10 @@ pub(crate) enum BlobCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// Fetch from **one** origin's concrete key, at data-low, verifying every
-    /// reply against the content root before it reaches disk (RFC 07 §2.1).
+    /// Fetch a blob from one origin, verified before it reaches disk.
+    ///
+    /// From **one** origin's concrete key, at data-low, verifying every reply
+    /// against the content root before it reaches disk (RFC 07 §2.1).
     Fetch(BlobFetchArgs),
 }
 
@@ -1263,8 +1302,9 @@ pub(crate) enum TopicCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum NodeCmd {
-    /// One node's full story: producers, versions, capabilities, freshness
-    /// (issue #49; RFC 08 §6's capability-and-version inventory, per node).
+    /// One node's full story: producers, versions, capabilities, freshness.
+    ///
+    /// RFC 08 §6's capability-and-version inventory, per node (issue #49).
     Info {
         /// The origin id (`h-<12hex>`). A hostname is refused — resolve it
         /// through the catalog first (RFC 06 §6).
@@ -1619,9 +1659,13 @@ pub(crate) struct FieldArgs {
 pub(crate) struct RecordArgs {
     #[command(flatten)]
     pub(crate) selector: SelectorArgs,
-    /// Output file.
+    /// Output file. An existing file is refused (exit 2) unless
+    /// --overwrite: a capture is the one artifact this verb exists to keep.
     #[arg(long, short = 'o', value_name = "FILE")]
     pub(crate) out: String,
+    /// Replace an existing --out file instead of refusing it.
+    #[arg(long)]
+    pub(crate) overwrite: bool,
     /// Stop after this many seconds. With --on: give up waiting for a
     /// rule after this long (nothing is written; a rule not firing is
     /// not a finding).
@@ -1768,9 +1812,13 @@ pub(crate) struct SnapshotArgs {
     #[command(flatten)]
     pub(crate) selector: SelectorArgs,
     /// Output file. Refused (exit 2) when nobody answered: a file of
-    /// silence would read as an empty fleet (RFC 05 §3.1).
+    /// silence would read as an empty fleet (RFC 05 §3.1). An existing file
+    /// is refused too (exit 2), before any session, unless --overwrite.
     #[arg(long, short = 'o', value_name = "FILE", required = true)]
     pub(crate) out: Option<String>,
+    /// Replace an existing --out file instead of refusing it.
+    #[arg(long)]
+    pub(crate) overwrite: bool,
     /// Replies kept per selector; past it they are drained, counted, and
     /// the header says how many (RFC 09 §5.1 O6).
     #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_MAX_REPLIES)]
@@ -1787,10 +1835,12 @@ pub(crate) struct SnapshotArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum SnapshotSub {
-    /// Compare two .zsnap files — no bus. Both spans are stated, the
-    /// facets (value, verdict, registration, holder) stay apart, and an
-    /// origin an alignment could not pair is listed, never dropped.
-    /// Exit 0 identical, 1 they differ, 2 a file could not be read.
+    /// Compare two .zsnap files, offline.
+    ///
+    /// No bus. Both spans are stated, the facets (value, verdict, registration,
+    /// holder) stay apart, and an origin an alignment could not pair is listed,
+    /// never dropped. Exit 0 identical, 1 they differ, 2 a file could not be
+    /// read.
     Diff(SnapshotDiffArgs),
 }
 
@@ -2628,8 +2678,10 @@ pub(crate) struct ServiceCallArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum ConfigCmd {
-    /// Read a resource's configuration: the served schema beside every
-    /// running value, its source, and any pending change (on-bus).
+    /// Read a resource's running configuration and any pending change.
+    ///
+    /// The served schema beside every running value, its source, and any
+    /// pending change (on-bus).
     Get(ConfigGetArgs),
     /// Change one group of a resource, typed against the served schema
     /// (on-bus).
@@ -2645,8 +2697,9 @@ pub(crate) enum ConfigCmd {
     Cancel(ConfigTokenArgs),
     /// Move a pending change's deadline (on-bus).
     Extend(ConfigExtendArgs),
-    /// Write a confirmed change into the producer's persisted layer — its
-    /// own key, so an ACL grants it apart from the change (on-bus).
+    /// Write a confirmed change into the producer's persisted configuration.
+    ///
+    /// Its own key, so an ACL grants it apart from the change (on-bus).
     Persist(ConfigTokenArgs),
 }
 

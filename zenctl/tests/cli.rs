@@ -207,3 +207,91 @@ fn the_corpus_names_every_leaf_verb() {
         found.len()
     );
 }
+
+/// Every short `about` — the one-liners `zenctl --help` and each noun's
+/// `--help` list — reads in operator language (#515).
+///
+/// The command list is the first page an operator reads, and it used to be
+/// written for the maintainers: issue numbers, observer rule codes (`P7`,
+/// `O4`), RFC section marks and capitals for emphasis. Those belong in the
+/// long help of the verb, where they help; this walks the real tree and
+/// refuses them in the one line a list shows.
+#[test]
+fn the_command_lists_speak_to_an_operator() {
+    use clap::CommandFactory as _;
+
+    /// Words that are capitals because they are names, not because they shout.
+    const ACRONYMS: [&str; 3] = ["TOML", "JSON", "HTTP"];
+
+    fn faults(line: &str) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        let b = line.as_bytes();
+        let follows = |c: u8| {
+            b.windows(2).enumerate().any(|(i, w)| {
+                w[0] == c && w[1].is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_alphanumeric())
+            })
+        };
+        if follows(b'#') {
+            out.push("an issue number");
+        }
+        if follows(b'P') || follows(b'O') || follows(b'D') {
+            out.push("a rule code");
+        }
+        if line.contains("RFC") || line.contains('§') {
+            out.push("an RFC citation");
+        }
+        if line
+            .split(|c: char| !(c.is_ascii_alphabetic() || c == '$'))
+            // `$EDITOR` is a variable's name, not a raised voice.
+            .filter(|w| !w.starts_with('$'))
+            .any(|w| {
+                w.len() >= 4 && w.bytes().all(|c| c.is_ascii_uppercase()) && !ACRONYMS.contains(&w)
+            })
+        {
+            out.push("a shouted word");
+        }
+        if line.contains('\n') {
+            out.push("more than one line");
+        }
+        if line.chars().count() > 80 {
+            out.push("more than 80 columns");
+        }
+        out
+    }
+
+    fn walk(cmd: &clap::Command, path: &str, bad: &mut Vec<String>, seen: &mut usize) {
+        for sub in cmd.get_subcommands().filter(|c| c.get_name() != "help") {
+            let here = format!("{path} {}", sub.get_name());
+            let about = sub.get_about().map(|a| a.to_string()).unwrap_or_default();
+            assert!(!about.is_empty(), "`{here}` has no short help at all");
+            *seen += 1;
+            let f = faults(&about);
+            if !f.is_empty() {
+                bad.push(format!("{here}: {f:?}\n    {about}"));
+            }
+            walk(sub, &here, bad, seen);
+        }
+    }
+
+    let cmd = zenctl::cli::Cli::command();
+    let mut bad = Vec::new();
+    let root = cmd.get_about().map(|a| a.to_string()).unwrap_or_default();
+    let f = faults(&root);
+    if !f.is_empty() {
+        bad.push(format!("zenctl: {f:?}\n    {root}"));
+    }
+    let mut seen = 0;
+    walk(&cmd, "zenctl", &mut bad, &mut seen);
+    assert!(
+        bad.is_empty(),
+        "{} short help line(s) speak to the maintainers rather than the \
+         operator — move the citation into the long help (the doc comment's \
+         second paragraph):\n{}",
+        bad.len(),
+        bad.join("\n")
+    );
+    assert!(
+        seen >= 80,
+        "the walk saw only {seen} commands — it stopped short"
+    );
+}
