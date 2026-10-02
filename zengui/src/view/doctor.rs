@@ -147,6 +147,13 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         ));
     }
 
+    // #510: a run over an empty scope judged nothing — its empty findings
+    // list is not a healthy fleet, and the panel says so in the engine's
+    // words.
+    if let Some(why) = &report.unobservable {
+        col = col.push(kit::muted(format!("unobservable — {why}")));
+    }
+
     if let Some(d) = &state.delta {
         col = col.push(kit::muted(format!(
             "vs previous run: {} new · {} fixed · {} unchanged",

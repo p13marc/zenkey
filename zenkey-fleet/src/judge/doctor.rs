@@ -498,6 +498,30 @@ pub(crate) async fn run_doctor_inner(
         None => None,
     };
 
+    // An empty scope judged nothing (#510). With no producer on the roster
+    // and no router answering, every check above ran over nothing:
+    // `introspect-coverage` compares 0 with 0, and the one finding left is
+    // the Info `admin-unreachable`. That is the report a wrong endpoint or a
+    // wrong base produces, and it read as a healthy fleet. Anything that did
+    // answer or ride — an introspect without a token, a describe, a state
+    // read, a sample in the window — is something judged, and keeps the run
+    // a verdict.
+    let fresh_read: usize = internals.fresh_read.values().sum();
+    let heard = observation.as_ref().map_or(0, |o| o.samples);
+    let unobservable = (live == 0
+        && routers.is_empty()
+        && answered == 0
+        && described.is_empty()
+        && fresh_read == 0
+        && heard == 0)
+        .then(|| {
+            format!(
+                "nothing in scope: no producer holds an alive token under the base {base:?} \
+                 and no router answered the admin space — a run over an empty bus judged \
+                 nothing, which is not a healthy fleet (RFC 13 §1.2)"
+            )
+        });
+
     let report = DoctorReport {
         findings,
         // `None` when no local registry was given: the served-vs-declared
@@ -512,6 +536,7 @@ pub(crate) async fn run_doctor_inner(
         router_version,
         deep: spec.deep,
         observation,
+        unobservable,
     };
     Ok((report, internals))
 }

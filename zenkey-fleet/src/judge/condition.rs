@@ -457,7 +457,9 @@ impl Condition {
     }
 
     /// Judge a doctor run. `None` unless this is [`Condition::DoctorCheck`].
-    /// A failed run is unobservable for every doctor condition — never `ok`.
+    /// A failed run is unobservable for every doctor condition — never `ok`
+    /// — and so is a run that judged nothing (#510): an empty scope has not
+    /// said any check is clean.
     pub fn judge_doctor(&self, outcome: Result<&DoctorReport, &str>) -> Option<Eval> {
         let Condition::DoctorCheck { check } = self else {
             return None;
@@ -466,6 +468,13 @@ impl Condition {
             Err(e) => Eval {
                 state: CondState::Unobservable,
                 evidence: format!("the doctor run failed: {e}"),
+            },
+            Ok(DoctorReport {
+                unobservable: Some(why),
+                ..
+            }) => Eval {
+                state: CondState::Unobservable,
+                evidence: format!("the doctor run judged nothing: {why}"),
             },
             Ok(report) => {
                 let mut hits = report.findings.iter().filter(|f| f.check == *check);
@@ -1512,6 +1521,7 @@ mod tests {
             router_version: None,
             deep: false,
             observation: None,
+            unobservable: None,
         }
     }
 
@@ -1880,5 +1890,27 @@ mod tests {
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));
+    }
+
+    /// #510: a run that judged nothing is unobservable for every check —
+    /// the empty bus is not a clean baseline, and a fleet that comes back
+    /// reads `observable` again through the ordinary path.
+    #[test]
+    fn an_empty_scope_is_unobservable_for_every_check() {
+        let mut watch = DoctorWatch::new();
+        let empty = DoctorReport {
+            unobservable: Some("nothing in scope".into()),
+            ..report_with(&[CheckId::AdminUnreachable])
+        };
+        let baseline = watch.observe(Ok(&empty), "t0");
+        assert_eq!(baseline.len(), CheckId::ALL.len());
+        assert!(
+            baseline.iter().all(|t| t.to == CondState::Unobservable
+                && t.evidence.contains("judged nothing: nothing in scope")),
+            "{baseline:?}"
+        );
+        let back = watch.observe(Ok(&report_with(&[])), "t1");
+        assert_eq!(back.len(), CheckId::ALL.len());
+        assert!(back.iter().all(|t| t.to == CondState::Ok));
     }
 }

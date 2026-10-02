@@ -1218,6 +1218,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         router_version: None,
         deep: false,
         observation: None,
+        unobservable: None,
     };
     let mut state = DoctorState::default();
     state.finish(
@@ -1303,6 +1304,7 @@ fn the_doctor_pane_states_what_the_listen_phase_observed() {
             field_paths_dropped: 0,
             facts_evicted: 0,
         }),
+        unobservable: None,
     };
     let mut state = DoctorState::default();
     state.finish(

@@ -9,6 +9,7 @@
 use std::fmt;
 
 use super::asked::{Asked, u64_is_zero};
+use super::judgement::Judgement;
 use serde::{Deserialize, Serialize};
 
 /// Every check [`run_doctor`](crate::judge::doctor::run_doctor) can emit.
@@ -142,6 +143,30 @@ pub enum DoctorSeverity {
     Info,
 }
 
+impl DoctorSeverity {
+    /// The wire token, exactly as it serializes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DoctorSeverity::Error => "error",
+            DoctorSeverity::Warning => "warning",
+            DoctorSeverity::Info => "info",
+        }
+    }
+
+    /// Whether this severity reaches `floor` — `Error` reaches every floor,
+    /// `Info` only its own. The ladder a severity threshold reads (#510).
+    pub fn reaches(self, floor: DoctorSeverity) -> bool {
+        fn rank(s: DoctorSeverity) -> u8 {
+            match s {
+                DoctorSeverity::Error => 2,
+                DoctorSeverity::Warning => 1,
+                DoctorSeverity::Info => 0,
+            }
+        }
+        rank(self) >= rank(floor)
+    }
+}
+
 /// One machine-readable doctor finding (issue #46): what check fired, on
 /// what, with the evidence and the normative citation — the shape the GUI
 /// doctor panel renders as-is.
@@ -222,6 +247,16 @@ pub struct DoctorReport {
     /// not run, so pre-#161 JSON consumers see an unchanged document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<ObservationSummary>,
+    /// Set when the run **judged nothing** (#510), with the reason: no
+    /// producer on the liveliness roster, no router answering the admin
+    /// space, and nothing else that answered or rode — every check ran over
+    /// an empty scope, so its silence is not a clean bill (RFC 13 §1.2's
+    /// `Unobservable`; RFC 05 §3.1, silence needs attribution). A doctor
+    /// pointed at the wrong endpoint or base used to look exactly like a
+    /// healthy fleet. Absent whenever something was in scope, so an ordinary
+    /// document is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unobservable: Option<String>,
 }
 
 /// What `doctor --for` observed (#161) — the scope statement that keeps
@@ -262,6 +297,36 @@ impl DoctorReport {
             .filter(|f| f.severity == severity)
             .count()
     }
+
+    /// The run as an RFC 13 §1.2 [`Judgement`], under an optional severity
+    /// threshold — what a frontend exits through (#510).
+    ///
+    /// The judged claim is *"the fleet has a finding at or above
+    /// `threshold`"*, so a hit is `Established` and none is
+    /// `NotEstablished`. With no threshold, findings are output rather than
+    /// verdicts and the run is `NotEstablished` whatever it found. A run that
+    /// [judged nothing](DoctorReport::unobservable) is `Unobservable` under
+    /// every threshold, `None` included: no threshold turns an empty scope
+    /// into a healthy fleet.
+    pub fn judgement(&self, threshold: Option<DoctorSeverity>) -> Judgement {
+        if let Some(reason) = &self.unobservable {
+            return Judgement::Unobservable {
+                reason: reason.clone(),
+            };
+        }
+        let Some(floor) = threshold else {
+            return Judgement::NotEstablished {
+                reason: "no severity threshold: findings are output, not verdicts".into(),
+            };
+        };
+        if self.findings.iter().any(|f| f.severity.reaches(floor)) {
+            Judgement::Established
+        } else {
+            Judgement::NotEstablished {
+                reason: format!("no finding at or above {}", floor.as_str()),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -294,6 +359,7 @@ mod tests {
             router_version: Some("1.9.0".into()),
             deep: false,
             observation: None,
+            unobservable: None,
         };
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(
@@ -399,6 +465,72 @@ mod tests {
         };
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["observation"]["facts_evicted"], 5);
+        // #510: a run that judged nothing says so, by name and with its
+        // reason — appended, absent otherwise, like every addition above.
+        assert!(!json.as_object().unwrap().contains_key("unobservable"));
+        let report = DoctorReport {
+            unobservable: Some("nothing in scope".into()),
+            ..report
+        };
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["unobservable"], "nothing in scope");
+    }
+
+    /// #510: the run's judgement under a threshold — a hit is the finding
+    /// (1), none is clean (0), no threshold is always clean, and a run that
+    /// judged nothing is unobservable (2) under every threshold, `None`
+    /// included.
+    #[test]
+    fn the_judgement_reads_the_threshold_and_the_empty_scope() {
+        use crate::report::judgement_exit_code;
+        let warning = DoctorFinding {
+            severity: DoctorSeverity::Warning,
+            check: CheckId::SchemaDrift,
+            subject: "Health".into(),
+            evidence: "agreement cannot be judged".into(),
+            citation: None,
+        };
+        let report = DoctorReport {
+            findings: vec![warning],
+            synced: Asked::NotAsked,
+            introspect_answered: 1,
+            live_producers: 1,
+            describe_served: 1,
+            describe_missing: 0,
+            routers: 0,
+            router_version: None,
+            deep: false,
+            observation: None,
+            unobservable: None,
+        };
+        let exit = |r: &DoctorReport, t| judgement_exit_code(&r.judgement(t));
+        assert_eq!(exit(&report, None), 0);
+        assert_eq!(exit(&report, Some(DoctorSeverity::Error)), 0);
+        assert_eq!(exit(&report, Some(DoctorSeverity::Warning)), 1);
+        assert_eq!(exit(&report, Some(DoctorSeverity::Info)), 1);
+
+        let empty = DoctorReport {
+            findings: vec![],
+            live_producers: 0,
+            introspect_answered: 0,
+            describe_served: 0,
+            unobservable: Some("nothing in scope".into()),
+            ..report
+        };
+        for t in [
+            None,
+            Some(DoctorSeverity::Error),
+            Some(DoctorSeverity::Warning),
+            Some(DoctorSeverity::Info),
+        ] {
+            assert_eq!(exit(&empty, t), 2, "{t:?}");
+        }
+        assert_eq!(
+            empty.judgement(None),
+            Judgement::Unobservable {
+                reason: "nothing in scope".into()
+            }
+        );
     }
 }
 

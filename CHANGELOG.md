@@ -77,6 +77,23 @@ struct literals must add.
   (`config/{device}/access/set`) now matches the call that fills it,
   where the guard compared paths literally.
 
+### Exit honesty (epic #498, chunk DS)
+
+**A doctor run that judged nothing says so** (#510). `DoctorReport` gains
+`unobservable: Option<String>`, set — with the reason — when no producer is
+on the roster, no router answered the admin space, and nothing else answered
+or rode (introspect, describe, a `--deep` state read, a `--for` sample).
+Absent otherwise, so an ordinary document is unchanged; pinned beside the
+report. `DoctorReport::judgement(threshold)` is the run as an RFC 13 §1.2
+`Judgement` — `Established` on a finding at or above the threshold,
+`NotEstablished` otherwise (and always, with no threshold), `Unobservable`
+for an empty scope under every threshold — and `DoctorSeverity` gains
+`as_str` and `reaches`. A `doctor <check>` condition, `DoctorWatch` (so
+`doctor --transitions`) and zenwatch's scheduled doctor read an empty-scope
+run as **unobservable** for every check, exactly as they read a failed run —
+zenwatch keeps the previous report and sends no `resolved` for findings it
+could not see. zengui's doctor panel states the reason.
+
 ---
 
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)

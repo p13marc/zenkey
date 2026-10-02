@@ -1822,6 +1822,7 @@ when = ["config:wifi"]
                 field_paths_dropped: 0,
                 facts_evicted: 0,
             }),
+            unobservable: None,
         };
         let mut internals = DoctorInternals::default();
         internals.described.insert("demo".into());
