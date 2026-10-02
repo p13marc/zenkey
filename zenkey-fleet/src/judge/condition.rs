@@ -1257,6 +1257,22 @@ impl<'a> RuleSet<'a> {
     pub fn transitions(&self) -> u64 {
         self.transitions
     }
+
+    /// Where each rule stands now, split the way [`WatchdogSummary`]
+    /// carries it (#511): the rules last judged `firing`, then those last
+    /// judged `unobservable` or never judged — canonical spellings, in rule
+    /// order. A rule last judged `ok` is in neither.
+    pub fn standing(&self) -> (Vec<String>, Vec<String>) {
+        let (mut firing, mut unobservable) = (Vec::new(), Vec::new());
+        for rt in &self.rules {
+            match rt.state.state() {
+                Some(CondState::Ok) => {}
+                Some(CondState::Firing) => firing.push(rt.rule.to_string()),
+                Some(CondState::Unobservable) | None => unobservable.push(rt.rule.to_string()),
+            }
+        }
+        (firing, unobservable)
+    }
 }
 
 /// Watch the rules and yield one [`Transition`] per genuine change, none per
@@ -1487,10 +1503,13 @@ pub fn watchdog<'a>(
             }
         }
         monitor.shutdown().await?;
+        let (firing, unobservable) = rules.standing();
         Ok(WatchdogSummary {
             ticks: rules.ticks(),
             transitions: rules.transitions(),
             facts_evicted: facts_cache.evicted(),
+            firing,
+            unobservable,
         })
     })
 }

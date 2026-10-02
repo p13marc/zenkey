@@ -94,6 +94,14 @@ run as **unobservable** for every check, exactly as they read a failed run —
 zenwatch keeps the previous report and sends no `resolved` for findings it
 could not see. zengui's doctor panel states the reason.
 
+**A bounded watchdog run ends on a judgement** (#511). `WatchdogSummary`
+carries the rules that ended `firing` and those that ended `unobservable`
+(or were never evaluated), by canonical spelling, and
+`WatchdogSummary::judgement()` folds them: firing → `Established`, else
+unobservable → `Unobservable`, else `NotEstablished`. `RuleSet::standing()`
+is the same split for a second driver. `WatchdogSummary` is no longer
+`Copy` (it holds the two lists); its serialized shape is now pinned.
+
 ---
 
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
