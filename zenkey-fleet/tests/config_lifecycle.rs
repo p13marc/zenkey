@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use zenkey::config::{ConfigChange, ConfigView, ControlRequest, ParamValue, ValueSource};
 use zenkey_fleet::bus::producer::BringUp;
 use zenkey_fleet::report::{CallOutcome, CallReport};
-use zenkey_fleet::{CallSpec, CallTarget, Fleet};
+use zenkey_fleet::{Answer, CallSpec, CallTarget, Fleet, GetOpts};
 
 mod util;
 use util::{SETTLE, peer_pair};
@@ -316,13 +316,41 @@ async fn a_change_is_read_set_confirmed_persisted_cancelled_extended_and_lapses(
 
     // The server's own guard (RFC 05 §2.1, v1.38): a broadcast write is
     // refused at the producer whatever the caller's side did or did not
-    // check — here it checked nothing, because no slices were loaded.
-    let fanned = call(
-        &client,
-        "*",
-        &set,
-        Some(change("fq", ParamValue::Bool(true), None)),
+    // check. The engine's `call` no longer lets this one leave — a
+    // convention write never fans out, registry or not (#505) — so the
+    // broadcast goes out as a raw GET: the caller with no layer of its own,
+    // which is the one the server's guard exists for.
+    let body = change("fq", ParamValue::Bool(true), None);
+    let fleet = Fleet::new(&client, "");
+    let refused = zenkey_fleet::call(
+        &fleet,
+        CallSpec {
+            target: &CallTarget::Fleet,
+            producer: PRODUCER,
+            procedure: &set,
+            params: &[],
+            body: Some(body.clone()),
+            attachment: None,
+            timeout: Duration::from_secs(5),
+            slices: None,
+            force: true,
+        },
     )
-    .await;
-    assert_eq!(refusal(&fanned), "error/fanout-forbidden");
+    .await
+    .expect_err("the engine refuses a convention write under `*`, forced or not");
+    assert!(refused.is_unaskable(), "{refused}");
+    let segments: Vec<&str> = set.split('/').collect();
+    let key = zenkey::selector::fleet_rpc(PRODUCER, &segments).to_string();
+    let answers = zenkey_fleet::fleet_get(
+        &fleet,
+        &key,
+        &GetOpts::new(Duration::from_secs(5)).payload(Some(body)),
+    )
+    .await
+    .expect("the raw broadcast");
+    assert_eq!(answers.len(), 1, "one origin, one answer");
+    match &answers[0].answer {
+        Answer::Error { name, .. } => assert_eq!(name, "error/fanout-forbidden"),
+        Answer::Value(_) => panic!("the server applied a broadcast write"),
+    }
 }
