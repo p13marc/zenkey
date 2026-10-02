@@ -43,7 +43,7 @@ Options:
           [default: 1]
 
       --i-know
-          Bench a procedure the registry does not declare idempotent
+          Bench a procedure the registry does not declare idempotent (with `*`, one it does not declare at all). A declared write that may not fan out stays refused under `*` (RFC 05 §2.1)
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.

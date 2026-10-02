@@ -202,6 +202,7 @@ async fn call(
         attachment: None,
         timeout: bus.timeout(),
         slices: None,
+        force: false,
     };
     Ok(zenkey_fleet::call(&fleet, spec).await?)
 }

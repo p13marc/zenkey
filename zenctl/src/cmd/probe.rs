@@ -100,6 +100,7 @@ pub async fn run(cli: crate::cli::CheckProbeArgs) -> Result<()> {
             // and its disagreement notes under `--registry`, on the one verb
             // whose stated purpose is a cheap concrete-key probe (#245).
             slices: None,
+            force: false,
         },
     )
     .await?;

@@ -220,7 +220,7 @@ pub use bus::session::{
 };
 pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, WriteAct, call,
-    call_traced, check_concrete, check_retire, declare_publication,
+    call_traced, check_concrete, check_fanout, check_retire, declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};

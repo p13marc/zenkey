@@ -36,7 +36,8 @@
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::bus::producer::{BringUp, LiveProducer};
@@ -347,6 +348,30 @@ impl Bus {
         tokio::task::spawn_blocking(move || run(&argv, &home, input))
             .await
             .expect("the zenctl runner")
+    }
+
+    /// A queryable on the producer's session that answers every query on
+    /// `key` and counts them — the witness a refused fleet call is asserted
+    /// against: if the count did not move, nothing reached the producer.
+    pub async fn counting_responder(&mut self, key: &str) -> Arc<AtomicUsize> {
+        let queryable = self
+            .session
+            .declare_queryable(key.to_string())
+            .await
+            .expect("a counting responder");
+        let heard = Arc::new(AtomicUsize::new(0));
+        let count = heard.clone();
+        let reply_key = key.to_string();
+        self.tasks.push(tokio::spawn(async move {
+            while let Ok(q) = queryable.recv_async().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                let _ = q
+                    .reply(reply_key.clone(), r#"{"done":true}"#)
+                    .encoding("application/json")
+                    .await;
+            }
+        }));
+        heard
     }
 
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way,

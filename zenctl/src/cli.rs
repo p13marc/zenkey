@@ -2031,7 +2031,9 @@ pub(crate) struct BenchRpcArgs {
     /// Calls in flight at once (1 = strictly sequential).
     #[arg(long, default_value_t = 1)]
     pub(crate) concurrency: usize,
-    /// Bench a procedure the registry does not declare idempotent.
+    /// Bench a procedure the registry does not declare idempotent (with
+    /// `*`, one it does not declare at all). A declared write that may
+    /// not fan out stays refused under `*` (RFC 05 §2.1).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
     #[command(flatten)]
@@ -2503,10 +2505,16 @@ pub(crate) struct ServiceCallArgs {
     /// text, `@file`, or `-` for stdin.
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub(crate) attachment: Option<Source>,
-    /// Skip the registry lookup (and with it the registry-layer
-    /// forbidden-fanout refusal and any body validation).
+    /// Skip the registry lookup and any body validation. With `*`, the
+    /// procedure's kind is then unknown, so the call is refused unless
+    /// --i-know.
     #[arg(long)]
     pub(crate) no_validate: bool,
+    /// Fan a `*` call out to a procedure whose kind could not be
+    /// established — no registry, or one that does not declare it. A
+    /// declared write that may not fan out stays refused (RFC 05 §2.1).
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
     /// Send the request body verbatim: no schema lookup, no encoding.
     #[arg(long)]
     pub(crate) raw: bool,

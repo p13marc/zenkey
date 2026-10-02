@@ -372,6 +372,7 @@ async fn probe_introspect(
         attachment: None,
         timeout,
         slices: None,
+        force: false,
     };
     let answers = match crate::bus::write::call_answers(fleet, spec).await {
         Ok((_, _, answers)) => answers,
@@ -417,6 +418,7 @@ async fn probe(
         attachment: None,
         timeout,
         slices: None,
+        force: false,
     };
     match crate::bus::write::call(fleet, spec).await {
         Ok(report) => report

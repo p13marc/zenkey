@@ -47,6 +47,7 @@ async fn call(
             attachment: None,
             timeout: Duration::from_secs(5),
             slices: None,
+            force: false,
         },
     )
     .await
