@@ -3,24 +3,27 @@ something declared — and the one verb under it plans, checks and explains.
 
 ```console
 $ zenctl acl --help
-Router access control: RFC 09 §3's grant matrix, generated from an enrollment file (#392)
+Router access control, generated from an enrollment file.
+
+RFC 09 §3's grant matrix, generated from an enrollment file (#392).
 
 Usage: zenctl acl <COMMAND>
 
 Commands:
-  gen   Generate the router's `access_control` block from an enrollment
-        file — CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+  gen   Generate the router's `access_control` block from an enrollment file
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 ```
 
 ```console
 $ zenctl acl gen --help
-Generate the router's `access_control` block from an enrollment
-file — CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+Generate the router's `access_control` block from an enrollment file
+
+CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
 
 Four facts of zenoh ACL shape every rule, and each is a way a
 hand-written block fails silently: matching is keyexpr INCLUSION and

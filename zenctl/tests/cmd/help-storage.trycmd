@@ -3,20 +3,25 @@ router block that makes the coverage happen (`storage gen`, #393).
 
 ```console
 $ zenctl storage --help
-Storages: what the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2)
+Storages: what the mesh persists, and the router config behind it.
+
+What the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2).
 
 Usage: zenctl storage <COMMAND>
 
 Commands:
-  list  List configured storages and judge declared state families against them (covered / partial / uncovered — RFC 04 §4, issue #14)
-  gen   Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
+  list  List configured storages and which declared state they cover
+  gen   Generate the router's storage config from the registry and a deployment file
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl storage list --help
-List configured storages and judge declared state families against them (covered / partial / uncovered — RFC 04 §4, issue #14)
+List configured storages and which declared state they cover.
+
+Each declared state family is judged covered, partial or uncovered (RFC 04 §4, issue #14).
 
 Usage: zenctl storage list [OPTIONS]
 
@@ -97,7 +102,11 @@ and this file is the smaller thing a deployment actually has to write.
 
 ```console
 $ zenctl storage gen --help
-Plan the router's storages from the registry and a small deployment file, and emit the `plugins.storage_manager` block with `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393)
+Generate the router's storage config from the registry and a deployment file
+
+Plan the router's storages from the registry and a small deployment
+file, and emit the `plugins.storage_manager` block with
+`garbage_collection.lifespan` DERIVED (RFC 09 §2, #393).
 
 RFC 09 §2 specifies class-driven storages, each with a selector, a
 literal `strip_prefix` and a `garbage_collection.lifespan` that must be

@@ -103,7 +103,9 @@ Error: inplace: holds no registry *.toml file — nothing to migrate
 
 ```console
 $ zenctl registry migrate --help
-Respell a registry directory in KDL (RFC 08 §5.1, #374): every `<stem>.toml` — producers, services, the type table — becomes `<stem>.kdl` meaning the same document, and every other file (the `.lock` ledgers, which stay line files) is kept beside unchanged.
+Rewrite a registry directory from TOML into KDL, all or nothing.
+
+RFC 08 §5.1, #374: every `<stem>.toml` — producers, services, the type table — becomes `<stem>.kdl` meaning the same document, and every other file (the `.lock` ledgers, which stay line files) is kept beside unchanged.
 
 The document crosses whole, columns this build does not read included. Comments cross too: a table's comment block becomes its node's, and the file's header and trailer stay where they were. The honest bound: a KDL node has no place for a comment *on* one property, so a comment written on or above a key is hoisted into its node's leading block as `// <key>: …` — kept and named, not placed.
 

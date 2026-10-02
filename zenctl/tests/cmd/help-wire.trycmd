@@ -14,9 +14,9 @@ observation — the one place the word still earns its keep.
 
 ```console
 $ zenctl get --help
-GET any selector with the fleet discipline (RFC 05 §2.1).
+Query any selector and print every reply, attributed to its key.
 
-Target All, consolidation None, every reply attributed by its own key; error envelopes render as errors (RFC 05 §3), and payloads ride the same rendering ladder as `echo` (served-schema decode → structural → text → hex). `@/**` browses the zenoh admin space. Exit codes: 0 values only, 1 an error reply, 2 silence.
+The fleet discipline (RFC 05 §2.1): target All, consolidation None, every reply attributed by its own key; error envelopes render as errors (RFC 05 §3), and payloads ride the same rendering ladder as `echo` (served-schema decode → structural → text → hex). `@/**` browses the zenoh admin space. Exit codes: 0 values only, 1 an error reply, 2 silence.
 
 Usage: zenctl get [OPTIONS] <SELECTOR>
 
@@ -205,7 +205,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl pub --help
-Publish to a key (issue #47) — a declared publisher, never an ad-hoc put (P7)
+Publish a value to a key.
+
+Through a declared publisher, never an ad-hoc put (P7, issue #47).
 
 Usage: zenctl pub [OPTIONS] <--from <FROM>|KEY> [BODY]
 
@@ -312,9 +314,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl retire --help
-Retire a key with a tombstone — an authoritative delete (RFC 04 §1.2), riding a declared publisher like `pub` (P7).
+Retire a key with a tombstone, an authoritative delete.
 
-State keys retire freely (retirement is the class's own semantics); anything else is an operator cleanup (v1.12) and needs --i-know. Wildcards are refused outright.
+RFC 04 §1.2's tombstone, riding a declared publisher like `pub` (P7). State keys retire freely (retirement is the class's own semantics); anything else is an operator cleanup (v1.12) and needs --i-know. Wildcards are refused outright.
 
 Usage: zenctl retire [OPTIONS] <KEY>
 
@@ -490,7 +492,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl field --help
-Field intelligence over a window (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see.
+Per-field statistics over a window: stuck, vanished and new fields.
+
+Field intelligence (#223): per-dotted-path statistics — presence, type stability, change count, numeric range, small-domain values — plus the three findings per-sample validation cannot see.
 
 The stuck sensor that passes every check: a key publishing at its declared rate with a perfectly valid payload whose temperature_c has not moved in four hours. field-stuck flags a numeric unchanged over a span long relative to the subject's declared ttl_s (an observation with a stated window, never a verdict); field-vanished a path SEEN then absent while later payloads still parse (a schema that declares it optional reads Valid without it by construction); field-new a path the served schema never declared — schema drift at field granularity. The path table is bounded and reports what it dropped (RFC 09 §5.1 O6); with no registry loaded, stuck/new are unjudgeable and the report says so (O4). Findings are output, not verdicts — exit 0 unless you opt in with `--fail-on`.
 
@@ -588,9 +592,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl record --help
-Capture a selector's traffic to a .zrec file (RFC 09 §5.2).
+Capture a selector's traffic to a .zrec file.
 
-Through the Monitor: a bus that outruns the disk surfaces as drop records *in the file*, where the gaps happened (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it cost. Replay with `zenctl replay`; the file is ndjson (one row per line, payloads lossless as base64 `bytes`), so `jq` reads it too.
+A capture (RFC 09 §5.2), taken through the Monitor: a bus that outruns the disk surfaces as drop records *in the file*, where the gaps happened (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it cost. Replay with `zenctl replay`; the file is ndjson (one row per line, payloads lossless as base64 `bytes`), so `jq` reads it too.
 
 Usage: zenctl record [OPTIONS] --out <FILE> [SELECTOR]
 
@@ -706,9 +710,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl replay --help
-Replay a .zrec capture onto the bus — replay is PUBLISHING.
+Replay a .zrec capture onto the bus (this publishes).
 
-Real puts through declared publishers, at the capture's own pacing (scaled by --speed), re-stamped with this session's HLC: re-stamped old data WINS last-writer-wins against a live fleet, which is why the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the capture header's base is a contract (`--force-base` to override).
+Replay is PUBLISHING: real puts through declared publishers, at the capture's own pacing (scaled by --speed), re-stamped with this session's HLC: re-stamped old data WINS last-writer-wins against a live fleet, which is why the etiquette is enforced (RFC 09 §5.2) — dry-run first, and the capture header's base is a contract (`--force-base` to override).
 
 Usage: zenctl replay [OPTIONS] <FILE>
 
@@ -800,9 +804,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl timeline --help
-The fleet timeline (#216): one merged ordering of a window's samples, lanes per origin/producer, the clock stated per report and the stamper per lane — and DELIBERATELY NO EDGES.
+One merged ordering of a window's samples, a lane per origin.
 
-A line between two lanes would claim a causality no observer on this bus can establish. What it can say: on the arrival axis, when each sample was seen here; on the HLC axis (`--order hlc`), the happened-before of ONE stamping node, or a comparison of skewed wall clocks when several stamped (RFC 09 §5.1 O7). Unstamped samples get their own lane on arrival and cannot be placed on the HLC axis at all; drops and coalescing render as breaks where they fell (O6). The per-publisher sequence-number lane is reported UNAVAILABLE on this zenoh, not empty. `--from <FILE>` reads a .zrec through the same projection, so live and replay render identically.
+The fleet timeline (#216): lanes per origin/producer, the clock stated per report and the stamper per lane — and DELIBERATELY NO EDGES. A line between two lanes would claim a causality no observer on this bus can establish. What it can say: on the arrival axis, when each sample was seen here; on the HLC axis (`--order hlc`), the happened-before of ONE stamping node, or a comparison of skewed wall clocks when several stamped (RFC 09 §5.1 O7). Unstamped samples get their own lane on arrival and cannot be placed on the HLC axis at all; drops and coalescing render as breaks where they fell (O6). The per-publisher sequence-number lane is reported UNAVAILABLE on this zenoh, not empty. `--from <FILE>` reads a .zrec through the same projection, so live and replay render identically.
 
 Usage: zenctl timeline [OPTIONS] [SELECTOR]...
 
@@ -887,15 +891,15 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl snapshot --help
-Take a fleet snapshot to a .zsnap file (RFC 13 §4.4) — or, with `diff`, compare two.
+Take a fleet snapshot to a .zsnap file, or compare two with `diff`.
 
-One fan-in GET per selector, folded last-writer-wins per key, each row carrying what the observer could establish: the exact payload, whose clock stamped it (O7), the registry rung (O2), the three-valued verdict, and who HOLDS it — `live` (its origin held an alive token during the collection, and whether the replier was the stamper), `storage_only` (a value answered, nobody is saying it now), or `unattributed` (the roster was not asked, or the key names no origin). A snapshot is collected OVER a span, never at an instant, and every rendering says so. Read, never replayed: seeding a fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2 nobody answered (silence is not a snapshot).
+The snapshot of RFC 13 §4.4: one fan-in GET per selector, folded last-writer-wins per key, each row carrying what the observer could establish: the exact payload, whose clock stamped it (O7), the registry rung (O2), the three-valued verdict, and who HOLDS it — `live` (its origin held an alive token during the collection, and whether the replier was the stamper), `storage_only` (a value answered, nobody is saying it now), or `unattributed` (the roster was not asked, or the key names no origin). A snapshot is collected OVER a span, never at an instant, and every rendering says so. Read, never replayed: seeding a fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2 nobody answered (silence is not a snapshot).
 
 Usage: zenctl snapshot [OPTIONS] --out <FILE> [SELECTOR]
        zenctl snapshot <COMMAND>
 
 Commands:
-  diff  Compare two .zsnap files — no bus. Both spans are stated, the facets (value, verdict, registration, holder) stay apart, and an origin an alignment could not pair is listed, never dropped. Exit 0 identical, 1 they differ, 2 a file could not be read
+  diff  Compare two .zsnap files, offline
   help  Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -984,7 +988,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl snapshot diff --help
-Compare two .zsnap files — no bus. Both spans are stated, the facets (value, verdict, registration, holder) stay apart, and an origin an alignment could not pair is listed, never dropped. Exit 0 identical, 1 they differ, 2 a file could not be read
+Compare two .zsnap files, offline.
+
+No bus. Both spans are stated, the facets (value, verdict, registration, holder) stay apart, and an origin an alignment could not pair is listed, never dropped. Exit 0 identical, 1 they differ, 2 a file could not be read.
 
 Usage: zenctl snapshot diff [OPTIONS] <A> <B>
 
@@ -1030,9 +1036,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl export --help
-Serve the bus and its contract as Prometheus metrics (#228): key series named and united by the registry, and the observer's own blind spots as first-class series beside them.
+Serve the bus and its contract as Prometheus metrics.
 
-`zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a series exists only where the registry declares the subject (names and units from `unit`/`kind`, never sniffed from the leaf; every `{var}` a label; the declared `cardinality` bounds the population and what it refuses is counted). What every other exporter hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the four evicted populations (never summed), coalesced and unstamped samples; a series that stopped keeps its labels and state — evicted, origin_down, retired — and loses its value, so absence and silence are different bytes; payload verdicts are three populations, the third `not_validated`; the selectors watched and the planes `**` cannot reach ride `zenkey_scope_info`. Killing a producer turns its series `origin_down`; forcing drops moves the counter and marks the series fed meanwhile; scraping twice with no traffic is byte-identical. A foreground observer, explicitly launched, one process per invocation, sharing nothing, caching no discovery, serving nothing another zenctl reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP, histograms and summaries, push gateways and remote write — `/metrics` over plain HTTP is the whole surface.
+Key series named and united by the registry, and the observer's own blind spots as first-class series beside them (#228). `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a series exists only where the registry declares the subject (names and units from `unit`/`kind`, never sniffed from the leaf; every `{var}` a label; the declared `cardinality` bounds the population and what it refuses is counted). What every other exporter hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the four evicted populations (never summed), coalesced and unstamped samples; a series that stopped keeps its labels and state — evicted, origin_down, retired — and loses its value, so absence and silence are different bytes; payload verdicts are three populations, the third `not_validated`; the selectors watched and the planes `**` cannot reach ride `zenkey_scope_info`. Killing a producer turns its series `origin_down`; forcing drops moves the counter and marks the series fed meanwhile; scraping twice with no traffic is byte-identical. A foreground observer, explicitly launched, one process per invocation, sharing nothing, caching no discovery, serving nothing another zenctl reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP, histograms and summaries, push gateways and remote write — `/metrics` over plain HTTP is the whole surface.
 
 Usage: zenctl export [OPTIONS] [SELECTOR]
 
@@ -1141,9 +1147,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl serve --help
-Stand up a mock queryable: answer every query on a keyexpr with one static body, and log every ask (#121).
+Stand up a mock queryable that answers one keyexpr and logs every ask.
 
-The log doubles as a "who is querying this key" probe. Deliberately no reply scripting — static and file bodies cover the dev-loop case; the shell covers dynamic replies by restarting serve. (nuze and zsak own the embedded-language lane, at the cost of a Nushell dependency and a linked libpython respectively.)
+Every query on the keyexpr gets one static body (#121). The log doubles as a "who is querying this key" probe. Deliberately no reply scripting — static and file bodies cover the dev-loop case; the shell covers dynamic replies by restarting serve. (nuze and zsak own the embedded-language lane, at the cost of a Nushell dependency and a linked libpython respectively.)
 
 Usage: zenctl serve [OPTIONS] <KEYEXPR> <REPLY>
 
@@ -1236,9 +1242,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl gen --help
-Generate registry-driven test traffic (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers.
+Generate test traffic from the registry: a mock producer.
 
-The full plan prints BEFORE anything is published; every sample carries the RFC 09 §5.3 synthetic marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window or a capture can tell this traffic from real. Events stay inside their declared rate budget on write-once keys. A run wider than 10 subjects needs --wide; faults need --i-know.
+Registry-driven (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers. The full plan prints BEFORE anything is published; every sample carries the RFC 09 §5.3 synthetic marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window or a capture can tell this traffic from real. Events stay inside their declared rate budget on write-once keys. A run wider than 10 subjects needs --wide; faults need --i-know.
 
 Usage: zenctl gen [OPTIONS]
 
@@ -1420,9 +1426,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl doctor --help
-Check the fleet against the contracts it claims (RFC 08 §6): drift, freshness, QoS, coverage.
+Check the fleet against the contracts it claims: drift, freshness, QoS.
 
-RFC 08 §6: "A disagreement between introspection and the checked-in TOML is a finding, not an ambiguity." This prints the findings — `registry diff` shows the two registries side by side; doctor *judges* the deployment. The local truth comes from `--registry <dir>`; without it only the roster-vs-introspect check runs.
+Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between introspection and the checked-in TOML is a finding, not an ambiguity." This prints the findings — `registry diff` shows the two registries side by side; doctor *judges* the deployment. The local truth comes from `--registry <dir>`; without it only the roster-vs-introspect check runs.
 
 Usage: zenctl doctor [OPTIONS]
 
@@ -1515,9 +1521,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl why --help
-Why is this key silent — the non-verdict, itemised (#214).
+Explain why a key is silent, one established fact at a time.
 
-A rung ladder over facts the engine already holds: scope reach, grammar, registry declaration, the liveliness roster, declared publishers, storage coverage, a stored value, freshness, admin reachability. Every rung answers established / not-established (with its reason) / NOT ASKED — "not asked" is never rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers declare lazily, on the first publication (RFC 08 §6.1). The default run costs the control plane only; `--for` adds the one data-plane rung. Exit 0 = nothing found and everything checked looks healthy; 1 = a cause was established — the finding; 2 = the observation was impaired.
+The non-verdict, itemised (#214): a rung ladder over facts the engine already holds: scope reach, grammar, registry declaration, the liveliness roster, declared publishers, storage coverage, a stored value, freshness, admin reachability. Every rung answers established / not-established (with its reason) / NOT ASKED — "not asked" is never rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers declare lazily, on the first publication (RFC 08 §6.1). The default run costs the control plane only; `--for` adds the one data-plane rung. Exit 0 = nothing found and everything checked looks healthy; 1 = a cause was established — the finding; 2 = the observation was impaired.
 
 Usage: zenctl why [OPTIONS] [SELECTOR]
 
@@ -1599,9 +1605,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl watchdog --help
-Watch conditions on the bus and emit TRANSITIONS as ndjson (#227).
+Watch conditions on the bus and print each state change as ndjson.
 
-A foreground observer — explicitly launched, one process per invocation, no shared state; not a daemon. Each --rule is one condition from a CLOSED vocabulary (no expressions, no templating); every genuine state change prints one line {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick prints nothing. Three states, not two (RFC 09 §5.1 O4/O6): ok / firing / unobservable — a drop under a completeness claim is "could not tell", never "ok", which is what keeps a 3am page honest. The first evaluation states each rule's baseline once, from null.
+Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per invocation, no shared state; not a daemon. Each --rule is one condition from a CLOSED vocabulary (no expressions, no templating); every genuine state change prints one line {"row":"transition","rule":…,"from":…,"to":…,"at":…,"evidence":…} and an unchanged tick prints nothing. Three states, not two (RFC 09 §5.1 O4/O6): ok / firing / unobservable — a drop under a completeness claim is "could not tell", never "ok", which is what keeps a 3am page honest. The first evaluation states each rule's baseline once, from null.
 
 Usage: zenctl watchdog [OPTIONS] --rule <RULE>
 

@@ -3,17 +3,20 @@ format and a flag, not a `--format` variant.
 
 ```console
 $ zenctl admin --help
-Zenoh admin space (`@/**`) — the middleware's own introspection
+Zenoh's own introspection: routers, peers and the mesh graph.
+
+The admin space (`@/**`) — the middleware's own introspection.
 
 Usage: zenctl admin <COMMAND>
 
 Commands:
   routers  Enumerate routers/peers (zid, version, locators)
-  graph    The mesh as the admin space answers it (#118): nodes, edges, and who only got mentioned
+  graph    The mesh as the admin space answers it: nodes, edges, mentions
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl admin routers --help
 Enumerate routers/peers (zid, version, locators)
@@ -82,9 +85,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl admin graph --help
-The mesh as the admin space answers it (#118): nodes, edges, and who only got mentioned.
+The mesh as the admin space answers it: nodes, edges, mentions.
 
-Their pictures are unlabeled circles; ours says which of admin space and liveliness backs each element. Nodes whose admin space is off render "heard of, not queryable" — never omitted.
+#118: nodes, edges, and who only got mentioned. Their pictures are unlabeled circles; ours says which of admin space and liveliness backs each element. Nodes whose admin space is off render "heard of, not queryable" — never omitted.
 
 Usage: zenctl admin graph [OPTIONS]
 

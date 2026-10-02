@@ -2,7 +2,9 @@ Procedures: what can be called, and calling it (RFC 05).
 
 ```console
 $ zenctl service --help
-Procedures on the `@rpc` plane
+Procedures producers offer: list them, describe them, call them.
+
+The `@rpc` plane.
 
 Usage: zenctl service <COMMAND>
 
@@ -13,7 +15,8 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 
 $ zenctl service list --help
 List registered procedures (bus-served slices, or `--registry`)
