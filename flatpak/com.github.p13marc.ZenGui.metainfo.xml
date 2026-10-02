@@ -53,6 +53,11 @@
     <keyword>iced</keyword>
   </keywords>
   <releases>
+    <release version="0.13.0" date="2026-10-02">
+      <description>
+        <p>zengui 0.6.0: the session is a Zenoh client by default (no listener, no multicast unless the config states it); a dead router is a link error at once, and --registry directories still load without a bus.</p>
+      </description>
+    </release>
     <release version="0.12.0" date="2026-09-29">
       <description>
         <p>zengui 0.5.2: reads registry directories in either spelling, TOML or KDL, and says an introspect reply was unreadable, naming its encoding, instead of drawing it as no reply.</p>

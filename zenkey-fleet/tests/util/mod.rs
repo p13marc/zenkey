@@ -10,9 +10,9 @@
 //! collide with themselves and suites fail for a reason that has nothing to
 //! do with the code under test.
 //!
-//! `session_open.rs` already had the technique: ask the OS for a free port
-//! (`TcpListener::bind("127.0.0.1:0")`), take its number, and let it go.
-//! Nothing here names a port, so nothing here can collide with a port.
+//! Nothing here names a port: a listener binds port 0 ([`ANY_PORT`]) and the
+//! test reads back what it got ([`bound`]), so nothing here can collide with a
+//! port — not even a port learned and then released, the gap #527 closed.
 
 // Each suite includes the whole module and uses the part it needs.
 #![allow(dead_code)]
@@ -35,26 +35,36 @@ use std::time::Duration;
 /// tight; none of these are.
 pub const SETTLE: Duration = Duration::from_secs(20);
 
-/// A loopback endpoint on a port the OS has just told us is free.
+/// The endpoint a test listener binds: loopback, the port chosen by the OS
+/// at bind time. Read back what it got with [`bound`].
+pub const ANY_PORT: &str = "tcp/127.0.0.1:0";
+
+/// Where a listener opened on [`ANY_PORT`] actually listens.
 ///
-/// The listener is released the instant its number is known, because zenoh
-/// binds next. That window is what makes this "a free port" rather than "a
-/// reserved one" — the OS does not hand the same ephemeral port out twice in
-/// a row, which is all this needs.
-pub fn endpoint() -> String {
-    let held = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-    let port = held.local_addr().expect("local addr").port();
-    drop(held);
-    format!("tcp/127.0.0.1:{port}")
+/// The listener binds port 0 itself and this reads back what zenoh bound, so
+/// no port is ever learned from one socket and then handed to another (#527).
+/// The old helper did exactly that — bind, read the number, drop, let zenoh
+/// bind next — and in that window any socket on the box could be given the
+/// port, a concurrent run's *outgoing* connection included: one run in
+/// eighteen of six concurrent live suites failed with EADDRINUSE.
+pub async fn bound(session: &zenoh::Session) -> String {
+    session
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("a loopback tcp listener")
 }
 
 /// Two in-process peers on a fresh port: one listening, one connected to it.
 /// No scouting, no external router — the fixture nearly every suite opens.
 pub async fn peer_pair() -> (zenoh::Session, zenoh::Session) {
-    let endpoint = endpoint();
-    let listen = zenkey_fleet::bus::session::open(&[], std::slice::from_ref(&endpoint), false)
+    let listen = zenkey_fleet::bus::session::open(&[], &[ANY_PORT.to_string()], false)
         .await
         .expect("listener session");
+    let endpoint = bound(&listen).await;
     let connect = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("connector session");
@@ -65,13 +75,13 @@ pub async fn peer_pair() -> (zenoh::Session, zenoh::Session) {
 /// with `timestamping.enabled`, which the seed, stamper and `@adv` cache
 /// fixtures need (an AdvancedPublisher's sequencing is timestamp-based).
 pub async fn timestamping_pair() -> (zenoh::Session, zenoh::Session) {
-    let endpoint = endpoint();
     let mut cfg = zenoh::Config::default();
     cfg.insert_json5("scouting/multicast/enabled", "false").ok();
     cfg.insert_json5("timestamping/enabled", "true").ok();
-    cfg.insert_json5("listen/endpoints", &format!("[\"{endpoint}\"]"))
+    cfg.insert_json5("listen/endpoints", &format!("[\"{ANY_PORT}\"]"))
         .ok();
     let listen = zenoh::open(cfg).await.expect("timestamping session");
+    let endpoint = bound(&listen).await;
     let connect = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("connector session");

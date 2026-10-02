@@ -6,18 +6,39 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 | 0.12.0 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** | **0.16.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** | **0.10.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged | **0.5.2** |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged | **0.3.0** |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 | 0.12.0 | 0.13.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** | **0.16.0** | **0.17.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** | **0.10.0** | **0.11.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged | **0.5.2** | **0.6.0** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged | **0.3.0** | **0.4.0** |
 
 ---
 
-## Unreleased
+## 0.13.0 — zenctl in production (2026-10-02)
+
+**Release commit** on 2026-10-02: `zenkey-fleet` 0.17.0 to crates.io, the
+`0.13.0` tag; `zenkey` and `zenkey-build` are unchanged at 0.11.0.
+
+Epic #498, from a production-readiness review of `zenctl` that reproduced
+six things against a live bus that must not reach a production one: every
+explorer joined the mesh as a full **peer** listening on every interface;
+`--zenoh-config` silently turned **multicast scouting on**; a typo'd or dead
+endpoint read as an **empty bus, exit 0**; `pub 'prod/v1/**'` was
+**accepted**; an invalid name **panicked** (exit 101); and `doctor` was
+**green on an empty bus**. None of `zenctl`'s own tests touched a bus. The
+rule the epic held every fix to: *an operator's mistake ends in a refusal
+or an exit 2, never in a silent write or a green exit.* Six chunks — **DP**
+(a live suite: the real binary against an in-process producer, first,
+so every later fix landed with its regression), **DQ** (the session
+posture), **DR** (write guards), **DS** (exit honesty), **DT** (the
+operator surface) — and two RFC amendments, **v1.47** and **v1.48**
+([rfcs/CHANGELOG.md](rfcs/CHANGELOG.md)). Every changed behaviour a script
+can see is in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md)'s old → new
+tables. #518 (two RFC 05 §5.1 wire questions the config test double
+found) stays open past this release.
 
 ### Explorer session posture (epic #498, chunk DQ)
 

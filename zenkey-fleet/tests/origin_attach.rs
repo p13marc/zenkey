@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 mod util;
-use util::{admin_config, endpoint};
+use util::admin_config;
 
 const TOKEN: &str = "v1/h-cccccccccccc/state/demo/alive";
 
@@ -19,15 +19,15 @@ const TOKEN: &str = "v1/h-cccccccccccc/state/demo/alive";
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_declared_token_attaches_its_origin() {
     let file = admin_config();
-    let endpoint = endpoint();
     let serving = zenkey_fleet::open_with_config(
         Some(&file),
         &[],
-        std::slice::from_ref(&endpoint),
+        &[util::ANY_PORT.to_string()],
         Some(false),
     )
     .await
     .expect("serving session");
+    let endpoint = util::bound(&serving).await;
     let asking = zenkey_fleet::bus::session::open(std::slice::from_ref(&endpoint), &[], false)
         .await
         .expect("asking session");
