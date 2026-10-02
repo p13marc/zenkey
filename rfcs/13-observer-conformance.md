@@ -1,7 +1,7 @@
 # 13 — Observer Conformance
 
 **Status: v1.24 (ratified)** · normative chapter · *created in v1.24 and
-amended in v1.32, v1.34, v1.35, v1.36, v1.39 and v1.45 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
+amended in v1.32, v1.34, v1.35, v1.36, v1.39, v1.45 and v1.48 — see [CHANGELOG.md](CHANGELOG.md)* — carved from chapter 09 §5.1–§5.3 and
 §6; the moved material entered the set in v1.2, v1.9, v1.13 and v1.19
 and was amended there in v1.18 and v1.21
 
@@ -155,6 +155,13 @@ something reads the report, not the code. And 2 is never a substitute for
 1: "could not check" exiting like "checked and failed" would let a broken
 observation masquerade as a finding — the exact confusion
 [05 §3.1](05-control-rpc.md) forbids on the wire, at the process boundary.
+
+**An empty scope is Unobservable (v1.48).** A judgement whose scope proved
+empty — nothing in scope was observed at all: no liveliness token, no
+reply, no sample — is `Unestablished(Unobservable)`, never
+`Established(no)`. The absence of findings over nothing is not a clean
+answer, and a tool MUST NOT project it to 0: a monitoring job pointed at
+the wrong endpoint would otherwise be green for as long as nobody looks.
 
 ## 2. Silence is never a verdict (normative)
 
@@ -637,7 +644,11 @@ between the rows. The reference replayer skips them unless told
   one in the capture header is refused unless explicitly forced
   (`--force-base`) — the tool never re-derives a base from the recorded
   keys (O3), and "same keys, different deployment" is presumed to be a
-  mistake until the operator says otherwise.
+  mistake until the operator says otherwise. Two **empty** bases are not
+  evidence of one deployment (v1.48): the empty base is the default every
+  deployment starts on ([03 §1.1](03-grammar.md)), so a re-publishing
+  replay whose capture and target are both base-less asks the same
+  explicit confirmation of its target.
 - **Tombstone rows are operator deletes.** A recorded delete replays
   through the same class-conscious retire gate as a live one
   ([04 §1.2](04-planes.md), the v1.12 bullet): confirmation off the

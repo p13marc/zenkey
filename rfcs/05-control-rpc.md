@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40, v1.42 and v1.47 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40, v1.42, v1.47 and v1.48 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -95,6 +95,15 @@ discipline does, and fleet callers MUST follow it:
   `*` actuates every host at once. The `*` origin stays legal only for
   `read`/`long-running` and for writes explicitly marked
   `fanout = "allowed"` ([08-registry.md §2](08-registry.md)).
+  A **dynamic caller** — one holding no generated builder, an explorer
+  above all — that cannot establish a procedure's kind (no registry, a
+  registry that does not declare it, or a kind token it cannot read) MUST
+  treat a fan-out call to it as a write and refuse it unless its operator
+  acknowledges the fan-out explicitly (v1.48): not knowing the declaration
+  is not a licence, and RFC 08 §2 defaults a write to forbidden. The
+  convention's own procedures carry their kind with no registry —
+  `introspect`, `describe` and `config/<r>` are reads, every other
+  `config/…` key a write (§5.1).
 
 Checklist, because every one of these has been shipped wrong at least once:
 
@@ -372,7 +381,11 @@ group; a subset of its parameters is a change of those alone.
   new link, then confirms. This is §3's long-running idiom, and the reach
   class is why it exists here. A reach group MUST NOT be carried by
   desired state ([12 §3](12-open-questions.md)): one bad desired publish
-  would lock the node out of its own supervision.
+  would lock the node out of its own supervision. A tool that cannot
+  read a group's class — no read-back to read it from — SHOULD treat a
+  change carrying `confirm_s` as reach when it asks its operator's consent
+  (v1.48): a window is how a reach change is sent, and asking once too
+  often costs a keystroke where not asking can cost the link.
 - **contract** — part of what the producer's transport was started
   against: an SDU size, a reliability claim. Refused at runtime with the
   restart named (`error/<producer>/restart-required`, an `[[error]]` entry);

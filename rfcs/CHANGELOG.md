@@ -25,6 +25,37 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.48 (2026-10-02, what the guards assumed)** — four rules the
+> write guards and the exit-honesty fixes of epic #498 (chunks DR, DS)
+> needed and the set did not state, each written from the implementation.
+>
+> **[05 §2.1](05-control-rpc.md).** A dynamic caller that cannot establish
+> a procedure's kind treats a fan-out call to it as a write and refuses it
+> without an explicit acknowledgement; the convention's own procedures
+> (`introspect`, `describe`, `config/<r>` reads; other `config/…` keys
+> writes) carry their kind with no registry (#505).
+>
+> **[05 §5.1](05-control-rpc.md).** A tool that cannot read a group's class
+> SHOULD treat a change carrying `confirm_s` as reach when it asks for
+> consent (#508).
+>
+> **[13 §1.2](13-observer-conformance.md).** A judgement over an empty
+> scope is `Unobservable`, never `Established(no)`, and never exits 0
+> (#510, #511).
+>
+> **[13 §4.3](13-observer-conformance.md).** Two empty bases are not
+> evidence of one deployment: a re-publishing replay between them asks
+> for its target as a base mismatch does (#506).
+>
+> **What deliberately did not change.** The three server- and
+> builder-side refusals of a write fan-out (§2.1): the new rule is a
+> fourth, the dynamic caller's, and changes nothing a generated builder or
+> a server does. The `hot`/`reach`/`contract` classes and who declares
+> them. RFC 13 §1's two Unestablished kinds: an empty scope is the
+> existing `Unobservable`, not a third. #518's two open wire questions.
+>
+> *Amends: 05, 13.*
+
 > **v1.47 (2026-10-02, what production found)** — the posture an
 > explorer opens its session in, and errata to v1.42's configuration
 > section. Both from epic #498 (zenctl in production): the first from a
