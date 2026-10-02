@@ -25,6 +25,37 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.47 (2026-10-02, what production found)** — the posture an
+> explorer opens its session in, and errata to v1.42's configuration
+> section. Both from epic #498 (zenctl in production): the first from a
+> review that found every explorer joining a production mesh as a peer,
+> listening on every interface, with multicast scouting silently back on
+> whenever a config file was given (#501–#503); the second from the first
+> configuration *server* the set has had, a test double (#517, #518).
+>
+> **[09 §5](09-operations.md).** A new bullet: an explorer is a Zenoh
+> `client` unless its user gives a listen endpoint or a config that states
+> `mode`; multicast scouting stays off unless the user's file *states* it —
+> a key Zenoh defaulted while loading the file is not the user's choice;
+> an endpoint that does not parse is refused by name, and endpoints that do
+> not answer are a failure to observe, never an empty bus.
+>
+> **[05 §5.1](05-control-rpc.md).** `confirm`, `cancel`, `extend` and
+> `persist` answer with the read-back document after the act, and a token
+> naming no pending (for `persist`, no pending or last confirmed) change is
+> `error/not-found` — what every caller already assumed and nothing said.
+>
+> **What deliberately did not change.** §0.1's isolation recipe, which is
+> written for participants, and every producer's session config: a
+> producer is a member of its deployment and peers as it is configured to.
+> The un-namespaced rule (§5) stands — the posture is about what the
+> explorer *is* on the mesh, not how it spells keys. Of #518's three
+> findings only the replies are errata; where a token rides on a `set`
+> (`ConfigChange` has no `token` field) and how a change without
+> `confirm_s` is persisted choose between wire shapes, and stay open there.
+>
+> *Amends: 05, 09.*
+
 > **v1.46 (2026-09-29, what the reader found)** — errata to v1.44 from
 > the first reader of the KDL spelling (chunk DN, #374), each a case §5.1
 > or §6 left to the implementation, now stated so a second reader agrees

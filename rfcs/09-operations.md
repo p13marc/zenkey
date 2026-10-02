@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38, v1.42 and v1.43 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38, v1.42, v1.43 and v1.47 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -817,6 +817,29 @@ that can drift from it.
   default one, in fact — so an explorer that cannot see and name it is
   blind to the common case. `zenctl base list` implements this sweep and
   reports the empty base as `(empty)`, selected with `--base ""`.
+- **An explorer's session posture (v1.47).** A tool that observes a
+  deployment it does not belong to opens its session in this posture
+  unless its user states otherwise:
+  1. **`mode: "client"`.** An observer is not a routing node. A peer
+     listens on every interface, gossips its locator, and is offered
+     direct links that churn every time the tool exits; pointed at a
+     production router, that is a debugging laptop joining the mesh. It is
+     a peer only when the user gives a listen endpoint, or when the user's
+     Zenoh config **states** `mode`.
+  2. **Multicast scouting off** (§0.1), with or without a config file. A
+     key the user's file states is the user's choice; a key Zenoh
+     *defaulted* while loading the file is not — Zenoh's defaults are
+     `peer` and multicast on. A tool that layers this posture over a user
+     file has to tell the two apart, or the path a secured deployment uses
+     (TLS, credentials — always a file) silently undoes the posture.
+  3. **Endpoint errors refuse.** An endpoint that does not parse is
+     refused by name before a session is attempted, never dropped. A
+     session whose endpoints do not answer is a failure to observe, not an
+     observation ([13 §3](13-observer-conformance.md)): a client fails to
+     open (Zenoh's client defaults, `connect.timeout_ms` 0 and
+     `exit_on_failure` true), and the tool reports no verdict — never an
+     empty bus. `zenctl`, `zengui` and `zenwatch` take this posture from
+     one session builder (`zenkey_fleet::open_reporting`).
 
 ### 5.1 Observer obligations — moved to [13 §3](13-observer-conformance.md) (v1.24)
 
