@@ -167,7 +167,7 @@ impl Bus {
             Err(SliceFailure::Named(e)) => {
                 Err(crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e)))
             }
-            Err(SliceFailure::Unreachable(e)) => {
+            Err(SliceFailure::Unopened(e) | SliceFailure::Unreachable(e)) => {
                 // The chain, not just `Display`: the engine's `Display` says
                 // *what* failed and the source says *why* (#348), so a bare
                 // format would announce "open session" and stop.
@@ -211,7 +211,7 @@ impl Bus {
                         return Err(SliceFailure::Named(e));
                     }
                     Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                        return Err(SliceFailure::Unreachable(e));
+                        return Err(SliceFailure::Unopened(e));
                     }
                 };
                 let set = zenkey_fleet::SliceSet::from_bus(&self.fleet(&session), self.timeout())
@@ -226,12 +226,13 @@ impl Bus {
             }
             resolve::SliceSource::Union(dirs) => dirs,
         };
-        // The README promises this works when the fleet is down, and it
-        // mostly did: zenoh opens a session against an unreachable endpoint,
-        // so the union simply falls back to the dirs. What it could not
-        // survive was a transport that would not come up at all — a taken
-        // listener port, say — which failed a question the dirs could answer
-        // on their own (#196).
+        // The README promises this works when the fleet is down. It used to
+        // mostly hold by accident — a peer session opens against an
+        // unreachable endpoint, so the union fell back to the dirs — and
+        // failed on a transport that would not come up at all, a taken
+        // listener port, say (#196). Since the session is a client (#501) an
+        // unreachable router *is* a transport that will not come up, so this
+        // arm is the one that answers whenever the fleet is down.
         let session = match self.session_reporting().await {
             Ok(s) => s,
             Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(SliceFailure::Named(e)),
@@ -308,7 +309,12 @@ enum SliceFailure {
     /// that did not work. Never degraded past — a silent structural echo in
     /// place of a refusal is how a typo becomes a wrong answer.
     Named(zenkey_fleet::Error),
-    /// The bus did not answer. A verb slices only enrich may continue.
+    /// The session never opened (#503). A verb slices only enrich may
+    /// continue, exactly as for [`Unreachable`](Self::Unreachable); a verb
+    /// they determine exits 2, because nothing was asked.
+    Unopened(zenkey_fleet::Error),
+    /// The session opened and the bus did not answer. A verb slices only
+    /// enrich may continue.
     Unreachable(zenkey_fleet::Error),
 }
 
@@ -327,6 +333,7 @@ impl SliceFailure {
             SliceFailure::Named(e) => {
                 crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
             }
+            SliceFailure::Unopened(e) => anyhow::Error::new(crate::exit::NoSession(e)),
             SliceFailure::Unreachable(e) => e.into(),
         }
     }
@@ -337,9 +344,13 @@ impl SliceFailure {
 ///
 /// The same fork as [`SliceFailure`], on the session side (#196): a
 /// `--zenoh-config` this tool refuses — one that sets a session namespace,
-/// say, which an explorer must not have (RFC 09 §5) — is *your file*, so it
-/// is a refused input and exits 2. A transport that would not come up is the
-/// world being unavailable, and keeps its 1.
+/// say, which an explorer must not have (RFC 09 §5) — or an endpoint that is
+/// not one (#503) is *your input*, so it is refused and exits 2. A transport
+/// that would not come up is the world being unavailable — and since the
+/// session is a client (#501) that is what an unreachable router *is*. It
+/// exits 2 as well, for its own reason: nothing was asked ([`NoSession`]).
+///
+/// [`NoSession`]: crate::exit::NoSession
 fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
     match f {
         // `one_line` defensively: `Config` carries an `Unaskable` today, which
@@ -347,7 +358,7 @@ fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
         zenkey_fleet::OpenFailure::Config(e) => {
             crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
         }
-        other => other.into_error().into(),
+        zenkey_fleet::OpenFailure::Transport(e) => anyhow::Error::new(crate::exit::NoSession(e)),
     }
 }
 

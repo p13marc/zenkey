@@ -1,7 +1,11 @@
 `registry export --as toml` renders a slice back to registry TOML through
 `zenkey::slice_to_toml`, the inverse of `parse_slice` — so what comes out can
 be fed back in (#50). Offline here: `--registry` reads the checkout's own
-files, and no bus is opened.
+files, and no endpoint is named — so no session opens, and the note on stderr
+says the dirs answered alone. That note is new with #501: the explorer session
+used to be a peer, which opens onto nothing without complaint, so this case
+quietly ran against an empty bus and called it offline. A client with nowhere
+to dial does not open, and the degradation is said rather than implied.
 
 The per-producer `[budget]` table (RFC 08 §2, v1.32) rides the slice like
 every other carried field and comes back out where the TOML grammar needs a
@@ -10,6 +14,8 @@ plain table to be — right after the header block, before the first
 
 ```console
 $ zenctl registry export --registry ../fixture-tests/registry --producer sysinfo --as toml
+no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
+That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 # ── sysinfo.toml ─────────────────────────────
 [registry]
 version = "1.1"
@@ -38,6 +44,8 @@ path separator.)
 
 ```console
 $ zenctl registry export --registry ../fixture-tests/registry --producer sysinfo --as kdl
+no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
+That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 // ── sysinfo.kdl ─────────────────────────────
 registry version="1.1" app="zensight" convention=1
 

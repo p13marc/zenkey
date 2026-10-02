@@ -17,6 +17,25 @@ Versions per crate, because they move independently:
 
 ---
 
+## Unreleased
+
+### Explorer session posture (epic #498, chunk DQ)
+
+Every session `zenkey-fleet` opens for an explorer — zenctl's, zengui's, and
+zenwatch's, which goes through the same `open_reporting` — is now a zenoh
+**client** unless it listens (#501), takes **multicast off** unless the user's
+`--zenoh-config` file states otherwise (#502), and **refuses an endpoint that
+does not parse** by name instead of dropping it (#503). A client whose router
+does not answer fails `open`, so an unreachable bus is an
+`OpenFailure::Transport`, not an empty one; zenctl exits 2 on it for every
+verb. `zenkey-fleet` reads a named config file twice — through zenoh, and raw
+(JSON5 or YAML, the dialects zenoh reads; `json5` and `serde_yaml` were
+already in the lock) — to tell a key the file states from one zenoh
+defaulted. `explorer_config` is fallible. The behaviour table is in
+[`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
+
+---
+
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
 
 **Release commit** on 2026-09-29: `zenkey` 0.11.0, `zenkey-build` 0.11.0

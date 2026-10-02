@@ -36,7 +36,7 @@ Options:
           Endpoint to connect to, repeatable
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable
+          Endpoint to listen on, repeatable — a context that listens opens a peer session, where every other context opens a client
 
       --registry <DIR>
           Registry dir, repeatable (offline slice source)

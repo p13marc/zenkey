@@ -14,6 +14,19 @@ Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespac
 
 ```
 
+An endpoint that is not one is the same half (#503). It used to go into the
+config through an `.ok()` that threw zenoh's refusal away, so this command
+connected to nothing, found nothing, and exited 0 with "no live producers" —
+a typo that read as an empty fleet. The missing protocol is the typo worth
+naming, so it gets its own sentence; it is refused before any session exists.
+
+```console
+$ zenctl node list -c 127.0.0.1:7461 --base prod
+? 2
+Error: connect endpoint "127.0.0.1:7461": has no protocol — an endpoint is <protocol>/<address>, so this is probably tcp/127.0.0.1:7461
+
+```
+
 The sibling failure, and it exits the same way. A `--context` that names
 nothing is your input too — the file is right there and the name is not in it.
 

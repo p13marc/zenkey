@@ -304,9 +304,16 @@ round trip, without SSH.
   stderr with its `error/...` name.
 - **No namespace.** RFC 09 §5: debug tools run *without* the session namespace
   and spell full keys — "the honest view of what is on the wire".
-- **Scouting is off by default.** A scouting explorer joins whatever mesh it can
-  find, which is how a throwaway session ends up talking to a production fleet.
-  `--scouting` is opt-in, and you should mean it.
+- **Scouting is off by default** — with `--zenoh-config` too, unless the file
+  itself states `scouting.multicast.enabled`. A scouting explorer joins
+  whatever mesh it can find, which is how a throwaway session ends up talking
+  to a production fleet. `--scouting` is opt-in, and you should mean it.
+- **Not a peer.** The session is a zenoh *client* of the endpoints you name: no
+  listener, no gossip, nothing the mesh can open links to or route through
+  (RFC 09 §5). `--listen` (or a config file that states `mode`) is how you ask
+  for a peer. A client also fails when its router does not answer, so a dead
+  or typo'd endpoint exits 2 instead of reading as an empty bus — and one that
+  does not parse (`-c 127.0.0.1:7447`, no `tcp/`) is refused by name.
 - **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
   *definitions* with the owning applications, and this tool has no opinion
   about their contents. But since RFC 08 §7, a producer **serves** its shapes

@@ -1,16 +1,19 @@
 The `OpenFailure::Transport` half of #196: the bus's problem, and the command
 answers anyway.
 
-#196's premise was half wrong — offline `--registry` already worked, because
-zenoh opens a session against an unreachable endpoint and the union simply falls
-back to the files. What it could not survive was a transport that would not come
-up at all, which failed a question the files could answer on their own. Only
-that second case degrades, and it says so on stderr rather than silently.
+#196's premise was half wrong — offline `--registry` already worked, because a
+peer session opens against an unreachable endpoint and the union simply fell
+back to the files. What it could not survive was a transport that would not
+come up at all, which failed a question the files could answer on their own.
+Only that second case degrades, and it says so on stderr rather than silently.
 
-The fixture is **client** mode on purpose. Zenoh's client defaults are
+Since #501 the explorer session is a **client**, and the two cases are one: a
+client whose router does not answer does not open. Zenoh's client defaults are
 `connect.timeout_ms: 0` and `connect.exit_on_failure: true`, so the failure is
 immediate and without retry; peer mode is `-1` / `false` — retry forever — which
-is how a case like this becomes a timeout instead of a test.
+is how a case like this used to become a timeout, or an empty bus, instead of a
+test. The fixture still *states* `mode: "client"`, which since #502 is the one
+way a file's mode counts — so it pins that path as well.
 
 `topic info` on one key rather than `topic list`, so what is pinned is the
 degradation note and the fact that a full answer follows it — not four hundred
@@ -56,5 +59,36 @@ $ zenctl topic info --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.j
 no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
 That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 {"class":"state","description":"sensor health document (framework; absorbs the legacy @/status running flag)","key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","note":"","origin":"h-3fa9c2d41b7e","payload_type":"HealthSnapshot","producer":"sysinfo","report":"topic-info","since":"1.0","subject":"health","ttl_s":120,"verdict":"registered"}
+
+```
+
+## A verb with nothing to fall back on (#503)
+
+Without `--registry` there is nothing on disk to answer from, and a session
+that never opened is not an empty bus. This used to print "no live producers"
+and exit 0 — the peer session opened onto nothing. It is the reserved 2 now,
+for every verb: nothing was asked, so there is no verdict and no finding.
+
+```console
+$ zenctl node list -c tcp/127.0.0.1:1 --base prod
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
+
+An act included. `pub` printed `published` and a 0 against the same dead
+router; nothing went out, and nothing was attempted either — an act's 1 says
+it was tried and failed, which is not what happened.
+
+```console
+$ zenctl pub v1/h-3fa9c2d41b7e/state/sysinfo/health '{}' --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
 ```

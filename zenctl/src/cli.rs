@@ -1117,7 +1117,8 @@ pub(crate) enum ContextCmd {
         /// Endpoint to connect to, repeatable.
         #[arg(long, short = 'c')]
         connect: Vec<String>,
-        /// Endpoint to listen on, repeatable.
+        /// Endpoint to listen on, repeatable — a context that listens opens
+        /// a peer session, where every other context opens a client.
         #[arg(long, short = 'l')]
         listen: Vec<String>,
         /// Registry dir, repeatable (offline slice source).
@@ -1280,16 +1281,26 @@ pub(crate) struct BusArgs {
     #[arg(long, value_name = "DIR")]
     pub(crate) registry: Vec<PathBuf>,
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+    ///
+    /// The session is a zenoh client of these endpoints: no listener of its
+    /// own, no gossip, nothing the mesh can route through (RFC 09 §5). An
+    /// endpoint nothing answers fails the command (exit 2) rather than
+    /// reading as an empty bus, and one that does not parse — no `tcp/`,
+    /// say — is refused by name (exit 2).
     #[arg(long, short = 'c')]
     pub(crate) connect: Vec<String>,
     /// Endpoint to listen on, repeatable.
+    ///
+    /// Listening makes the session a zenoh peer — reachable, and part of the
+    /// mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
     #[arg(long, short = 'l')]
     pub(crate) listen: Vec<String>,
     /// Enable multicast scouting.
     ///
-    /// OFF by default, and you should think before turning it on: a scouting
-    /// explorer joins whatever mesh it can find, which is how a throwaway
-    /// session ends up talking to a production fleet.
+    /// OFF by default — with a --zenoh-config too, unless the file itself
+    /// states `scouting.multicast.enabled` — and you should think before
+    /// turning it on: a scouting explorer joins whatever mesh it can find,
+    /// which is how a throwaway session ends up talking to a production fleet.
     #[arg(long)]
     pub(crate) scouting: bool,
     /// Seconds to wait for replies (default 5; a context may override the
@@ -1301,6 +1312,11 @@ pub(crate) struct BusArgs {
     /// layer; --connect/--listen/--scouting apply on top when given
     /// (flag > env > context > file). A file that sets a session namespace
     /// is refused — explorers run un-namespaced (RFC 09 §5).
+    ///
+    /// Only what the file states counts: one that does not name `mode` gets
+    /// the explorer's client session (a peer when it listens), and one that
+    /// does not name `scouting.multicast.enabled` gets multicast off — zenoh's
+    /// own defaults (peer, multicast on) do not leak in.
     #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
     pub(crate) zenoh_config: Option<PathBuf>,
     #[command(flatten)]

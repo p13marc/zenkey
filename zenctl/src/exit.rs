@@ -24,10 +24,11 @@
 //!   other refusal of *your input* joins it rather than competing with it);
 //!   an expression that does not parse; a `--context` that names nothing; a
 //!   `--qos`, a class, or a `--fault` kind outside its vocabulary; a
-//!   `--zenoh-config` this tool refuses; silence under a fan-out; an
-//!   observation too impaired to carry the claim (RFC 13 §1, the O4/O6
-//!   rules); and, on the verdict verbs, *any* failure before the question was
-//!   put.
+//!   `--zenoh-config` this tool refuses; an endpoint that is not one; a
+//!   session that never opened — nothing answered the endpoint, so nothing was
+//!   asked ([`NoSession`], #503); silence under a fan-out; an observation too
+//!   impaired to carry the claim (RFC 13 §1, the O4/O6 rules); and, on the
+//!   verdict verbs, *any* failure before the question was put.
 //!
 //! ## Where each code comes from, mechanically
 //!
@@ -36,7 +37,8 @@
 //! 1. [`Unaskable`] — an input **this tool itself refuses**, before the bus is
 //!    ever asked. Wrapped into the `anyhow` chain, recognised by
 //!    [`code_for`], and rendered like any other error. This is the seam that
-//!    moved `--context`/`--qos`/class/`--fault`/`$*` from 1 to 2.
+//!    moved `--context`/`--qos`/class/`--fault`/`$*` from 1 to 2. Its sibling
+//!    [`NoSession`] rides the same seam for a session that never opened.
 //! 2. [`asked`] — the verdict verbs' pre-run guard. `check expect`, `check
 //!    cutover`, `check retired`, `check probe`, `check conform`, `check
 //!    schema` and `why` give their 0 **and their 1** meanings, so a `?` on
@@ -56,6 +58,10 @@
 //! something. "Could
 //! not be proven" has no meaning for an act — either it went out or it did
 //! not — so their failures are 1, and only an input **they** refuse is a 2.
+//!
+//! A session that never opened is neither (#503). No act was attempted and no
+//! question was put, so it is the 2 every verb shares — the one `pub` against a
+//! typo'd router used to cover with `published` and a 0.
 
 use zenkey_fleet::{Judgement, judgement_exit_code};
 
@@ -98,14 +104,42 @@ macro_rules! unaskable {
 }
 pub(crate) use unaskable;
 
+/// A session that never opened — `zenkey_fleet::OpenFailure::Transport` —
+/// marked for [`code_for`] (#503).
+///
+/// Since #501 an explorer session is a zenoh client, and a client whose router
+/// does not answer fails `open` instead of opening onto nothing. That failure
+/// is not a finding: nothing was asked, nothing was attempted. It was a 1
+/// only because no verb ever reached it — the peer session opened anyway and
+/// the verb reported an empty bus with a 0.
+///
+/// Transparent: `Display` and `source()` are the engine error's own, so the
+/// rendered chain — what failed, then zenoh's why — is unchanged.
+#[derive(Debug)]
+pub struct NoSession(pub zenkey_fleet::Error);
+
+impl std::fmt::Display for NoSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for NoSession {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(&self.0)
+    }
+}
+
 /// The exit code an error chain deserves: [`NO_VERDICT`] when anything in it
-/// is an [`Unaskable`], [`FINDING`] otherwise.
+/// is an [`Unaskable`] or a [`NoSession`], [`FINDING`] otherwise.
 ///
 /// Called from `main`, once, so the choice is made in exactly one place.
 pub fn code_for(err: &anyhow::Error) -> i32 {
     let unaskable = err.chain().any(|c| {
         // This tool's own refusals…
         c.is::<Unaskable>()
+            // …a session that never opened, which asked nothing (#503)…
+            || c.is::<NoSession>()
             // …and the engine's, which it now states in its own type
             // (#348). Before that, an engine failure carried no marker at
             // all, so *every* one of them landed on FINDING — which is how
@@ -181,8 +215,9 @@ impl Asking {
 /// main's anyhow edge — which reads "the old family still speaks" about a bus
 /// nobody listened to, and told CI exactly that. Wrap every fallible step
 /// *before* the verdict in this instead: the error is rendered in the one
-/// shape and the process takes the reserved 2. Listings and acts keep their 1;
-/// their exit codes carry no verdict to protect.
+/// shape and the process takes the reserved 2. Listings and acts keep their 1
+/// for a failure after the session opened; their exit codes carry no verdict
+/// to protect. A session that never opened is a 2 for them too ([`NoSession`]).
 pub fn asked<T, E>(verb: &str, result: std::result::Result<T, E>) -> T
 where
     E: Into<anyhow::Error>,
@@ -233,6 +268,25 @@ mod tests {
         // Wrapped by a caller's context, the way `.with_context` leaves it.
         let wrapped = refused.context("loading the selector");
         assert_eq!(code_for(&wrapped), NO_VERDICT);
+    }
+
+    /// #503: a session that never opened is a 2 for every verb — and the
+    /// marker is transparent, so the chain still reads what failed, then why.
+    #[test]
+    fn a_session_that_never_opened_is_a_two() {
+        let err = anyhow::Error::new(NoSession(zenkey_fleet::Error::Bus {
+            op: "failed to open",
+            target: "the Zenoh session".into(),
+            source: "Unable to connect to any of [Single(tcp/127.0.0.1:1)]!".into(),
+        }));
+        assert_eq!(code_for(&err), NO_VERDICT);
+        let rendered = crate::errors::render(&err);
+        assert!(
+            rendered.starts_with(
+                "Error: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect"
+            ),
+            "{rendered}"
+        );
     }
 
     /// A migration is an act (#374): its refused input is a 2, and a
