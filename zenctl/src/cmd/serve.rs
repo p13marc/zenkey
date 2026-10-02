@@ -7,6 +7,7 @@
 use anyhow::Result;
 
 use crate::Bus;
+use crate::exit::unaskable;
 
 pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
     let bus = Bus::resolve(&cli.bus)?;
@@ -19,6 +20,7 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
         raw,
         complete,
         count,
+        i_know,
         bus: _,
     } = cli;
     let (keyexpr, reply, encoding) = (keyexpr.as_str(), &reply, encoding.as_deref());
@@ -26,14 +28,41 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
     // complete — one complete queryable short-circuits every default
     // (`BestMatching`) fleet call to a single reply. Refused before any
     // session opens, so the refusal is offline-testable like gen's guards.
+    //
+    // A refusal of the command line, so a 2 (`crate::exit`) — it was a bare
+    // `bail!`, a 1, until #507 put serve's guards on the contract.
     let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
     if complete && key_part.split('/').any(|c| c == "@rpc") {
-        anyhow::bail!(
+        return Err(unaskable!(
             "--complete on an @rpc key expression: RFC 05 §2.1 forbids it — a \
              `complete` @rpc queryable short-circuits every BestMatching fleet \
              call to this one responder, silently collapsing the fleet to a \
              single reply. Serve the procedure without --complete."
-        );
+        ));
+    }
+    // A mock answers real GETs (#507): a wildcard stands it in front of every
+    // key it intersects, across every producer's — a storage's state
+    // included — and `--complete` makes zenoh's default BestMatching target
+    // stop at it. Either is a decision about a bus, so either needs the one
+    // acknowledgement this verb has; the `@rpc` refusal above is not
+    // overridable, and comes first.
+    if !i_know {
+        if key_part.contains(['*', '$']) {
+            return Err(unaskable!(
+                "{key_part} is a wildcard: this queryable answers every GET it \
+                 intersects, across every producer's keys, with one static body — \
+                 state a storage would have answered included. Pass --i-know to \
+                 mean it."
+            ));
+        }
+        if complete {
+            return Err(unaskable!(
+                "--complete claims this responder holds all the data {key_part} \
+                 names: zenoh's default (BestMatching) GET stops at a complete \
+                 queryable, so a production read of that state gets this static \
+                 body instead of the storage's. Pass --i-know to mean it."
+            ));
+        }
     }
 
     let typed = reply.read()?;

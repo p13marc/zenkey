@@ -218,9 +218,10 @@ pub(crate) struct GenArgs {
     /// plan.
     #[arg(long = "var", value_name = "K=V")]
     pub(crate) vars: Vec<String>,
-    /// Origin the generated keys claim (h-<12 hex>). Default: derived
-    /// from this session's zid — printed either way, and stamped into
-    /// the marker.
+    /// Origin the generated keys claim (h-<12 hex>). Naming one is
+    /// publishing as that host, so it needs --i-know (not with
+    /// --dry-run). Default: derived from this session's zid — printed
+    /// either way, and stamped into the marker.
     #[arg(long)]
     pub(crate) origin: Option<String>,
     /// Override every entry's rate (Hz). Default: registry-driven —
@@ -264,12 +265,15 @@ pub(crate) struct GenArgs {
     /// Print the plan and publish nothing.
     #[arg(long)]
     pub(crate) dry_run: bool,
-    /// Mean the faults: the acknowledging half of --fault's double guard.
+    /// Mean traffic that lies on purpose: the acknowledging half of
+    /// --fault's double guard, and an --origin that names a host.
     //
-    // One `--i-know` per verb (#307). `gen` has two guards — deliberately
-    // non-conforming traffic, and a fleet-wide impersonation — and one flag
-    // discharging both meant acknowledging the wide run also armed the fault
-    // injector. The graver guard keeps the name; the other is `--wide`.
+    // One `--i-know` per verb (#307). `gen` had two guards on it —
+    // deliberately non-conforming traffic, and a fleet-wide impersonation —
+    // and one flag discharging both meant acknowledging the wide run also
+    // armed the fault injector. The graver guard kept the name; the other is
+    // `--wide`. A named `--origin` (#507) joined the graver one: it is the
+    // same decision — untrue traffic — about the sender instead of the body.
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
     /// Acknowledge a run wider than 10 subjects — a fleet-wide impersonation.
@@ -1809,12 +1813,18 @@ pub(crate) struct ServeArgs {
     #[arg(long)]
     pub(crate) raw: bool,
     /// Declare the queryable complete — a claim this responder holds
-    /// ALL the data the expression names. Say it only when you mean it.
+    /// ALL the data the expression names. Needs --i-know; never on an
+    /// `@rpc` key (RFC 05 §2.1).
     #[arg(long)]
     pub(crate) complete: bool,
     /// Exit after N queries (0 = until ctrl-c).
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: usize,
+    /// Serve a wildcard key expression, or declare --complete: a mock that
+    /// answers real GETs in place of the bus's own answers. The refusal
+    /// you are overriding names its reason.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }
@@ -2619,11 +2629,13 @@ pub(crate) struct ConfigSetArgs {
     #[arg(long, value_name = "ID")]
     pub(crate) request_id: Option<String>,
     /// Send a `reach` change without being asked (for a script that has
-    /// decided).
+    /// decided) — or a --confirm change to a group whose class no
+    /// read-back established, which may be one.
     #[arg(long)]
     pub(crate) yes: bool,
     /// Skip the read-back: values ride by their spelling and the producer
-    /// judges the rest.
+    /// judges the rest. With --confirm, the group may be reach, so --yes
+    /// (or a terminal's yes) is asked for.
     #[arg(long)]
     pub(crate) no_validate: bool,
     #[command(flatten)]

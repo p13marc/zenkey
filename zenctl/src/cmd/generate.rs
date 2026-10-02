@@ -24,7 +24,13 @@
 //! both. That is the one thing an acknowledgement flag must never do:
 //! somebody widening a benign run past the threshold typed `--i-know`, and
 //! from then on `--fault` was armed on that command line. `--wide` carries
-//! the width guard now; `--i-know` means the faults and nothing else.
+//! the width guard now.
+//!
+//! `--i-know` means one thing: **this run's traffic lies on purpose** —
+//! about its conformance (`--fault`), or, since #507, about who sent it
+//! (`--origin` naming a host, whose stored state the run then overwrites).
+//! Both are a decision to put untrue traffic on a bus; a wide benign run
+//! is not, which is why the width kept a flag of its own.
 
 use crate::cli::Pattern;
 use anyhow::Result;
@@ -109,6 +115,21 @@ pub async fn run(cli: crate::cli::GenArgs, target_typed: bool) -> Result<()> {
                  shell was pointed at, and faults must never land there by default."
             ));
         }
+    }
+    // `--origin` names a host (#507): the run then publishes as that host —
+    // its timestamped state samples win last-writer-wins over the real
+    // host's in every storage. The derived origin is this session's own and
+    // nobody else's; a named one is impersonation, and needs the verb's one
+    // acknowledgement. A dry run publishes nothing, so it asks nothing.
+    if let Some(o) = origin
+        && !i_know
+        && !dry_run
+    {
+        return Err(crate::exit::unaskable!(
+            "--origin {o} publishes as that host: its state samples overwrite the \
+             real {o}'s in every storage (last writer wins, RFC 04 §1.2). Pass \
+             --i-know to mean it, or omit --origin to publish as this session's own."
+        ));
     }
 
     let vars: Vec<(String, String)> = vars

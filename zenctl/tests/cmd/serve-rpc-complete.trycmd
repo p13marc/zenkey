@@ -6,9 +6,12 @@ that claims completeness on a procedure key silently collapses every
 default-target fleet call to its one reply. The dev tool refuses to model
 the violation.
 
+It exits **2** since #507: a refusal of the command line, where it used to
+be a bare 1 that read "the act failed".
+
 ```console
 $ zenctl serve v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes {} --complete
-? 1
+? 2
 Error: --complete on an @rpc key expression: RFC 05 §2.1 forbids it — a `complete` @rpc queryable short-circuits every BestMatching fleet call to this one responder, silently collapsing the fleet to a single reply. Serve the procedure without --complete.
 
 ```
@@ -17,7 +20,55 @@ The parameters half of a selector does not hide the plane chunk:
 
 ```console
 $ zenctl serve v1/*/@rpc/sysinfo/processes?sort=cpu {} --complete
-? 1
+? 2
 Error: --complete on an @rpc key expression: RFC 05 §2.1 forbids it — a `complete` @rpc queryable short-circuits every BestMatching fleet call to this one responder, silently collapsing the fleet to a single reply. Serve the procedure without --complete.
+
+```
+
+`--i-know` does not move it — the checklist row is a "never", and it is
+asked before the acknowledgement is:
+
+```console
+$ zenctl serve v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes {} --complete --i-know
+? 2
+Error: --complete on an @rpc key expression: RFC 05 §2.1 forbids it — a `complete` @rpc queryable short-circuits every BestMatching fleet call to this one responder, silently collapsing the fleet to a single reply. Serve the procedure without --complete.
+
+```
+
+## A mock that answers real GETs needs `--i-know` (#507)
+
+`serve` stands a queryable up on a bus, and a queryable answers real queries.
+On a wildcard it stands in front of every key it intersects, across every
+producer's — `serve 'prod/v1/**' x` answers production applications' GETs
+for state with one static body. `--complete` on any key makes zenoh's default
+(`BestMatching`) target stop at this responder, so a read of that state gets
+the mock's body instead of the storage's. Either is a decision about a bus,
+and both now take the verb's one acknowledgement; both are refused before a
+session opens.
+
+```console
+$ zenctl serve 'v1/**' {}
+? 2
+Error: v1/** is a wildcard: this queryable answers every GET it intersects, across every producer's keys, with one static body — state a storage would have answered included. Pass --i-know to mean it.
+
+```
+
+```console
+$ zenctl serve v1/h-3fa9c2d41b7e/state/demo/health {} --complete
+? 2
+Error: --complete claims this responder holds all the data v1/h-3fa9c2d41b7e/state/demo/health names: zenoh's default (BestMatching) GET stops at a complete queryable, so a production read of that state gets this static body instead of the storage's. Pass --i-know to mean it.
+
+```
+
+With it, the mock goes up (here against the dead-bus fixture, so the session
+is where it stops):
+
+```console
+$ zenctl serve 'v1/**' {} --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 1
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
 ```

@@ -49,3 +49,45 @@ acknowledgement flag must acknowledge exactly one thing. `--wide` carries the
 width guard now, and the graver guard kept the name. That half needs a plan,
 and a plan needs a registry, so it is not an offline case — `gen --help` in
 `help-wire.trycmd` is where both flags are pinned.
+
+## `--origin` naming a host is impersonation (#507)
+
+`gen` publishes as an origin: by default one derived from its own session's
+zid, which is nobody else's. `--origin h-<real host>` publishes as that
+host instead — and its timestamped state samples win last-writer-wins over
+the real host's in every storage (RFC 04 §1.2). That is the same decision
+`--fault` asks for, made about the sender rather than the body: traffic that
+lies on purpose. So it takes the same acknowledgement, and is refused before
+a session opens.
+
+```console
+$ zenctl gen --origin h-3fa9c2d41b7e
+? 2
+Error: --origin h-3fa9c2d41b7e publishes as that host: its state samples overwrite the real h-3fa9c2d41b7e's in every storage (last writer wins, RFC 04 §1.2). Pass --i-know to mean it, or omit --origin to publish as this session's own.
+
+```
+
+With `--i-know` the run goes on to its session (the dead-bus fixture, so it
+stops there):
+
+```console
+$ zenctl gen --origin h-3fa9c2d41b7e --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 1
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
+
+`--dry-run` publishes nothing, so it asks nothing, and gets as far:
+
+```console
+$ zenctl gen --origin h-3fa9c2d41b7e --dry-run --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 1
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

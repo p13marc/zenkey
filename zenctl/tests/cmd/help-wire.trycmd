@@ -1149,7 +1149,7 @@ Usage: zenctl serve [OPTIONS] <KEYEXPR> <REPLY>
 
 Arguments:
   <KEYEXPR>
-          Key expression to serve (full wire form; wildcards welcome)
+          Key expression to serve (full wire form; a wildcard needs --i-know)
 
   <REPLY>
           Reply body: inline text, `@file`, or `-` for stdin (read once) — through the same encode ladder as `pub`
@@ -1165,12 +1165,15 @@ Options:
           Reply the bytes verbatim: no schema lookup, no refusal
 
       --complete
-          Declare the queryable complete — a claim this responder holds ALL the data the expression names. Say it only when you mean it
+          Declare the queryable complete — a claim this responder holds ALL the data the expression names. Needs --i-know; never on an `@rpc` key (RFC 05 §2.1)
 
       --count <N>
           Exit after N queries (0 = until ctrl-c)
           
           [default: 0]
+
+      --i-know
+          Serve a wildcard key expression, or declare --complete: a mock that answers real GETs in place of the bus's own answers. The refusal you are overriding names its reason
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.
@@ -1250,7 +1253,7 @@ Options:
           Value for a `{var}` in a declared path (repeatable, k=v). Unnamed vars get deterministic synthetic values, stated in the plan
 
       --origin <ORIGIN>
-          Origin the generated keys claim (h-<12 hex>). Default: derived from this session's zid — printed either way, and stamped into the marker
+          Origin the generated keys claim (h-<12 hex>). Naming one is publishing as that host, so it needs --i-know (not with --dry-run). Default: derived from this session's zid — printed either way, and stamped into the marker
 
       --rate <HZ>
           Override every entry's rate (Hz). Default: registry-driven — telemetry 1 Hz, state refreshes at ttl/2, events inside their declared budget
@@ -1284,7 +1287,7 @@ Options:
           Print the plan and publish nothing
 
       --i-know
-          Mean the faults: the acknowledging half of --fault's double guard
+          Mean traffic that lies on purpose: the acknowledging half of --fault's double guard, and an --origin that names a host
 
       --wide
           Acknowledge a run wider than 10 subjects — a fleet-wide impersonation
