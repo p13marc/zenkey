@@ -1,13 +1,18 @@
 //! Names the build: `zenctl --version` carries `git describe` (#513).
 //!
-//! Releases are source-only — every production `zenctl` is somebody's
-//! `cargo install --git … --tag X.Y.Z` — so the crate version alone cannot
-//! say which build a bug report came from, and the commit can. This embeds
-//! `git describe --tags --always --dirty` as `ZENCTL_GIT_DESCRIBE`, and
-//! `unknown` whenever that is not a fact this build can establish: no `git`
-//! on the path, no repository (a `cargo package` tarball), or a repository
-//! that is not this crate's (a tarball unpacked inside somebody else's
-//! checkout would otherwise describe *their* commit).
+//! Every production `zenctl` is a local build — a `cargo install --git …
+//! --tag X.Y.Z`, a build of the release tarball, or the release lane's own —
+//! so the crate version alone cannot say which build a bug report came from,
+//! and the commit can. This embeds a description as `ZENCTL_GIT_DESCRIBE`,
+//! from the first source that can establish one:
+//!
+//! 1. `git describe --tags --always --dirty`, in a repository that tracks
+//!    this crate (a tarball unpacked inside somebody else's checkout would
+//!    otherwise describe *their* commit);
+//! 2. `describe.txt`, which `git archive` fills in through `export-subst`
+//!    (`.gitattributes`) — the release tarball has no `.git`, and this is how
+//!    it still names its tag;
+//! 3. `unknown`: no git and no archive — a `cargo package` tarball, say.
 //!
 //! Nothing here may fail the build. A missing fact is `unknown`, never an
 //! error: the version line is a courtesy to a bug report, not a gate.
@@ -41,10 +46,24 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn describe(manifest: &Path) -> Option<String> {
+    from_git(manifest).or_else(|| from_archive(manifest))
+}
+
+fn from_git(manifest: &Path) -> Option<String> {
     // The repository has to be *this crate's*: its manifest must be a
     // tracked file. Fails outside git and inside a foreign checkout alike.
     git(manifest, &["ls-files", "--error-unmatch", "Cargo.toml"])?;
     git(manifest, &["describe", "--tags", "--always", "--dirty"])
+}
+
+/// `describe.txt` as `git archive` substituted it; in a checkout it still
+/// holds its own `$Format:…$` placeholder, which describes nothing.
+fn from_archive(manifest: &Path) -> Option<String> {
+    let path = manifest.join("describe.txt");
+    watch(&path);
+    let text = std::fs::read_to_string(path).ok()?;
+    let text = text.trim();
+    (!text.is_empty() && !text.contains("$Format")).then(|| text.to_owned())
 }
 
 /// Re-describe when HEAD moves: the worktree's `HEAD` (a commit, a branch
