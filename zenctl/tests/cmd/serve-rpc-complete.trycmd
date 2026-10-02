@@ -61,11 +61,11 @@ Error: --complete claims this responder holds all the data v1/h-3fa9c2d41b7e/sta
 ```
 
 With it, the mock goes up (here against the dead-bus fixture, so the session
-is where it stops):
+is where it stops — exit 2, and the error is the session's, not the guard's):
 
 ```console
 $ zenctl serve 'v1/**' {} --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 Error: failed to open the Zenoh session
 
 Caused by:

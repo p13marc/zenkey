@@ -34,11 +34,11 @@ Error: capture base "" != target base "acme" — recorded keys spell the capture
 
 `--force-base` is the same flag with the same meaning — *I mean this
 target* — and gets past the guard to the session (the dead-bus fixture, so
-the act stops there with its 1):
+the act stops there — exit 2, and the error is the session's, not the guard's):
 
 ```console
 $ zenctl replay --force-base --zenoh-config tests/cmd/fixtures/dead-bus.json5 tests/cmd/fixtures/baseless.zrec
-? 1
+? 2
 tests/cmd/fixtures/baseless.zrec: captured v1/h-3fa9c2d41b7e/state/demo/** under base "" (2026-09-06T00:00:00Z)
 replaying onto base "" at speed 1
 Error: failed to open the Zenoh session

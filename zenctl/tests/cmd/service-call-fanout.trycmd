@@ -22,11 +22,12 @@ Error: procedure netring/reset: has no registry loaded to declare it, so whether
 
 `--i-know` is the one acknowledgement `service call` carries, and it moves
 exactly this refusal: the call goes on to open its session (here the dead-bus
-fixture, so it stops there, an act's 1).
+fixture, so it stops there — exit 2, and the error is the session's, not the
+guard's).
 
 ```console
 $ zenctl service call '*' netring reset --no-validate --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 Error: failed to open the Zenoh session
 
 Caused by:
@@ -52,7 +53,7 @@ registry at all, which is what `config get '*'` and `bench rpc '*'` stand on.
 
 ```console
 $ zenctl service call '*' netring introspect --no-validate --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 Error: failed to open the Zenoh session
 
 Caused by:

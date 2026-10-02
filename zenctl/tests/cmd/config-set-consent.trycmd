@@ -25,11 +25,12 @@ Error: the class of group "link" could not be established (--no-validate skipped
 ```
 
 A dry run touches nothing, so it asks nothing — it goes on to the session
-(the dead-bus fixture here, so it stops there, an act's 1):
+(the dead-bus fixture here, so it stops there — exit 2, and the error is the
+session's, not the guard's):
 
 ```console
 $ zenctl config set h-3fa9c2d41b7e modem wlan0 link ssid=field --confirm 60 --no-validate --dry-run --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 note: no read-back to type against — values ride by their spelling (true/false, an integer, else text) and the producer judges the rest
 Error: failed to open the Zenoh session
 
@@ -43,7 +44,7 @@ producer received nothing; with `--yes`, it received the change.
 
 ```console
 $ zenctl config set h-3fa9c2d41b7e modem wlan0 link ssid=field --confirm 60 --no-validate --yes --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 note: no read-back to type against — values ride by their spelling (true/false, an integer, else text) and the producer judges the rest
 Error: failed to open the Zenoh session
 

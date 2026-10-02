@@ -68,11 +68,11 @@ Error: --origin h-3fa9c2d41b7e publishes as that host: its state samples overwri
 ```
 
 With `--i-know` the run goes on to its session (the dead-bus fixture, so it
-stops there):
+stops there — exit 2, and the error is the session's, not the guard's):
 
 ```console
 $ zenctl gen --origin h-3fa9c2d41b7e --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 Error: failed to open the Zenoh session
 
 Caused by:
@@ -84,7 +84,7 @@ Caused by:
 
 ```console
 $ zenctl gen --origin h-3fa9c2d41b7e --dry-run --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 1
+? 2
 Error: failed to open the Zenoh session
 
 Caused by:
