@@ -830,3 +830,49 @@ async fn config_a_contract_set_is_refused_before_it_is_sent() {
     assert!(run.stderr.contains("restart"), "{run}");
 }
 
+/// With no read-back — `--no-validate` — the group's class is unknown, and
+/// a `--confirm` change is a reach change's shape: from a script without
+/// `--yes` it is refused, 2, and the double received nothing; with `--yes`
+/// it is sent and answered (#508).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_a_set_with_no_read_back_needs_yes_from_a_script() {
+    let bus = Bus::up().await;
+    config_get(&bus).await;
+    let args = [
+        "config",
+        "set",
+        HOST,
+        PRODUCER,
+        "wlan0",
+        "link",
+        "ssid=blind",
+        "--confirm",
+        "60",
+        "--no-validate",
+        "--idempotency-key",
+        "live-blind",
+    ];
+    let before = sets_of(&bus, "link");
+    let refused = bus.zenctl(&args).await;
+    exits(&refused, 2);
+    assert!(refused.stdout.is_empty(), "{refused}");
+    assert!(
+        refused.stderr.contains("could not be established")
+            && refused.stderr.contains("Pass --yes"),
+        "{refused}"
+    );
+    assert_eq!(
+        sets_of(&bus, "link"),
+        before,
+        "refused, yet sent\n{refused}"
+    );
+
+    let run = config_write(&bus, &[&args[1..], &["--yes"]].concat()).await;
+    exits(&run, 0);
+    assert!(sets_of(&bus, "link") > before, "--yes sends it\n{run}");
+    let reply = &run.rows("answer")[0];
+    assert!(
+        reply["value"]["token"].is_string() && reply["value"]["apply_at"].is_string(),
+        "a reach set answers {{token, apply_at}}\n{run}"
+    );
+}

@@ -1796,7 +1796,8 @@ pub(crate) struct ReplayArgs {
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct ServeArgs {
-    /// Key expression to serve (full wire form; wildcards welcome).
+    /// Key expression to serve (full wire form; a wildcard needs
+    /// --i-know).
     #[arg(add = ArgValueCandidates::new(completion::keys))]
     pub(crate) keyexpr: String,
     /// Reply body: inline text, `@file`, or `-` for stdin (read once) —

@@ -7,8 +7,9 @@
 //! schema first, so a change is typed against the declared kind rather than
 //! guessed from its spelling, refused here in the producer's own words when
 //! it would be refused there (`ConfigSchema::validate`, the same validator),
-//! and — for a `reach` group — never sent without a rollback armed and a
-//! person saying yes, because a reach change can cut the link the reply
+//! and — for a `reach` group, or a windowed change to a group whose class
+//! no read-back established (#508) — never sent without a rollback armed and
+//! a person saying yes, because a reach change can cut the link the reply
 //! would travel on.
 //!
 //! A write addresses one origin. `*` is refused at the edge, before a
@@ -116,13 +117,41 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
             .map_err(|e| unaskable!("{e}"))?;
         let class = view.group(&cli.group).map(|g| g.class);
         if class == Some(ParamClass::Reach) && !cli.dry_run {
-            consent(&cli.origin, &cli.group, cli.confirm.unwrap_or(0), cli.yes)?;
+            consent(
+                &cli.origin,
+                &cli.group,
+                Reach::Declared,
+                cli.confirm.unwrap_or(0),
+                cli.yes,
+            )?;
         }
-    } else if cli.confirm.is_none() && !cli.dry_run {
-        // No schema, so the class is unknown: a reach change sent bare
-        // would be refused by the producer, and that is the right place
-        // for it — but say what the flag is for.
-        eprintln!("note: no `--confirm`: a reach group will refuse this (RFC 05 §5.1)");
+    } else if !cli.dry_run {
+        // No schema, so the class is unknown — and RFC 05 §5.1 makes the
+        // window the line: a reach `set` without `confirm_s` is the
+        // producer's `invalid-args`, never applied, so a bare change cannot
+        // cut the link and the producer is the right place to refuse it.
+        // *With* `--confirm`, a reach change is exactly what this is shaped
+        // as, and nothing here can say it is not one (#508). Until #508 the
+        // consent above was the only one, so the form with no schema and no
+        // validation — `--no-validate`, or a read-back that met silence —
+        // was the one that asked nothing. A dry run touches nothing either
+        // way.
+        match cli.confirm {
+            Some(window) => consent(
+                &cli.origin,
+                &cli.group,
+                Reach::Unestablished(if cli.no_validate {
+                    "--no-validate skipped the read-back"
+                } else {
+                    "no read-back document was served"
+                }),
+                window,
+                cli.yes,
+            )?,
+            None => {
+                eprintln!("note: no `--confirm`: a reach group will refuse this (RFC 05 §5.1)")
+            }
+        }
     }
 
     let body = serde_json::to_vec(&change)?;
@@ -309,23 +338,46 @@ fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
-/// A reach change is sent with a person's yes, or with `--yes` from a
-/// script that has decided. Not at a terminal and not told: refused, as this
-/// tool's own refusal (exit 2) — never silently sent, never silently
-/// dropped.
-fn consent(origin: &str, group: &str, window_s: u64, yes: bool) -> Result<()> {
+/// Why a change needs a person's yes.
+#[derive(Debug, Clone, Copy)]
+enum Reach {
+    /// The served schema says the group is `reach`.
+    Declared,
+    /// No schema to say what the group is, and the change carries a window
+    /// — the shape of a reach change (#508). The reason there is no schema.
+    Unestablished(&'static str),
+}
+
+impl Reach {
+    /// The sentence the refusal and the prompt both open with.
+    fn claim(self, origin: &str, group: &str) -> String {
+        match self {
+            Reach::Declared => format!("group {group:?} is reach: it can cut the link to {origin}"),
+            Reach::Unestablished(why) => format!(
+                "the class of group {group:?} could not be established ({why}), and a change \
+                 with --confirm is how a reach group is changed: it may cut the link to {origin}"
+            ),
+        }
+    }
+}
+
+/// A reach change — or one that may be — is sent with a person's yes, or
+/// with `--yes` from a script that has decided. Not at a terminal and not
+/// told: refused, as this tool's own refusal (exit 2) — never silently
+/// sent, never silently dropped.
+fn consent(origin: &str, group: &str, reach: Reach, window_s: u64, yes: bool) -> Result<()> {
     if yes {
         return Ok(());
     }
+    let claim = reach.claim(origin, group);
     if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
         return Err(unaskable!(
-            "group {group:?} is reach: it can cut the link to {origin}. Pass --yes to send it \
-             from a script, or run at a terminal to be asked"
+            "{claim}. Pass --yes to send it from a script, or run at a terminal to be asked"
         ));
     }
     eprint!(
-        "group {group:?} is reach: it can cut the link to {origin}. Apply with a {window_s}s \
-         rollback window, then confirm over the new link? [y/N] "
+        "{claim}. Apply with a {window_s}s rollback window, then confirm over the new link? \
+         [y/N] "
     );
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;
