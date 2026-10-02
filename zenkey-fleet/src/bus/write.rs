@@ -437,11 +437,14 @@ fn declared_procedure<'a>(
 /// Only a [`CallTarget::Fleet`] call is judged. Three outcomes:
 ///
 /// - **allowed** — the procedure is declared `fanout = "allowed"`, or is a
-///   read (declared, or by the convention's own table, [`convention_kind`]);
+///   read (declared, or by the convention's own table: `introspect`,
+///   `describe`, and RFC 05 §5.1's configuration read-back);
 /// - **forbidden, unconditionally** — declared `fanout = "forbidden"`, or a
 ///   write with no readable `fanout`: RFC 08 §2 defaults a write to
 ///   forbidden, and introspect serves the TOML verbatim, so the default is
-///   this guard's to apply. No `force` moves it;
+///   this guard's to apply — and a write by the convention's own table
+///   (every RFC 05 §5.1 `config/` key but the read-back). No `force` moves
+///   it;
 /// - **not established, refused unless `force`** (#505) — no slices loaded
 ///   (`--no-validate`, a degraded introspect sweep), a producer or procedure
 ///   they do not declare, or a declaration whose kind this build cannot
