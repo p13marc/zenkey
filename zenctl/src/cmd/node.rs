@@ -2,15 +2,17 @@
 //! producer against its served introspect slice.
 //! `node info <origin>` — the per-node capability inventory (issue #49).
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use zenkey_fleet as bus;
 
 use crate::Bus;
 
 pub async fn info(origin: &str, args: &Bus) -> Result<()> {
     // The identity bridge, enforced: an origin id or nothing (RFC 06 §6).
+    // This tool's refusal of its input, so the 2 every other one is — it was
+    // a 1, the code `crate::exit` keeps for a finding (#509).
     if !zenkey::grammar::is_valid_host_origin(origin) && !origin.starts_with('@') {
-        return Err(anyhow!(
+        return Err(crate::exit::unaskable!(
             "{origin:?} is not an origin id — a hostname must be resolved to its \
              origin first (RFC 06 §6); `zenctl node list` shows the roster"
         ));

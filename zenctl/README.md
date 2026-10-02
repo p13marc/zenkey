@@ -101,7 +101,7 @@ zenctl blob list --base acme            # who declares which @blob tier (registr
 zenctl blob locate 01jqz3demo0001       # who *holds* it, and at which content root
 zenctl blob fetch 01jqz3demo0001 --origin h-3fa9 --root <hex> -o bundle.bin
 zenctl doctor --base acme --registry path/to/registry
-zenctl doctor --deep --sample 10 --fail-on error   # bounded deep sweep; exit 1 on errors
+zenctl doctor --deep --sample 10 --fail-on error   # bounded deep sweep; 1 on errors, 2 if nothing was judged
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
 zenctl context edit                     # the whole config file, in $EDITOR, validated
 ```
@@ -293,6 +293,20 @@ $ zenctl doctor --base acme --registry registry -c tcp/127.0.0.1:7447
 Version skew, subjects a host serves that we cannot name, subjects we expect
 that it does not publish, and hosts still serving a deprecated subject — in one
 round trip, without SSH.
+
+As a monitoring job, give it a threshold — findings are output, not verdicts,
+until you do:
+
+```
+zenctl doctor --base acme -c tcp/router:7447 --fail-on error
+```
+
+0 is a fleet with no error finding, 1 is one with an error finding, and **2
+is no verdict**: the session never opened, or it opened onto a bus where no
+producer holds an `alive` token and no router answers — a wrong endpoint or a
+wrong `--base` looks exactly like that, and it is never green (#510).
+`watchdog --count N` follows the same contract on how its rules ended:
+1 firing, 2 unobservable, 0 ok (#511).
 
 ## Things it will not do, on purpose
 

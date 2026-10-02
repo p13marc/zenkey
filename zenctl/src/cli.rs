@@ -130,6 +130,61 @@ pub(crate) enum PubSource {
     Ndjson,
 }
 
+// ── Names the grammar can spell (#509) ─────────────────────────────────────
+//
+// A producer, a procedure path, a config resource or group lands in a chunk
+// position of a key, and the typed builders in `zenkey::selector` *assert*
+// on an illegal chunk — rightly, for the registry constants they were written
+// for, where an illegal one is a programmer error. Typed at a shell it is a
+// usage error: `service call h-… MyApp foo` panicked with exit 101, outside
+// the 0/1/2 contract (`crate::exit`). So every such argument is validated
+// here, by the same `is_valid_plain_chunk` the builders and the registry
+// linter use, and clap refuses it — exit 2, naming the argument — before a
+// session is ever opened. `zenkey`'s assert stays as it is.
+//
+// The selector positions (`--producer` beside `--origin`/`--class` on the
+// wire verbs) are deliberately not here: they compose a key *expression*,
+// where `net*` is a legitimate thing to type, and nothing on that path
+// asserts.
+
+/// The rule, spelled once for every refusal below.
+const CHUNK_RULE: &str =
+    "RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends";
+
+/// One plain chunk (RFC 03 §2): a producer, a config resource or group.
+fn chunk_arg(s: &str) -> Result<String, String> {
+    if zenkey::grammar::is_valid_plain_chunk(s) {
+        Ok(s.to_string())
+    } else {
+        Err(format!("not a plain chunk — {CHUNK_RULE}"))
+    }
+}
+
+/// A producer chunk, or `-` for none — a service origin's `@rpc` has no
+/// producer chunk (RFC 06 §5), and `service call`/`bench rpc` take a
+/// positional for it all the same.
+fn producer_slot_arg(s: &str) -> Result<String, String> {
+    if s == "-" {
+        return Ok(s.to_string());
+    }
+    chunk_arg(s)
+        .map_err(|_| format!("not a plain chunk, nor `-` for a service origin — {CHUNK_RULE}"))
+}
+
+/// A procedure path: plain chunks joined by `/` (`artifact/status`).
+fn procedure_arg(s: &str) -> Result<String, String> {
+    match s
+        .split('/')
+        .find(|seg| !zenkey::grammar::is_valid_plain_chunk(seg))
+    {
+        None => Ok(s.to_string()),
+        Some(seg) => Err(format!(
+            "{seg:?} is not a plain chunk; a procedure path is plain chunks joined by `/` — \
+             {CHUNK_RULE}"
+        )),
+    }
+}
+
 /// How output is rendered: which format, and whether it may carry colour.
 ///
 /// One struct rather than two loose flags, and flattened everywhere either is
@@ -208,7 +263,8 @@ pub struct Cli {
 #[derive(clap::Args)]
 pub(crate) struct GenArgs {
     /// Only this producer's subjects.
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: Option<String>,
     /// Only subjects whose declared path contains this.
     #[arg(long)]
@@ -438,7 +494,10 @@ pub(crate) struct DoctorArgs {
     #[arg(long = "for", value_name = "SECS")]
     pub(crate) for_secs: Option<f64>,
     /// Exit 1 when a finding at (or above) this severity exists.
-    /// Default: always exit 0 — findings are output, not verdicts.
+    /// Default: exit 0 whatever was found — findings are output, not
+    /// verdicts. Either way, a run that judged nothing (no producer holds
+    /// an alive token, no router answered) exits 2: an empty bus is not a
+    /// healthy fleet.
     #[arg(long, value_enum, value_name = "SEVERITY")]
     pub(crate) fail_on: Option<FailOn>,
     /// Re-run the checks on an interval and report CHECK-ID TRANSITIONS as
@@ -1234,7 +1293,8 @@ pub(crate) enum ServiceCmd {
     /// List registered procedures (bus-served slices, or `--registry`).
     List {
         /// Only this producer.
-        #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+        #[arg(long, value_parser = chunk_arg,
+              add = ArgValueCandidates::new(completion::producers))]
         producer: Option<String>,
         #[command(flatten)]
         bus: BusArgs,
@@ -1873,7 +1933,9 @@ pub(crate) struct WatchdogArgs {
     /// Seconds between evaluations — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 5.0)]
     pub(crate) every: f64,
-    /// Stop after N evaluations (default: run until interrupted).
+    /// Stop after N evaluations (default: run until interrupted). A bounded
+    /// run exits on how its rules ended: 1 if any is firing, else 2 if any
+    /// is unobservable, else 0.
     #[arg(long, value_name = "N")]
     pub(crate) count: Option<u64>,
     #[command(flatten)]
@@ -1937,7 +1999,8 @@ pub(crate) struct CheckCutoverArgs {
 #[derive(clap::Args)]
 pub(crate) struct CheckConformArgs {
     /// The producer whose registry slice is the suite.
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Call this origin only (`h-…` or `@service`), not every origin the
     /// roster shows. Off the roster, its silence is unknowable, not a
@@ -1968,10 +2031,10 @@ pub(crate) struct CheckProbeArgs {
     /// Origin id (`h-…`) or hostname (resolved via the bridge).
     pub(crate) target: String,
     /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Procedure path, e.g. `introspect`.
-    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    #[arg(value_parser = procedure_arg, add = ArgValueCandidates::new(completion::procedures))]
     pub(crate) procedure: String,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
@@ -1988,7 +2051,8 @@ pub(crate) struct CheckSchemaArgs {
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub(crate) from: Source,
     /// Producer whose served `describe` carries the schema (live mode).
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: Option<String>,
     /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
     #[arg(long, value_name = "FILE")]
@@ -2027,12 +2091,15 @@ pub(crate) struct KeyIntersectsArgs {
 pub(crate) struct BenchRpcArgs {
     /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
     pub(crate) origin: String,
-    /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    /// Producer name, or `-` for a service origin (`@catalog`), which has no
+    /// producer chunk.
+    #[arg(value_parser = producer_slot_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
     /// it a read every producer serves.
-    #[arg(default_value = "introspect", add = ArgValueCandidates::new(completion::procedures))]
+    #[arg(default_value = "introspect", value_parser = procedure_arg,
+          add = ArgValueCandidates::new(completion::procedures))]
     pub(crate) procedure: String,
     /// Calls to issue (default 100).
     //
@@ -2057,7 +2124,7 @@ pub(crate) struct BenchRpcArgs {
 #[derive(clap::Args)]
 pub(crate) struct SchemaShowArgs {
     /// Producer name, e.g. `sysinfo`.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Show only this type (implies the full document).
     #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
@@ -2080,7 +2147,8 @@ pub(crate) struct RegistryExportArgs {
     #[arg(long = "as", value_enum, default_value = "toml")]
     pub(crate) target: ExportAs,
     /// Only this producer.
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: Option<String>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
@@ -2359,7 +2427,8 @@ pub(crate) struct StorageGenArgs {
 #[derive(clap::Args)]
 pub(crate) struct BlobListArgs {
     /// Only this producer's declarations.
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: Option<String>,
     /// Only this tier: artifact, tree or store.
     #[arg(long, add = ArgValueCandidates::new(completion::blob_tiers))]
@@ -2410,7 +2479,8 @@ pub(crate) struct BlobFetchArgs {
 #[derive(clap::Args)]
 pub(crate) struct TopicListArgs {
     /// Only this producer.
-    #[arg(long, add = ArgValueCandidates::new(completion::producers))]
+    #[arg(long, value_parser = chunk_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: Option<String>,
     /// Only this class: telemetry, state, or events.
     #[arg(long, add = ArgValueCandidates::new(completion::classes))]
@@ -2484,10 +2554,10 @@ pub(crate) struct BaseListArgs {
 #[derive(clap::Args)]
 pub(crate) struct ServiceInfoArgs {
     /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Only this procedure path, e.g. `introspect`.
-    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    #[arg(value_parser = procedure_arg, add = ArgValueCandidates::new(completion::procedures))]
     pub(crate) procedure: Option<String>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
@@ -2500,11 +2570,13 @@ pub(crate) struct ServiceCallArgs {
     /// Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole
     /// fleet, or `@catalog` for a service origin.
     pub(crate) origin: String,
-    /// Producer name. Omit for a service origin, which has no producer chunk.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    /// Producer name, or `-` for a service origin, which has no producer
+    /// chunk.
+    #[arg(value_parser = producer_slot_arg,
+          add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// Procedure path, e.g. `introspect` or `artifact/status`.
-    #[arg(add = ArgValueCandidates::new(completion::procedures))]
+    #[arg(value_parser = procedure_arg, add = ArgValueCandidates::new(completion::procedures))]
     pub(crate) procedure: String,
     /// Selector parameters, repeatable: `--param state=established`.
     #[arg(long = "param", value_name = "K=V")]
@@ -2584,9 +2656,10 @@ pub(crate) struct ConfigGetArgs {
     /// Origin to target: a host id (`h-3fa9c2d41b7e`) or `*` for the fleet.
     pub(crate) origin: String,
     /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// The resource — the chunk an ACL grants by: a device, an interface.
+    #[arg(value_parser = chunk_arg)]
     pub(crate) resource: String,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
@@ -2598,12 +2671,14 @@ pub(crate) struct ConfigSetArgs {
     /// Origin to target: one host id — a change never fans out.
     pub(crate) origin: String,
     /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// The resource the group belongs to.
+    #[arg(value_parser = chunk_arg)]
     pub(crate) resource: String,
     /// The group to change — the unit that has a class and that the write
     /// key names.
+    #[arg(value_parser = chunk_arg)]
     pub(crate) group: String,
     /// The values, `name=value`, one or more; a subset of the group changes
     /// those alone.
@@ -2650,9 +2725,10 @@ pub(crate) struct ConfigTokenArgs {
     /// Origin to target: one host id.
     pub(crate) origin: String,
     /// Producer name.
-    #[arg(add = ArgValueCandidates::new(completion::producers))]
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
     pub(crate) producer: String,
     /// The resource the change is on.
+    #[arg(value_parser = chunk_arg)]
     pub(crate) resource: String,
     /// The change's token, as `set` answered it.
     pub(crate) token: String,

@@ -169,7 +169,7 @@ Arguments:
           Origin to target: a host id (`h-3fa9c2d41b7e`), `*` for the whole fleet, or `@catalog` for a service origin
 
   <PRODUCER>
-          Producer name. Omit for a service origin, which has no producer chunk
+          Producer name, or `-` for a service origin, which has no producer chunk
 
   <PROCEDURE>
           Procedure path, e.g. `introspect` or `artifact/status`

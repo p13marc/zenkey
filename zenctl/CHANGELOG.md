@@ -116,6 +116,46 @@ change that carries no window.
 | `config set … --confirm S --no-validate`, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
 | `config set … --confirm S`, read-back unanswered, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
 
+### Exit honesty (chunk DS)
+
+**Three exits that said less than the run knew** (epic marcpardo/zenkey#498)
+now say it, on the one contract in `src/exit.rs`.
+
+`doctor` on a reachable bus with **nothing on it** — no producer holding an
+alive token, no router answering the admin space — judged nothing, and
+exited 0 even under `--fail-on error`: the coverage check compared 0 with 0.
+It now exits **2**, under every `--fail-on` and without one, with the reason
+in the report (`"unobservable"` in `--format json`, a silence note in the
+table) and on stderr (marcpardo/zenkey#510). `doctor --transitions` reads
+such a run as `unobservable` for every check. A run with anything in scope
+is unchanged: findings are still output by default.
+
+`watchdog --count N` exited 0 whatever its rules ended on. A bounded run now
+exits **1** if any rule ended firing, else **2** if any ended unobservable,
+else 0 — the transition stream is unchanged, and an unbounded run still
+exits 0 (marcpardo/zenkey#511).
+
+A producer, procedure path, config resource or group that is not a plain
+chunk (RFC 03 §2) **panicked with exit 101** wherever it reached a key
+builder — `service call h-… MyApp foo`. Every such argument (`service
+call|info|list`, `config *`, `bench rpc`, `check probe|conform|schema`,
+`schema show`, `topic list`, `registry export`, `blob list`, `gen`) is now
+refused by clap: exit **2**, naming the argument and the grammar. `-` stays
+the producer of a service-origin call; against a host or `*` it is refused
+(2). `node info <hostname>`'s refusal moved from 1 to **2** with the other
+refusals of input (marcpardo/zenkey#509).
+
+| before | now |
+|---|---|
+| `doctor --fail-on error` on a bus with no producer and no router answering → exit 0 | exit 2, `unobservable: "nothing in scope: …"` |
+| `doctor` (no `--fail-on`) on the same → exit 0 | exit 2 |
+| `doctor --transitions` on the same → every check `ok` | every check `unobservable` |
+| `watchdog --rule … --count N`, a rule still firing at the end → exit 0 | exit 1 |
+| `watchdog --rule … --count N`, a rule ending unobservable → exit 0 | exit 2 |
+| `service call h-… MyApp foo` (and every chunk argument) → panic, exit 101 | `error: invalid value 'MyApp' for '<PRODUCER>': …`, exit 2 |
+| `service call h-… - introspect` → panic, exit 101 | ``Error: producer `-` stands for no producer chunk, …``, exit 2 |
+| `node info myhost` → exit 1 | exit 2 |
+
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 
 One new judgement and no moved spelling: a script written against 0.9.1

@@ -152,6 +152,34 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
         "a mute live producer must be a coverage finding, got: {:?}",
         report.findings
     );
+    // A token on the roster is something in scope: the run is a verdict.
+    assert_eq!(report.unobservable, None);
+}
+
+/// #510: a bus with nothing on it — no token, no router answering, no
+/// answer of any kind — is a run that judged nothing. The report says so
+/// with its reason, and its judgement is `Unobservable` under every
+/// threshold: the coverage check compares 0 with 0 and must not read as a
+/// healthy fleet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_bus_is_a_run_that_judged_nothing() {
+    use zenkey_fleet::report::DoctorSeverity;
+    let (_a, b) = peer_pair().await;
+    let report = run_doctor(&zenkey_fleet::Fleet::new(&b, "acme"), None, &spec())
+        .await
+        .expect("run_doctor");
+    assert_eq!((report.live_producers, report.routers), (0, 0));
+    let why = report.unobservable.as_deref().expect("judged nothing");
+    assert!(
+        why.contains("nothing in scope") && why.contains("\"acme\""),
+        "{why}"
+    );
+    for threshold in [None, Some(DoctorSeverity::Error)] {
+        assert!(
+            report.judgement(threshold).is_unobservable(),
+            "{threshold:?}"
+        );
+    }
 }
 
 /// A live producer that *answers* introspect with a slice this build cannot

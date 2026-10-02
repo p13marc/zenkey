@@ -25,8 +25,9 @@
 //! the same finding.
 //!
 //! **The four poles ride through** (RFC 13 §1). A run that could not
-//! happen — the transport, the timeout — is an `unobservable` notification
-//! naming the error, and the previous report is **retained**, never
+//! happen — the transport, the timeout — or that judged nothing because
+//! nothing was in scope (#510) is an `unobservable` notification naming
+//! why, and the previous report is **retained**, never
 //! replaced with nothing; the run after it is `observable_again`. Inside a
 //! report, what was *not asked* is stated, never read as clean: the
 //! registry diff that never ran because no registry was loaded (`synced:
@@ -262,6 +263,13 @@ impl Schedule {
         announced: &[String],
     ) -> Vec<DoctorNotice> {
         self.runs += 1;
+        // A run that judged nothing (#510) is one that could not see: the
+        // same `unobservable` notice as a failed one, the previous report
+        // retained — never an empty baseline every finding is fixed against.
+        let outcome = outcome.and_then(|r| match r.unobservable {
+            Some(why) => Err(why),
+            None => Ok(r),
+        });
         let ran_at = rfc3339(now);
         let next_at = rfc3339(now + self.every.as_secs_f64());
         let every_s = self.every.as_secs_f64();
@@ -605,6 +613,7 @@ mod tests {
             router_version: None,
             deep: false,
             observation: None,
+            unobservable: None,
         }
     }
 
@@ -884,6 +893,37 @@ mod tests {
             "flushed in id order: the baseline, then the run"
         );
         assert_eq!(out[0].notification.state, CondState::Ok, "a clean baseline");
+    }
+
+    /// #510: a run over an empty scope judged nothing — it reads exactly as
+    /// a failed run does: `unobservable` with the reason, the baseline's
+    /// report retained, and no `resolved` for findings it could not see.
+    #[test]
+    fn an_empty_scope_is_unobservable_never_a_fix() {
+        let mut h = Harness::new(None);
+        let a = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
+        h.run(Ok(report(vec![a], Asked::NotAsked)), 0.0);
+        let empty = DoctorReport {
+            unobservable: Some("nothing in scope".into()),
+            ..report(vec![], Asked::NotAsked)
+        };
+        let out = h.run(Ok(empty), 100.0);
+        assert_eq!(
+            ids(&out),
+            vec![(
+                RUN_ID.to_string(),
+                NoticeKind::Unobservable,
+                CondState::Unobservable
+            )]
+        );
+        assert!(
+            out[0].notification.message.contains("nothing in scope"),
+            "{}",
+            out[0].notification.message
+        );
+        let doc = h.schedule.document().unwrap();
+        assert_eq!(doc.outcome, DoctorOutcome::Failed);
+        assert_eq!(doc.findings, 1, "the baseline's findings, retained");
     }
 
     /// `synced: not asked` (no registry) is carried as-is — absent from the

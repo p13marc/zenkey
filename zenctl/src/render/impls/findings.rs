@@ -105,9 +105,17 @@ impl Render for DoctorReport {
                 .map(|v| format!(" (version {v})"))
                 .unwrap_or_default(),
         )));
+        // #510: the empty scope, stated in every format — the silence note
+        // reaches `--format json` too, and the summary below stops calling
+        // an empty bus a fleet that agrees with this build.
+        if let Some(why) = &self.unobservable {
+            notes.push(Note::silence(why.clone()));
+        }
         let errors = self.count(DoctorSeverity::Error);
         let warnings = self.count(DoctorSeverity::Warning);
-        notes.push(if errors == 0 && warnings == 0 {
+        notes.push(if self.unobservable.is_some() {
+            Note::summary("nothing judged — no verdict on the fleet.")
+        } else if errors == 0 && warnings == 0 {
             Note::summary("no findings — the fleet agrees with this build.")
         } else {
             Note::summary(format!(

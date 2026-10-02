@@ -81,7 +81,7 @@ pub struct Transition {
 }
 
 /// What a bounded watchdog run cost and said.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WatchdogSummary {
     pub ticks: u64,
     pub transitions: u64,
@@ -93,4 +93,85 @@ pub struct WatchdogSummary {
     /// projection is a pure function of key and slice set), so evictions
     /// cost recompute, never a changed verdict.
     pub facts_evicted: u64,
+    /// The rules whose last evaluation was `firing`, in their canonical
+    /// spelling (#511) — what a bounded run *ended* on, which the
+    /// transition stream only says to a reader who replays all of it.
+    pub firing: Vec<String>,
+    /// The rules whose last evaluation was `unobservable`, or that were
+    /// never evaluated at all — likewise canonical (#511).
+    pub unobservable: Vec<String>,
+}
+
+impl WatchdogSummary {
+    /// How the run ended, as one RFC 13 §1.2 [`Judgement`] (#511): any rule
+    /// firing is `Established` — the finding; otherwise any rule
+    /// unobservable is `Unobservable`, since a rule nobody could judge has
+    /// not said the fleet is fine; otherwise every rule ended `ok`, which is
+    /// `NotEstablished`. The polarity is [`CondState`]'s: a condition names
+    /// what *firing* means.
+    pub fn judgement(&self) -> Judgement {
+        if !self.firing.is_empty() {
+            return Judgement::Established;
+        }
+        if !self.unobservable.is_empty() {
+            return Judgement::Unobservable {
+                reason: format!(
+                    "{} rule(s) ended unobservable: {}",
+                    self.unobservable.len(),
+                    self.unobservable.join("; ")
+                ),
+            };
+        }
+        Judgement::NotEstablished {
+            reason: "every rule ended ok".into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::judgement_exit_code;
+
+    fn summary(firing: &[&str], unobservable: &[&str]) -> WatchdogSummary {
+        WatchdogSummary {
+            ticks: 2,
+            transitions: 3,
+            facts_evicted: 0,
+            firing: firing.iter().map(|r| r.to_string()).collect(),
+            unobservable: unobservable.iter().map(|r| r.to_string()).collect(),
+        }
+    }
+
+    /// The summary's wire shape, pinned now that it carries the end states
+    /// (#511) — appended after the three counters it always had.
+    #[test]
+    fn watchdog_summary_json_shape_is_pinned() {
+        assert_eq!(
+            serde_json::to_value(summary(&["rate-above v1/** 5"], &["dropped"])).unwrap(),
+            serde_json::json!({
+                "ticks": 2,
+                "transitions": 3,
+                "facts_evicted": 0,
+                "firing": ["rate-above v1/** 5"],
+                "unobservable": ["dropped"],
+            })
+        );
+    }
+
+    /// #511: firing wins (1), then unobservable (2), then clean (0) — the
+    /// order a cron job reading `$?` needs.
+    #[test]
+    fn a_bounded_run_ends_firing_then_unobservable_then_clean() {
+        let exit = |s: &WatchdogSummary| judgement_exit_code(&s.judgement());
+        assert_eq!(exit(&summary(&["a"], &["b"])), 1);
+        assert_eq!(exit(&summary(&[], &["b"])), 2);
+        assert_eq!(exit(&summary(&[], &[])), 0);
+        assert_eq!(
+            summary(&[], &["b", "c"]).judgement(),
+            Judgement::Unobservable {
+                reason: "2 rule(s) ended unobservable: b; c".into()
+            }
+        );
+    }
 }

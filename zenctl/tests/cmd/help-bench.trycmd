@@ -26,7 +26,7 @@ Arguments:
           Origin to target: a host id, `*` for the fleet, or `@catalog`
 
   <PRODUCER>
-          Producer name
+          Producer name, or `-` for a service origin (`@catalog`), which has no producer chunk
 
   [PROCEDURE]
           Procedure path. `introspect` is the safe default: RFC 08 §6 makes it a read every producer serves

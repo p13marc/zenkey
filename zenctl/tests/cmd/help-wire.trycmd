@@ -1437,7 +1437,7 @@ Options:
           Listen passively to the data planes for this many seconds after the GET fan-in and judge what rides (#161): undecodable/invalid payloads, declared-vs-observed QoS, unregistered traffic, over-rate events. The report states the window, its scopes, and what the bounded observer dropped (O5/O6)
 
       --fail-on <SEVERITY>
-          Exit 1 when a finding at (or above) this severity exists. Default: always exit 0 — findings are output, not verdicts
+          Exit 1 when a finding at (or above) this severity exists. Default: exit 0 whatever was found — findings are output, not verdicts. Either way, a run that judged nothing (no producer holds an alive token, no router answered) exits 2: an empty bus is not a healthy fleet
 
           Possible values:
           - error:   Fail on error-severity findings only
@@ -1615,7 +1615,7 @@ Options:
           [default: 5]
 
       --count <N>
-          Stop after N evaluations (default: run until interrupted)
+          Stop after N evaluations (default: run until interrupted). A bounded run exits on how its rules ended: 1 if any is firing, else 2 if any is unobservable, else 0
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.

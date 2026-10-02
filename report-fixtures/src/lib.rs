@@ -350,6 +350,7 @@ pub fn doctor_report() -> DoctorReport {
             field_paths_dropped: 0,
             facts_evicted: 0,
         }),
+        unobservable: None,
     }
 }
 

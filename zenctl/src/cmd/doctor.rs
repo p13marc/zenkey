@@ -4,7 +4,9 @@
 //! Since #55 the checks live in the engine (`zenkey_fleet::judge::doctor`), where
 //! the GUI doctor panel calls the exact same [`zenkey_fleet::run_doctor`];
 //! this command is orchestration and rendering: load the local slices,
-//! run, print, and apply the opt-in `--fail-on` exit policy.
+//! run, print, and exit through the report's own judgement — the opt-in
+//! `--fail-on` threshold, and the reserved 2 for a run that judged nothing
+//! (#510).
 //!
 //! `--transitions` (#227) re-runs the checks on an interval and reports
 //! **check-id transitions** as ndjson through the engine's delta machinery
@@ -75,17 +77,23 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
     let report = zenkey_fleet::run_doctor(&args.fleet(&session), locals.as_ref(), &spec).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
-    let failed = match fail_on {
-        Some(FailOn::Error) => report.count(DoctorSeverity::Error) > 0,
-        Some(FailOn::Warning) => {
-            report.count(DoctorSeverity::Error) > 0 || report.count(DoctorSeverity::Warning) > 0
-        }
-        None => false,
-    };
-    if failed {
-        std::process::exit(crate::exit::FINDING);
+    // The exit is the report's own judgement (RFC 13 §1.2), projected by
+    // the one seam: a finding at or above `--fail-on` is the 1, none is the
+    // 0 — and with no `--fail-on`, findings are output, so 0 — unless the
+    // run judged nothing, which is the 2 under every threshold (#510). An
+    // empty bus used to exit 0 under `--fail-on error`, so a monitoring job
+    // pointed at the wrong endpoint or base stayed green forever.
+    let judgement = report.judgement(fail_on.map(|f| match f {
+        FailOn::Error => DoctorSeverity::Error,
+        FailOn::Warning => DoctorSeverity::Warning,
+    }));
+    if judgement.is_unobservable() {
+        eprintln!(
+            "doctor: nothing was judged — exit 2, the reserved non-verdict (0 here would \
+             call an empty bus a healthy fleet)"
+        );
     }
-    Ok(())
+    crate::exit::verdict(&judgement)
 }
 
 /// The `--transitions` loop: run, delta, say only what changed. A failed run

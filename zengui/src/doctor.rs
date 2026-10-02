@@ -155,6 +155,7 @@ mod tests {
             router_version: None,
             deep: false,
             observation: None,
+            unobservable: None,
         }
     }
 

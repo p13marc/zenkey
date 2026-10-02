@@ -33,6 +33,7 @@ pub async fn rpc(cli: crate::cli::BenchRpcArgs) -> Result<()> {
     } = cli;
     let (origin, producer, procedure) = (origin.as_str(), producer.as_str(), procedure.as_str());
     let target = zenkey_fleet::CallTarget::parse(origin)?;
+    super::producer_slot(&target, producer)?;
     let slices = args.slices_optional().await?;
     let session = args.session().await?;
     let count = calls.unwrap_or(DEFAULT_COUNT);

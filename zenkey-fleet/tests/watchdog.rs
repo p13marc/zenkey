@@ -130,6 +130,19 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     // The per-key facts cache is bounded (#107) and its cost is a summary
     // fact (O6): this fixture's key set fits, so the ledger reads zero.
     assert_eq!(summary.facts_evicted, 0);
+    // #511: the run ended with the silence firing again, and the summary
+    // says so — the 1 a bounded `zenctl watchdog` exits with.
+    assert_eq!(
+        summary.firing,
+        [format!("silent-for {KEY} 0.7")],
+        "{summary:?}"
+    );
+    assert!(summary.unobservable.is_empty(), "{summary:?}");
+    assert_eq!(
+        zenkey_fleet::judgement_exit_code(&summary.judgement()),
+        1,
+        "{summary:?}"
+    );
 }
 
 /// `origin-down` judges the roster: an origin holding no alive token is a
@@ -153,6 +166,11 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
         transitions[0].evidence.contains("no alive token"),
         "{}",
         transitions[0].evidence
+    );
+    assert_eq!(
+        summary.firing,
+        ["origin-down h-000000000000"],
+        "{summary:?}"
     );
 }
 
