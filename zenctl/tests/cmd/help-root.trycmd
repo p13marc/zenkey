@@ -67,9 +67,21 @@ Options:
 
 ```
 
+The version names the build as well as the crate (#513): `zenctl <crate
+version> (<git describe>)`, where the parenthesis is `git describe --tags
+--always --dirty` of the tree it was built from — or `unknown`, for a build
+with no repository behind it. Releases are source-only, so that commit is the
+one fact that tells two production binaries apart.
+
 ```console
 $ zenctl --version
-zenctl [..]
+zenctl [..] ([..])
+
+```
+
+```console
+$ zenctl -V
+zenctl [..] ([..])
 
 ```
 

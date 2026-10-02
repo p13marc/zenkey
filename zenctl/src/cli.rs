@@ -250,7 +250,10 @@ pub(crate) struct SelectorArgs {
 #[command(
     name = "zenctl",
     about = "Explore, query and check a keyspace-v2 Zenoh bus",
-    version
+    // The crate version, then the build (#513): `git describe` from
+    // `build.rs`, or `unknown` where that is not a fact — releases are
+    // source-only, so the commit is what names a production binary.
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("ZENCTL_GIT_DESCRIBE"), ")")
 )]
 pub struct Cli {
     #[command(subcommand)]
