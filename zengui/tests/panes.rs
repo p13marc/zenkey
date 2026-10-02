@@ -1388,8 +1388,9 @@ fn the_connect_pane_states_what_scouting_means() {
     assert!(
         ui.find(
             "RFC 09 §0.1: multicast scouting and gossip are independent. This toggle is \
-             the multicast half only — with it off, a peer still learns about others \
-             through gossip over an established link."
+             the multicast half only. The session is a client of its endpoints — no \
+             listener, no gossip — unless it listens, and a listening peer still \
+             learns about others through gossip over an established link."
         )
         .is_ok(),
         "the two-switch distinction must be on screen, not just in the RFC"

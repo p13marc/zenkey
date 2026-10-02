@@ -1874,3 +1874,82 @@ fn a_section_message_routes_to_its_slot_and_misses_a_dropped_one() {
         "a dropped slot's message must not land in another slot"
     );
 }
+
+/// Run a task to quiescence the way the runtime would: every message it
+/// outputs goes back through `update`, and every task *that* returns is run
+/// too. Window and widget actions are dropped — a headless test has neither.
+async fn drive(app: &mut Zengui, task: iced::Task<Message>) {
+    use iced::futures::StreamExt as _;
+    use iced_test::runtime::{Action, task::into_stream};
+
+    let mut queue = vec![task];
+    let mut steps = 0;
+    while let Some(task) = queue.pop() {
+        let Some(mut stream) = into_stream(task) else {
+            continue;
+        };
+        while let Some(action) = stream.next().await {
+            if let Action::Output(message) = action {
+                steps += 1;
+                assert!(steps < 100, "the boot tasks did not settle");
+                queue.push(app.update(message));
+            }
+        }
+    }
+}
+
+/// The boot, with a dead router and `--registry` dirs, and nothing faked: the
+/// real open task, the real failure, the real dirs load.
+async fn boot_against(connect: &str) -> Zengui {
+    let mut settings = super::test_settings();
+    settings.connect = vec![connect.to_string()];
+    settings.registry = vec![
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry"),
+    ];
+    let (mut app, open) = Zengui::with_prefs(settings, crate::prefs::Prefs::default(), None);
+    tokio::time::timeout(std::time::Duration::from_secs(10), drive(&mut app, open))
+        .await
+        .expect("a dead router fails the open at once — the boot never hangs");
+    app
+}
+
+/// #196 in the GUI, after #501 made the session a client: a router that
+/// does not answer fails the open — the link says so — and the `--registry`
+/// dirs load anyway, labelled dirs-only. Before #501 the peer session opened
+/// onto nothing and the dirs loaded by accident; right after it, they did not
+/// load at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dead_router_still_loads_the_registry_dirs() {
+    use crate::message::LinkState;
+    use crate::view::status::SliceSource;
+
+    let app = boot_against("tcp/127.0.0.1:1").await;
+    assert!(
+        matches!(app.obs.link, LinkState::Failed(_)),
+        "the link says the session never opened"
+    );
+    assert!(app.dep.session.is_none());
+    let Some(slices) = app.dep.slices.as_ref() else {
+        panic!("the dirs answer without a session")
+    };
+    assert!(!slices.slices().is_empty());
+    assert!(
+        matches!(app.dep.slice_source, SliceSource::Dirs { count } if count == slices.slices().len()),
+        "labelled as what it is: the dirs alone, not a union with a bus"
+    );
+}
+
+/// The other half of the fork: an endpoint that does not parse is the user's
+/// own error, and the dirs are not loaded past it — answering anyway would
+/// hide the typo behind a window that looks configured.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_malformed_endpoint_loads_nothing_past_it() {
+    use crate::message::LinkState;
+
+    let app = boot_against("127.0.0.1:1").await;
+    assert!(matches!(app.obs.link, LinkState::Failed(_)));
+    assert!(
+        app.dep.slices.is_none(),
+        "a config failure is not answered past"
+    );
+}

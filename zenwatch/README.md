@@ -292,6 +292,37 @@ The `bus` section resolves like a zenctl context — config > env
 (`ZENWATCH_BASE`, `ZENWATCH_ZENOH_CONFIG`) > the active named context
 (`~/.config/zenkey-explorer/config.toml`) > the base-less bus root.
 
+### The session: a client, and it fails fast
+
+zenwatch opens its session through the same engine call as zenctl and
+zengui, so it takes the explorer posture (RFC 09 §5, #501–#503): a zenoh
+**client** of the endpoints it names — no listener, no gossip, multicast
+off unless `bus.scouting` or the zenoh config file states it.
+Before #501 it was a peer that listened on every interface.
+
+A client does not open onto nothing, so **if no router answers at start,
+zenwatch exits 1** (the transport would not open) instead of running as a
+daemon that watches an empty bus and never pages. That is deliberate — a
+loud failure beats a silent watcher — and it means the service manager
+owns the retry:
+
+```ini
+# zenwatch.service
+[Service]
+ExecStart=/usr/local/bin/zenwatch run --config /etc/zenwatch/zenwatch.json5
+Restart=on-failure
+RestartSec=10s
+```
+
+Once open, a client reconnects to its router on its own; the restart is
+for the start. An endpoint that does not parse (`127.0.0.1:7447`, no
+`tcp/`) is a refused config, exit 2, and `Restart=on-failure` restarting
+it will not help — `check-config` catches it first.
+
+To run as a **peer** instead, say so: give `bus.listen` endpoints, or set
+`mode: "peer"` in the zenoh config file `bus.zenoh_config` names (a file's
+stated `mode` always stands).
+
 Rendering is **bounded**: a 4 KB alert document does not become a 4 KB push.
 Payloads render through the producer's served schema (RFC 08 §7) when one
 is served, structurally (and saying so) when not, and as key plus timestamp

@@ -355,8 +355,10 @@ fn scouting_help<'a>() -> Element<'a, Message> {
     Column::with_children(vec![
         kit::body(
             "RFC 09 §0.1: multicast scouting and gossip are independent. This \
-             toggle is the multicast half only — with it off, a peer still \
-             learns about others through gossip over an established link.",
+             toggle is the multicast half only. The session is a client of its \
+             endpoints — no listener, no gossip — unless it listens, and a \
+             listening peer still learns about others through gossip over an \
+             established link.",
         )
         .style(muted)
         .into(),

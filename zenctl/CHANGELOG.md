@@ -6,6 +6,45 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased — the session stops being a peer
+
+Three defaults changed, all in the session every verb opens (epic
+marcpardo/zenkey#498, chunk DQ). No spelling moved; the exit contract gained
+one row.
+
+**The session is a zenoh client** (marcpardo/zenkey#501). It was a peer:
+a listener on `tcp/[::]:0` on every interface, gossip on, and a mesh that
+learned a laptop's locator and opened links to it. It now holds no listener
+and gossips nothing. `--listen` (or a context that listens) still makes it a
+peer, and a `--zenoh-config` that states `mode` keeps its own.
+
+**`--zenoh-config` no longer turns multicast on** (marcpardo/zenkey#502).
+zenoh fills every key a file leaves out with its own default, and its
+default is multicast *on*, so a file holding only `connect.endpoints` used
+to scout. Multicast and mode now follow the file only where it names them
+(`scouting.multicast.enabled`, `mode`); `--scouting` still wins over both.
+
+**A typo or a dead router is no longer an empty bus** (marcpardo/zenkey#503).
+An endpoint that does not parse is refused by name — the missing `tcp/` in
+its own sentence — where it was silently dropped (and, with a config file,
+the file's endpoints were dialled instead). A router that does not answer
+fails the session, because a client does not open onto nothing. Both exit
+**2**, for every verb, `pub` and `retire` included: a session that never
+opened asked nothing and attempted nothing. A verb holding `--registry`
+dirs still answers from them and says so (#196); with no endpoint named at
+all, that note now appears where the old peer session ran silently against
+nothing.
+
+| before | now |
+|---|---|
+| `zenctl echo 'prod/v1/**' -c tcp/r:7447` holds `LISTEN *:<port>` | holds no listener (a client); `--listen` for a peer |
+| `--zenoh-config z.json5` (no `scouting` key) joins `224.0.0.224:7446` | multicast off unless the file states it, or `--scouting` |
+| `--zenoh-config z.json5` (no `mode` key) opens a peer | opens a client; state `mode` in the file to keep a peer |
+| `-c 127.0.0.1:7447` (no `tcp/`) → "no live producers", exit 0 | `Error: connect endpoint "127.0.0.1:7447": has no protocol …`, exit 2 |
+| `-c tcp/127.0.0.1:1` (nothing listening) → empty answer, exit 0 | `Error: failed to open the Zenoh session`, exit 2 |
+| `pub … -c tcp/127.0.0.1:1` → `published`, exit 0 | exit 2, nothing published |
+| no endpoint, no context, no `--scouting` → empty answer, exit 0 | "nothing to connect to: …", exit 2 (or the `--registry` dirs alone, with the note) |
+
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 
 One new judgement and no moved spelling: a script written against 0.9.1

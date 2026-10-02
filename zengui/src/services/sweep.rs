@@ -36,6 +36,23 @@ pub fn slices(session: zenoh::Session, base: String, timeout: Duration) -> Task<
     )
 }
 
+/// The registry slices from the `--registry` dirs alone, for a session that
+/// never opened (#196's doctrine, which zenctl already keeps): a transport
+/// that will not come up leaves what is on disk answerable. Off the update
+/// thread (#255) — it reads every file in every dir. Lands on
+/// [`BusMsg::SlicesLoaded`], whose handler labels a set loaded with dirs
+/// configured as dirs-only, which is what this is.
+pub fn slices_from_dirs(dirs: Vec<std::path::PathBuf>) -> Task<Message> {
+    Task::perform(
+        async move {
+            SliceSet::from_dirs(&dirs)
+                .map(Arc::new)
+                .map_err(ServiceError::of)
+        },
+        |r| Message::Bus(BusMsg::SlicesLoaded(r)),
+    )
+}
+
 /// The §6.1 union (issue #43): served wins, dirs fill, and the disagreement
 /// count reaches the status strip as data.
 pub fn slices_union(

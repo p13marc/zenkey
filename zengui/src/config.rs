@@ -39,19 +39,25 @@ pub struct Cli {
     pub context: Option<String>,
 
     /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+    ///
+    /// The session is a zenoh client of these endpoints — no listener, no
+    /// gossip (RFC 09 §5) — so one nothing answers is a link error, not an
+    /// empty tree, and one that does not parse is refused by name.
     #[arg(long, short = 'c', value_name = "ENDPOINT")]
     pub connect: Vec<String>,
 
-    /// Endpoint to listen on, repeatable.
+    /// Endpoint to listen on, repeatable. Listening makes the session a peer,
+    /// which an explorer otherwise never is.
     #[arg(long, short = 'l', value_name = "ENDPOINT")]
     pub listen: Vec<String>,
 
     /// Enable multicast scouting.
     ///
-    /// Off by default, and deliberately so: an explorer that multicast-scouts
-    /// joins whatever mesh it can reach, which is how a throwaway session ends
-    /// up in a live fleet. Note RFC 09 §0.1 — this is the *multicast* half
-    /// only; gossip is a separate switch.
+    /// Off by default — with a --zenoh-config too, unless the file itself
+    /// states `scouting.multicast.enabled` — and deliberately so: an explorer
+    /// that multicast-scouts joins whatever mesh it can reach, which is how a
+    /// throwaway session ends up in a live fleet. Note RFC 09 §0.1 — this is
+    /// the *multicast* half only; gossip is a separate switch.
     #[arg(long)]
     pub scouting: bool,
 
@@ -70,7 +76,9 @@ pub struct Cli {
     /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
     /// layer; --connect/--listen/--scouting apply on top when given
     /// (flag > env > context > file). A file that sets a session namespace
-    /// is refused — explorers run un-namespaced (RFC 09 §5).
+    /// is refused — explorers run un-namespaced (RFC 09 §5). Only what the
+    /// file states counts: no `mode` means the explorer's client session, no
+    /// `scouting.multicast.enabled` means multicast off.
     #[arg(long, value_name = "FILE", env = "ZENGUI_ZENOH_CONFIG")]
     pub zenoh_config: Option<PathBuf>,
 
