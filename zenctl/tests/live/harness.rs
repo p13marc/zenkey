@@ -260,15 +260,17 @@ impl Bus {
             .expect("telemetry");
         tasks.push(tokio::spawn(async move {
             let mut tick = tokio::time::interval(TELEMETRY_PERIOD);
-            for n in 0u64.. {
+            let mut n = 0u64;
+            loop {
                 tick.tick().await;
                 let _ = cpu
                     .put(format!(r#"{{"value":{}}}"#, n % 100))
                     .encoding("application/json")
                     .await;
-                if n % 10 == 0 {
+                if n.is_multiple_of(10) {
                     let _ = state_pub.put(HEALTH).encoding("application/json").await;
                 }
+                n = n.wrapping_add(1);
             }
         }));
 
