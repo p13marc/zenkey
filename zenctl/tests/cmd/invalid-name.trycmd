@@ -1,0 +1,277 @@
+An argument that lands in a chunk position of a key — a producer, a procedure
+path, a config resource or group — is a name the grammar has to be able to
+spell (RFC 03 §2). The typed builders in `zenkey::selector` *assert* on an
+illegal chunk, which is right for the registry constants they were written for
+and wrong for a shell: `zenctl service call h-0123456789ab MyApp foo` against a
+live bus panicked with **exit 101**, outside the 0/1/2 contract (#509).
+
+Every such argument now goes through one clap `value_parser` built on
+`zenkey::grammar::is_valid_plain_chunk` — the predicate the builders and the
+registry linter share — so it is a usage error: exit 2, naming the argument and
+the rule, before any session is opened. That is why none of these needs a bus.
+The list is every verb that takes one; a new one belongs here.
+
+```console
+$ zenctl service call h-0123456789ab MyApp introspect
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk, nor `-` for a service origin — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service call h-0123456789ab probe Ping
+? 2
+error: invalid value 'Ping' for '<PROCEDURE>': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service call h-0123456789ab probe 'artifact//status'
+? 2
+error: invalid value 'artifact//status' for '<PROCEDURE>': "" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service info MyApp
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service info probe Ping
+? 2
+error: invalid value 'Ping' for '[PROCEDURE]': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service list --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl bench rpc h-0123456789ab MyApp
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk, nor `-` for a service origin — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl bench rpc h-0123456789ab probe Ping
+? 2
+error: invalid value 'Ping' for '[PROCEDURE]': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config get h-0123456789ab MyApp wlan0
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config get h-0123456789ab probe Wlan0
+? 2
+error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config set h-0123456789ab MyApp wlan0 radio channel=6
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config set h-0123456789ab probe Wlan0 radio channel=6
+? 2
+error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config set h-0123456789ab probe wlan0 Radio channel=6
+? 2
+error: invalid value 'Radio' for '<GROUP>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config confirm h-0123456789ab MyApp wlan0 t-1
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config cancel h-0123456789ab probe Wlan0 t-1
+? 2
+error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config persist h-0123456789ab MyApp wlan0 t-1
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl config extend h-0123456789ab MyApp wlan0 t-1 --by 30
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl check probe h-0123456789ab MyApp introspect
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl check probe h-0123456789ab probe Ping
+? 2
+error: invalid value 'Ping' for '<PROCEDURE>': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl check conform --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl check schema --type Health --from '{}' --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl schema show MyApp
+? 2
+error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl topic list --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl registry export --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl blob list --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl gen --producer MyApp
+? 2
+error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+
+For more information, try '--help'.
+
+```
+
+`-` is the one non-chunk a call's producer position admits: a service origin's
+`@rpc` has no producer chunk (RFC 06 §5), so `service call @catalog - …` names
+none. Against a host or the fleet it is this tool's own refusal — still a 2,
+and still before a session.
+
+```console
+$ zenctl service call h-0123456789ab - introspect
+? 2
+Error: producer `-` stands for no producer chunk, which only a service origin (`@…`) has (RFC 06 §5) — a host or the fleet needs the producer's name
+
+```
+
+```console
+$ zenctl bench rpc '*' -
+? 2
+each call times out after 5.0s — a p99 at or near that number is measuring the timeout, not the fleet
+Error: producer `-` stands for no producer chunk, which only a service origin (`@…`) has (RFC 06 §5) — a host or the fleet needs the producer's name
+
+```
+
+`node info` takes an origin id and refuses a hostname (RFC 06 §6) — a refusal
+of the input, so the same 2. It used to be a 1, the code reserved for a
+finding.
+
+```console
+$ zenctl node info MyHost
+? 2
+Error: "MyHost" is not an origin id — a hostname must be resolved to its origin first (RFC 06 §6); `zenctl node list` shows the roster
+
+```

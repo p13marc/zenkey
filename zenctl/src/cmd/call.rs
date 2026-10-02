@@ -43,6 +43,7 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
     // through the typed builders and applies the fan-in discipline plus the
     // registry-layer fanout guard (issue #36).
     let target = zenkey_fleet::CallTarget::parse(origin)?;
+    super::producer_slot(&target, producer)?;
     // A trace attributes to one origin, so a fan-out has nothing to trace.
     // Refused here, before a session opens (the engine refuses it too, for
     // library callers), and as this tool's own refusal of the input: exit 2.
