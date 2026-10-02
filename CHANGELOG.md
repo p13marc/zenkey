@@ -34,6 +34,18 @@ already in the lock) — to tell a key the file states from one zenoh
 defaulted. `explorer_config` is fallible. The behaviour table is in
 [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
+**zenwatch** inherits the posture with no code change: it is a client now,
+and when no router answers at start it **exits 1** rather than watching an
+empty bus — run it under a service manager that restarts it (systemd
+`Restart=on-failure` with a `RestartSec`). `bus.listen` endpoints, or
+`mode: "peer"` in its zenoh config file, make it a peer again
+([`zenwatch/README.md`](zenwatch/README.md#the-session-a-client-and-it-fails-fast)).
+
+**zengui** keeps #196's doctrine through the change: a session that never
+opened on the transport still loads the `--registry` dirs (labelled
+dirs-only, the link line saying it failed); a malformed endpoint or a
+config file it refuses loads nothing past it.
+
 ---
 
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
