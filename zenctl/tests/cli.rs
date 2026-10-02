@@ -12,13 +12,24 @@
 //!
 //! ## What is in here, and what is not
 //!
-//! Only verbs that answer **without a bus**, because anything else is a flake
-//! wearing a test's name. That is more than it sounds: `--help` for every leaf
-//! verb (which alone would have caught #195's runs of spaces), the key-expression
-//! algebra, `registry lint`, `check schema --schema-set`, and both halves of
-//! #196's open-failure fork. Verbs that must reach a producer to say anything
-//! are `--help`-only; their *rendering* is pinned by the render snapshots
-//! instead, which exercise the same code with no process and no network.
+//! Only verbs that answer **without a bus**. That is more than it sounds:
+//! `--help` for every leaf verb (which alone would have caught #195's runs of
+//! spaces), the key-expression algebra, `registry lint`, `check schema
+//! --schema-set`, and both halves of #196's open-failure fork. The cases here
+//! that open a session point at `fixtures/dead-bus.json5`, so the only bus
+//! outcome this corpus can pin is the exit-2 "no verdict".
+//!
+//! Verbs that must reach a producer to say anything are pinned by
+//! **`tests/live.rs`** (#499): the real binary against an in-process producer
+//! on an OS-given port — `node list`, `topic list`, `get`, `echo`, `rate`,
+//! `pub`, `retire`, `service call`, every 0 and 1 of `check expect`, `why` and
+//! `doctor --fail-on`, and the `config` write lifecycle against an RFC 05
+//! §5.1 double (#500). This file used to call anything on a bus "a flake
+//! wearing a test's name"; that was true of hand-carved fixed ports, and
+//! stopped being true when #301 moved every bus suite to ephemeral ports on
+//! in-process sessions — the footing the live suite stands on. Their
+//! *rendering* is pinned by the render snapshots as well, which exercise the
+//! same code with no process and no network.
 //!
 //! The files are grouped the way the tree is (#307): `help-<noun>` per noun
 //! family, `help-wire` for the verbs that hang off the root, `help-check` for
