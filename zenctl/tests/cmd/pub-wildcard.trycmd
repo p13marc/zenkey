@@ -1,0 +1,34 @@
+`pub` on a wildcard is refused, and nothing overrides it (#504).
+
+A put is addressed to one concrete key: RFC 07 §3 makes a publisher's key
+its own, by rule. A wildcard put is something else — zenoh delivers it to
+every subscriber whose subscription intersects it, across every producer's
+keys — and `retire` had refused the same blast radius since v1.12 while
+`pub` printed `published prod/v1/** (7 bytes) [1/1]` and exited 0. The
+refusal is now one engine function (`zenkey_fleet::check_concrete`) that the
+tombstone gate, every put row and the declared publisher itself all ask, so
+no write path can forget it.
+
+It is a refusal of the command line, so it comes first — before the body is
+read, before a session opens — and exits **2** (`zenctl/src/exit.rs`).
+
+```console
+$ zenctl pub 'prod/v1/**' '{"x":1}' --base prod
+? 2
+Error: prod/v1/**: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+
+```
+
+`$*` is a wildcard too — the sub-chunk one, and the only place a `$` may
+stand in a key expression.
+
+```console
+$ zenctl pub 'v1/h-3fa9c2d41b7e/state/sysinfo/he$*' '{}'
+? 2
+Error: v1/h-3fa9c2d41b7e/state/sysinfo/he$*: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+
+```
+
+A `pub --from ndjson` row on a wildcard key is refused the same way, and
+counted with the refused delete rows rather than aborting the pipe — that
+half needs a bus to read the rows into, so it is pinned in `tests/live.rs`.

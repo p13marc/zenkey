@@ -24,6 +24,7 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
         body,
         attachment,
         no_validate,
+        i_know,
         raw,
         trace,
         for_secs,
@@ -63,9 +64,12 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
     let attachment = attachment.map(Source::read).transpose()?;
 
     // The fanout guard needs slices; loading them costs one introspect
-    // fan-in. --no-validate skips it (and with it the registry-layer refusal
-    // — the generated-builder and ACL layers remain).
+    // fan-in. --no-validate skips that, and with it any way to know what the
+    // procedure is — so a fleet call is judged here, before a session opens,
+    // with no registry at all: a convention read passes, anything else needs
+    // --i-know (#505). Skipping the lookup used to skip the refusal too.
     let slices = if no_validate {
+        zenkey_fleet::check_fanout(&target, None, producer, procedure, i_know)?;
         None
     } else {
         args.slices_optional().await?
@@ -114,6 +118,7 @@ pub async fn run(cli: crate::cli::ServiceCallArgs) -> Result<()> {
         attachment,
         timeout: args.timeout(),
         slices: slices.as_ref(),
+        force: i_know,
     };
     let fleet = args.fleet(&session);
     // Exit-code discipline preserved either way: 1 = an error reply, 2 =

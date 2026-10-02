@@ -141,10 +141,10 @@ Options:
           A request id for the change event's record, likewise claimed
 
       --yes
-          Send a `reach` change without being asked (for a script that has decided)
+          Send a `reach` change without being asked (for a script that has decided) — or a --confirm change to a group whose class no read-back established, which may be one
 
       --no-validate
-          Skip the read-back: values ride by their spelling and the producer judges the rest
+          Skip the read-back: values ride by their spelling and the producer judges the rest. With --confirm, the group may be reach, so --yes (or a terminal's yes) is asked for
 
       --base <BASE>
           The deployment base — the first chunk(s) of every key on the wire.

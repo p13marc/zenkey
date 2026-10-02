@@ -51,12 +51,18 @@ impl std::fmt::Debug for Publication {
 /// The profile maps to the wire in one place: reliability, congestion
 /// control, priority, and the express bit (RFC 04 §3 — `alert` and `frame`
 /// are the express profiles; nothing in the workspace ever set it before).
+///
+/// A wildcard key is refused, never declared ([`check_concrete`], #504).
 pub async fn declare_publication(
     session: &Session,
     key: &str,
     qos: QosProfile,
     encoding: Option<&str>,
 ) -> Result<Publication> {
+    // The only publish path refuses the blast radius itself (#504), so no
+    // frontend can forget to: a caller that wants the refusal before a
+    // session opens asks `check_concrete` first, as `zenctl pub` does.
+    check_concrete(key, WriteAct::Put)?;
     let publisher = session
         .declare_publisher(key.to_string())
         .reliability(qos.reliability())
@@ -154,6 +160,46 @@ impl Publication {
     }
 }
 
+/// The two acts a key is written with — what [`check_concrete`] names in
+/// its refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteAct {
+    /// A put: a sample on a declared publisher.
+    Put,
+    /// A tombstone (RFC 04 §1.2).
+    Retire,
+}
+
+/// Refuse a write addressed to a wildcard — the one refusal every write
+/// path shares, and the one no `force` overrides (#504).
+///
+/// A tombstone was the first act to carry it (RFC 04 §1.2, v1.12); a put
+/// is the same blast radius with a payload attached: it is delivered to
+/// every subscriber whose subscription intersects it, across every
+/// producer's keys, and RFC 07 §3 makes a publisher's key concrete by rule.
+/// `zenctl pub 'prod/v1/**' x` used to exit 0 with "published". `$` counts:
+/// the only place it may stand in a key expression is `$*`.
+pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
+    if !key.contains('*') && !key.contains('$') {
+        return Ok(());
+    }
+    let why = match act {
+        WriteAct::Retire => {
+            "a tombstone is addressed to one concrete key; a wildcard delete is not \
+             an operator act, it is a blast radius (RFC 04 §1.2, v1.12)"
+        }
+        WriteAct::Put => {
+            "a put is addressed to one concrete key (RFC 07 §3: a publisher always \
+             names its own); a wildcard put reaches every subscriber it intersects, \
+             across every producer's keys — not an operator act, a blast radius"
+        }
+    };
+    Err(Error::unaskable(
+        key,
+        format!("is a wildcard — {why}. Not overridable."),
+    ))
+}
+
 /// What a key is, for the purpose of retiring it — the guard's positive
 /// verdict, so callers print facts instead of re-deriving them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,14 +236,7 @@ pub fn check_retire(
     slices: Option<&SliceSet>,
     force: bool,
 ) -> Result<RetireClass> {
-    if key.contains('*') || key.contains('$') {
-        return Err(Error::unaskable(
-            key,
-            "is a wildcard — a tombstone is addressed to one concrete key; a \
-             wildcard delete is not an operator act, it is a blast radius \
-             (RFC 04 §1.2, v1.12). Not overridable.",
-        ));
-    }
+    check_concrete(key, WriteAct::Retire)?;
     let facts = crate::model::facts::describe_key(base, key, slices).facts;
     use crate::model::facts::{ClassKind, KeyShape, Registration};
     match &facts.shape {
@@ -346,6 +385,167 @@ fn attachment_value(bytes: &[u8]) -> serde_json::Value {
     }
 }
 
+/// The procedures this convention defines, with the kind it gives them —
+/// so their kind is a fact about the convention, not something a registry
+/// has to bother declaring (`bench`'s `FRAMEWORK_READS`, widened): RFC 08
+/// §6's `introspect` and §7's `describe` are reads every producer serves,
+/// and RFC 05 §5.1's table fixes the configuration keys — the read-back a
+/// read, every other key under it a write.
+///
+/// Consulted only after the loaded slices: a producer's own declaration of
+/// one of these paths is still the registry layer's to judge.
+fn convention_kind(procedure: &str) -> Option<ProcedureKind> {
+    let chunks: Vec<&str> = procedure.split('/').collect();
+    match chunks.as_slice() {
+        ["introspect" | "describe"] => Some(ProcedureKind::Read),
+        ["config", _] => Some(ProcedureKind::Read),
+        ["config", _, "confirm" | "cancel" | "extend" | "persist"] | ["config", _, _, "set"] => {
+            Some(ProcedureKind::Write)
+        }
+        _ => None,
+    }
+}
+
+/// A slice's declaration of a called procedure: the literal path first,
+/// then a declared pattern whose `{var}` chunks the call fills
+/// (`config/{device}/access/set` declares `config/wlan0/access/set`). A
+/// literal-only lookup made every templated write look undeclared — which
+/// was harmless while undeclared meant "proceed", and is not now.
+fn declared_procedure<'a>(
+    slice: &'a zenkey::slice::RegistrySlice,
+    procedure: &str,
+) -> Option<&'a zenkey::slice::ProcedureDecl> {
+    let fills = |pattern: &str| {
+        let (p, c): (Vec<&str>, Vec<&str>) =
+            (pattern.split('/').collect(), procedure.split('/').collect());
+        p.len() == c.len()
+            && p.iter().zip(&c).all(|(p, c)| {
+                p == c || (p.starts_with('{') && p.ends_with('}') && !p.ends_with("...}"))
+            })
+    };
+    slice
+        .procedures
+        .iter()
+        .find(|p| p.path == procedure)
+        .or_else(|| slice.procedures.iter().find(|p| fills(&p.path)))
+}
+
+/// The registry layer of RFC 05 §2.1's write fan-out refusal, for dynamic
+/// callers — the generated builders make a forbidden fan-out unspellable,
+/// and a CLI argument has no builder.
+///
+/// Only a [`CallTarget::Fleet`] call is judged. Three outcomes:
+///
+/// - **allowed** — the procedure is declared `fanout = "allowed"`, or is a
+///   read (declared, or by the convention's own table: `introspect`,
+///   `describe`, and RFC 05 §5.1's configuration read-back);
+/// - **forbidden, unconditionally** — declared `fanout = "forbidden"`, or a
+///   write with no readable `fanout`: RFC 08 §2 defaults a write to
+///   forbidden, and introspect serves the TOML verbatim, so the default is
+///   this guard's to apply — and a write by the convention's own table
+///   (every RFC 05 §5.1 `config/` key but the read-back). No `force` moves
+///   it;
+/// - **not established, refused unless `force`** (#505) — no slices loaded
+///   (`--no-validate`, a degraded introspect sweep), a producer or procedure
+///   they do not declare, or a declaration whose kind this build cannot
+///   read. Until #505 every one of these *proceeded*: the guard ran only
+///   when it could find a declaration, so `service call '*' p reset
+///   --no-validate` fanned a write to every origin. Not knowing the
+///   declaration is not a licence (RFC 09 §5.1 O4).
+pub fn check_fanout(
+    target: &CallTarget,
+    slices: Option<&SliceSet>,
+    producer: &str,
+    procedure: &str,
+    force: bool,
+) -> Result<()> {
+    if !matches!(target, CallTarget::Fleet) {
+        return Ok(());
+    }
+    let what = || format!("procedure {producer}/{procedure}");
+    let refuse = |declared: String| {
+        Err(Error::unaskable(
+            what(),
+            format!(
+                "{declared} — a fleet (`*`) call to it is refused \
+                 (RFC 05 §2.1); name one origin"
+            ),
+        ))
+    };
+    let slice = slices.and_then(|s| s.get(producer));
+    let unestablished = match slice.and_then(|s| declared_procedure(s, procedure)) {
+        Some(decl) => {
+            let kind = decl.kind.as_ref().and_then(Declared::known);
+            match (decl.fanout.as_ref(), kind) {
+                (Some(f), _) if f.is(&Fanout::Allowed) => return Ok(()),
+                // Three refusals, because there are three reasons. Reading
+                // `fanout.is_some()` once folded the second into the first
+                // and told the operator the slice "declares fanout =
+                // \"forbidden\"" when it declared something this build
+                // cannot read — a claim that sends them grepping the
+                // registry for a string that is not in it.
+                (Some(f), _) if f.is(&Fanout::Forbidden) => {
+                    return refuse("declares fanout = \"forbidden\"".to_string());
+                }
+                (Some(f), Some(ProcedureKind::Write)) => {
+                    return refuse(format!(
+                        "declares fanout = {:?}, a token this build does not know — \
+                         RFC 08 §2 defaults a write to forbidden and an unreadable \
+                         spelling is not a licence",
+                        f.token()
+                    ));
+                }
+                (None, Some(ProcedureKind::Write)) => {
+                    return refuse(
+                        "is a write with no declared fanout, which defaults to forbidden \
+                         (RFC 08 §2)"
+                            .to_string(),
+                    );
+                }
+                (_, Some(ProcedureKind::Read)) => return Ok(()),
+                (_, None) => match &decl.kind {
+                    Some(k) => format!(
+                        "is declared kind = {:?}, a token this build does not know",
+                        k.token()
+                    ),
+                    None => "is declared with no kind".to_string(),
+                },
+            }
+        }
+        None => match convention_kind(procedure) {
+            Some(ProcedureKind::Read) => return Ok(()),
+            Some(ProcedureKind::Write) => {
+                return refuse(
+                    "is a write by the convention's own table (RFC 05 §5.1), and a \
+                     write with no declared fanout defaults to forbidden (RFC 08 §2)"
+                        .to_string(),
+                );
+            }
+            None => match (slices, slice) {
+                (None, _) => "has no registry loaded to declare it".to_string(),
+                (Some(_), None) => {
+                    format!("is not declared: the loaded registry has no producer {producer:?}")
+                }
+                (Some(_), Some(_)) => {
+                    format!("is not declared: producer {producer:?} declares no such procedure")
+                }
+            },
+        },
+    };
+    if force {
+        return Ok(());
+    }
+    Err(Error::unaskable(
+        what(),
+        format!(
+            "{unestablished}, so whether it is a write could not be established — \
+             RFC 08 §2 defaults a write to fanout = \"forbidden\", and not knowing the \
+             declaration is not a licence (RFC 09 §5.1 O4). A fleet (`*`) call to it is \
+             refused (RFC 05 §2.1): name one origin, or pass --i-know to fan it out anyway"
+        ),
+    ))
+}
+
 /// One procedure call, as a spec rather than nine positional arguments —
 /// the shape [`crate::BenchSpec`] already uses next door, for the same
 /// call.
@@ -365,9 +565,15 @@ pub struct CallSpec<'a> {
     /// registry's vocabulary (#117).
     pub attachment: Option<Vec<u8>>,
     pub timeout: Duration,
-    /// The loaded registry, for the fan-out guard below. `None` = none
-    /// loaded, and the guard says so rather than judging.
+    /// The loaded registry, for the fan-out guard ([`check_fanout`]).
+    /// `None` = none loaded — and for a fleet call that is a refusal unless
+    /// [`force`](Self::force), never a licence (#505).
     pub slices: Option<&'a SliceSet>,
+    /// Fan out a fleet call whose procedure's kind could not be established
+    /// — no registry, or one that does not declare it. The caller must have
+    /// meant it (`--i-know`). It never overrides a declared or defaulted
+    /// `fanout = "forbidden"`: that refusal is RFC 05 §2.1's MUST.
+    pub force: bool,
 }
 
 /// Call a procedure and report every attributed answer.
@@ -376,13 +582,9 @@ pub struct CallSpec<'a> {
 ///   the wire with the configured base.
 /// - `params` ride the selector (`?k=v;k=v`), the body rides the payload
 ///   (RFC 05 §1).
-/// - **Fan-out guard**: a [`CallTarget::Fleet`] call is refused when the
-///   loaded slices declare the procedure `fanout = "forbidden"` — or when a
-///   `kind = "write"` procedure declares nothing, because RFC 08 §2 defaults
-///   a write to forbidden and introspect serves the TOML verbatim. With no
-///   slices loaded the registry layer cannot judge — the call proceeds, and
-///   the builder/ACL layers remain (documented, not silent: the report's key
-///   is the caller's audit trail).
+/// - **Fan-out guard** ([`check_fanout`]): a [`CallTarget::Fleet`] call to a
+///   write the registry forbids to fan out is refused, and so — unless
+///   [`CallSpec::force`] — is one whose kind nobody could establish.
 /// - Exit-code semantics stay on [`CallReport::exit_code`]: an error reply is
 ///   a failure, zero replies stay a distinct non-verdict (RFC 05 §3.1).
 pub async fn call(fleet: &crate::Fleet<'_>, spec: CallSpec<'_>) -> Result<CallReport> {
@@ -407,59 +609,9 @@ pub(crate) async fn call_answers(
         attachment,
         timeout,
         slices,
+        force,
     } = spec;
-    if matches!(target, CallTarget::Fleet)
-        && let Some(slices) = slices
-        && let Some(slice) = slices.get(producer)
-        && let Some(proc_decl) = slice.procedures.iter().find(|p| p.path == procedure)
-    {
-        // Introspect serves the TOML verbatim, so an omitted `fanout` reaches
-        // this layer as `None` — and RFC 08 §2 *defaults* a `kind = "write"`
-        // procedure to forbidden. The default has to be applied here, or a
-        // dynamic caller fans out a write the generated builders refuse to
-        // spell.
-        let forbidden = match proc_decl.fanout.as_ref().and_then(Declared::known) {
-            Some(Fanout::Forbidden) => true,
-            Some(Fanout::Allowed) => false,
-            // An unrecognised token is not a licence: RFC 08 §2 defaults a
-            // `write` to forbidden, and a `fanout` spelling this build cannot
-            // read is exactly the case where guessing "allowed" would fan out
-            // a write the generated builders refuse to spell.
-            None => matches!(
-                proc_decl.kind.as_ref().and_then(Declared::known),
-                Some(ProcedureKind::Write)
-            ),
-        };
-        if forbidden {
-            // Three cases, because the guard above has three. Reading
-            // `fanout.is_some()` folded the middle one into the first and
-            // told the operator the slice "declares fanout = \"forbidden\""
-            // when it declared something this build cannot read — a claim
-            // that sends them grepping the registry for a string that is
-            // not in it.
-            let declared = match proc_decl.fanout.as_ref() {
-                Some(f) if f.is(&Fanout::Forbidden) => {
-                    "declares fanout = \"forbidden\"".to_string()
-                }
-                Some(f) => format!(
-                    "declares fanout = {:?}, a token this build does not know — \
-                     RFC 08 §2 defaults a write to forbidden and an unreadable \
-                     spelling is not a licence",
-                    f.token()
-                ),
-                None => "is a write with no declared fanout, which defaults to forbidden \
-                         (RFC 08 §2)"
-                    .to_string(),
-            };
-            return Err(Error::unaskable(
-                format!("procedure {producer}/{procedure}"),
-                format!(
-                    "{declared} — a fleet (`*`) call to it is refused \
-                     (RFC 05 §2.1); name one origin"
-                ),
-            ));
-        }
-    }
+    check_fanout(target, slices, producer, procedure, force)?;
 
     let segments: Vec<&str> = procedure.split('/').collect();
     let relative = match target {
@@ -790,6 +942,43 @@ mod tests {
         }
     }
 
+    /// #504: the wildcard refusal is one function, and a put meets it as
+    /// a tombstone does — `$*` included, a concrete key untouched.
+    #[test]
+    fn a_wildcard_write_is_refused_whatever_the_act() {
+        for key in [
+            "prod/v1/**",
+            "v1/*/state/sysinfo/health",
+            "v1/h-3fa9c2d41b7e/$*",
+        ] {
+            for act in [WriteAct::Put, WriteAct::Retire] {
+                let err = check_concrete(key, act).unwrap_err();
+                assert!(err.is_unaskable(), "a refused input, exit 2: {err}");
+                let err = err.to_string();
+                assert!(err.contains("is a wildcard"), "{err}");
+                assert!(err.contains("blast radius"), "{err}");
+                assert!(err.contains("Not overridable"), "{err}");
+            }
+        }
+        let put = check_concrete("prod/v1/**", WriteAct::Put)
+            .unwrap_err()
+            .to_string();
+        assert!(put.contains("RFC 07 §3"), "{put}");
+        assert!(put.contains("every subscriber"), "{put}");
+        assert!(check_concrete("v1/h-3fa9c2d41b7e/state/sysinfo/health", WriteAct::Put).is_ok());
+    }
+
+    /// … and the only publish path asks it, so no frontend can forget to.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_wildcard_publication_is_never_declared() {
+        let session = crate::bus::session::standalone().await;
+        let err = declare_publication(&session, "prod/v1/**", QosProfile::Sampled, None)
+            .await
+            .unwrap_err();
+        assert!(err.is_unaskable(), "{err}");
+        assert!(err.to_string().contains("blast radius"), "{err}");
+    }
+
     #[test]
     fn a_state_key_retires_without_a_registry() {
         // The class is written in the key itself — unlike bench's
@@ -891,6 +1080,108 @@ mod tests {
         assert!(err.contains("RFC 06 §6"), "{err}");
     }
 
+    /// The judgement of [`check_fanout`] alone, row by row.
+    fn fanout(slices: Option<&SliceSet>, procedure: &str, force: bool) -> Result<()> {
+        check_fanout(&CallTarget::Fleet, slices, "netring", procedure, force)
+    }
+
+    /// #505: a fleet call whose procedure nobody could establish is refused
+    /// unless forced — with no registry, with one that does not declare the
+    /// producer or the procedure, and with a kind this build cannot read.
+    /// Before, each of these skipped the guard and fanned out.
+    #[test]
+    fn an_unestablished_fleet_call_is_refused_unless_forced() {
+        let declared = slice_with_proc("write", None);
+        let mut unknown_kind = ProcedureDecl::new("capture/trigger");
+        unknown_kind.kind = Some(Declared::parse("actuate"));
+        let mut slice = RegistrySlice::new("1.0", "t", "netring");
+        slice.procedures = vec![unknown_kind];
+        let unknown_kind = SliceSet::from_slices(vec![slice]);
+        let mut no_kind = ProcedureDecl::new("capture/trigger");
+        no_kind.kind = None;
+        let mut slice = RegistrySlice::new("1.0", "t", "netring");
+        slice.procedures = vec![no_kind];
+        let no_kind = SliceSet::from_slices(vec![slice]);
+        let other = SliceSet::from_slices(vec![RegistrySlice::new("1.0", "t", "other")]);
+
+        for (slices, procedure, says) in [
+            (None, "reset", "no registry loaded"),
+            (Some(&other), "reset", "no producer \"netring\""),
+            (Some(&declared), "reset", "declares no such procedure"),
+            (Some(&unknown_kind), "capture/trigger", "\"actuate\""),
+            (Some(&no_kind), "capture/trigger", "with no kind"),
+        ] {
+            let err = fanout(slices, procedure, false).unwrap_err();
+            assert!(err.is_unaskable(), "exit 2: {err}");
+            let err = err.to_string();
+            assert!(err.contains(says), "{says:?} in {err}");
+            assert!(err.contains("could not be established"), "{err}");
+            assert!(err.contains("RFC 05 §2.1"), "{err}");
+            assert!(err.contains("--i-know"), "{err}");
+            fanout(slices, procedure, true).expect("forced, it fans out");
+        }
+
+        // One origin is never a fan-out, whatever is known.
+        let host = CallTarget::parse("h-3fa9c2d41b7e").unwrap();
+        check_fanout(&host, None, "netring", "reset", false).unwrap();
+    }
+
+    /// What `force` never moves: a declared — or defaulted — forbidden
+    /// fan-out, and the convention's own writes. And what needs no force:
+    /// a declared read, an allowed write, the convention's reads (with no
+    /// registry at all — `config get '*'` and `bench rpc '*'` of
+    /// introspect keep working), and a templated declaration the call fills.
+    #[test]
+    fn force_moves_only_the_unknown() {
+        for slices in [
+            slice_with_proc("write", Some("forbidden")),
+            slice_with_proc("write", None),
+            slice_with_proc("write", Some("per-iface")),
+        ] {
+            let err = fanout(Some(&slices), "capture/trigger", true).unwrap_err();
+            assert!(err.to_string().contains("RFC 05 §2.1"), "{err}");
+        }
+        for procedure in [
+            "config/wlan0/link/set",
+            "config/wlan0/confirm",
+            "config/wlan0/persist",
+        ] {
+            let err = fanout(None, procedure, true).unwrap_err().to_string();
+            assert!(err.contains("RFC 05 §5.1"), "{err}");
+        }
+
+        fanout(
+            Some(&slice_with_proc("read", None)),
+            "capture/trigger",
+            false,
+        )
+        .unwrap();
+        fanout(
+            Some(&slice_with_proc("write", Some("allowed"))),
+            "capture/trigger",
+            false,
+        )
+        .unwrap();
+        for procedure in ["introspect", "describe", "config/wlan0"] {
+            fanout(None, procedure, false).unwrap();
+        }
+
+        let mut set = ProcedureDecl::new("config/{device}/access/set");
+        set.kind = Some(Declared::parse("write"));
+        let mut lanes = ProcedureDecl::new("device/{device}/lanes");
+        lanes.kind = Some(Declared::parse("read"));
+        let mut slice = RegistrySlice::new("1.0", "t", "netring");
+        slice.procedures = vec![set, lanes];
+        let templated = SliceSet::from_slices(vec![slice]);
+        let err = fanout(Some(&templated), "config/wlan0/access/set", true)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("defaults to forbidden"), "{err}");
+        fanout(Some(&templated), "device/eth0/lanes", false).unwrap();
+        // A pattern fills chunk for chunk, never across a slash.
+        assert!(fanout(Some(&templated), "device/eth0/x/lanes", false).is_err());
+    }
+
     /// The registry layer of the three-layer refusal: a fleet call to a
     /// declared forbidden-fanout write never leaves the process.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -908,6 +1199,7 @@ mod tests {
                 attachment: None,
                 timeout: Duration::from_millis(100),
                 slices: Some(&slices),
+                force: false,
             },
         )
         .await
@@ -930,6 +1222,7 @@ mod tests {
                 attachment: None,
                 timeout: Duration::from_millis(100),
                 slices: Some(&slice_with_proc("write", None)),
+                force: false,
             },
         )
         .await
@@ -954,6 +1247,7 @@ mod tests {
                 attachment: None,
                 timeout: Duration::from_millis(100),
                 slices: Some(&slice_with_proc("write", Some("per-iface"))),
+                force: false,
             },
         )
         .await
@@ -985,6 +1279,7 @@ mod tests {
                     attachment: None,
                     timeout: Duration::from_millis(100),
                     slices: Some(&slices),
+                    force: false,
                 },
             )
             .await

@@ -219,8 +219,8 @@ pub use bus::session::{
     Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, call, call_traced,
-    check_retire, declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, WriteAct, call,
+    call_traced, check_concrete, check_fanout, check_retire, declare_publication,
 };
 pub use judge::budget::{BudgetObservation, join_budget};
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};

@@ -2,17 +2,19 @@
 //! — through declared publishers, at the capture's own pacing — or list
 //! what doing so would put (`--dry-run`, no session at all). The etiquette
 //! is RFC 09 §5.2's, enforced rather than suggested: the capture header's
-//! base is a contract, and replaying under any other base is refused
+//! base is a contract, and replaying under any other base — or from the
+//! empty base onto the empty base, which proves nothing (#506) — is refused
 //! without `--force-base`; a recorded delete keeps the retire gate's price
 //! (`--i-know`); the capture's drop ledger is repeated, because a replay
 //! of a partial view is a partial view.
 
 use std::io::BufReader;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecSource};
 
 use crate::Bus;
+use crate::exit::unaskable;
 
 pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
     let bus = Bus::resolve(&cli.bus)?;
@@ -52,17 +54,35 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         header.captured_at,
     );
     let target_base = args.base();
-    if !dry_run {
-        eprintln!("replaying onto base {target_base:?} at speed {speed}");
-    }
+    // Both base refusals are refusals of the command line, so both are a 2
+    // (`crate::exit`); the mismatch was a bare `bail!`, a 1, until #506 put
+    // its sibling beside it. Neither opens a session.
     if header.base != target_base && !force_base {
-        bail!(
+        return Err(unaskable!(
             "capture base {:?} != target base {:?} — recorded keys spell the \
              capture's deployment, and \"same keys, different deployment\" is \
              presumed a mistake (RFC 09 §5.2). Pass --force-base to mean it.",
             header.base,
             target_base,
-        );
+        ));
+    }
+    // The guard above compares bases, and the empty base is the RFC v1.6
+    // default — so a staging capture replayed onto a production bus, both
+    // base-less, compared equal and republished every row under its
+    // original origins, re-stamped to win last-writer-wins (#506). Two
+    // empty bases are not evidence of one deployment; they are the absence
+    // of the evidence this guard relies on. A dry run writes nothing.
+    if !dry_run && header.base.is_empty() && target_base.is_empty() && !force_base {
+        return Err(unaskable!(
+            "capture and target are both on the empty base — and the empty base \
+             cannot tell two deployments apart, so nothing here says this bus is \
+             the one the capture came from. Replaying republishes every row under \
+             its original origin, re-stamped to win over live state (RFC 09 §5.2). \
+             Pass --force-base to mean this bus, or --dry-run to look first."
+        ));
+    }
+    if !dry_run {
+        eprintln!("replaying onto base {target_base:?} at speed {speed}");
     }
 
     // One resolution for the whole run, and it happens in `Mode::of` (#198).

@@ -152,6 +152,9 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
         raw,
         attachment,
     } = p;
+    // A wildcard key is a blast radius, not a publication (#504) — refused
+    // first, before the body or the bus, and no flag moves it.
+    zenkey_fleet::check_concrete(key, zenkey_fleet::WriteAct::Put)?;
     // An explicit --qos fails fast, before the body or the bus.
     let explicit_qos = qos.map(parse_qos).transpose()?;
     let typed = body.read()?;
@@ -356,10 +359,15 @@ pub async fn run_from_ndjson(
         };
         // A delete row is a tombstone (RFC 04 §1.2): even in a pipe, the
         // off-state operator act keeps its price (v1.12) — refused rows are
-        // counted, never silently dropped.
-        if row.delete
-            && let Err(e) = zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know)
-        {
+        // counted, never silently dropped. A put row on a wildcard is the
+        // same blast radius as a wildcard delete (#504), and `--i-know`
+        // moves neither.
+        let refusal = if row.delete {
+            zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know).err()
+        } else {
+            zenkey_fleet::check_concrete(&row.key, zenkey_fleet::WriteAct::Put).err()
+        };
+        if let Some(e) = refusal {
             record_err(line_no, e.to_string(), &mut refused);
             continue;
         }
@@ -427,7 +435,7 @@ pub async fn run_from_ndjson(
     }
     if malformed > 0 || refused > 0 {
         eprintln!(
-            "{malformed} malformed row(s), {refused} refused delete row(s) — counted, \
+            "{malformed} malformed row(s), {refused} refused row(s) — counted, \
              not silently skipped:"
         );
         for e in &first_errors {

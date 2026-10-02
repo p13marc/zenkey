@@ -66,6 +66,7 @@ async fn a_call_carries_attachments_both_ways() {
             attachment: Some(b"who=me".to_vec()),
             timeout: Duration::from_secs(5),
             slices: None,
+            force: false,
         },
     )
     .await
@@ -92,6 +93,7 @@ async fn a_call_carries_attachments_both_ways() {
             attachment: None,
             timeout: Duration::from_secs(5),
             slices: None,
+            force: false,
         },
     )
     .await

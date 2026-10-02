@@ -278,6 +278,141 @@ async fn retire_refuses_a_wildcard() {
     }
 }
 
+/// Everything `sub` hears within `window` whose payload is `body`.
+async fn heard_body(sub: &Sub, body: &str, window: Duration) -> usize {
+    let mut n = 0;
+    let _ = tokio::time::timeout(window, async {
+        while let Ok(s) = sub.recv_async().await {
+            if s.payload().to_bytes().as_ref() == body.as_bytes() {
+                n += 1;
+            }
+        }
+    })
+    .await;
+    n
+}
+
+/// A wildcard put is refused — 2, before a session opens, `--raw` or not —
+/// and a subscriber on everything under the base hears none of it (#504).
+/// The same subscriber hears a concrete `pub` first, so its silence is
+/// about the refusal and not about a route that never formed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pub_refuses_a_wildcard_and_nothing_is_delivered() {
+    let bus = Bus::up().await;
+    let everything = bus.key("v1/**");
+    let sub = bus.subscribe(&everything).await;
+    let control = r#"{"status":"control"}"#;
+    let (run, _) = act_until_heard(&bus, &["pub", &health(&bus), control], &sub, |s| {
+        s.payload().to_bytes().as_ref() == control.as_bytes()
+    })
+    .await;
+    exits(&run, 0);
+
+    let wild = r#"{"status":"wild"}"#;
+    for args in [
+        vec!["pub", &everything, wild],
+        vec!["pub", &everything, wild, "--raw"],
+    ] {
+        let run = bus.zenctl(&args).await;
+        exits(&run, 2);
+        assert!(
+            run.stderr.contains("is a wildcard") && run.stderr.contains("Not overridable"),
+            "{run}"
+        );
+    }
+    assert_eq!(
+        heard_body(&sub, wild, Duration::from_secs(2)).await,
+        0,
+        "a refused put was delivered"
+    );
+}
+
+/// A `pub --from ndjson` put row on a wildcard is refused and counted — the
+/// pipe's 1 — while the concrete row beside it is published (#504).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pub_from_ndjson_refuses_a_wildcard_row() {
+    let bus = Bus::up().await;
+    let everything = bus.key("v1/**");
+    let sub = bus.subscribe(&everything).await;
+    let rows = format!(
+        "{}\n{}\n",
+        json!({ "key": everything, "value": "wild-row" }),
+        json!({ "key": health(&bus), "value": "concrete-row" }),
+    );
+    let deadline = Instant::now() + SETTLE;
+    let mut wild = 0;
+    loop {
+        let run = bus
+            .zenctl_with_stdin(&["pub", "--from", "ndjson"], &rows)
+            .await;
+        exits(&run, 1);
+        assert!(run.stderr.contains("1 refused row(s)"), "{run}");
+        assert!(run.stderr.contains("is a wildcard"), "{run}");
+        let mut concrete = false;
+        let _ = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Ok(s) = sub.recv_async().await {
+                match s.payload().to_bytes().as_ref() {
+                    b"wild-row" => wild += 1,
+                    b"concrete-row" => concrete = true,
+                    _ => {}
+                }
+            }
+        })
+        .await;
+        if concrete {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the concrete row never arrived\n{run}"
+        );
+    }
+    assert_eq!(wild, 0, "a refused row was delivered");
+}
+
+/// A fleet `service call` with `--no-validate` has no registry to say what
+/// the procedure is, so it is refused — 2 — and the producer's queryable is
+/// never asked (#505). `--i-know` is the one acknowledgement, and with it
+/// the same call reaches the same queryable: the witness can hear.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn service_call_fleet_without_a_registry_needs_i_know() {
+    let mut bus = Bus::up().await;
+    let heard = bus
+        .counting_responder(&bus.key(&format!("v1/{HOST}/@rpc/{PRODUCER}/reset")))
+        .await;
+    let call = ["service", "call", "*", PRODUCER, "reset", "--no-validate"];
+
+    let refused = bus.zenctl(&call).await;
+    exits(&refused, 2);
+    assert!(refused.stdout.is_empty(), "{refused}");
+    assert!(
+        refused.stderr.contains("could not be established") && refused.stderr.contains("--i-know"),
+        "{refused}"
+    );
+
+    let mut forced = call.to_vec();
+    forced.extend(["--i-know", "--format", "json"]);
+    let run = bus.until(&forced, |r| r.code == 0).await;
+    exits(&run, 0);
+    assert_eq!(
+        run.json()["rows"],
+        json!([{ "row": "answer", "origin": HOST, "ok": true, "value": { "done": true } }]),
+        "{run}"
+    );
+    // Every query the witness heard came from a forced run; the refused one
+    // never opened a session to send one.
+    let forced_runs = heard.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(forced_runs >= 1, "the forced call reached the producer");
+    let again = bus.zenctl(&call).await;
+    exits(&again, 2);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        heard.load(std::sync::atomic::Ordering::SeqCst),
+        forced_runs,
+        "a refused call reached the producer\n{again}"
+    );
+}
+
 // ── verdicts ────────────────────────────────────────────────────────────
 
 /// `check expect`: 0 when the expectation is met, 1 when a clean
@@ -693,4 +828,51 @@ async fn config_a_contract_set_is_refused_before_it_is_sent() {
     config_get(&bus).await;
     let run = refused_unsent(&bus, "transport", "mtu=9000", "startup configuration").await;
     assert!(run.stderr.contains("restart"), "{run}");
+}
+
+/// With no read-back — `--no-validate` — the group's class is unknown, and
+/// a `--confirm` change is a reach change's shape: from a script without
+/// `--yes` it is refused, 2, and the double received nothing; with `--yes`
+/// it is sent and answered (#508).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_a_set_with_no_read_back_needs_yes_from_a_script() {
+    let bus = Bus::up().await;
+    config_get(&bus).await;
+    let args = [
+        "config",
+        "set",
+        HOST,
+        PRODUCER,
+        "wlan0",
+        "link",
+        "ssid=blind",
+        "--confirm",
+        "60",
+        "--no-validate",
+        "--idempotency-key",
+        "live-blind",
+    ];
+    let before = sets_of(&bus, "link");
+    let refused = bus.zenctl(&args).await;
+    exits(&refused, 2);
+    assert!(refused.stdout.is_empty(), "{refused}");
+    assert!(
+        refused.stderr.contains("could not be established")
+            && refused.stderr.contains("Pass --yes"),
+        "{refused}"
+    );
+    assert_eq!(
+        sets_of(&bus, "link"),
+        before,
+        "refused, yet sent\n{refused}"
+    );
+
+    let run = config_write(&bus, &[&args[1..], &["--yes"]].concat()).await;
+    exits(&run, 0);
+    assert!(sets_of(&bus, "link") > before, "--yes sends it\n{run}");
+    let reply = &run.rows("answer")[0];
+    assert!(
+        reply["value"]["token"].is_string() && reply["value"]["apply_at"].is_string(),
+        "a reach set answers {{token, apply_at}}\n{run}"
+    );
 }

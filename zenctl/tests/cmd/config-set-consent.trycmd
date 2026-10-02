@@ -1,0 +1,54 @@
+`config set` with no read-back asks for the yes a reach change needs
+(#508).
+
+A `reach` group decides whether the producer can reach the bus at all, so a
+change to one is never sent without a rollback armed and a person's yes —
+`--yes` from a script that has decided (RFC 05 §5.1). But the class comes
+from the read-back, and until #508 the yes was asked only when there was
+one: under `--no-validate`, or when the read-back met silence, the riskiest
+form of the command — no schema, no validation — was the one that asked
+nothing.
+
+Where the line falls: RFC 05 §5.1 makes a reach `set` without `confirm_s` the
+producer's `invalid-args`, never applied — so a bare change cannot cut the
+link, and the producer is the right place to refuse it. *With* `--confirm`,
+the change has a reach change's shape and nothing here can say it is not
+one. So that is what asks. Here stdin is not a terminal, so there is no one
+to ask: refused, before anything is sent, and **2**.
+
+```console
+$ zenctl config set h-3fa9c2d41b7e modem wlan0 link ssid=field --confirm 60 --no-validate
+? 2
+note: no read-back to type against — values ride by their spelling (true/false, an integer, else text) and the producer judges the rest
+Error: the class of group "link" could not be established (--no-validate skipped the read-back), and a change with --confirm is how a reach group is changed: it may cut the link to h-3fa9c2d41b7e. Pass --yes to send it from a script, or run at a terminal to be asked
+
+```
+
+A dry run touches nothing, so it asks nothing — it goes on to the session
+(the dead-bus fixture here, so it stops there — exit 2, and the error is the
+session's, not the guard's):
+
+```console
+$ zenctl config set h-3fa9c2d41b7e modem wlan0 link ssid=field --confirm 60 --no-validate --dry-run --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+note: no read-back to type against — values ride by their spelling (true/false, an integer, else text) and the producer judges the rest
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```
+
+And so does `--yes`. The live suite proves the other side: refused, the
+producer received nothing; with `--yes`, it received the change.
+
+```console
+$ zenctl config set h-3fa9c2d41b7e modem wlan0 link ssid=field --confirm 60 --no-validate --yes --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+note: no read-back to type against — values ride by their spelling (true/false, an integer, else text) and the producer judges the rest
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

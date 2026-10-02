@@ -6,7 +6,9 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased — the session stops being a peer
+## Unreleased
+
+### The session stops being a peer (chunk DQ)
 
 Three defaults changed, all in the session every verb opens (epic
 marcpardo/zenkey#498, chunk DQ). No spelling moved; the exit contract gained
@@ -44,6 +46,75 @@ nothing.
 | `-c tcp/127.0.0.1:1` (nothing listening) → empty answer, exit 0 | `Error: failed to open the Zenoh session`, exit 2 |
 | `pub … -c tcp/127.0.0.1:1` → `published`, exit 0 | exit 2, nothing published |
 | no endpoint, no context, no `--scouting` → empty answer, exit 0 | "nothing to connect to: …", exit 2 (or the `--registry` dirs alone, with the note) |
+
+### The write guards (chunk DR)
+
+Every one of these used to write with no consent and exit 0; each now ends
+in a refusal — exit 2, before a session opens wherever the input alone
+decides it — or asks the acknowledgement its verb already had. The
+table below is the whole migration.
+
+**`pub` refuses a wildcard key** (marcpardo/zenkey#504): `pub 'prod/v1/**'
+x` printed `published` and reached every subscriber the expression
+intersects. It is the blast radius `retire` already refused, and now one
+refusal serves both (`zenkey_fleet::check_concrete`), not overridable. A
+`pub --from ndjson` or `replay` put row on a wildcard is refused and
+counted with the other refused rows (the closing line says "refused
+row(s)", where it said "refused delete row(s)").
+
+**A fleet `service call` whose procedure nobody could establish needs
+`--i-know`** (marcpardo/zenkey#505): the forbidden-fanout guard ran only
+when it found a declaration, so `service call '*' p reset --no-validate` —
+or any `*` call during a degraded introspect sweep, or to a procedure the
+registry does not declare — fanned out to every origin. `service call`
+gains `--i-know` for exactly that; a declared (or defaulted) forbidden
+fan-out stays refused, and so does a write under RFC 05 §5.1's `config/`
+keys. The convention's reads — `introspect`, `describe`, a configuration
+read-back — fan out with no registry, so `config get '*'` and `bench rpc
+'*'` of introspect are unchanged. `bench rpc '*'` answers to the same
+guard: an idempotent write declared forbidden-fanout is refused under `*`
+even with `--i-know`.
+
+**`replay` from the empty base onto the empty base needs `--force-base`**
+(marcpardo/zenkey#506): two empty bases compared equal, so a base-less
+staging capture republished onto a base-less production bus under its
+original origins. `--dry-run` is unchanged. The base mismatch refusal
+beside it exits 2, where it exited 1.
+
+**`serve` on a wildcard, or with `--complete`, needs `--i-know`; `gen
+--origin <host>` needs `--i-know`** (marcpardo/zenkey#507): a mock that
+answers real GETs, and a generator that publishes as a real host, are
+decisions about a bus. `serve` gains `--i-know`; `gen` reuses the one it
+had, which now means "this traffic lies on purpose" — about its body
+(`--fault`) or its sender (`--origin`). `gen --dry-run` asks nothing. The
+`--complete`-on-`@rpc` refusal exits 2, where it exited 1, and `--i-know`
+does not move it.
+
+**`config set --confirm` with no read-back asks for the yes**
+(marcpardo/zenkey#508): a reach change was asked about only when the
+read-back said "reach", so under `--no-validate` — or when the read-back
+met silence — a windowed change went out unasked. With no read-back the
+class is unknown, and a change with `--confirm` is a reach change's shape,
+so it now needs `--yes` from a script (or a terminal's yes). Without
+`--confirm` nothing changed: RFC 05 §5.1 has the producer refuse a reach
+change that carries no window.
+
+| 0.10.0 | Unreleased | to mean it |
+|---|---|---|
+| `pub 'prod/v1/**' x` — exit 0, delivered | exit 2 | not overridable: name the concrete key |
+| `pub --from ndjson` put row on a wildcard — published | refused and counted, exit 1 | not overridable |
+| `service call '*' p proc --no-validate` — fanned out | exit 2 | `--i-know` |
+| `service call '*' p proc`, `proc` undeclared or no slices served — fanned out | exit 2 | `--i-know` |
+| `service call '*' p config/<r>/<g>/set --no-validate` — fanned out | exit 2 | not overridable: name one origin |
+| `bench rpc '*' p proc --i-know`, `proc` a write declared forbidden-fanout — fanned out | exit 2 | not overridable: name one origin |
+| `replay cap.zrec` (capture and target base both empty) — republished | exit 2 | `--force-base` |
+| `replay cap.zrec` (capture base ≠ target base) — exit 1 | exit 2 | `--force-base`, as before |
+| `serve 'prod/v1/**' x` — served | exit 2 | `--i-know` |
+| `serve <key> x --complete` — served | exit 2 | `--i-know` |
+| `serve <…/@rpc/…> x --complete` — exit 1 | exit 2 | not overridable, as before |
+| `gen --origin h-…` — published as that host | exit 2 | `--i-know` (or `--dry-run`) |
+| `config set … --confirm S --no-validate`, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
+| `config set … --confirm S`, read-back unanswered, no `--yes`, not a terminal — sent | exit 2 | `--yes` |
 
 ## 0.10.0 (2026-09-29) — the contract executed, and the second spelling
 

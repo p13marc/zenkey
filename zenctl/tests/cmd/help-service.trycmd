@@ -185,7 +185,10 @@ Options:
           Attachment riding beside the request, verbatim — never schema-encoded (#117's rule, on the call side: #126). Inline text, `@file`, or `-` for stdin
 
       --no-validate
-          Skip the registry lookup (and with it the registry-layer forbidden-fanout refusal and any body validation)
+          Skip the registry lookup and any body validation. With `*`, the procedure's kind is then unknown, so the call is refused unless --i-know
+
+      --i-know
+          Fan a `*` call out to a procedure whose kind could not be established — no registry, or one that does not declare it. A declared write that may not fan out stays refused (RFC 05 §2.1)
 
       --raw
           Send the request body verbatim: no schema lookup, no encoding

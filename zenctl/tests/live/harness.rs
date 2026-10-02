@@ -36,7 +36,8 @@
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use zenkey_fleet::bus::producer::{BringUp, LiveProducer};
@@ -325,6 +326,17 @@ impl Bus {
 
     /// Run `zenctl <args> -c <endpoint> --base <base>` once.
     pub async fn zenctl(&self, args: &[&str]) -> Run {
+        self.zenctl_fed(args, None).await
+    }
+
+    /// [`zenctl`](Self::zenctl), with `input` piped to its stdin — the
+    /// `pub --from ndjson` shape. A pipe is no more a terminal than a closed
+    /// stdin is.
+    pub async fn zenctl_with_stdin(&self, args: &[&str], input: &str) -> Run {
+        self.zenctl_fed(args, Some(input.to_string())).await
+    }
+
+    async fn zenctl_fed(&self, args: &[&str], input: Option<String>) -> Run {
         let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         argv.extend([
             "-c".into(),
@@ -333,9 +345,33 @@ impl Bus {
             self.base.clone(),
         ]);
         let home = self.home.clone();
-        tokio::task::spawn_blocking(move || run(&argv, &home))
+        tokio::task::spawn_blocking(move || run(&argv, &home, input))
             .await
             .expect("the zenctl runner")
+    }
+
+    /// A queryable on the producer's session that answers every query on
+    /// `key` and counts them — the witness a refused fleet call is asserted
+    /// against: if the count did not move, nothing reached the producer.
+    pub async fn counting_responder(&mut self, key: &str) -> Arc<AtomicUsize> {
+        let queryable = self
+            .session
+            .declare_queryable(key.to_string())
+            .await
+            .expect("a counting responder");
+        let heard = Arc::new(AtomicUsize::new(0));
+        let count = heard.clone();
+        let reply_key = key.to_string();
+        self.tasks.push(tokio::spawn(async move {
+            while let Ok(q) = queryable.recv_async().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                let _ = q
+                    .reply(reply_key.clone(), r#"{"done":true}"#)
+                    .encoding("application/json")
+                    .await;
+            }
+        }));
+        heard
     }
 
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way,
@@ -403,10 +439,11 @@ impl std::fmt::Display for Run {
     }
 }
 
-/// The run itself, blocking: hermetic environment, stdin closed (so never a
-/// terminal — the non-interactive posture a script has), both pipes drained
-/// on threads of their own so a chatty run cannot fill one and stall.
-fn run(argv: &[String], home: &std::path::Path) -> Run {
+/// The run itself, blocking: hermetic environment, stdin closed or a pipe
+/// (so never a terminal — the non-interactive posture a script has), both
+/// output pipes drained on threads of their own so a chatty run cannot fill
+/// one and stall.
+fn run(argv: &[String], home: &std::path::Path, input: Option<String>) -> Run {
     let mut child = Command::new(env!("CARGO_BIN_EXE_zenctl"))
         .args(argv)
         // The variables that would redirect a run (see `tests/cli.rs`'s
@@ -419,11 +456,23 @@ fn run(argv: &[String], home: &std::path::Path) -> Run {
         .env("ZENKEY_EXPLORER_CONFIG_DIR", home)
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "off")
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn zenctl");
+    if let Some(input) = input {
+        // Written whole and closed, so the run sees an EOF and finishes.
+        let mut stdin = child.stdin.take().expect("stdin");
+        std::thread::spawn(move || {
+            use std::io::Write as _;
+            let _ = stdin.write_all(input.as_bytes());
+        });
+    }
     let drain = |mut pipe: Box<dyn std::io::Read + Send>| {
         std::thread::spawn(move || {
             let mut s = String::new();

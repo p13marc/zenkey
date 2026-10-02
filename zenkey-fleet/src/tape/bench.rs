@@ -170,6 +170,18 @@ pub async fn run_bench(
     if !spec.force {
         check_idempotent(slices, spec.producer, spec.procedure)?;
     }
+    // A `*` bench is N fleet calls, so it answers to the fleet call's guard
+    // too (#505) — which this path, building its own querier, never asked:
+    // a write declared idempotent but not fan-out-able was benched across
+    // every origin. `force` covers what it covers on `call`, the
+    // undeclared; a declared forbidden fan-out stays refused.
+    crate::bus::write::check_fanout(
+        spec.target,
+        slices,
+        spec.producer,
+        spec.procedure,
+        spec.force,
+    )?;
     if spec.count == 0 {
         return Err(Error::unaskable("--calls 0", "measures nothing"));
     }

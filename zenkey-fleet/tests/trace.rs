@@ -150,6 +150,7 @@ async fn a_traced_long_running_call_lists_request_then_state_then_event_on_both_
             attachment: None,
             timeout: Duration::from_secs(5),
             slices: Some(&slices),
+            force: false,
         },
         TraceSpec {
             window: Duration::from_secs(2),
@@ -256,6 +257,7 @@ async fn a_fleet_target_cannot_be_traced() {
             attachment: None,
             timeout: Duration::from_secs(1),
             slices: None,
+            force: false,
         },
         TraceSpec {
             window: Duration::from_millis(100),

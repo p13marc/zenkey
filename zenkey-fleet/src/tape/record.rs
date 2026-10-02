@@ -992,9 +992,15 @@ pub async fn replay(
             ReplayTarget::Bus { slices, .. } => *slices,
             ReplayTarget::DryRun => None,
         };
-        if row.delete
-            && let Err(e) = crate::bus::write::check_retire(&base, &row.key, slices, i_know)
-        {
+        // A put row on a wildcard is refused like a wildcard delete (#504):
+        // a refused row, counted — not the fatal declare error it would
+        // otherwise surface as halfway through the replay.
+        let gate = if row.delete {
+            crate::bus::write::check_retire(&base, &row.key, slices, i_know).map(|_| ())
+        } else {
+            crate::bus::write::check_concrete(&row.key, crate::bus::write::WriteAct::Put)
+        };
+        if let Err(e) = gate {
             let reason = e.to_string();
             on_event(ReplayEvent::Refused {
                 key: row.key.clone(),

@@ -66,6 +66,7 @@ pub fn call(c: Call) -> Task<Message> {
                     attachment,
                     timeout,
                     slices: slices.as_deref(),
+                    force: false,
                 },
             )
             .await

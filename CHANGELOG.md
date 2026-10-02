@@ -46,6 +46,37 @@ opened on the transport still loads the `--registry` dirs (labelled
 dirs-only, the link line saying it failed); a malformed endpoint or a
 config file it refuses loads nothing past it.
 
+### Write guards (epic #498, chunk DR)
+
+**The write guards — chunk DR of epic #498** (#504, #505, #506, #507,
+#508). Five ways a production operator's mistake wrote to a bus with no
+consent and exited 0; each now ends in a refusal or the acknowledgement
+its verb carries. `zenctl`'s half, with the old → new table, is in
+[`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md). The engine's half is
+`zenkey-fleet`, and it is **breaking**: `CallSpec` gained `force`, which
+struct literals must add.
+
+- **One wildcard refusal for every write** (#504). `check_concrete(key,
+  WriteAct)` is the refusal `check_retire` carried alone since v1.12, now
+  asked by every put path too, never overridable: `declare_publication`
+  refuses a wildcard key itself — the only publish path, so zengui, `gen`
+  and `replay` cannot forget it — and `replay` counts a wildcard put row
+  as refused rather than failing on it. RFC 07 §3 makes a publisher's key
+  concrete by rule; a wildcard put is delivered to every subscriber it
+  intersects.
+- **The fan-out guard judges what it does not know** (#505).
+  `check_fanout` is the registry layer of RFC 05 §2.1, lifted out of
+  `call` so `bench` (which builds its own querier and never asked it) and
+  a frontend refusing before a session opens ask the same function. A
+  fleet call whose kind could not be established — no slices, an
+  undeclared producer or procedure, a kind token this build cannot read —
+  used to proceed and is now refused unless `force`. What is known is
+  judged as before, plus two things: the convention's own procedures
+  (`introspect`, `describe`, RFC 05 §5.1's `config/` keys) have the kind
+  the convention gives them with no registry, and a templated declaration
+  (`config/{device}/access/set`) now matches the call that fills it,
+  where the guard compared paths literally.
+
 ---
 
 ## 0.12.0 — the contract executed, and the registry's second spelling (2026-09-29)
