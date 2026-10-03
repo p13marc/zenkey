@@ -70,7 +70,18 @@ use super::judgement::Judgement;
 /// [[principal]]
 /// cn = "zensight-watch"
 /// role = "watch"                         # read-only: data classes, catalog, RPC reads
+///
+/// [[principal]]
+/// user = "ops"                           # a zenoh usrpwd user name, in place of cn
+/// role = "console"
+/// writes = ["modem/config/*/*/set"]      # per-resource write grants (RFC 09 §3)
 /// ```
+///
+/// A principal is bound by `cn`, `user`, or both — zenoh ANDs a subject's
+/// properties; `zid` stands in only under `--allow-zid-subjects`. Under `acl gen --face` (RFC 09 §4, v1.49) only a `user`
+/// console or watch is planned — an operator on the far side of the link,
+/// authenticated by the face's `usrpwd`; every other principal is refused
+/// with its reason.
 ///
 /// A `zid = "…"` in place of `cn` is accepted only under
 /// `--allow-zid-subjects`: zenoh's own config says a ZID "is not backed by
@@ -107,13 +118,17 @@ pub struct FleetSpec {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrincipalSpec {
-    /// The certificate common name — the one subject property that is
-    /// backed by authentication (RFC 03 §4 D6).
+    /// The certificate common name — backed by the mTLS handshake
+    /// (RFC 03 §4 D6).
     pub cn: Option<String>,
     /// A zenoh id, for prototyping only (`--allow-zid-subjects`).
     pub zid: Option<String>,
+    /// A zenoh `usrpwd` user name (v1.49): the identity a transport
+    /// authenticated with user and password — `usernames` in the subject.
+    /// The one binding a constrained face plans (RFC 09 §4).
+    pub user: Option<String>,
     /// The subject id in the emitted config. Defaults to the CN (or the
-    /// zid).
+    /// user, or the zid).
     pub id: Option<String>,
     pub role: Role,
     /// The origin this principal acts as: `h-…` for a host, `@…` for a
@@ -138,10 +153,12 @@ pub struct PrincipalSpec {
     #[serde(default)]
     pub remote_actions: bool,
     /// Per-resource write grants (RFC 09 §3, v1.43): `<producer>/<procedure>`
-    /// patterns under `@rpc/`, every `{var}` a `*` or narrower. Each is
-    /// allowed, and the deny is **carved** to the declared writes no grant
-    /// includes — which needs the registry; without one the deny stays
-    /// whole and the plan says so. A watch refuses this.
+    /// patterns under `@rpc/`, each including whole declared writes — every
+    /// `{var}` a `*`. Each is allowed, and the deny is **carved** to the
+    /// declared writes no grant includes — which needs the registry; without
+    /// one the deny stays whole and the plan says so. A pattern narrower
+    /// than the declared write it falls in cannot carve it and is not
+    /// emitted (v1.49). A watch refuses this.
     #[serde(default)]
     pub writes: Vec<String>,
 }
@@ -345,6 +362,9 @@ pub struct AclSubject {
     /// Prototyping only (`--allow-zid-subjects`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zids: Vec<String>,
+    /// zenoh `usrpwd` user names (v1.49).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub usernames: Vec<String>,
     /// A constrained face (RFC 09 §4, v1.43) is selected by its transport,
     /// never by an identity: the link protocols and interfaces that pick it.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -428,8 +448,12 @@ pub enum AclWarningKind {
     /// is the unnarrowed leaf, nothing can be carved from it, so the grant
     /// is not emitted and the deny stays whole (v1.43).
     GrantNotNarrowed,
-    /// A `writes` pattern includes no declared write procedure (v1.43).
+    /// A `writes` pattern intersects no declared write procedure (v1.43).
     GrantMatchesNothing,
+    /// A `writes` pattern is narrower than the declared write it falls in
+    /// (v1.49): no finite deny includes every key of that write but the
+    /// grant's, so the deny keeps it whole and the grant is not emitted.
+    GrantCannotCarve,
     /// On a constrained face: entries that cross because they are `fleet`
     /// or declare no exposure — said, not denied (v1.43).
     FaceCrosses,
@@ -451,6 +475,7 @@ impl AclWarningKind {
             AclWarningKind::RoleAbsent => "role_absent",
             AclWarningKind::GrantNotNarrowed => "grant_not_narrowed",
             AclWarningKind::GrantMatchesNothing => "grant_matches_nothing",
+            AclWarningKind::GrantCannotCarve => "grant_cannot_carve",
             AclWarningKind::FaceCrosses => "face_crosses",
             AclWarningKind::FaceCutsPlane => "face_cuts_plane",
             AclWarningKind::FaceRulesIntersect => "face_rules_intersect",
@@ -461,7 +486,8 @@ impl AclWarningKind {
 /// One principal the plan refused to enrol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AclRefusal {
-    /// The principal as the file named it: its id, CN or zid, or its index.
+    /// The principal as the file named it: its id, CN, user or zid, or its
+    /// index.
     pub principal: String,
     pub reason: String,
     pub cite: String,
@@ -524,9 +550,9 @@ pub struct AclRuleDoc {
     pub permission: String,
 }
 
-/// `AclConfigSubjects`, as parsed — the properties this tool does not plan
-/// (`interfaces`, `usernames`, `link_protocols`) are carried so a check can
-/// say they are there.
+/// `AclConfigSubjects`, as parsed — every property zenoh 1.10 knows, so a
+/// check can compare the ones the plan carries and name the ones it does
+/// not.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AclSubjectDoc {
     pub id: String,
@@ -603,10 +629,11 @@ pub enum AclFindingKind {
     RuleDiffers,
     SubjectMissing,
     SubjectExtra,
-    /// Same id, different `cert_common_names` or `zids`.
+    /// Same id, a different value of a property the plan carries.
     SubjectDiffers,
-    /// A configured subject bound by a property this tool never plans
-    /// (`interfaces`, `usernames`, `link_protocols`).
+    /// A configured subject bound by a property the plan does not carry
+    /// for it (`interfaces`, `usernames`, `link_protocols`) — on a subject
+    /// the plan does not know, any of them.
     SubjectUnplannedProperty,
     /// A planned policy (rule set × subject set) the block does not carry.
     PolicyMissing,
@@ -812,6 +839,7 @@ origin = "@desired"
                 role: Role::Host,
                 cert_common_names: vec!["h-3fa9c2d41b7e".into()],
                 zids: vec![],
+                usernames: vec![],
                 link_protocols: vec![],
                 interfaces: vec![],
             }],

@@ -6,6 +6,25 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased — user principals, and principals on a face
+
+For a per-operator write grant on a constrained face (marcpardo/zenkey#529,
+RFC v1.49; zenoh-modem#153). No spelling moved.
+
+| Invocation | Before | Now |
+|---|---|---|
+| `acl gen` with a `[[principal]]` carrying `user = "…"` | exit 2: `unknown field user` | planned: the subject carries `usernames: ["…"]` |
+| `acl gen --face …` with `[[principal]]`s in the enrollment | every principal silently ignored | a `user` console or watch is planned onto the face (its own subject on the face's transport, repeating every face deny); every other principal is refused by name — **exit 1** |
+| `acl gen` with a `writes` pattern narrower than its declared write (`modem/config/rf0/air/set` under `config/{device}/{group}/set`) | a dead `writes-…` allow, and a `grant_matches_nothing` note claiming it was undeclared | no allow; a `grant_cannot_carve` warning naming the declared write — grant the write as the registry spells it |
+| `acl gen --explain <user> …` | `principal … is not enrolled` | resolves the principal by user |
+| `acl gen --check` against a subject with `usernames` the plan carries | `subject_unplanned_property` | compared: `subject_differs` when the names differ, nothing when they agree |
+
+The table renderer's `bound by` column names every property a subject is
+bound by (`user ops; link_protocols unixsock-stream`). An enrollment that
+used to be reused for `--face` only for its `base` — a fleet's, with
+certificate principals in it — now exits 1 with a refusal per principal:
+give the face an enrollment of its own (`base`, and its operators).
+
 ## 0.11.0 (2026-10-02) — zenctl in production
 
 Built for a production bus (marcpardo/zenkey#498). **Scripts should read

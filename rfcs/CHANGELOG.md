@@ -25,6 +25,43 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.49 (2026-10-03, principals on a face)** — an operator authenticated
+> by user name, and the composition rule a face's grant needs, from the
+> second adopter's first authenticated face (zenoh-modem#153, #98; #529).
+>
+> **[09 §3](09-operations.md).** A principal is bound by `cn`, by `user` (a
+> zenoh `usrpwd` user name, the subject's `usernames`), or by both, ANDed;
+> a `user` binding is as strong as its channel. A `writes` pattern
+> narrower than the declared write it falls in cannot carve it — no finite
+> deny includes every key of a `*` but one — so it is not emitted and the
+> plan says so; "or narrower" was wrong, and the worked configuration
+> table's per-device rows are rule shapes the generator's carve cannot
+> produce.
+>
+> **[09 §4](09-operations.md).** Principals on a face. A transport matches
+> every subject whose properties match, the face's own included, and
+> across them any allow wins; so a `user` console or watch gets a subject
+> on the face's transport whose policy repeats every face deny, with
+> `deny-rpc` split into the legs no call uses (denied whole) and the
+> three a call does (query, reply, declare_queryable — carved to the
+> console's write shape). A wildcard query broader than the carve still
+> crosses (fact 6), and the server's own refusal is the second lock
+> (05 §2.1, #472). Every other principal is refused by name. The
+> sentence that had the face's blocks merging "beside the principal
+> block's" as "separate policies on separate subjects" is withdrawn: one
+> router, one default, and matching subjects are never separate.
+>
+> **What deliberately did not change.** The face's own block: an
+> enrollment with no principal plans byte-for-byte what v1.43 planned. The
+> principal plan's shape for `cn` principals, and its default deny. The
+> console's `@rpc` read grant, which is why a face operator reads the
+> plane — a face principal is a console, not a narrower thing. `zid`
+> stays a prototype's binding, and a face plans none, nor any `cn`: a
+> certificate identity on a constrained link is the principal plan's, and
+> nothing here makes the two blocks share a router.
+>
+> *Amends: 09.*
+
 > **v1.48 (2026-10-02, what the guards assumed)** — four rules the
 > write guards and the exit-honesty fixes of epic #498 (chunks DR, DS)
 > needed and the set did not state, each written from the implementation.

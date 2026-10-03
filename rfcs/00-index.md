@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.48** (2026-10-02; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.49** (2026-10-03; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.49** (2026-10-03) — principals on a face: a principal is bound by
+  `cn` or zenoh `usrpwd` `user`; a face plans a user console or watch as a
+  subject that repeats every face deny, because any matching subject's
+  allow wins (09 §3, §4).
 - **v1.48** (2026-10-02) — what the guards assumed: a dynamic caller
   treats a fan-out to a procedure of unknown kind as a write (05 §2.1);
   no class read ⇒ a windowed change asks consent as reach (05 §5.1); an
@@ -22,10 +26,6 @@ what changed and what deliberately did not — is
   session as a Zenoh client with multicast off unless its user's config
   *states* otherwise, and refuses an endpoint that does not parse (09 §5);
   `confirm`/`cancel`/`extend`/`persist` answer the read-back (05 §5.1).
-- **v1.46** (2026-09-29) — what the reader found: errata to v1.44 — an
-  unknown KDL node's arguments are ignored and its repeats are rows, a
-  `type` outside `types.kdl` declares nothing, string-list elements are
-  KDL strings, and an unsniffable undeclared reply is TOML (08 §5.1, §6).
 
 ---
 

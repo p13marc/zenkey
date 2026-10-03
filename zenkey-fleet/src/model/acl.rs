@@ -279,8 +279,31 @@ fn procedure_exprs(
 fn principal_name(index: usize, p: &PrincipalSpec) -> String {
     p.id.clone()
         .or_else(|| p.cn.clone())
+        .or_else(|| p.user.clone())
         .or_else(|| p.zid.clone())
         .unwrap_or_else(|| format!("principal #{}", index + 1))
+}
+
+/// The refusal a principal's write grants earn whatever plan it is in: a
+/// watch is read-only, and only a console takes a grant (RFC 09 §3).
+fn grant_refusal(p: &PrincipalSpec) -> Option<String> {
+    if p.remote_actions && p.role == Role::Watch {
+        return Some(
+            "a watch is read-only by definition; `remote_actions = true` wants a console".into(),
+        );
+    }
+    if !p.writes.is_empty() && p.role != Role::Console {
+        return Some(format!(
+            "`writes` grants belong to a console; a {} {}",
+            p.role.as_str(),
+            if p.role == Role::Watch {
+                "is read-only by definition"
+            } else {
+                "acts as itself and needs no grant"
+            }
+        ));
+    }
+    None
 }
 
 /// A host's origin: given, computed from its machine-id, or both in
@@ -506,6 +529,7 @@ pub fn plan_acl(
 
     let mut seen_ids = BTreeSet::new();
     let mut seen_cns = BTreeSet::new();
+    let mut seen_users = BTreeSet::new();
     let mut seen_zids = BTreeSet::new();
     let mut hosts = 0usize;
     let mut consumers = 0usize;
@@ -523,10 +547,11 @@ pub fn plan_acl(
         // The subject: who this is on the wire.
         let cn = p.cn.as_deref().filter(|s| !s.is_empty());
         let zid = p.zid.as_deref().filter(|s| !s.is_empty());
-        if cn.is_none() && zid.is_none() {
+        let user = p.user.as_deref().filter(|s| !s.is_empty());
+        if cn.is_none() && zid.is_none() && user.is_none() {
             refuse(
-                "a principal needs a `cn` (the certificate common name) — that is the \
-                 enrollment"
+                "a principal needs a `cn` (the certificate common name) or a `user` (a zenoh \
+                 usrpwd user name) — that is the enrollment"
                     .into(),
                 "RFC 03 §4 D6",
             );
@@ -555,6 +580,15 @@ pub fn plan_acl(
             );
             continue;
         }
+        if let Some(u) = user
+            && !seen_users.insert(u.to_string())
+        {
+            refuse(
+                format!("user {u:?} is already enrolled — one transport identity, one principal"),
+                "RFC 03 §4 D6",
+            );
+            continue;
+        }
         if let Some(z) = zid
             && !seen_zids.insert(z.to_string())
         {
@@ -564,8 +598,9 @@ pub fn plan_acl(
         let sid =
             p.id.clone()
                 .or_else(|| cn.map(str::to_string))
+                .or_else(|| user.map(str::to_string))
                 .or_else(|| zid.map(str::to_string))
-                .expect("cn or zid is present");
+                .expect("cn, user or zid is present");
         if !seen_ids.insert(sid.clone()) {
             refuse(
                 format!("subject id {sid:?} is already taken — give this principal an `id`"),
@@ -584,28 +619,8 @@ pub fn plan_acl(
                 ),
             ));
         }
-        if p.remote_actions && p.role == Role::Watch {
-            refuse(
-                "a watch is read-only by definition; `remote_actions = true` wants a \
-                 console"
-                    .into(),
-                "RFC 09 §3",
-            );
-            continue;
-        }
-        if !p.writes.is_empty() && p.role != Role::Console {
-            refuse(
-                format!(
-                    "`writes` grants belong to a console; a {} {}",
-                    p.role.as_str(),
-                    if p.role == Role::Watch {
-                        "is read-only by definition"
-                    } else {
-                        "acts as itself and needs no grant"
-                    }
-                ),
-                "RFC 09 §3",
-            );
+        if let Some(reason) = grant_refusal(p) {
+            refuse(reason, "RFC 09 §3");
             continue;
         }
         if p.role == Role::Link {
@@ -924,6 +939,7 @@ pub fn plan_acl(
             role: p.role,
             cert_common_names: cn.map(|c| vec![c.to_string()]).unwrap_or_default(),
             zids: zid.map(|z| vec![z.to_string()]).unwrap_or_default(),
+            usernames: user.map(|u| vec![u.to_string()]).unwrap_or_default(),
             link_protocols: Vec::new(),
             interfaces: Vec::new(),
         });
@@ -1005,12 +1021,41 @@ fn write_rules(
                     .filter(|w| keyexpr::new(w.as_str()).is_ok_and(|wk| ke.includes(wk)))
                     .count();
                 if covers == 0 {
+                    // Overlapping a declared write without including it is
+                    // not a carve: the deny keeps the write whole, because
+                    // no finite set of key expressions includes every key of
+                    // `config/*/*/set` but `config/rf0/air/set` — a `*`
+                    // cannot be subtracted from — and deny wins. An allow
+                    // emitted anyway would never decide (v1.49).
+                    let overlapped: Vec<&str> = write_set
+                        .iter()
+                        .filter(|w| keyexpr::new(w.as_str()).is_ok_and(|wk| ke.intersects(wk)))
+                        .map(String::as_str)
+                        .collect();
+                    if !overlapped.is_empty() {
+                        warnings.push(warn(
+                            AclWarningKind::GrantCannotCarve,
+                            Some(sid),
+                            "RFC 09 §3 (v1.49)",
+                            format!(
+                                "writes pattern {pattern:?} overlaps the declared write {} \
+                                 without including it: deny wins and is by inclusion, and no \
+                                 finite deny includes every key of that write but the grant's — \
+                                 a `*` chunk cannot be subtracted from — so the deny keeps it \
+                                 whole and the grant would never decide; not emitted. Grant the \
+                                 write as the registry spells it (every {{var}} a `*`), or \
+                                 declare the resource as a literal chunk",
+                                overlapped.join(", ")
+                            ),
+                        ));
+                        continue;
+                    }
                     warnings.push(warn(
                         AclWarningKind::GrantMatchesNothing,
                         Some(sid),
                         "RFC 09 §3",
                         format!(
-                            "writes pattern {pattern:?} includes no declared write procedure — \
+                            "writes pattern {pattern:?} intersects no declared write procedure — \
                              allowed as spelled, but nothing the registry knows answers there"
                         ),
                     ));
@@ -1129,7 +1174,28 @@ fn class_messages(class: &str) -> &'static [AclMessage] {
 /// query would step over. The default exposure is `fleet`, so an unmarked
 /// registry crosses whole — said in a warning, never denied on the
 /// planner's initiative: the registry is where the classification belongs.
-pub fn plan_face(slices: &SliceSet, base: &str, spec: &FaceSpec) -> AclPlan {
+///
+/// `principals` are the enrollment's (v1.49). A `user` console or watch —
+/// an operator on the far side, authenticated by the face's `usrpwd` — gets
+/// a subject of its own on the face's transport, and that subject has to
+/// **repeat every face deny**, because a transport matches every subject
+/// whose properties match, the face's own included, and across matching
+/// subjects zenoh lets **any allow win** (`AclActionMethods::action`,
+/// `zenoh-1.10.0/src/net/routing/interceptor/access_control.rs`): a
+/// principal subject holding only an allow, under this block's permissive
+/// default, would evaluate Allow for everything the face denies. Of
+/// `deny-rpc` it repeats the legs no call uses and carves the three a call
+/// does (query, reply, declare_queryable) to the console's write shape —
+/// `write_rules`, the declared writes no grant includes. Its denies are
+/// therefore a subset of the face's, so its own evaluation is the
+/// principal's whole answer. Every other principal is refused, never
+/// dropped.
+pub fn plan_face(
+    slices: &SliceSet,
+    base: &str,
+    spec: &FaceSpec,
+    principals: &[PrincipalSpec],
+) -> AclPlan {
     use zenkey::slice::{Declared, Exposure};
 
     let mut rules = Rules::default();
@@ -1361,29 +1427,171 @@ pub fn plan_face(slices: &SliceSet, base: &str, spec: &FaceSpec) -> AclPlan {
         }
     }
 
-    let subject = AclSubject {
+    let mut subjects = vec![AclSubject {
         id: spec.id.clone(),
         role: Role::Link,
         cert_common_names: Vec::new(),
         zids: Vec::new(),
+        usernames: Vec::new(),
         link_protocols: spec.link_protocols.clone(),
         interfaces: spec.interfaces.clone(),
-    };
-    let policy = AclPolicy {
+    }];
+    let mut policies = vec![AclPolicy {
         id: format!("{}-mgmt", spec.id),
-        rules: ids,
+        rules: ids.clone(),
         subjects: vec![spec.id.clone()],
-    };
+    }];
+    let mut refusals = Vec::new();
+
+    // The principals on the face (v1.49): see the doc above for why each
+    // one repeats the face's denies rather than sitting beside them.
+    let write_set = write_exprs(base, slices);
+    let sensitive_set = sensitive_exprs(base, slices);
+    // A principal's subject and policy share its id; the face holds one of
+    // each already.
+    let mut seen_ids = BTreeSet::from([spec.id.clone(), format!("{}-mgmt", spec.id)]);
+    let mut seen_users = BTreeSet::new();
+    for (i, p) in principals.iter().enumerate() {
+        let name = principal_name(i, p);
+        let mut refuse = |reason: String, cite: &str| {
+            refusals.push(AclRefusal {
+                principal: name.clone(),
+                reason,
+                cite: cite.into(),
+            });
+        };
+        let user = p.user.as_deref().filter(|s| !s.is_empty());
+        let other = [("cn", &p.cn), ("zid", &p.zid)]
+            .into_iter()
+            .find(|(_, v)| v.as_deref().is_some_and(|s| !s.is_empty()));
+        if let Some((prop, _)) = other {
+            refuse(
+                format!(
+                    "a `{prop}` on a face: a face principal is an operator the face's usrpwd \
+                     authenticated, bound by `user` alone — a certificate or zid principal \
+                     belongs to the principal plan (`acl gen` without --face), which runs \
+                     under a deny default this face's router cannot share"
+                ),
+                "RFC 09 §4 (v1.49)",
+            );
+            continue;
+        }
+        let Some(user) = user else {
+            refuse(
+                "a principal on a face needs a `user` — the zenoh usrpwd user name the face \
+                 authenticates"
+                    .into(),
+                "RFC 09 §4 (v1.49)",
+            );
+            continue;
+        };
+        if !matches!(p.role, Role::Console | Role::Watch) {
+            refuse(
+                format!(
+                    "a {} on a face: a face principal is an operator on the far side — a \
+                     console or a watch; a publisher's grants are the principal plan's",
+                    p.role.as_str()
+                ),
+                "RFC 09 §4 (v1.49)",
+            );
+            continue;
+        }
+        if let Some(reason) = grant_refusal(p) {
+            refuse(reason, "RFC 09 §3");
+            continue;
+        }
+        if !any_host_procedure {
+            refuse(
+                "nothing to grant: this face denies no @rpc (no procedure is `host`), so the \
+                 plane already crosses for every peer — and a principal's subject can only \
+                 widen what the face's own allows, because any matching subject's allow wins"
+                    .into(),
+                "RFC 09 §4 (v1.49)",
+            );
+            continue;
+        }
+        if !seen_users.insert(user.to_string()) {
+            refuse(
+                format!(
+                    "user {user:?} is already enrolled — one transport identity, one principal"
+                ),
+                "RFC 03 §4 D6",
+            );
+            continue;
+        }
+        let sid = p.id.clone().unwrap_or_else(|| user.to_string());
+        if !seen_ids.insert(sid.clone()) {
+            refuse(
+                format!("subject id {sid:?} is already taken — give this principal an `id`"),
+                "zenoh-config: subject ids are unique",
+            );
+            continue;
+        }
+
+        // Every face deny but `deny-rpc`, which is split: the legs no call
+        // uses stay denied whole, the three a call does are carved.
+        let mut own: Vec<String> = ids.iter().filter(|r| *r != "deny-rpc").cloned().collect();
+        own.push(rules.push(rule(
+            "deny-rpc-legs",
+            AclPermission::Deny,
+            Some(BOTH),
+            &[
+                AclMessage::Put,
+                AclMessage::Delete,
+                AclMessage::DeclareSubscriber,
+            ],
+            vec!["**/@rpc/**".to_string()],
+            "face-deny-plane",
+            "RFC 09 §4 (v1.49): a face principal's subject repeats every face deny, because \
+             any matching subject's allow wins — of the @rpc plane, the legs no call uses; \
+             query, reply and declare_queryable are carved to its grants below",
+        )));
+        if write_set.is_empty() {
+            warnings.push(warn(
+                AclWarningKind::NoWriteProcedures,
+                Some(&sid),
+                "RFC 09 §4 (v1.49)",
+                "the registry declares no `kind = \"write\"` procedure, so nothing is carved: \
+                 this principal reaches every @rpc call the face keeps from the link",
+            ));
+        }
+        for r in write_rules(
+            base,
+            &sid,
+            p,
+            &write_set,
+            &sensitive_set,
+            true,
+            &mut warnings,
+        ) {
+            own.push(rules.push(r));
+        }
+        subjects.push(AclSubject {
+            id: sid.clone(),
+            role: p.role,
+            cert_common_names: Vec::new(),
+            zids: Vec::new(),
+            usernames: vec![user.to_string()],
+            link_protocols: spec.link_protocols.clone(),
+            interfaces: spec.interfaces.clone(),
+        });
+        policies.push(AclPolicy {
+            id: sid.clone(),
+            rules: own,
+            subjects: vec![sid],
+        });
+    }
+
     AclPlan {
         base: base.to_string(),
         default_permission: AclPermission::Allow,
         registry: Asked::Asked(registry_facts(slices)),
         rules: rules.into_vec(),
-        subjects: vec![subject],
-        policies: vec![policy],
+        subjects,
+        policies,
         downsampling,
         warnings,
-        refusals: Vec::new(),
+        refusals,
     }
 }
 
@@ -1529,6 +1737,13 @@ pub fn to_json5(plan: &AclPlan) -> String {
                 out,
                 ", zids: {}",
                 js_list(s.zids.iter().map(String::as_str))
+            );
+        }
+        if !s.usernames.is_empty() {
+            let _ = write!(
+                out,
+                ", usernames: {}",
+                js_list(s.usernames.iter().map(String::as_str))
             );
         }
         if !s.link_protocols.is_empty() {
@@ -1730,20 +1945,25 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
         .iter()
         .flat_map(|s| s.cert_common_names.iter().map(String::as_str))
         .collect();
-    let subject_shape = |cns: &[String], zids: &[String], protos: &[String], ifs: &[String]| {
-        let mut s = format!("cns {cns:?} zids {zids:?}");
-        if !protos.is_empty() {
-            s.push_str(&format!(" link_protocols {protos:?}"));
-        }
-        if !ifs.is_empty() {
-            s.push_str(&format!(" interfaces {ifs:?}"));
-        }
-        s
-    };
+    let subject_shape =
+        |cns: &[String], zids: &[String], users: &[String], protos: &[String], ifs: &[String]| {
+            let mut s = format!("cns {cns:?} zids {zids:?}");
+            if !users.is_empty() {
+                s.push_str(&format!(" usernames {users:?}"));
+            }
+            if !protos.is_empty() {
+                s.push_str(&format!(" link_protocols {protos:?}"));
+            }
+            if !ifs.is_empty() {
+                s.push_str(&format!(" interfaces {ifs:?}"));
+            }
+            s
+        };
     for p in &plan.subjects {
         let planned = subject_shape(
             &p.cert_common_names,
             &p.zids,
+            &p.usernames,
             &p.link_protocols,
             &p.interfaces,
         );
@@ -1752,6 +1972,7 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
             Some(o) => {
                 let o_cns = o.cert_common_names.clone().unwrap_or_default();
                 let o_zids = o.zids.clone().unwrap_or_default();
+                let o_users = o.usernames.clone().unwrap_or_default();
                 let o_protos = o.link_protocols.clone().unwrap_or_default();
                 let o_ifs = o.interfaces.clone().unwrap_or_default();
                 let differs = |a: &[String], b: &[String]| {
@@ -1759,6 +1980,7 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
                 };
                 if differs(&o_cns, &p.cert_common_names)
                     || differs(&o_zids, &p.zids)
+                    || differs(&o_users, &p.usernames)
                     || differs(&o_protos, &p.link_protocols)
                     || differs(&o_ifs, &p.interfaces)
                 {
@@ -1766,7 +1988,7 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
                         AclFindingKind::SubjectDiffers,
                         &p.id,
                         Some(planned),
-                        Some(subject_shape(&o_cns, &o_zids, &o_protos, &o_ifs)),
+                        Some(subject_shape(&o_cns, &o_zids, &o_users, &o_protos, &o_ifs)),
                     );
                 }
             }
@@ -1786,18 +2008,23 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
                 )),
             );
         }
-        // A transport-selected property is planned only on a face (v1.43);
-        // on an identity subject it is a property nobody planned.
-        let planned_face = plan
-            .subjects
-            .iter()
-            .any(|p| p.id == o.id && (!p.link_protocols.is_empty() || !p.interfaces.is_empty()));
+        // A property is unplanned when the plan's subject of that id does
+        // not carry it (v1.49) — on a subject the plan does not know, every
+        // one is. A carried property's value is SubjectDiffers' business.
+        let planned = plan.subjects.iter().find(|p| p.id == o.id);
+        let carried = |prop: &str| {
+            planned.is_some_and(|p| match prop {
+                "interfaces" => !p.interfaces.is_empty(),
+                "usernames" => !p.usernames.is_empty(),
+                _ => !p.link_protocols.is_empty(),
+            })
+        };
         for (prop, value) in [
             ("interfaces", &o.interfaces),
             ("usernames", &o.usernames),
             ("link_protocols", &o.link_protocols),
         ] {
-            if planned_face && prop != "usernames" {
+            if carried(prop) {
                 continue;
             }
             if value.as_ref().is_some_and(|v| !v.is_empty()) {
@@ -1895,7 +2122,10 @@ pub fn check_acl(plan: &AclPlan, observed: &AclConfigDoc, against: &str) -> AclC
 /// Does `principal` hold `message` on `key`, in each direction, and via
 /// which rules — over the plan alone, inclusion by `zenoh-keyexpr`.
 ///
-/// `principal` is a subject id, a CN or a zid. A principal the plan does
+/// `principal` is a subject id, a CN, a user or a zid. On a face plan a
+/// user principal's own subject is its whole answer: its denies are a
+/// subset of the face's (`plan_face`), so the face's subject, which also
+/// matches its link, never allows what it denies. A principal the plan does
 /// not carry (unknown, or refused) is an [`Error::Unaskable`]: there is no
 /// policy to explain.
 pub fn explain_acl(
@@ -1910,6 +2140,7 @@ pub fn explain_acl(
         .find(|s| {
             s.id == principal
                 || s.cert_common_names.iter().any(|c| c == principal)
+                || s.usernames.iter().any(|u| u == principal)
                 || s.zids.iter().any(|z| z == principal)
         })
         .ok_or_else(|| {
@@ -2845,7 +3076,7 @@ mod tests {
     #[test]
     fn a_constrained_face_keeps_host_surfaces_home_and_caps_link_ones() {
         let slices = modem_slices();
-        let p = plan_face(&slices, "", &face(LinkInterval::EverySecs(60)));
+        let p = plan_face(&slices, "", &face(LinkInterval::EverySecs(60)), &[]);
         assert_eq!(p.default_permission, AclPermission::Allow);
         assert_eq!(p.subjects.len(), 1);
         assert_eq!(p.subjects[0].link_protocols, ["unixsock-stream"]);
@@ -2947,7 +3178,7 @@ mod tests {
 
         // No affordable rate (a billed channel): the `link` counters stay
         // home too, the class is denied whole, nothing is capped.
-        let p = plan_face(&slices, "", &face(LinkInterval::None));
+        let p = plan_face(&slices, "", &face(LinkInterval::None), &[]);
         assert!(p.downsampling.is_empty());
         let detail = rule_of(&p, "deny-telemetry-modem-detail");
         assert!(includes(
@@ -2965,7 +3196,12 @@ mod tests {
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
         let fixtures = SliceSet::from_dirs(&[dir]).unwrap();
-        let p = plan_face(&fixtures, "zensight", &face(LinkInterval::EverySecs(10)));
+        let p = plan_face(
+            &fixtures,
+            "zensight",
+            &face(LinkInterval::EverySecs(10)),
+            &[],
+        );
         assert!(
             p.rules.iter().any(|r| r.id == "deny-rpc"),
             "systemd marks a write host"
@@ -2986,5 +3222,337 @@ mod tests {
                 .key_expr
                 .starts_with("zensight/v1/*/telemetry/sysinfo/memory/used")
         );
+    }
+
+    // ── user principals (v1.49, #529) ─────────────────────────────────────
+
+    /// The pasted fragment read back through zenoh's own loader, as
+    /// `acl gen --check --against` reads a router's config file.
+    fn observed_of(text: &str) -> AclConfigDoc {
+        let config = zenoh::Config::from_json5(&format!("{{\n  mode: \"router\",\n{text}}}\n"))
+            .expect("the fragment parses");
+        serde_json::from_str(&config.get_json("access_control").expect("a block"))
+            .expect("zenoh's AclConfig shape")
+    }
+
+    fn user(name: &str, role: Role) -> PrincipalSpec {
+        PrincipalSpec {
+            user: Some(name.into()),
+            role,
+            ..Default::default()
+        }
+    }
+
+    /// A `user` binds `usernames` as a `cn` binds `cert_common_names`, both
+    /// together AND, and the plan checks clean against its own block.
+    #[test]
+    fn a_user_principal_is_bound_by_usernames() {
+        let mut e = fleet();
+        e.principal.push(user("ops", Role::Console));
+        e.principal.push(PrincipalSpec {
+            cn: Some("radio-desk".into()),
+            ..user("desk", Role::Watch)
+        });
+        let p = plan_acl(&e, "zensight", None, AclOptions::default());
+        assert!(p.refusals.is_empty(), "{:?}", p.refusals);
+        let ops = p.subjects.iter().find(|s| s.id == "ops").expect("ops");
+        assert_eq!(ops.usernames, ["ops"]);
+        assert!(ops.cert_common_names.is_empty() && ops.zids.is_empty());
+        let desk = p.subjects.iter().find(|s| s.id == "radio-desk").unwrap();
+        assert_eq!(desk.usernames, ["desk"]);
+        assert_eq!(desk.cert_common_names, ["radio-desk"]);
+        assert!(
+            policy_of(&p, "ops")
+                .rules
+                .iter()
+                .any(|r| r == NO_REMOTE_ACTIONS)
+        );
+
+        let text = to_json5(&p);
+        assert_pastes_into_a_router_config(&text);
+        assert!(text.contains("{ id: \"ops\", usernames: [\"ops\"] },  // console"));
+        let c = check_acl(&p, &observed_of(&text), "router.json5");
+        assert!(c.findings.is_empty(), "{:?}", c.findings);
+        // --explain resolves a principal by its user, too.
+        let x = explain_acl(
+            &p,
+            "ops",
+            "zensight/v1/h-3fa9c2d41b7e/state/x",
+            AclMessage::Reply,
+        )
+        .unwrap();
+        assert_eq!(x.principal, "ops");
+
+        // A username the block carries and the plan does not is a
+        // difference, not an unplanned property: the plan carries usernames
+        // on that subject.
+        let mut doc = observed_of(&text);
+        let s = doc.subjects.iter_mut().find(|s| s.id == "ops").unwrap();
+        s.usernames = Some(vec!["someone-else".into()]);
+        let c = check_acl(&p, &doc, "router.json5");
+        let kinds: Vec<AclFindingKind> = c.findings.iter().map(|f| f.kind).collect();
+        assert_eq!(kinds, [AclFindingKind::SubjectDiffers], "{:?}", c.findings);
+        // On a subject the plan binds by cn alone, it is unplanned.
+        let mut doc = observed_of(&text);
+        let s = doc
+            .subjects
+            .iter_mut()
+            .find(|s| s.id == "zensight-console")
+            .unwrap();
+        s.usernames = Some(vec!["ops".into()]);
+        let c = check_acl(&p, &doc, "router.json5");
+        assert!(
+            c.findings
+                .iter()
+                .any(|f| f.kind == AclFindingKind::SubjectUnplannedProperty
+                    && f.id == "zensight-console"),
+            "{:?}",
+            c.findings
+        );
+
+        // One user, one principal; and nothing to bind by is refused, the
+        // refusal naming the new binding.
+        let mut e = fleet();
+        e.principal.push(user("ops", Role::Console));
+        e.principal.push(user("ops", Role::Watch));
+        e.principal.push(PrincipalSpec {
+            role: Role::Watch,
+            ..Default::default()
+        });
+        let p = plan_acl(&e, "zensight", None, AclOptions::default());
+        let reasons: Vec<&str> = p.refusals.iter().map(|r| r.reason.as_str()).collect();
+        assert_eq!(reasons.len(), 2, "{reasons:?}");
+        assert!(reasons[0].contains("user \"ops\" is already enrolled"));
+        assert!(reasons[1].contains("or a `user`"));
+    }
+
+    /// A grant narrower than the declared write it falls in cannot carve
+    /// it: no finite deny includes `config/*/power/set` but
+    /// `config/rf0/power/set`. The allow is not emitted — it would never
+    /// decide — and the plan says why.
+    #[test]
+    fn a_grant_narrower_than_its_declared_write_is_not_emitted() {
+        let slices = modem_slices();
+        let mut e = fleet();
+        e.principal[4].writes = vec!["modem/config/rf0/power/set".into()];
+        let p = plan_acl(&e, "", Some(&slices), AclOptions::default());
+        assert!(!p.rules.iter().any(|r| r.id.starts_with("writes-")));
+        let w = p
+            .warnings
+            .iter()
+            .find(|w| w.kind == AclWarningKind::GrantCannotCarve)
+            .expect("said");
+        assert!(
+            w.text.contains("v1/*/@rpc/modem/config/*/power/set"),
+            "{}",
+            w.text
+        );
+        assert!(
+            !p.warnings
+                .iter()
+                .any(|w| w.kind == AclWarningKind::GrantMatchesNothing),
+            "it is declared, and it is not allowed — both halves of the old note were wrong"
+        );
+        let x = explain_acl(
+            &p,
+            "zensight-console",
+            "v1/h-0123456789ab/@rpc/modem/config/rf0/power/set",
+            AclMessage::Query,
+        )
+        .unwrap();
+        assert_eq!(x.ingress.decision, AclDecision::Denied);
+    }
+
+    /// Every deny of `inner`'s policy is included by a deny of `outer`'s,
+    /// message for message and flow for flow.
+    fn denies_within(p: &AclPlan, inner: &str, outer: &str) -> bool {
+        let rules_of = |id: &str| -> Vec<&AclRule> {
+            let ids = &policy_of(p, id).rules;
+            p.rules
+                .iter()
+                .filter(|r| ids.contains(&r.id) && r.permission == AclPermission::Deny)
+                .collect()
+        };
+        let flows = |r: &AclRule| r.flows.clone().unwrap_or_else(|| BOTH.to_vec());
+        let outer = rules_of(outer);
+        rules_of(inner).iter().all(|r| {
+            r.messages.iter().all(|m| {
+                flows(r).iter().all(|f| {
+                    r.key_exprs.iter().all(|k| {
+                        outer.iter().any(|o| {
+                            o.messages.contains(m) && flows(o).contains(f) && includes(o, k)
+                        })
+                    })
+                })
+            })
+        })
+    }
+
+    /// A user principal on the face (RFC 09 §4, v1.49): its own subject on
+    /// the face's transport, repeating every face deny — any matching
+    /// subject's allow wins in zenoh, so an allow beside the face's denies
+    /// would open the face — with `deny-rpc` split into the legs no call
+    /// uses and the console's carve.
+    #[test]
+    fn a_user_on_a_face_repeats_every_face_deny_and_carves_its_grant() {
+        let slices = modem_slices();
+        let ops = PrincipalSpec {
+            writes: vec!["modem/config/*/power/set".into()],
+            ..user("ops", Role::Console)
+        };
+        let p = plan_face(&slices, "", &face(LinkInterval::EverySecs(60)), &[ops]);
+        assert!(p.refusals.is_empty(), "{:?}", p.refusals);
+        assert_eq!(p.default_permission, AclPermission::Allow);
+        assert_eq!(p.subjects.len(), 2);
+        assert_eq!(p.subjects[0].id, "modem-lane", "the face stays first");
+        let s = &p.subjects[1];
+        assert_eq!((s.id.as_str(), s.role), ("ops", Role::Console));
+        assert_eq!(s.usernames, ["ops"]);
+        assert_eq!(s.link_protocols, ["unixsock-stream"], "and the face's link");
+
+        let face_rules = &policy_of(&p, "modem-lane-mgmt").rules;
+        let own = &policy_of(&p, "ops").rules;
+        for r in face_rules {
+            assert_eq!(own.contains(r), r != "deny-rpc", "{r}");
+        }
+        for r in ["deny-rpc-legs", "writes-ops", "no-remote-actions-ops"] {
+            assert!(own.contains(&r.to_string()), "{r}");
+        }
+        assert!(
+            denies_within(&p, "ops", "modem-lane-mgmt"),
+            "the user's denies are a subset of the face's, so its own evaluation is its \
+             whole answer"
+        );
+
+        let ask = |who: &str, key: &str, m: AclMessage| explain_acl(&p, who, key, m).unwrap();
+        let rpc = "v1/h-0123456789ab/@rpc/modem/config/rf0";
+        let x = ask("ops", &format!("{rpc}/power/set"), AclMessage::Query);
+        assert_eq!(x.ingress.decision, AclDecision::Allowed, "{x:?}");
+        let x = ask("ops", &format!("{rpc}/power/set"), AclMessage::Reply);
+        assert_eq!(x.egress.decision, AclDecision::AllowedByDefault);
+        for key in ["persist", "access/set"] {
+            let x = ask("ops", &format!("{rpc}/{key}"), AclMessage::Query);
+            assert_eq!(x.ingress.decision, AclDecision::Denied, "{key}");
+        }
+        let x = ask("ops", &format!("{rpc}/power/set"), AclMessage::Put);
+        assert_eq!(
+            x.ingress.decision,
+            AclDecision::Denied,
+            "a leg no call uses"
+        );
+        let x = ask(
+            "ops",
+            "v1/h-0123456789ab/telemetry/modem/rf0/tx_sdus_total",
+            AclMessage::Put,
+        );
+        assert_eq!(
+            x.egress.decision,
+            AclDecision::Denied,
+            "a face deny, repeated"
+        );
+        let x = ask("modem-lane", &format!("{rpc}/power/set"), AclMessage::Query);
+        assert_eq!(x.ingress.decision, AclDecision::Denied, "everyone else");
+
+        let text = to_json5(&p);
+        assert_pastes_into_a_router_config(&text);
+        assert!(text.contains(
+            "{ id: \"ops\", usernames: [\"ops\"], link_protocols: [\"unixsock-stream\"] },  // console"
+        ));
+        assert!(text.contains("{ id: \"modem-lane-telemetry\", link_protocols:"));
+        let c = check_acl(&p, &observed_of(&text), "router.json5");
+        assert!(c.findings.is_empty(), "{:?}", c.findings);
+
+        // A watch on the face: no grant, so the whole write set stays denied.
+        let p = plan_face(
+            &slices,
+            "",
+            &face(LinkInterval::EverySecs(60)),
+            &[user("viewer", Role::Watch)],
+        );
+        assert!(p.refusals.is_empty(), "{:?}", p.refusals);
+        assert!(
+            policy_of(&p, "viewer")
+                .rules
+                .contains(&NO_REMOTE_ACTIONS.to_string())
+        );
+        let x = explain_acl(
+            &p,
+            "viewer",
+            "v1/h-0123456789ab/@rpc/modem/config/rf0/power/set",
+            AclMessage::Query,
+        )
+        .unwrap();
+        assert_eq!(x.ingress.decision, AclDecision::Denied);
+    }
+
+    /// What a face cannot plan is refused with its reason — never dropped,
+    /// which is what `--face` did with every principal before v1.49.
+    #[test]
+    fn a_face_refuses_what_it_cannot_plan_and_says_why() {
+        let slices = modem_slices();
+        let principals = vec![
+            principal("zensight-console", Role::Console),
+            PrincipalSpec {
+                zid: Some("38a4829bce9166ee".into()),
+                role: Role::Watch,
+                ..Default::default()
+            },
+            PrincipalSpec {
+                role: Role::Console,
+                ..Default::default()
+            },
+            PrincipalSpec {
+                origin: Some("h-0123456789ab".into()),
+                ..user("far-host", Role::Host)
+            },
+            PrincipalSpec {
+                writes: vec!["modem/config/*/power/set".into()],
+                ..user("viewer", Role::Watch)
+            },
+            user("ops", Role::Console),
+            user("ops", Role::Watch),
+            PrincipalSpec {
+                id: Some("modem-lane".into()),
+                ..user("lane-squatter", Role::Console)
+            },
+        ];
+        let p = plan_face(&slices, "", &face(LinkInterval::None), &principals);
+        let reasons: Vec<(&str, &str)> = p
+            .refusals
+            .iter()
+            .map(|r| (r.principal.as_str(), r.reason.as_str()))
+            .collect();
+        assert_eq!(reasons.len(), 7, "{reasons:#?}");
+        assert!(reasons[0].1.contains("a `cn` on a face"));
+        assert!(reasons[1].1.contains("a `zid` on a face"));
+        assert!(reasons[2].1.contains("needs a `user`"));
+        assert!(reasons[3].1.contains("a host on a face"));
+        assert!(reasons[4].1.contains("read-only"));
+        assert!(reasons[5].1.contains("user \"ops\" is already enrolled"));
+        assert!(reasons[6].1.contains("\"modem-lane\" is already taken"));
+        assert_eq!(p.subjects.len(), 2, "the face and the one ops");
+
+        // A face that denies no @rpc has nothing to carve: a principal's
+        // subject could only widen what the face's own already allows.
+        let open = SliceSet::from_slices(vec![
+            zenkey::parse_slice(
+                "[registry]\nversion = \"1.0\"\napp = \"acme\"\nconvention = 1\n\n\
+                 [producer]\nname = \"modem\"\n\n\
+                 [[subject]]\npath = \"{device}/tx_sdus_total\"\nclass = \"telemetry\"\n\
+                 type = \"C\"\ncardinality = 4\nexposure = \"host\"\n\n\
+                 [[procedure]]\npath = \"introspect\"\nkind = \"read\"\n\
+                 reply = \"RegistrySlice\"\nexposure = \"link\"\n",
+            )
+            .expect("parses"),
+        ]);
+        let p = plan_face(
+            &open,
+            "",
+            &face(LinkInterval::EverySecs(60)),
+            &[user("ops", Role::Console)],
+        );
+        assert_eq!(p.refusals.len(), 1);
+        assert!(p.refusals[0].reason.contains("nothing to grant"));
+        assert_eq!(p.subjects.len(), 1);
     }
 }

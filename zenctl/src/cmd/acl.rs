@@ -2,7 +2,9 @@
 //! enrollment file — and checked, and explained. With `--face`, RFC 09 §4's
 //! constrained-face profile instead (v1.43): the enrollment still names the
 //! base, but the two blocks are planned from the registry's `exposure`
-//! markers, because a face is selected by its transport, not enrolled.
+//! markers, because a face is selected by its transport, not enrolled. Its
+//! principals ride along (v1.49): a `user` console or watch is planned onto
+//! the face, and every other principal is refused — never dropped.
 //!
 //! Thin by design. The matrix, the four facts and the fifth, the registry
 //! narrowing, the check and the explanation are all judgement over values
@@ -201,6 +203,7 @@ pub async fn run(cli: crate::cli::AclGenArgs) -> Result<()> {
                     interfaces: link_interface,
                     interval,
                 },
+                &enrollment.principal,
             )
         }
     };
