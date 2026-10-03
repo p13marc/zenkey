@@ -1110,6 +1110,10 @@ pub(crate) enum AclCmd {
     ///   cn = "zensight-console"
     ///   role = "console"
     ///   remote_actions = false            # true drops the no-remote-actions deny
+    ///   [[principal]]
+    ///   user = "ops"                      # a zenoh usrpwd user, in place of cn
+    ///   role = "console"
+    ///   writes = ["modem/config/*/*/set"] # per-resource write grants
     // Verbatim, so the enrollment example above keeps its lines: clap would
     // otherwise fold it into one.
     #[command(verbatim_doc_comment)]
@@ -2341,8 +2345,8 @@ pub(crate) struct AdminGraphArgs {
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct AclGenArgs {
-    /// The enrollment file (TOML): CN ↔ role ↔ origin, one [[principal]]
-    /// each. See `zenctl acl gen --help` for the shape.
+    /// The enrollment file (TOML): CN or user ↔ role ↔ origin, one
+    /// [[principal]] each. See `zenctl acl gen --help` for the shape.
     #[arg(long, value_name = "FILE")]
     pub(crate) enrollment: PathBuf,
     /// Emit the router's `access_control` JSON5 block on stdout, a comment
@@ -2364,7 +2368,7 @@ pub(crate) struct AclGenArgs {
     /// own loader so what is compared is what zenohd would run.
     #[arg(long, value_name = "FILE", requires = "check")]
     pub(crate) against: Option<PathBuf>,
-    /// Does PRINCIPAL (a subject id or CN) hold MESSAGE on KEY, via which
+    /// Does PRINCIPAL (a subject id, CN or user) hold MESSAGE on KEY, via which
     /// rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0.
     #[arg(long, num_args = 3, value_names = ["PRINCIPAL", "KEY", "MESSAGE"])]
     pub(crate) explain: Option<Vec<String>>,
@@ -2376,7 +2380,9 @@ pub(crate) struct AclGenArgs {
     /// `access_control` and `downsampling` blocks that keep the registry's
     /// `host`-exposed surfaces off one link and cap the `link`-exposed ones.
     /// Needs `--registry` — the markers are the registry's — and a
-    /// `--link-protocol` or `--link-interface` to select the face.
+    /// `--link-protocol` or `--link-interface` to select the face. A `user`
+    /// console or watch in the enrollment is planned onto the face (v1.49);
+    /// every other principal is refused.
     #[arg(long, value_name = "constrained", requires = "link_interval")]
     pub(crate) face: Option<Face>,
     /// With --face: a link protocol that selects the face (`unixsock-stream`,

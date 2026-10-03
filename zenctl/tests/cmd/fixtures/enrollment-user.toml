@@ -1,0 +1,14 @@
+# Principals on a constrained face (RFC 09 §4, v1.49): an operator on the
+# far side, authenticated by the face's usrpwd, enrolled by `user`, granted
+# one write — and a certificate principal, which a face refuses by name.
+
+base = "zensight"
+
+[[principal]]
+user = "ops"
+role = "console"
+writes = ["systemd/expectations/set"]
+
+[[principal]]
+cn = "zensight-console"
+role = "console"

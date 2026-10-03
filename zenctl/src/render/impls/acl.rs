@@ -62,22 +62,26 @@ impl Render for AclPlan {
             .blank();
             let mut g = Grid::new(["  subject", "role", "bound by", "rules"]);
             for s in &self.subjects {
-                // An identity, or — for a face (v1.43) — the transport that
-                // selects it.
-                let bound = if !s.cert_common_names.is_empty() {
-                    format!("cn {}", s.cert_common_names.join(", "))
-                } else if !s.link_protocols.is_empty() || !s.interfaces.is_empty() {
-                    let mut parts = Vec::new();
-                    if !s.link_protocols.is_empty() {
-                        parts.push(format!("link_protocols {}", s.link_protocols.join(", ")));
-                    }
-                    if !s.interfaces.is_empty() {
-                        parts.push(format!("interfaces {}", s.interfaces.join(", ")));
-                    }
-                    parts.join("; ")
-                } else {
-                    format!("zid {}", s.zids.join(", "))
-                };
+                // An identity, the transport that selects a face (v1.43), or
+                // both — a user on a face (v1.49). A zid is named when it is
+                // all there is.
+                let mut parts = Vec::new();
+                if !s.cert_common_names.is_empty() {
+                    parts.push(format!("cn {}", s.cert_common_names.join(", ")));
+                }
+                if !s.usernames.is_empty() {
+                    parts.push(format!("user {}", s.usernames.join(", ")));
+                }
+                if !s.link_protocols.is_empty() {
+                    parts.push(format!("link_protocols {}", s.link_protocols.join(", ")));
+                }
+                if !s.interfaces.is_empty() {
+                    parts.push(format!("interfaces {}", s.interfaces.join(", ")));
+                }
+                if parts.is_empty() {
+                    parts.push(format!("zid {}", s.zids.join(", ")));
+                }
+                let bound = parts.join("; ");
                 let rules = self
                     .policies
                     .iter()

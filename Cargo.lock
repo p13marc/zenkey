@@ -8472,7 +8472,7 @@ dependencies = [
 
 [[package]]
 name = "zenkey-fleet"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",

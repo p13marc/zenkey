@@ -1,6 +1,6 @@
 # 09 — Operations Cookbook
 
-**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38, v1.42, v1.43 and v1.47 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
+**Status: v1.24** · informative chapter · *amended in v1.2, v1.4, v1.5, v1.9, v1.13, v1.18, v1.19, v1.21, v1.24, v1.27, v1.28, v1.31, v1.33, v1.38, v1.42, v1.43, v1.47 and v1.49 — see [CHANGELOG.md](CHANGELOG.md)* — the v1.24 amendment is the move: the tool-facing material (§5.1–§5.3, §6, including the former normative carve-outs) went to [13](13-observer-conformance.md), tombstones below
 
 Worked recipes for the infrastructure concerns the grammar was shaped
 around: session setup, subscriptions, storage, ACL, and constrained links.
@@ -391,7 +391,8 @@ Six facts, ~30 rules, 8 subjects and a policy list for a six-host fleet,
 every `key_exprs` entry carrying an `h-<12hex>` no human can proofread —
 which is why the recipe went undeployed for a year. Since v1.33 the
 reference tooling generates it: `zenctl acl gen --enrollment <file>` expands
-this matrix from a small TOML binding certificate CNs to roles and origins
+this matrix from a small TOML binding certificate CNs — or, since v1.49,
+zenoh `usrpwd` user names — to roles and origins
 (given, or computed from a machine-id by [06 §1](06-identity.md)'s
 derivation), narrowed by the registry to the planes each producer declares,
 and `--explain <principal> <key> <message>` answers "which rule decided"
@@ -549,6 +550,16 @@ must **include** (⊇) the consumer's declared selector, not merely
 intersect it — allow `zensight/v1/**` does not admit a `zensight/**`
 subscriber.
 
+**Principals by user (v1.49).** A `[[principal]]` is bound by `cn`, by
+`user` — the name a transport authenticated with zenoh's `usrpwd`, emitted
+as the subject's `usernames` — or by both, which zenoh ANDs: a subject is
+the product of its properties, and a transport matches it only when every
+property does. `zid` stands in for either only as a prototype, as before.
+A `user` binding is as strong as its channel: `usrpwd` authenticates at
+establishment and nothing after it, so over a link that is neither TLS nor
+otherwise protected, whoever is on the channel can still inject into a
+live transport. The subject id defaults to the CN, then the user.
+
 **Sub-host authority needs the resource in the path (v1.4).** Because ACL
 matching is keyexpr *inclusion* (fact 1) and a rule **cannot** discriminate
 on *selector parameters* — a `?if=eth1` on a query is invisible to the
@@ -581,7 +592,17 @@ writes = ["modem/config/*/power/set", "modem/config/*/confirm"]
 ```
 
 Each pattern is `<producer>/<procedure>` relative to `@rpc/`, spelled as the
-registry spells the procedure with every `{var}` a `*`, or narrower. The
+registry spells the procedure with every `{var}` a `*` — or wider, taking in
+several declared writes at once. **Not narrower** (v1.49): a pattern that
+stops short of the declared write it falls in — `modem/config/rf0/power/set`
+where the registry declares `config/{device}/power/set` — cannot carve it.
+Deny is by inclusion, and no finite set of key expressions includes every
+key of `config/*/power/set` but `config/rf0/power/set`: a `*` cannot be
+subtracted from. The deny keeps the declared write whole, so the grant would
+never decide, and the generator does not emit it and says why
+(`grant_cannot_carve`) — before v1.49 it emitted the dead allow under a note
+claiming the pattern matched nothing. Authority below a variable chunk is
+the server's to enforce, or the registry's to make a literal chunk. The
 generator emits one allow (`writes-<subject>`: `query`, both flows, every
 pattern lifted under `v1/*/@rpc/`) and **carves the deny**: the principal's
 `no-remote-actions` lists the declared writes a grant does not include, and
@@ -681,6 +702,13 @@ person can proofread:
 | the same operator | nothing on `sat0` | no rule names it; under `default_permission: "deny"`, absent is denied |
 | a script with a stale spelling | nothing by accident | the server's exact-key check ([05 §2.1](05-control-rpc.md)) refuses `config/*/radio/set`, whatever the ACL forwarded |
 
+These rows are rule *shapes*, as a hand-written block under
+`default_permission: "deny"` with no broader `@rpc` grant would spell them.
+The generator's console carries the fleet's `…/v1/*/@rpc/**` read grant, so
+its write authority is a carve of the declared writes, and the per-device
+rows would need `rf0` subtracted from the declared `{device}` — which, by
+the paragraph on per-resource grants, no deny can do (v1.49).
+
 `zenctl config get h-xxx modem rf0` renders the first row's answer as the
 document it is; `zenctl config set h-xxx modem rf0 radio frequency_khz=868100
 --confirm 60` is the second row's, typed against the served schema, and it
@@ -730,7 +758,8 @@ constrained face, from the registry's `exposure` markers
   has to be a *deny* under a permissive default, and the host bus keeps
   flowing by absence. One subject, selected by the link (`link_protocols`
   or `interfaces` — a unixsock-stream link reports no interface name in
-  zenoh 1.10, so a modem lane is selected by protocol).
+  zenoh 1.10, so a modem lane is selected by protocol) — and one more per
+  enrolled operator, below (v1.49).
 - A deny per `host`-exposed subject, by its pattern (`{var}` as `*`) — or,
   when every subject of a class under a producer is `host`, one deny on
   `v1/*/<class>/<producer>/**`, which also covers the framework keys under
@@ -752,9 +781,60 @@ constrained face, from the registry's `exposure` markers
 
 `--check --against` compares a face plan as it compares the principal
 plan; `--explain <face-id> <key> <message>` answers over it. The two blocks
-merge at the router config's top level beside the principal block's: they
-are separate policies on separate subjects, and neither reads the other's
-rules.
+merge at the router config's top level. They do **not** merge beside a
+principal plan's block (corrected in v1.49): a router has one
+`access_control` and one node-global `default_permission`, which the face
+needs `allow` and the principal plan needs `deny`; and policies on subjects
+that match the same transport are never separate — zenoh evaluates every
+matching subject, and any one's allow wins (below).
+
+**Principals on a face (v1.49).** An authenticated face is where remote
+configuration becomes a grant rather than a switch: the enrollment's
+`[[principal]]`s ride `--face`, and a `user` console or watch — an
+operator on the far side, authenticated by the face's `usrpwd` — is planned
+onto it. Three facts of zenoh 1.10's matcher
+(`zenoh-1.10.0/src/net/routing/interceptor/`) decide the shape:
+
+1. A transport matches **every** subject whose properties all match. The
+   face's subject names only the link, so it matches the operator's
+   transport too.
+2. Within one subject's policy deny wins, and under this block's `allow`
+   default a policy evaluates Allow unless a deny includes the key.
+3. Across the matching subjects **any Allow wins** (`AclActionMethods::
+   action`). And subjects with identical properties are one subject
+   (`SubjectMapBuilder::insert_or_get`), so their policies merge and deny
+   wins again.
+
+So a principal's grant cannot sit *beside* the face's denies: a subject
+holding only an allow evaluates Allow for everything the face denies, and
+wins. The generator gives the principal a subject of its own —
+`usernames: [<user>]` **and** the face's `link_protocols`/`interfaces`, so it
+matches only the operator on that link — whose policy **repeats every face
+deny** but `deny-rpc`. That one is split: the legs no call uses (`put`,
+`delete`, `declare_subscriber`) stay denied on `**/@rpc/**` whole
+(`deny-rpc-legs`), and the three a call does — `query`, `reply`,
+`declare_queryable`, the last because between two peers a call is routed
+only once the queryable's declaration has crossed — are carved to §3's
+console shape: the `writes` grants allowed, `no-remote-actions` denying the
+declared writes no grant includes, a `sensitive` write denied unless named.
+The operator therefore reads the `@rpc` plane, as a console does, and writes
+exactly what it was granted. Its denies are a subset of the face's, so its
+own evaluation is its whole answer; everyone else on the link — another
+user, or a peer with no user at all — matches only the face's subject and
+keeps every deny. A wildcard query broader than the carve
+(`…/v1/*/@rpc/**`) is included by none of the operator's denies and
+crosses (fact 6); the second lock on a broadcast write is the server's own
+refusal ([05 §2.1](05-control-rpc.md), #472), as it is for a console
+anywhere.
+
+Refused by name, never dropped: a `cn` or `zid` principal (a certificate
+identity belongs to the principal plan, whose router cannot share this
+block's default); a principal with no `user`; a host, catalog,
+desired-author or link (a publisher's grants are the principal plan's); a
+watch with a grant; and every principal on a face that denies no `@rpc` —
+there the plane already crosses for every peer, and a principal's subject
+can only widen what the face's own allows. `--explain <user> <key>
+<message>` answers for the operator.
 
 Advanced-tier traffic deserves a thought on constrained links: per-key
 miss-detection heartbeats and declare-time history bursts are real bytes

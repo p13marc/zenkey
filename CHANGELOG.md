@@ -17,6 +17,46 @@ Versions per crate, because they move independently:
 
 ---
 
+## Unreleased
+
+### User principals, and principals on a face (#529, RFC v1.49)
+
+For zenoh-modem#153: a per-operator write grant on a constrained face whose
+link authenticates by zenoh `usrpwd` (zenoh-modem#98). **`zenkey-fleet`
+moves to 0.18.0 — breaking**: `PrincipalSpec` gains `user`, `AclSubject`
+gains `usernames` (struct literals need the field), `plan_face` takes the
+enrollment's principals as a fourth argument, and `AclWarningKind` gains
+`GrantCannotCarve`.
+
+- `plan_acl` binds a principal by `cn`, `user` or both (zenoh ANDs them);
+  `user` becomes the subject's `usernames`, deduplicated like a CN, and the
+  subject id defaults to the CN, then the user.
+- `plan_face` plans a `user` console or watch onto the face as a subject on
+  the face's transport whose policy **repeats every face deny** — zenoh
+  matches every subject whose properties match and lets any one's allow
+  win, so an allow beside the face's denies would open the face — with
+  `deny-rpc` split into `deny-rpc-legs` (put, delete, declare_subscriber,
+  denied whole) and the console's write carve over query, reply and
+  declare_queryable. Every other principal is refused by name; before,
+  `--face` dropped them all silently. `tests/acl_face.rs` judges the block
+  with zenoh itself: a real router holding it beside a `usrpwd`
+  dictionary, the granted user answered, a write it was not granted,
+  another user and an unauthenticated peer all denied — as a client and,
+  in the adopter's peer-to-peer shape, as a peer.
+- A `writes` pattern narrower than the declared write it falls in
+  (`config/rf0/power/set` under `config/{device}/power/set`) cannot carve
+  it, because no finite deny includes every key of a `*` but one. It was
+  emitted as a dead allow under a `grant_matches_nothing` note saying it was
+  undeclared and allowed — both wrong; it is now not emitted, with a
+  `grant_cannot_carve` warning naming the declared write.
+- `to_json5` renders `usernames`; `check_acl` compares them, and calls a
+  property *unplanned* only when the plan's subject of that id does not
+  carry it; `explain_acl` resolves a principal by user.
+
+zenctl's half is in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
+
+---
+
 ## 0.13.0 — zenctl in production (2026-10-02)
 
 **Release commit** on 2026-10-02: `zenkey-fleet` 0.17.0 to crates.io, the

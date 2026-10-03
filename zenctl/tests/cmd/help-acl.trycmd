@@ -57,12 +57,16 @@ The enrollment file:
   cn = "zensight-console"
   role = "console"
   remote_actions = false            # true drops the no-remote-actions deny
+  [[principal]]
+  user = "ops"                      # a zenoh usrpwd user, in place of cn
+  role = "console"
+  writes = ["modem/config/*/*/set"] # per-resource write grants
 
 Usage: zenctl acl gen [OPTIONS] --enrollment <FILE>
 
 Options:
       --enrollment <FILE>
-          The enrollment file (TOML): CN ↔ role ↔ origin, one [[principal]] each. See `zenctl acl gen --help` for the shape
+          The enrollment file (TOML): CN or user ↔ role ↔ origin, one [[principal]] each. See `zenctl acl gen --help` for the shape
 
       --json5
           Emit the router's `access_control` JSON5 block on stdout, a comment per rule naming its matrix row and its fact — pipe it into the router config. A foreign schema, so `--format` has no say over it
@@ -76,13 +80,13 @@ Options:
           With --check: the router's JSON5 config file, read through zenoh's own loader so what is compared is what zenohd would run
 
       --explain <PRINCIPAL> <KEY> <MESSAGE>
-          Does PRINCIPAL (a subject id or CN) hold MESSAGE on KEY, via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0
+          Does PRINCIPAL (a subject id, CN or user) hold MESSAGE on KEY, via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0
 
       --allow-zid-subjects
           Admit `zid = "…"` subjects. Prototyping only: a ZID is not backed by authentication, and zenoh's own config says so
 
       --face <constrained>
-          Plan a constrained face instead of the principals (RFC 09 §4): the `access_control` and `downsampling` blocks that keep the registry's `host`-exposed surfaces off one link and cap the `link`-exposed ones. Needs `--registry` — the markers are the registry's — and a `--link-protocol` or `--link-interface` to select the face
+          Plan a constrained face instead of the principals (RFC 09 §4): the `access_control` and `downsampling` blocks that keep the registry's `host`-exposed surfaces off one link and cap the `link`-exposed ones. Needs `--registry` — the markers are the registry's — and a `--link-protocol` or `--link-interface` to select the face. A `user` console or watch in the enrollment is planned onto the face (v1.49); every other principal is refused
 
           Possible values:
           - constrained: A bandwidth-limited leaf: radio, cell, tactical, satellite
