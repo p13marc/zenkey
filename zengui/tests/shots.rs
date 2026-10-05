@@ -6,13 +6,14 @@
 //!   shows its landmark. It keeps the scenes honest as the GUI moves, so a
 //!   screenshot named "diagnose" is still a picture of the doctor.
 //! * `shots` is `#[ignore]`d — it writes files. `just shots` runs it with
-//!   `ICED_TEST_BACKEND=wgpu` over `WGPU_BACKEND=gl` — the renderer the app
-//!   itself uses, on mesa's software GL where there is no GPU. Not
-//!   tiny-skia, though it needs no GPU at all: iced_test 0.14's tiny-skia
-//!   path drops a canvas's fills and strokes and draws its text at the
-//!   wrong offset, so the mesh and every sparkline came out blank (#533) —
-//!   a screenshot that silently omits the charts is worse than none. The
-//!   PNGs land in `$SHOTS_DIR` (default `target/shots/current`), named
+//!   `ICED_TEST_BACKEND=wgpu WGPU_BACKEND=vulkan` — the renderer the app
+//!   itself uses, on lavapipe where there is no GPU. Two cheaper paths were
+//!   tried and both lie about charts: iced_test 0.14's tiny-skia drops a
+//!   canvas's fills and strokes and misplaces its text (#533), and wgpu's
+//!   GL backend on mesa draws only the **last** canvas in a frame — the
+//!   Inspector's value sparkline came out blank above a drawn rate line
+//!   (#540). A screenshot that silently omits a chart is worse than none.
+//!   The PNGs land in `$SHOTS_DIR` (default `target/shots/current`), named
 //!   `<scene>-<theme>-wgpu.png`, at twice the scene's logical size;
 //!   `just shots-base <rev>` renders the same list from another revision,
 //!   so a visual change is reviewed as a pair.

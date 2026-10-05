@@ -134,8 +134,9 @@ just shots-base main        # the same scenes drawn from main → target/shots/b
 
 There is no display on the CI host, so the shots are how a visual change is
 reviewed: `zengui/tests/shots.rs` renders the whole-window scenes in
-`tests/common/scenes.rs` with the app's own renderer (wgpu on mesa's software
-GL — iced_test's tiny-skia path drops canvases), and a PR that moves pixels
+`tests/common/scenes.rs` with the app's own renderer (wgpu on Vulkan —
+lavapipe without a GPU; tiny-skia drops canvases and mesa's GL path draws only
+the last one in a frame), and a PR that moves pixels
 carries the before/after pair. The scenes' landmarks are checked by an
 ordinary test, so a scene keeps meaning what its name says.
 
