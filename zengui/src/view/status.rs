@@ -368,9 +368,9 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             Ok(out) => match out.as_ref() {
                 zenkey_fleet::FetchOutcome::Value(v) => {
                     format!(
-                        "fetched {key}: {} bytes via {:?}",
+                        "fetched {key}: {} bytes via {}",
                         v.payload.len(),
-                        v.source
+                        crate::view::detail::source_word(v.source)
                     )
                 }
                 zenkey_fleet::FetchOutcome::None { attempted } => format!(

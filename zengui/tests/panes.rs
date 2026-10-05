@@ -819,6 +819,15 @@ fn the_detail_pane_tags_decode_provenance() {
         "typed-but-undecoded must say so"
     );
     assert!(ui.find("hex").is_ok(), "the hex side is present");
+    // #563: the value's facts as chips — the ladder's rung in words, never
+    // the enum's `Debug` name.
+    assert!(ui.find("via storage").is_ok());
+    assert!(ui.find("application/json").is_ok());
+    assert!(
+        ui.find("value: 14 bytes via Storage · encoding application/json")
+            .is_err(),
+        "the Debug-named line is gone"
+    );
 
     // The attributed nothing.
     let none: Result<Arc<FetchOutcome>, zengui::services::ServiceError> =

@@ -17,7 +17,7 @@
 //!   explorer that renders an empty chart for a string payload has invented an
 //!   error state out of an ordinary fact.
 
-use iced::widget::{Column, row, text};
+use iced::widget::{Column, row};
 use iced::{Element, Length};
 use zenkey_fleet::Rendering;
 use zenkey_fleet::{FetchOutcome, KeyFacts, KeyShape, Registration};
@@ -27,7 +27,7 @@ use crate::series::{NumericLeaves, Series};
 use crate::value::DecodedValue;
 use crate::view::kit;
 use crate::view::spark;
-use crate::view::theme::{RegistrationTone, SeriesTone, colors};
+use crate::view::theme::{RegistrationTone, SeriesTone};
 use crate::view::tokens::{Spacing, face};
 
 /// How much payload the hex view shows before truncating (with a note).
@@ -83,7 +83,19 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
     if elided > 0 {
         col = col.push(kit::muted(format!("… {elided} more bytes not shown")));
     }
-    col.into()
+    // Set into the panel like its hex beside it (#563): the decoded value's
+    // pane always was, and the attachment's was the one left on the panel.
+    kit::inset(col).width(Length::FillPortion(1)).into()
+}
+
+/// Which rung of the fetch ladder answered, as a word (#563) — never the
+/// enum's `Debug` name. The ladder's own spelling: storage → cache → window.
+pub(crate) fn source_word(source: zenkey_fleet::ValueSource) -> &'static str {
+    match source {
+        zenkey_fleet::ValueSource::Storage => "storage",
+        zenkey_fleet::ValueSource::Cache => "@adv cache",
+        zenkey_fleet::ValueSource::Window => "live window",
+    }
 }
 
 /// Messages the pane emits.
@@ -202,38 +214,58 @@ fn qos_section<'a>(data: &DetailData<'a>) -> Option<Element<'a, Message>> {
     if declared.is_none() && observed.is_none() {
         return None;
     }
-    let mut col = Column::new().spacing(data.sp.xs);
-    col = col.push(kit::muted("QoS — declared vs observed (RFC 04 §3)"));
-    match &declared {
-        Some(q) => col = col.push(kit::mono(format!("declared: {q}"))),
-        None => col = col.push(kit::muted("declared: (registry names no profile)")),
-    }
+    // Fields since #563: the claim, the fact and where the fact came from,
+    // each under its eyebrow — "—" where there is none, said beneath.
+    let sp = data.sp;
+    let mut col = Column::new().spacing(sp.xs);
+    col = col.push(kit::eyebrow("QOS — DECLARED VS OBSERVED (RFC 04 §3)"));
+    let mono = |s: String| kit::caption(s).font(face::MONO);
+    let mut fields = vec![kit::field(
+        "DECLARED",
+        mono(
+            declared
+                .as_ref()
+                .map_or("—".to_string(), ToString::to_string),
+        ),
+    )];
     match observed {
         Some(entry) => {
-            let mut line = format!("observed: {}", qos_token(entry));
+            fields.push(kit::field("OBSERVED", mono(qos_token(entry))));
             if let Some(src) = &entry.source {
-                use std::fmt::Write as _;
-                let _ = write!(line, "  ·  source {}:{}#{}", src.zid, src.eid, src.sn);
-            }
-            col = col.push(kit::mono(line));
-            if let Some(declared) = &declared {
-                match qos_verdict(declared, entry) {
-                    Some(true) => {
-                        col = col.push(kit::muted("observed axes match the declared profile"))
-                    }
-                    Some(false) => {
-                        col = col.push(kit::muted(
-                            "⚠ observed axes differ from the declared profile — the wire \
-                             is the fact, the registry is the claim (RFC 04 §3)",
-                        ));
-                    }
-                    None => {}
-                }
+                fields.push(kit::field(
+                    "SOURCE",
+                    mono(format!("{}:{}#{}", src.zid, src.eid, src.sn)),
+                ));
             }
         }
+        None => fields.push(kit::field("OBSERVED", mono("—".to_string()))),
+    }
+    col = col.push(kit::fields(fields));
+    if declared.is_none() {
+        col = col.push(kit::muted("the registry names no profile for this key"));
+    }
+    match observed {
+        // The verdict, a badge whose glyph comes from its tone (#193) where
+        // a hand-typed ⚠ stood.
+        Some(entry) => match declared.as_ref().and_then(|d| qos_verdict(d, entry)) {
+            Some(true) => {
+                col = col.push(kit::badge_verdict(
+                    crate::view::theme::VerdictTone::Valid,
+                    "observed axes match the declared profile",
+                ))
+            }
+            Some(false) => {
+                col = col.push(kit::badge_severity(
+                    crate::view::theme::SeverityTone::Warning,
+                    "observed axes differ from the declared profile — the wire is the \
+                     fact, the registry is the claim (RFC 04 §3)",
+                ));
+            }
+            None => {}
+        },
         None => {
             col = col.push(kit::muted(
-                "observed: nothing recorded yet — axes appear once the key is observed (O4)",
+                "nothing recorded yet — the axes appear once the key is observed (O4)",
             ));
         }
     }
@@ -315,17 +347,22 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
         // One row per population. Folding a publisher-stamped sample and a
         // router-stamped one into a single median produces a number that
         // describes neither (#213).
+        col = col.push(kit::eyebrow("OBSERVED SKEWED LATENCY"));
         for (label, s) in lat.populations() {
-            col = col.push(kit::mono(format!(
-                "observed skewed latency [{label}]: med {} · p95 {} (min {} · max {}, {})",
-                human_us(s.median_us),
-                human_us(s.p95_us),
-                human_us(s.min_us),
-                human_us(s.max_us),
-                s.samples,
-            )));
+            col = col.push(
+                row![
+                    kit::caption(label.to_string()).font(face::MONO),
+                    kit::data_chip(format!("med {}", human_us(s.median_us))),
+                    kit::data_chip(format!("p95 {}", human_us(s.p95_us))),
+                    kit::data_chip(format!("min {}", human_us(s.min_us))),
+                    kit::data_chip(format!("max {}", human_us(s.max_us))),
+                    kit::muted(kit::plural(s.samples, "sample")),
+                ]
+                .spacing(sp.xs)
+                .align_y(iced::Alignment::Center),
+            );
         }
-        col = col.push(kit::mono(format!("{unstamped} unstamped")));
+        col = col.push(kit::data_chip(format!("{unstamped} unstamped")));
         // The caveat comes from the engine, so this pane and `zenctl rate
         // --latency` cannot describe the same measurement differently.
         col = col.push(kit::muted(lat.caveat()));
@@ -346,11 +383,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             ));
         }
         Fetched::Landed(Err(e)) => {
-            col = col.push(
-                kit::body(format!("fetch failed: {e}")).style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
-            );
+            col = col.push(kit::error(format!("fetch failed: {e}")));
         }
         Fetched::Landed(Ok(outcome)) => match outcome.as_ref() {
             FetchOutcome::None { attempted } => {
@@ -361,16 +394,23 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
                 )));
             }
             FetchOutcome::Value(v) => {
-                col = col.push(kit::muted(format!(
-                    "value: {} bytes via {:?} · encoding {}",
-                    v.payload.len(),
-                    v.source,
-                    if v.encoding.is_empty() {
-                        "(unset)"
-                    } else {
-                        &v.encoding
-                    },
-                )));
+                // The value's facts as chips (#563): its size, the ladder's
+                // rung that answered — in words, never a `Debug` name — and
+                // its encoding.
+                col = col.push(
+                    row![
+                        kit::eyebrow("VALUE"),
+                        kit::data_chip(kit::human_bytes(v.payload.len() as u64)),
+                        kit::data_chip(format!("via {}", source_word(v.source))),
+                        kit::data_chip(if v.encoding.is_empty() {
+                            "encoding unset".to_string()
+                        } else {
+                            v.encoding.clone()
+                        }),
+                    ]
+                    .spacing(sp.xs)
+                    .align_y(iced::Alignment::Center),
+                );
                 // Borrow through the Cow: `to_bytes()` is already free for a
                 // contiguous payload, and `.to_vec()` on top of it was the
                 // double copy the redesign flagged (`docs/zero-copy.md`).
@@ -499,7 +539,10 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
                 "ORIGIN",
                 row![
                     kit::mono(v.origin.to_string()),
-                    kit::muted(format!("{:?}", v.origin_kind)),
+                    kit::muted(match v.origin_kind {
+                        zenkey_fleet::model::facts::OriginKind::Host => "host",
+                        zenkey_fleet::model::facts::OriginKind::Service => "service",
+                    }),
                 ]
                 .spacing(sp.xs)
                 .align_y(iced::Alignment::Center),
