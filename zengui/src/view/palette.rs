@@ -19,7 +19,7 @@
 //! and these are only ever the latter).
 
 use iced::widget::{Column, column, row};
-use iced::{Element, Length};
+use iced::{Element, Length, Padding};
 
 use crate::message::{
     ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg, RightPane, WorkspaceMsg,
@@ -112,6 +112,57 @@ pub struct Action {
     pub label: String,
     /// The message it sends — the same one the UI path sends.
     pub message: Message,
+    /// Where it is filed (#558): a section of the unfiltered list, the
+    /// trailing word of a ranked one.
+    pub group: ActionGroup,
+    /// The glyph its own control wears, where it has one.
+    pub icon: kit::Icon,
+}
+
+/// The palette's sections (#558), in the order an unfiltered palette shows
+/// them: the session and the diagnoses first, so "reconnect" and "run
+/// doctor" are always on the first screen — the verbs a lost user opens the
+/// palette for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ActionGroup {
+    Session,
+    Diagnose,
+    Scope,
+    Go,
+    Activity,
+    Echo,
+    View,
+    Layout,
+}
+
+impl ActionGroup {
+    /// The section's eyebrow.
+    pub fn label(self) -> &'static str {
+        match self {
+            ActionGroup::Session => "SESSION",
+            ActionGroup::Diagnose => "DIAGNOSE",
+            ActionGroup::Scope => "SCOPE",
+            ActionGroup::Go => "GO TO",
+            ActionGroup::Activity => "ACTIVITY",
+            ActionGroup::Echo => "ECHO",
+            ActionGroup::View => "VIEW",
+            ActionGroup::Layout => "LAYOUT",
+        }
+    }
+
+    /// The trailing word of a ranked row.
+    pub fn word(self) -> &'static str {
+        match self {
+            ActionGroup::Session => "session",
+            ActionGroup::Diagnose => "diagnose",
+            ActionGroup::Scope => "scope",
+            ActionGroup::Go => "go to",
+            ActionGroup::Activity => "activity",
+            ActionGroup::Echo => "echo",
+            ActionGroup::View => "view",
+            ActionGroup::Layout => "layout",
+        }
+    }
 }
 
 /// Every command the palette offers.
@@ -120,11 +171,23 @@ pub struct Action {
 /// `ScopePreset`), so a pane or scope added elsewhere shows up here without
 /// anyone remembering to add it.
 pub fn actions(contexts: &[String]) -> Vec<Action> {
+    use ActionGroup as G;
+    use kit::Icon;
+    let act = |label: String, message: Message, group: ActionGroup, icon: Icon| Action {
+        label,
+        message,
+        group,
+        icon,
+    };
     let mut out: Vec<Action> = RightPane::ALL
         .into_iter()
-        .map(|p| Action {
-            label: format!("go to {} pane", p.label()),
-            message: Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+        .map(|p| {
+            act(
+                format!("go to {} pane", p.label()),
+                Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+                G::Go,
+                crate::view::panes::tool_icon(p),
+            )
         })
         .collect();
 
@@ -133,105 +196,141 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     // reach by clicking the right tab is one the palette has stopped
     // covering.
     for t in crate::message::ActivityTab::ALL {
-        out.push(Action {
-            label: format!("activity: {}", t.label()),
-            message: Message::Workspace(WorkspaceMsg::ActivityTab(t)),
-        });
+        out.push(act(
+            format!("activity: {}", t.label()),
+            Message::Workspace(WorkspaceMsg::ActivityTab(t)),
+            G::Activity,
+            crate::view::activity::tab_icon(t),
+        ));
     }
 
     // `ScopePreset::ALL`, custom included (#187): the palette must not
     // re-create the defect the picker had — an option list that excludes a
     // scope the window can be in.
     for scope in crate::scope::ScopePreset::ALL {
-        out.push(Action {
-            label: format!("scope: {}", scope.short()),
-            message: Message::Deployment(DeploymentMsg::ScopeSelected(scope)),
-        });
+        out.push(act(
+            format!("scope: {}", scope.short()),
+            Message::Deployment(DeploymentMsg::ScopeSelected(scope)),
+            G::Scope,
+            Icon::Filter,
+        ));
     }
 
     for name in contexts {
-        out.push(Action {
-            label: format!("context: {name}"),
-            message: Message::Pane(PaneMsg::Context(
+        out.push(act(
+            format!("context: {name}"),
+            Message::Pane(PaneMsg::Context(
                 crate::view::contexts::ContextMsg::Selected(name.clone()),
             )),
-        });
+            G::Session,
+            Icon::Plug,
+        ));
     }
 
     out.extend([
         // Connect stopped being a pane (#185), so it is not in the generated
         // pane list any more — the overlay gets its own entry, sending the
         // same message the location bar's context chip and Ctrl+Shift+C send.
-        Action {
-            label: "connect — contexts and endpoints".into(),
-            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
-        },
+        act(
+            "connect — contexts and endpoints".into(),
+            Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect))),
+            G::Session,
+            Icon::Plug,
+        ),
         // The key-expression editor (#187): the same message the location
         // bar's selectors chip sends.
-        Action {
-            label: "edit scope selectors".into(),
-            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Selectors))),
-        },
+        act(
+            "edit scope selectors".into(),
+            Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Selectors))),
+            G::Scope,
+            Icon::Selectors,
+        ),
         // The Settings overlay (#188): the same message the location bar's
         // settings chip and Ctrl+, send.
-        Action {
-            label: "settings — bounds and launch knobs".into(),
-            message: Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))),
-        },
-        Action {
-            label: "observe scope (start/stop)".into(),
-            message: Message::Deployment(DeploymentMsg::ScopeWatchToggled),
-        },
-        Action {
-            label: "run doctor".into(),
-            message: Message::Pane(PaneMsg::Doctor(crate::view::doctor::DoctorMsg::Run)),
-        },
+        act(
+            "settings — bounds and launch knobs".into(),
+            Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))),
+            G::Session,
+            Icon::Settings,
+        ),
+        act(
+            "observe scope (start/stop)".into(),
+            Message::Deployment(DeploymentMsg::ScopeWatchToggled),
+            G::Scope,
+            Icon::Watched,
+        ),
+        act(
+            "run doctor".into(),
+            Message::Pane(PaneMsg::Doctor(crate::view::doctor::DoctorMsg::Run)),
+            G::Diagnose,
+            Icon::Doctor,
+        ),
         // The why ladder (#214): the same message the Inspector's "why?"
         // button sends, run on the current subject key at the frugal
         // default (no listen).
-        Action {
-            label: "why is this key silent?".into(),
-            message: Message::Pane(PaneMsg::Why(
+        act(
+            "why is this key silent?".into(),
+            Message::Pane(PaneMsg::Why(
                 crate::message::SlotId::FOLLOW,
                 crate::view::why::WhyMsg::Run,
             )),
-        },
-        Action {
-            label: "reconnect".into(),
-            message: Message::Deployment(DeploymentMsg::Reconnect),
-        },
-        Action {
-            label: "toggle theme".into(),
-            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
-        },
-        Action {
-            label: "toggle density (comfortable/compact)".into(),
-            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)),
-        },
-        Action {
-            label: "zoom in".into(),
-            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
-        },
-        Action {
-            label: "zoom out".into(),
-            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)),
-        },
-        Action {
-            label: "reset zoom".into(),
-            message: Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)),
-        },
-        Action {
-            label: "clear echo".into(),
-            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear)),
-        },
-        Action {
-            label: "export echo as ndjson".into(),
-            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Export)),
-        },
-        Action {
-            label: "pause/follow echo".into(),
-            message: Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::FollowToggled)),
-        },
+            G::Diagnose,
+            Icon::Silent,
+        ),
+        act(
+            "reconnect".into(),
+            Message::Deployment(DeploymentMsg::Reconnect),
+            G::Session,
+            Icon::Reconnect,
+        ),
+        act(
+            "toggle theme".into(),
+            Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)),
+            G::View,
+            Icon::Dark,
+        ),
+        act(
+            "toggle density (comfortable/compact)".into(),
+            Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled)),
+            G::View,
+            Icon::Density,
+        ),
+        act(
+            "zoom in".into(),
+            Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)),
+            G::View,
+            Icon::ZoomIn,
+        ),
+        act(
+            "zoom out".into(),
+            Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)),
+            G::View,
+            Icon::ZoomOut,
+        ),
+        act(
+            "reset zoom".into(),
+            Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)),
+            G::View,
+            Icon::Search,
+        ),
+        act(
+            "clear echo".into(),
+            Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Clear)),
+            G::Echo,
+            Icon::Clear,
+        ),
+        act(
+            "export echo as ndjson".into(),
+            Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::Export)),
+            G::Echo,
+            Icon::Export,
+        ),
+        act(
+            "pause/follow echo".into(),
+            Message::Pane(PaneMsg::Echo(crate::view::echo::EchoMsg::FollowToggled)),
+            G::Echo,
+            Icon::Pause,
+        ),
     ]);
 
     // The workspace grid (#180), past the first screenful on purpose — the
@@ -240,20 +339,43 @@ pub fn actions(contexts: &[String]) -> Vec<Action> {
     //
     // The saved layouts: the same messages Alt+1/2/3 send.
     for preset in crate::prefs::LayoutPreset::ALL {
-        out.push(Action {
-            label: format!("layout: {}", preset.label()),
-            message: Message::Workspace(WorkspaceMsg::LayoutPreset(preset)),
-        });
+        out.push(act(
+            format!("layout: {}", preset.label()),
+            Message::Workspace(WorkspaceMsg::LayoutPreset(preset)),
+            G::Layout,
+            crate::view::location::preset_icon(preset),
+        ));
     }
     // The dock toggles: the same message the dock strip and each title bar's
     // `×` send — and the keyboard route back to a closed dock.
     for role in crate::prefs::DockRole::ALL {
-        out.push(Action {
-            label: format!("toggle {} dock", role.label()),
-            message: Message::Workspace(WorkspaceMsg::DockToggled(role)),
-        });
+        out.push(act(
+            format!("toggle {} dock", role.label()),
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+            G::Layout,
+            crate::view::panes::dock_icon(role),
+        ));
     }
     out
+}
+
+/// The order the command palette shows `items` in (#558). Unfiltered, by
+/// section — [`ActionGroup`]'s order, then the list's — so the first screen
+/// is the session and the diagnoses; with a query, best match first
+/// ([`rank`]). Bounded either way, by the same `MAX_ROWS`: the section
+/// headers are drawn, not counted.
+///
+/// The one ordering the view and the cursor share, so the row the cursor
+/// highlights is the row Enter runs.
+pub fn command_order(items: &[Action], query: &str) -> Vec<usize> {
+    if query.trim().is_empty() {
+        let mut order: Vec<usize> = (0..items.len()).collect();
+        order.sort_by_key(|&i| (items[i].group, i));
+        order.truncate(MAX_ROWS);
+        order
+    } else {
+        rank(items, query, |a| a.label.as_str())
+    }
 }
 
 /// Subsequence fuzzy match, case-insensitive: `gtd` finds "go to detail pane".
@@ -319,15 +441,34 @@ pub fn overlay<'a>(
         Overlay::Settings => Some(floated(crate::view::settings::pane(settings))),
         Overlay::Commands => {
             let items = actions(&form.known);
-            let order = rank(&items, &state.query, |a| a.label.as_str());
+            let order = command_order(&items, &state.query);
+            // Unfiltered, the list is sectioned; ranked, each row names its
+            // section instead — a header between ranked rows would split
+            // the best match from the next.
+            let grouped = state.query.trim().is_empty();
+            let mut previous = None;
+            let rows = order
+                .iter()
+                .map(|&i| {
+                    let a = &items[i];
+                    let header = (grouped && previous != Some(a.group)).then(|| a.group.label());
+                    previous = Some(a.group);
+                    ListRow {
+                        label: a.label.clone(),
+                        icon: Some(a.icon),
+                        mono: false,
+                        keys: crate::shortcuts::keys_for(&a.message),
+                        header,
+                        trailing: (!grouped).then(|| a.group.word()),
+                    }
+                })
+                .collect();
             Some(list(
                 state,
-                "Command palette",
-                "type to filter — Enter runs, Esc closes",
-                order
-                    .iter()
-                    .map(|i| items[*i].label.clone())
-                    .collect::<Vec<_>>(),
+                (kit::Icon::Command, "Command palette"),
+                "type a command…",
+                None,
+                rows,
             ))
         }
         Overlay::Keys => {
@@ -336,24 +477,49 @@ pub fn overlay<'a>(
             let order = rank(&keys, &state.query, |k| *k);
             Some(list(
                 state,
-                "Jump to key",
-                "fuzzy over keys observed so far — nothing here is a guess (O4)",
+                (kit::Icon::Keys, "Jump to key"),
+                "type part of a key…",
+                Some("fuzzy over keys observed so far — nothing here is a guess (O4)"),
                 order
                     .iter()
-                    .map(|i| keys[*i].to_string())
-                    .collect::<Vec<_>>(),
+                    .map(|i| ListRow {
+                        label: keys[*i].to_string(),
+                        icon: None,
+                        mono: true,
+                        keys: None,
+                        header: None,
+                        trailing: None,
+                    })
+                    .collect(),
             ))
         }
     }
 }
 
+/// One drawn row of a list overlay (#558).
+struct ListRow {
+    label: String,
+    icon: Option<kit::Icon>,
+    /// A key is mono; a command is sans — it is read, not compared.
+    mono: bool,
+    /// The chord that runs it, from the shortcut map ([`crate::shortcuts::keys_for`]).
+    keys: Option<&'static str>,
+    /// A section eyebrow drawn above this row — the unfiltered palette.
+    header: Option<&'static str>,
+    /// The section as a trailing word — the ranked palette.
+    trailing: Option<&'static str>,
+}
+
+/// A list overlay: the shared header, a search field, the rows, and the
+/// keys that drive them as a footer.
 fn list<'a>(
     state: &'a PaletteState,
-    title: &'a str,
-    hint: &'a str,
-    rows: Vec<String>,
+    (icon, title): (kit::Icon, &'static str),
+    placeholder: &str,
+    hint: Option<&'static str>,
+    rows: Vec<ListRow>,
 ) -> Element<'a, Message> {
-    let input = kit::input("…", &state.query)
+    let input = kit::search(placeholder, &state.query)
         .on_input(|q| Message::Chrome(ChromeMsg::Palette(PaletteMsg::QueryChanged(q))))
         .on_submit(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Activate)))
         .size(font::BODY);
@@ -362,41 +528,108 @@ fn list<'a>(
     if rows.is_empty() {
         body = body.push(kit::muted("nothing matches"));
     }
-    for (i, label) in rows.iter().enumerate() {
+    for (i, r) in rows.into_iter().enumerate() {
+        if let Some(h) = r.header {
+            // Air above every section but the first; the eyebrow is a
+            // label, not a row — the cursor never lands on it.
+            let air = if i == 0 { 0.0 } else { space::SM };
+            body = body.push(
+                iced::widget::container(kit::eyebrow(h))
+                    .padding(Padding::ZERO.top(air).left(space::XS)),
+            );
+        }
         let selected = i == state.cursor;
+        let label = kit::caption(r.label);
+        let mut line = row![
+            // The cursor's mark holds its width when absent, so the labels
+            // never shift as the cursor moves.
+            if selected {
+                Element::from(kit::icon_caption(kit::Icon::ChevronRight))
+            } else {
+                iced::widget::Space::new()
+                    .width(Length::Fixed(font::CAPTION))
+                    .into()
+            },
+        ]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center);
+        if let Some(icon) = r.icon {
+            line = line.push(kit::icon_caption(icon));
+        }
+        line = line.push(if r.mono {
+            label.font(face::MONO)
+        } else {
+            label
+        });
+        line = line.push(iced::widget::space::horizontal());
+        if let Some(word) = r.trailing {
+            line = line.push(kit::muted(word));
+        }
+        if let Some(keys) = r.keys {
+            line = line.push(kit::data_chip(keys));
+        }
         body = body.push(
-            kit::row_button(
-                row![
-                    // The cursor's mark holds its width when absent, so
-                    // the labels never shift as the cursor moves.
-                    if selected {
-                        Element::from(kit::icon_caption(kit::Icon::ChevronRight))
-                    } else {
-                        iced::widget::Space::new()
-                            .width(Length::Fixed(font::CAPTION))
-                            .into()
-                    },
-                    kit::caption(label.clone()).font(face::MONO),
-                ]
-                .spacing(space::SM),
-                selected,
-            )
-            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
-            .padding([0.0, space::XS]),
+            kit::row_button(line, selected)
+                .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Pick(i))))
+                .padding([0.0, space::XS]),
         );
     }
 
+    let mut col = column![modal_header(icon, title), input].spacing(space::SM);
+    if let Some(hint) = hint {
+        col = col.push(kit::muted(hint));
+    }
     kit::modal(
-        column![
-            kit::section_header(title, None),
-            input,
-            kit::muted(hint),
-            iced::widget::scrollable(body).height(Length::Fixed(260.0)),
-        ]
-        .spacing(space::SM),
+        // Embedded (#558, as the tree's since #557): iced's rail is opaque,
+        // and floating it covered each row's keycap.
+        col.push(
+            iced::widget::scrollable(body)
+                .height(Length::Fixed(300.0))
+                .spacing(space::XS),
+        )
+        .push(keycaps()),
         560.0,
         None,
     )
+}
+
+/// The shared header of the overlays this module draws whole (#558): the
+/// overlay's glyph and name, and how to leave it, on one line.
+fn modal_header<'a>(icon: kit::Icon, title: &'static str) -> Element<'a, Message> {
+    use crate::shortcuts::{Chord, chord_keys};
+    row![
+        kit::icon(icon),
+        kit::section(title),
+        iced::widget::space::horizontal(),
+        kit::data_chip(chord_keys(Chord::Escape)),
+        kit::muted("closes"),
+    ]
+    .spacing(space::SM)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The keys that drive a list overlay, as keycaps (#558) — spelled by the
+/// shortcut map's own chord rows, so the footer cannot restate a key the
+/// app does not answer.
+fn keycaps<'a>() -> Element<'a, Message> {
+    use crate::shortcuts::{Chord, chord_keys};
+    let pair = |keys: &[Chord], what: &'static str| {
+        let mut r = iced::widget::Row::new()
+            .spacing(space::XS)
+            .align_y(iced::Alignment::Center);
+        for k in keys {
+            r = r.push(kit::data_chip(chord_keys(*k)));
+        }
+        r.push(kit::muted(what))
+    };
+    row![
+        pair(&[Chord::Up, Chord::Down], "move"),
+        pair(&[Chord::Enter], "run"),
+    ]
+    .spacing(space::MD)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 /// The Connect overlay (#185): [`crate::view::contexts::pane`], floated.
@@ -405,15 +638,16 @@ fn list<'a>(
 /// workbench and its messages still route through `PaneMsg::Context` — only
 /// the surface moved: contexts and endpoints are about how the window
 /// reaches a bus, not about the subject, so they stopped being a tab a lost
-/// user had to find.
+/// user had to find. The pane brings its own header, so how to leave sits
+/// below it (#558) — a caption above a header read as a header of its own.
 fn connect<'a>(
     form: &'a crate::view::contexts::ContextForm,
     unreachable: bool,
 ) -> Element<'a, Message> {
     kit::modal(
         column![
-            kit::muted("session setup — Esc closes"),
             crate::view::contexts::pane(form, unreachable),
+            kit::muted("session setup — Esc closes"),
         ]
         .spacing(space::SM),
         640.0,
@@ -430,12 +664,12 @@ fn selectors(scope: crate::view::scope_editor::ScopeEditorData<'_>) -> Element<'
 
 /// The shared frame of the Selectors (#187) and Settings (#188) modals:
 /// Connect's shape — fixed, bordered, on the surface color — with the modal's
-/// content scrolling inside it.
+/// content scrolling inside it, and how to leave below it (#558).
 fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
     kit::modal(
         column![
-            kit::muted("Esc closes"),
             iced::widget::scrollable(content).height(Length::Fill),
+            kit::muted("Esc closes"),
         ]
         .spacing(space::SM),
         640.0,
@@ -447,24 +681,41 @@ fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
 /// what dispatches. There is no second list to keep in step: the trailing
 /// lines that used to restate `Ctrl P`, `Ctrl K` and `?` by hand are gone
 /// (#190) — the table holds the modifier-less bindings now, Esc included,
-/// so the overlay renders exactly the table and nothing else.
+/// so the overlay renders exactly the table and nothing else. Since #558 it
+/// is sectioned by the table's own [`crate::shortcuts::Group`], and each
+/// binding's keys are one keycap — one text, so `find(binding.keys)` still
+/// sees each.
 fn help<'a>() -> Element<'a, Message> {
     let mut body = Column::new().spacing(space::XS);
+    let mut previous = None;
     for b in crate::shortcuts::map() {
+        if previous != Some(b.group) {
+            let air = if previous.is_none() { 0.0 } else { space::SM };
+            body = body.push(
+                iced::widget::container(kit::eyebrow(b.group.label()))
+                    .padding(Padding::ZERO.top(air)),
+            );
+            previous = Some(b.group);
+        }
         body = body.push(
             row![
-                kit::caption(b.keys)
-                    .font(face::MONO)
-                    .width(Length::Fixed(90.0)),
-                kit::muted(b.what),
+                iced::widget::container(kit::data_chip(b.keys)).width(Length::Fixed(120.0)),
+                kit::caption(b.what),
             ]
-            .spacing(space::SM),
+            .spacing(space::SM)
+            .align_y(iced::Alignment::Center),
         );
     }
 
     kit::modal(
-        column![kit::section_header("Shortcuts", None), body].spacing(space::SM),
-        480.0,
+        column![
+            modal_header(kit::Icon::Keyboard, "Shortcuts"),
+            iced::widget::scrollable(body)
+                .height(Length::Fixed(560.0))
+                .spacing(space::XS),
+        ]
+        .spacing(space::SM),
+        520.0,
         None,
     )
 }
@@ -685,13 +936,42 @@ mod tests {
         // …and an unfiltered palette still reaches past the panes and scopes,
         // so a fresh overlay does not read as "this is all there is".
         let items = actions(&["lab".to_string()]);
-        let unfiltered = rank(&items, "", |a| a.label.as_str());
+        let unfiltered = command_order(&items, "");
+        assert_eq!(unfiltered.len(), MAX_ROWS);
         assert!(
             unfiltered
                 .iter()
                 .any(|i| items[*i].label.starts_with("context:")),
             "the first screenful must show more than panes and scopes"
         );
+    }
+
+    /// #558: the unfiltered palette is sectioned, session and diagnoses
+    /// first — so the verbs a lost user opens it for are on the first
+    /// screen, not wherever their label length put them.
+    #[test]
+    fn an_unfiltered_palette_leads_with_the_session_and_the_diagnoses() {
+        let items = actions(&["lab".to_string()]);
+        let order = command_order(&items, "");
+        let groups: Vec<ActionGroup> = order.iter().map(|i| items[*i].group).collect();
+        assert!(
+            groups.windows(2).all(|w| w[0] <= w[1]),
+            "one run per section"
+        );
+        assert_eq!(groups[0], ActionGroup::Session);
+        let first_screen: Vec<&str> = order[..10]
+            .iter()
+            .map(|i| items[*i].label.as_str())
+            .collect();
+        for verb in ["reconnect", "run doctor", "why is this key silent?"] {
+            assert!(
+                first_screen.contains(&verb),
+                "{verb} is past the first screen"
+            );
+        }
+        // A query ranks instead: the best match first, sections or not.
+        let ranked = command_order(&items, "doctor");
+        assert_eq!(items[ranked[0]].label, "run doctor");
     }
 
     /// One overlay at a time, by construction — and closing forgets the query

@@ -227,6 +227,18 @@ fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Messa
         .padding([space::XS, space::SM])
 }
 
+/// The icon a workbench tool wears on the tool strip — and on its palette
+/// entry (#558).
+pub(crate) fn tool_icon(p: RightPane) -> kit::Icon {
+    match p {
+        RightPane::Send => kit::Icon::Send,
+        RightPane::Nodes => kit::Icon::Nodes,
+        RightPane::Admin => kit::Icon::Admin,
+        RightPane::Mesh => kit::Icon::Mesh,
+        RightPane::Inspector => kit::Icon::Inspector,
+    }
+}
+
 /// The icon a dock wears in its header and on the dock strip.
 pub(crate) fn dock_icon(role: DockRole) -> kit::Icon {
     match role {
@@ -381,13 +393,7 @@ fn workbench<'a>(
             .map(|p| kit::Segment {
                 value: p,
                 label: p.label().to_string(),
-                icon: Some(match p {
-                    RightPane::Send => kit::Icon::Send,
-                    RightPane::Nodes => kit::Icon::Nodes,
-                    RightPane::Admin => kit::Icon::Admin,
-                    RightPane::Mesh => kit::Icon::Mesh,
-                    RightPane::Inspector => kit::Icon::Inspector,
-                }),
+                icon: Some(tool_icon(p)),
                 count: None,
                 tip: None,
             })

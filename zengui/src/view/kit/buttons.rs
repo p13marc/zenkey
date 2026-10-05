@@ -9,7 +9,7 @@ use iced::{Border, Color, Element, Length};
 use super::caption;
 use super::icon::{Icon, icon};
 use crate::view::theme::colors;
-use crate::view::tokens::{radius, space, stroke};
+use crate::view::tokens::{face, font, radius, space, stroke};
 
 // ---------------------------------------------------------------------------
 // Interactive constructors (#193)
@@ -249,6 +249,19 @@ pub fn input<'a, M: Clone + 'a>(placeholder: &str, value: &str) -> TextInput<'a,
     })
 }
 
+/// A search field (#558): [`input`] with a search glyph inside it, on the
+/// left — the palette, the tree's find box, echo's filter. The glyph keeps
+/// saying what the field is for once its placeholder has been typed over.
+pub fn search<'a, M: Clone + 'a>(placeholder: &str, value: &str) -> TextInput<'a, M> {
+    input(placeholder, value).icon(iced::widget::text_input::Icon {
+        font: face::ICONS,
+        code_point: Icon::Search.codepoint(),
+        size: Some(font::CAPTION.into()),
+        spacing: space::SM,
+        side: iced::widget::text_input::Side::Left,
+    })
+}
+
 /// A dropdown. An open picker wears the [`focus_ring`] — it holds the
 /// keyboard.
 pub fn picker<'a, T, L, V, M>(
@@ -371,7 +384,10 @@ pub fn icon_button<'a, M: 'a>(i: Icon, word: Option<&'a str>) -> Button<'a, M> {
 /// A hover hint. Never the only place something is said: what a tooltip
 /// holds is a *name* or a *shortcut* for a control whose meaning is
 /// already on screen.
-pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: &'a str) -> Element<'a, M> {
+pub fn tip<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
+    label: impl iced::widget::text::IntoFragment<'a>,
+) -> Element<'a, M> {
     tooltip(
         content,
         container(caption(label))

@@ -97,6 +97,25 @@ pub const ALL: &[Scene] = &[
         build: palette,
         landmark: "run doctor",
     },
+    // The palette ranked (#558): a typed query, each row naming its section.
+    Scene {
+        name: "palette-query",
+        size: DESKTOP,
+        build: palette_query,
+        landmark: "zoom in",
+    },
+    Scene {
+        name: "keys",
+        size: DESKTOP,
+        build: keys,
+        landmark: "fuzzy over keys observed so far — nothing here is a guess (O4)",
+    },
+    Scene {
+        name: "help",
+        size: DESKTOP,
+        build: help,
+        landmark: "Shortcuts",
+    },
     Scene {
         name: "settings",
         size: DESKTOP,
@@ -507,6 +526,23 @@ fn overlay(theme: ThemeChoice, which: Overlay) -> Zengui {
 
 fn palette(theme: ThemeChoice) -> Zengui {
     overlay(theme, Overlay::Commands)
+}
+
+fn palette_query(theme: ThemeChoice) -> Zengui {
+    let mut app = overlay(theme, Overlay::Commands);
+    send(
+        &mut app,
+        Message::Chrome(ChromeMsg::Palette(PaletteMsg::QueryChanged("zo".into()))),
+    );
+    app
+}
+
+fn keys(theme: ThemeChoice) -> Zengui {
+    overlay(theme, Overlay::Keys)
+}
+
+fn help(theme: ThemeChoice) -> Zengui {
+    overlay(theme, Overlay::Help)
 }
 
 fn settings(theme: ThemeChoice) -> Zengui {

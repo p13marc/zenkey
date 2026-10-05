@@ -230,11 +230,11 @@ fn update_palette(
 /// keys (fat pointers, no string bytes) — runs per keypress, not per
 /// frame (#110).
 fn palette_row_count(chrome: &Chrome, dep: &Deployment, work: &Workspace) -> usize {
-    use view::palette::{Overlay, actions, rank};
+    use view::palette::{Overlay, actions, command_order, rank};
     match chrome.palette.overlay {
         Overlay::Commands => {
             let items = actions(&work.bench.context_form.known);
-            rank(&items, &chrome.palette.query, |a| a.label.as_str()).len()
+            command_order(&items, &chrome.palette.query).len()
         }
         Overlay::Keys => {
             // Observed keys only — never a guess (O4): the jump-to
@@ -255,11 +255,12 @@ fn palette_row(
     work: &Workspace,
     index: usize,
 ) -> Option<Message> {
-    use view::palette::{Overlay, actions, rank};
+    use view::palette::{Overlay, actions, command_order, rank};
     match chrome.palette.overlay {
         Overlay::Commands => {
             let items = actions(&work.bench.context_form.known);
-            let order = rank(&items, &chrome.palette.query, |a| a.label.as_str());
+            // The view's own order (#558): the cursor runs the row it lit.
+            let order = command_order(&items, &chrome.palette.query);
             order.get(index).map(|i| items[*i].message.clone())
         }
         Overlay::Keys => {
