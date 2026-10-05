@@ -469,6 +469,8 @@ pub enum PaneMsg {
     Consumers(SlotId, crate::view::consumers::ConsumersMsg),
     /// Admin & storage panel interactions (issue #70).
     Admin(crate::view::admin::AdminMsg),
+    /// Mesh tool interactions (#541).
+    Mesh(crate::view::mesh::MeshMsg),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
     /// Connect-overlay interactions (issue #67; an overlay since #185).
@@ -504,6 +506,7 @@ impl PaneMsg {
             | PaneMsg::Consumers(..) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
+            PaneMsg::Mesh(_) => RightPane::Mesh,
             // The Activity dock's streams (#183), and the Connect (#185),
             // Selectors (#187) and Settings (#188) overlays: regions of the
             // window, but not right-hand panes, and answering a pane for one
@@ -619,6 +622,9 @@ pub enum RightPane {
     Nodes,
     /// Routers, storages and the state-coverage table (issue #70).
     Admin,
+    /// The swept topology, drawn (#541) — a tool of its own, read from the
+    /// admin sweep.
+    Mesh,
     // `Connect` is deliberately absent since #185: contexts and endpoints
     // (issue #67) are a session-scoped *overlay*
     // ([`Overlay::Connect`](crate::view::palette::Overlay)), reached from the
@@ -629,11 +635,12 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in the old tab order — the palette and the workbench's
     /// tool strip iterate this, so a new variant cannot be forgotten.
-    pub const ALL: [RightPane; 4] = [
+    pub const ALL: [RightPane; 5] = [
         RightPane::Send,
         RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Admin,
+        RightPane::Mesh,
     ];
 
     pub fn label(self) -> &'static str {
@@ -642,6 +649,7 @@ impl RightPane {
             RightPane::Inspector => "inspector",
             RightPane::Nodes => "nodes",
             RightPane::Admin => "admin",
+            RightPane::Mesh => "mesh",
         }
     }
 }
@@ -765,6 +773,7 @@ mod tests {
             PaneMsg::Fields(SlotId::FOLLOW, view::fields::FieldsMsg::Run),
             PaneMsg::Why(SlotId::FOLLOW, view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
+            PaneMsg::Mesh(view::mesh::MeshMsg::CopyDot),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),
             PaneMsg::Settings(view::settings::SettingsMsg::Apply),

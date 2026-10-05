@@ -104,6 +104,7 @@ pub mod inspector;
 pub mod kit;
 pub mod location;
 pub mod media;
+pub mod mesh;
 pub mod nodes;
 pub mod palette;
 pub mod panes;

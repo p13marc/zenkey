@@ -360,6 +360,7 @@ fn workbench<'a>(
                     RightPane::Send => kit::Icon::Send,
                     RightPane::Nodes => kit::Icon::Nodes,
                     RightPane::Admin => kit::Icon::Admin,
+                    RightPane::Mesh => kit::Icon::Mesh,
                     RightPane::Inspector => kit::Icon::Inspector,
                 }),
                 count: None,
@@ -384,6 +385,7 @@ fn workbench<'a>(
             sp,
         }),
         RightPane::Admin => view::admin::pane(&work.verdicts.admin, sp),
+        RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
         // Unreachable by construction — `PaneSelected(Inspector)` restores
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and

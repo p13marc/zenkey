@@ -69,6 +69,12 @@ pub const ALL: &[Scene] = &[
         name: "workbench-admin",
         size: DESKTOP,
         build: workbench_admin,
+        landmark: "open the mesh tool",
+    },
+    Scene {
+        name: "workbench-mesh",
+        size: DESKTOP,
+        build: workbench_mesh,
         landmark: "drag to pan · scroll to zoom · right-click resets",
     },
     Scene {
@@ -312,6 +318,15 @@ fn workbench_send(theme: ThemeChoice) -> Zengui {
 
 fn workbench_nodes(theme: ThemeChoice) -> Zengui {
     workbench(theme, RightPane::Nodes)
+}
+
+fn workbench_mesh(theme: ThemeChoice) -> Zengui {
+    let mut app = workbench_admin(theme);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Mesh)),
+    );
+    app
 }
 
 fn workbench_admin(theme: ThemeChoice) -> Zengui {
