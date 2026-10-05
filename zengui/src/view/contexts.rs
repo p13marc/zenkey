@@ -256,66 +256,73 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     if unreachable {
         // The same warning the status strip carries, repeated where the fix
         // is: an empty tree and a session that reaches nothing look identical.
-        col = col.push(
-            kit::body(
-                "this session has no endpoints and multicast scouting is off — \
-                 it reaches nothing",
-            )
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            }),
-        );
+        col = col.push(kit::error(
+            "this session has no endpoints and multicast scouting is off — \
+             it reaches nothing",
+        ));
     }
 
+    // Labelled fields (#559): the label survives typing, the placeholder is
+    // only an example, and what a field means is its helper line.
     col = col.push(kit::section_header("Edit", None));
     col = col.push(
-        kit::input("name", &form.name)
-            .on_input(|t| msg(ContextMsg::NameChanged(t)))
-            .size(font::CAPTION),
+        row![
+            field("NAME", "lab", &form.name, ContextMsg::NameChanged, None),
+            field(
+                "BASE",
+                "acme/fleet-a",
+                &form.base,
+                ContextMsg::BaseChanged,
+                Some("empty = the bus root: keys start at v1/".into()),
+            ),
+            field(
+                "TIMEOUT (S)",
+                "5",
+                &form.timeout,
+                ContextMsg::TimeoutChanged,
+                Some("per query; empty = 5".into()),
+            ),
+        ]
+        .spacing(space::SM),
     );
-    col = col.push(
-        kit::input("base (empty = the bus root, keys start at v1/)", &form.base)
-            .on_input(|t| msg(ContextMsg::BaseChanged(t)))
-            .size(font::CAPTION),
-    );
-    col = col.push(
-        kit::input("connect: tcp/127.0.0.1:7447 …", &form.connect)
-            .on_input(|t| msg(ContextMsg::ConnectChanged(t)))
-            .size(font::CAPTION),
-    );
-    col = col.push(
-        kit::input("listen: tcp/0.0.0.0:7448 …", &form.listen)
-            .on_input(|t| msg(ContextMsg::ListenChanged(t)))
-            .size(font::CAPTION),
-    );
-    col = col.push(
-        kit::input(
-            "zenoh config file (JSON5) — reaches a secured bus; knobs above apply on top",
-            &form.zenoh_config,
-        )
-        .on_input(|t| msg(ContextMsg::ZenohConfigChanged(t)))
-        .size(font::CAPTION),
-    );
-    col = col.push(
-        kit::input(
-            "registry dirs (registry/*.{toml,kdl}), space-separated — offline slices, RFC 08 §6",
-            &form.registry,
-        )
-        .on_input(|t| msg(ContextMsg::RegistryChanged(t)))
-        .size(font::CAPTION),
-    );
-    col = col.push(
-        kit::input("query timeout in seconds (empty = 5)", &form.timeout)
-            .on_input(|t| msg(ContextMsg::TimeoutChanged(t)))
-            .size(font::CAPTION),
-    );
+    col = col.push(field(
+        "CONNECT",
+        "tcp/127.0.0.1:7447 …",
+        &form.connect,
+        ContextMsg::ConnectChanged,
+        Some("endpoints this session dials, space-separated".into()),
+    ));
+    col = col.push(field(
+        "LISTEN",
+        "tcp/0.0.0.0:7448 …",
+        &form.listen,
+        ContextMsg::ListenChanged,
+        Some("listening makes the session a peer others can reach (RFC 09 §5)".into()),
+    ));
+    col = col.push(field(
+        "ZENOH CONFIG",
+        "~/zenoh/secure.json5",
+        &form.zenoh_config,
+        ContextMsg::ZenohConfigChanged,
+        Some("a JSON5 file — reaches a secured bus; the fields above apply on top".into()),
+    ));
+    col = col.push(field(
+        "REGISTRY",
+        "registry/ ../other/registry",
+        &form.registry,
+        ContextMsg::RegistryChanged,
+        Some("dirs of registry/*.{toml,kdl}, space-separated — offline slices (RFC 08 §6)".into()),
+    ));
     col = col.push(
         kit::check(form.scouting)
             .label("multicast scouting")
             .on_toggle(|b| msg(ContextMsg::ScoutingToggled(b)))
             .text_size(font::CAPTION),
     );
-    col = col.push(scouting_help());
+    col = col.push(kit::callout(
+        crate::view::theme::Tone::Info,
+        scouting_help(),
+    ));
     col = col.push(
         row![
             kit::secondary(kit::caption("save"))
@@ -334,15 +341,32 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     if let Some(status) = &form.status {
         col = col.push(match status {
             Ok(s) => kit::muted(s.clone()),
-            Err(e) => kit::body(e.to_string())
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                })
-                .into(),
+            Err(e) => kit::error(e.to_string()),
         });
     }
 
-    iced::widget::scrollable(col).height(Length::Fill).into()
+    // Embedded: iced's opaque rail would sit over the inputs' right edge.
+    iced::widget::scrollable(col)
+        .height(Length::Fill)
+        .spacing(space::XS)
+        .into()
+}
+
+/// One labelled text box of the editor (#559).
+fn field<'a>(
+    label: &'static str,
+    example: &str,
+    value: &'a str,
+    on_input: fn(String) -> ContextMsg,
+    help: Option<String>,
+) -> Element<'a, Message> {
+    kit::form_field(
+        label,
+        kit::input(example, value)
+            .on_input(move |t| msg(on_input(t)))
+            .size(font::CAPTION),
+        help,
+    )
 }
 
 /// RFC 09 §0.1, in the place it matters. Two switches, not one — and the

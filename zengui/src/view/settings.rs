@@ -139,88 +139,81 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     let mut col = column![
         kit::section_header("Settings", None),
         // ── Window (issue #73's chrome preferences, grouped here) ──
-        kit::caption("window"),
+        group("window"),
         row![
             kit::ghost(kit::caption(format!("theme: {}", d.theme)))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)))
                 .padding(space::XS),
-            kit::ghost(kit::caption("-"))
-                .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)))
-                .padding(space::XS),
+            kit::icon_button(kit::Icon::ZoomOut, None)
+                .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut))),
             kit::ghost(kit::caption(format!(
                 "{}%",
                 (d.zoom * 100.0).round() as i32
             )))
             .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)))
             .padding(space::XS),
-            kit::ghost(kit::caption("+"))
-                .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)))
-                .padding(space::XS),
+            kit::icon_button(kit::Icon::ZoomIn, None)
+                .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
         ]
-        .spacing(space::SM),
+        .spacing(space::XS)
+        .align_y(iced::Alignment::Center),
         // ── The bounds that apply live ──
-        kit::caption("bounds — applied live"),
+        group("bounds — applied live"),
         kit::body(BOUND_INVARIANT).style(muted),
     ]
     .spacing(space::SM);
 
     let (echo_len, echo_evicted, echo_lagged) = d.echo;
+    // Each bound is a labelled field whose helper is its cost (#559): the
+    // sentence that says what raising it spends sits under the box, not in
+    // a placeholder that typing erases.
     col = col.push(input_row(
-        "echo lines",
-        "how many echo lines to retain",
+        "ECHO LINES",
+        "2000",
         &d.form.echo_lines,
         SettingsMsg::EchoLinesChanged,
-    ));
-    col = col.push(
-        kit::body(format!(
+        format!(
             "applies live — a larger ring is more memory and a longer filter \
              scan. now: {} held (+{echo_evicted} evicted, {echo_lagged} lagged)",
             kit::plural(echo_len, "line"),
-        ))
-        .style(muted),
-    );
+        ),
+    ));
     col = col.push(input_row(
-        "history entries",
-        "how many samples of the selected key to retain",
+        "HISTORY ENTRIES",
+        "200",
         &d.form.history_entries,
         SettingsMsg::HistoryEntriesChanged,
-    ));
-    col = col.push(
-        kit::body(format!(
+        format!(
             "applies live — history keeps whole payloads so it can diff them: \
              the costliest bound per entry. now: {}",
             match d.history {
                 Some((len, evicted)) => format!("{len} entries (+{evicted} evicted)"),
                 None => "no key recording (nothing selected)".to_string(),
             }
-        ))
-        .style(muted),
-    );
+        ),
+    ));
     col = col.push(input_row(
-        "timeout (s)",
-        "query timeout in seconds",
+        "QUERY TIMEOUT (S)",
+        "5",
         &d.form.timeout,
         SettingsMsg::TimeoutChanged,
+        "applies live — from the next query".to_string(),
     ));
-    col = col.push(kit::body("applies live — from the next query").style(muted));
 
     // ── The bounds that need a reconnect ──
     let (keys, keys_evicted) = d.keys;
-    col = col.push(kit::caption("bounds — take effect on reconnect"));
+    col = col.push(group("bounds — take effect on reconnect"));
     col = col.push(input_row(
-        "max keys",
-        "how many distinct keys to keep statistics for",
+        "MAX KEYS",
+        "50000",
         &d.form.max_keys,
         SettingsMsg::MaxKeysChanged,
-    ));
-    col = col.push(
-        kit::body(format!(
+        format!(
             "takes effect on reconnect — a larger key table is more memory. \
              now: {}",
             keys_text(keys, keys_evicted),
-        ))
-        .style(muted),
-    );
+        ),
+    ));
     col = col.push(
         kit::check(d.form.eager)
             .label("eager — observe the scope immediately on connect")
@@ -236,23 +229,22 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     );
 
     // ── The registry, which is not a bound at all ──
-    col = col.push(kit::caption("registry"));
+    col = col.push(group("registry"));
     col = col.push(input_row(
-        "registry dirs",
-        "registry dirs (registry/*.{toml,kdl}), space-separated — empty = the bus's slices",
+        "REGISTRY DIRS",
+        "registry/ ../other/registry",
         &d.form.registry,
         SettingsMsg::RegistryChanged,
+        "a registry change re-runs the slice union and can change every \
+         registration badge in the tree — applying it takes the same \
+         forget path a base change does: every verdict about the old \
+         slices is dropped rather than left on screen (O4). To keep it \
+         across launches, save it into a context (Connect)."
+            .to_string(),
     ));
-    col = col.push(
-        kit::body(
-            "a registry change re-runs the slice union and can change every \
-             registration badge in the tree — applying it takes the same \
-             forget path a base change does: every verdict about the old \
-             slices is dropped rather than left on screen (O4). To keep it \
-             across launches, save it into a context (Connect).",
-        )
-        .style(muted),
-    );
+    col = col.push(kit::muted(
+        "dirs of registry/*.{toml,kdl}, space-separated — empty = the bus's slices",
+    ));
 
     col = col.push(
         row![
@@ -269,16 +261,12 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     if let Some(status) = &d.form.status {
         col = col.push(match status {
             Ok(s) => Element::from(kit::body(s.clone()).style(muted)),
-            Err(e) => kit::body(e.clone())
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                })
-                .into(),
+            Err(e) => kit::error(e.clone()),
         });
     }
 
     // ── Every remaining Settings field, documented where it lives ──
-    col = col.push(kit::caption("owned elsewhere"));
+    col = col.push(group("owned elsewhere"));
     col = col.push(
         kit::body(format!(
             "base: {} — the location bar's base picker owns it",
@@ -324,7 +312,7 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
     );
     // The embedded faces are third-party works (#533): say so where a user
     // looks at what the window is made of.
-    col = col.push(kit::caption("type"));
+    col = col.push(group("type"));
     col = col.push(kit::body(FONTS_NOTICE).style(muted));
     col.into()
 }
@@ -335,21 +323,29 @@ pub const FONTS_NOTICE: &str = "Inter and JetBrains Mono NL (SIL Open Font \
     License 1.1), Lucide icons (ISC) — embedded, so every host draws the same \
     type; see FONTS-NOTICE.md beside the binary";
 
-/// One labelled text box.
+/// One labelled bound (#559): the label over the box, an example in it,
+/// and the cost of raising it under it.
 fn input_row<'a>(
-    label: &'a str,
-    placeholder: &'a str,
+    label: &'static str,
+    example: &'a str,
     value: &'a str,
     on_input: impl Fn(String) -> SettingsMsg + 'a,
+    cost: String,
 ) -> Element<'a, Message> {
-    row![
-        kit::caption(label).width(iced::Length::Fixed(110.0)),
-        kit::input(placeholder, value)
+    kit::form_field(
+        label,
+        kit::input(example, value)
             .on_input(move |t| msg(on_input(t)))
             .on_submit(msg(SettingsMsg::Apply))
             .size(font::CAPTION),
-    ]
-    .spacing(space::SM)
-    .align_y(iced::Alignment::Center)
-    .into()
+        Some(cost),
+    )
+}
+
+/// A group header of the overlay (#559): the overlay's own sections, a
+/// step above the field labels and below its title.
+fn group<'a>(name: &'static str) -> Element<'a, Message> {
+    iced::widget::container(kit::emphasis(name))
+        .padding(iced::Padding::ZERO.top(space::SM))
+        .into()
 }

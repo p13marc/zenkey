@@ -143,6 +143,27 @@ pub fn field<'a, M: 'a>(label: &'static str, value: impl Into<Element<'a, M>>) -
     .into()
 }
 
+/// A labelled control (#559): an eyebrow over the input, and a muted helper
+/// line under it when there is one. The label stays when the field is typed
+/// into — a placeholder does not — so a placeholder keeps only an example,
+/// and whatever explains the field, its cost or its blast radius, is the
+/// helper.
+pub fn form_field<'a, M: 'a>(
+    label: &'static str,
+    control: impl Into<Element<'a, M>>,
+    help: Option<String>,
+) -> Element<'a, M> {
+    let mut col = column![eyebrow(label), control.into()]
+        .spacing(space::XS)
+        .width(Length::Fill);
+    if let Some(help) = help {
+        col = col.push(caption(help).style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).text_muted()),
+        }));
+    }
+    col.into()
+}
+
 /// A grid of fields that wraps to the width it is given (#539).
 pub fn fields<'a, M: 'a>(items: Vec<Element<'a, M>>) -> Element<'a, M> {
     Row::from_vec(items)

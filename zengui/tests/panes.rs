@@ -1516,11 +1516,34 @@ fn the_connect_pane_states_what_scouting_means() {
         "the shared store is the feature; say so"
     );
 
-    // A session that reaches nothing is called out where the fix is.
+    // #559: every box is labelled by a label, not a placeholder — the
+    // placeholder disappears once typed into, and iced's `find` never sees
+    // it anyway, which is how its words used to go unpinned.
+    for label in [
+        "NAME",
+        "BASE",
+        "TIMEOUT (S)",
+        "CONNECT",
+        "LISTEN",
+        "ZENOH CONFIG",
+        "REGISTRY",
+    ] {
+        assert!(
+            ui.find(label).is_ok(),
+            "the {label} field has lost its label"
+        );
+    }
+
+    // A session that reaches nothing is called out where the fix is — as an
+    // error, the mark beside the words (#559).
     let mut ui = simulator::<Message, _, _>(pane(&form, true));
     assert!(
         ui.find("this session has no endpoints and multicast scouting is off — it reaches nothing")
             .is_ok()
+    );
+    assert!(
+        ui.find("✗").is_ok(),
+        "an error carries its mark, not colour alone"
     );
 }
 
@@ -3053,7 +3076,7 @@ fn the_selector_editor_shows_the_resolved_truth_and_its_blind_spots() {
     // Every selector names what it cannot see.
     assert!(
         ui.find(format!(
-            "  cannot see: {}",
+            "cannot see: {}",
             zengui::scope::blind_spot("zensight/v1/*/telemetry/**")
         ))
         .is_ok(),
@@ -3090,7 +3113,7 @@ fn the_selector_editor_validates_each_row_as_typed() {
     // The valid row carries its blind spot…
     assert!(
         ui.find(format!(
-            "  cannot see: {}",
+            "cannot see: {}",
             zengui::scope::blind_spot("demo/**")
         ))
         .is_ok()
@@ -3099,7 +3122,9 @@ fn the_selector_editor_validates_each_row_as_typed() {
     // which is where RFC 03 §2 reaches the screen.
     let err = zengui::scope::validate_selector("demo/$*/x").unwrap_err();
     assert!(
-        ui.find(format!("  {err}")).is_ok(),
+        // Its own words, no leading spaces since #559: the row's error is a
+        // `kit::error` callout under it, grouped by the frame, not indented.
+        ui.find(err.to_string()).is_ok(),
         "the row's own error must be beside it"
     );
     assert!(ui.find("apply — the scope becomes custom").is_ok());
