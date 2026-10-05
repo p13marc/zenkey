@@ -60,7 +60,7 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
     } else {
         "sweep admin space"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
+    let mut run = kit::primary(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(AdminMsg::Run));
     }
@@ -262,7 +262,7 @@ fn coverage_row(r: &CoverageRow, sp: Spacing) -> Element<'_, Message> {
     kit::card(
         row![
             kit::badge_coverage(tone, detail),
-            kit::action(kit::caption(r.producer.clone()))
+            kit::ghost(kit::caption(r.producer.clone()))
                 .padding([0.0, sp.xs])
                 .on_press(msg(AdminMsg::FilterProducer(r.producer.clone()))),
             kit::mono(r.path.clone()),
@@ -318,7 +318,7 @@ fn entities(sweep: &AdminSweep, sp: Spacing) -> Element<'_, Message> {
 
 fn raw_toggle<'a>(id: &str, state: &AdminState, sp: Spacing) -> Element<'a, Message> {
     let shown = state.expanded_raw.contains(id);
-    kit::action(kit::caption(if shown {
+    kit::ghost(kit::caption(if shown {
         "hide raw document"
     } else {
         "show raw document"
@@ -460,7 +460,7 @@ fn topology<'a>(
     ));
     col = col.push(
         row![
-            kit::action(kit::caption("copy graphviz (dot)"))
+            kit::secondary(kit::caption("copy graphviz (dot)"))
                 .padding([0.0, sp.xs])
                 .on_press(msg(AdminMsg::CopyDot)),
             kit::muted(

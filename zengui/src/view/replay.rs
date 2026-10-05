@@ -282,7 +282,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     meta = meta.push(iced::widget::space::horizontal());
     meta = meta.push(kit::muted("live link off"));
     meta = meta.push(
-        kit::action(kit::caption(match &state.source {
+        kit::secondary(kit::caption(match &state.source {
             ReplaySource::File { .. } => "exit replay",
             ReplaySource::Retained { .. } => "back to live",
         }))
@@ -302,7 +302,7 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let mut transport = row![
-        kit::action(kit::caption(if state.playing { "pause" } else { "play" }))
+        kit::primary(kit::caption(if state.playing { "pause" } else { "play" }))
             .on_press(msg(ReplayMsg::Toggled))
             .padding(sp.xs),
         kit::picker(SPEEDS, Some(Speed(state.speed)), |s| msg(
@@ -326,7 +326,7 @@ pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
     // writer, so the result is indistinguishable from a deliberate capture.
     if let ReplaySource::Retained { .. } = &state.source {
         transport = transport.push(
-            kit::action(kit::caption("save window as .zrec"))
+            kit::secondary(kit::caption("save window as .zrec"))
                 .on_press(msg(ReplayMsg::SaveWindow))
                 .padding(sp.xs),
         );
@@ -342,7 +342,7 @@ pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
         .align_y(iced::Alignment::Center);
     for (t_us, t) in &state.triggers {
         markers = markers.push(
-            kit::action(kit::caption(trigger_label(*t_us, t)))
+            kit::secondary(kit::caption(trigger_label(*t_us, t)))
                 .on_press(msg(ReplayMsg::Scrubbed(*t_us)))
                 .padding(sp.xs),
         );
@@ -370,10 +370,10 @@ pub fn open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
             .on_submit(msg(ReplayMsg::Open))
             .size(font::CAPTION)
             .width(Length::Fill),
-        kit::action(kit::caption("open"))
+        kit::primary(kit::caption("open"))
             .on_press(msg(ReplayMsg::Open))
             .padding(sp.xs),
-        kit::action(kit::caption("cancel"))
+        kit::secondary(kit::caption("cancel"))
             .on_press(msg(ReplayMsg::OpenToggled))
             .padding(sp.xs),
     ]
@@ -393,10 +393,10 @@ pub fn snapshot_open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
             .on_submit(msg(ReplayMsg::SnapshotOpen))
             .size(font::CAPTION)
             .width(Length::Fill),
-        kit::action(kit::caption("open"))
+        kit::primary(kit::caption("open"))
             .on_press(msg(ReplayMsg::SnapshotOpen))
             .padding(sp.xs),
-        kit::action(kit::caption("cancel"))
+        kit::secondary(kit::caption("cancel"))
             .on_press(msg(ReplayMsg::SnapshotOpenToggled))
             .padding(sp.xs),
     ]

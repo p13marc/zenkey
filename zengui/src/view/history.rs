@@ -110,7 +110,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     col = col.push(kit::section_header(
         "History",
         Some(
-            kit::action(kit::caption("clear"))
+            kit::ghost(kit::caption("clear"))
                 .on_press(msg(data.slot, HistoryMsg::Clear))
                 .padding(sp.xs)
                 .into(),
@@ -126,7 +126,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
              already went past are gone, not hidden.",
         ));
         col = col.push(
-            kit::action(kit::caption("watch this key"))
+            kit::primary(kit::caption("watch this key"))
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
                 .padding(sp.xs),
         );
@@ -204,7 +204,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     // because a snapshot is collected over one (RFC 13 §4.4).
     if let Some((row, header)) = data.snapshot {
         col = col.push(
-            kit::action(kit::caption(if data.compare_snapshot {
+            kit::secondary(kit::caption(if data.compare_snapshot {
                 "compare with previous sample"
             } else {
                 "compare with snapshot"

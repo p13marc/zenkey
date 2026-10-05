@@ -54,9 +54,9 @@ jobs:
       # also touches an RFC runs it in the same status set.
       - run: ./scripts/check-rfc-status.sh
 
-  # The type scale, by role (#191): `.size(` outside `kit.rs`/`tokens.rs`
+  # The type scale, by role (#191): `.size(` outside `kit/`/`tokens.rs`
   # must take a `font::` constant, and a bare `text(` must not appear outside
-  # `kit.rs`; `.font(` names a bundled `face::` (#533). The colour rule beside
+  # `kit/`; `.font(` names a bundled `face::` (#533). The colour rule beside
   # it is check-color.sh (#534) — claimed here since day one, gated since.
   type-scale:
     runs-on: ubuntu-24.04

@@ -141,19 +141,19 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         // ── Window (issue #73's chrome preferences, grouped here) ──
         kit::caption("window"),
         row![
-            kit::action(kit::caption(format!("theme: {}", d.theme)))
+            kit::ghost(kit::caption(format!("theme: {}", d.theme)))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled)))
                 .padding(space::XS),
-            kit::action(kit::caption("-"))
+            kit::ghost(kit::caption("-"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut)))
                 .padding(space::XS),
-            kit::action(kit::caption(format!(
+            kit::ghost(kit::caption(format!(
                 "{}%",
                 (d.zoom * 100.0).round() as i32
             )))
             .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset)))
             .padding(space::XS),
-            kit::action(kit::caption("+"))
+            kit::ghost(kit::caption("+"))
                 .on_press(Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn)))
                 .padding(space::XS),
         ]
@@ -256,10 +256,10 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
 
     col = col.push(
         row![
-            kit::action(kit::caption("apply"))
+            kit::primary(kit::caption("apply"))
                 .on_press(msg(SettingsMsg::Apply))
                 .padding(space::XS),
-            kit::action(kit::caption("reconnect now"))
+            kit::secondary(kit::caption("reconnect now"))
                 .on_press(Message::Deployment(DeploymentMsg::Reconnect))
                 .padding(space::XS),
         ]

@@ -2,7 +2,7 @@
 # Interactive elements route through kit:: (#193).
 #
 # Every button, input, picker, checkbox, slider and tooltip in zengui is built by a
-# constructor in `view/kit.rs` — that is the one place the `button::Status`
+# constructor in `view/kit/` — that is the one place the `button::Status`
 # set (Active, Hovered, Pressed, Disabled) is handled, and the one place
 # keyboard focus is styled (`kit::focus_ring`: a ring, never a fill change).
 # A raw widget constructor at a call site would re-open the per-site styling
@@ -19,15 +19,16 @@ set -euo pipefail
 
 fail=0
 
-# A bare or `iced::widget::`-qualified interactive constructor outside kit.rs.
+# A bare or `iced::widget::`-qualified interactive constructor outside kit/.
 # `button::Status` / `text_input::Style` are the *modules* (kit's own
 # vocabulary) and carry no `(`; only the constructor calls are flagged.
 bad=$(grep -rnE '(^|[^.[:alnum:]_])((iced::)?widget::)?(button|text_input|pick_list|checkbox|slider|mouse_area|tooltip)\(' \
     zengui/src --include='*.rs' \
-    | grep -v '^zengui/src/view/kit\.rs:' || true)
+    | grep -vE '^zengui/src/view/kit(\.rs:|/)' || true)
 if [ -n "$bad" ]; then
-    echo "interactive: raw widget constructor outside kit.rs — use"
-    echo "kit::{action, link, row_button, icon_button, tip, input, picker, check, scrub}:"
+    echo "interactive: raw widget constructor outside kit/ — use"
+    echo "kit::{primary, secondary, ghost, danger, link, row_button, icon_button, tip,"
+    echo "input, picker, check, scrub}:"
     echo "$bad"
     fail=1
 fi
@@ -35,7 +36,7 @@ fi
 if [ "$fail" -ne 0 ]; then
     echo
     echo "The four button::Status variants and the focus ring are handled"
-    echo "once, in view/kit.rs (#193). Pick the constructor; the states"
+    echo "once, in view/kit/ (#193). Pick the constructor; the states"
     echo "follow."
     exit 1
 fi

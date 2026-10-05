@@ -142,7 +142,7 @@ fn origin_card<'a>(
                 Subject::Origin(origin.to_string())
             }))),
         iced::widget::space::horizontal(),
-        kit::action(kit::caption("show in tree"))
+        kit::secondary(kit::caption("show in tree"))
             .padding([0.0, sp.xs])
             .on_press(msg(NodesMsg::ShowInTree(origin.to_string()))),
     ]

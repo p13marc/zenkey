@@ -126,7 +126,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     } else {
         "observe fields"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
+    let mut run = kit::primary(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(slot, FieldsMsg::Run));
     }

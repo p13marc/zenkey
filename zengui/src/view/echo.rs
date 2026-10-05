@@ -293,7 +293,7 @@ pub fn section<'a>(
             .on_input(|t| msg(EchoMsg::KeyFilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(190.0)),
-        kit::action(kit::caption(if view.following {
+        kit::ghost(kit::caption(if view.following {
             "pause"
         } else {
             "follow"
@@ -302,17 +302,17 @@ pub fn section<'a>(
         .padding(sp.xs),
         // The publish-verification loop in one control (#183): pin the stream
         // to whatever the window is looking at, or read the whole scope.
-        kit::action(kit::caption(if view.follow_subject {
+        kit::ghost(kit::caption(if view.follow_subject {
             "pinned to subject"
         } else {
             "pin to subject"
         }),)
         .on_press(msg(EchoMsg::FollowSubjectToggled))
         .padding(sp.xs),
-        kit::action(kit::caption("ndjson"))
+        kit::ghost(kit::caption("ndjson"))
             .on_press(msg(EchoMsg::Export))
             .padding(sp.xs),
-        kit::action(kit::caption("clear"))
+        kit::ghost(kit::caption("clear"))
             .on_press(msg(EchoMsg::Clear))
             .padding(sp.xs),
     ]

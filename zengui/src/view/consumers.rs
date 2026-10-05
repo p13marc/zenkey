@@ -90,7 +90,7 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
     } else {
         "consumers?"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
+    let mut run = kit::primary(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(slot, ConsumersMsg::Run));
     }

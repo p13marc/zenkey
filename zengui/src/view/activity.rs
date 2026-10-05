@@ -125,7 +125,7 @@ fn replay_stream<'a>(
     {
         col = col.push(
             row![
-                kit::action(kit::caption("scrub retained window"))
+                kit::secondary(kit::caption("scrub retained window"))
                     .on_press(Message::Workspace(WorkspaceMsg::Replay(
                         replay::ReplayMsg::RetainedToggled,
                     )))
@@ -159,7 +159,7 @@ fn replay_stream<'a>(
             col = col.push(
                 row![
                     kit::muted(replay::snapshot_label(s)),
-                    kit::action(kit::caption("close"))
+                    kit::secondary(kit::caption("close"))
                         .on_press(Message::Workspace(WorkspaceMsg::Replay(
                             replay::ReplayMsg::SnapshotClosed,
                         )))
@@ -171,7 +171,7 @@ fn replay_stream<'a>(
         }
         None if r.snapshot_open.is_none() && r.snapshot_loading.is_none() => {
             col = col.push(
-                kit::action(kit::caption("open a .zsnap to compare against\u{2026}"))
+                kit::secondary(kit::caption("open a .zsnap to compare against\u{2026}"))
                     .on_press(Message::Workspace(WorkspaceMsg::Replay(
                         replay::ReplayMsg::SnapshotOpenToggled,
                     )))

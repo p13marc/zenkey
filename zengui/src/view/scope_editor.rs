@@ -126,7 +126,7 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
         col = col.push(selector_row(sel));
     }
     col.push(
-        kit::action(kit::caption("fork into custom and edit"))
+        kit::secondary(kit::caption("fork into custom and edit"))
             .on_press(msg(ScopeMsg::Fork))
             .padding(space::XS),
     )
@@ -153,7 +153,7 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
                     .on_submit(msg(ScopeMsg::Apply))
                     .font(face::MONO)
                     .size(font::CAPTION),
-                kit::action(kit::caption("remove"))
+                kit::ghost(kit::caption("remove"))
                     .on_press(msg(ScopeMsg::RowRemoved(i)))
                     .padding(space::XS),
             ]
@@ -173,10 +173,10 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
     }
     col.push(
         row![
-            kit::action(kit::caption("add selector"))
+            kit::secondary(kit::caption("add selector"))
                 .on_press(msg(ScopeMsg::RowAdded))
                 .padding(space::XS),
-            kit::action(kit::caption("apply — the scope becomes custom"))
+            kit::primary(kit::caption("apply — the scope becomes custom"))
                 .on_press(msg(ScopeMsg::Apply))
                 .padding(space::XS),
         ]
