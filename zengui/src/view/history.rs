@@ -481,11 +481,9 @@ fn brief(v: &serde_json::Value) -> String {
     s.chars().take(MAX).chain(['…']).collect()
 }
 
-/// A statement about the timeline that is not a field change.
+/// A statement about the timeline that is not a field change — a fact,
+/// commentary's callout (#566). It wore danger's red, and both its uses are
+/// about retirement, which is a fact, never a negative verdict (RFC 04 §1.2).
 fn note<'a>(s: &'static str) -> Element<'a, Message> {
-    kit::body(s)
-        .style(|theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).danger()),
-        })
-        .into()
+    kit::callout(crate::view::theme::Tone::Info, kit::caption(s))
 }

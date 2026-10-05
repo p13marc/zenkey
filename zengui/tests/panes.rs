@@ -187,7 +187,8 @@ fn the_tree_renders_the_registration_state() {
 }
 
 /// #557: a narrow Locator shows less of a row, never two rows at once. At
-/// 300px the deep leaves are in the narrow tier — the counts collapse to the
+/// 240px (300px since #566 halved a narrow pane's indent, and gave the
+/// badge its room back) the deep leaves are in the narrow tier — the counts collapse to the
 /// rate, on one line, inside the pane — and a badge with no room is left
 /// out whole and *counted* (`+1`), never cut and never silently gone. At the
 /// default width the whole row is back.
@@ -251,7 +252,7 @@ fn a_narrow_tree_keeps_each_row_on_its_line() {
         selected: None,
     };
 
-    let width = 300.0;
+    let width = 240.0;
     let mut ui = iced_test::Simulator::with_size(
         iced::Settings::default(),
         (width, 600.0),

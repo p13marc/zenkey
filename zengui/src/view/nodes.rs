@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use iced::widget::{column, row, scrollable, text};
+use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::report::NodeList;
 use zenkey_fleet::{NodeInfo, SliceSet};
@@ -13,7 +13,7 @@ use zenkey_fleet::{NodeInfo, SliceSet};
 use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
-use crate::view::theme::{PresenceTone, colors};
+use crate::view::theme::PresenceTone;
 use crate::view::tokens::{Spacing, face};
 
 /// The pane's interactions, nested per the `CallMsg` precedent.
@@ -280,11 +280,7 @@ pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message>
     match detail {
         DetailState::NotAsked => kit::muted("select to ask node_info"),
         DetailState::Loading(origin) => kit::muted(format!("asking node_info for {origin}…")),
-        DetailState::Loaded(_, Err(e)) => kit::body(format!("node_info failed: {e}"))
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            })
-            .into(),
+        DetailState::Loaded(_, Err(e)) => kit::error(format!("node_info failed: {e}")),
         DetailState::Loaded(_, Ok(info)) => {
             let mut col = column![].spacing(sp.xs);
             if info.producers.is_empty() {
@@ -348,10 +344,9 @@ pub fn detail_section(detail: &DetailState, sp: Spacing) -> Element<'_, Message>
                         if f.stale { "  STALE" } else { "" }
                     );
                     if f.stale {
-                        col =
-                            col.push(kit::caption(line).style(|theme: &iced::Theme| text::Style {
-                                color: Some(colors(theme).danger()),
-                            }));
+                        // A finding about the fleet: caution's chip, the
+                        // line's own words — never red text alone (#566).
+                        col = col.push(kit::status_chip(crate::view::theme::Tone::Caution, line));
                     } else {
                         col = col.push(kit::muted(line));
                     }
