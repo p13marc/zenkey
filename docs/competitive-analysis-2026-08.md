@@ -92,6 +92,13 @@ Legend: ✅ solid · 🟡 partial/crude · ❌ absent · 🚫 deliberate refusal
 | Blob / artifact plane | ✅ list/probe/fetch, verify-before-disk | 🟡 own chunking protocol | ❌ | ❌ | ❌ | ❌ |
 | i18n | ❌ | ❌ | ❌ (abandoned stub) | ❌ | ❌ | ❌ |
 
+> **Amendment (2026-10-05).** The *Topology graph* row was true when this
+> analysis was written (2026-08-11, a40ddcc) and was superseded the same day:
+> zengui's mesh canvas landed that afternoon (#118), took the origin overlay
+> the next (#131) and a DOT export with `zenctl admin graph` (#234), and since
+> #541 is a Workbench tool of its own rather than the foot of the admin pane.
+> The row is left as written, dated, so the gap it recorded stays legible.
+
 ---
 
 ## 4. Per-competitor profiles

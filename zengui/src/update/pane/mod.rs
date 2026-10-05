@@ -22,6 +22,7 @@ pub(crate) mod doctor;
 pub(crate) mod echo;
 pub(crate) mod fields;
 pub(crate) mod media;
+pub(crate) mod mesh;
 pub(crate) mod nodes;
 pub(crate) mod replay;
 pub(crate) mod scope_editor;
@@ -47,6 +48,7 @@ pub(crate) fn update(
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
         PaneMsg::Media(msg) => media::update(&mut work.bench.media, &work.verdicts.roster, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
+        PaneMsg::Mesh(msg) => mesh::update(&work.verdicts.admin, msg),
         // The four subject-slot sections (#257): the SlotId names which
         // Inspector spoke — the docked one is the follow slot, a pinned
         // window its own. This is the one routing point; the handlers below

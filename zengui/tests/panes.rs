@@ -2406,7 +2406,7 @@ mod admin {
             })),
             "",
         );
-        let mut ui = simulator::<Message, _, _>(pane(&state, sp()));
+        let mut ui = simulator::<Message, _, _>(zengui::view::mesh::pane(&state, sp()));
         // #131: the origin join's evidence distinction reaches the caption —
         // attached-by-declaration vs reported-only vs outside the mesh.
         assert!(
@@ -2446,7 +2446,7 @@ mod admin {
 
         // And the unanswered mesh stays a reading.
         let empty = sweep(vec![], vec![], vec![], None, None);
-        let mut ui = simulator::<Message, _, _>(pane(&empty, sp()));
+        let mut ui = simulator::<Message, _, _>(zengui::view::mesh::pane(&empty, sp()));
         assert!(
             ui.find(
                 "no admin space answered @/*/* — adminspace.enabled defaults off; this is a \
