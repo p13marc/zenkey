@@ -26,7 +26,7 @@ use crate::message::{
 };
 use crate::view::kit;
 use crate::view::theme::colors;
-use crate::view::tokens::{face, font, space};
+use crate::view::tokens::{face, font, radius, space, stroke};
 
 /// How many rows the overlay renders. A palette that draws a 50k-key list is
 /// the same bug as a tree that does.
@@ -402,8 +402,8 @@ fn list<'a>(
         background: Some(colors(theme).surface().into()),
         border: iced::Border {
             color: colors(theme).border(),
-            width: 1.0,
-            radius: 4.0.into(),
+            width: stroke::HAIRLINE,
+            radius: radius::MODAL.into(),
         },
         ..container::Style::default()
     })
@@ -435,8 +435,8 @@ fn connect<'a>(
         background: Some(colors(theme).surface().into()),
         border: iced::Border {
             color: colors(theme).border(),
-            width: 1.0,
-            radius: 4.0.into(),
+            width: stroke::HAIRLINE,
+            radius: radius::MODAL.into(),
         },
         ..container::Style::default()
     })
@@ -468,8 +468,8 @@ fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
         background: Some(colors(theme).surface().into()),
         border: iced::Border {
             color: colors(theme).border(),
-            width: 1.0,
-            radius: 4.0.into(),
+            width: stroke::HAIRLINE,
+            radius: radius::MODAL.into(),
         },
         ..container::Style::default()
     })
@@ -502,8 +502,8 @@ fn help<'a>() -> Element<'a, Message> {
             background: Some(colors(theme).surface().into()),
             border: iced::Border {
                 color: colors(theme).border(),
-                width: 1.0,
-                radius: 4.0.into(),
+                width: stroke::HAIRLINE,
+                radius: radius::MODAL.into(),
             },
             ..container::Style::default()
         })
