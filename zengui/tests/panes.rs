@@ -1267,7 +1267,7 @@ fn the_doctor_pane_never_invents_a_verdict() {
         "the delta strip renders"
     );
     assert!(
-        ui.find("fixed since last run").is_ok(),
+        ui.find("Fixed since last run").is_ok(),
         "fixed findings stay visible, dimmed"
     );
 }
@@ -3229,7 +3229,7 @@ fn the_inspector_marks_a_declared_but_unpublished_subject() {
         &media,
         &node_detail,
     )));
-    assert!(ui.find("declared subjects").is_ok());
+    assert!(ui.find("Declared subjects").is_ok());
     assert!(
         ui.find("sysinfo: 2 declared subject(s) · 1 observed on this origin")
             .is_ok(),

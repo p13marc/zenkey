@@ -228,7 +228,7 @@ impl Icon {
             Icon::Watch => ("binoculars", '\u{E621}'),
             Icon::Diagnose => ("heart-pulse", '\u{E36E}'),
             Icon::NotAsked => ("circle-dashed", '\u{E4B0}'),
-            Icon::Silent => ("signal-zero", '\u{E263}'),
+            Icon::Silent => ("hourglass", '\u{E296}'),
             Icon::Empty => ("inbox", '\u{E0F7}'),
             Icon::Unselected => ("mouse-pointer-click", '\u{E120}'),
             Icon::Info => ("info", '\u{E0F9}'),
@@ -256,7 +256,7 @@ pub fn icon_caption<'a>(i: Icon) -> Text<'a> {
     glyph_text(i).size(font::CAPTION)
 }
 
-fn glyph_text<'a>(i: Icon) -> Text<'a> {
+pub(crate) fn glyph_text<'a>(i: Icon) -> Text<'a> {
     text(i.codepoint().to_string())
         .font(face::ICONS)
         // A lone private-use glyph needs no shaping, and basic shaping

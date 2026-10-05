@@ -362,7 +362,12 @@ pub fn section<'a>(
     let drawn = last - first;
 
     let content: Element<'_, Message> = if lines.is_empty() {
-        kit::empty_state(
+        kit::empty(
+            if ring.is_empty() {
+                kit::EmptyKind::Silent
+            } else {
+                kit::EmptyKind::Filtered
+            },
             "No matching samples",
             if ring.is_empty() {
                 "Nothing has arrived on the current scope yet. That is not a \

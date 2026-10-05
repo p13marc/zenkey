@@ -126,3 +126,23 @@ pub fn callout<'a, M: 'a>(
         })
         .into()
 }
+
+/// An inset well (#539): a payload's hex or its decoded document, set into
+/// the panel on the darker well with a hairline — the code block of the
+/// window. Returns the container so the caller can size it.
+pub fn inset<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> container::Container<'a, M> {
+    container(content)
+        .padding(space::SM)
+        .style(|theme: &iced::Theme| {
+            let c = colors(theme);
+            container::Style {
+                background: Some(c.well().into()),
+                border: Border {
+                    color: c.line(),
+                    width: stroke::HAIRLINE,
+                    radius: radius::CARD.into(),
+                },
+                ..container::Style::default()
+            }
+        })
+}

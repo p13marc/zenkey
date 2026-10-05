@@ -81,7 +81,7 @@ pub fn section<'a>(state: &'a BlobState, slices_loaded: bool, sp: Spacing) -> Co
     let mut col = column![kit::section_header("Blobs", None)].spacing(sp.sm);
 
     col = col.push(tier_matrix(state.list.as_ref(), slices_loaded, sp));
-    col = col.push(kit::section_header("probe", None));
+    col = col.push(kit::section_header("Probe", None));
     col = col.push(target_row(state, sp));
     col = col.push(holders(state, sp));
     col = col.push(fetch_form(state, sp));
@@ -98,14 +98,16 @@ fn tier_matrix<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     let Some(list) = list.filter(|_| slices_loaded) else {
-        return kit::empty_state(
+        return kit::empty(
+            kit::EmptyKind::NotAsked,
             "no registry loaded",
             "which producers serve blobs comes from their registry slices (RFC 08 §2) — \
              this is \"not asked\", not \"nobody serves blobs\"",
         );
     };
     if list.tiers.is_empty() {
-        return kit::empty_state(
+        return kit::empty(
+            kit::EmptyKind::Empty,
             "no producer declares an @blob tier",
             format!(
                 "{} were read and none declares one — what the registry says, \
@@ -158,7 +160,7 @@ fn tier_matrix<'a>(
     }
 
     column![
-        kit::section_header("declared tiers", None),
+        kit::section_header("Declared tiers", None),
         kit::muted(
             "a declaration is a capability, never possession — probe below to ask who \
              actually holds one"
@@ -218,7 +220,8 @@ fn target_row(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
 fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     match &state.probe {
         // O4: never probed is not "no holders".
-        Probe::NotAsked => kit::empty_state(
+        Probe::NotAsked => kit::empty(
+            kit::EmptyKind::NotAsked,
             "no probe yet",
             "nothing has been asked — this is \"not asked\", not \"nobody holds it\"",
         ),
@@ -233,7 +236,11 @@ fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
 
             // O5: the coverage claim is exactly what was asked.
             if let Some(why) = &report.not_probed {
-                col = col.push(kit::empty_state("not probed", why.clone()));
+                col = col.push(kit::empty(
+                    kit::EmptyKind::NotAsked,
+                    "not probed",
+                    why.clone(),
+                ));
                 if !report.declared_by.is_empty() {
                     col = col.push(kit::muted(format!(
                         "declared by {} — a registry claim, not a statement that any of \
@@ -259,7 +266,11 @@ fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
                     "silence is not a verdict (RFC 05 §3.1): nobody holds this id, \
                      nobody is up, or the timeout was too short"
                 };
-                col = col.push(kit::empty_state("no origin answered", detail));
+                col = col.push(kit::empty(
+                    kit::EmptyKind::Silent,
+                    "no origin answered",
+                    detail,
+                ));
                 return col.into();
             }
 
@@ -355,7 +366,7 @@ fn holder_row<'a>(
 }
 
 fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
-    let mut col = column![kit::section_header("fetch", None)].spacing(sp.xs);
+    let mut col = column![kit::section_header("Fetch", None)].spacing(sp.xs);
 
     let dest = kit::input("destination path", &state.dest_input)
         .on_input(|t| msg(BlobMsg::DestChanged(t)))

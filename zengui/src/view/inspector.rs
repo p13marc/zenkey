@@ -137,7 +137,8 @@ pub fn pane<'a>(d: InspectorData<'a>) -> Element<'a, Message> {
 fn nothing_selected<'a>() -> Column<'a, Message> {
     column![
         kit::section_header("Inspector", None),
-        kit::empty_state(
+        kit::empty(
+            kit::EmptyKind::Unselected,
             "Nothing selected",
             "Pick a key in the tree, or a node in the dashboard. The Inspector \
              follows whatever the window is looking at — it holds nothing of \
@@ -157,7 +158,8 @@ fn prefix_sections<'a>(prefix: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
         kit::emphasis(prefix).font(face::MONO),
-        kit::empty_state(
+        kit::empty(
+            kit::EmptyKind::Inapplicable,
             "A subtree, not a key",
             "Nothing was fetched, because a prefix names no value any producer \
              publishes. Expand it and select a leaf.",
@@ -259,7 +261,7 @@ const DECLARED_ROWS: usize = 40;
 /// not observed — with the ledger rows included, because "which hosts still
 /// serve a deprecated subject" is RFC 08 §6's headline buy.
 fn declared_subjects<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> {
-    let mut col = column![kit::section_header("declared subjects", None)].spacing(d.sp.xs);
+    let mut col = column![kit::section_header("Declared subjects", None)].spacing(d.sp.xs);
     let Some(slices) = d.slices else {
         return col.push(kit::muted(
             "no registry loaded — what this origin's producers declare is \
