@@ -4000,7 +4000,7 @@ fn the_config_tool_draws_the_served_schema_and_nothing_it_did_not_say() {
             target,
             at: Instant::now(),
         }),
-        in_flight: None,
+        ..ConfigForm::default()
     };
     let mut ui = simulator::<Message, _, _>(pane(ConfigData {
         form: &form,
@@ -4062,7 +4062,7 @@ fn the_config_tool_says_what_it_has_not_got() {
             target: target.clone(),
             at: Instant::now(),
         }),
-        in_flight: None,
+        ..ConfigForm::default()
     };
     let silent = landed(Reply::Silent);
     assert!(data(&silent, true).find("No reply").is_ok());
@@ -4075,4 +4075,94 @@ fn the_config_tool_says_what_it_has_not_got() {
             .find("error/not-found — no resource eth9")
             .is_ok()
     );
+}
+
+/// #481, editing: a draft that does not parse is its field's error, a
+/// change the producer would refuse is refused here in the validator's own
+/// words, and a contract group names the restart instead of offering a box.
+/// The outcomes of a write each say what they are — an unknown outcome
+/// above all, which must never read as a failure or a success.
+#[test]
+fn the_config_tool_refuses_here_what_the_producer_would_refuse() {
+    use std::time::Instant;
+    use zengui::configure::{ConfigForm, ConfigRead, ConfigTarget, GroupNote, Reply};
+    use zengui::view::configure::{ConfigData, pane};
+
+    let target = ConfigTarget::new("h-3fa9c2d41b7e", "radio", "wlan0");
+    let mut form = ConfigForm {
+        target: target.clone(),
+        read: Some(ConfigRead {
+            reply: Reply::Document(Box::new(common::config_view())),
+            target,
+            at: Instant::now(),
+        }),
+        ..ConfigForm::default()
+    };
+    let slot = |p: &str| ("queue".to_string(), p.to_string());
+    let render = |form: &ConfigForm| {
+        let mut ui = simulator::<Message, _, _>(pane(ConfigData {
+            form,
+            producers: vec![],
+            origins: vec![],
+            session: true,
+            sp: sp(),
+        }));
+        let mut seen = Vec::new();
+        for words in [
+            "tx_queue_len: 0 packets is below the minimum of 1 packets",
+            "expected an integer, got \"lots\"",
+            "changed in the producer's startup configuration and applied by a restart \
+             (RFC 05 §5.1) — read-only here",
+            "NEW VALUE",
+        ] {
+            if ui.find(words).is_ok() {
+                seen.push(words);
+            }
+        }
+        seen
+    };
+
+    form.drafts.insert(slot("tx_queue_len"), "0".into());
+    let seen = render(&form);
+    assert!(seen.contains(&"tx_queue_len: 0 packets is below the minimum of 1 packets"));
+    assert!(
+        seen.iter()
+            .any(|w| w.starts_with("changed in the producer's startup"))
+    );
+    assert!(
+        seen.contains(&"NEW VALUE"),
+        "a hot group is edited in place"
+    );
+
+    form.drafts.insert(slot("tx_queue_len"), "lots".into());
+    assert!(render(&form).contains(&"expected an integer, got \"lots\""));
+
+    // The notes, one sentence each.
+    for (note, words) in [
+        (
+            GroupNote::Applied { revision: 5 },
+            "applied — the document is at revision 5",
+        ),
+        (
+            GroupNote::Unknown,
+            "no reply within the timeout: whether it applied is unknown. Read back before \
+             deciding — apply again sends the same change with the same key, so the \
+             producer answers it once (RFC 05 §5.1)",
+        ),
+        (
+            GroupNote::Refused("error/radio/device-refused — the device refused: busy".into()),
+            "error/radio/device-refused — the device refused: busy",
+        ),
+    ] {
+        form.drafts.clear();
+        form.notes.insert("queue".into(), note);
+        let mut ui = simulator::<Message, _, _>(pane(ConfigData {
+            form: &form,
+            producers: vec![],
+            origins: vec![],
+            session: true,
+            sp: sp(),
+        }));
+        assert!(ui.find(words).is_ok(), "{words:?}");
+    }
 }
