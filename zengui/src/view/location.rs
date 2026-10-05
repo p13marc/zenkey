@@ -331,6 +331,16 @@ pub fn endpoint_label(s: &crate::config::Settings) -> Option<String> {
     })
 }
 
+/// The icon a saved layout wears on the app bar — and on its palette entry
+/// (#558).
+pub(crate) fn preset_icon(p: LayoutPreset) -> kit::Icon {
+    match p {
+        LayoutPreset::Explore => kit::Icon::Explore,
+        LayoutPreset::Watch => kit::Icon::Watch,
+        LayoutPreset::Diagnose => kit::Icon::Diagnose,
+    }
+}
+
 /// The layout presets, on screen at last (#180's Alt+1/2/3): the same
 /// [`WorkspaceMsg::LayoutPreset`] the shortcuts send. A dragged splitter or
 /// a toggled dock leaves no preset lit — and says "custom layout" rather
@@ -341,17 +351,11 @@ fn presets<'a>(chrome: &'a Chrome) -> Element<'a, Message> {
         .map(|p| kit::Segment {
             value: p,
             label: p.label().to_string(),
-            icon: Some(match p {
-                LayoutPreset::Explore => kit::Icon::Explore,
-                LayoutPreset::Watch => kit::Icon::Watch,
-                LayoutPreset::Diagnose => kit::Icon::Diagnose,
-            }),
+            icon: Some(preset_icon(p)),
             count: None,
-            tip: Some(match p {
-                LayoutPreset::Explore => "layout · Alt 1",
-                LayoutPreset::Watch => "layout · Alt 2",
-                LayoutPreset::Diagnose => "layout · Alt 3",
-            }),
+            // The shortcut, read off the map (#558): the segment's word
+            // already says which layout it is.
+            tip: crate::shortcuts::keys_for(&Message::Workspace(WorkspaceMsg::LayoutPreset(p))),
         })
         .collect();
     let active = chrome.prefs.layout.preset;
@@ -403,6 +407,7 @@ fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, M
             ReplayMsg::OpenToggled,
         )))
         .padding([space::XS, space::SM]);
+    let settings = Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings)));
     let theme_icon = match chrome.prefs.theme {
         crate::prefs::ThemeChoice::Dark => kit::Icon::Dark,
         crate::prefs::ThemeChoice::Light => kit::Icon::Light,
@@ -411,27 +416,25 @@ fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, M
         record,
         replay,
         kit::tip(
-            kit::icon_button(kit::Icon::Settings, None).on_press(Message::Chrome(
-                ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))
-            )),
-            "settings · Ctrl ,",
+            kit::icon_button(kit::Icon::Settings, None).on_press(settings.clone()),
+            tip_for("settings", &settings),
         ),
         // The icon is the theme you are in; the window around it is the
         // rest of the statement.
         kit::tip(
             kit::icon_button(theme_icon, None).on_press(prefs(PrefsMsg::ThemeToggled)),
-            "theme · Ctrl T",
+            tip_for("theme", &prefs(PrefsMsg::ThemeToggled)),
         ),
         // Density (#192) keeps its word: the two modes look alike at a
         // glance, and the word is the only thing that says which is on.
         kit::tip(
             kit::icon_button(kit::Icon::Density, Some(chrome.prefs.density.label()))
                 .on_press(prefs(PrefsMsg::DensityToggled)),
-            "density · Ctrl Shift D",
+            tip_for("density", &prefs(PrefsMsg::DensityToggled)),
         ),
         kit::tip(
             kit::icon_button(kit::Icon::ZoomOut, None).on_press(prefs(PrefsMsg::ZoomOut)),
-            "zoom out · Ctrl −",
+            tip_for("zoom out", &prefs(PrefsMsg::ZoomOut)),
         ),
         kit::tip(
             kit::ghost(kit::caption(format!(
@@ -440,21 +443,32 @@ fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, M
             )))
             .on_press(prefs(PrefsMsg::ZoomReset))
             .padding([space::XS, space::XS]),
-            "reset zoom · Ctrl 0",
+            tip_for("reset zoom", &prefs(PrefsMsg::ZoomReset)),
         ),
         kit::tip(
             kit::icon_button(kit::Icon::ZoomIn, None).on_press(prefs(PrefsMsg::ZoomIn)),
-            "zoom in · Ctrl +",
+            tip_for("zoom in", &prefs(PrefsMsg::ZoomIn)),
         ),
         kit::tip(
             kit::icon_button(kit::Icon::Reconnect, None)
                 .on_press(Message::Deployment(DeploymentMsg::Reconnect)),
-            "reconnect · Ctrl R",
+            tip_for("reconnect", &Message::Deployment(DeploymentMsg::Reconnect)),
         ),
     ]
     .spacing(space::XS)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// A control's tooltip: its name, and the chord that does the same, read
+/// off the shortcut map (#558) — so a tooltip cannot spell a binding the
+/// map does not hold (the zoom-out tip once said U+2212 where the map says
+/// ASCII `-`).
+fn tip_for(what: &str, message: &Message) -> String {
+    match crate::shortcuts::keys_for(message) {
+        Some(keys) => format!("{what} · {keys}"),
+        None => what.to_string(),
+    }
 }
 
 /// The dock strip (#180, restyled by #536): four toggles, one per

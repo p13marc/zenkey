@@ -25,6 +25,8 @@
 //!   undocumented by construction: the old table had no way to hold a binding
 //!   without a modifier.
 
+use std::sync::LazyLock;
+
 use iced::keyboard::{Key, Modifiers, key::Named};
 
 use crate::message::{ChromeMsg, DeploymentMsg, Message, PrefsMsg, WorkspaceMsg};
@@ -39,6 +41,37 @@ pub struct Binding {
     pub what: &'static str,
     /// How the app answers it.
     pub action: Action,
+    /// Where the help sheet files it (#558).
+    pub group: Group,
+}
+
+/// The help sheet's sections (#558), in the order it shows them — which is
+/// also the order [`map`] lists the bindings, a test holds the two together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// The overlays: palette, jump-to-key, Connect, Settings.
+    Open,
+    /// The session itself.
+    Session,
+    /// How the window looks: zoom, theme, density.
+    View,
+    /// The saved layouts and the dock focus keys.
+    Layout,
+    /// The modifier-less keys, whose meaning depends on what is open.
+    Keys,
+}
+
+impl Group {
+    /// The section's eyebrow.
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::Open => "OPEN",
+            Group::Session => "SESSION",
+            Group::View => "VIEW",
+            Group::Layout => "LAYOUT AND FOCUS",
+            Group::Keys => "KEYS",
+        }
+    }
 }
 
 /// How a binding dispatches (#190).
@@ -81,45 +114,17 @@ impl Chord {
     ];
 }
 
-/// The whole map, in the order the help overlay shows it.
+/// The whole map, in the order the help overlay shows it — grouped, a
+/// section at a time (#558).
 pub fn map() -> Vec<Binding> {
     let mut out = vec![
-        Binding {
-            keys: "Ctrl +",
-            what: "zoom in",
-            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
-        },
-        Binding {
-            keys: "Ctrl -",
-            what: "zoom out",
-            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut))),
-        },
-        Binding {
-            keys: "Ctrl 0",
-            what: "reset zoom",
-            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset))),
-        },
-        Binding {
-            keys: "Ctrl T",
-            what: "toggle theme",
-            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled))),
-        },
-        Binding {
-            keys: "Ctrl Shift D",
-            what: "toggle density (comfortable/compact)",
-            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled))),
-        },
-        Binding {
-            keys: "Ctrl R",
-            what: "reconnect",
-            action: Action::Emit(|| Message::Deployment(DeploymentMsg::Reconnect)),
-        },
         Binding {
             keys: "Ctrl P",
             what: "command palette",
             action: Action::Emit(|| {
                 Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Commands)))
             }),
+            group: Group::Open,
         },
         Binding {
             keys: "Ctrl K",
@@ -127,6 +132,7 @@ pub fn map() -> Vec<Binding> {
             action: Action::Emit(|| {
                 Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Keys)))
             }),
+            group: Group::Open,
         },
         // Connect finally has a keyboard route (#185): it used to be the one
         // pane without one, and it is the surface a lost user most needs.
@@ -136,6 +142,7 @@ pub fn map() -> Vec<Binding> {
             action: Action::Emit(|| {
                 Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Connect)))
             }),
+            group: Group::Open,
         },
         // The launch knobs, surfaced (#188) — the family's usual chord for a
         // settings surface.
@@ -145,6 +152,43 @@ pub fn map() -> Vec<Binding> {
             action: Action::Emit(|| {
                 Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings)))
             }),
+            group: Group::Open,
+        },
+        Binding {
+            keys: "Ctrl R",
+            what: "reconnect",
+            action: Action::Emit(|| Message::Deployment(DeploymentMsg::Reconnect)),
+            group: Group::Session,
+        },
+        Binding {
+            keys: "Ctrl +",
+            what: "zoom in",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomIn))),
+            group: Group::View,
+        },
+        Binding {
+            keys: "Ctrl -",
+            what: "zoom out",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut))),
+            group: Group::View,
+        },
+        Binding {
+            keys: "Ctrl 0",
+            what: "reset zoom",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomReset))),
+            group: Group::View,
+        },
+        Binding {
+            keys: "Ctrl T",
+            what: "toggle theme",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ThemeToggled))),
+            group: Group::View,
+        },
+        Binding {
+            keys: "Ctrl Shift D",
+            what: "toggle density (comfortable/compact)",
+            action: Action::Emit(|| Message::Chrome(ChromeMsg::Prefs(PrefsMsg::DensityToggled))),
+            group: Group::View,
         },
     ];
     // The saved layouts, in preset order — so the numbers on screen and the
@@ -159,6 +203,7 @@ pub fn map() -> Vec<Binding> {
             keys: LAYOUT_KEYS[i],
             what: LAYOUT_WHAT[i],
             action: Action::Emit(LAYOUT_MESSAGES[i]),
+            group: Group::Layout,
         });
         let _ = preset;
     }
@@ -172,6 +217,7 @@ pub fn map() -> Vec<Binding> {
             keys: DOCK_KEYS[i],
             what: DOCK_WHAT[i],
             action: Action::Emit(DOCK_MESSAGES[i]),
+            group: Group::Layout,
         });
         let _ = role;
     }
@@ -185,29 +231,66 @@ pub fn map() -> Vec<Binding> {
             keys: "Esc",
             what: "close the overlay, else clear the selection",
             action: Action::Chord(Chord::Escape),
+            group: Group::Keys,
         },
         Binding {
             keys: "↑",
             what: "overlay: cursor up",
             action: Action::Chord(Chord::Up),
+            group: Group::Keys,
         },
         Binding {
             keys: "↓",
             what: "overlay: cursor down",
             action: Action::Chord(Chord::Down),
+            group: Group::Keys,
         },
         Binding {
             keys: "⏎",
             what: "overlay: run the highlighted row",
             action: Action::Chord(Chord::Enter),
+            group: Group::Keys,
         },
         Binding {
             keys: "?",
             what: "this map",
             action: Action::Chord(Chord::Help),
+            group: Group::Keys,
         },
     ]);
     out
+}
+
+/// The keys bound to `message`, if a chord emits exactly it (#558) — what
+/// the palette prints beside a command and the location bar's tooltips name,
+/// so neither can spell a binding the map does not hold.
+///
+/// Matched on the `Debug` rendering, like every message-equality check in
+/// this crate (`Message` is not `PartialEq`); the table is rendered once.
+pub fn keys_for(message: &Message) -> Option<&'static str> {
+    static EMITTED: LazyLock<Vec<(String, &'static str)>> = LazyLock::new(|| {
+        map()
+            .into_iter()
+            .filter_map(|b| match b.action {
+                Action::Emit(m) => Some((format!("{:?}", m()), b.keys)),
+                Action::Chord(_) => None,
+            })
+            .collect()
+    });
+    let want = format!("{message:?}");
+    EMITTED.iter().find(|(m, _)| *m == want).map(|(_, k)| *k)
+}
+
+/// How a bare chord is spelled in the map (#558) — the overlays' footer
+/// keycaps read it here rather than restating it.
+pub fn chord_keys(chord: Chord) -> &'static str {
+    map()
+        .into_iter()
+        .find_map(|b| match b.action {
+            Action::Chord(c) if c == chord => Some(b.keys),
+            _ => None,
+        })
+        .expect("every chord has a row — every_chord_the_app_answers_is_advertised")
 }
 
 /// Alt+1/2/3, one per saved layout. Parallel arrays rather than a formatted
@@ -392,6 +475,47 @@ mod tests {
                     .any(|b| matches!(b.action, Action::Chord(x) if x == c)),
                 "{c:?} dispatches but the overlay does not list it"
             );
+        }
+    }
+
+    /// #558: the help sheet shows one section per group, so a group's
+    /// bindings must be contiguous in the map — a binding filed out of
+    /// place would open a second section with the same eyebrow.
+    #[test]
+    fn each_group_is_one_run_of_the_map() {
+        let groups: Vec<Group> = map().iter().map(|b| b.group).collect();
+        let mut seen: Vec<Group> = Vec::new();
+        for g in groups {
+            if seen.last() != Some(&g) {
+                assert!(!seen.contains(&g), "{g:?} appears in two runs");
+                seen.push(g);
+            }
+        }
+    }
+
+    /// #558: `keys_for` answers exactly the chords the map emits, so the
+    /// palette and the tooltips cannot name a binding that does not
+    /// dispatch — and a message no chord sends has no keys.
+    #[test]
+    fn keys_for_names_the_maps_own_spelling() {
+        for b in map() {
+            if let Action::Emit(m) = b.action {
+                assert_eq!(keys_for(&m()), Some(b.keys), "{}", b.what);
+            }
+        }
+        assert_eq!(
+            keys_for(&Message::Chrome(ChromeMsg::Prefs(PrefsMsg::ZoomOut))),
+            Some("Ctrl -"),
+            "ASCII, as the dispatch test parses it — the tooltip once said U+2212"
+        );
+        assert_eq!(
+            keys_for(&Message::Workspace(WorkspaceMsg::DockToggled(
+                DockRole::Workbench
+            ))),
+            None
+        );
+        for c in Chord::ALL {
+            assert!(!chord_keys(c).is_empty());
         }
     }
 

@@ -75,13 +75,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
             .map(|t| kit::Segment {
                 value: t,
                 label: t.label().to_string(),
-                icon: Some(match t {
-                    ActivityTab::Echo => kit::Icon::Echo,
-                    ActivityTab::Publish => kit::Icon::Send,
-                    ActivityTab::Doctor => kit::Icon::Doctor,
-                    ActivityTab::Replay => kit::Icon::Replay,
-                    ActivityTab::Traffic => kit::Icon::Traffic,
-                }),
+                icon: Some(tab_icon(t)),
                 count: match t {
                     ActivityTab::Echo => Some(d.echo.len().to_string()),
                     ActivityTab::Publish => Some(d.publish.log.len().to_string()),
@@ -241,4 +235,16 @@ fn replay_stream<'a>(
         }));
     }
     iced::widget::scrollable(col).height(Length::Fill).into()
+}
+
+/// The icon a stream wears on the dock's tab strip — and on its palette
+/// entry (#558), so the two spell the same glyph.
+pub(crate) fn tab_icon(t: ActivityTab) -> kit::Icon {
+    match t {
+        ActivityTab::Echo => kit::Icon::Echo,
+        ActivityTab::Publish => kit::Icon::Send,
+        ActivityTab::Doctor => kit::Icon::Doctor,
+        ActivityTab::Replay => kit::Icon::Replay,
+        ActivityTab::Traffic => kit::Icon::Traffic,
+    }
 }

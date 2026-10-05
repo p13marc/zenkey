@@ -300,7 +300,7 @@ pub fn section<'a>(
     sp: Spacing,
 ) -> Column<'a, Message> {
     let controls = row![
-        kit::input("filter payload/key…", &view.filter)
+        kit::search("filter payload/key…", &view.filter)
             .on_input(|t| msg(EchoMsg::FilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(170.0)),

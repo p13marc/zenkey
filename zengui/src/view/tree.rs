@@ -1892,7 +1892,7 @@ pub fn pane<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         Message::Workspace(WorkspaceMsg::PivotSelected(v))
     })
     .text_size(font::CAPTION);
-    let find = kit::input("find keys…", d.search)
+    let find = kit::search("find keys…", d.search)
         .size(font::CAPTION)
         .on_input(|v| Message::Workspace(WorkspaceMsg::TreeSearchChanged(v)));
     let mut header = row![pivot_picker, find]
