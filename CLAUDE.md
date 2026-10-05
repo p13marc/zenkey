@@ -211,6 +211,10 @@ Plain cargo is still the build system; the `justfile` only covers what needs
 more than one command — chiefly running the GUI against traffic to look at.
 The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
 straight to it (`just --list` for the recipes).
+`just shots` renders every zengui scene (`zengui/tests/common/scenes.rs`) to
+PNGs in both themes headlessly (#532) — the only way to *see* the GUI on a
+host with no display; `just shots-base main` draws the same scenes from `main`
+for a before/after pair.
 
 CI gates live in `.forgejo/workflows/ci.yml`; the release and publish lanes in
 `release.yml` (tag push `X.Y.Z` — **bare, no `v`**, from 0.7.1 on; the

@@ -21,8 +21,8 @@
 #     under `everything` because `**` never crosses an `@` chunk (RFC 03 §4 D2)
 #     — which is also why `**` cannot pull the `@media` frames spray publishes.
 #   * Select `…/telemetry/sysinfo/disk/var-log/used` and watch its subtree. The
-#     detail pane's `Series` section traces the wandering `value`; the `history`
-#     tab (Alt 8) fills, and clicking a row names the field that moved. Before
+#     Inspector's `Series` section traces the wandering `value`; its `History`
+#     section fills, and clicking a row names the field that moved. Before
 #     the watch, both say *why* they are empty — an unwatched key records
 #     nothing, and that is not the same as a quiet one.
 #   * Select `…/state/sysinfo/health` and wait: every 20th sample is a
@@ -30,12 +30,14 @@
 #     rather than a change (RFC 04 §1.2).
 #   * `…/telemetry/probe/reading` moves too, but offers no chart: a protobuf
 #     leaf needs a schema decode, which must not sit on a render path.
-#   * Alt 9 opens the blob pane. Probe `01jqz3demo0001`: spray serves it from
+#   * Select a key on spray's `@blob` plane and the Inspector grows a Blobs
+#     section. Probe `01jqz3demo0001`: spray serves it from
 #     two origins at two different content roots, so the pane flags the
 #     disagreement rather than picking (RFC 07 §2.1). Fetch from the second
 #     with the first's root pinned and it aborts naming that origin, leaving
 #     no file — verification happens before disk, not after transfer.
-#   * Alt 0 opens the admin pane. Sweep it: against this demo's peer-only bus
+#   * Open the admin tool (the Workbench dock, or the palette's "go to admin
+#     pane"). Sweep it: against this demo's peer-only bus
 #     every section should say why it is empty, and the coverage table should
 #     read "coverage not judged" rather than "uncovered" — a registry that was
 #     never loaded has not told you a family is uncovered (RFC 09 §5.1 O4).
@@ -155,6 +157,31 @@ bench:
 # The ledger itself is an ordinary test and runs in `just ci`.
 soak:
     cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
+
+# A picture of every zengui surface, both themes (#532): the scene list in
+# zengui/tests/common/scenes.rs, drawn by the CPU renderer so every host draws
+# the same pixels. PNGs land in `dir`, twice the scenes' logical size.
+shots dir="target/shots/current":
+    SHOTS_DIR={{justfile_directory()}}/{{dir}} ICED_TEST_BACKEND=tiny-skia \
+        cargo test -p zengui --test shots --locked -- --ignored --nocapture
+
+# The same scenes drawn from another revision, into target/shots/base, so a
+# visual change is reviewed as a before/after pair. The scene list is this
+# checkout's, copied over the other tree — a revision older than #532 has none.
+shots-base rev="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root={{justfile_directory()}}
+    src=$root/target/shots-src
+    git -C "$root" worktree remove --force "$src" 2>/dev/null || rm -rf "$src"
+    git -C "$root" worktree add --detach "$src" {{rev}}
+    trap 'git -C "$root" worktree remove --force "$src"' EXIT
+    mkdir -p "$src/zengui/tests/common"
+    cp "$root/zengui/tests/shots.rs" "$src/zengui/tests/"
+    cp "$root"/zengui/tests/common/*.rs "$src/zengui/tests/common/"
+    cd "$src"
+    SHOTS_DIR=$root/target/shots/base ICED_TEST_BACKEND=tiny-skia CARGO_TARGET_DIR=$root/target \
+        cargo test -p zengui --test shots --locked -- --ignored --nocapture
 
 # Re-capture every pinned CLI transcript and render snapshot after an
 # intentional change (#201). Review the diff: that review is the point of the
