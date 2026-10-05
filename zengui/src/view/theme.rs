@@ -68,6 +68,8 @@ pub struct Tokens {
     pub accent: [Color; 2],
     /// Behind a modal.
     pub scrim: Color,
+    /// Under a modal, lifting it off the scrim.
+    pub shadow: Color,
 }
 
 const fn rgb(hex: u32) -> Color {
@@ -97,6 +99,7 @@ pub const DARK: Tokens = Tokens {
     syntax_string: rgb(0xf0abfc),
     accent: [rgb(0x38bdf8), rgb(0xe879f9)],
     scrim: Color::from_rgba8(0, 0, 0, 0.6),
+    shadow: Color::from_rgba8(0, 0, 0, 0.5),
 };
 
 /// Zinc + indigo, light.
@@ -121,6 +124,7 @@ pub const LIGHT: Tokens = Tokens {
     syntax_string: rgb(0xa21caf),
     accent: [rgb(0x0284c7), rgb(0xc026d3)],
     scrim: Color::from_rgba8(9, 9, 11, 0.35),
+    shadow: Color::from_rgba8(9, 9, 11, 0.18),
 };
 
 impl ThemeChoice {
@@ -303,6 +307,11 @@ impl ThemeColors<'_> {
     /// Behind a modal.
     pub fn scrim(&self) -> Color {
         self.tokens().scrim
+    }
+
+    /// Under a modal.
+    pub fn shadow(&self) -> Color {
+        self.tokens().shadow
     }
 
     /// A payload's syntax role.

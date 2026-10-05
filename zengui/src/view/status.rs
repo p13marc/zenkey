@@ -7,11 +7,11 @@
 //! Every one of those is stated here so the user never has to infer it.
 
 use iced::Element;
-use iced::widget::{row, text};
+use iced::widget::row;
 
 use crate::message::{LinkState, Message};
 use crate::view::kit::{self, human_bytes, human_rate};
-use crate::view::theme::{Tone, colors};
+use crate::view::theme::Tone;
 use crate::view::tokens::space;
 
 /// What a §6.1 union of served and on-disk slices came to.
@@ -208,11 +208,9 @@ fn keys_label<'a>(keys: usize, evicted: u64) -> Element<'a, Message> {
     if evicted == 0 {
         return kit::muted(label);
     }
-    kit::caption(label)
-        .style(|theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).warning()),
-        })
-        .into()
+    // A bound that has cost something is a caution chip (#537): the quiet
+    // cells are words, so the one that matters stands out.
+    kit::status_chip(Tone::Caution, label)
 }
 
 /// The wording of the key count. Split from the widget so it is testable.
@@ -274,13 +272,11 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         LinkState::Failed(e) => (format!("link failed: {e}"), true),
     };
 
-    let link = kit::caption(link_text).style(move |theme: &iced::Theme| text::Style {
-        color: Some(if link_is_bad {
-            colors(theme).danger()
-        } else {
-            colors(theme).text_muted()
-        }),
-    });
+    let link: Element<'a, Message> = if link_is_bad {
+        kit::status_chip(Tone::Negative, link_text)
+    } else {
+        kit::muted(link_text)
+    };
 
     let crate::message::WatchedTotals {
         samples: count,
@@ -352,11 +348,7 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     if let Some(ret) = s.retention.as_ref().filter(|_| !s.replaying) {
         let label = retention_text(ret);
         r = r.push(if ret.evicted > 0 {
-            kit::caption(label)
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).warning()),
-                })
-                .into()
+            kit::status_chip(Tone::Caution, label)
         } else {
             kit::muted(label)
         });
@@ -365,13 +357,10 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // the population, so a quiet cache has nothing to disclose. Warning tone,
     // like every other bound that is costing something.
     if s.facts_evicted > 0 {
-        r = r.push(
-            kit::caption(facts_text(s.facts_cached, s.facts_evicted)).style(
-                |theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).warning()),
-                },
-            ),
-        );
+        r = r.push(kit::status_chip(
+            Tone::Caution,
+            facts_text(s.facts_cached, s.facts_evicted),
+        ));
     }
     if let Some((key, outcome)) = s.fetched {
         let label = match outcome {
@@ -397,24 +386,20 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     // looks reset, and "your settings did not load" is a much better
     // explanation than the user re-deriving it (issue #73).
     if let Some(note) = s.prefs_note {
-        r = r.push(
-            kit::caption(format!("preferences: {note}")).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).warning()),
-            }),
-        );
+        r = r.push(kit::status_chip(
+            Tone::Caution,
+            format!("preferences: {note}"),
+        ));
     }
 
     // The single most misleading state a bus explorer can be in: a healthy
     // window, an empty tree, and no way to tell that the session never reached
     // anything. Say it outright.
     if s.unreachable {
-        r = r.push(
-            kit::caption("no endpoints and scouting off — this session reaches nothing").style(
-                |theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                },
-            ),
-        );
+        r = r.push(kit::status_chip(
+            Tone::Negative,
+            "no endpoints and scouting off — this session reaches nothing",
+        ));
     }
 
     // It wraps (#536): a strip that clips loses its right-hand end — the

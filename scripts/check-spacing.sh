@@ -11,14 +11,15 @@
 # Same shape as the type-scale gate (#191): the rule is greppable, so it is
 # enforced. A `.padding(` / `.spacing(` line must reference the scale —
 # `space::` / `sp.` — or `Padding::ZERO`, which is the *absence* of spacing,
-# not a fifth number.
+# not a fifth number. A wrapping row's `.vertical_spacing(` is spacing too
+# (#537).
 set -euo pipefail
 
 # tokens.rs is the file that defines the scale; its doc comments spell the
 # bare forms this gate forbids, on purpose.
-bad=$(grep -rnE '\.(padding|spacing)\(' zengui/src/view zengui/src/app.rs --include='*.rs' \
+bad=$(grep -rnE '\.(padding|spacing|vertical_spacing)\(' zengui/src/view zengui/src/app.rs --include='*.rs' \
     | grep -v '^zengui/src/view/tokens\.rs:' \
-    | grep -vE '\.(padding|spacing)\(([^)]*\b(space::|sp\.|Padding::ZERO))' || true)
+    | grep -vE '\.(padding|spacing|vertical_spacing)\(([^)]*\b(space::|sp\.|Padding::ZERO))' || true)
 if [ -n "$bad" ]; then
     echo "spacing: raw numeric .padding()/.spacing() — use the grid (#192):"
     echo "$bad"

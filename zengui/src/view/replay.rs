@@ -21,7 +21,7 @@ use iced::{Element, Length};
 use zenkey_fleet::RetentionStats;
 
 use super::kit;
-use super::theme::colors;
+use super::theme::{Tone, colors};
 use super::tokens::{Spacing, font, space};
 use crate::message::{Message, WorkspaceMsg};
 use crate::replay::{ReplaySource, ReplayState};
@@ -250,31 +250,22 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
     if let ReplaySource::Retained { taken } = &state.source
         && let Some(note) = retained_evicted_note(taken)
     {
-        meta = meta.push(kit::caption(note).style(|theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).warning()),
-        }));
+        meta = meta.push(kit::status_chip(Tone::Caution, note));
     }
     if state.capture_dropped > 0 {
-        meta = meta.push(
-            kit::caption(format!(
+        meta = meta.push(kit::status_chip(
+            Tone::Caution,
+            format!(
                 "capture dropped {} sample(s) — partial view",
                 state.capture_dropped
-            ))
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).warning()),
-            }),
-        );
+            ),
+        ));
     }
     if state.malformed > 0 {
-        meta = meta.push(
-            kit::caption(format!(
-                "{} malformed row(s) skipped-and-counted",
-                state.malformed
-            ))
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).warning()),
-            }),
-        );
+        meta = meta.push(kit::status_chip(
+            Tone::Caution,
+            format!("{} malformed row(s) skipped-and-counted", state.malformed),
+        ));
     }
     if let Some(note) = preamble_note(state) {
         meta = meta.push(kit::caption(note));
@@ -290,7 +281,9 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
         .padding(space::XS),
     );
 
-    iced::widget::column![meta].spacing(space::XS).into()
+    // A callout card in the banner's own tone (#537) — still in every
+    // window, still the loudest claim on screen.
+    kit::callout(Tone::Negative, meta.align_y(iced::Alignment::Center))
 }
 
 /// The transport: play/pause, speed, and the scrubber.

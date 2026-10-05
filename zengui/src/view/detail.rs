@@ -442,15 +442,21 @@ fn series_section<'a>(
     if plottable {
         // The leaf picker. Small buttons rather than a dropdown: the list is
         // short by construction and the choice is one click either way.
-        let mut picker = row![].spacing(sp.xs);
-        for (path, _) in &data.leaves.leaves {
-            let active = data.leaf.as_deref() == Some(path.as_str());
-            picker = picker.push(kit::tab(
-                path.clone(),
-                active,
-                msg(slot, DetailMsg::LeafSelected(path.clone())),
-            ));
-        }
+        let picker = kit::segmented(
+            data.leaves
+                .leaves
+                .iter()
+                .map(|(path, _)| kit::Segment {
+                    value: path.clone(),
+                    label: path.clone(),
+                    icon: None,
+                    count: None,
+                    tip: None,
+                })
+                .collect(),
+            data.leaf.clone(),
+            move |path| msg(slot, DetailMsg::LeafSelected(path)),
+        );
         col = col.push(iced::widget::scrollable(picker).width(Length::Fill));
         if data.leaves.truncated > 0 {
             col = col.push(kit::muted(format!(

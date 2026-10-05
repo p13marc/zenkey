@@ -24,6 +24,7 @@ mod badge;
 mod buttons;
 mod chrome;
 mod format;
+mod frame;
 mod icon;
 mod list;
 
@@ -31,12 +32,13 @@ pub use badge::*;
 pub use buttons::*;
 pub use chrome::*;
 pub use format::*;
+pub use frame::*;
 pub use icon::*;
 pub use list::*;
 
 use iced::widget::text::IntoFragment;
-use iced::widget::{Text, button, column, container, row, text};
-use iced::{Border, Color, Element, Length};
+use iced::widget::{Text, column, container, row, text};
+use iced::{Border, Element, Length};
 
 use super::theme::colors;
 use super::tokens::{face, font, radius, space, stroke};
@@ -89,50 +91,6 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
                 ..container::Style::default()
             }
         })
-        .into()
-}
-
-/// One tab of the right-pane strip: the active tab reads `primary` on the
-/// pane surface, inactive tabs read muted with no background — and hovering
-/// an inactive one paints the hover wash, like every interactive element
-/// (#193).
-pub fn tab<'a, M: Clone + 'a>(
-    label: impl Into<String>,
-    active: bool,
-    on_press: M,
-) -> Element<'a, M> {
-    button(caption(label.into()))
-        // Half-XS vertical, SM horizontal: a tab is a chip, and its anatomy
-        // is the constructor's to own (#193) — on the scale, not off it.
-        .padding([space::XS / 2.0, space::SM])
-        .style(move |theme: &iced::Theme, status| {
-            let c = colors(theme);
-            let mut style = button::Style {
-                background: active.then(|| c.surface().into()),
-                text_color: if active { c.primary() } else { c.text_muted() },
-                border: Border {
-                    color: if active {
-                        c.border()
-                    } else {
-                        Color::TRANSPARENT
-                    },
-                    width: stroke::HAIRLINE,
-                    radius: radius::CONTROL.into(),
-                },
-                ..Default::default()
-            };
-            match status {
-                button::Status::Active => {}
-                button::Status::Hovered | button::Status::Pressed if !active => {
-                    style.background = Some(c.hover().into());
-                    style.text_color = c.text();
-                }
-                button::Status::Hovered | button::Status::Pressed => {}
-                button::Status::Disabled => style.text_color = c.text_dim(),
-            }
-            style
-        })
-        .on_press(on_press)
         .into()
 }
 

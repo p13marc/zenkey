@@ -8,6 +8,8 @@
 #
 #   1. No colour is constructed outside `view/theme.rs`. `kit/` may say
 #      `Color::TRANSPARENT` (an absent fill is not a colour), nothing else.
+#   1b. No `Border {` or `Shadow {` outside kit/theme (#537): frames are
+#       kit's.
 #   2. Nothing outside theme.rs reaches into iced's palette or builds an iced
 #      theme: every colour is a `colors(theme).<role>()`, so a view names a
 #      role and the theme decides the colour.
@@ -29,6 +31,17 @@ bad_transparent=$(grep -rn 'Color::TRANSPARENT' zengui/src --include='*.rs' \
 if [ -n "$bad_transparent" ]; then
     echo "colour: Color::TRANSPARENT outside theme/kit — a view asks kit for the widget:"
     echo "$bad_transparent"
+    fail=1
+fi
+
+# 1b. A frame or a shadow (#537): a border carries a colour and a radius, a
+# shadow a colour and a lift — both are kit's (the dock frame, the modal, the
+# chip), so a view asks kit for the widget rather than drawing its own edge.
+bad_frame=$(grep -rnE '(^|[^[:alnum:]_])(iced::)?(Border|Shadow) \{' zengui/src --include='*.rs' \
+    | grep -vE '^zengui/src/view/(kit/|(theme|kit)\.rs:)' || true)
+if [ -n "$bad_frame" ]; then
+    echo "colour: a Border/Shadow drawn outside kit/theme — ask kit for the frame:"
+    echo "$bad_frame"
     fail=1
 fi
 

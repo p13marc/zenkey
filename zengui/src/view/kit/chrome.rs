@@ -12,7 +12,7 @@ use crate::view::tokens::{face, radius, space, stroke};
 /// One segment of a [`segmented`] control.
 pub struct Segment<'a, T> {
     pub value: T,
-    pub label: &'a str,
+    pub label: String,
     pub icon: Option<Icon>,
     /// A count beside the label — a separate text, so the label stays
     /// findable on its own. `None` is no pill, never a zero: a count that
@@ -33,12 +33,12 @@ pub fn segmented<'a, T, M>(
     on_select: impl Fn(T) -> M + 'a,
 ) -> Element<'a, M>
 where
-    T: Copy + PartialEq + 'a,
+    T: Clone + PartialEq + 'a,
     M: Clone + 'a,
 {
     let mut track = Row::new().spacing(space::XS / 2.0);
     for seg in segments {
-        let lit = active == Some(seg.value);
+        let lit = active.as_ref() == Some(&seg.value);
         let mut content = Row::new()
             .spacing(space::XS)
             .align_y(iced::Alignment::Center);
@@ -55,7 +55,7 @@ where
         }
         let b = button(content)
             .padding([space::XS / 2.0, space::SM])
-            .on_press(on_select(seg.value))
+            .on_press(on_select(seg.value.clone()))
             .style(move |theme: &iced::Theme, status| {
                 let c = colors(theme);
                 let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
