@@ -2695,7 +2695,8 @@ pub(crate) enum ConfigCmd {
     /// The read-back is fetched first, so a value is read as the kind the
     /// producer declares and refused here — in the producer's own words —
     /// when the producer would refuse it. A `reach` group needs `--confirm`
-    /// and a yes; a `contract` group is refused with the restart named.
+    /// — or `--token`, joining a pending change that has a window — and a
+    /// yes; a `contract` group is refused with the restart named.
     Set(ConfigSetArgs),
     /// Make a pending change permanent (on-bus).
     Confirm(ConfigTokenArgs),
@@ -2703,10 +2704,10 @@ pub(crate) enum ConfigCmd {
     Cancel(ConfigTokenArgs),
     /// Move a pending change's deadline (on-bus).
     Extend(ConfigExtendArgs),
-    /// Write a confirmed change into the producer's persisted configuration.
+    /// Write a change into the producer's persisted configuration.
     ///
     /// Its own key, so an ACL grants it apart from the change (on-bus).
-    Persist(ConfigTokenArgs),
+    Persist(ConfigPersistArgs),
 }
 
 /// The `config get` verb's flags.
@@ -2747,9 +2748,15 @@ pub(crate) struct ConfigSetArgs {
     #[arg(long)]
     pub(crate) dry_run: bool,
     /// Arm a rollback: the change is undone after SECS unless confirmed.
-    /// Required for a `reach` group.
+    /// Required for a `reach` group, unless --token joins a change that has
+    /// one.
     #[arg(long, value_name = "SECS")]
     pub(crate) confirm: Option<u64>,
+    /// Join the pending change named by TOKEN (RFC 05 §5.1, v1.50): this
+    /// group is applied under that change's window and confirmed, cancelled
+    /// or rolled back with it — so it takes no --confirm of its own.
+    #[arg(long, value_name = "TOKEN", conflicts_with = "confirm")]
+    pub(crate) token: Option<String>,
     /// Refuse the change if the document's revision has moved past this.
     #[arg(long, value_name = "N")]
     pub(crate) expect_revision: Option<u64>,
@@ -2764,8 +2771,8 @@ pub(crate) struct ConfigSetArgs {
     #[arg(long, value_name = "ID")]
     pub(crate) request_id: Option<String>,
     /// Send a `reach` change without being asked (for a script that has
-    /// decided) — or a --confirm change to a group whose class no
-    /// read-back established, which may be one.
+    /// decided) — or a --confirm or --token change to a group whose class
+    /// no read-back established, which may be one.
     #[arg(long)]
     pub(crate) yes: bool,
     /// Skip the read-back: values ride by their spelling and the producer
@@ -2791,6 +2798,26 @@ pub(crate) struct ConfigTokenArgs {
     pub(crate) resource: String,
     /// The change's token, as `set` answered it.
     pub(crate) token: String,
+    #[command(flatten)]
+    pub(crate) bus: BusArgs,
+}
+
+/// The `config persist` verb's flags: the change by its token, or — with
+/// none — the read-back's `last_change` (RFC 05 §5.1, v1.50).
+#[derive(clap::Args)]
+pub(crate) struct ConfigPersistArgs {
+    /// Origin to target: one host id.
+    pub(crate) origin: String,
+    /// Producer name.
+    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
+    pub(crate) producer: String,
+    /// The resource the change is on.
+    #[arg(value_parser = chunk_arg)]
+    pub(crate) resource: String,
+    /// The change's token: the pending change's, or `last_change`'s. Omitted,
+    /// the read-back's `last_change` is persisted — the way a change made
+    /// without a window survives a restart.
+    pub(crate) token: Option<String>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }

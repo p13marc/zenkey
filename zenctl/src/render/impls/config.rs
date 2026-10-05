@@ -86,6 +86,15 @@ impl Render for ConfigReport {
                 }
                 out(Row::tagged("pending", row));
             }
+            // The change `persist` takes with no token (RFC 05 §5.1, v1.50).
+            if let Some(l) = &d.view.last_change {
+                let mut row = serde_json::to_value(l).expect("a last change serializes");
+                if let serde_json::Value::Object(m) = &mut row {
+                    m.insert("origin".into(), d.origin.clone().into());
+                    m.insert("resource".into(), d.view.resource.clone().into());
+                }
+                out(Row::tagged("last_change", row));
+            }
         }
         for a in &self.other {
             out(Row::of("answer", a));
@@ -104,6 +113,13 @@ impl Render for ConfigReport {
                     p.token,
                     p.groups.join(", "),
                     p.deadline.as_deref().unwrap_or("(no deadline stated)")
+                ));
+            }
+            if let Some(l) = &d.view.last_change {
+                head.push_str(&format!(
+                    "  last change {} on {}",
+                    l.token,
+                    l.groups.join(", ")
                 ));
             }
             t.line(head);

@@ -1966,6 +1966,28 @@ psk            (write-only)             file     text                         th
     );
 }
 
+/// RFC v1.50: the change `persist` takes with no token is named on the
+/// document's head line and as a `last_change` row.
+#[test]
+fn a_config_read_back_names_its_last_change() {
+    let mut r = config_report();
+    let view = &mut r.documents[0].view;
+    view.pending = None;
+    view.last_change = Some(zenkey::config::LastChange::new("chg-01j8", ["access"]));
+    let table = table(&r);
+    assert_eq!(
+        table.lines().next(),
+        Some("h-3fa9c2d41b7e  rf0  revision 7  last change chg-01j8 on access"),
+        "{table}"
+    );
+    let rows = ndjson(&r);
+    assert!(
+        rows.lines().any(|l| l
+            == r#"{"groups":["access"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"last_change","token":"chg-01j8"}"#),
+        "{rows}"
+    );
+}
+
 /// The reply that is not a document is kept and drawn as a reply, and the
 /// caveat says so in every format; an empty report says silence.
 #[test]
