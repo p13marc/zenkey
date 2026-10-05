@@ -25,7 +25,7 @@ use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
 use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::{CoverageTone, colors};
+use crate::view::theme::{Accent, CoverageTone, alpha, colors};
 use crate::view::tokens::{Spacing, face, font};
 
 /// How many declared entities the list renders before it stops and says so.
@@ -351,10 +351,41 @@ fn raw_text(value: &serde_json::Value) -> String {
 #[derive(Debug, Clone)]
 struct MeshNode {
     label: String,
-    router: bool,
+    role: MeshRole,
     answered: bool,
     is_self: bool,
     has_storage: bool,
+}
+
+/// What a node said it is (#540) — its fill's hue and the initial inside it.
+/// Neither is a verdict: the hues are the router primary and two accents
+/// chosen to sit clear of every verdict colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MeshRole {
+    Router,
+    Peer,
+    Client,
+    Other,
+}
+
+impl MeshRole {
+    fn of(whatami: &str) -> MeshRole {
+        match whatami {
+            "router" => MeshRole::Router,
+            "peer" => MeshRole::Peer,
+            "client" => MeshRole::Client,
+            _ => MeshRole::Other,
+        }
+    }
+
+    fn initial(self) -> &'static str {
+        match self {
+            MeshRole::Router => "R",
+            MeshRole::Peer => "P",
+            MeshRole::Client => "C",
+            MeshRole::Other => "?",
+        }
+    }
 }
 
 /// One origin satellite (#131): drawn beside the node its evidence names.
@@ -395,7 +426,7 @@ fn topology<'a>(
         .iter()
         .map(|n| MeshNode {
             label: short_zid(&n.zid),
-            router: n.whatami == "router",
+            role: MeshRole::of(&n.whatami),
             answered: n.answered,
             is_self: n.zid == report.self_zid,
             has_storage: storage_zids.contains(n.zid.as_str()),
@@ -440,6 +471,10 @@ fn topology<'a>(
         edges.len(),
         sweep.base,
     )));
+    // The letters inside the nodes (#540), said in words.
+    col = col.push(kit::muted(
+        "R router · P peer · C client — the role each node reported",
+    ));
     if !sweep.origins.is_empty() || unanchored > 0 {
         let attached = origins.iter().filter(|o| !o.reported).count();
         col = col.push(kit::muted(format!(
@@ -524,8 +559,11 @@ fn short_zid(zid: &str) -> String {
     }
 }
 
-const MESH_HEIGHT: f32 = 220.0;
-const NODE_R: f32 = 7.0;
+const MESH_HEIGHT: f32 = 260.0;
+
+/// The background dot grid's pitch (#540).
+const GRID: f32 = 16.0;
+const NODE_R: f32 = 10.0;
 
 struct Mesh<'a> {
     nodes: Vec<MeshNode>,
@@ -635,64 +673,99 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
             return vec![canvas::Frame::new(renderer, bounds.size()).into_geometry()];
         }
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            let palette = colors(theme);
+            // A dot grid under everything (#540): the canvas reads as a
+            // surface to pan, and the grid stays put while the mesh moves.
+            let mut x = GRID / 2.0;
+            while x < bounds.width {
+                let mut y = GRID / 2.0;
+                while y < bounds.height {
+                    frame.fill(&canvas::Path::circle(Point::new(x, y), 0.9), palette.line());
+                    y += GRID;
+                }
+                x += GRID;
+            }
             // Pan/zoom (#131): translate then scale around the panned center.
             frame.translate(state.offset);
             let cx = bounds.width / 2.0;
-            let cy = MESH_HEIGHT / 2.0;
+            let cy = bounds.height / 2.0;
             frame.translate(iced::Vector::new(cx, cy));
             frame.scale(state.zoom);
             frame.translate(iced::Vector::new(-cx, -cy));
-            let radius = (MESH_HEIGHT / 2.0 - 30.0).max(10.0);
+            let radius = (cx.min(cy) - 34.0).max(10.0);
             let pos = |i: usize| {
                 let angle = std::f32::consts::TAU * (i as f32) / (n as f32);
                 Point::new(cx + radius * angle.cos(), cy + radius * angle.sin())
             };
-            let palette = colors(theme);
             for (a, b, corroborated) in &self.edges {
                 let path = canvas::Path::line(pos(*a), pos(*b));
+                // Corroborated by both ends: heavier and surer. One end's
+                // word alone: thinner and fainter — the same evidence grade
+                // as before, drawn on a darker ground.
                 frame.stroke(
                     &path,
                     canvas::Stroke::default()
-                        .with_width(if *corroborated { 1.8 } else { 1.0 })
-                        .with_color(palette.axis()),
+                        .with_width(if *corroborated { 2.0 } else { 1.0 })
+                        .with_color(alpha(
+                            palette.text_dim(),
+                            if *corroborated { 0.85 } else { 0.5 },
+                        )),
                 );
             }
             for (i, node) in self.nodes.iter().enumerate() {
                 let p = pos(i);
-                let dot = canvas::Path::circle(p, NODE_R);
-                let tone = if node.router {
-                    palette.primary()
-                } else {
-                    palette.text_muted()
+                let tone = match node.role {
+                    MeshRole::Router => palette.primary(),
+                    MeshRole::Peer => palette.accent(Accent::Sky),
+                    MeshRole::Client => palette.accent(Accent::Fuchsia),
+                    MeshRole::Other => palette.text_muted(),
                 };
-                if node.answered {
+                // This session: a layered glow in the primary — not success,
+                // which would claim this node is "good" (#540).
+                if node.is_self {
+                    for (grow, a) in [(4.0, 0.55), (7.5, 0.28), (11.0, 0.12)] {
+                        frame.stroke(
+                            &canvas::Path::circle(p, NODE_R + grow),
+                            canvas::Stroke::default()
+                                .with_width(2.0)
+                                .with_color(alpha(palette.primary(), a)),
+                        );
+                    }
+                }
+                let dot = canvas::Path::circle(p, NODE_R);
+                let ink = if node.answered {
+                    // Answered: a filled claim, the initial knocked out of it.
                     frame.fill(&dot, tone);
+                    palette.panel()
                 } else {
                     // Heard of, not queryable: an outline, not a filled claim.
+                    frame.fill(&dot, palette.panel());
                     frame.stroke(
                         &dot,
                         canvas::Stroke::default().with_width(1.5).with_color(tone),
                     );
-                }
-                if node.is_self {
-                    let ring = canvas::Path::circle(p, NODE_R + 3.5);
-                    frame.stroke(
-                        &ring,
-                        canvas::Stroke::default()
-                            .with_width(1.5)
-                            .with_color(palette.success()),
-                    );
-                }
+                    tone
+                };
+                frame.fill_text(canvas::Text {
+                    content: node.role.initial().to_string(),
+                    position: p,
+                    color: ink,
+                    size: iced::Pixels(font::CAPTION),
+                    font: face::SEMIBOLD,
+                    align_x: iced::widget::text::Alignment::Center,
+                    align_y: iced::alignment::Vertical::Center,
+                    ..canvas::Text::default()
+                });
                 if node.has_storage {
                     let mark = canvas::Path::rectangle(
-                        Point::new(p.x + NODE_R, p.y - NODE_R - 4.0),
-                        iced::Size::new(5.0, 5.0),
+                        Point::new(p.x + NODE_R, p.y - NODE_R - 5.0),
+                        iced::Size::new(6.0, 6.0),
                     );
-                    frame.fill(&mark, palette.warning());
+                    frame.fill(&mark, palette.text_muted());
                 }
                 frame.fill_text(canvas::Text {
                     content: node.label.clone(),
-                    position: Point::new(p.x + NODE_R + 3.0, p.y + 3.0),
+                    position: Point::new(p.x + NODE_R + 5.0, p.y + 4.0),
                     color: palette.text(),
                     // On the scale, in the data face (#533): a zid is data.
                     size: iced::Pixels(font::CAPTION),
@@ -712,7 +785,10 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                 let angle = std::f32::consts::TAU * (k as f32) / 6.0 + 0.5;
                 let d = NODE_R + 22.0 + 10.0 * (k / 6) as f32;
                 let p = Point::new(a.x + d * angle.cos(), a.y + d * angle.sin());
-                let tone = palette.success();
+                // Neutral (#540): the evidence grade is the drawing — solid
+                // and filled for a declared session, dotted and outlined for
+                // the reporter's word alone — never a verdict colour.
+                let tone = palette.text_muted();
                 if o.reported {
                     // Dotted: short dashes along the anchor line.
                     let steps = 6;
@@ -736,7 +812,7 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                         canvas::Stroke::default().with_width(1.0).with_color(tone),
                     );
                 }
-                let dot = canvas::Path::circle(p, NODE_R - 3.0);
+                let dot = canvas::Path::circle(p, NODE_R - 5.0);
                 if o.reported {
                     frame.stroke(
                         &dot,

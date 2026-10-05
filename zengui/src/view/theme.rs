@@ -418,6 +418,18 @@ impl ThemeColors<'_> {
         }
     }
 
+    /// A series' area fill (#540): its own colour fading to nothing, top to
+    /// baseline — emphasis under the line, never a second encoding of it.
+    /// The rate's is fainter, as its line is.
+    pub fn series_area(&self, kind: SeriesTone) -> (Color, Color) {
+        let c = self.series(kind);
+        let top = match kind {
+            SeriesTone::Value => 0.22,
+            SeriesTone::Rate => 0.12,
+        };
+        (alpha(c, top), alpha(c, 0.0))
+    }
+
     /// The baseline and gridline of a chart — structure, never data.
     pub fn axis(&self) -> Color {
         self.border()

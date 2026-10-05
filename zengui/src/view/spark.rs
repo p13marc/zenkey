@@ -31,10 +31,10 @@ use crate::view::theme::{SeriesTone, colors};
 use crate::view::tokens::Spacing;
 
 /// The plot's height. Small on purpose — this is a shape, not a dashboard.
-const HEIGHT: f32 = 44.0;
+const HEIGHT: f32 = 56.0;
 
 /// Line weight.
-const STROKE: f32 = 1.5;
+const STROKE: f32 = 2.0;
 
 /// A labelled sparkline: caption, then the plot.
 ///
@@ -175,7 +175,9 @@ impl canvas::Program<Message> for Spark<'_> {
 
             let stroke = canvas::Stroke::default()
                 .with_width(STROKE)
-                .with_color(colors(theme).series(self.tone));
+                .with_color(colors(theme).series(self.tone))
+                .with_line_join(canvas::LineJoin::Round)
+                .with_line_cap(canvas::LineCap::Round);
 
             // One path per contiguous run of measurements: the gaps between runs
             // are drawn by *not* drawing.
@@ -190,6 +192,29 @@ impl canvas::Program<Message> for Spark<'_> {
                         colors(theme).series(self.tone),
                     ),
                     _ => {
+                        // The area under this run (#540), closed down to the
+                        // baseline and filled with the series' colour fading
+                        // out. Per run, so a gap stays a gap: no fill bridges
+                        // what the line refuses to. The baseline is the
+                        // window's minimum, not zero — the fill is emphasis,
+                        // not magnitude, and the caption states min and max.
+                        let area = canvas::Path::new(|b| {
+                            b.move_to(Point::new(run[0].x, h));
+                            for p in run.iter() {
+                                b.line_to(*p);
+                            }
+                            b.line_to(Point::new(run[run.len() - 1].x, h));
+                            b.close();
+                        });
+                        let (top, bottom) = colors(theme).series_area(self.tone);
+                        frame.fill(
+                            &area,
+                            canvas::gradient::Linear::new(Point::new(0.0, 0.0), Point::new(0.0, h))
+                                .add_stop(0.0, top)
+                                .add_stop(1.0, bottom),
+                        );
+                        // Straight segments, never a spline: a curve through
+                        // the samples would draw values nobody measured.
                         let path = canvas::Path::new(|b| {
                             b.move_to(run[0]);
                             for p in &run[1..] {

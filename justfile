@@ -162,11 +162,12 @@ soak:
     cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
 
 # A picture of every zengui surface, both themes (#532): the scene list in
-# zengui/tests/common/scenes.rs, drawn by the app's own renderer (wgpu, on GL —
-# mesa's software rasterizer on a host with no GPU; tiny-skia drops canvases,
-# #533). PNGs land in `dir`, twice the scenes' logical size.
+# zengui/tests/common/scenes.rs, drawn by the app's own renderer — wgpu on
+# Vulkan (lavapipe where there is no GPU). Not tiny-skia, which drops canvases
+# (#533), and not GL, whose mesa path draws only the last canvas in a frame
+# (#540). PNGs land in `dir`, twice the scenes' logical size.
 shots dir="target/shots/current":
-    SHOTS_DIR={{justfile_directory()}}/{{dir}} ICED_TEST_BACKEND=wgpu \
+    SHOTS_DIR={{justfile_directory()}}/{{dir}} ICED_TEST_BACKEND=wgpu WGPU_BACKEND=vulkan \
         cargo test -p zengui --test shots --locked -- --ignored --nocapture
 
 # The same scenes drawn from another revision, into target/shots/base, so a
@@ -187,7 +188,7 @@ shots-base rev="main":
         cp "$root"/zengui/tests/common/*.rs "$src/zengui/tests/common/"
     fi
     cd "$src"
-    SHOTS_DIR=$root/target/shots/base ICED_TEST_BACKEND=wgpu CARGO_TARGET_DIR=$root/target \
+    SHOTS_DIR=$root/target/shots/base ICED_TEST_BACKEND=wgpu WGPU_BACKEND=vulkan CARGO_TARGET_DIR=$root/target \
         cargo test -p zengui --test shots --locked -- --ignored --nocapture
 
 # Re-capture every pinned CLI transcript and render snapshot after an
