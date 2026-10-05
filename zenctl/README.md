@@ -57,7 +57,7 @@ The toolchain is **Rust 1.98** (the workspace `rust-version`, pinned by
 
 ```console
 $ zenctl --version
-zenctl 0.10.0 (0.12.0)
+zenctl 0.12.0 (0.14.0)
 ```
 
 The first number is the crate's own version; the parenthesis is `git describe

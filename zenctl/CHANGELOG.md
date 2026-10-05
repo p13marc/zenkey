@@ -6,7 +6,9 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased — config speaks RFC v1.50
+## 0.12.0 (2026-10-06) — config speaks RFC v1.50, and principals on a face
+
+### config speaks RFC v1.50
 
 The configuration verbs catch up with RFC 05 §5.1 v1.50 (marcpardo/zenkey#518,
 #560). One argument became optional; nothing that worked before stops.
@@ -19,7 +21,7 @@ The configuration verbs catch up with RFC 05 §5.1 v1.50 (marcpardo/zenkey#518,
 | `config confirm`/`cancel`/`extend`/`persist` output | the reply drawn as a generic call reply (JSON in the table) | the read-back after the act, drawn as `config get` draws it — `parameter` rows, `pending` and `last_change` rows in NDJSON |
 | `config get`, `config set` | — | a `last_change` row (NDJSON) and `last change <token> on <groups>` on the table's head line, when the producer serves one |
 
-## Unreleased — user principals, and principals on a face
+### user principals, and principals on a face
 
 For a per-operator write grant on a constrained face (marcpardo/zenkey#529,
 RFC v1.49; zenoh-modem#153). No spelling moved.

@@ -53,6 +53,11 @@
     <keyword>iced</keyword>
   </keywords>
   <releases>
+    <release version="0.14.0" date="2026-10-06">
+      <description>
+        <p>zengui 0.7.0: a visual system (bundled type, one palette, chips and cards), a Traffic tab and a Mesh tool; rows that hold their line at any width; a command palette sectioned and keyed from the shortcut map; labelled fields throughout; and a Config tool that reads and changes a producer's configuration through RFC 05 §5.1 — a hot change at once, a reach change only with a rollback window and a person's yes.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-10-02">
       <description>
         <p>zengui 0.6.0: the session is a Zenoh client by default (no listener, no multicast unless the config states it); a dead router is a link error at once, and --registry directories still load without a bus.</p>

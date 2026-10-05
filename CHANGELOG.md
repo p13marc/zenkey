@@ -6,18 +6,103 @@ its own migration table in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 Versions per crate, because they move independently:
 
-| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 | 0.12.0 | 0.13.0 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged |
-| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged |
-| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** | **0.16.0** | **0.17.0** |
-| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** | **0.10.0** | **0.11.0** |
-| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged | **0.5.2** | **0.6.0** |
-| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged | **0.3.0** | **0.4.0** |
+| Crate | 0.6.0 | 0.7.0 | 0.7.1 | 0.7.2 | 0.8.0 | 0.9.0 | 0.10.0 | 0.11.0 | 0.11.1 | 0.12.0 | 0.13.0 | 0.14.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `zenkey` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged | **0.11.1** |
+| `zenkey-build` | 0.6.0 | 0.7.0 | 0.7.0 — unchanged | 0.7.0 — unchanged | **0.8.0** | **0.8.1** | **0.9.0** | **0.10.0** | **0.10.1** | **0.11.0** | 0.11.0 — unchanged | **0.11.1** |
+| `zenkey-fleet` | 0.9.0 | 0.10.0 | **0.11.0** | **0.11.1** | **0.12.0** | **0.13.0** | **0.14.0** | **0.15.0** | **0.15.1** | **0.16.0** | **0.17.0** | **0.18.0** |
+| `zenctl` | 0.4.0 | 0.5.0 | **0.5.1** | 0.5.1 — unchanged | **0.6.0** | **0.7.0** | **0.8.0** | **0.9.0** | **0.9.1** | **0.10.0** | **0.11.0** | **0.12.0** |
+| `zengui` | 0.2.0 | 0.3.0 | **0.3.1** | 0.3.1 — unchanged | **0.4.0** | **0.5.0** | 0.5.0 — unchanged | **0.5.1** | 0.5.1 — unchanged | **0.5.2** | **0.6.0** | **0.7.0** |
+| `zenwatch` | — | — | — | — | **0.1.0** (new) | 0.1.0 — unchanged | **0.2.0** | 0.2.0 — unchanged | 0.2.0 — unchanged | **0.3.0** | **0.4.0** | **0.5.0** |
 
 ---
 
-## Unreleased
+## 0.14.0 — the second pass, and configuration from the GUI (2026-10-06)
+
+**Release commit** on 2026-10-06: `zenkey` and `zenkey-build` 0.11.1 and
+`zenkey-fleet` 0.18.0 to crates.io, the `0.14.0` tag; `zenctl` 0.12.0,
+`zengui` 0.7.0 and `zenwatch` 0.5.0 as release binaries.
+
+Two zengui epics and one wire amendment. **Epic #531** gave zengui a visual
+system — bundled type, one palette as tokens, a kit every surface draws
+through, and the gates that keep it that way. **Epic #556** carried it to
+the surfaces #531 did not reach, fixed what the new shots showed was broken
+(tree rows painting over each other, an opaque scrollbar rail hiding the
+right-hand end of every list), and added the **Config tool** (#481) — which
+needed **RFC v1.50** (#518) to settle how a token rides on a change and how
+a change made without a window is persisted. Every chunk's PR carries its
+before/after shots.
+
+### zengui's visual system (epic #531, chunks DU–EE)
+
+- **A picture of every surface** (#532): `just shots` renders every
+  whole-window scene in both themes to PNGs on Vulkan (`just shots-base
+  <rev>` the same from another revision) — the only way to look at the GUI
+  on a display-less host, and what every later PR attaches.
+- **Bundled type and icons** (#533): Inter, JetBrains Mono NL and a Lucide
+  subset, embedded, so every host draws the same type (licences in
+  `zengui/assets/fonts/NOTICE.md`, shipped beside the binary).
+- **One palette** (#534): zinc surfaces and one indigo primary as `Tokens`,
+  the iced theme built from them, every text role tested at WCAG AA on its
+  ground and its chip, and `check-color.sh` — only `theme` and `kit` name a
+  colour.
+- **Chips and ranked buttons** (#535), **an app bar** with the layout
+  presets on screen (#536), **docks as cards** with tab counts, a status
+  strip that flags and modals over a scrim (#537).
+- **Echo rows stop overlapping** (#538); payload previews in colour
+  (syntax spans computed at ingest), freshness as words.
+- **The Inspector's facts as fields**, one casing rule, empty states by
+  kind (#539); **charts with a ground**, and a mesh that claims nothing it
+  did not see (#540); **the mesh a tool of its own** (#541); **a Traffic
+  tab** — where the traffic is, the heaviest keys and their share (#542).
+
+### zengui's second pass (epic #556)
+
+- **Tree rows hold their line** (#557): a narrow Locator wrapped the counts
+  onto lines that painted over the next rows. Rows clip; chips never wrap;
+  width tiers decide what a row spells; a badge with no room is left out
+  whole and counted (`+N`), never cut and never silently gone; the
+  scrollbar is embedded. "unwatched" is a choice, not a finding (#543).
+- **Replay is a mode, not an alarm** (#544): a fuchsia mode hue of its own
+  (`Tone::Mode`), for replay and recording, where danger and caution stood.
+- **The palette and help** (#558): sectioned, each command with its chord
+  read off the shortcut map (`shortcuts::keys_for`), which the tooltips use
+  too; help grouped by the map's own sections; `kit::search`.
+- **Labelled fields and one error idiom** (#559): `kit::form_field` and
+  `kit::error`, through Connect, Settings, the scope editor — then Send
+  (#562), Detail (#563), the Inspector's sections (#564), the Activity
+  streams (#565) and the workbench and planes (#566). No hand-coloured
+  error text is left outside the kit, no `Debug` name reaches the screen,
+  and no hand-drawn glyph stands in for a badge.
+- **The Config tool** (#481, below).
+
+### The Config tool (#481)
+
+A producer's configuration, read and changed through RFC 05 §5.1 from the
+GUI. The schema is the one the producer serves, so the tool works against
+a producer this build has never heard of. A `hot` group applies at once —
+typed against the served kinds, judged by the producer's own validator
+before anything is sent, guarded by the read-back's revision, keyed so a
+retry after a lost reply is never a doubled write. A `reach` group, which
+can cut the link, leaves only with a rollback window and a person's yes;
+its pending change is then driven — confirm, extend, cancel — with the
+producer's deadline verbatim beside this window's own count. A change made
+while one is pending joins it by its token; `persist` is its own button.
+What the producer did not say is drawn as not said: a value not read back
+is *unknown*, a sensitive one *write-only*, silence after a write an
+*unknown outcome*. Entry points: "configure" on a configurable producer's
+presence row and on a `state/<p>/config/<r>` key; `spray` serves the RFC 05
+§5.1 test double as `probe`'s configuration, so `just gui-demo` has one to
+try.
+
+### zenctl config speaks RFC v1.50 (#560), and `call` refuses a non-chunk (#561)
+
+`config set --token` joins a pending change; `config persist` with no token
+takes the read-back's `last_change`; the control verbs draw their reply as
+the read-back it is. `zenkey_fleet::call` refuses a procedure path that is
+not plain chunks (a declared template such as `config/{device}/set`)
+instead of reaching the selector builder's assert. The old → new rows are
+in [`zenctl/CHANGELOG.md`](zenctl/CHANGELOG.md).
 
 ### The change's name (#518, RFC v1.50)
 
