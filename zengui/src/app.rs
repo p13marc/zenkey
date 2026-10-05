@@ -16,7 +16,7 @@
 //! [`Zengui::update`] and [`Zengui::view`], the two functions iced calls.
 
 use iced::widget::column;
-use iced::{Element, Length, Subscription, Task};
+use iced::{Element, Subscription, Task};
 
 use crate::config::Settings;
 use crate::link::{self, LinkKey};
@@ -368,15 +368,9 @@ impl Zengui {
             self.dep.facts.keys(),
         ) {
             None => layout.into(),
-            Some(overlay) => iced::widget::stack![
-                layout,
-                iced::widget::container(overlay)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .padding(space::XL),
-            ]
-            .into(),
+            // Over a scrim (#537): the window dims behind the overlay, and
+            // clicks on it no longer reach the panes beneath.
+            Some(overlay) => iced::widget::stack![layout, view::kit::scrim(overlay)].into(),
         }
     }
 }

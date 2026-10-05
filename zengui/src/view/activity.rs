@@ -60,15 +60,39 @@ pub(crate) struct ActivityData<'a> {
 pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
     // Putting the dock away is the grid's `×` since #180 — the strip is
     // only the stream switch now.
-    let mut tabs = row![].spacing(d.sp.xs);
-    for t in ActivityTab::ALL {
-        tabs = tabs.push(kit::tab(
-            t.label(),
-            d.dock.tab == t,
-            Message::Workspace(WorkspaceMsg::ActivityTab(t)),
-        ));
-    }
-    let strip = row![tabs].spacing(d.sp.sm).align_y(iced::Alignment::Center);
+    // The stream switch (#537): a segmented control, each stream with what
+    // it holds. A count is a count that was taken — the doctor's pill is
+    // absent until a run has answered (never-run is not 0, O4), "…" while
+    // one is in flight; replay's says "rec" only while a capture runs.
+    let strip = kit::segmented(
+        ActivityTab::ALL
+            .into_iter()
+            .map(|t| kit::Segment {
+                value: t,
+                label: t.label().to_string(),
+                icon: Some(match t {
+                    ActivityTab::Echo => kit::Icon::Echo,
+                    ActivityTab::Publish => kit::Icon::Send,
+                    ActivityTab::Doctor => kit::Icon::Doctor,
+                    ActivityTab::Replay => kit::Icon::Replay,
+                }),
+                count: match t {
+                    ActivityTab::Echo => Some(d.echo.len().to_string()),
+                    ActivityTab::Publish => Some(d.publish.log.len().to_string()),
+                    ActivityTab::Doctor if d.doctor.in_flight => Some("…".to_string()),
+                    ActivityTab::Doctor => d
+                        .doctor
+                        .current
+                        .as_ref()
+                        .map(|r| r.findings.len().to_string()),
+                    ActivityTab::Replay => d.replay.recording.is_some().then(|| "rec".to_string()),
+                },
+                tip: None,
+            })
+            .collect(),
+        Some(d.dock.tab),
+        |t| Message::Workspace(WorkspaceMsg::ActivityTab(t)),
+    );
 
     let body: Element<'a, Message> = match d.dock.tab {
         ActivityTab::Echo => echo::section(

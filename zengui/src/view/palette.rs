@@ -18,15 +18,14 @@
 //! nothing it has not seen, which keeps the overlay from inventing a keyspace (O4 — a suggestion is not an observation,
 //! and these are only ever the latter).
 
-use iced::widget::{Column, column, container, row};
+use iced::widget::{Column, column, row};
 use iced::{Element, Length};
 
 use crate::message::{
     ChromeMsg, DeploymentMsg, Message, PaneMsg, PrefsMsg, RightPane, WorkspaceMsg,
 };
 use crate::view::kit;
-use crate::view::theme::colors;
-use crate::view::tokens::{face, font, radius, space, stroke};
+use crate::view::tokens::{face, font, space};
 
 /// How many rows the overlay renders. A palette that draws a 50k-key list is
 /// the same bug as a tree that does.
@@ -387,7 +386,7 @@ fn list<'a>(
         );
     }
 
-    container(
+    kit::modal(
         column![
             kit::section_header(title, None),
             input,
@@ -395,19 +394,9 @@ fn list<'a>(
             iced::widget::scrollable(body).height(Length::Fixed(260.0)),
         ]
         .spacing(space::SM),
+        560.0,
+        None,
     )
-    .padding(space::MD)
-    .width(Length::Fixed(560.0))
-    .style(|theme: &iced::Theme| container::Style {
-        background: Some(colors(theme).surface().into()),
-        border: iced::Border {
-            color: colors(theme).border(),
-            width: stroke::HAIRLINE,
-            radius: radius::MODAL.into(),
-        },
-        ..container::Style::default()
-    })
-    .into()
 }
 
 /// The Connect overlay (#185): [`crate::view::contexts::pane`], floated.
@@ -421,26 +410,15 @@ fn connect<'a>(
     form: &'a crate::view::contexts::ContextForm,
     unreachable: bool,
 ) -> Element<'a, Message> {
-    container(
+    kit::modal(
         column![
             kit::muted("session setup — Esc closes"),
             crate::view::contexts::pane(form, unreachable),
         ]
         .spacing(space::SM),
+        640.0,
+        Some(560.0),
     )
-    .padding(space::MD)
-    .width(Length::Fixed(640.0))
-    .height(Length::Fixed(560.0))
-    .style(|theme: &iced::Theme| container::Style {
-        background: Some(colors(theme).surface().into()),
-        border: iced::Border {
-            color: colors(theme).border(),
-            width: stroke::HAIRLINE,
-            radius: radius::MODAL.into(),
-        },
-        ..container::Style::default()
-    })
-    .into()
 }
 
 /// The Selectors overlay (#187): [`crate::view::scope_editor::pane`],
@@ -454,26 +432,15 @@ fn selectors(scope: crate::view::scope_editor::ScopeEditorData<'_>) -> Element<'
 /// Connect's shape — fixed, bordered, on the surface color — with the modal's
 /// content scrolling inside it.
 fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
-    container(
+    kit::modal(
         column![
             kit::muted("Esc closes"),
             iced::widget::scrollable(content).height(Length::Fill),
         ]
         .spacing(space::SM),
+        640.0,
+        Some(560.0),
     )
-    .padding(space::MD)
-    .width(Length::Fixed(640.0))
-    .height(Length::Fixed(560.0))
-    .style(|theme: &iced::Theme| container::Style {
-        background: Some(colors(theme).surface().into()),
-        border: iced::Border {
-            color: colors(theme).border(),
-            width: stroke::HAIRLINE,
-            radius: radius::MODAL.into(),
-        },
-        ..container::Style::default()
-    })
-    .into()
 }
 
 /// The `?` overlay — rendered from [`crate::shortcuts::map`], which is also
@@ -495,19 +462,11 @@ fn help<'a>() -> Element<'a, Message> {
         );
     }
 
-    container(column![kit::section_header("Shortcuts", None), body].spacing(space::SM))
-        .padding(space::MD)
-        .width(Length::Fixed(480.0))
-        .style(|theme: &iced::Theme| container::Style {
-            background: Some(colors(theme).surface().into()),
-            border: iced::Border {
-                color: colors(theme).border(),
-                width: stroke::HAIRLINE,
-                radius: radius::MODAL.into(),
-            },
-            ..container::Style::default()
-        })
-        .into()
+    kit::modal(
+        column![kit::section_header("Shortcuts", None), body].spacing(space::SM),
+        480.0,
+        None,
+    )
 }
 
 #[cfg(test)]

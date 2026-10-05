@@ -340,7 +340,7 @@ fn presets<'a>(chrome: &'a Chrome) -> Element<'a, Message> {
         .into_iter()
         .map(|p| kit::Segment {
             value: p,
-            label: p.label(),
+            label: p.label().to_string(),
             icon: Some(match p {
                 LayoutPreset::Explore => kit::Icon::Explore,
                 LayoutPreset::Watch => kit::Icon::Watch,
@@ -454,12 +454,7 @@ fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, M
 fn dock_strip<'a>(work: &'a Workspace) -> Element<'a, Message> {
     iced::widget::Row::from_iter(DockRole::ALL.into_iter().map(|role| {
         kit::toggle_chip(
-            Some(match role {
-                DockRole::Locator => kit::Icon::Locator,
-                DockRole::Inspector => kit::Icon::Inspector,
-                DockRole::Activity => kit::Icon::Activity,
-                DockRole::Workbench => kit::Icon::Workbench,
-            }),
+            Some(super::panes::dock_icon(role)),
             role.label(),
             work.docks.is_open(role),
             Message::Workspace(WorkspaceMsg::DockToggled(role)),

@@ -23,8 +23,8 @@ use crate::prefs::{Density, DockRole};
 use crate::state::subject::SubjectSlot;
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
+use crate::view::kit;
 use crate::view::tokens::{Spacing, space};
-use crate::view::{kit, theme};
 
 /// Whether any active watch selector covers this exact key.
 ///
@@ -63,10 +63,16 @@ pub(crate) fn grid<'a>(
         let sp = Spacing::of(role.density(density));
         // The grid's docks all follow the selection (#257): only a torn-off
         // window ([`solo`]) can bind another slot.
-        pane_grid::Content::new(body(dep, obs, sub, tree, work, *role, SlotId::FOLLOW, sp))
-            .title_bar(title_bar(*role, focused))
+        // A dock is a card on the well (#537): the panel, a hairline, the
+        // card radius, and its body inset from the frame.
+        pane_grid::Content::new(
+            iced::widget::container(body(dep, obs, sub, tree, work, *role, SlotId::FOLLOW, sp))
+                .padding(iced::Padding::ZERO.left(sp.sm).right(sp.sm).bottom(sp.sm)),
+        )
+        .title_bar(title_bar(*role, focused))
+        .style(kit::dock_frame(focused))
     })
-    .spacing(space::XS)
+    .spacing(space::SM)
     .min_size(120)
     .on_click(|pane| Message::Workspace(WorkspaceMsg::DockFocused(pane)))
     .on_drag(|event| Message::Workspace(WorkspaceMsg::PaneDragged(event)))
@@ -142,6 +148,7 @@ pub(crate) fn solo<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(sp.md)
+        .style(kit::dock_frame(false))
         .into()
 }
 
@@ -199,19 +206,22 @@ fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Messa
             .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
         "close dock",
     ));
-    pane_grid::TitleBar::new(if focused {
-        kit::caption(role.label())
-    } else {
-        kit::caption(role.label()).style(|t: &iced::Theme| iced::widget::text::Style {
-            color: Some(theme::colors(t).text_muted()),
-        })
-    })
-    .controls(pane_grid::Controls::new(controls))
-    .padding(space::XS)
-    .style(move |t: &iced::Theme| iced::widget::container::Style {
-        background: focused.then(|| theme::colors(t).surface().into()),
-        ..iced::widget::container::Style::default()
-    })
+    // The header strip (#537): the dock's icon and its name — SemiBold when
+    // focused, beside the frame's primary hairline, so focus is never the
+    // colour alone — on the dock's own panel.
+    pane_grid::TitleBar::new(kit::dock_title(dock_icon(role), role.label(), focused))
+        .controls(pane_grid::Controls::new(controls))
+        .padding([space::XS, space::SM])
+}
+
+/// The icon a dock wears in its header and on the dock strip.
+pub(crate) fn dock_icon(role: DockRole) -> kit::Icon {
+    match role {
+        DockRole::Locator => kit::Icon::Locator,
+        DockRole::Inspector => kit::Icon::Inspector,
+        DockRole::Activity => kit::Icon::Activity,
+        DockRole::Workbench => kit::Icon::Workbench,
+    }
 }
 
 fn locator<'a>(
@@ -322,18 +332,28 @@ fn workbench<'a>(
     work: &'a Workspace,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut tools = row![].spacing(sp.xs);
-    for p in RightPane::ALL {
-        if p == RightPane::Inspector {
-            // A dock of its own since #180, not a tool of this one.
-            continue;
-        }
-        tools = tools.push(kit::tab(
-            p.label(),
-            work.right_pane == p,
-            Message::Workspace(WorkspaceMsg::PaneSelected(p)),
-        ));
-    }
+    let tools = kit::segmented(
+        RightPane::ALL
+            .into_iter()
+            // The Inspector is a dock of its own since #180, not a tool of
+            // this one.
+            .filter(|p| *p != RightPane::Inspector)
+            .map(|p| kit::Segment {
+                value: p,
+                label: p.label().to_string(),
+                icon: Some(match p {
+                    RightPane::Send => kit::Icon::Send,
+                    RightPane::Nodes => kit::Icon::Nodes,
+                    RightPane::Admin => kit::Icon::Admin,
+                    RightPane::Inspector => kit::Icon::Inspector,
+                }),
+                count: None,
+                tip: None,
+            })
+            .collect(),
+        Some(work.right_pane),
+        |p| Message::Workspace(WorkspaceMsg::PaneSelected(p)),
+    );
     let body: Element<'a, Message> = match work.right_pane {
         RightPane::Send => view::send::pane(
             &work.bench.send_form,

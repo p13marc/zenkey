@@ -408,14 +408,20 @@ pub fn pane<'a>(
     roster: &'a crate::nodes::NodeRoster,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut modes = row![].spacing(sp.xs);
-    for m in SendMode::ALL {
-        modes = modes.push(kit::tab(
-            m.label(),
-            form.mode == m,
-            msg(SendMsg::ModeSelected(m)),
-        ));
-    }
+    let modes = kit::segmented(
+        SendMode::ALL
+            .into_iter()
+            .map(|m| kit::Segment {
+                value: m,
+                label: m.label().to_string(),
+                icon: None,
+                count: None,
+                tip: None,
+            })
+            .collect(),
+        Some(form.mode),
+        |m| msg(SendMsg::ModeSelected(m)),
+    );
     let mut col = column![kit::section_header("Send", None), modes].spacing(sp.sm);
 
     col = match form.mode {
