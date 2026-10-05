@@ -214,10 +214,19 @@ fn replay_stream<'a>(
         None => {}
     }
     if let Some(rec) = &r.recording {
-        col = col.push(kit::muted(format!(
-            "● recording current watches to {} — the location bar's 'stop recording' finishes the file",
-            rec.path
-        )));
+        // The mode's status, not a hand-drawn ● (#544): the dot and the
+        // word come from the same constructor as the app bar's.
+        col = col.push(
+            row![
+                kit::status(crate::view::theme::Tone::Mode, "recording"),
+                kit::muted(format!(
+                    "current watches to {} — the location bar's 'stop recording' finishes the file",
+                    rec.path
+                )),
+            ]
+            .spacing(sp.sm)
+            .align_y(iced::Alignment::Center),
+        );
     }
     if let Some(done) = &r.recorded {
         col = col.push(kit::muted(match done {

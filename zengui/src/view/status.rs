@@ -254,28 +254,29 @@ pub fn retention_text(r: &zenkey_fleet::RetentionStats) -> String {
 }
 
 pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
-    let (link_text, link_is_bad) = match s.link {
+    // `Some(tone)` = worth a chip. Replay is a mode, not a fault (#544):
+    // its chip is the mode's, where a failed link's is danger's.
+    let (link_text, chip) = match s.link {
         // Replay wins over whatever the link was doing: the panes are
         // showing a file, and the strip says so (#74).
-        _ if s.replaying => ("REPLAY — live link off".to_string(), true),
-        LinkState::Connecting => ("connecting…".to_string(), false),
+        _ if s.replaying => ("REPLAY — live link off".to_string(), Some(Tone::Mode)),
+        LinkState::Connecting => ("connecting…".to_string(), None),
         LinkState::Pumping if s.watched.is_empty() => (
             // The lazy resting state, stated as a posture, not an absence.
             "skeleton only — nothing observed by choice".to_string(),
-            false,
+            None,
         ),
         LinkState::Pumping => (
             format!("observing {}", kit::plural(s.watched.len(), "watch")),
-            false,
+            None,
         ),
-        LinkState::Ended => ("link ended — retrying".to_string(), true),
-        LinkState::Failed(e) => (format!("link failed: {e}"), true),
+        LinkState::Ended => ("link ended — retrying".to_string(), Some(Tone::Negative)),
+        LinkState::Failed(e) => (format!("link failed: {e}"), Some(Tone::Negative)),
     };
 
-    let link: Element<'a, Message> = if link_is_bad {
-        kit::status_chip(Tone::Negative, link_text)
-    } else {
-        kit::muted(link_text)
+    let link: Element<'a, Message> = match chip {
+        Some(tone) => kit::status_chip(tone, link_text),
+        None => kit::muted(link_text),
     };
 
     let crate::message::WatchedTotals {
@@ -412,11 +413,12 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
 /// glance. The strip's first cell keeps the full posture sentence; this is
 /// the word beside the dot, and the dot never stands without it.
 ///
-/// Replay wins, as it does in the strip: the panes are showing a file. A
-/// session that reaches nothing says so even while its pump runs.
+/// Replay wins, as it does in the strip: the panes are showing a file — in
+/// the mode's tone, never caution's (#544). A session that reaches nothing
+/// says so even while its pump runs.
 pub fn link_word(link: &LinkState, replaying: bool, unreachable: bool) -> (Tone, &'static str) {
     if replaying {
-        return (Tone::Caution, "replay — live link off");
+        return (Tone::Mode, "replay — live link off");
     }
     if unreachable {
         return (Tone::Negative, "reaches nothing");
@@ -458,9 +460,9 @@ mod tests {
         );
         assert_eq!(words[3].0, Tone::Negative);
         assert_eq!(
-            link_word(&LinkState::Pumping, true, false).1,
-            "replay — live link off",
-            "replay wins, as it does in the strip"
+            link_word(&LinkState::Pumping, true, false),
+            (Tone::Mode, "replay — live link off"),
+            "replay wins, as it does in the strip — as a mode, not a caution (#544)"
         );
         assert_eq!(
             link_word(&LinkState::Pumping, false, true),

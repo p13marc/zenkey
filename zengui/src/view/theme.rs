@@ -18,6 +18,14 @@
 //! own chip fill, in both themes; the syntax and accent hues are tested to sit
 //! at least 30° from every verdict hue, for the reason [`ThemeColors::series`]
 //! gives.
+//!
+//! **A mode is not an alarm (#544).** Replay — the panes reading a file, the
+//! live link off — and a recording in progress are states the operator chose,
+//! not findings, yet they used to wear danger red and caution amber, the
+//! colours of "something is wrong". They have a hue of their own now,
+//! [`Tokens::mode`] through [`Tone::Mode`]: loud enough that the mode cannot
+//! be missed, and tested to sit clear of every verdict hue and of the
+//! primary, so it never reads as a verdict or as a selection.
 
 use std::sync::LazyLock;
 
@@ -63,9 +71,12 @@ pub struct Tokens {
     /// punctuation the dim one, so a number never lands near amber.
     pub syntax_key: Color,
     pub syntax_string: Color,
-    /// Two non-verdict hues for things that need telling apart without a
-    /// claim (a node's role on the mesh).
-    pub accent: [Color; 2],
+    /// A non-verdict hue for telling a thing apart without a claim (a peer
+    /// on the mesh).
+    pub accent: Color,
+    /// A mode the operator chose (#544): replay, a recording. Never a
+    /// verdict, never the primary — see [`Tone::Mode`].
+    pub mode: Color,
     /// Behind a modal.
     pub scrim: Color,
     /// Under a modal, lifting it off the scrim.
@@ -97,7 +108,8 @@ pub const DARK: Tokens = Tokens {
     retired: rgb(0xa8a29e),
     syntax_key: rgb(0x7dd3fc),
     syntax_string: rgb(0xf0abfc),
-    accent: [rgb(0x38bdf8), rgb(0xe879f9)],
+    accent: rgb(0x38bdf8),
+    mode: rgb(0xe879f9),
     scrim: Color::from_rgba8(0, 0, 0, 0.6),
     shadow: Color::from_rgba8(0, 0, 0, 0.5),
 };
@@ -122,7 +134,9 @@ pub const LIGHT: Tokens = Tokens {
     retired: rgb(0x6f6862),
     syntax_key: rgb(0x0369a1),
     syntax_string: rgb(0xa21caf),
-    accent: [rgb(0x0284c7), rgb(0xc026d3)],
+    accent: rgb(0x0284c7),
+    // The 700: the 600 (#c026d3) does not read at AA on its own chip.
+    mode: rgb(0xa21caf),
     scrim: Color::from_rgba8(9, 9, 11, 0.35),
     shadow: Color::from_rgba8(9, 9, 11, 0.18),
 };
@@ -353,9 +367,14 @@ impl ThemeColors<'_> {
         }
     }
 
-    /// One of the two non-verdict accents.
-    pub fn accent(&self, which: Accent) -> Color {
-        self.tokens().accent[which as usize]
+    /// The non-verdict accent.
+    pub fn accent(&self) -> Color {
+        self.tokens().accent
+    }
+
+    /// A chosen mode (#544) — see [`Tone::Mode`].
+    pub fn mode(&self) -> Color {
+        self.tokens().mode
     }
 
     /// The one swatch resolver (#193): every badge scale maps into [`Tone`]
@@ -371,6 +390,7 @@ impl ThemeColors<'_> {
             // Absence of information, not a value — dimmer than commentary.
             Tone::Neutral => self.text_dim(),
             Tone::Info => self.text_muted(),
+            Tone::Mode => self.mode(),
         }
     }
 
@@ -378,7 +398,9 @@ impl ThemeColors<'_> {
     /// question not asked has no answer to tint, so its chip is an outline.
     pub fn tone_fill(&self, tone: Tone) -> Option<Color> {
         match tone {
-            Tone::Positive | Tone::Caution | Tone::Negative => Some(alpha(self.tone(tone), 0.10)),
+            Tone::Positive | Tone::Caution | Tone::Negative | Tone::Mode => {
+                Some(alpha(self.tone(tone), 0.10))
+            }
             Tone::Info => Some(self.raised()),
             Tone::Neutral => None,
         }
@@ -387,7 +409,9 @@ impl ThemeColors<'_> {
     /// A chip's hairline for a tone (#535).
     pub fn tone_border(&self, tone: Tone) -> Color {
         match tone {
-            Tone::Positive | Tone::Caution | Tone::Negative => alpha(self.tone(tone), 0.28),
+            Tone::Positive | Tone::Caution | Tone::Negative | Tone::Mode => {
+                alpha(self.tone(tone), 0.28)
+            }
             Tone::Info => Color::TRANSPARENT,
             Tone::Neutral => self.line(),
         }
@@ -477,6 +501,11 @@ pub enum Tone {
     Neutral,
     /// Commentary — muted, but still information (the doctor's `Info`).
     Info,
+    /// A mode the operator chose (#544): the panes are replaying a file, a
+    /// recording is running. Loud, because a mode must not be missed — and
+    /// a hue of its own, because it is no verdict: replay is not an error
+    /// and a recording is not a warning.
+    Mode,
 }
 
 /// What a span of a payload preview is (#538 draws them; the colours are
@@ -489,13 +518,6 @@ pub enum SyntaxRole {
     /// read as a caution.
     Literal,
     Punct,
-}
-
-/// The two non-verdict accents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Accent {
-    Sky = 0,
-    Fuchsia = 1,
 }
 
 /// How storage coverage should read (#70).
@@ -929,6 +951,7 @@ mod tests {
                 ("retired", t.retired),
                 ("syntax key", t.syntax_key),
                 ("syntax string", t.syntax_string),
+                ("mode", t.mode),
             ];
             for (name, fg) in roles {
                 for (ground, bg) in [("panel", t.panel), ("well", t.well)] {
@@ -936,7 +959,13 @@ mod tests {
                     assert!(r >= 4.5, "{choice:?} {name} on {ground}: {r:.2}");
                 }
             }
-            for tone in [Tone::Positive, Tone::Caution, Tone::Negative, Tone::Info] {
+            for tone in [
+                Tone::Positive,
+                Tone::Caution,
+                Tone::Negative,
+                Tone::Info,
+                Tone::Mode,
+            ] {
                 let fill = over(c.tone_fill(tone).expect("tinted"), t.panel);
                 let r = contrast(c.tone(tone), fill);
                 assert!(r >= 4.5, "{choice:?} {tone:?} chip: {r:.2}");
@@ -956,8 +985,8 @@ mod tests {
             let neutral = [
                 ("syntax key", t.syntax_key),
                 ("syntax string", t.syntax_string),
-                ("accent 0", t.accent[0]),
-                ("accent 1", t.accent[1]),
+                ("accent", t.accent),
+                ("mode", t.mode),
             ];
             for (name, c) in neutral {
                 for (verdict, v) in [
@@ -969,6 +998,17 @@ mod tests {
                     assert!(d >= 30.0, "{choice:?} {name} is {d:.0}° from {verdict}");
                 }
             }
+        }
+    }
+
+    /// #544: a mode must not read as a selection either — the primary is
+    /// what the user picked, the mode what the panes are doing.
+    #[test]
+    fn the_mode_is_not_the_primary() {
+        for choice in ThemeChoice::ALL {
+            let t = choice.tokens();
+            let d = hue_distance(t.mode, t.primary);
+            assert!(d >= 30.0, "{choice:?} mode is {d:.0}° from primary");
         }
     }
 
@@ -1004,7 +1044,7 @@ mod tests {
             let theme = iced_theme(choice);
             let c = colors(&theme);
             assert_eq!(c.tone_fill(Tone::Neutral), None);
-            for tone in [Tone::Positive, Tone::Caution, Tone::Negative] {
+            for tone in [Tone::Positive, Tone::Caution, Tone::Negative, Tone::Mode] {
                 assert!(c.tone_fill(tone).is_some());
             }
         }
