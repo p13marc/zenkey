@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use zenkey::config::{ConfigChange, ConfigView, Edit, ParamClass, ParamKind, ParamValue};
 use zenkey_fleet::SliceSet;
@@ -69,6 +69,11 @@ impl ConfigTarget {
     /// One group's write procedure.
     pub fn set_path(&self, group: &str) -> String {
         format!("config/{}/{group}/set", self.resource.trim())
+    }
+
+    /// A control verb's procedure.
+    pub fn control_path(&self, verb: Verb) -> String {
+        format!("config/{}/{}", self.resource.trim(), verb.word())
     }
 }
 
@@ -133,6 +138,52 @@ pub enum ConfigAct {
     Set(String),
     /// A group's change as a dry run: what would change, nothing touched.
     Preview(String),
+    /// A control verb on a change, by its token.
+    Control(Verb),
+}
+
+/// The four verbs a change is driven with after it is sent (RFC 05 §5.1),
+/// each its own key — `persist` above all, so an ACL can grant a change and
+/// deny making it survive a restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verb {
+    Confirm,
+    Cancel,
+    Extend,
+    Persist,
+}
+
+impl Verb {
+    pub fn word(self) -> &'static str {
+        match self {
+            Verb::Confirm => "confirm",
+            Verb::Cancel => "cancel",
+            Verb::Extend => "extend",
+            Verb::Persist => "persist",
+        }
+    }
+}
+
+/// A change this window sent with a rollback window, counted from the send
+/// (#481). The producer's deadline is the truth and is shown verbatim; this
+/// count starts when the request left, before the producer armed anything,
+/// so it errs early — the safe side of a window that rolls a link back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Armed {
+    pub token: String,
+    pub sent: Instant,
+    pub window: Duration,
+    /// The count reached zero and the read-back was asked once — so a
+    /// rollback is seen, and not asked again every tick.
+    pub reread: bool,
+}
+
+impl Armed {
+    /// What is left of the window by this count.
+    pub fn left(&self, now: Instant) -> Duration {
+        self.window
+            .saturating_sub(now.saturating_duration_since(self.sent))
+    }
 }
 
 /// A parameter's address: `(group, parameter)`.
@@ -154,6 +205,14 @@ pub enum GroupNote {
     /// The document had moved under the edit; it was read again and the
     /// draft kept.
     Moved,
+    /// A reach change was answered with its token before being applied
+    /// (RFC 05 §5.1): pending, by that token.
+    Pending(String),
+    /// Another writer's change is pending, by this token: read again, and
+    /// the next apply joins it (RFC v1.50).
+    Busy(String),
+    /// A control verb's outcome, in words.
+    Done(String),
 }
 
 /// The Config tool's state (#481), in the workbench: what the user typed
@@ -176,6 +235,19 @@ pub struct ConfigForm {
     /// reused by the retry, so a lost reply never becomes a doubled write
     /// (RFC 05 §5.1). Dropped once an answer is known.
     pub keys: BTreeMap<String, String>,
+    /// The CONFIRM WINDOW field, seconds, as typed.
+    pub window: String,
+    /// The EXTEND BY field, seconds, as typed.
+    pub extend_by: String,
+    /// The person's yes to a change that can cut the link (RFC 05 §5.1,
+    /// v1.48) — per change: spent by the send.
+    pub consent: bool,
+    /// The change this window armed, while it is pending.
+    pub armed: Option<Armed>,
+    /// When the last change left — what an armed window counts from.
+    pub sent_at: Option<Instant>,
+    /// The last control verb's outcome, said under the pending change.
+    pub control_note: Option<GroupNote>,
 }
 
 impl ConfigForm {
@@ -187,11 +259,38 @@ impl ConfigForm {
         }
     }
 
+    /// The pending change's token, if the document names one — what a `set`
+    /// carries to join it (RFC v1.50).
+    pub fn pending_token(&self) -> Option<&str> {
+        self.view()?.pending.as_ref().map(|p| p.token.as_str())
+    }
+
+    /// The typed window, when it is a whole number of seconds above zero.
+    pub fn window_secs(&self) -> Option<u64> {
+        seconds(&self.window)
+    }
+
+    /// The typed extension, likewise.
+    pub fn extend_secs(&self) -> Option<u64> {
+        seconds(&self.extend_by)
+    }
+
     /// Whether the target was edited since the last read — the document on
     /// screen is then about another resource, and says so.
     pub fn stale(&self) -> bool {
         self.read.as_ref().is_some_and(|r| r.target != self.target)
     }
+}
+
+fn seconds(text: &str) -> Option<u64> {
+    text.trim().parse::<u64>().ok().filter(|s| *s > 0)
+}
+
+/// The token a producer names when it answers `error/busy` (the reference
+/// validator's words): the change another writer has pending.
+pub fn busy_token(message: &str) -> Option<&str> {
+    let rest = message.split_once("(token ")?.1;
+    rest.split_once(')').map(|(token, _)| token)
 }
 
 /// A value as a person types it: text bare, everything else as displayed —
@@ -420,6 +519,34 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].0, "len");
         assert!(fresh_key() != fresh_key());
+    }
+
+    /// The armed count errs early and never runs negative; a busy refusal
+    /// names the token to join.
+    #[test]
+    fn a_window_counts_down_from_the_send_and_a_busy_names_its_token() {
+        let t0 = Instant::now();
+        let armed = Armed {
+            token: "chg-1".into(),
+            sent: t0,
+            window: Duration::from_secs(60),
+            reread: false,
+        };
+        assert_eq!(
+            armed.left(t0 + Duration::from_secs(20)),
+            Duration::from_secs(40)
+        );
+        assert_eq!(armed.left(t0 + Duration::from_secs(90)), Duration::ZERO);
+        assert_eq!(
+            busy_token(
+                "a change is pending on this resource (token chg-0ff1); confirm, cancel or \
+                 extend it, or carry its token"
+            ),
+            Some("chg-0ff1")
+        );
+        assert_eq!(busy_token("no"), None);
+        assert_eq!(seconds(" 60 "), Some(60));
+        assert_eq!(seconds("0"), None);
     }
 
     #[test]
