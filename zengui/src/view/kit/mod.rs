@@ -16,17 +16,20 @@
 //! One module per kind since #535, re-exported flat — `kit::primary`,
 //! `kit::Icon`, `kit::window` — so the split can be re-cut without a call
 //! site moving: `badge` (chips: the six badge scales, data and status
-//! chips), `buttons` (every interactive constructor), `icon`, `list`
+//! chips), `buttons` (every interactive constructor), `chrome` (the
+//! segmented control, toggle chips, status dots, pills), `icon`, `list`
 //! (the shared virtualized window), `format` (bytes, rates, plurals).
 
 mod badge;
 mod buttons;
+mod chrome;
 mod format;
 mod icon;
 mod list;
 
 pub use badge::*;
 pub use buttons::*;
+pub use chrome::*;
 pub use format::*;
 pub use icon::*;
 pub use list::*;

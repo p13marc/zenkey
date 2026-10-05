@@ -22,7 +22,7 @@ use iced::widget::{column, row};
 
 use crate::config::BaseChoice;
 use crate::message::{ChromeMsg, DeploymentMsg, Message, Subject, SubjectMsg, WorkspaceMsg};
-use crate::prefs::DockRole;
+use crate::prefs::{DockRole, LayoutPreset};
 use crate::scope::ScopePreset;
 use crate::state::{Chrome, Deployment, Observation, SubjectState, Workspace};
 use crate::view::palette::{Overlay, PaletteMsg};
@@ -87,10 +87,13 @@ pub fn segments(subject: &Subject, base: &str) -> Vec<Segment> {
 
 /// The breadcrumb itself: context ▸ base ▸ scope ▸ key.
 pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
-    let context_chip = kit::secondary(kit::caption(match d.context {
-        Some(name) => format!("context: {name}"),
-        None => "no context".to_string(),
-    }))
+    let context_chip = kit::secondary(kit::labelled(
+        kit::Icon::Plug,
+        match d.context {
+            Some(name) => format!("context: {name}"),
+            None => "no context".to_string(),
+        },
+    ))
     .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
         Overlay::Connect,
     ))))
@@ -112,7 +115,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         Message::Deployment(DeploymentMsg::ScopeSelected(s))
     })
     .text_size(tokens::font::CAPTION);
-    let selectors_chip = kit::secondary(kit::caption("selectors…"))
+    let selectors_chip = kit::ghost(kit::labelled(kit::Icon::Selectors, "selectors…"))
         .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
             Overlay::Selectors,
         ))))
@@ -120,15 +123,18 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
 
     // Observation is opt-in and labelled by its cost (issue #85); it rides
     // beside the scope it observes.
-    let observe = kit::secondary(kit::caption(if d.observing {
-        "stop observing scope"
+    let observe = kit::secondary(if d.observing {
+        kit::labelled(kit::Icon::Unwatched, "stop observing scope")
     } else {
-        "observe scope"
-    }))
+        kit::labelled(kit::Icon::Watched, "observe scope")
+    })
     .on_press(Message::Deployment(DeploymentMsg::ScopeWatchToggled))
     .padding(space::XS);
 
-    let mut bar = row![
+    // Two lines (#536): where the window points — context, base, scope —
+    // and, under it, what it is looking at. Each wraps on its own, so a
+    // narrow window never splits a key across the stations.
+    let stations = row![
         context_chip,
         kit::separator(),
         base_picker,
@@ -136,21 +142,24 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         scope_picker,
         selectors_chip,
         observe,
-        kit::separator(),
     ]
     .spacing(space::SM)
-    .align_y(iced::Alignment::Center);
+    .align_y(iced::Alignment::Center)
+    .width(iced::Length::Fill)
+    .wrap()
+    .vertical_spacing(space::XS);
 
+    let mut trail = row![].spacing(space::XS).align_y(iced::Alignment::Center);
     let segs = segments(d.subject, d.base);
     if segs.is_empty() {
         // An empty segment list is a state, and it says which one.
-        bar = bar.push(kit::muted("nothing selected — pick a key in the tree"));
+        trail = trail.push(kit::muted("nothing selected — pick a key in the tree"));
     } else {
         for (i, seg) in segs.into_iter().enumerate() {
             if i > 0 {
-                bar = bar.push(kit::muted("/"));
+                trail = trail.push(kit::muted("/"));
             }
-            bar = bar.push(match seg.select {
+            trail = trail.push(match seg.select {
                 Some(subtree) => Element::from(
                     kit::link(kit::caption(seg.label).font(face::MONO))
                         .on_press(Message::Subject(SubjectMsg::Select(subtree)))
@@ -161,10 +170,19 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
             });
         }
     }
-    bar.into()
+    column![
+        stations,
+        trail
+            .width(iced::Length::Fill)
+            .wrap()
+            .vertical_spacing(space::XS),
+    ]
+    .spacing(space::XS)
+    .into()
 }
 
-/// The whole top region: the breadcrumb, then the window's own controls.
+/// The whole top region (#536): the app bar, then the breadcrumb with the
+/// dock strip at its end.
 ///
 /// It reads five of the six sub-states and moves none, which is what a
 /// location bar is.
@@ -175,7 +193,9 @@ pub(crate) fn bar<'a>(
     sub: &'a SubjectState,
     work: &'a Workspace,
 ) -> Element<'a, Message> {
-    column![
+    // The breadcrumb wraps within whatever the dock strip leaves it, so a
+    // deep key at 1024px flows onto a second line instead of clipping.
+    let place = row![
         breadcrumb(LocationData {
             context: work.bench.context_form.active.as_deref(),
             base: dep.base(),
@@ -184,105 +204,268 @@ pub(crate) fn bar<'a>(
             observing: !obs.scope_watches.is_empty(),
             subject: &sub.follow.current,
         }),
-        controls(chrome, dep, work),
+        dock_strip(work),
     ]
-    .spacing(space::XS)
+    .spacing(space::MD)
+    .align_y(iced::Alignment::Center);
+    column![app_bar(chrome, dep, obs, work), place]
+        .spacing(space::SM)
+        .into()
+}
+
+/// Wide enough to hold the app bar's three groups on one line, presets
+/// centred. Below it the presets take a line of their own, so nothing clips
+/// at the 1024px the shots harness checks.
+const ONE_LINE: f32 = 1240.0;
+
+/// The app bar (#536): who the window is talking to on the left, which
+/// layout it is in at the centre, the window's own controls on the right.
+fn app_bar<'a>(
+    chrome: &'a Chrome,
+    dep: &'a Deployment,
+    obs: &'a Observation,
+    work: &'a Workspace,
+) -> Element<'a, Message> {
+    iced::widget::responsive(move |size| {
+        let left = row![app_mark(), connection(dep, obs, work)]
+            .spacing(space::MD)
+            .align_y(iced::Alignment::Center);
+        if size.width >= ONE_LINE {
+            row![
+                left,
+                iced::widget::space::horizontal(),
+                presets(chrome),
+                iced::widget::space::horizontal(),
+                window_controls(chrome, work),
+            ]
+            .spacing(space::SM)
+            .align_y(iced::Alignment::Center)
+            .into()
+        } else {
+            column![
+                row![
+                    left,
+                    iced::widget::space::horizontal(),
+                    window_controls(chrome, work)
+                ]
+                .spacing(space::SM)
+                .align_y(iced::Alignment::Center),
+                iced::widget::container(presets(chrome)).center_x(iced::Length::Fill),
+            ]
+            .spacing(space::SM)
+            .into()
+        }
+    })
+    .height(iced::Length::Shrink)
     .into()
 }
 
-/// The window's own controls: the dock strip, capture/replay, theme, zoom,
-/// reconnect — everything that is about the window rather than the place.
-///
-/// The dock strip replaced the eleven-tab pane strip (#180): four toggles,
-/// one per [`DockRole`], where lit means *open in the grid* — not "the one
-/// pane showing". Clicking closes an open dock or restores a closed one; it
-/// is the same [`WorkspaceMsg::DockToggled`] each dock's title-bar `×`
-/// sends, and the way back once one is closed.
-fn controls<'a>(
-    chrome: &'a Chrome,
+/// The app's mark: an icon and its name, at EMPHASIS — the window's one
+/// TITLE stays the subject's (#191).
+fn app_mark<'a>() -> Element<'a, Message> {
+    row![
+        kit::icon(kit::Icon::Logo).style(|theme: &iced::Theme| iced::widget::text::Style {
+            color: Some(crate::view::theme::colors(theme).primary()),
+        }),
+        kit::emphasis("zengui").font(face::SEMIBOLD),
+    ]
+    .spacing(space::XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The connection pill (#536): the link's state as a dot **and** a word,
+/// the session's mode when the flags decide it, and where it dials. The
+/// status strip keeps the full posture sentence; this is the glance.
+fn connection<'a>(
     dep: &'a Deployment,
+    obs: &'a Observation,
     work: &'a Workspace,
 ) -> Element<'a, Message> {
-    row![
-        iced::widget::Row::from_iter(DockRole::ALL.into_iter().map(|role| {
-            kit::tab(
-                role.label(),
-                work.docks.is_open(role),
-                Message::Workspace(WorkspaceMsg::DockToggled(role)),
-            )
-        }))
-        .spacing(space::XS),
-        // The scope's honest coverage statement — "everything" is not
-        // everything (RFC 03 §4 D2), and this is where it says so.
-        kit::muted(dep.settings.scope.label()),
-        // Capture and replay (#74): record writes the current watches to a
-        // .zrec; replay feeds the panes from one.
-        kit::secondary(kit::caption(if work.replay.recording.is_some() {
-            "stop recording"
-        } else {
-            "record"
-        }))
+    let (tone, word) = super::status::link_word(
+        &obs.link,
+        work.replay.replay.is_some(),
+        dep.settings.is_unreachable(),
+    );
+    let mut r = row![kit::status(tone, word)]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center);
+    if let Some(mode) = session_mode(&dep.settings) {
+        r = r.push(kit::data_chip(mode));
+    }
+    if let Some(endpoint) = endpoint_label(&dep.settings) {
+        r = r.push(kit::data_chip(endpoint));
+    }
+    kit::pill(r)
+}
+
+/// The session's mode, when the flags decide it (#501): listen endpoints
+/// make a peer, anything else a client — and a zenoh config file may state
+/// its own, which the window has not read, so it claims nothing.
+pub fn session_mode(s: &crate::config::Settings) -> Option<&'static str> {
+    if s.zenoh_config.is_some() {
+        None
+    } else if s.listen.is_empty() {
+        Some("client")
+    } else {
+        Some("peer")
+    }
+}
+
+/// Where the session dials: the first connect endpoint, `+N` for the rest;
+/// else what it listens on. `None` when it does neither — the pill's word
+/// ("reaches nothing") already says what that means.
+pub fn endpoint_label(s: &crate::config::Settings) -> Option<String> {
+    let (list, prefix) = if !s.connect.is_empty() {
+        (&s.connect, "")
+    } else if !s.listen.is_empty() {
+        (&s.listen, "listen ")
+    } else {
+        return None;
+    };
+    let more = list.len() - 1;
+    Some(if more == 0 {
+        format!("{prefix}{}", list[0])
+    } else {
+        format!("{prefix}{} +{more}", list[0])
+    })
+}
+
+/// The layout presets, on screen at last (#180's Alt+1/2/3): the same
+/// [`WorkspaceMsg::LayoutPreset`] the shortcuts send. A dragged splitter or
+/// a toggled dock leaves no preset lit — and says "custom layout" rather
+/// than leave a lit segment lying.
+fn presets<'a>(chrome: &'a Chrome) -> Element<'a, Message> {
+    let segs = LayoutPreset::ALL
+        .into_iter()
+        .map(|p| kit::Segment {
+            value: p,
+            label: p.label(),
+            icon: Some(match p {
+                LayoutPreset::Explore => kit::Icon::Explore,
+                LayoutPreset::Watch => kit::Icon::Watch,
+                LayoutPreset::Diagnose => kit::Icon::Diagnose,
+            }),
+            count: None,
+            tip: Some(match p {
+                LayoutPreset::Explore => "layout · Alt 1",
+                LayoutPreset::Watch => "layout · Alt 2",
+                LayoutPreset::Diagnose => "layout · Alt 3",
+            }),
+        })
+        .collect();
+    let active = chrome.prefs.layout.preset;
+    let control = kit::segmented(segs, active, |p| {
+        Message::Workspace(WorkspaceMsg::LayoutPreset(p))
+    });
+    match active {
+        Some(_) => control,
+        None => row![control, kit::muted("custom layout")]
+            .spacing(space::SM)
+            .align_y(iced::Alignment::Center)
+            .into(),
+    }
+}
+
+/// The window's own controls (#536): capture and replay, then the window
+/// itself. A stateless verb that is also in the palette may be an icon with
+/// a tooltip (settings, theme, zoom steps, reconnect); a control with state
+/// keeps its word — a recording, the density, the zoom level — because a
+/// tooltip is not read until hovered (#187's rule).
+fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, Message> {
+    use crate::message::PrefsMsg;
+    let prefs = |m| Message::Chrome(ChromeMsg::Prefs(m));
+    // Capture and replay (#74): record writes the current watches to a
+    // .zrec; replay feeds the panes from one. A recording is the one state
+    // here worth a colour, and it is in words too.
+    let record: Element<'a, Message> = if work.replay.recording.is_some() {
+        kit::danger(kit::labelled(kit::Icon::Stop, "stop recording"))
+    } else {
+        kit::secondary(kit::labelled(kit::Icon::Record, "record"))
+    }
+    .on_press(Message::Workspace(WorkspaceMsg::Replay(
+        ReplayMsg::RecordToggled,
+    )))
+    .padding([space::XS, space::SM])
+    .into();
+    let replay = kit::secondary(kit::labelled(kit::Icon::Replay, "replay…"))
         .on_press(Message::Workspace(WorkspaceMsg::Replay(
-            ReplayMsg::RecordToggled
+            ReplayMsg::OpenToggled,
         )))
-        .padding(space::XS),
-        kit::secondary(kit::caption("replay…"))
-            .on_press(Message::Workspace(WorkspaceMsg::Replay(
-                ReplayMsg::OpenToggled
+        .padding([space::XS, space::SM]);
+    let theme_icon = match chrome.prefs.theme {
+        crate::prefs::ThemeChoice::Dark => kit::Icon::Dark,
+        crate::prefs::ThemeChoice::Light => kit::Icon::Light,
+    };
+    row![
+        record,
+        replay,
+        kit::tip(
+            kit::icon_button(kit::Icon::Settings, None).on_press(Message::Chrome(
+                ChromeMsg::Palette(PaletteMsg::Open(Overlay::Settings))
+            )),
+            "settings · Ctrl ,",
+        ),
+        // The icon is the theme you are in; the window around it is the
+        // rest of the statement.
+        kit::tip(
+            kit::icon_button(theme_icon, None).on_press(prefs(PrefsMsg::ThemeToggled)),
+            "theme · Ctrl T",
+        ),
+        // Density (#192) keeps its word: the two modes look alike at a
+        // glance, and the word is the only thing that says which is on.
+        kit::tip(
+            kit::icon_button(kit::Icon::Density, Some(chrome.prefs.density.label()))
+                .on_press(prefs(PrefsMsg::DensityToggled)),
+            "density · Ctrl Shift D",
+        ),
+        kit::tip(
+            kit::icon_button(kit::Icon::ZoomOut, None).on_press(prefs(PrefsMsg::ZoomOut)),
+            "zoom out · Ctrl −",
+        ),
+        kit::tip(
+            kit::ghost(kit::caption(format!(
+                "{}%",
+                (chrome.prefs.zoom * 100.0).round() as i32
             )))
-            .padding(space::XS),
-        iced::widget::space::horizontal(),
-        // The Settings overlay (#188): the launch knobs, and the same
-        // chrome preferences the buttons beside it move.
-        kit::ghost(kit::caption("settings…"))
-            .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
-                Overlay::Settings
-            ))))
-            .padding(space::XS),
-        // Window preferences (issue #73): the theme name is the button, so
-        // the label says what you get rather than what you have.
-        kit::ghost(kit::caption(format!(
-            "theme: {}",
-            chrome.prefs.theme.label()
-        )))
-        .on_press(Message::Chrome(ChromeMsg::Prefs(
-            crate::message::PrefsMsg::ThemeToggled
-        )))
-        .padding(space::XS),
-        // Density (#192): the same chip shape as the theme's, one button
-        // over. Ctrl+Shift+D sends the same message.
-        kit::ghost(kit::caption(format!(
-            "density: {}",
-            chrome.prefs.density.label()
-        )))
-        .on_press(Message::Chrome(ChromeMsg::Prefs(
-            crate::message::PrefsMsg::DensityToggled
-        )))
-        .padding(space::XS),
-        kit::ghost(kit::caption("-"))
-            .on_press(Message::Chrome(ChromeMsg::Prefs(
-                crate::message::PrefsMsg::ZoomOut
-            )))
-            .padding(space::XS),
-        kit::ghost(kit::caption(format!(
-            "{}%",
-            (chrome.prefs.zoom * 100.0).round() as i32
-        )))
-        .on_press(Message::Chrome(ChromeMsg::Prefs(
-            crate::message::PrefsMsg::ZoomReset
-        )))
-        .padding(space::XS),
-        kit::ghost(kit::caption("+"))
-            .on_press(Message::Chrome(ChromeMsg::Prefs(
-                crate::message::PrefsMsg::ZoomIn
-            )))
-            .padding(space::XS),
-        kit::ghost(kit::caption("reconnect"))
-            .on_press(Message::Deployment(DeploymentMsg::Reconnect))
-            .padding(space::XS),
+            .on_press(prefs(PrefsMsg::ZoomReset))
+            .padding([space::XS, space::XS]),
+            "reset zoom · Ctrl 0",
+        ),
+        kit::tip(
+            kit::icon_button(kit::Icon::ZoomIn, None).on_press(prefs(PrefsMsg::ZoomIn)),
+            "zoom in · Ctrl +",
+        ),
+        kit::tip(
+            kit::icon_button(kit::Icon::Reconnect, None)
+                .on_press(Message::Deployment(DeploymentMsg::Reconnect)),
+            "reconnect · Ctrl R",
+        ),
     ]
-    .spacing(space::SM)
+    .spacing(space::XS)
     .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The dock strip (#180, restyled by #536): four toggles, one per
+/// [`DockRole`], where on means *open in the grid* — not "the one pane
+/// showing". Clicking closes an open dock or restores a closed one: the
+/// same [`WorkspaceMsg::DockToggled`] each dock's title-bar close sends.
+fn dock_strip<'a>(work: &'a Workspace) -> Element<'a, Message> {
+    iced::widget::Row::from_iter(DockRole::ALL.into_iter().map(|role| {
+        kit::toggle_chip(
+            Some(match role {
+                DockRole::Locator => kit::Icon::Locator,
+                DockRole::Inspector => kit::Icon::Inspector,
+                DockRole::Activity => kit::Icon::Activity,
+                DockRole::Workbench => kit::Icon::Workbench,
+            }),
+            role.label(),
+            work.docks.is_open(role),
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        )
+    }))
+    .spacing(space::XS)
     .into()
 }
 

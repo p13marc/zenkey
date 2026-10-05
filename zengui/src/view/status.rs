@@ -11,7 +11,7 @@ use iced::widget::{row, text};
 
 use crate::message::{LinkState, Message};
 use crate::view::kit::{self, human_bytes, human_rate};
-use crate::view::theme::colors;
+use crate::view::theme::{Tone, colors};
 use crate::view::tokens::space;
 
 /// What a §6.1 union of served and on-disk slices came to.
@@ -116,11 +116,14 @@ pub struct Status<'a> {
         String,
         Result<std::sync::Arc<zenkey_fleet::FetchOutcome>, crate::services::ServiceError>,
     )>,
-    /// The scope's short name. The long explanation lives in the location bar; the
-    /// strip must stay narrow enough to fit, or its right-hand end — which is
-    /// where the registry state and the reachability warning live — clips off
-    /// screen exactly when something is wrong.
+    /// The scope's short name.
     pub scope_label: &'a str,
+    /// What the scope covers, in words — "everything" is not everything
+    /// (RFC 03 §4 D2), and this is where that is said. It moved here from the
+    /// location bar with #536; the strip wraps rather than clipping, so a
+    /// long statement no longer pushes the registry state and the
+    /// reachability warning off screen.
+    pub scope_coverage: &'a str,
     pub keys: usize,
     /// Keys retired to stay within the table's bound.
     pub keys_evicted: u64,
@@ -173,6 +176,7 @@ impl<'a> Status<'a> {
             link: &obs.link,
             base_label: dep.base_label(),
             scope_label: dep.settings.scope.short(),
+            scope_coverage: dep.settings.scope.label(),
             keys: obs.keys,
             keys_evicted: obs.keys_evicted,
             keys_unwatched: obs.keys_unwatched,
@@ -287,7 +291,11 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
     let mut r = row![
         link,
         kit::muted(format!("base: {}", s.base_label)),
-        kit::muted(format!("scope: {}", s.scope_label)),
+        kit::muted(if s.scope_coverage.is_empty() {
+            format!("scope: {}", s.scope_label)
+        } else {
+            format!("scope: {} ({})", s.scope_label, s.scope_coverage)
+        }),
         keys_label(s.keys, s.keys_evicted),
         kit::muted(format!(
             "{count} samples · {} · {}",
@@ -409,12 +417,72 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
         );
     }
 
-    r.into()
+    // It wraps (#536): a strip that clips loses its right-hand end — the
+    // registry state and the reachability warning — exactly when there is
+    // most to say.
+    r.wrap().vertical_spacing(space::XS).into()
+}
+
+/// The link's state as a tone and a word (#536) — the connection pill's
+/// glance. The strip's first cell keeps the full posture sentence; this is
+/// the word beside the dot, and the dot never stands without it.
+///
+/// Replay wins, as it does in the strip: the panes are showing a file. A
+/// session that reaches nothing says so even while its pump runs.
+pub fn link_word(link: &LinkState, replaying: bool, unreachable: bool) -> (Tone, &'static str) {
+    if replaying {
+        return (Tone::Caution, "replay — live link off");
+    }
+    if unreachable {
+        return (Tone::Negative, "reaches nothing");
+    }
+    match link {
+        LinkState::Connecting => (Tone::Caution, "connecting…"),
+        LinkState::Pumping => (Tone::Positive, "connected"),
+        LinkState::Ended => (Tone::Caution, "link ended — retrying"),
+        LinkState::Failed(_) => (Tone::Negative, "link failed"),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pill's word (#536): every link state has one, the healthy and
+    /// the failed states never share one, and the dot's tone agrees with the
+    /// word — a failure is never a green dot.
+    #[test]
+    fn every_link_state_has_its_own_word() {
+        let failed = LinkState::Failed(crate::services::ServiceError::from("router refused"));
+        let states = [
+            LinkState::Connecting,
+            LinkState::Pumping,
+            LinkState::Ended,
+            failed,
+        ];
+        let words: Vec<_> = states.iter().map(|l| link_word(l, false, false)).collect();
+        for (i, (_, a)) in words.iter().enumerate() {
+            assert!(!a.is_empty());
+            for (_, b) in &words[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert_eq!(
+            link_word(&LinkState::Pumping, false, false).0,
+            Tone::Positive
+        );
+        assert_eq!(words[3].0, Tone::Negative);
+        assert_eq!(
+            link_word(&LinkState::Pumping, true, false).1,
+            "replay — live link off",
+            "replay wins, as it does in the strip"
+        );
+        assert_eq!(
+            link_word(&LinkState::Pumping, false, true),
+            (Tone::Negative, "reaches nothing"),
+            "a session that reaches nothing is not connected, whatever the pump says"
+        );
+    }
 
     /// "Not loaded" and "loaded, and empty" are different facts and must read
     /// differently — otherwise a missing registry looks like a bus with no
