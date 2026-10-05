@@ -12,7 +12,9 @@
 
 use std::time::{Duration, Instant};
 
-use zenkey::config::{ConfigChange, ConfigView, ControlRequest, ParamValue, ValueSource};
+use zenkey::config::{
+    ConfigChange, ConfigView, ControlRequest, ParamValue, PendingReply, ValueSource,
+};
 use zenkey_fleet::bus::producer::BringUp;
 use zenkey_fleet::report::{CallOutcome, CallReport};
 use zenkey_fleet::{Answer, CallSpec, CallTarget, Fleet, GetOpts};
@@ -353,4 +355,158 @@ async fn a_change_is_read_set_confirmed_persisted_cancelled_extended_and_lapses(
         Answer::Error { name, .. } => assert_eq!(name, "error/fanout-forbidden"),
         Answer::Value(_) => panic!("the server applied a broadcast write"),
     }
+}
+
+/// RFC v1.50 (#518), against the double: a `set` carrying the pending
+/// token joins that change — its group with it, cancelled with it — and
+/// carries no window of its own; a token naming no pending change is
+/// not-found; and a change made without a window has a token too, read back
+/// as `last_change` and persisted by it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_set_joins_the_pending_change_by_its_token_and_last_change_persists() {
+    let (server, client) = peer_pair().await;
+    let double = ConfigServer::fixture(PRODUCER);
+    let mut up = BringUp::new(&server);
+    double
+        .declare(&mut up, &format!("v1/{ORIGIN}/@rpc/{PRODUCER}"))
+        .await
+        .expect("declare the config procedures");
+    let mut live = up
+        .alive(&format!("v1/{ORIGIN}/state/{PRODUCER}/alive"))
+        .await
+        .expect("alive");
+    let _served: Vec<_> = std::mem::take(&mut live.responders)
+        .into_iter()
+        .map(|r| double.spawn(r))
+        .collect();
+
+    let read = format!("config/{RESOURCE}");
+    let deadline = Instant::now() + SETTLE;
+    while call(&client, ORIGIN, &read, None).await.answers.is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "the double never became routable"
+        );
+    }
+    let set = |group: &str| format!("config/{RESOURCE}/{group}/set");
+    let joining = |name: &str, v: ParamValue, token: &str, confirm_s: Option<u64>| {
+        let mut c = ConfigChange::of([(name, v)]).joining(token);
+        c.confirm_s = confirm_s;
+        serde_json::to_vec(&c).expect("change")
+    };
+
+    // A reach change opens the pending change: answered `PendingReply`.
+    let reply: PendingReply = serde_json::from_value(value(
+        &call(
+            &client,
+            ORIGIN,
+            &set("link"),
+            Some(change("ssid", ParamValue::Text("field".into()), Some(60))),
+        )
+        .await,
+    ))
+    .expect("a reach change answers {token, apply_at}");
+    assert!(reply.apply_at.is_some());
+    let token = reply.token;
+
+    // A hot set carrying that token joins it: one change, two groups, the
+    // deadline unmoved.
+    let before = view(&call(&client, ORIGIN, &read, None).await)
+        .pending
+        .expect("pending")
+        .deadline;
+    let joined = view(
+        &call(
+            &client,
+            ORIGIN,
+            &set("queue"),
+            Some(joining("fq", ParamValue::Bool(true), &token, None)),
+        )
+        .await,
+    );
+    let pending = joined
+        .pending
+        .clone()
+        .expect("still the one pending change");
+    assert_eq!(pending.token, token);
+    assert_eq!(pending.groups, ["link", "queue"]);
+    assert_eq!(
+        pending.deadline, before,
+        "joining does not move the deadline"
+    );
+    assert_eq!(
+        param(&joined, "queue", "fq"),
+        (Some(ParamValue::Bool(true)), Some(ValueSource::Runtime))
+    );
+
+    // A joining set brings no window of its own.
+    let both = call(
+        &client,
+        ORIGIN,
+        &set("queue"),
+        Some(joining("fq", ParamValue::Bool(false), &token, Some(30))),
+    )
+    .await;
+    assert_eq!(refusal(&both), "error/invalid-args");
+    // A token that names no pending change is not-found, never busy.
+    let stray = call(
+        &client,
+        ORIGIN,
+        &set("queue"),
+        Some(joining("fq", ParamValue::Bool(false), "chg-404", None)),
+    )
+    .await;
+    assert_eq!(refusal(&stray), "error/not-found");
+
+    // Cancel undoes the whole change — both groups, as one.
+    let cancelled = view(
+        &call(
+            &client,
+            ORIGIN,
+            &format!("config/{RESOURCE}/cancel"),
+            Some(control(&token, None)),
+        )
+        .await,
+    );
+    assert!(cancelled.pending.is_none());
+    assert_eq!(
+        param(&cancelled, "queue", "fq"),
+        (Some(ParamValue::Bool(false)), Some(ValueSource::File))
+    );
+    assert_eq!(
+        param(&cancelled, "link", "ssid").0,
+        Some(ParamValue::Text("lab".into()))
+    );
+    assert_eq!(cancelled.last_change, None, "a cancel is not a last change");
+
+    // A change without a window is confirmed at once, and named.
+    let hot = view(
+        &call(
+            &client,
+            ORIGIN,
+            &set("queue"),
+            Some(change("tx_queue_len", ParamValue::Integer(1500), None)),
+        )
+        .await,
+    );
+    assert!(hot.pending.is_none());
+    let last = hot.last_change.expect("every applied change has a token");
+    assert_eq!(last.groups, ["queue"]);
+    assert_ne!(last.token, token, "a token is never reused");
+
+    // …and persisted by it.
+    let persisted = view(
+        &call(
+            &client,
+            ORIGIN,
+            &format!("config/{RESOURCE}/persist"),
+            Some(control(&last.token, None)),
+        )
+        .await,
+    );
+    assert_eq!(
+        param(&persisted, "queue", "tx_queue_len"),
+        (Some(ParamValue::Integer(1500)), Some(ValueSource::Overlay))
+    );
+    assert_eq!(persisted.last_change, Some(last));
 }

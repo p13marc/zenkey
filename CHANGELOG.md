@@ -19,6 +19,28 @@ Versions per crate, because they move independently:
 
 ## Unreleased
 
+### The change's name (#518, RFC v1.50)
+
+The two configuration wire questions v1.47 and v1.48 left open, decided
+when the GUI form (#481) was planned. **`zenkey` 0.11.1 — additive**:
+
+- `ConfigChange.token` (with `ConfigChange::joining`): a `set` carrying
+  the pending change's token joins it — its group with it, confirmed,
+  cancelled, persisted and rolled back as one, under the change's window.
+  `ConfigSchema::validate` takes the token as a reach group's window, and
+  refuses a change carrying both (`ConfigError::JoiningWithWindow`,
+  `error/invalid-args`).
+- Every applied change has a token: `ConfigView.last_change` (`LastChange
+  {token, groups}`) names the most recent change made permanent at
+  runtime, and `persist` takes it — how a change made without a window
+  survives a restart.
+- `PendingReply {token, apply_at}`: a reach `set`'s reply, typed.
+- A read-back from before v1.50 still deserializes (no `last_change`).
+
+The config test double (`zenkey-fleet/tests/util/config_server.rs`) serves
+all of it; RFC 09 §3's worked slice says `persist` answers the read-back
+(errata — it has since v1.47).
+
 ### User principals, and principals on a face (#529, RFC v1.49)
 
 For zenoh-modem#153: a per-operator write grant on a constrained face whose

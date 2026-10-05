@@ -654,9 +654,9 @@ path = "config/{device}/persist"
 kind = "write"
 fanout = "forbidden"
 request = "ControlRequest"
-reply = "Ack"
+reply = "ConfigView"
 since = "1.0"
-description = "write the confirmed change into the persisted layer — its own key, so it is its own grant"
+description = "write the pending change, or the read-back's last_change, into the persisted layer — its own key, so it is its own grant"
 
 [[subject]]
 path = "config/{device}"
