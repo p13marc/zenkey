@@ -296,9 +296,13 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
 pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
     let (pos, span) = state.clock();
     let mut transport = row![
-        kit::primary(kit::caption(if state.playing { "pause" } else { "play" }))
-            .on_press(msg(ReplayMsg::Toggled))
-            .padding(sp.xs),
+        kit::primary(if state.playing {
+            kit::labelled(kit::Icon::Pause, "pause")
+        } else {
+            kit::labelled(kit::Icon::Play, "play")
+        })
+        .on_press(msg(ReplayMsg::Toggled))
+        .padding(sp.xs),
         kit::picker(SPEEDS, Some(Speed(state.speed)), |s| msg(
             ReplayMsg::SpeedSelected(s)
         ))
@@ -331,12 +335,12 @@ pub fn scrubber(state: &ReplayState, sp: Spacing) -> Element<'_, Message> {
     // The trigger markers (#218): one per record, on the capture clock,
     // each a jump to where the rule fired — the scrubber's axis has no
     // notion of a marker, so they ride under it, labelled.
-    let mut markers = row![kit::muted("triggers")]
+    let mut markers = row![kit::eyebrow("TRIGGERS")]
         .spacing(sp.sm)
         .align_y(iced::Alignment::Center);
     for (t_us, t) in &state.triggers {
         markers = markers.push(
-            kit::secondary(kit::caption(trigger_label(*t_us, t)))
+            kit::secondary(kit::labelled(kit::Icon::GoTo, trigger_label(*t_us, t)))
                 .on_press(msg(ReplayMsg::Scrubbed(*t_us)))
                 .padding(sp.xs),
         );
@@ -358,8 +362,8 @@ pub fn loading_note(path: &str) -> String {
 /// The open row: a path box, shown on demand from the location bar.
 pub fn open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
     row![
-        kit::caption("replay file"),
-        kit::input(".zrec path", path)
+        kit::eyebrow("REPLAY FILE"),
+        kit::input("capture.zrec", path)
             .on_input(|s| msg(ReplayMsg::PathChanged(s)))
             .on_submit(msg(ReplayMsg::Open))
             .size(font::CAPTION)
@@ -381,8 +385,8 @@ pub fn open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
 /// `.zrec`'s sibling and is opened the same way.
 pub fn snapshot_open_row(path: &str, sp: Spacing) -> Element<'_, Message> {
     row![
-        kit::caption("snapshot file"),
-        kit::input(".zsnap path", path)
+        kit::eyebrow("SNAPSHOT FILE"),
+        kit::input("fleet.zsnap", path)
             .on_input(|s| msg(ReplayMsg::SnapshotPathChanged(s)))
             .on_submit(msg(ReplayMsg::SnapshotOpen))
             .size(font::CAPTION)
