@@ -17,9 +17,10 @@ use iced::{Element, Length};
 
 use crate::echo::{EchoLine, EchoRing};
 use crate::message::{Message, PaneMsg};
+use crate::prefs::ThemeChoice;
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::{CAPTION_LINE, Spacing, face, font};
+use crate::view::tokens::{BODY_LINE, CAPTION_LINE, Spacing, face, font};
 
 /// One echo line's height, so the window can do arithmetic on it (#183).
 ///
@@ -28,8 +29,20 @@ use crate::view::tokens::{CAPTION_LINE, Spacing, face, font};
 /// reached nothing. A window draws about forty and reaches all of them.
 ///
 /// The comfortable baseline; the section renders at
-/// `sp.row(ROW_HEIGHT, CAPTION_LINE)` (#192).
-pub const ROW_HEIGHT: f32 = 20.0;
+/// `sp.row(ROW_HEIGHT, ROW_TEXT)` (#192).
+///
+/// 44 since #538. It was 20 under a row of two *body* lines — 36px of text
+/// in a 20px box that did not clip, so every row's preview was drawn under
+/// the next row's key and the stream read as a column of keys.
+pub const ROW_HEIGHT: f32 = 44.0;
+
+/// The text an echo row holds (#538): the key on a body line (a chip beside
+/// it is shorter), the preview on a caption line.
+pub const ROW_TEXT: f32 = BODY_LINE + CAPTION_LINE;
+
+// The head line's chips must not out-grow the body line beside them, or
+// `ROW_TEXT` would undercount the row it describes.
+const _: () = assert!(kit::CHIP_HEIGHT <= BODY_LINE);
 
 /// The pane's view state (owned by the app).
 #[derive(Debug, Clone, Default)]
@@ -275,6 +288,7 @@ fn msg(m: EchoMsg) -> Message {
 /// `verdicts` is the #164 cache — every row *looks up* its key's verdict;
 /// the pane never decodes (this file's own rule: the sync structural decode
 /// only, never the bus-touching `decode_sample`).
+#[allow(clippy::too_many_arguments)]
 pub fn section<'a>(
     ring: &'a EchoRing,
     view: &'a EchoView,
@@ -282,6 +296,7 @@ pub fn section<'a>(
     next_seq: u64,
     scroll: crate::view::kit::Viewport,
     verdicts: &'a crate::verdict::VerdictCache,
+    theme: ThemeChoice,
     sp: Spacing,
 ) -> Column<'a, Message> {
     let controls = row![
@@ -324,7 +339,7 @@ pub fn section<'a>(
     let (lines, matched) = visible(ring, view, selection);
     // O(visible) (#183), the same window the tree and the timeline use —
     // at the density-scaled row height (#192).
-    let row_h = sp.row(ROW_HEIGHT, CAPTION_LINE);
+    let row_h = sp.row(ROW_HEIGHT, ROW_TEXT);
     let (first, last) = kit::window(lines.len(), scroll, row_h);
     let mut body = Column::new();
     if first > 0 {
@@ -332,8 +347,11 @@ pub fn section<'a>(
     }
     for line in &lines[first..last] {
         body = body.push(
-            iced::widget::container(line_view(line, verdicts.get(&line.key), sp))
-                .height(Length::Fixed(row_h)),
+            iced::widget::container(line_view(line, verdicts.get(&line.key), theme, sp))
+                .height(Length::Fixed(row_h))
+                // A row never paints into its neighbour, whatever its
+                // content measures (#538).
+                .clip(true),
         );
     }
     if last < lines.len() {
@@ -456,6 +474,7 @@ fn verdict_strip<'a>(verdicts: &crate::verdict::VerdictCache) -> Element<'a, Mes
 fn line_view<'a>(
     line: &'a EchoLine,
     verdict: Option<&'a crate::verdict::CachedVerdict>,
+    theme: ThemeChoice,
     sp: Spacing,
 ) -> Element<'a, Message> {
     // The #164 badge: the cached verdict for this line's key — of the most
@@ -472,51 +491,54 @@ fn line_view<'a>(
             crate::verdict::UNCHECKED_LABEL,
         ),
     };
-    // Both texts borrow, and the click message is built on the click (#178).
-    // Up to 300 rows are drawn per frame and each was cloning two `String`s
-    // for a rendering identical to the last one's; `on_press_with` moves the
-    // third clone from every frame to the one frame somebody actually clicks.
+    // Everything borrows, and the click message is built on the click
+    // (#178): a frame draws ~40 rows, and the one that is clicked is the
+    // only one that needs a clone.
     let key = kit::body(line.key.as_str())
         .font(face::MONO)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).text()),
         });
+    let mut head = row![key, iced::widget::space::horizontal()]
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center);
+    // The sample's declared encoding — the highest-precedence signal there
+    // is (RFC 08 §7) — and its true size, as data chips.
+    if !line.encoding.is_empty() {
+        head = head.push(kit::data_chip(line.encoding.as_str()));
+    }
+    head = head
+        .push(kit::data_chip(human_bytes(line.len as u64)))
+        .push(badge);
 
     // A tombstone is authoritative retirement, not an empty value
-    // (RFC 04 §1.2) — so it must not look like a put with no payload.
-    let is_delete = line.is_delete;
-    let preview =
-        kit::body(line.preview.as_str())
-            .font(face::MONO)
-            .style(move |theme: &iced::Theme| text::Style {
-                color: Some(if is_delete {
-                    colors(theme).danger()
-                } else {
-                    colors(theme).text_muted()
-                }),
-            });
+    // (RFC 04 §1.2) — so it must not look like a put with no payload: the
+    // retired edge, a DELETE chip, and the `<delete>` preview beside it.
+    let (edge, second): (kit::Edge, Element<'a, Message>) = if line.is_delete {
+        (
+            kit::Edge::Retired,
+            row![
+                kit::retired_chip("DELETE"),
+                kit::code(line.preview.as_str(), &[], theme)
+            ]
+            .spacing(sp.xs)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        )
+    } else {
+        (
+            kit::Edge::Put,
+            kit::code(line.preview.as_str(), &line.spans, theme),
+        )
+    };
 
     // The whole row is the click target: drilling in is the common action,
     // and a hairline button next to a monospace key is not. `row_button`
     // paints the hover wash, so the line under the cursor is legible (#193).
-    // No spacing and no padding on the body: the row is pinned to
-    // `sp.row(..)` (#192), which already spends all the air the density
-    // allows.
-    kit::row_button(
-        column![
-            row![
-                key,
-                iced::widget::space::horizontal(),
-                badge,
-                kit::muted(human_bytes(line.len as u64)),
-            ]
-            .spacing(sp.sm),
-            preview,
-        ],
-        false,
-    )
-    .on_press_with(|| msg(EchoMsg::LineClicked(line.key.clone())))
-    .into()
+    kit::row_button(kit::edge_row(edge, column![head, second]), false)
+        .padding(iced::Padding::ZERO.right(sp.xs))
+        .on_press_with(|| msg(EchoMsg::LineClicked(line.key.clone())))
+        .into()
 }
 
 #[cfg(test)]
@@ -535,6 +557,7 @@ mod tests {
             timestamp: None,
             attachment: None,
             attachment_len: None,
+            spans: Box::default(),
         }
     }
 

@@ -3417,6 +3417,7 @@ fn the_echo_rows_badge_cached_verdicts_and_admit_the_unchecked() {
         ring.next_seq(),
         Default::default(),
         &verdicts,
+        zengui::prefs::ThemeChoice::Dark,
         sp(),
     ))));
     assert!(

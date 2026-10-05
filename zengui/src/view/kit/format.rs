@@ -37,3 +37,18 @@ pub fn human_rate(hz: f64) -> String {
         format!("{:.1}k/s", hz / 1000.0)
     }
 }
+
+/// An age as one short word (#538): "now" under three seconds — a key seen
+/// within the last few monitor ticks — then "12s", "4m", "2h".
+pub fn age_word(secs: f32) -> String {
+    let s = secs.max(0.0);
+    if s < 3.0 {
+        "now".to_string()
+    } else if s < 60.0 {
+        format!("{}s", s as u32)
+    } else if s < 3600.0 {
+        format!("{}m", (s / 60.0) as u32)
+    } else {
+        format!("{}h", (s / 3600.0) as u32)
+    }
+}

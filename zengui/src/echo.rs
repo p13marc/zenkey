@@ -72,6 +72,9 @@ pub struct EchoLine {
     pub attachment: Option<String>,
     /// True attachment size, regardless of the preview bound.
     pub attachment_len: Option<usize>,
+    /// Where the preview's keys, strings and literals are (#538) — computed
+    /// here, once, beside the preview it describes; a redraw only reads it.
+    pub spans: Box<[crate::view::syntax::SyntaxSpan]>,
 }
 
 impl EchoLine {
@@ -106,8 +109,14 @@ impl EchoLine {
                 truncate(zenkey_fleet::structural(&a.to_bytes()))
             }
         });
+        let spans = if view.kind == zenoh::sample::SampleKind::Delete {
+            Box::default()
+        } else {
+            crate::view::syntax::spans(&preview)
+        };
         EchoLine {
             seq,
+            spans,
             key_expr: zenoh::key_expr::OwnedKeyExpr::new(view.key.clone()).ok(),
             key: view.key.clone(),
             preview,
@@ -126,7 +135,10 @@ impl EchoLine {
         // The validated copy of the key counts too: a bound that ignores what
         // it stores stops being a bound, and `key_expr` is a second owned copy
         // of exactly `key`.
-        self.key.len() * 2 + self.preview.len() + self.attachment.as_ref().map_or(0, String::len)
+        self.key.len() * 2
+            + self.preview.len()
+            + self.attachment.as_ref().map_or(0, String::len)
+            + std::mem::size_of_val(&*self.spans)
     }
 }
 
@@ -266,6 +278,39 @@ impl EchoRing {
 mod tests {
     use super::*;
 
+    /// The preview's syntax is read once, here (#538): a document gets
+    /// spans, a tombstone and prose get none — and the ring's byte budget
+    /// counts them, because a bound that ignores what it stores stops being
+    /// a bound.
+    #[test]
+    fn a_line_carries_its_syntax_and_pays_for_it() {
+        use zenkey_fleet::SampleView;
+        let view = |payload: &[u8], kind| SampleView {
+            key: "v1/h-a/state/p/a".into(),
+            payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
+            encoding: "application/json".into(),
+            kind,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::DEFAULT,
+            congestion_control: zenoh::qos::CongestionControl::DEFAULT,
+            reliability: zenoh::qos::Reliability::DEFAULT,
+            express: false,
+            source: None,
+            received: std::time::Instant::now(),
+        };
+        let put = zenoh::sample::SampleKind::Put;
+        let doc = EchoLine::render(1, &view(br#"{"value":1}"#, put));
+        assert!(!doc.spans.is_empty());
+        assert!(doc.weight() > doc.key.len() * 2 + doc.preview.len());
+        let prose = EchoLine::render(2, &view(b"hello", put));
+        assert!(prose.spans.is_empty());
+        let gone = EchoLine::render(3, &view(b"", zenoh::sample::SampleKind::Delete));
+        assert!(gone.spans.is_empty());
+        assert_eq!(gone.preview, "<delete>");
+    }
+
     fn line(seq: u64, key: &str, preview_len: usize) -> EchoLine {
         EchoLine {
             seq,
@@ -278,6 +323,7 @@ mod tests {
             timestamp: None,
             attachment: None,
             attachment_len: None,
+            spans: Box::default(),
         }
     }
 

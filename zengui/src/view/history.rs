@@ -84,9 +84,14 @@ pub struct HistoryData<'a> {
 /// pre-truncated by the recorder rather than by the layout.
 ///
 /// The comfortable baseline: the section renders at
-/// `sp.row(ROW_HEIGHT, 2.0 * CAPTION_LINE)` (#192) — two lines of text and
-/// almost no air, so this is the row density compacts the least.
-pub const ROW_HEIGHT: f32 = 34.0;
+/// `sp.row(ROW_HEIGHT, ROW_TEXT)` (#192) — two lines of text and little air,
+/// so this is the row density compacts the least. 40 since #538, so the head
+/// line's chip fits beside the stamp.
+pub const ROW_HEIGHT: f32 = 40.0;
+
+/// The text a history row holds (#538): the head line, as tall as its chip,
+/// over a caption preview.
+pub const ROW_TEXT: f32 = crate::view::kit::CHIP_HEIGHT + CAPTION_LINE;
 
 /// The Inspector's history sections (#182). See [`super::detail::section`]
 /// for why this is a `Column`.
@@ -169,7 +174,7 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     let total = rec.ring.len();
     // Two lines of text per row: density shaves the row's air, not its type
     // (#192) — the window arithmetic and the containers share the result.
-    let row_h = sp.row(ROW_HEIGHT, 2.0 * CAPTION_LINE);
+    let row_h = sp.row(ROW_HEIGHT, ROW_TEXT);
     let (first, last) = kit::window(total, data.scroll, row_h);
     let mut rows = Column::new();
     if first > 0 {
@@ -265,32 +270,36 @@ fn row_view<'a>(
     // asks the question ("what did it look like two samples ago").
     let age = newest.saturating_sub(entry.seq);
     let marker = if focused { "▸" } else { " " };
-    let kind = if entry.is_delete {
-        "DELETE (tombstone)".to_string()
+    // A tombstone is retirement (RFC 04 §1.2): the retired edge and its own
+    // chip — never the danger hue, which is for an answer that came back no
+    // (#538). A put's size is data, in a data chip.
+    let (edge, kind): (kit::Edge, Element<'a, Message>) = if entry.is_delete {
+        (kit::Edge::Retired, kit::retired_chip("DELETE (tombstone)"))
     } else {
-        format!("put {}", human_bytes(entry.len as u64))
+        (
+            kit::Edge::Put,
+            kit::data_chip(format!("put {}", human_bytes(entry.len as u64))),
+        )
     };
-    let is_delete = entry.is_delete;
 
     let head = row![
         kit::mono(format!("{marker} t-{age}")),
         kit::muted(stamp(entry, rec)),
-        kit::caption(kind).style(move |theme: &iced::Theme| text::Style {
-            color: Some(if is_delete {
-                colors(theme).danger()
-            } else {
-                colors(theme).text_muted()
-            }),
-        }),
+        kind,
     ]
-    .spacing(sp.sm);
+    .spacing(sp.sm)
+    .align_y(iced::Alignment::Center);
 
     // No spacing and no padding on the two-line body: the row is pinned to
     // `sp.row(..)`, which already spends all the air the density allows —
-    // spacing here would only push the preview past the clip.
-    kit::row_button(column![head, kit::mono(entry.preview.clone())], false)
-        .on_press(msg(slot, HistoryMsg::Select(entry.seq)))
-        .into()
+    // spacing here would only push the preview past the clip. The focused
+    // row takes the selection wash as well as its `▸` (#538).
+    kit::row_button(
+        kit::edge_row(edge, column![head, kit::mono(entry.preview.clone())]),
+        focused,
+    )
+    .on_press(msg(slot, HistoryMsg::Select(entry.seq)))
+    .into()
 }
 
 /// The row's time, labelled with the clock that produced it.

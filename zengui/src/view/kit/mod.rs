@@ -18,7 +18,9 @@
 //! site moving: `badge` (chips: the six badge scales, data and status
 //! chips), `buttons` (every interactive constructor), `chrome` (the
 //! segmented control, toggle chips, status dots, pills), `icon`, `list`
-//! (the shared virtualized window), `format` (bytes, rates, plurals).
+//! (the shared virtualized window), `rows` (a row's edge, its coloured
+//! preview, the retired chip, the age word), `format` (bytes, rates,
+//! plurals, ages).
 
 mod badge;
 mod buttons;
@@ -27,6 +29,7 @@ mod format;
 mod frame;
 mod icon;
 mod list;
+mod rows;
 
 pub use badge::*;
 pub use buttons::*;
@@ -35,6 +38,7 @@ pub use format::*;
 pub use frame::*;
 pub use icon::*;
 pub use list::*;
+pub use rows::*;
 
 use iced::widget::text::IntoFragment;
 use iced::widget::{Text, column, container, row, text};
@@ -164,7 +168,7 @@ mod tests {
     /// (#183). Three lists, one window, one test.
     #[test]
     fn the_window_is_bounded_and_covers_the_viewport_at_every_height() {
-        for row_height in [20.0_f32, 24.0, 34.0] {
+        for row_height in [24.0_f32, 40.0, 44.0] {
             let rows = 50_000;
             let viewport = 600.0;
             let expected = (viewport / row_height).ceil() as usize + 1 + 2 * OVERSCAN;
@@ -188,21 +192,48 @@ mod tests {
         }
     }
 
-    /// A badge became a chip (#535), and a chip has height: it must fit the
-    /// rows that hold one at both densities, or the tree would clip the very
-    /// glyph that carries the state. Echo and History join with #538, which
-    /// re-measures their rows.
+    /// No row paints into its neighbour (#538). Echo drew two body lines
+    /// in a 20px row for months — 36px of text, unclipped, every preview
+    /// under the next key. Each list now states what it holds (`ROW_TEXT`),
+    /// and this holds the rows to it at both densities, chips included:
+    /// a badge became a chip (#535), and a chip has height.
     #[test]
-    fn chips_fit_every_row() {
+    fn rows_never_clip() {
         use super::super::tokens::{CAPTION_LINE, Spacing};
+        use super::super::{echo, history, tree};
         use crate::prefs::Density;
+        // Echo's head line is a body line with chips beside it — the line,
+        // not the chip, sets its height, which `echo.rs` asserts at compile
+        // time.
         for density in Density::ALL {
-            let row = Spacing::of(density).row(super::super::tree::ROW_HEIGHT, CAPTION_LINE);
-            assert!(
-                CHIP_HEIGHT <= row,
-                "a {density:?} tree row is {row}px; a chip is {CHIP_HEIGHT}px"
-            );
+            let sp = Spacing::of(density);
+            for (list, base, holds) in [
+                ("tree", tree::ROW_HEIGHT, CHIP_HEIGHT.max(CAPTION_LINE)),
+                ("echo", echo::ROW_HEIGHT, echo::ROW_TEXT),
+                ("history", history::ROW_HEIGHT, history::ROW_TEXT),
+            ] {
+                let text = if list == "tree" { CAPTION_LINE } else { holds };
+                let row = sp.row(base, text);
+                assert!(
+                    holds <= row,
+                    "a {density:?} {list} row is {row}px and holds {holds}px"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn ages_are_one_short_word() {
+        assert_eq!(age_word(0.4), "now");
+        assert_eq!(age_word(2.9), "now");
+        assert_eq!(age_word(12.0), "12s");
+        assert_eq!(age_word(240.0), "4m");
+        assert_eq!(age_word(7_300.0), "2h");
+        assert_eq!(
+            age_word(-1.0),
+            "now",
+            "a clock that stepped back is not the future"
+        );
     }
 
     #[test]

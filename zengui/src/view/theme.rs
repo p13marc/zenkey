@@ -187,6 +187,20 @@ fn build(name: &'static str, t: &'static Tokens) -> iced::Theme {
     })
 }
 
+/// A payload syntax role's colour, resolved for a theme choice rather than
+/// from a live theme (#538): a rich text's spans take colours, not
+/// closures, so the echo preview resolves them one step early. Same tokens
+/// as [`ThemeColors::syntax`].
+pub fn syntax_ink(choice: ThemeChoice, role: SyntaxRole) -> Color {
+    let t = choice.tokens();
+    match role {
+        SyntaxRole::Key => t.syntax_key,
+        SyntaxRole::String => t.syntax_string,
+        SyntaxRole::Literal => t.text,
+        SyntaxRole::Punct => t.text_dim,
+    }
+}
+
 /// `c` at opacity `a` — a tint over whatever is behind it.
 pub(crate) fn alpha(c: Color, a: f32) -> Color {
     Color { a, ..c }
@@ -297,6 +311,20 @@ impl ThemeColors<'_> {
     /// stuck hover (#534). The row's own text still says which it is.
     pub fn selected(&self) -> Color {
         alpha(self.primary(), 0.16)
+    }
+
+    /// How fresh a key is, as a single-hue ramp (#538): primary when seen
+    /// just now, fading to dim. One hue on purpose — the old dot went green
+    /// then amber, verdict colours for something that is not a verdict. The
+    /// age word beside it carries the claim.
+    pub fn freshness(&self, age_s: f32) -> Color {
+        if age_s < 3.0 {
+            self.primary()
+        } else if age_s < 30.0 {
+            mix(self.primary(), self.text_muted(), 0.6)
+        } else {
+            self.text_dim()
+        }
     }
 
     /// A tombstone's colour (RFC 04 §1.2).

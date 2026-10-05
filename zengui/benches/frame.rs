@@ -118,6 +118,22 @@ fn bench_echo(c: &mut Criterion) {
             )
         })
     });
+    // Per sample, not per frame (#538): a line is rendered once, on the
+    // update thread — the structural preview and, since #538, its syntax
+    // spans. A 512-char preview is the bound the spans are read over.
+    let long = format!(
+        r#"{{"values":[{}],"unit":"%","ok":true}}"#,
+        (0..80).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+    );
+    let doc = sample(&format!("v1/{HOST}/state/sysinfo/doc"), long.as_bytes());
+    group.bench_function("render_one_json_sample", |b| {
+        b.iter(|| black_box(zengui::echo::EchoLine::render(1, black_box(&doc))))
+    });
+    // The spans' share of that, alone.
+    let preview = zengui::echo::EchoLine::render(1, &doc).preview;
+    group.bench_function("syntax_spans_one_preview", |b| {
+        b.iter(|| black_box(zengui::view::syntax::spans(black_box(&preview))))
+    });
     group.finish();
 }
 

@@ -293,6 +293,7 @@ impl Zengui {
                     // renders its own subject; everything else follows.
                     torn.slot,
                     self.chrome.prefs.density,
+                    self.chrome.prefs.theme,
                 ))
                 .into();
         }
@@ -307,6 +308,7 @@ impl Zengui {
             &self.tree,
             &self.work,
             self.chrome.prefs.density,
+            self.chrome.prefs.theme,
         );
 
         let mut layout = column![view::location::bar(

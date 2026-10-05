@@ -173,10 +173,10 @@ impl Spacing {
     ///
     /// `base` is the list's comfortable height (`ROW_HEIGHT` in `tree`/
     /// `history`/`echo`) and `text` the laid-out height of the type inside it
-    /// ([`CAPTION_LINE`] per line). A bare `base * factor` would push Echo's
-    /// 20px row under its own 15.6px line — compacting a row means shaving
-    /// its padding, and a row that is already mostly text (History's
-    /// two-liner) honestly compacts almost not at all.
+    /// (each list's `ROW_TEXT`). A bare `base * factor` would push a row under
+    /// its own text — compacting a row means shaving its padding, and a row
+    /// that is already mostly text (History's two-liner) honestly compacts
+    /// almost not at all.
     pub fn row(self, base: f32, text: f32) -> f32 {
         text + (base - text) * self.factor
     }
@@ -186,6 +186,10 @@ impl Spacing {
 /// relative line height. The text floor of every virtualized row — what
 /// [`Spacing::row`] refuses to squeeze.
 pub const CAPTION_LINE: f32 = font::CAPTION * 1.3;
+
+/// One body line as laid out — echo's key line (#538), which is read rather
+/// than scanned.
+pub const BODY_LINE: f32 = font::BODY * 1.3;
 
 impl Default for Spacing {
     /// The comfortable grid — what the constants in [`space`] spell.
@@ -263,12 +267,16 @@ mod tests {
     fn a_compact_row_shaves_air_and_never_squeezes_text() {
         let c = Spacing::of(Density::Comfortable);
         let k = Spacing::of(Density::Compact);
-        // The three lists' real baselines: tree 24 (one line), echo 20 (one
-        // line), history 34 (two lines).
+        // The three lists' real baselines (#538): tree 24 (one caption
+        // line), echo 44 (a body line over a caption line), history 40 (a
+        // chip-high head over a caption line).
         for (base, text) in [
-            (24.0, CAPTION_LINE),
-            (20.0, CAPTION_LINE),
-            (34.0, 2.0 * CAPTION_LINE),
+            (crate::view::tree::ROW_HEIGHT, CAPTION_LINE),
+            (crate::view::echo::ROW_HEIGHT, crate::view::echo::ROW_TEXT),
+            (
+                crate::view::history::ROW_HEIGHT,
+                crate::view::history::ROW_TEXT,
+            ),
         ] {
             let compact = k.row(base, text);
             assert!(compact < base, "compact must be tighter than {base}");
