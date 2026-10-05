@@ -98,6 +98,7 @@ pub mod detail;
 pub mod doctor;
 pub mod echo;
 pub mod fields;
+pub mod fonts;
 pub mod history;
 pub mod inspector;
 pub mod kit;

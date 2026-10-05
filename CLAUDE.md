@@ -89,7 +89,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   dock (`panes::grid`) from the persisted density — Ctrl+Shift+D, Compact
   default in the Locator — which multiplies the grid and row heights, never a
   font size. Gated by `scripts/check-spacing.sh`, like the type scale (#191)
-  and the interactive seam (#193). **Windows (#186)**: `main.rs` runs
+  and the interactive seam (#193). **Type is bundled (#533)**: Inter,
+  JetBrains Mono NL (no ligatures — `->` stays two bytes on screen) and a
+  Lucide cut to `kit::Icon` (`scripts/subset-icons.py`), loaded by
+  `view/fonts.rs::settings()` for the daemon *and* the shots harness;
+  `tokens::face` names them by role, and icons are chrome only — a badge's
+  glyph stays text, because it is the honesty carrier the tests read. **Windows (#186)**: `main.rs` runs
   `iced::daemon`, so the process owns N windows and `view`/`title`/`theme`/
   `scale_factor` take a `window::Id`. Inspector, Activity and Workbench tear
   off into windows of their own (`WorkspaceMsg::TearOff`, rendered through

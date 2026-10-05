@@ -28,6 +28,38 @@ pub mod font {
     pub const TITLE: f32 = 24.0;
 }
 
+/// The bundled faces (#533), by role — the *family* half of typography, as
+/// [`font`] is the size half. Kept apart so `.size(font::X)` and
+/// `.font(face::X)` cannot be confused at a call site, and gated the same
+/// way: outside `kit`, `tokens` and `fonts`, a `.font(` names one of these.
+///
+/// The files are in `zengui/assets/fonts/`, loaded by
+/// [`super::fonts::settings`]; `fonts`' tests prove each name here is a
+/// family the files answer to — a misspelt one would fall back to a host
+/// font without a word.
+pub mod face {
+    use iced::Font;
+    use iced::font::Weight;
+
+    /// Chrome: labels, prose, headers. The default font.
+    pub const SANS: Font = Font::with_name("Inter");
+    /// Emphasis — a card title, a stat.
+    pub const MEDIUM: Font = Font {
+        weight: Weight::Medium,
+        ..SANS
+    };
+    /// Section headers, the active segment, a focused dock's title.
+    pub const SEMIBOLD: Font = Font {
+        weight: Weight::Semibold,
+        ..SANS
+    };
+    /// Data: keys, payloads, ids, hex. The no-ligature cut, so `->` is two
+    /// characters on screen because it is two bytes on the wire.
+    pub const MONO: Font = Font::with_name("JetBrains Mono NL");
+    /// Chrome icons — only ever through `kit::Icon`.
+    pub const ICONS: Font = Font::with_name("lucide");
+}
+
 /// Spacing scale (pixels) on an 8pt grid. Use for `padding` and `spacing`.
 /// `XS` (4) is reserved for tight icon/label gaps; everything else is a multiple
 /// of 8. `f32` so it feeds `.padding(..)`/`.spacing(..)` directly.

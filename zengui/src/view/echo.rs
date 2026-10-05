@@ -19,7 +19,7 @@ use crate::echo::{EchoLine, EchoRing};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::{CAPTION_LINE, Spacing, font};
+use crate::view::tokens::{CAPTION_LINE, Spacing, face, font};
 
 /// One echo line's height, so the window can do arithmetic on it (#183).
 ///
@@ -477,7 +477,7 @@ fn line_view<'a>(
     // for a rendering identical to the last one's; `on_press_with` moves the
     // third clone from every frame to the one frame somebody actually clicks.
     let key = kit::body(line.key.as_str())
-        .font(iced::Font::MONOSPACE)
+        .font(face::MONO)
         .style(|theme: &iced::Theme| text::Style {
             color: Some(colors(theme).text()),
         });
@@ -485,15 +485,16 @@ fn line_view<'a>(
     // A tombstone is authoritative retirement, not an empty value
     // (RFC 04 §1.2) — so it must not look like a put with no payload.
     let is_delete = line.is_delete;
-    let preview = kit::body(line.preview.as_str())
-        .font(iced::Font::MONOSPACE)
-        .style(move |theme: &iced::Theme| text::Style {
-            color: Some(if is_delete {
-                colors(theme).danger()
-            } else {
-                colors(theme).text_muted()
-            }),
-        });
+    let preview =
+        kit::body(line.preview.as_str())
+            .font(face::MONO)
+            .style(move |theme: &iced::Theme| text::Style {
+                color: Some(if is_delete {
+                    colors(theme).danger()
+                } else {
+                    colors(theme).text_muted()
+                }),
+            });
 
     // The whole row is the click target: drilling in is the common action,
     // and a hairline button next to a monospace key is not. `row_button`

@@ -4,7 +4,7 @@
   <name>ZenGui</name>
   <summary>Graphical bus explorer for Zenoh</summary>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>Apache-2.0</project_license>
+  <project_license>Apache-2.0 AND OFL-1.1 AND ISC</project_license>
   <developer id="com.github.p13marc">
     <name>Marc Pardo</name>
   </developer>

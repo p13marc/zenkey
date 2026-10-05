@@ -51,7 +51,7 @@ use crate::message::{Message, SlotId, Subject};
 use crate::nodes::NodeRoster;
 use crate::view::media::MediaState;
 use crate::view::nodes::DetailState;
-use crate::view::tokens::Spacing;
+use crate::view::tokens::{Spacing, face};
 
 /// Everything the Inspector may show, for whatever the subject turns out to
 /// be.
@@ -156,7 +156,7 @@ fn prefix_sections<'a>(prefix: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
-        kit::emphasis(prefix).font(iced::Font::MONOSPACE),
+        kit::emphasis(prefix).font(face::MONO),
         kit::empty_state(
             "A subtree, not a key",
             "Nothing was fetched, because a prefix names no value any producer \
@@ -236,7 +236,7 @@ fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
         kit::section_header("Inspector", None),
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
-        kit::emphasis(origin).font(iced::Font::MONOSPACE),
+        kit::emphasis(origin).font(face::MONO),
         nodes::presence_section(d.roster, origin, joined.as_ref(), d.sp),
         nodes::detail_section(d.node_detail, d.sp),
     ]

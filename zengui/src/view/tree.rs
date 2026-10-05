@@ -38,7 +38,7 @@ use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::patharena::{ChunkId, PathArena, PathId};
 use crate::view::kit::{self, human_bytes, human_rate};
 use crate::view::theme::{RegistrationTone, colors};
-use crate::view::tokens::{Spacing, font};
+use crate::view::tokens::{Spacing, face, font};
 
 /// Fixed row height — what makes the scroll window arithmetic exact. The
 /// *comfortable* baseline: the pane renders at `sp.row(ROW_HEIGHT)` (#192),
@@ -1463,26 +1463,29 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
     let marker: Element<'a, Message> = match marker_press(shape, arena) {
-        Some(msg) => kit::link(kit::caption(if r.expanded { "▾" } else { "▸" }))
-            // Horizontal only: a fixed-height row has no vertical air to
-            // spend, at either density.
-            .padding([0.0, sp.xs])
-            .on_press(msg)
-            .into(),
+        Some(msg) => kit::link(kit::icon_caption(if r.expanded {
+            kit::Icon::ChevronDown
+        } else {
+            kit::Icon::ChevronRight
+        }))
+        // Horizontal only: a fixed-height row has no vertical air to
+        // spend, at either density.
+        .padding([0.0, sp.xs])
+        .on_press(msg)
+        .into(),
         None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
     let is_selected = r.target.is_some() && selected == r.target.as_deref();
-    let name =
-        kit::caption(r.chunk)
-            .font(iced::Font::MONOSPACE)
-            .style(move |theme: &iced::Theme| text::Style {
-                color: Some(if is_selected {
-                    colors(theme).primary()
-                } else {
-                    colors(theme).text()
-                }),
-            });
+    let name = kit::caption(r.chunk)
+        .font(face::MONO)
+        .style(move |theme: &iced::Theme| text::Style {
+            color: Some(if is_selected {
+                colors(theme).primary()
+            } else {
+                colors(theme).text()
+            }),
+        });
 
     let mut line = row![name].spacing(sp.xs).align_y(iced::Alignment::Center);
 
@@ -1600,12 +1603,20 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
     // a real wire subtree offer it (pivot groups are synthetic).
     let watch: Element<'a, Message> = match r.target {
         Some(t) => {
-            let watch_label = if watches.mine.contains(&t) {
-                "◉"
+            // Two shapes, not one shape in two colours (#193): the open eye
+            // is a watch this app holds, the struck one is none — and the
+            // struck one no longer shares a glyph with the Unregistered
+            // badge in the same row, as the old `○` did (#533).
+            let watch_icon = if watches.mine.contains(&t) {
+                kit::icon_caption(kit::Icon::Watched)
             } else {
-                "○"
+                kit::icon_caption(kit::Icon::Unwatched).style(|theme: &iced::Theme| {
+                    iced::widget::text::Style {
+                        color: Some(crate::view::theme::colors(theme).text_dim()),
+                    }
+                })
             };
-            kit::link(kit::caption(watch_label))
+            kit::link(watch_icon)
                 .padding([0.0, sp.xs])
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t)))
                 .into()

@@ -159,15 +159,17 @@ soak:
     cargo test --release -p zenkey-fleet --test ledger -- --ignored --nocapture
 
 # A picture of every zengui surface, both themes (#532): the scene list in
-# zengui/tests/common/scenes.rs, drawn by the CPU renderer so every host draws
-# the same pixels. PNGs land in `dir`, twice the scenes' logical size.
+# zengui/tests/common/scenes.rs, drawn by the app's own renderer (wgpu, on GL —
+# mesa's software rasterizer on a host with no GPU; tiny-skia drops canvases,
+# #533). PNGs land in `dir`, twice the scenes' logical size.
 shots dir="target/shots/current":
-    SHOTS_DIR={{justfile_directory()}}/{{dir}} ICED_TEST_BACKEND=tiny-skia \
+    SHOTS_DIR={{justfile_directory()}}/{{dir}} ICED_TEST_BACKEND=wgpu \
         cargo test -p zengui --test shots --locked -- --ignored --nocapture
 
 # The same scenes drawn from another revision, into target/shots/base, so a
-# visual change is reviewed as a before/after pair. The scene list is this
-# checkout's, copied over the other tree — a revision older than #532 has none.
+# visual change is reviewed as a before/after pair. The revision's own harness
+# draws them — its scenes speak its API; only a revision older than #532,
+# which has none, borrows this checkout's.
 shots-base rev="main":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -176,11 +178,13 @@ shots-base rev="main":
     git -C "$root" worktree remove --force "$src" 2>/dev/null || rm -rf "$src"
     git -C "$root" worktree add --detach "$src" {{rev}}
     trap 'git -C "$root" worktree remove --force "$src"' EXIT
-    mkdir -p "$src/zengui/tests/common"
-    cp "$root/zengui/tests/shots.rs" "$src/zengui/tests/"
-    cp "$root"/zengui/tests/common/*.rs "$src/zengui/tests/common/"
+    if [ ! -f "$src/zengui/tests/shots.rs" ]; then
+        mkdir -p "$src/zengui/tests/common"
+        cp "$root/zengui/tests/shots.rs" "$src/zengui/tests/"
+        cp "$root"/zengui/tests/common/*.rs "$src/zengui/tests/common/"
+    fi
     cd "$src"
-    SHOTS_DIR=$root/target/shots/base ICED_TEST_BACKEND=tiny-skia CARGO_TARGET_DIR=$root/target \
+    SHOTS_DIR=$root/target/shots/base ICED_TEST_BACKEND=wgpu CARGO_TARGET_DIR=$root/target \
         cargo test -p zengui --test shots --locked -- --ignored --nocapture
 
 # Re-capture every pinned CLI transcript and render snapshot after an

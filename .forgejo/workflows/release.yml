@@ -43,6 +43,8 @@ jobs:
           cargo build --release -p zenctl -p zengui -p zenwatch --locked
           cp target/release/zenctl "dist/release/zenctl-${RELEASE_TAG}-linux-x86_64"
           cp target/release/zengui "dist/release/zengui-${RELEASE_TAG}-linux-x86_64"
+          # The binary embeds third-party faces (#533); their notice ships beside it.
+          cp zengui/assets/fonts/NOTICE.md "dist/release/zengui-${RELEASE_TAG}-FONTS-NOTICE.md"
           cp target/release/zenwatch "dist/release/zenwatch-${RELEASE_TAG}-linux-x86_64"
           (cd dist/release && sha256sum * > SHA256SUMS)
       - name: Create release if missing

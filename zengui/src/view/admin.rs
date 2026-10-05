@@ -26,7 +26,7 @@ use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::{CoverageTone, colors};
-use crate::view::tokens::Spacing;
+use crate::view::tokens::{Spacing, face, font};
 
 /// How many declared entities the list renders before it stops and says so.
 ///
@@ -689,7 +689,9 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                     content: node.label.clone(),
                     position: Point::new(p.x + NODE_R + 3.0, p.y + 3.0),
                     color: palette.text(),
-                    size: iced::Pixels(11.0),
+                    // On the scale, in the data face (#533): a zid is data.
+                    size: iced::Pixels(font::CAPTION),
+                    font: face::MONO,
                     ..canvas::Text::default()
                 });
             }
@@ -744,7 +746,8 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                     content: o.label.clone(),
                     position: Point::new(p.x + NODE_R, p.y + 3.0),
                     color: palette.text_muted(),
-                    size: iced::Pixels(10.0),
+                    size: iced::Pixels(font::CAPTION),
+                    font: face::MONO,
                     ..canvas::Text::default()
                 });
             }
