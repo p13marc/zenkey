@@ -35,7 +35,7 @@
 
 use std::collections::VecDeque;
 
-use iced::widget::{Column, column, row, text};
+use iced::widget::{Column, column, row};
 use iced::{Element, Length};
 use zenkey::qos::QosProfile;
 use zenkey_fleet::report::CallReport;
@@ -45,7 +45,7 @@ use std::sync::Arc;
 
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::colors;
+use crate::view::theme::Tone;
 use crate::view::tokens::{Spacing, face, font};
 
 /// How many send-log lines the pane keeps. Bounded on purpose: a 5 Hz stream
@@ -440,23 +440,22 @@ fn publish_body<'a>(
     slices_loaded: bool,
     sp: Spacing,
 ) -> Column<'a, Message> {
-    let key = kit::input("key: full wire key to publish on", &form.key)
-        .on_input(|t| msg(SendMsg::KeyChanged(t)))
-        .size(font::CAPTION);
+    // Labelled fields (#562, after #559): the label survives typing; the
+    // placeholder is only an example.
+    let key = kit::form_field(
+        "KEY",
+        kit::input("v1/h-3fa9c2d41b7e/state/demo/health", &form.key)
+            .on_input(|t| msg(SendMsg::KeyChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("a full wire key, base included — this session is un-namespaced (RFC 09 §5)".into()),
+    );
 
     // KeyFacts feedback as you type — the same classification ladder the tree
     // renders, so a key that will not refine says so *before* the send.
     let mut facts_col = Column::new().spacing(sp.xs);
-    match (&form.facts, form.key.trim().is_empty()) {
-        (_, true) => {
-            facts_col = facts_col.push(kit::muted(
-                "a full wire key, base included — this session is un-namespaced (RFC 09 §5)",
-            ));
-        }
-        (Some(f), false) => {
-            facts_col = facts_col.push(crate::view::detail::facts_section(f, sp));
-        }
-        (None, false) => {}
+    if let (Some(f), false) = (&form.facts, form.key.trim().is_empty()) {
+        facts_col = facts_col.push(crate::view::detail::facts_section(f, sp));
     }
     if !slices_loaded && !form.key.trim().is_empty() {
         facts_col = facts_col.push(kit::muted(
@@ -465,12 +464,14 @@ fn publish_body<'a>(
         ));
     }
 
-    let body = kit::input(
-        "body: JSON (encoded for the wire by the engine)",
-        &form.body,
-    )
-    .on_input(|t| msg(SendMsg::BodyChanged(t)))
-    .size(font::CAPTION);
+    let body = kit::form_field(
+        "BODY",
+        kit::input("{\"value\": 42}", &form.body)
+            .on_input(|t| msg(SendMsg::BodyChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("JSON — encoded for the wire by the engine, against the registry's type".into()),
+    );
 
     let qos = kit::picker(qos_choices(), Some(form.qos), |q| {
         msg(SendMsg::QosPicked(q))
@@ -478,21 +479,34 @@ fn publish_body<'a>(
     .placeholder("qos")
     .text_size(font::CAPTION);
     // #158: say when the picker is following the registry, so a declared
-    // default never reads as the operator's choice.
-    let qos_source: Option<Element<'a, Message>> = (!form.qos_touched
-        && declared_qos(form.facts.as_ref()) == Some(form.qos.0))
-    .then(|| kit::muted(format!("qos {} (declared)", form.qos.0.name())));
+    // default never reads as the operator's choice — a chip beside it now
+    // (#562), the same words.
+    let mut qos_row = row![qos].spacing(sp.sm).align_y(iced::Alignment::Center);
+    if !form.qos_touched && declared_qos(form.facts.as_ref()) == Some(form.qos.0) {
+        qos_row = qos_row.push(kit::status_chip(
+            Tone::Info,
+            format!("qos {} (declared)", form.qos.0.name()),
+        ));
+    }
+    let qos = kit::form_field("QOS", qos_row, None);
 
-    let encoding = kit::input("encoding override (optional)", &form.encoding)
-        .on_input(|t| msg(SendMsg::EncodingChanged(t)))
-        .size(font::CAPTION);
+    let encoding = kit::form_field(
+        "ENCODING",
+        kit::input("application/json", &form.encoding)
+            .on_input(|t| msg(SendMsg::EncodingChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("optional — overrides what the registry declares".into()),
+    );
 
-    let attachment = kit::input(
-        "attachment (optional — ships verbatim, never schema-encoded)",
-        &form.attachment,
-    )
-    .on_input(|t| msg(SendMsg::AttachmentChanged(t)))
-    .size(font::CAPTION);
+    let attachment = kit::form_field(
+        "ATTACHMENT",
+        kit::input("trace-id=4bf92f35", &form.attachment)
+            .on_input(|t| msg(SendMsg::AttachmentChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("optional — ships verbatim beside the body, never schema-encoded".into()),
+    );
 
     let raw = kit::check(form.raw)
         .label("send raw")
@@ -502,10 +516,15 @@ fn publish_body<'a>(
         .label("repeat")
         .on_toggle(|b| msg(SendMsg::RepeatToggled(b)))
         .text_size(font::CAPTION);
-    let interval = kit::input("interval (s)", &form.interval)
-        .on_input(|t| msg(SendMsg::IntervalChanged(t)))
-        .size(font::CAPTION)
-        .width(Length::Fixed(90.0));
+    let interval = row![
+        kit::eyebrow("INTERVAL (S)"),
+        kit::input("1", &form.interval)
+            .on_input(|t| msg(SendMsg::IntervalChanged(t)))
+            .size(font::CAPTION)
+            .width(Length::Fixed(90.0)),
+    ]
+    .spacing(sp.xs)
+    .align_y(iced::Alignment::Center);
 
     let ready = !form.key.trim().is_empty() && !form.in_flight;
     let mut send = kit::primary(kit::caption(if form.in_flight {
@@ -549,9 +568,6 @@ fn publish_body<'a>(
     col = col.push(facts_col);
     col = col.push(body);
     col = col.push(row![qos, encoding].spacing(sp.sm));
-    if let Some(line) = qos_source {
-        col = col.push(line);
-    }
     col = col.push(attachment);
     col = col.push(
         row![raw, repeat, interval]
@@ -564,11 +580,7 @@ fn publish_body<'a>(
     }
 
     if let Some(e) = &form.error {
-        col = col.push(
-            kit::body(format!("refused: {e}")).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            }),
-        );
+        col = col.push(kit::error(format!("refused: {e}")));
     }
     if let Some(line) = provenance(form) {
         col = col.push(line);
@@ -577,23 +589,32 @@ fn publish_body<'a>(
         col = col.push(kit::muted(note.clone()));
     }
     if form.armed {
-        col = col.push(kit::muted(matching_sentence(form.matching)));
+        // A routing fact about this publisher (#38): commentary when asked,
+        // the outline of a question not asked when not.
+        let tone = if form.matching.is_some() {
+            Tone::Info
+        } else {
+            Tone::Neutral
+        };
+        col = col.push(kit::status_chip(tone, matching_sentence(form.matching)));
     }
     col.push(log_view(form, sp))
 }
 
 /// How the last body reached the wire. Encoded and as-typed must never look
-/// alike — that is the whole reason `BodySource` leaves the engine.
+/// alike — that is the whole reason `BodySource` leaves the engine. A chip
+/// since #562: three facts, three sentences, no verdict among them.
 fn provenance(form: &SendForm) -> Option<Element<'_, Message>> {
     let source = form.source.as_ref()?;
     let encoding = form.encoding_used.as_deref().unwrap_or("(no encoding set)");
-    Some(match source {
-        BodySource::Encoded { type_name } => {
-            kit::muted(format!("encoded as {type_name} → {encoding}"))
-        }
-        BodySource::AsTyped => kit::muted(format!("sent as typed → {encoding}")),
-        BodySource::Raw => kit::muted("sent raw — bytes verbatim, not encoded".to_string()),
-    })
+    Some(kit::status_chip(
+        Tone::Info,
+        match source {
+            BodySource::Encoded { type_name } => format!("encoded as {type_name} → {encoding}"),
+            BodySource::AsTyped => format!("sent as typed → {encoding}"),
+            BodySource::Raw => "sent raw — bytes verbatim, not encoded".to_string(),
+        },
+    ))
 }
 
 /// The #38 badge, worded exactly as the CLI words it: a routing fact about
@@ -621,7 +642,14 @@ pub fn log_section(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
 fn log_view(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
     let mut col = Column::new().spacing(sp.xs);
     if form.log.is_empty() {
-        return col.push(kit::muted("no sends yet")).into();
+        return kit::empty(
+            kit::EmptyKind::Empty,
+            "No sends yet",
+            format!(
+                "Every publish, retire and call this window sends lands here, newest first — \
+                 bounded at {LOG_LINES}, and the drops are counted."
+            ),
+        );
     }
     col = col.push(kit::muted(if form.dropped > 0 {
         format!(
@@ -632,14 +660,19 @@ fn log_view(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
     } else {
         format!("send log — {}", kit::plural(form.log.len(), "entry"))
     }));
+    // Rows with a leading edge (#562, echo's anatomy): a failed send wears
+    // danger's edge and says so in words — the colour never alone.
     for line in &form.log {
-        let entry = kit::body(line.text.as_str()).font(face::MONO);
+        let entry = kit::caption(line.text.as_str()).font(face::MONO);
         col = col.push(if line.ok {
-            entry
+            kit::edge_row(kit::Edge::Put, entry)
         } else {
-            entry.style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            })
+            kit::edge_row(
+                kit::Edge::Failed,
+                row![kit::status_chip(Tone::Negative, "failed"), entry]
+                    .spacing(sp.sm)
+                    .align_y(iced::Alignment::Center),
+            )
         });
     }
     col.into()
@@ -715,11 +748,7 @@ fn call_body<'a>(
     if let Some(Err(e)) = info.as_ref() {
         // Unreachable while the picker feeds from the same slices, but a
         // projection that answers with an error is rendered, not swallowed.
-        meta = meta.push(
-            kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            }),
-        );
+        meta = meta.push(kit::error(e.to_string()));
     }
     if let Some(d) = decl {
         // The key a caller would use — with `{origin}` standing for the
@@ -727,22 +756,25 @@ fn call_body<'a>(
         // (RFC 06 §5). The surface the Call pane picked from but never
         // showed (#234).
         meta = meta.push(kit::mono(format!("→ {}", d.key)));
-        meta = meta.push(kit::muted(format!(
-            "kind {} · request {} · reply {}",
-            d.kind,
-            d.request.as_deref().unwrap_or("—"),
-            d.reply.as_deref().unwrap_or("—"),
-        )));
-        meta = meta.push(kit::muted(format!(
-            "fanout {} · idempotent {} · encoding {} · since {}",
-            d.fanout.as_deref().unwrap_or("—"),
-            d.idempotent
-                .map(|b| b.to_string())
-                .as_deref()
-                .unwrap_or("—"),
-            d.encoding.as_deref().unwrap_or("—"),
-            d.since.as_deref().unwrap_or("—"),
-        )));
+        // The declared shape as fields (#562, after #539): what was one
+        // joined line each, an eyebrow over each value. "—" where the
+        // registry declares nothing — absent, never guessed.
+        let dash = |v: Option<&str>| v.unwrap_or("—").to_string();
+        let shape = |label: &'static str, value: String| {
+            kit::field(label, kit::caption(value).font(face::MONO))
+        };
+        meta = meta.push(kit::fields(vec![
+            shape("KIND", d.kind.to_string()),
+            shape("REQUEST", dash(d.request.as_deref())),
+            shape("REPLY", dash(d.reply.as_deref())),
+            shape("FANOUT", dash(d.fanout.as_deref())),
+            shape(
+                "IDEMPOTENT",
+                dash(d.idempotent.map(|b| b.to_string()).as_deref()),
+            ),
+            shape("ENCODING", dash(d.encoding.as_deref())),
+            shape("SINCE", dash(d.since.as_deref())),
+        ]));
         if let Some(desc) = &d.description {
             meta = meta.push(kit::muted(desc.clone()));
         }
@@ -779,30 +811,49 @@ fn call_body<'a>(
             };
         }
         if fanout_forbidden {
-            meta = meta.push(
-                kit::body("fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)")
-                    .style(|theme: &iced::Theme| text::Style {
-                        color: Some(colors(theme).danger()),
-                    }),
-            );
+            // A rule the send will meet, said before it: a caution, not an
+            // error — nothing has been refused yet.
+            meta = meta.push(kit::callout(
+                Tone::Caution,
+                kit::caption(
+                    "fanout = \"forbidden\" — a fleet (*) target is refused (RFC 05 §2.1)",
+                ),
+            ));
         }
     }
 
-    let target = kit::input("target: h-… | @service | *", &form.target)
-        .on_input(|t| msg(SendMsg::TargetChanged(t)))
-        .size(font::CAPTION);
-    let params = kit::input("params: k=v;k=v (selector)", &form.params)
-        .on_input(|t| msg(SendMsg::ParamsChanged(t)))
-        .size(font::CAPTION);
-    let body = kit::input("body: JSON (query payload)", &form.body)
-        .on_input(|t| msg(SendMsg::BodyChanged(t)))
-        .size(font::CAPTION);
-    let attachment = kit::input(
-        "attachment: verbatim, beside the body (empty = none)",
-        &form.attachment,
-    )
-    .on_input(|t| msg(SendMsg::AttachmentChanged(t)))
-    .size(font::CAPTION);
+    let target = kit::form_field(
+        "TARGET",
+        kit::input("h-3fa9c2d41b7e", &form.target)
+            .on_input(|t| msg(SendMsg::TargetChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("one host id, a service (@catalog), or * for the fleet".into()),
+    );
+    let params = kit::form_field(
+        "PARAMS",
+        kit::input("actor=ops;request_id=r-9", &form.params)
+            .on_input(|t| msg(SendMsg::ParamsChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("k=v;k=v — the selector's parameters".into()),
+    );
+    let body = kit::form_field(
+        "BODY",
+        kit::input("{\"window_s\": 10}", &form.body)
+            .on_input(|t| msg(SendMsg::BodyChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("JSON — the query's payload".into()),
+    );
+    let attachment = kit::form_field(
+        "ATTACHMENT",
+        kit::input("trace-id=4bf92f35", &form.attachment)
+            .on_input(|t| msg(SendMsg::AttachmentChanged(t)))
+            .font(face::MONO)
+            .size(font::CAPTION),
+        Some("optional — verbatim, beside the body".into()),
+    );
 
     let ready = decl.is_some()
         && !form.target.is_empty()
@@ -869,62 +920,83 @@ fn outcome_view<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     match outcome {
-        Err(e) => kit::body(format!("refused / failed: {e}"))
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            })
-            .into(),
+        Err(e) => kit::error(format!("refused / failed: {e}")),
         Ok(report) => {
-            let mut col = Column::new().spacing(sp.xs);
+            let mut col = Column::new().spacing(sp.sm);
             col = col.push(kit::mono(format!("→ {}", report.key)));
             if report.answers.is_empty() {
                 // Exit-code 2's meaning, rendered: silence is not a verdict —
                 // and the wait it is read against is stated, not alluded to
                 // (R5: the report carries it now).
-                col = col.push(kit::muted(format!(
-                    "no replies within {}s — a non-verdict, not proof of \
-                     absence (RFC 05 §3.1); the roster says who should have answered",
-                    report.timeout_s
-                )));
+                col = col.push(kit::empty(
+                    kit::EmptyKind::Silent,
+                    "No replies",
+                    format!(
+                        "no replies within {}s — a non-verdict, not proof of absence \
+                         (RFC 05 §3.1); the roster says who should have answered",
+                        report.timeout_s
+                    ),
+                ));
             }
             for a in &report.answers {
-                // A total match on the outcome enum: the old flat shape
-                // could spell ok:false with no error, and that row fell
-                // through every arm.
-                use zenkey_fleet::report::CallOutcome;
-                let line = match &a.outcome {
-                    CallOutcome::Err(err) => {
-                        format!("{}  ✗ {}: {}", a.origin, err.name, err.message)
-                    }
-                    CallOutcome::Ok { value: Some(v), .. } => format!("{}  ✓ {}", a.origin, v),
-                    CallOutcome::Ok {
-                        value: None,
-                        text: Some(t),
-                    } => {
-                        format!("{}  ✓ {}", a.origin, t.lines().next().unwrap_or(""))
-                    }
-                    CallOutcome::Ok {
-                        value: None,
-                        text: None,
-                    } => format!("{}  ✓", a.origin),
-                };
-                col = col.push(kit::mono(line));
-                // A reply attachment is a wire fact, shown where the reply
-                // is — present only when the wire carried one (#126).
-                if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
-                    col = col.push(kit::muted(format!("   attachment ({n} B): {att}")));
-                }
+                col = col.push(answer_card(a, sp));
             }
             let silent = non_repliers(report, form, roster);
             if !silent.is_empty() {
-                col = col.push(kit::muted(format!(
-                    "did not answer, though alive: {}",
-                    silent.join(", ")
-                )));
+                col = col.push(kit::callout(
+                    Tone::Info,
+                    kit::caption(format!(
+                        "did not answer, though alive: {}",
+                        silent.join(", ")
+                    )),
+                ));
             }
             col.into()
         }
     }
+}
+
+/// One origin's answer, as a card (#562): its origin, an ok or an error
+/// chip — words, where hand-drawn ✓/✗ used to stand — and what it said.
+/// A total match on the outcome: the old flat shape could spell ok:false
+/// with no error, and that row fell through every arm.
+fn answer_card<'a>(a: &'a zenkey_fleet::report::CallAnswer, sp: Spacing) -> Element<'a, Message> {
+    use zenkey_fleet::report::CallOutcome;
+    let (chip, said): (Element<'a, Message>, Option<String>) = match &a.outcome {
+        CallOutcome::Err(err) => (
+            kit::status_chip(Tone::Negative, err.name.clone()),
+            Some(err.message.clone()),
+        ),
+        CallOutcome::Ok { value: Some(v), .. } => {
+            (kit::status_chip(Tone::Positive, "ok"), Some(v.to_string()))
+        }
+        CallOutcome::Ok {
+            value: None,
+            text: Some(t),
+        } => (
+            kit::status_chip(Tone::Positive, "ok"),
+            Some(t.lines().next().unwrap_or("").to_string()),
+        ),
+        CallOutcome::Ok {
+            value: None,
+            text: None,
+        } => (kit::status_chip(Tone::Positive, "ok — no payload"), None),
+    };
+    let mut col = column![
+        row![kit::caption(a.origin.clone()).font(face::MONO), chip]
+            .spacing(sp.sm)
+            .align_y(iced::Alignment::Center)
+    ]
+    .spacing(sp.xs);
+    if let Some(said) = said {
+        col = col.push(kit::inset(kit::caption(said).font(face::MONO)).width(Length::Fill));
+    }
+    // A reply attachment is a wire fact, shown where the reply is — present
+    // only when the wire carried one (#126).
+    if let (Some(att), Some(n)) = (&a.attachment, a.attachment_bytes) {
+        col = col.push(kit::muted(format!("attachment ({n} B): {att}")));
+    }
+    kit::card(col)
 }
 
 #[cfg(test)]
