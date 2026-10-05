@@ -83,6 +83,14 @@ pub const ALL: &[Scene] = &[
         build: traffic,
         landmark: "DROPPED",
     },
+    // A mode, not an alarm (#544). (A recording needs a live monitor, which
+    // no scene has — `app_tests` pins its status instead.)
+    Scene {
+        name: "replay",
+        size: DESKTOP,
+        build: replay,
+        landmark: "REPLAY",
+    },
     Scene {
         name: "palette",
         size: DESKTOP,
@@ -247,6 +255,33 @@ fn traffic(theme: ThemeChoice) -> Zengui {
             Message::Workspace(WorkspaceMsg::DockToggled(role)),
         );
     }
+    app
+}
+
+fn replay(theme: ThemeChoice) -> Zengui {
+    use zengui::replay::{LoadedReplay, ReplayState};
+    use zengui::view::replay::ReplayMsg;
+    let file = [
+        r#"{"zrec":1,"selectors":["v1/**"],"base":"","captured_at":"2026-10-05T03:00:00Z"}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","t":0,"bytes":"NjQ="}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/state/sysinfo/health","t":500000,"bytes":"b2s="}"#,
+        r#"{"dropped":4}"#,
+        r#"{"key":"v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","t":2000000,"bytes":"NjU="}"#,
+    ]
+    .join("\n");
+    let state = ReplayState::load("incident.zrec", file.as_bytes()).expect("a valid capture");
+    let mut app = watching(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Replay)),
+    );
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::Loaded(
+            "incident.zrec".into(),
+            Ok(LoadedReplay::new(state)),
+        ))),
+    );
     app
 }
 

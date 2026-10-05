@@ -242,9 +242,10 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
         ),
     };
     // The mode indicator is the loudest claim on this row: EMPHASIS, in the
-    // danger tone — everything else in the banner is metadata about it.
+    // mode's own hue (#544) — everything else in the banner is metadata
+    // about it. Danger red said "something is wrong"; replay is a choice.
     let title = kit::emphasis(mode).style(|theme: &iced::Theme| text::Style {
-        color: Some(colors(theme).danger()),
+        color: Some(colors(theme).mode()),
     });
     let mut meta = row![title, kit::muted(what)].spacing(space::SM);
     if let ReplaySource::Retained { taken } = &state.source
@@ -281,9 +282,9 @@ pub fn banner(state: &ReplayState) -> Element<'_, Message> {
         .padding(space::XS),
     );
 
-    // A callout card in the banner's own tone (#537) — still in every
-    // window, still the loudest claim on screen.
-    kit::callout(Tone::Negative, meta.align_y(iced::Alignment::Center))
+    // A callout card in the mode's tone (#537, #544) — still in every
+    // window, still the loudest claim on screen, and no longer an alarm.
+    kit::callout(Tone::Mode, meta.align_y(iced::Alignment::Center))
 }
 
 /// The transport: play/pause, speed, and the scrubber.

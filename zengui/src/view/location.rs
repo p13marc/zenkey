@@ -377,17 +377,27 @@ fn window_controls<'a>(chrome: &'a Chrome, work: &'a Workspace) -> Element<'a, M
     let prefs = |m| Message::Chrome(ChromeMsg::Prefs(m));
     // Capture and replay (#74): record writes the current watches to a
     // .zrec; replay feeds the panes from one. A recording is the one state
-    // here worth a colour, and it is in words too.
+    // here worth a colour, and it is in words too — the mode's (#544), as a
+    // status beside the button. The button itself is secondary: danger's
+    // rank is for the irreversible wire act, and stopping a recording
+    // finishes a file.
+    let toggle = Message::Workspace(WorkspaceMsg::Replay(ReplayMsg::RecordToggled));
     let record: Element<'a, Message> = if work.replay.recording.is_some() {
-        kit::danger(kit::labelled(kit::Icon::Stop, "stop recording"))
+        row![
+            kit::status(crate::view::theme::Tone::Mode, "recording"),
+            kit::secondary(kit::labelled(kit::Icon::Stop, "stop recording"))
+                .on_press(toggle)
+                .padding([space::XS, space::SM]),
+        ]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center)
+        .into()
     } else {
         kit::secondary(kit::labelled(kit::Icon::Record, "record"))
-    }
-    .on_press(Message::Workspace(WorkspaceMsg::Replay(
-        ReplayMsg::RecordToggled,
-    )))
-    .padding([space::XS, space::SM])
-    .into();
+            .on_press(toggle)
+            .padding([space::XS, space::SM])
+            .into()
+    };
     let replay = kit::secondary(kit::labelled(kit::Icon::Replay, "replay…"))
         .on_press(Message::Workspace(WorkspaceMsg::Replay(
             ReplayMsg::OpenToggled,

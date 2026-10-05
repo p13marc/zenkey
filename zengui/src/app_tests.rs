@@ -1953,3 +1953,32 @@ async fn a_malformed_endpoint_loads_nothing_past_it() {
         "a config failure is not answered past"
     );
 }
+
+/// #544: a recording is a mode the operator chose — its status says so in
+/// the mode's own tone, beside a *secondary* "stop recording" (danger's rank
+/// is the irreversible wire act's), in the app bar and on the Replay tab.
+#[test]
+fn a_recording_is_a_status_not_an_alarm() {
+    use crate::message::{ActivityTab, WorkspaceMsg};
+    use iced_test::simulator;
+
+    let mut app = test_app();
+    let _ = app.update(Message::Workspace(WorkspaceMsg::ActivityTab(
+        ActivityTab::Replay,
+    )));
+    let (stop, _stopped) = tokio::sync::oneshot::channel();
+    app.work.replay.recording = Some(crate::state::workspace::RecordingHandle {
+        stop,
+        path: "capture.zrec".into(),
+    });
+    let mut ui = simulator::<Message, _, _>(app.view(iced::window::Id::unique()));
+    assert!(ui.find("recording").is_ok(), "the status names the mode");
+    assert!(ui.find("stop recording").is_ok());
+    assert!(
+        ui.find(
+            "current watches to capture.zrec — the location bar's 'stop recording' finishes the file"
+        )
+        .is_ok(),
+        "the Replay tab says where it is writing"
+    );
+}

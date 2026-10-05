@@ -15,7 +15,7 @@ use crate::admin::{AdminState, AdminSweep};
 use crate::message::{Message, PaneMsg};
 use crate::view::admin::AdminMsg;
 use crate::view::kit;
-use crate::view::theme::{Accent, alpha, colors};
+use crate::view::theme::{alpha, colors};
 use crate::view::tokens::{Spacing, face, font};
 
 /// What the mesh tool can say.
@@ -445,8 +445,11 @@ impl iced::widget::canvas::Program<Message> for Mesh<'_> {
                 let p = pos(i);
                 let tone = match node.role {
                     MeshRole::Router => palette.primary(),
-                    MeshRole::Peer => palette.accent(Accent::Sky),
-                    MeshRole::Client => palette.accent(Accent::Fuchsia),
+                    MeshRole::Peer => palette.accent(),
+                    // The plain text tone: the role's initial and the legend
+                    // carry "client", and the fuchsia it wore is the replay
+                    // mode's now (#544) — a client is not a mode.
+                    MeshRole::Client => palette.text(),
                     MeshRole::Other => palette.text_muted(),
                 };
                 // This session: a layered glow in the primary — not success,
