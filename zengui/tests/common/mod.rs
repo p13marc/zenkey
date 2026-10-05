@@ -243,3 +243,76 @@ impl World {
         }
     }
 }
+
+/// A read-back with every anatomy the Config tool draws (#481): a group of
+/// each class, a sensitive parameter, a value differing from its startup
+/// one, one with no value read back, a change pending on the reach group
+/// and the last change on the hot one.
+pub fn config_view() -> zenkey::config::ConfigView {
+    use zenkey::config::{
+        ConfigGroup, ConfigSchema, ConfigView, LastChange, ParamClass, ParamKind, ParamSpec,
+        ParamValue, PendingChange, ValueSource,
+    };
+    let schema = ConfigSchema::new()
+        .with(
+            ConfigGroup::new("queue", ParamClass::Hot, "the transmit queue")
+                .with(ParamSpec::new(
+                    "tx_queue_len",
+                    ParamKind::Integer {
+                        min: Some(1),
+                        max: Some(10_000),
+                        unit: Some("packets".into()),
+                    },
+                    "packets queued in front of the radio",
+                ))
+                .with(ParamSpec::new("fq", ParamKind::Bool, "fair queueing"))
+                .with(ParamSpec::new("psk", ParamKind::Text, "the network key").sensitive()),
+        )
+        .with(
+            ConfigGroup::new("link", ParamClass::Reach, "how the node reaches the bus").with(
+                ParamSpec::new("ssid", ParamKind::Text, "the network joined"),
+            ),
+        )
+        .with(
+            ConfigGroup::new(
+                "transport",
+                ParamClass::Contract,
+                "what the transport was started against",
+            )
+            .with(ParamSpec::new(
+                "mtu",
+                ParamKind::Integer {
+                    min: None,
+                    max: None,
+                    unit: Some("bytes".into()),
+                },
+                "the SDU size",
+            )),
+        );
+    let mut view = ConfigView::of("wlan0", &schema);
+    view.revision = 4;
+    view.pending = Some(PendingChange::new("chg-2", ["link"]).until("2026-10-05T12:00:00Z"));
+    view.last_change = Some(LastChange::new("chg-1", ["queue"]));
+    let set = |view: &mut ConfigView, g: usize, p: usize, v: ParamValue, s: ValueSource| {
+        view.groups[g].parameters[p].value = Some(v);
+        view.groups[g].parameters[p].source = Some(s);
+    };
+    set(
+        &mut view,
+        0,
+        0,
+        ParamValue::Integer(2000),
+        ValueSource::Overlay,
+    );
+    view.groups[0].parameters[0].startup = Some(ParamValue::Integer(1000));
+    set(&mut view, 0, 1, ParamValue::Bool(false), ValueSource::File);
+    view.groups[0].parameters[2].source = Some(ValueSource::File);
+    set(
+        &mut view,
+        1,
+        0,
+        ParamValue::Text("field".into()),
+        ValueSource::Runtime,
+    );
+    view
+}

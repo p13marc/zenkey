@@ -72,6 +72,8 @@ pub enum Icon {
     Nodes,
     Admin,
     Mesh,
+    /// The Config tool (#481): a producer's served configuration.
+    Config,
     // Layout presets.
     Explore,
     Watch,
@@ -96,7 +98,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 65] = [
+    pub const ALL: [Icon; 66] = [
         Icon::Close,
         Icon::TearOff,
         Icon::ChevronRight,
@@ -145,6 +147,7 @@ impl Icon {
         Icon::Nodes,
         Icon::Admin,
         Icon::Mesh,
+        Icon::Config,
         Icon::Explore,
         Icon::Watch,
         Icon::Diagnose,
@@ -223,6 +226,7 @@ impl Icon {
             Icon::Traffic => ("chart-column", '\u{E2A3}'),
             Icon::Nodes => ("server", '\u{E153}'),
             Icon::Admin => ("database", '\u{E0AD}'),
+            Icon::Config => ("sliders-horizontal", '\u{E29A}'),
             Icon::Mesh => ("network", '\u{E125}'),
             Icon::Explore => ("compass", '\u{E09B}'),
             Icon::Watch => ("binoculars", '\u{E621}'),

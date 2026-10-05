@@ -410,6 +410,9 @@ sub_state! {
         /// view, never for opening the pane (the RFC 07 §1 plane deserves the
         /// laziest posture in the app).
         pub(crate) media: view::media::MediaState,
+        /// The Config tool's form (#481): the resource it addresses, the
+        /// last read-back, and the call in flight.
+        pub(crate) config_form: crate::configure::ConfigForm,
     }
 }
 

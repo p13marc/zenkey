@@ -20,7 +20,8 @@ name = "zengui"
 path = "src/main.rs"
 
 [dependencies]
-zenkey = { workspace = true }
+# The Config tool (#481) deserializes the RFC 05 §5.1 read-back.
+zenkey = { workspace = true, features = ["serde"] }
 # Same feature set as zenctl (#97, #98, #58) — the two explorers must not
 # disagree about which payloads they can read, nor about which planes they
 # can reach.

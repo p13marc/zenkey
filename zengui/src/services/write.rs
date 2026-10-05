@@ -38,8 +38,19 @@ pub struct Call {
 }
 
 /// One RPC, whose target the engine parses (a bad target is an answer, not a
-/// panic).
+/// panic) — landing on the Send tool.
 pub fn call(c: Call) -> Task<Message> {
+    call_then(c, |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))))
+}
+
+/// One RPC, landing wherever `land` says (#481: the Config tool's calls are
+/// the same engine call, answered into its own form).
+pub fn call_then(
+    c: Call,
+    land: impl FnOnce(Result<Arc<zenkey_fleet::report::CallReport>, ServiceError>) -> Message
+    + Send
+    + 'static,
+) -> Task<Message> {
     Task::perform(
         async move {
             let Call {
@@ -73,7 +84,7 @@ pub fn call(c: Call) -> Task<Message> {
             .map(Arc::new)
             .map_err(ServiceError::of)
         },
-        |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))),
+        land,
     )
 }
 

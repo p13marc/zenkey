@@ -264,6 +264,11 @@ mod tests {
                     "send_form",
                     "publication",
                     "media",
+                    // The Config tool (#481): what the user typed and the
+                    // read-back it asked for — and, once a change is armed,
+                    // the only surface that knows a rollback window is
+                    // running, so a base switch must not drop it.
+                    "config_form",
                 ],
             ),
             ("work.echo", &["echo", "echo_view", "echo_scroll"]),
@@ -333,7 +338,8 @@ mod tests {
         // the slot's `id`; the container keeps the id mint — 72 became 74.
         // Then #224: the Consumers section, 75. Then #219: the loaded
         // snapshot and its open row (four under `work.replay`) and the
-        // slot's compare toggle — 75 became 80.
-        assert_eq!(leaves, 80, "the split must place every field exactly once");
+        // slot's compare toggle — 75 became 80. Then #481: the Config
+        // tool's form, 81.
+        assert_eq!(leaves, 81, "the split must place every field exactly once");
     }
 }
