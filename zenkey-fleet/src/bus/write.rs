@@ -200,6 +200,39 @@ pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
     ))
 }
 
+/// Every chunk of the key [`call`] is about to build is a plain chunk
+/// (RFC 03 §2) — or the call is refused, naming the chunk (#561).
+///
+/// The selector builders assert this, because to a generated builder the
+/// producer and the procedure are registry constants and an illegal one is
+/// a programmer error. A dynamic caller's are not: zengui's Send tool takes
+/// a declared path such as `config/{device}/{group}/set` as it is written,
+/// and before this check that template reached the assert and took the
+/// window down. A refusal (exit 2 in zenctl's terms) is what an input that
+/// cannot be asked deserves.
+fn check_chunks(target: &CallTarget, producer: &str, procedure: &str) -> Result<()> {
+    // A service call names no producer: its origin is the service.
+    let producer = match target {
+        CallTarget::Service(_) => None,
+        CallTarget::Host(_) | CallTarget::Fleet => Some(producer),
+    };
+    let bad = producer
+        .into_iter()
+        .chain(procedure.split('/'))
+        .find(|c| !zenkey::grammar::is_valid_plain_chunk(c));
+    match bad {
+        None => Ok(()),
+        Some(chunk) => Err(Error::unaskable(
+            procedure,
+            format!(
+                "has the chunk {chunk:?}, which is not a plain chunk (RFC 03 §2: lowercase \
+                 letters, digits, `.`, `_` and `-`, alphanumeric at both ends) — a declared \
+                 template such as `{{device}}` is filled in before it is called"
+            ),
+        )),
+    }
+}
+
 /// What a key is, for the purpose of retiring it — the guard's positive
 /// verdict, so callers print facts instead of re-deriving them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -611,6 +644,7 @@ pub(crate) async fn call_answers(
         slices,
         force,
     } = spec;
+    check_chunks(target, producer, procedure)?;
     check_fanout(target, slices, producer, procedure, force)?;
 
     let segments: Vec<&str> = procedure.split('/').collect();
@@ -1006,6 +1040,32 @@ mod tests {
                 registered: true,
                 ttl_s: Some(900)
             }
+        );
+    }
+
+    /// #561: a procedure path that is not plain chunks is a refusal, never
+    /// the selector builder's assert — the producer too, except on a
+    /// service call, which names none.
+    #[test]
+    fn a_call_on_a_template_or_a_bad_chunk_is_refused_not_panicked_on() {
+        let host = CallTarget::parse("h-0123456789ab").unwrap();
+        let err = check_chunks(&host, "modem", "config/{device}/{group}/set").unwrap_err();
+        assert!(err.is_unaskable(), "{err}");
+        assert!(err.to_string().contains("\"{device}\""), "{err}");
+        assert!(check_chunks(&host, "modem", "config/rf0/radio/set").is_ok());
+        assert!(
+            check_chunks(&host, "modem", "config//set").is_err(),
+            "an empty chunk"
+        );
+        assert!(
+            check_chunks(&host, "Modem", "config/rf0").is_err(),
+            "the producer too"
+        );
+        assert!(check_chunks(&CallTarget::Fleet, "modem", "a/B").is_err());
+        let service = CallTarget::Service(zenkey::origin::ServiceOrigin::catalog());
+        assert!(
+            check_chunks(&service, "", "describe").is_ok(),
+            "a service call has no producer to check"
         );
     }
 
