@@ -117,5 +117,6 @@ pub mod status;
 pub mod syntax;
 pub mod theme;
 pub mod tokens;
+pub mod traffic;
 pub mod tree;
 pub mod why;

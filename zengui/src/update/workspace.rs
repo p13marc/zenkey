@@ -123,6 +123,11 @@ pub(crate) fn update(
             // nothing. A *torn* dock is not invisible — it is elsewhere, so
             // the reveal is its window, focused (#186).
             work.activity.tab = tab;
+            // Opening Traffic ranks at once (#542); while it stays open, each
+            // tick re-ranks. A hidden tab walks no tree.
+            if tab == crate::message::ActivityTab::Traffic {
+                work.activity.traffic.rank(&obs.observed);
+            }
             if let Some(id) = work.windows.follow_window_of(DockRole::Activity) {
                 return iced::window::gain_focus(id);
             }

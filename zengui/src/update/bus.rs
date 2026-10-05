@@ -60,6 +60,13 @@ pub(crate) fn apply_tick(
         obs.retention = Some(monitor.core().retention());
     }
     obs.observed = Arc::clone(&tick.tree);
+    // The Traffic tab (#542): the session's rate every tick, the ranking
+    // only while the tab is the one showing.
+    work.activity.traffic.tick(
+        tick.totals,
+        &tick.tree,
+        work.activity.tab == crate::message::ActivityTab::Traffic,
+    );
     obs.keys = tick.keys;
     obs.keys_evicted = tick.keys_evicted;
     obs.keys_unwatched = tick.keys_unwatched;
