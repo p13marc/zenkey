@@ -94,7 +94,11 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   Lucide cut to `kit::Icon` (`scripts/subset-icons.py`), loaded by
   `view/fonts.rs::settings()` for the daemon *and* the shots harness;
   `tokens::face` names them by role, and icons are chrome only — a badge's
-  glyph stays text, because it is the honesty carrier the tests read. **Windows (#186)**: `main.rs` runs
+  glyph stays text, because it is the honesty carrier the tests read. **Colour
+  is ours (#534)**: `theme::Tokens` (zinc surfaces well → panel → raised, one
+  indigo primary) builds the iced theme via `custom_with_fn`, every text role
+  is tested to AA in both themes, and `scripts/check-color.sh` keeps every
+  colour a `colors(theme).<role>()`. **Windows (#186)**: `main.rs` runs
   `iced::daemon`, so the process owns N windows and `view`/`title`/`theme`/
   `scale_factor` take a `window::Id`. Inspector, Activity and Workbench tear
   off into windows of their own (`WorkspaceMsg::TearOff`, rendered through

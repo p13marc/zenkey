@@ -56,8 +56,8 @@ jobs:
 
   # The type scale, by role (#191): `.size(` outside `kit.rs`/`tokens.rs`
   # must take a `font::` constant, and a bare `text(` must not appear outside
-  # `kit.rs` — the same greppable discipline as "no raw Color outside
-  # theme.rs/kit.rs", extended to typography.
+  # `kit.rs`; `.font(` names a bundled `face::` (#533). The colour rule beside
+  # it is check-color.sh (#534) — claimed here since day one, gated since.
   type-scale:
     runs-on: ubuntu-24.04
     steps:
@@ -71,6 +71,11 @@ jobs:
       # (sp.* in a dock, space::* in the chrome) — density can only multiply
       # what goes through the tokens.
       - run: ./scripts/check-spacing.sh
+      # Colour comes from the theme (#534): no colour is constructed outside
+      # view/theme.rs, and no view reaches past `colors(theme).<role>()` into
+      # iced's palette — which is what lets both themes be contrast-tested
+      # in one place.
+      - run: ./scripts/check-color.sh
 
   clippy:
     runs-on: ubuntu-24.04

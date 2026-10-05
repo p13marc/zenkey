@@ -1,7 +1,8 @@
 //! Small shared widgets.
 //!
-//! Together with [`super::theme`] this is the only other place allowed to name
-//! a color — and the only place allowed to call `text(` at all (#191): every
+//! The only place besides [`super::theme`] allowed to name a colour — and here
+//! only `Color::TRANSPARENT`, the absence of one (`check-color.sh`, #534) — and
+//! the only place allowed to call `text(` at all (#191): every
 //! view builds its text through the five role constructors below, so the type
 //! scale is assigned by role, not by taste, and a grep can enforce it.
 //!
@@ -20,7 +21,7 @@ use iced::widget::{
 use iced::{Border, Color, Element, Length};
 
 use super::theme::colors;
-use super::tokens::{face, font, space};
+use super::tokens::{face, font, radius, space, stroke};
 
 /// The subject (`font::TITLE`). One per window: the selected key or producer
 /// in the location bar. If two of these are visible, one of them is lying
@@ -64,8 +65,8 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
                 background: Some(c.surface().into()),
                 border: Border {
                     color: c.border(),
-                    width: 1.0,
-                    radius: 4.0.into(),
+                    width: stroke::HAIRLINE,
+                    radius: radius::CARD.into(),
                 },
                 ..container::Style::default()
             }
@@ -97,8 +98,8 @@ pub fn tab<'a, M: Clone + 'a>(
                     } else {
                         Color::TRANSPARENT
                     },
-                    width: 1.0,
-                    radius: 4.0.into(),
+                    width: stroke::HAIRLINE,
+                    radius: radius::CONTROL.into(),
                 },
                 ..Default::default()
             };
@@ -260,8 +261,8 @@ pub fn badge_rung<'a, M: 'a>(
 pub fn focus_ring(theme: &iced::Theme) -> Border {
     Border {
         color: colors(theme).primary(),
-        width: 2.0,
-        radius: 4.0.into(),
+        width: stroke::FOCUS,
+        radius: radius::CONTROL.into(),
     }
 }
 
@@ -279,7 +280,7 @@ pub fn action<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Button<'a, M> {
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
-                radius: 4.0.into(),
+                radius: radius::CONTROL.into(),
             },
             ..button::Style::default()
         };
@@ -312,7 +313,7 @@ pub fn link<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Button<'a, M> {
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
-                radius: 4.0.into(),
+                radius: radius::CONTROL.into(),
             },
             ..button::Style::default()
         };
@@ -347,7 +348,9 @@ pub fn row_button<'a, M: 'a>(content: impl Into<Element<'a, M>>, selected: bool)
         .style(move |theme: &iced::Theme, status| {
             let c = colors(theme);
             let background = if selected {
-                Some(c.border().into())
+                // A primary tint, not the border shade a hover's press also
+                // paints: selection is a state, hover is the mouse (#534).
+                Some(c.selected().into())
             } else {
                 match status {
                     button::Status::Hovered => Some(c.hover().into()),
@@ -365,7 +368,7 @@ pub fn row_button<'a, M: 'a>(content: impl Into<Element<'a, M>>, selected: bool)
                 border: Border {
                     color: Color::TRANSPARENT,
                     width: 0.0,
-                    radius: 4.0.into(),
+                    radius: radius::CONTROL.into(),
                 },
                 ..button::Style::default()
             }
@@ -382,8 +385,8 @@ pub fn input<'a, M: Clone + 'a>(placeholder: &str, value: &str) -> TextInput<'a,
             background: c.background().into(),
             border: Border {
                 color: c.border(),
-                width: 1.0,
-                radius: 4.0.into(),
+                width: stroke::HAIRLINE,
+                radius: radius::CONTROL.into(),
             },
             icon: c.text_muted(),
             placeholder: c.text_dim(),
@@ -435,8 +438,8 @@ where
             background: c.background().into(),
             border: Border {
                 color: c.border(),
-                width: 1.0,
-                radius: 4.0.into(),
+                width: stroke::HAIRLINE,
+                radius: radius::CONTROL.into(),
             },
         };
         match status {
@@ -476,8 +479,8 @@ pub fn check<'a, M: 'a>(is_checked: bool) -> Checkbox<'a, M> {
             icon_color: c.on_primary(),
             border: Border {
                 color: c.border(),
-                width: 1.0,
-                radius: 2.0.into(),
+                width: stroke::HAIRLINE,
+                radius: radius::CHECK.into(),
             },
             text_color: Some(c.text()),
         };
@@ -828,8 +831,8 @@ pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: &'a str) -> Ele
                     text_color: Some(c.text()),
                     border: Border {
                         color: c.border(),
-                        width: 1.0,
-                        radius: 4.0.into(),
+                        width: stroke::HAIRLINE,
+                        radius: radius::CONTROL.into(),
                     },
                     ..container::Style::default()
                 }

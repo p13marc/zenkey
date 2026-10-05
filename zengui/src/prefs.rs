@@ -49,11 +49,9 @@ impl ThemeChoice {
         }
     }
 
+    /// The iced theme, built from zengui's own tokens (#534).
     pub fn theme(self) -> iced::Theme {
-        match self {
-            ThemeChoice::Light => iced::Theme::Light,
-            ThemeChoice::Dark => iced::Theme::Dark,
-        }
+        crate::view::theme::iced_theme(self)
     }
 
     /// The other one — what a toggle switches to.

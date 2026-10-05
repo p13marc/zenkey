@@ -84,6 +84,39 @@ pub mod space {
     pub const XL: f32 = 32.0;
 }
 
+/// Corner radii by role (#534). A control is crisp, a card a little
+/// softer, a modal softest — the order a surface's distance from the well
+/// reads in.
+pub mod radius {
+    /// Buttons, inputs, pickers, a row's wash.
+    pub const CONTROL: f32 = 4.0;
+    /// A badge or data chip.
+    pub const CHIP: f32 = 4.0;
+    /// A checkbox's box — small enough that 4 reads as a circle.
+    pub const CHECK: f32 = 2.0;
+    /// A card, a dock panel.
+    pub const CARD: f32 = 6.0;
+    /// An overlay floating over the scrim.
+    pub const MODAL: f32 = 12.0;
+    /// Fully round: a count pill, a status dot.
+    pub const PILL: f32 = 999.0;
+}
+
+/// Stroke widths by role (#534).
+pub mod stroke {
+    /// Every border.
+    pub const HAIRLINE: f32 = 1.0;
+    /// The focus ring (#193) — heavier than any border, so focus is never
+    /// mistaken for a frame.
+    pub const FOCUS: f32 = 2.0;
+    /// A list row's leading edge (a tombstone's mark, #538).
+    pub const EDGE: f32 = 3.0;
+}
+
+/// The height a control is built to (#534): 28px, ZenohX's grid and the
+/// height every chrome button, input and picker lands on.
+pub const CONTROL_HEIGHT: f32 = 28.0;
+
 /// How much of the comfortable grid Compact keeps (#192). Three quarters:
 /// enough to visibly trade air for rows, not enough to let adjacent rows
 /// touch — and it divides the whole scale without leaving sub-pixel values

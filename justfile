@@ -136,11 +136,14 @@ ci:
     # README.md is the newest entry's. CI runs it on both lanes: ci.yml for
     # code pushes, docs.yml for doc-only ones (#420).
     ./scripts/check-rfc-status.sh
-    # The type scale by role (#191), the interactive seam (#193) and the
-    # spacing grid (#192) — all run as CI's type-scale job.
+    # The type scale by role (#191), the interactive seam (#193), the
+    # spacing grid (#192) and the colour gate (#534) — all run as CI's
+    # type-scale job.
     ./scripts/check-type-scale.sh
     ./scripts/check-interactive.sh
     ./scripts/check-spacing.sh
+    # Colour comes from the theme (#534).
+    ./scripts/check-color.sh
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
     cargo build --workspace --all-targets --locked
     cargo test --workspace --locked

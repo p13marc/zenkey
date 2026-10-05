@@ -1333,8 +1333,11 @@ fn preferences_are_visible_and_a_broken_file_says_so() {
     use zengui::view::status::{self, Status};
 
     // The theme choice drives the actual iced theme, not just a label.
-    assert_eq!(ThemeChoice::Light.theme(), iced::Theme::Light);
-    assert_eq!(ThemeChoice::Dark.theme(), iced::Theme::Dark);
+    // Since #534 it is zengui's own palette rather than iced's stock one, so
+    // what is pinned is the property: each choice renders as itself.
+    assert!(!ThemeChoice::Light.theme().extended_palette().is_dark);
+    assert!(ThemeChoice::Dark.theme().extended_palette().is_dark);
+    assert_ne!(ThemeChoice::Light.theme(), ThemeChoice::Dark.theme());
 
     let mut prefs = Prefs::default();
     prefs.zoom_in();
