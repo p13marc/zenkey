@@ -106,12 +106,14 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
     };
     let report = match report {
         Ok(r) => r,
-        Err(e) => return col.push(kit::muted(format!("consumers sweep failed: {e}"))),
+        Err(e) => return col.push(kit::error(format!("consumers sweep failed: {e}"))),
     };
 
     match report.admin {
         AdminAnswer::NotAvailable => {
-            return col.push(kit::muted(
+            return col.push(kit::empty(
+                kit::EmptyKind::NotAsked,
+                "No admin space answered",
                 "no admin space answered — zenoh's adminspace.enabled is off by \
                  default; the declared readers are not asked, never none (RFC 13 §3 O4)",
             ));
@@ -125,7 +127,9 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
         }
     }
     if report.rows.is_empty() {
-        return col.push(kit::muted(
+        return col.push(kit::empty(
+            kit::EmptyKind::Empty,
+            "Nothing declared relates to this subject",
             "nothing declared in the answering admin space(s) relates to this subject \
              — a reading of what was declared there, not a verdict about who reads it",
         ));
@@ -136,23 +140,30 @@ pub fn section(state: &ConsumersState, slot: SlotId, sp: Spacing) -> Column<'_, 
         } else {
             r.zid.clone()
         };
-        col = col.push(
-            row![
-                kit::mono(format!("{who} · {}", r.whatami.as_deref().unwrap_or("—"))),
-                kit::muted(origin_label(r)),
-            ]
-            .spacing(sp.sm)
-            .align_y(iced::Alignment::Center),
-        );
-        col = col.push(kit::muted(format!(
-            "  {} {} — {}",
-            match r.kind {
-                zenkey_fleet::EntityKind::Querier => "querier",
-                _ => "subscriber",
-            },
-            r.keyexpr,
-            relation_label(r.relation)
-        )));
+        // A card per declared reader (#564): who, then what it declared
+        // and how that relates to the subject — a declaration, never a
+        // matching status (RFC 12 §9).
+        col = col.push(kit::card(
+            Column::new()
+                .spacing(sp.xs)
+                .push(
+                    row![
+                        kit::mono(format!("{who} · {}", r.whatami.as_deref().unwrap_or("—"))),
+                        kit::muted(origin_label(r)),
+                    ]
+                    .spacing(sp.sm)
+                    .align_y(iced::Alignment::Center),
+                )
+                .push(kit::muted(format!(
+                    "{} {} — {}",
+                    match r.kind {
+                        zenkey_fleet::EntityKind::Querier => "querier",
+                        _ => "subscriber",
+                    },
+                    r.keyexpr,
+                    relation_label(r.relation)
+                ))),
+        ));
     }
     if report.rows.len() > ROWS {
         col = col.push(kit::muted(format!(

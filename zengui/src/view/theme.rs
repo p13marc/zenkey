@@ -577,6 +577,18 @@ pub enum SeverityTone {
 }
 
 impl SeverityTone {
+    /// A doctor finding's severity as its tone (#564) — the one mapping the
+    /// doctor, the Fields section and the finding card share, where each
+    /// used to keep its own copy.
+    pub fn of(severity: zenkey_fleet::report::DoctorSeverity) -> Self {
+        use zenkey_fleet::report::DoctorSeverity;
+        match severity {
+            DoctorSeverity::Error => SeverityTone::Error,
+            DoctorSeverity::Warning => SeverityTone::Warning,
+            DoctorSeverity::Info => SeverityTone::Info,
+        }
+    }
+
     /// Every state of the scale, for the uniqueness tests.
     pub const ALL: [Self; 3] = [Self::Error, Self::Warning, Self::Info];
 

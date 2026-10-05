@@ -21,7 +21,7 @@ use zenkey_fleet::report::{RungAnswer, WhyReport, WhyVerdict};
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::view::kit;
-use crate::view::theme::RungTone;
+use crate::view::theme::{RungTone, Tone};
 use crate::view::tokens::Spacing;
 
 /// The section's interactions.
@@ -105,53 +105,82 @@ pub fn section(state: &WhyState, slot: SlotId, sp: Spacing) -> Column<'_, Messag
     let report = match report {
         Ok(r) => r,
         Err(e) => {
-            return col.push(kit::muted(format!("why run failed: {e}")));
+            return col.push(kit::error(format!("why run failed: {e}")));
         }
     };
 
     // The overall reading first — the same three-way verdict the CLI exits
     // with, worded so "healthy" never over-claims.
     let causes = report.causes();
-    col = col.push(kit::muted(match report.verdict {
-        WhyVerdict::Explained => format!(
-            "explained — cause established by: {}",
-            causes
-                .iter()
-                .map(|c| c.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        WhyVerdict::Healthy => "no cause established, and everything checked looks healthy \
+    // A callout in the reading's tone (#564): a cause is a finding (Caution),
+    // healthy is commentary (Info), impaired is the outline of a question
+    // that could not be asked (Neutral).
+    let tone = match report.verdict {
+        WhyVerdict::Explained => Tone::Caution,
+        WhyVerdict::Healthy => Tone::Info,
+        WhyVerdict::Impaired => Tone::Neutral,
+    };
+    col = col.push(kit::callout(
+        tone,
+        kit::caption(match report.verdict {
+            WhyVerdict::Explained => format!(
+                "explained — cause established by: {}",
+                causes
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            WhyVerdict::Healthy => "no cause established, and everything checked looks healthy \
              (\"declared, alive, never published\" lands here on purpose — \
              publishers declare lazily, RFC 08 §6.1)"
-            .to_string(),
-        WhyVerdict::Impaired => "no cause established, and the observation was impaired — \
+                .to_string(),
+            WhyVerdict::Impaired => "no cause established, and the observation was impaired — \
              \"healthy\" cannot be claimed over questions that could not be \
              asked"
-            .to_string(),
-    }));
-    for impairment in &report.impairments {
-        col = col.push(kit::muted(format!("impaired: {impairment}")));
+                .to_string(),
+        }),
+    ));
+    if !report.impairments.is_empty() {
+        col = col.push(
+            iced::widget::Row::from_iter(
+                report
+                    .impairments
+                    .iter()
+                    .map(|i| kit::status_chip(Tone::Neutral, format!("impaired: {i}"))),
+            )
+            .spacing(sp.xs)
+            .wrap()
+            .vertical_spacing(sp.xs),
+        );
     }
     if let Some(s) = report.listened_s {
         col = col.push(kit::muted(format!("listened {s:.0}s (opt-in window)")));
     }
 
+    // The ladder, a rung a row with echo's leading edge (#564): the badge
+    // carries the answer, the reason and the evidence sit under the rung
+    // they belong to — grouped by the row, not by leading spaces.
     for rung in &report.rungs {
-        let header = row![
-            kit::badge_rung(rung_tone(&rung.answer), rung_label(&rung.answer)),
-            kit::mono(rung.id.to_string()),
-            kit::muted(rung.question),
-        ]
-        .spacing(sp.sm)
-        .align_y(iced::Alignment::Center);
-        col = col.push(header);
+        let mut body = Column::new().spacing(sp.xs).push(
+            row![
+                kit::badge_rung(rung_tone(&rung.answer), rung_label(&rung.answer)),
+                kit::mono(rung.id.to_string()),
+                kit::muted(rung.question),
+            ]
+            .spacing(sp.sm)
+            .align_y(iced::Alignment::Center),
+        );
         if let RungAnswer::NotEstablished { reason } = &rung.answer {
-            col = col.push(kit::muted(format!("  — {reason}")));
+            body = body.push(kit::caption(format!("— {reason}")));
         }
         for evidence in &rung.evidence {
-            col = col.push(kit::muted(format!("  · {evidence}")));
+            body = body.push(kit::muted(format!("· {evidence}")));
         }
+        col = col.push(kit::edge_row(
+            kit::Edge::Put,
+            iced::widget::container(body).padding(iced::Padding::ZERO.left(sp.sm)),
+        ));
     }
     col
 }

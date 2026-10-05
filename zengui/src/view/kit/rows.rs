@@ -24,6 +24,29 @@ pub enum Edge {
     Failed,
 }
 
+/// A finding (#564): its check as a severity badge — glyph, word and colour
+/// from the tone — the subject it is about, and its evidence, on a card.
+/// The doctor's findings and the Fields section's are one shape now.
+pub fn finding<'a, M: 'a>(
+    severity: crate::view::theme::SeverityTone,
+    check: impl Into<String>,
+    subject: impl Into<String>,
+    evidence: impl Into<String>,
+) -> Element<'a, M> {
+    super::card(
+        iced::widget::column![
+            iced::widget::row![
+                super::badge_severity(severity, check),
+                super::caption(subject.into()).font(face::MONO),
+            ]
+            .spacing(space::SM)
+            .align_y(iced::Alignment::Center),
+            super::muted(evidence.into()),
+        ]
+        .spacing(space::XS),
+    )
+}
+
 /// A list row with a 3px leading edge (#538). The edge groups; the row's
 /// own words carry the claim.
 pub fn edge_row<'a, M: 'a>(edge: Edge, content: impl Into<Element<'a, M>>) -> Element<'a, M> {

@@ -3918,7 +3918,8 @@ fn the_consumers_section_renders_not_asked_and_never_matching_status() {
     assert!(ui.find("ffffffff  (this zengui session) · peer").is_ok());
     assert!(ui.find("session only, unattributed").is_ok());
     assert!(
-        ui.find("  subscriber ** — total — a whole-base `**`, intersects everything")
+        // Its leading spaces went with #564: the card groups it now.
+        ui.find("subscriber ** — total — a whole-base `**`, intersects everything")
             .is_ok()
     );
     find_none(&mut ui, FORBIDDEN);
