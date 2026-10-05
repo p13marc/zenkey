@@ -45,7 +45,7 @@ pub use list::*;
 pub use rows::*;
 pub use stat::*;
 
-use iced::widget::text::IntoFragment;
+use iced::widget::text::{IntoFragment, Wrapping};
 use iced::widget::{Text, container, row, text};
 use iced::{Border, Element, Length};
 
@@ -135,6 +135,18 @@ pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
             color: Some(colors(theme).text_muted()),
         })
         .into()
+}
+
+/// A single-line cell (#557): a muted caption that never wraps. In a
+/// fixed-height row a wrapped cell's second line paints over the next row;
+/// a cell that does not fit is clipped by its row instead, so a narrow pane
+/// shows less of a row, never two rows at once.
+pub fn cell<'a>(s: impl IntoFragment<'a>) -> Text<'a> {
+    caption(s)
+        .wrapping(Wrapping::None)
+        .style(|theme: &iced::Theme| text::Style {
+            color: Some(colors(theme).text_muted()),
+        })
 }
 
 /// Monospaced caption text — keys, payload previews, dense table cells.

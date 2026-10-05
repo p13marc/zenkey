@@ -186,6 +186,114 @@ fn the_tree_renders_the_registration_state() {
     }
 }
 
+/// #557: a narrow Locator shows less of a row, never two rows at once. At
+/// 300px the deep leaves are in the narrow tier — the counts collapse to the
+/// rate, on one line, inside the pane — and a badge with no room is left
+/// out whole and *counted* (`+1`), never cut and never silently gone. At the
+/// default width the whole row is back.
+#[test]
+fn a_narrow_tree_keeps_each_row_on_its_line() {
+    use zengui::view::tokens::CAPTION_LINE;
+
+    let keys = [REGISTERED, UNREGISTERED];
+    let mut stats = StatsTable::new();
+    let t0 = Instant::now();
+    for k in &keys {
+        for i in 0..5u64 {
+            stats.record(
+                k,
+                512,
+                None,
+                t0 + std::time::Duration::from_millis(200 * i),
+                None,
+                None,
+            );
+        }
+    }
+    let skel = zenkey_fleet::Skeleton::build("", &SliceSet::default(), &BTreeMap::new(), None);
+    let snap = zenkey_fleet::model::skeleton::merge(
+        &skel,
+        &KeyTreeSnapshot::build(&stats),
+        &["**".to_string()],
+    );
+    let flat = tree::flatten(&snap, "", &expand_all(&keys), 500, Instant::now());
+    let facts = index(&keys, true);
+    let leaf = (0..flat.rows.len())
+        .map(|i| flat.row(i))
+        .find(|r| r.target.as_deref() == Some(REGISTERED))
+        .expect("the registered leaf is a row");
+    let rate = zengui::view::kit::human_rate(leaf.rate_hz);
+    let wide = format!(
+        "{} · {} · {rate}",
+        leaf.count,
+        zengui::view::kit::human_bytes(leaf.bytes)
+    );
+    assert_ne!(
+        rate, "—",
+        "the leaf must carry a rate for this test to mean anything"
+    );
+
+    let watches = BTreeSet::new();
+    let verdicts = zengui::verdict::VerdictCache::default();
+    let data = tree::TreeData {
+        sp: sp(),
+        flat: &flat,
+        pivot: tree::Pivot::Chunks,
+        search: "",
+        viewport: Default::default(),
+        facts: &facts,
+        verdicts: &verdicts,
+        budgets: None,
+        watches: tree::Watches {
+            mine: &watches,
+            seeding: &watches,
+        },
+        selected: None,
+    };
+
+    let width = 300.0;
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        (width, 600.0),
+        tree::pane(data),
+    );
+    let counts = ui
+        .find(rate.as_str())
+        .expect("the narrow tier keeps the rate");
+    let b = counts.bounds();
+    assert!(
+        b.height <= CAPTION_LINE + 0.5,
+        "the counts are one caption line tall, got {}",
+        b.height
+    );
+    assert!(
+        b.x + b.width <= width,
+        "the counts are laid out inside the pane, not pushed past it: {b:?}"
+    );
+    assert!(ui.find(wide.as_str()).is_err(), "the bytes go first");
+    assert!(
+        ui.find("TelemetryPoint").is_err(),
+        "the type name is the lowest priority"
+    );
+    assert!(
+        ui.find("registered").is_err() && ui.find("unregistered").is_err(),
+        "no room for a badge at this depth"
+    );
+    assert!(
+        ui.find("+1").is_ok(),
+        "…so it is counted, not silently dropped (an absent badge reads as not asked)"
+    );
+
+    let mut ui = simulator::<Message, _, _>(tree::pane(data));
+    assert!(
+        ui.find(wide.as_str()).is_ok(),
+        "the default width is the whole row"
+    );
+    assert!(ui.find("registered").is_ok());
+    assert!(ui.find("unregistered").is_ok());
+    assert!(ui.find("+1").is_err(), "nothing is held back when it fits");
+}
+
 /// #192's acceptance, from the render side: density moves the grid and the
 /// row heights, never the words or their sizes. The same pane at Comfortable
 /// and Compact makes the same claims — and the type side is pinned

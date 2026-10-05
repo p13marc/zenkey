@@ -1,5 +1,6 @@
 //! Chips (#193, #535): the six badge scales, data chips, status chips.
 
+use iced::widget::text::Wrapping;
 use iced::widget::{container, row, text};
 use iced::{Border, Color, Element};
 
@@ -32,9 +33,12 @@ fn glyph_badge<'a, M: 'a>(
         color: Some(colors(theme).tone(tone)),
     };
     chip_frame(
-        row![caption(glyph).style(ink), caption(label.into()).style(ink)]
-            .spacing(space::XS)
-            .align_y(iced::Alignment::Center),
+        row![
+            caption(glyph).wrapping(Wrapping::None).style(ink),
+            caption(label.into()).wrapping(Wrapping::None).style(ink)
+        ]
+        .spacing(space::XS)
+        .align_y(iced::Alignment::Center),
         move |theme| {
             let c = colors(theme);
             (c.tone_fill(tone), c.tone_border(tone))
@@ -45,7 +49,9 @@ fn glyph_badge<'a, M: 'a>(
 /// The chip's box, shared by every chip kind: a hairline at
 /// [`radius::CHIP`], a single pixel of vertical air — so a chip is one
 /// caption line plus two pixels, and fits a compact tree row (the
-/// `chips_fit_every_row` test holds it there).
+/// `chips_fit_every_row` test holds it there). Every caption inside a chip
+/// is `Wrapping::None` (#557): a chip squeezed by its row is clipped by the
+/// row, never folded onto a second line that paints over the next one.
 fn chip_frame<'a, M: 'a>(
     content: impl Into<Element<'a, M>>,
     paint: impl Fn(&iced::Theme) -> (Option<Color>, Color) + 'a,
@@ -81,6 +87,7 @@ pub fn data_chip<'a, M: 'a>(s: impl iced::widget::text::IntoFragment<'a>) -> Ele
     chip_frame(
         caption(s)
             .font(face::MONO)
+            .wrapping(Wrapping::None)
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).text_muted()),
             }),
@@ -95,9 +102,11 @@ pub fn status_chip<'a, M: 'a>(
     s: impl Into<String>,
 ) -> Element<'a, M> {
     chip_frame(
-        caption(s.into()).style(move |theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).tone(tone)),
-        }),
+        caption(s.into())
+            .wrapping(Wrapping::None)
+            .style(move |theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).tone(tone)),
+            }),
         move |theme| {
             let c = colors(theme);
             (c.tone_fill(tone), c.tone_border(tone))

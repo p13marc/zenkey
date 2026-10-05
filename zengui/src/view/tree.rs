@@ -37,7 +37,7 @@ use crate::keyfacts::Registration;
 use crate::message::{Message, Subject, SubjectMsg, WorkspaceMsg};
 use crate::patharena::{ChunkId, PathArena, PathId};
 use crate::view::kit::{self, human_bytes, human_rate};
-use crate::view::theme::{RegistrationTone, colors};
+use crate::view::theme::{RegistrationTone, Tone, colors};
 use crate::view::tokens::{Spacing, face, font};
 
 /// Fixed row height — what makes the scroll window arithmetic exact. The
@@ -1257,7 +1257,8 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 ///
 /// They were adjacent `&BTreeSet<String>` parameters at **three** call layers —
 /// [`pane`], `tree_view` and `row_view`, which is where both are actually
-/// read: one picks "seeding…" over "quiet", the other ◉ over ○. Transposing
+/// read: one picks "seeding…" over "quiet", the other the open eye over the
+/// struck one. Transposing
 /// them compiled, and the tree then drew every watched subtree as still
 /// seeding and every seeding one as settled.
 ///
@@ -1267,7 +1268,8 @@ pub type FactsIndex = zenkey_fleet::FactsCache;
 /// acceptance grep.
 #[derive(Clone, Copy)]
 pub struct Watches<'a> {
-    /// Subtrees this app watches: the ◉/○ toggle on each row.
+    /// Subtrees this app watches: the eye toggle on each row (open = a watch
+    /// this app holds, struck = none, #533).
     pub mine: &'a BTreeSet<String>,
     /// Watches whose seed phase has not resolved yet (issue #92) — the
     /// "seeding…" badge, which must never read as "quiet".
@@ -1287,6 +1289,10 @@ pub struct Watches<'a> {
 /// missing a field is a compile error where a builder missing a `.with_…` is a
 /// silent default — and these are honesty inputs, where a default is a claim
 /// nobody made.
+///
+/// `Copy` since #557: the rows are built inside `responsive`, whose closure
+/// may run once per layout, so it holds the struct rather than consuming it.
+#[derive(Clone, Copy)]
 pub struct TreeData<'a> {
     /// The flattened rows and their numbers, as of the last rebuild (#177).
     pub flat: &'a Flattened,
@@ -1371,6 +1377,17 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
         );
     }
 
+    // How much of each row fits is a question about the pane's width
+    // (#557), so the rows are built where that width is known — the app
+    // bar's idiom (#536).
+    iced::widget::responsive(move |size| rows_view(d, size.width)).into()
+}
+
+/// The windowed rows at one pane width (#557).
+fn rows_view<'a>(d: TreeData<'a>, width: f32) -> Element<'a, Message> {
+    let flat = d.flat;
+    // The rows end where the embedded scrollbar begins (below).
+    let width = width - SCROLLBAR - d.sp.xs;
     // The density-scaled row height (#192): the window arithmetic and the
     // fixed row containers must agree on it, or the scrollbar lies.
     let row_h = d.sp.row(ROW_HEIGHT, crate::view::tokens::CAPTION_LINE);
@@ -1397,9 +1414,14 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
                     selected: d.selected,
                     watches: d.watches,
                     sp: d.sp,
+                    width,
                 },
             ))
-            .height(Length::Fixed(row_h)),
+            .height(Length::Fixed(row_h))
+            // A row is one line however narrow the pane (#557): whatever
+            // does not fit is cut here, never painted over the next row —
+            // echo's rows have held the same line since #538.
+            .clip(true),
         );
     }
     if last < flat.rows.len() {
@@ -1416,9 +1438,16 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
     }
     iced::widget::scrollable(col)
         .height(Length::Fill)
+        // Embedded, not floating (#557): iced's rail is opaque, and a
+        // floating one sat on the right-hand end of every row — the rate
+        // and the badges, the half the tiers exist to keep.
+        .spacing(d.sp.xs)
         .on_scroll(|viewport| Message::Workspace(WorkspaceMsg::TreeScrolled(viewport.into())))
         .into()
 }
+
+/// iced's default scrollbar width — what an embedded one takes from the rows.
+const SCROLLBAR: f32 = 10.0;
 
 /// Two halves of one row, and the split is the point (#177).
 ///
@@ -1448,7 +1477,154 @@ struct RowContext<'a> {
     /// The dock's resolved spacing grid (#192) — rows spend it, they never
     /// resolve it.
     sp: Spacing,
+    /// The pane's width, from `responsive` (#557) — what decides the row's
+    /// [`RowTier`].
+    width: f32,
 }
+
+/// How much of a row the pane has room for (#557).
+///
+/// A row has two halves. The **left** — the name, its age, its role, its
+/// status — fills what is left and is clipped at its edge, so a long name
+/// is cut rather than wrapped. The **right** — the numbers and the verdict
+/// badges — is laid out first at its natural width, so it is never the part
+/// that disappears; which is exactly why it must shrink with the pane, or a
+/// narrow Locator would be all numbers and no names. The tiers are what it
+/// gives up, lowest priority first: the declared type, the bytes and the
+/// verdict's parenthetical, then the role word and the sample count. The
+/// registration and verdict badges are the last to go — they are findings —
+/// and below the narrowest tier `fit` drops them whole and counts them
+/// (`+N`) rather than let the right half take the name past `NAME_FLOOR`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RowTier {
+    /// Name, age, status | rate, registration, verdict.
+    Narrow,
+    /// Adds the role word and the sample count.
+    Medium,
+    /// Today's whole row: adds the declared type, the type name and the
+    /// bytes.
+    Wide,
+}
+
+impl RowTier {
+    /// The body width at and above which a row is [`RowTier::Wide`].
+    pub const WIDE: f32 = 560.0;
+    /// … and [`RowTier::Medium`].
+    pub const MEDIUM: f32 = 360.0;
+
+    /// The tier for a row whose body — the pane minus the watch toggle, the
+    /// expand marker and the indent — is `body` pixels wide.
+    pub fn for_body(body: f32) -> Self {
+        if body >= Self::WIDE {
+            RowTier::Wide
+        } else if body >= Self::MEDIUM {
+            RowTier::Medium
+        } else {
+            RowTier::Narrow
+        }
+    }
+}
+
+/// What a row spends outside its two halves, on the comfortable grid: the
+/// watch toggle and the expand marker (each a 12px glyph in XS padding), the
+/// three gaps between them, the row button's padding and the gap between the
+/// halves. Compact spends less, so it errs toward room.
+const ROW_GUTTER: f32 = 68.0;
+
+/// What the right half always leaves the name (#557): a dozen characters of
+/// a mono caption.
+const NAME_FLOOR: f32 = 96.0;
+
+/// A caption character's advance, rounded up (#557): Inter at 12px measures
+/// about 5.8px a character on these words, JetBrains Mono 7.2px. Estimates,
+/// and deliberately generous ones — overestimating drops a cell that would
+/// have fitted (and counts it), underestimating would clip one mid-word.
+const SANS_W: f32 = 6.4;
+const MONO_W: f32 = 7.2;
+
+/// A plain caption cell's estimated width.
+fn text_width(s: &str) -> f32 {
+    s.chars().count() as f32 * SANS_W
+}
+
+/// A glyph badge's estimated width: its word, its glyph, the gap between
+/// them and the chip's horizontal padding.
+fn badge_width(word: &str) -> f32 {
+    text_width(word) + SANS_W + 3.0 * crate::view::tokens::space::XS
+}
+
+/// A data chip's estimated width: its mono text and the chip's padding.
+fn chip_width(s: &str) -> f32 {
+    s.chars().count() as f32 * MONO_W + 2.0 * crate::view::tokens::space::XS
+}
+
+/// One cell of a row's right half (#557).
+struct RightCell<'a> {
+    /// Lower keeps longer: the numbers, then registration, then the
+    /// verdict, then the type name.
+    rank: u8,
+    /// Estimated, see [`SANS_W`].
+    width: f32,
+    el: Element<'a, Message>,
+}
+
+/// The right half at `budget` pixels (#557): every cell if they fit, else
+/// the cells that fit **in priority order**, in display order, followed by a
+/// `+N` chip for the ones that did not. A badge that does not fit is left out
+/// whole and counted — never cut into a sliver, and never silently gone,
+/// because a missing badge would read as a question nobody asked. The first
+/// cell by priority is always kept; past that, the first cell that does not
+/// fit ends the run, so a small low-priority cell never jumps the queue.
+///
+/// Returns the row and its estimated width — more than `budget` only when
+/// the first cell and the count alone overrun it.
+fn fit<'a>(
+    cells: Vec<RightCell<'a>>,
+    budget: f32,
+    sp: Spacing,
+) -> (iced::widget::Row<'a, Message>, f32) {
+    let gap = sp.xs;
+    let total: f32 =
+        cells.iter().map(|c| c.width).sum::<f32>() + gap * cells.len().saturating_sub(1) as f32;
+    let mut keep = vec![true; cells.len()];
+    if total > budget {
+        let mut order: Vec<usize> = (0..cells.len()).collect();
+        order.sort_by_key(|&i| cells[i].rank);
+        // Room for the count itself, at its widest likely spelling.
+        let room = budget - chip_width("+9") - gap;
+        let mut used = 0.0;
+        let mut fits = true;
+        for (n, &i) in order.iter().enumerate() {
+            let w = cells[i].width + if n > 0 { gap } else { 0.0 };
+            if n == 0 || (fits && used + w <= room) {
+                used += w;
+            } else {
+                fits = false;
+                keep[i] = false;
+            }
+        }
+    }
+    let dropped = keep.iter().filter(|k| !**k).count();
+    let mut need = 0.0;
+    let mut row = iced::widget::Row::new()
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center);
+    for (cell, kept) in cells.into_iter().zip(keep) {
+        if kept {
+            need += cell.width + if need > 0.0 { gap } else { 0.0 };
+            row = row.push(cell.el);
+        }
+    }
+    if dropped > 0 {
+        let count = format!("+{dropped}");
+        need += chip_width(&count) + if need > 0.0 { gap } else { 0.0 };
+        row = row.push(kit::data_chip(count));
+    }
+    (row, need)
+}
+
+/// Pixels of indent per depth level.
+const INDENT: f32 = 14.0;
 
 fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a, Message> {
     let RowContext {
@@ -1459,8 +1635,12 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         selected,
         watches,
         sp,
+        width,
     } = cx;
-    let indent = iced::widget::Space::new().width(Length::Fixed(r.depth as f32 * 14.0));
+    let indent_w = r.depth as f32 * INDENT;
+    let body_w = width - indent_w - ROW_GUTTER;
+    let tier = RowTier::for_body(body_w);
+    let indent = iced::widget::Space::new().width(Length::Fixed(indent_w));
 
     // The expand marker is its own affordance (issue #93): a concrete key
     // that is also a prefix of deeper keys keeps body-click = select.
@@ -1479,7 +1659,21 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
     };
 
     let is_selected = r.target.is_some() && selected == r.target.as_deref();
-    let name = kit::caption(r.chunk)
+    // Read off `r` before the name takes its chunk.
+    let status = status_word(&r, watches);
+    // What the name and its age actually need, up to the floor — a short
+    // name leaves the right half the rest (#557).
+    let mono = |s: &str| s.chars().count() as f32 * MONO_W;
+    let name_need =
+        (mono(&r.chunk) + r.age_s.map_or(0.0, |a| sp.xs + mono(&kit::age_word(a)))).min(NAME_FLOOR);
+    let counts = if r.is_leaf {
+        Some(leaf_counts(&r, tier))
+    } else if !r.expanded && r.subtree_count > 0 {
+        Some(subtree_counts(&r, tier))
+    } else {
+        None
+    };
+    let name = kit::cell(r.chunk)
         .font(face::MONO)
         .style(move |theme: &iced::Theme| text::Style {
             color: Some(if is_selected {
@@ -1490,6 +1684,9 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         });
 
     let mut line = row![name].spacing(sp.xs).align_y(iced::Alignment::Center);
+    // The right half's cells, in display order, each with its priority and
+    // its estimated width — `fit` decides which of them the row has room for.
+    let mut right: Vec<RightCell<'a>> = Vec::new();
 
     // Freshness (issue #65), as a word since #538: "now", "12s", "4m" on a
     // single-hue ramp. The dot it replaced said freshness by colour alone —
@@ -1499,39 +1696,21 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         line = line.push(kit::freshness(age));
     }
 
-    if let Some(role) = r.role {
-        line = line.push(kit::muted(role.label()));
+    if let Some(role) = r.role.filter(|_| tier >= RowTier::Medium) {
+        line = line.push(kit::cell(role.label()));
     }
 
     // The declared/observed state (issue #85): "declared" must never read
-    // like "quiet", and "unwatched" like neither.
-    match r.status {
-        NodeStatus::DeclaredOnly(_) => {
-            line = line.push(kit::tone_badge(
-                crate::view::theme::RegistrationTone::Unknown,
-                "declared",
-            ));
-        }
-        NodeStatus::WatchedQuiet(_) => {
-            // While the watch's seed phase is still running, "quiet" is not
-            // yet an observation — the seed may still deliver (issue #92).
-            let check = r.target.as_deref().unwrap_or(&r.path);
-            if under_seeding(check, watches.seeding) {
-                line = line.push(kit::muted("seeding…"));
-            } else {
-                line = line.push(kit::muted("quiet"));
-            }
-        }
-        NodeStatus::Unwatched(_) => {
-            line = line.push(kit::tone_badge(
-                crate::view::theme::RegistrationTone::Unregistered,
-                "unwatched",
-            ));
-        }
-        NodeStatus::Observed(_) => {}
+    // like "quiet", and "unwatched" like neither — three words, and none of
+    // them a verdict (#543). Unwatching is the operator's choice, so it is
+    // the outline of a question not asked; the other three are commentary.
+    // None borrows a registration glyph: the old "unwatched" wore the
+    // Unregistered ○, in a row that could carry the real one.
+    if let Some((tone, word)) = status {
+        line = line.push(kit::status_chip(tone, word));
     }
-    if let Some(ty) = r.decl_type {
-        line = line.push(kit::muted(ty));
+    if let Some(ty) = r.decl_type.filter(|_| tier == RowTier::Wide) {
+        line = line.push(kit::cell(ty));
     }
 
     // The key-population budget (#221), on the offending family's subtree
@@ -1547,29 +1726,34 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         line = line.push(kit::badge_severity(severity, b.label()));
     }
 
-    line = line.push(iced::widget::space::horizontal());
-
     // A collapsed node reports its whole subtree; an expanded leaf reports
     // itself. Showing only leaf traffic on a collapsed node would understate
     // it by exactly the part the user cannot see.
+    if let Some(counts) = counts {
+        right.push(RightCell {
+            rank: 0,
+            width: text_width(&counts),
+            el: kit::cell(counts).into(),
+        });
+    }
     if r.is_leaf {
-        line = line.push(kit::muted(format!(
-            "{} · {} · {}",
-            r.count,
-            human_bytes(r.bytes),
-            human_rate(r.rate_hz)
-        )));
         if let Some(f) = r.target.as_deref().and_then(|t| facts.get(t)) {
             // No badge for `NotApplicable`: the registry question does not
             // exist for a foreign key, so a badge would only be noise.
             if !matches!(f.registration, Registration::NotApplicable) {
-                line = line.push(kit::tone_badge(
-                    tone(&f.registration),
-                    registration_label(&f.registration),
-                ));
+                let word = registration_label(&f.registration);
+                right.push(RightCell {
+                    rank: 1,
+                    width: badge_width(word),
+                    el: kit::tone_badge(tone(&f.registration), word),
+                });
             }
-            if let Some(ty) = f.type_name() {
-                line = line.push(kit::muted(ty.to_string()));
+            if let Some(ty) = f.type_name().filter(|_| tier == RowTier::Wide) {
+                right.push(RightCell {
+                    rank: 3,
+                    width: text_width(ty),
+                    el: kit::cell(ty.to_string()).into(),
+                });
             }
         }
         // The payload verdict of the most recently checked sample (#164) —
@@ -1578,20 +1762,36 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         // payload to check, and a badge would claim a check nobody ran —
         // the checked states, `NotValidated` included, all render.
         if let Some(entry) = r.target.as_deref().and_then(|t| verdicts.get(t)) {
-            line = line.push(kit::badge_verdict(
-                crate::verdict::tone(&entry.verdict),
-                crate::verdict::label(&entry.verdict),
-            ));
+            let word = if tier == RowTier::Wide {
+                crate::verdict::label(&entry.verdict)
+            } else {
+                crate::verdict::short_label(&entry.verdict).to_string()
+            };
+            right.push(RightCell {
+                rank: 2,
+                width: badge_width(&word),
+                el: kit::badge_verdict(crate::verdict::tone(&entry.verdict), word),
+            });
         }
-    } else if !r.expanded && r.subtree_count > 0 {
-        line = line.push(kit::muted(format!(
-            "{} · {} · {} · {}",
-            kit::plural(r.subtree_keys, "key"),
-            r.subtree_count,
-            human_bytes(r.subtree_bytes),
-            human_rate(r.subtree_rate_hz)
-        )));
     }
+
+    // The left half fills and clips; the right half is laid out first, at
+    // its natural width (#557, [`RowTier`]) — but never past the name's
+    // floor: `fit` keeps whole cells by priority and counts the rest, and
+    // the clip is only the backstop for an estimate that ran short, so the
+    // row always says *which* key the numbers belong to.
+    let budget = (body_w - name_need).max(0.0);
+    let (right, need) = fit(right, budget, sp);
+    let line = row![
+        iced::widget::container(line).width(Length::Fill).clip(true),
+        // The first cell and the count are kept whatever the budget, so the
+        // half may need more than it was given: then the name gives way.
+        iced::widget::container(right)
+            .max_width(budget.max(need))
+            .clip(true)
+    ]
+    .spacing(sp.sm)
+    .align_y(iced::Alignment::Center);
 
     // Observation is opt-in, per subtree (issue #85). The toggle reflects
     // *this app's* watches, not global coverage — and only rows standing for
@@ -1628,6 +1828,61 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         .spacing(sp.xs)
         .align_y(iced::Alignment::Center)
         .into()
+}
+
+/// A row's declared/observed status as a word chip (#85, #543) — `None` for
+/// an observed key, whose numbers say it all.
+fn status_word(r: &TreeRow, watches: Watches<'_>) -> Option<(Tone, &'static str)> {
+    match r.status {
+        NodeStatus::DeclaredOnly(_) => Some((Tone::Info, "declared")),
+        NodeStatus::WatchedQuiet(_) => {
+            // While the watch's seed phase is still running, "quiet" is not
+            // yet an observation — the seed may still deliver (issue #92).
+            let check = r.target.as_deref().unwrap_or(&r.path);
+            Some(if under_seeding(check, watches.seeding) {
+                (Tone::Info, "seeding…")
+            } else {
+                (Tone::Info, "quiet")
+            })
+        }
+        NodeStatus::Unwatched(_) => Some((Tone::Neutral, "unwatched")),
+        NodeStatus::Observed(_) => None,
+    }
+}
+
+/// A leaf's own numbers at a tier (#557): the rate always, then the count,
+/// then the bytes.
+fn leaf_counts(r: &TreeRow, tier: RowTier) -> String {
+    match tier {
+        RowTier::Narrow => human_rate(r.rate_hz),
+        RowTier::Medium => format!("{} · {}", r.count, human_rate(r.rate_hz)),
+        RowTier::Wide => format!(
+            "{} · {} · {}",
+            r.count,
+            human_bytes(r.bytes),
+            human_rate(r.rate_hz)
+        ),
+    }
+}
+
+/// A collapsed node's subtree numbers at a tier — the same priority as
+/// [`leaf_counts`], with the key count where the sample count is.
+fn subtree_counts(r: &TreeRow, tier: RowTier) -> String {
+    match tier {
+        RowTier::Narrow => human_rate(r.subtree_rate_hz),
+        RowTier::Medium => format!(
+            "{} · {}",
+            kit::plural(r.subtree_keys, "key"),
+            human_rate(r.subtree_rate_hz)
+        ),
+        RowTier::Wide => format!(
+            "{} · {} · {} · {}",
+            kit::plural(r.subtree_keys, "key"),
+            r.subtree_count,
+            human_bytes(r.subtree_bytes),
+            human_rate(r.subtree_rate_hz)
+        ),
+    }
 }
 
 /// A standalone pane, for tests and for the `view/mod` composition.

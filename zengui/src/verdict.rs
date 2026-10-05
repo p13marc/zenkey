@@ -204,6 +204,18 @@ pub fn label(v: &Verdict) -> String {
     }
 }
 
+/// The verdict alone, without its parenthetical (#557) — what a narrow tree
+/// row has room for. Three words for three states, so the badge still never
+/// collapses "not validated" into either answer; the reason and the count
+/// are one click away, on the Inspector.
+pub fn short_label(v: &Verdict) -> &'static str {
+    match v {
+        Verdict::Valid => "valid",
+        Verdict::Invalid(_) => "invalid",
+        Verdict::NotValidated(_) => "not validated",
+    }
+}
+
 /// The parenthetical for each not-validated reason. Shorter than the
 /// engine's `Display` sentence (these ride tree rows), but one word pair per
 /// reason — never shared.
@@ -311,6 +323,23 @@ mod tests {
         // And the unchecked wording is not any verdict's wording.
         for reason in all {
             assert_ne!(label(&Verdict::NotValidated(reason)), UNCHECKED_LABEL);
+        }
+    }
+
+    /// #557: the narrow tree's badge drops the parenthetical and keeps the
+    /// state. The reasons merge there on purpose — the claim ("not
+    /// validated") is the same, only its why is one click away — but the
+    /// three states never do, and none reads as the unchecked wording.
+    #[test]
+    fn the_short_label_keeps_the_three_states_apart() {
+        let three = [
+            short_label(&Verdict::Valid),
+            short_label(&Verdict::Invalid(vec!["a".into()])),
+            short_label(&Verdict::NotValidated(NotValidated::NoSchema)),
+        ];
+        assert_eq!(three, ["valid", "invalid", "not validated"]);
+        for s in three {
+            assert_ne!(s, UNCHECKED_LABEL);
         }
     }
 }
