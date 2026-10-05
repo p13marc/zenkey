@@ -28,6 +28,7 @@ pub(crate) mod replay;
 pub(crate) mod scope_editor;
 pub(crate) mod send;
 pub(crate) mod settings;
+pub(crate) mod traffic;
 pub(crate) mod why;
 
 /// One pane-shaped surface.
@@ -49,6 +50,7 @@ pub(crate) fn update(
         PaneMsg::Media(msg) => media::update(&mut work.bench.media, &work.verdicts.roster, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Mesh(msg) => mesh::update(&work.verdicts.admin, msg),
+        PaneMsg::Traffic(msg) => traffic::update(&mut work.activity.traffic, msg, cx),
         // The four subject-slot sections (#257): the SlotId names which
         // Inspector spoke — the docked one is the follow slot, a pinned
         // window its own. This is the one routing point; the handlers below

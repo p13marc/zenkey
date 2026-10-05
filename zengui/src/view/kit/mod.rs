@@ -32,6 +32,7 @@ mod frame;
 mod icon;
 mod list;
 mod rows;
+mod stat;
 
 pub use badge::*;
 pub use buttons::*;
@@ -42,6 +43,7 @@ pub use frame::*;
 pub use icon::*;
 pub use list::*;
 pub use rows::*;
+pub use stat::*;
 
 use iced::widget::text::IntoFragment;
 use iced::widget::{Text, container, row, text};

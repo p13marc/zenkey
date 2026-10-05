@@ -81,7 +81,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   (#182). Under `view/`, a `pane` returns an `Element`
   and owns its scroll; a `section` returns a `Column` and is a piece of one; a
   `dock` (`view/activity.rs`, #183) is a region holding the session's parallel
-  streams — echo, the publish log, doctor verdicts, replay transport — with its
+  streams — echo, the publish log, doctor verdicts, replay transport, and
+  traffic (#542: stat tiles and the heaviest keys) — with its
   own tab strip. The three virtualized lists (tree, timeline, echo) share
   `kit::window`. **Spacing (#192)** comes off the 8pt grid in `view/tokens.rs`
   by role (SM inside a card, MD between cards / dock padding, LG between

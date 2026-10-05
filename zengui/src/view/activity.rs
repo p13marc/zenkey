@@ -56,6 +56,8 @@ pub(crate) struct ActivityData<'a> {
     /// The theme the window renders in — echo's coloured previews resolve
     /// their syntax colours from it (#538).
     pub theme: crate::prefs::ThemeChoice,
+    /// What the Traffic tab reads (#542), assembled by the grid.
+    pub traffic: super::traffic::TrafficData<'a>,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -78,6 +80,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
                     ActivityTab::Publish => kit::Icon::Send,
                     ActivityTab::Doctor => kit::Icon::Doctor,
                     ActivityTab::Replay => kit::Icon::Replay,
+                    ActivityTab::Traffic => kit::Icon::Traffic,
                 }),
                 count: match t {
                     ActivityTab::Echo => Some(d.echo.len().to_string()),
@@ -89,6 +92,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
                         .as_ref()
                         .map(|r| r.findings.len().to_string()),
                     ActivityTab::Replay => d.replay.recording.is_some().then(|| "rec".to_string()),
+                    ActivityTab::Traffic => None,
                 },
                 tip: None,
             })
@@ -112,6 +116,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
         ActivityTab::Publish => send::log_section(d.publish, d.sp),
         ActivityTab::Doctor => doctor::section(d.doctor, d.base, d.sp),
         ActivityTab::Replay => replay_stream(d.replay, d.slices, d.retention, d.sp),
+        ActivityTab::Traffic => super::traffic::section(d.traffic).into(),
     };
     column![strip, body].spacing(d.sp.sm).into()
 }

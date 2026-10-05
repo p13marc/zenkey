@@ -333,6 +333,31 @@ fn activity<'a>(
         slices: dep.slices.as_deref(),
         retention: obs.retention,
         theme,
+        traffic: view::traffic::TrafficData {
+            table: work.activity.traffic.table.as_ref(),
+            sort: work.activity.traffic.sort,
+            total_rate: work.activity.traffic.total_rate.series(),
+            cache: &work.activity.traffic.cache,
+            // Asked once a pump has run (or a file is feeding the panes):
+            // the link state the strip reads, not the monitor handle alone —
+            // a link that ended after pumping still asked.
+            session: obs.monitor.is_some()
+                || matches!(
+                    obs.link,
+                    crate::message::LinkState::Pumping | crate::message::LinkState::Ended
+                )
+                || work.replay.replay.is_some(),
+            watched: obs.watched.len(),
+            replaying: work.replay.replay.is_some(),
+            totals: obs.totals,
+            keys: obs.keys,
+            keys_evicted: obs.keys_evicted,
+            keys_unwatched: obs.keys_unwatched,
+            lagged: work.echo.echo.lagged(),
+            coalesced: work.echo.echo.coalesced(),
+            evicted: work.echo.echo.evicted(),
+            sp,
+        },
         sp,
     })
 }

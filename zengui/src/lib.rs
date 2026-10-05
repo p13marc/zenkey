@@ -53,6 +53,7 @@ pub mod series;
 pub mod services;
 pub mod shortcuts;
 pub(crate) mod state;
+pub mod traffic;
 pub(crate) mod update;
 pub mod value;
 pub mod verdict;

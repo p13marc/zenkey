@@ -329,6 +329,9 @@ pub(crate) struct RepeatLoad {
 #[derive(Default)]
 pub(crate) struct ActivityDock {
     pub(crate) tab: ActivityTab,
+    /// The Traffic tab's sort, ranking and rate series (#542) — the dock's
+    /// own stream state, like the tab itself.
+    pub(crate) traffic: crate::traffic::TrafficState,
 }
 
 /// A running capture (#74, started from the location bar).

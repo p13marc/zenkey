@@ -471,6 +471,8 @@ pub enum PaneMsg {
     Admin(crate::view::admin::AdminMsg),
     /// Mesh tool interactions (#541).
     Mesh(crate::view::mesh::MeshMsg),
+    /// Traffic tab interactions (#542) — a stream of the Activity dock.
+    Traffic(crate::view::traffic::TrafficMsg),
     /// Echo pane interactions (issue #72, echo v2).
     Echo(crate::view::echo::EchoMsg),
     /// Connect-overlay interactions (issue #67; an overlay since #185).
@@ -513,6 +515,7 @@ impl PaneMsg {
             // would put a message in the strip that the strip cannot select.
             PaneMsg::Echo(_)
             | PaneMsg::Doctor(_)
+            | PaneMsg::Traffic(_)
             | PaneMsg::Context(_)
             | PaneMsg::Scope(_)
             | PaneMsg::Settings(_) => return None,
@@ -581,14 +584,18 @@ pub enum ActivityTab {
     Publish,
     Doctor,
     Replay,
+    /// Where the traffic is (#542): tiles, the session's rate, the heaviest
+    /// keys.
+    Traffic,
 }
 
 impl ActivityTab {
-    pub const ALL: [ActivityTab; 4] = [
+    pub const ALL: [ActivityTab; 5] = [
         ActivityTab::Echo,
         ActivityTab::Publish,
         ActivityTab::Doctor,
         ActivityTab::Replay,
+        ActivityTab::Traffic,
     ];
 
     pub fn label(self) -> &'static str {
@@ -597,6 +604,7 @@ impl ActivityTab {
             ActivityTab::Publish => "publish log",
             ActivityTab::Doctor => "doctor",
             ActivityTab::Replay => "replay",
+            ActivityTab::Traffic => "traffic",
         }
     }
 }
@@ -774,6 +782,9 @@ mod tests {
             PaneMsg::Why(SlotId::FOLLOW, view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Mesh(view::mesh::MeshMsg::CopyDot),
+            PaneMsg::Traffic(view::traffic::TrafficMsg::Sort(
+                crate::traffic::TrafficSort::Rate,
+            )),
             PaneMsg::Context(view::contexts::ContextMsg::Load),
             PaneMsg::Scope(view::scope_editor::ScopeMsg::Apply),
             PaneMsg::Settings(view::settings::SettingsMsg::Apply),
@@ -797,9 +808,10 @@ mod tests {
 
         // And the two foldings are themselves claims. Six variants name the
         // Inspector — the four tabs it replaced (#182) plus the Fields (#223)
-        // and Why (#214) sections; five name no pane at all — the two
-        // streams that moved to the dock (#183) and the Connect (#185),
-        // Selectors (#187) and Settings (#188) overlays. Without these, a
+        // and Why (#214) sections; six name no pane at all — the two
+        // streams that moved to the dock (#183), the Traffic stream (#542),
+        // and the Connect (#185), Selectors (#187) and Settings (#188)
+        // overlays. Without these, a
         // further variant quietly joining either group would go unnoticed.
         let folded = one_per_pane
             .iter()
@@ -811,9 +823,10 @@ mod tests {
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(
-            docked, 5,
-            "Echo and Doctor are Activity streams; Connect, the selector \
-             editor and Settings are overlays — none is a right-hand pane"
+            docked, 6,
+            "Echo, Doctor and Traffic are Activity streams; Connect, the \
+             selector editor and Settings are overlays — none is a right-hand \
+             pane"
         );
     }
 }

@@ -78,6 +78,12 @@ pub const ALL: &[Scene] = &[
         landmark: "drag to pan · scroll to zoom · right-click resets",
     },
     Scene {
+        name: "traffic",
+        size: DESKTOP,
+        build: traffic,
+        landmark: "DROPPED",
+    },
+    Scene {
         name: "palette",
         size: DESKTOP,
         build: palette,
@@ -224,6 +230,24 @@ fn explore(theme: ThemeChoice) -> Zengui {
 
 fn watch(theme: ThemeChoice) -> Zengui {
     watching(prefs(theme))
+}
+
+fn traffic(theme: ThemeChoice) -> Zengui {
+    use zengui::prefs::DockRole;
+    let mut app = watching(prefs(theme));
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::ActivityTab(ActivityTab::Traffic)),
+    );
+    // The tab given the window: the ranking sits under the tiles and the
+    // chart, and a 40% dock would show only those.
+    for role in [DockRole::Locator, DockRole::Inspector] {
+        send(
+            &mut app,
+            Message::Workspace(WorkspaceMsg::DockToggled(role)),
+        );
+    }
+    app
 }
 
 fn compact_watch(theme: ThemeChoice) -> Zengui {
