@@ -63,7 +63,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
     } else {
         "run doctor"
     };
-    let mut run = kit::action(kit::caption(run_label)).padding(sp.xs);
+    let mut run = kit::primary(kit::caption(run_label)).padding(sp.xs);
     if !state.in_flight {
         run = run.on_press(msg(DoctorMsg::Run));
     }
@@ -81,7 +81,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
 
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
-    let reask = kit::action(kit::caption("re-ask schemas"))
+    let reask = kit::secondary(kit::caption("re-ask schemas"))
         .padding(sp.xs)
         .on_press(msg(DoctorMsg::ReaskSchemas));
 
@@ -257,7 +257,7 @@ fn finding_row<'a>(
     let mut body = column![header, kit::muted(f.evidence.clone())].spacing(sp.xs);
     if finding_target(f, base).is_some() {
         body = body.push(
-            kit::action(kit::caption("go to subject"))
+            kit::secondary(kit::caption("go to subject"))
                 .padding([0.0, sp.xs])
                 .on_press(msg(DoctorMsg::FindingClicked(index))),
         );

@@ -177,7 +177,7 @@ fn target_row(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     .on_input(|t| msg(BlobMsg::TargetChanged(t)))
     .size(font::CAPTION);
 
-    let mut probe = kit::action(kit::caption(match state.probe {
+    let mut probe = kit::primary(kit::caption(match state.probe {
         Probe::InFlight => "probing…",
         _ => "probe",
     }))
@@ -320,7 +320,7 @@ fn holder_row<'a>(
 
     let mut body = column![
         row![
-            kit::action(kit::caption(if selected {
+            kit::secondary(kit::caption(if selected {
                 "● selected"
             } else {
                 "○ choose"
@@ -368,7 +368,7 @@ fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
         .is_some()
     {
         dest_row = dest_row.push(
-            kit::action(kit::caption("use suggested name"))
+            kit::secondary(kit::caption("use suggested name"))
                 .padding([0.0, sp.xs])
                 .on_press(msg(BlobMsg::UseSuggestedName)),
         );
@@ -399,7 +399,7 @@ fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
         Some(h) => format!("fetch from {}", h.origin),
         None => "fetch".to_string(),
     };
-    let mut go = kit::action(kit::caption(label)).padding(sp.xs);
+    let mut go = kit::primary(kit::caption(label)).padding(sp.xs);
     match state.fetch_ready() {
         Ok(()) => go = go.on_press(msg(BlobMsg::Fetch)),
         Err(why) => col = col.push(kit::muted(why)),
@@ -407,7 +407,7 @@ fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
     let mut controls = row![go].spacing(sp.sm);
     if matches!(state.fetch, Fetch::InFlight { .. }) {
         controls = controls.push(
-            kit::action(kit::caption("stop"))
+            kit::secondary(kit::caption("stop"))
                 .padding(sp.xs)
                 .on_press(msg(BlobMsg::Cancel)),
         );

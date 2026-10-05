@@ -217,7 +217,7 @@ pub fn section<'a>(
                     );
                     if decodable(m.encoding.as_encoding_str()) {
                         col = col.push(
-                            kit::action(kit::caption(label))
+                            kit::secondary(kit::caption(label))
                                 .on_press(msg(MediaMsg::DeclPicked {
                                     producer: slice.name.clone(),
                                     path: m.path.clone(),
@@ -249,10 +249,10 @@ pub fn section<'a>(
         producer,
         subpath,
         match &state.viewing {
-            None => kit::action(kit::caption("view"))
+            None => kit::primary(kit::caption("view"))
                 .on_press(msg(MediaMsg::View))
                 .padding(sp.xs),
-            Some(_) => kit::action(kit::caption("stop"))
+            Some(_) => kit::secondary(kit::caption("stop"))
                 .on_press(msg(MediaMsg::Stop))
                 .padding(sp.xs),
         },

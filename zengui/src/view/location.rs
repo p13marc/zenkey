@@ -87,7 +87,7 @@ pub fn segments(subject: &Subject, base: &str) -> Vec<Segment> {
 
 /// The breadcrumb itself: context ▸ base ▸ scope ▸ key.
 pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
-    let context_chip = kit::action(kit::caption(match d.context {
+    let context_chip = kit::secondary(kit::caption(match d.context {
         Some(name) => format!("context: {name}"),
         None => "no context".to_string(),
     }))
@@ -112,7 +112,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
         Message::Deployment(DeploymentMsg::ScopeSelected(s))
     })
     .text_size(tokens::font::CAPTION);
-    let selectors_chip = kit::action(kit::caption("selectors…"))
+    let selectors_chip = kit::secondary(kit::caption("selectors…"))
         .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
             Overlay::Selectors,
         ))))
@@ -120,7 +120,7 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
 
     // Observation is opt-in and labelled by its cost (issue #85); it rides
     // beside the scope it observes.
-    let observe = kit::action(kit::caption(if d.observing {
+    let observe = kit::secondary(kit::caption(if d.observing {
         "stop observing scope"
     } else {
         "observe scope"
@@ -217,7 +217,7 @@ fn controls<'a>(
         kit::muted(dep.settings.scope.label()),
         // Capture and replay (#74): record writes the current watches to a
         // .zrec; replay feeds the panes from one.
-        kit::action(kit::caption(if work.replay.recording.is_some() {
+        kit::secondary(kit::caption(if work.replay.recording.is_some() {
             "stop recording"
         } else {
             "record"
@@ -226,7 +226,7 @@ fn controls<'a>(
             ReplayMsg::RecordToggled
         )))
         .padding(space::XS),
-        kit::action(kit::caption("replay…"))
+        kit::secondary(kit::caption("replay…"))
             .on_press(Message::Workspace(WorkspaceMsg::Replay(
                 ReplayMsg::OpenToggled
             )))
@@ -234,14 +234,14 @@ fn controls<'a>(
         iced::widget::space::horizontal(),
         // The Settings overlay (#188): the launch knobs, and the same
         // chrome preferences the buttons beside it move.
-        kit::action(kit::caption("settings…"))
+        kit::ghost(kit::caption("settings…"))
             .on_press(Message::Chrome(ChromeMsg::Palette(PaletteMsg::Open(
                 Overlay::Settings
             ))))
             .padding(space::XS),
         // Window preferences (issue #73): the theme name is the button, so
         // the label says what you get rather than what you have.
-        kit::action(kit::caption(format!(
+        kit::ghost(kit::caption(format!(
             "theme: {}",
             chrome.prefs.theme.label()
         )))
@@ -251,7 +251,7 @@ fn controls<'a>(
         .padding(space::XS),
         // Density (#192): the same chip shape as the theme's, one button
         // over. Ctrl+Shift+D sends the same message.
-        kit::action(kit::caption(format!(
+        kit::ghost(kit::caption(format!(
             "density: {}",
             chrome.prefs.density.label()
         )))
@@ -259,12 +259,12 @@ fn controls<'a>(
             crate::message::PrefsMsg::DensityToggled
         )))
         .padding(space::XS),
-        kit::action(kit::caption("-"))
+        kit::ghost(kit::caption("-"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomOut
             )))
             .padding(space::XS),
-        kit::action(kit::caption(format!(
+        kit::ghost(kit::caption(format!(
             "{}%",
             (chrome.prefs.zoom * 100.0).round() as i32
         )))
@@ -272,12 +272,12 @@ fn controls<'a>(
             crate::message::PrefsMsg::ZoomReset
         )))
         .padding(space::XS),
-        kit::action(kit::caption("+"))
+        kit::ghost(kit::caption("+"))
             .on_press(Message::Chrome(ChromeMsg::Prefs(
                 crate::message::PrefsMsg::ZoomIn
             )))
             .padding(space::XS),
-        kit::action(kit::caption("reconnect"))
+        kit::ghost(kit::caption("reconnect"))
             .on_press(Message::Deployment(DeploymentMsg::Reconnect))
             .padding(space::XS),
     ]

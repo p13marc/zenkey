@@ -502,7 +502,7 @@ fn publish_body<'a>(
         .width(Length::Fixed(90.0));
 
     let ready = !form.key.trim().is_empty() && !form.in_flight;
-    let mut send = kit::action(kit::caption(if form.in_flight {
+    let mut send = kit::primary(kit::caption(if form.in_flight {
         "sending…"
     } else if form.armed {
         "re-send"
@@ -516,7 +516,7 @@ fn publish_body<'a>(
     let mut controls = row![send].spacing(sp.sm);
     if form.armed {
         controls = controls.push(
-            kit::action(kit::caption("stop"))
+            kit::secondary(kit::caption("stop"))
                 .padding(sp.xs)
                 .on_press(msg(SendMsg::Stop)),
         );
@@ -524,7 +524,7 @@ fn publish_body<'a>(
     // Retire (#115): a tombstone, not an empty put. Off the state class it
     // is the v1.12 operator act and stays disabled until confirmed.
     let needs_i_know = retire_needs_i_know(form.facts.as_ref());
-    let mut retire = kit::action(kit::caption("retire")).padding(sp.xs);
+    let mut retire = kit::danger(kit::caption("retire")).padding(sp.xs);
     if ready && (!needs_i_know || form.retire_i_know) {
         retire = retire.on_press(msg(SendMsg::Retire));
     }
@@ -754,7 +754,7 @@ fn call_body<'a>(
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         )),
-                        kit::action(kit::caption("scaffold body"))
+                        kit::secondary(kit::caption("scaffold body"))
                             .padding([0.0, sp.xs])
                             .on_press(msg(SendMsg::ScaffoldBody)),
                     ]
@@ -800,7 +800,7 @@ fn call_body<'a>(
         && !form.target.is_empty()
         && !(fanout_forbidden && form.target == "*")
         && !form.in_flight;
-    let mut submit = kit::action(kit::caption(if form.in_flight {
+    let mut submit = kit::primary(kit::caption(if form.in_flight {
         "calling…"
     } else {
         "call"

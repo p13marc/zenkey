@@ -6,7 +6,7 @@
 # a gate, the same shape as the type scale (#191), the interactive seam (#193)
 # and the spacing grid (#192):
 #
-#   1. No colour is constructed outside `view/theme.rs`. `kit.rs` may say
+#   1. No colour is constructed outside `view/theme.rs`. `kit/` may say
 #      `Color::TRANSPARENT` (an absent fill is not a colour), nothing else.
 #   2. Nothing outside theme.rs reaches into iced's palette or builds an iced
 #      theme: every colour is a `colors(theme).<role>()`, so a view names a
@@ -25,7 +25,7 @@ if [ -n "$bad_color" ]; then
     fail=1
 fi
 bad_transparent=$(grep -rn 'Color::TRANSPARENT' zengui/src --include='*.rs' \
-    | grep -vE '^zengui/src/view/(theme|kit)\.rs:' || true)
+    | grep -vE '^zengui/src/view/(kit/|(theme|kit)\.rs:)' || true)
 if [ -n "$bad_transparent" ]; then
     echo "colour: Color::TRANSPARENT outside theme/kit — a view asks kit for the widget:"
     echo "$bad_transparent"

@@ -237,7 +237,7 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
         row![
             kit::caption("context"),
             picker,
-            kit::action(kit::caption("load into editor"))
+            kit::secondary(kit::caption("load into editor"))
                 .on_press(msg(ContextMsg::Load))
                 .padding(space::XS),
         ]
@@ -318,13 +318,13 @@ pub fn pane<'a>(form: &'a ContextForm, unreachable: bool) -> Element<'a, Message
     col = col.push(scouting_help());
     col = col.push(
         row![
-            kit::action(kit::caption("save"))
+            kit::secondary(kit::caption("save"))
                 .on_press(msg(ContextMsg::Save))
                 .padding(space::XS),
-            kit::action(kit::caption("save + switch to it"))
+            kit::primary(kit::caption("save + switch to it"))
                 .on_press(msg(ContextMsg::SaveAndSelect))
                 .padding(space::XS),
-            kit::action(kit::caption("isolated-verification preset"))
+            kit::secondary(kit::caption("isolated-verification preset"))
                 .on_press(msg(ContextMsg::Isolate))
                 .padding(space::XS),
         ]

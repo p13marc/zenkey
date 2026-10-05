@@ -3,14 +3,14 @@
 #
 # zengui's five-step scale was defined, tested for monotonicity — and unused:
 # 137 sites said CAPTION and one said TITLE, so the app read as a wall of 12px.
-# The fix was to assign sizes by *role* through the constructors in `view/kit.rs`
+# The fix was to assign sizes by *role* through the constructors in `view/kit/`
 # (`title`/`section`/`emphasis`/`body`/`caption`), and this gate is what keeps
 # the next site honest, the same way "no raw Color outside theme/kit" already
 # is a rule a grep can enforce:
 #
-#   1. `.size(` outside `kit.rs`/`tokens.rs` must take a `font::` constant —
+#   1. `.size(` outside `kit/`/`tokens.rs` must take a `font::` constant —
 #      a text_input or pick_list may size itself, but only off the scale.
-#   2. A bare `text(` must not appear outside `kit.rs` — every piece of text
+#   2. A bare `text(` must not appear outside `kit/` — every piece of text
 #      names its role, and the size follows from that.
 #   3. A `.font(` outside kit/tokens/fonts names a `face::` constant (#533).
 #   4. No literal `Pixels(<number>)` — a canvas's text is on the scale too.
@@ -22,10 +22,10 @@ fail=0
 # 1. `.size(<arg>)` with anything but a `font::` constant. The empty-argument
 # form (`bounds.size()`) is geometry, not typography, and stays out of scope.
 bad_size=$(grep -rn '\.size([^)]' zengui/src --include='*.rs' \
-    | grep -vE '^zengui/src/view/(kit|tokens)\.rs:' \
+    | grep -vE '^zengui/src/view/(kit/|(kit|tokens)\.rs:)' \
     | grep -vE '\.size\((tokens::)?font::' || true)
 if [ -n "$bad_size" ]; then
-    echo "type scale: .size() outside kit.rs/tokens.rs must take a font:: constant:"
+    echo "type scale: .size() outside kit/ or tokens.rs must take a font:: constant:"
     echo "$bad_size"
     fail=1
 fi
@@ -33,10 +33,10 @@ fi
 # 2. A bare `text(` constructor. `.text(` (the theme's color accessor) and
 # `fn text(` (its definition) are not the widget; everything else is.
 bad_text=$(grep -rnE '(^|[^.[:alnum:]_])text\(' zengui/src --include='*.rs' \
-    | grep -v '^zengui/src/view/kit\.rs:' \
+    | grep -vE '^zengui/src/view/kit(\.rs:|/)' \
     | grep -vE 'fn text\(' || true)
 if [ -n "$bad_text" ]; then
-    echo "type scale: bare text( outside kit.rs — use kit::{title, section, emphasis, body, caption}:"
+    echo "type scale: bare text( outside kit/ — use kit::{title, section, emphasis, body, caption}:"
     echo "$bad_text"
     fail=1
 fi
@@ -45,10 +45,10 @@ fi
 # constant — the bundled families, by role. `Font::MONOSPACE` and
 # `Font::with_name` would reach past the bundle to whatever the host has.
 bad_font=$(grep -rn '\.font(' zengui/src --include='*.rs' \
-    | grep -vE '^zengui/src/view/(kit|tokens|fonts)\.rs:' \
+    | grep -vE '^zengui/src/view/(kit/|(kit|tokens|fonts)\.rs:)' \
     | grep -v 'face::' || true)
 bad_face=$(grep -rnE 'Font::(MONOSPACE|with_name|DEFAULT)' zengui/src --include='*.rs' \
-    | grep -vE '^zengui/src/view/(kit|tokens|fonts)\.rs:' || true)
+    | grep -vE '^zengui/src/view/(kit/|(kit|tokens|fonts)\.rs:)' || true)
 if [ -n "$bad_font$bad_face" ]; then
     echo "type scale: a font outside kit/tokens/fonts must be a face:: constant (#533):"
     echo "$bad_font"
@@ -60,7 +60,7 @@ fi
 # `size: Pixels(..)`, which rule 1 cannot see; it takes a `font::` constant
 # like everything else.
 bad_pixels=$(grep -rnE 'Pixels\([0-9]' zengui/src --include='*.rs' \
-    | grep -vE '^zengui/src/view/(kit|tokens|fonts)\.rs:' || true)
+    | grep -vE '^zengui/src/view/(kit/|(kit|tokens|fonts)\.rs:)' || true)
 if [ -n "$bad_pixels" ]; then
     echo "type scale: a literal Pixels(..) outside kit/tokens/fonts — use Pixels(font::X):"
     echo "$bad_pixels"
@@ -71,9 +71,9 @@ fi
 # never see — and that `iced_test` cannot find, since a rich text reports no
 # text to `operate`. They live in kit, behind a constructor that does.
 bad_rich=$(grep -rnE '(^|[^.[:alnum:]_])(rich_text|span)\(' zengui/src --include='*.rs' \
-    | grep -v '^zengui/src/view/kit\.rs:' || true)
+    | grep -vE '^zengui/src/view/kit(\.rs:|/)' || true)
 if [ -n "$bad_rich" ]; then
-    echo "type scale: rich_text/span outside kit.rs:"
+    echo "type scale: rich_text/span outside kit/:"
     echo "$bad_rich"
     fail=1
 fi
