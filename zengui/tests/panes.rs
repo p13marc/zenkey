@@ -9,9 +9,12 @@
 //! `iced_test` selects widgets by the text they contain, so `find("x")` is
 //! literally "is this on screen".
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::time::Instant;
+
+use common::slices;
 
 use iced_test::simulator;
 use zengui::history::HistoryRecorder;
@@ -42,11 +45,6 @@ fn snapshot(keys: &[&str]) -> zenkey_fleet::model::skeleton::MergedNode {
 /// (#192), so the honesty tests pin them at the default.
 fn sp() -> Spacing {
     Spacing::default()
-}
-
-fn slices() -> SliceSet {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-    SliceSet::from_dirs(&[dir]).expect("fixture registry")
 }
 
 /// Expand every prefix of every key, so leaves are visible.

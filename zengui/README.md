@@ -100,14 +100,16 @@ What to look at:
   reads `N keys (+M retired — bound reached)` **and**
   `facts: N cached (+M projections retired — cache bound reached)`. Two
   bounds over two different populations, so two sentences (#107).
-- Alt 0, the **admin** pane. Against the demo's peer-only bus every section
+- The **admin** tool (the Workbench dock, or the palette's "go to admin
+  pane"). Against the demo's peer-only bus every section
   should say *why* it is empty — "a peer-only mesh, or the admin space is
   disabled" — and the coverage table should read "coverage not judged"
   without a registry, never "uncovered". Point it at a router with storages
   and the rows must match `zenctl storage list`.
 - `just gui-demo-no-registry` withholds the registry, so every badge reads `—`
   ("not asked") rather than "unregistered".
-- Alt 9, the **blobs** pane. `spray` serves a 1 MiB artifact *and* a second
+- Select a key on spray's `@blob` plane and the Inspector grows a **Blobs**
+  section. `spray` serves a 1 MiB artifact *and* a second
   origin claiming the same id at a different content root, so probing
   `01jqz3demo0001` lists two holders and flags the disagreement. Fetching from
   the second one with the first one's root pinned aborts naming that origin,
@@ -126,7 +128,15 @@ cargo test -p zengui        # unit, registry-overlay and pane-rendering tests
 just spray                  # traffic in one terminal…
 just test-live              # …live-bus tests in another
 just ci                     # everything CI runs
+just shots                  # a PNG of every scene, both themes → target/shots/current
+just shots-base main        # the same scenes drawn from main → target/shots/base
 ```
+
+There is no display on the CI host, so the shots are how a visual change is
+reviewed: `zengui/tests/shots.rs` renders the whole-window scenes in
+`tests/common/scenes.rs` with the CPU renderer, and a PR that moves pixels
+carries the before/after pair. The scenes' landmarks are checked by an
+ordinary test, so a scene keeps meaning what its name says.
 
 ## Distribution
 
