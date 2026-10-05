@@ -388,7 +388,8 @@ fn workbench<'a>(
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and
         // "look one dock over" is the honest answer.
-        RightPane::Inspector => kit::empty_state(
+        RightPane::Inspector => kit::empty(
+            kit::EmptyKind::Inapplicable,
             "the inspector is a dock of its own",
             "select a tool above; the subject renders in the inspector dock",
         ),

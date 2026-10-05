@@ -66,7 +66,7 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
     }
 
     let mut col = column![
-        kit::section_header("admin & storage", None),
+        kit::section_header("Admin & storage", None),
         row![run].spacing(sp.sm),
         kit::muted(
             "the admin space is queried on demand — routers, the storage-manager subtree \
@@ -89,7 +89,8 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
 
     let Some(sweep) = state.sweep.as_deref() else {
         // O4: never swept is not "no routers".
-        col = col.push(kit::empty_state(
+        col = col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
             "admin space not swept yet",
             "nothing has been asked — this is \"not asked\", not \"no routers\" \
              (RFC 09 §5.1 O4)",
@@ -107,7 +108,7 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
 }
 
 fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("routers", None)].spacing(sp.xs);
+    let mut col = column![kit::section_header("Routers", None)].spacing(sp.xs);
     if rows.is_empty() {
         // Verbatim from `zenctl admin routers`, so the two tools say one thing.
         col = col.push(kit::muted(
@@ -156,7 +157,7 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
 }
 
 fn storages<'a>(list: &'a StorageList, state: &'a AdminState, sp: Spacing) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("storages", None)].spacing(sp.xs);
+    let mut col = column![kit::section_header("Storages", None)].spacing(sp.xs);
     if list.storages.is_empty() {
         // Verbatim from `zenctl storage list`.
         col = col.push(kit::muted(
@@ -212,7 +213,11 @@ fn coverage<'a>(list: &'a StorageList, note: Option<&'a str>, sp: Spacing) -> El
     .spacing(sp.xs);
 
     if let Some(why) = note {
-        col = col.push(kit::empty_state("coverage not judged", why.to_string()));
+        col = col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
+            "coverage not judged",
+            why.to_string(),
+        ));
         return col.into();
     }
     if list.coverage.is_empty() {
@@ -277,7 +282,7 @@ fn coverage_row(r: &CoverageRow, sp: Spacing) -> Element<'_, Message> {
 /// only thing separating "the admin space is reachable and empty" from "the
 /// admin space is unreachable", which is #70's explicit reachability ask.
 fn entities(sweep: &AdminSweep, sp: Spacing) -> Element<'_, Message> {
-    let mut col = column![kit::section_header("declared entities", None)].spacing(sp.xs);
+    let mut col = column![kit::section_header("Declared entities", None)].spacing(sp.xs);
     let Some(declared) = &sweep.declared else {
         col = col.push(kit::muted(
             "declared entities: n/a — nothing answered the admin sweep. zenoh's \
@@ -367,7 +372,7 @@ fn topology<'a>(
     mesh_cache: &'a iced::widget::canvas::Cache,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    let mut col = column![kit::section_header("topology", None)].spacing(sp.xs);
+    let mut col = column![kit::section_header("Topology", None)].spacing(sp.xs);
     let report = &sweep.topology;
     if report.answered == 0 {
         // Verbatim posture from `zenctl admin graph`: a reading about

@@ -655,7 +655,8 @@ fn call_body<'a>(
     sp: Spacing,
 ) -> Column<'a, Message> {
     let Some(slices) = slices else {
-        return col.push(kit::empty_state(
+        return col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
             "No registry loaded",
             "Call mode scaffolds its form from registry slices — none are \
              loaded yet. \"Not asked\" is not \"nothing serves\" (RFC 09 §5.1 O4).",
@@ -675,7 +676,8 @@ fn call_body<'a>(
         .collect();
     producers.dedup();
     if producers.is_empty() {
-        return col.push(kit::empty_state(
+        return col.push(kit::empty(
+            kit::EmptyKind::Empty,
             "No procedures declared",
             "The loaded slices declare no [[procedure]] entries.",
         ));

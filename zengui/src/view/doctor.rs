@@ -86,7 +86,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         .on_press(msg(DoctorMsg::ReaskSchemas));
 
     let mut col = column![
-        kit::section_header("doctor", None),
+        kit::section_header("Doctor", None),
         row![run, deep, listen]
             .spacing(sp.md)
             .align_y(iced::Alignment::Center),
@@ -117,7 +117,8 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
 
     let Some(report) = state.current.as_deref() else {
         // Never-run is not "0 findings" (O4).
-        col = col.push(kit::empty_state(
+        col = col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
             "no doctor run yet",
             "findings are produced on demand — a sweep queries the fleet",
         ));
@@ -210,10 +211,9 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         if group.is_empty() {
             continue;
         }
-        list = list.push(kit::section_header(
-            format!("{severity:?}").to_lowercase(),
-            None,
-        ));
+        // Sentence case like every section header (#539): "Error",
+        // "Warning", "Info" — the severity's own name.
+        list = list.push(kit::section_header(format!("{severity:?}"), None));
         for (i, f) in group {
             list = list.push(finding_row(state, f, i, base, sp));
         }
@@ -221,7 +221,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
     if let Some(d) = &state.delta
         && !d.fixed.is_empty()
     {
-        list = list.push(kit::section_header("fixed since last run", None));
+        list = list.push(kit::section_header("Fixed since last run", None));
         for f in &d.fixed {
             list = list.push(kit::muted(format!(
                 "{} · {} — {}",

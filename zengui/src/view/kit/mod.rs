@@ -17,7 +17,8 @@
 //! `kit::Icon`, `kit::window` — so the split can be re-cut without a call
 //! site moving: `badge` (chips: the six badge scales, data and status
 //! chips), `buttons` (every interactive constructor), `chrome` (the
-//! segmented control, toggle chips, status dots, pills), `icon`, `list`
+//! segmented control, toggle chips, status dots, pills), `empty` (empty
+//! states by kind, eyebrow fields), `icon`, `list`
 //! (the shared virtualized window), `rows` (a row's edge, its coloured
 //! preview, the retired chip, the age word), `format` (bytes, rates,
 //! plurals, ages).
@@ -25,6 +26,7 @@
 mod badge;
 mod buttons;
 mod chrome;
+mod empty;
 mod format;
 mod frame;
 mod icon;
@@ -34,6 +36,7 @@ mod rows;
 pub use badge::*;
 pub use buttons::*;
 pub use chrome::*;
+pub use empty::*;
 pub use format::*;
 pub use frame::*;
 pub use icon::*;
@@ -41,7 +44,7 @@ pub use list::*;
 pub use rows::*;
 
 use iced::widget::text::IntoFragment;
-use iced::widget::{Text, column, container, row, text};
+use iced::widget::{Text, container, row, text};
 use iced::{Border, Element, Length};
 
 use super::theme::colors;
@@ -99,6 +102,12 @@ pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
 }
 
 /// A section title with optional trailing controls.
+///
+/// Sentence case (#539): a section header and a card title start with a
+/// capital — "Detail", "Declared subjects" — where controls, chips, tabs and
+/// dock titles stay lowercase and only an eyebrow is in capitals. Sentences,
+/// empty-state headlines among them, keep their wording: many are the CLI's
+/// own, verbatim.
 pub fn section_header<'a, M: 'a>(
     title: impl Into<String>,
     trailing: Option<Element<'a, M>>,
@@ -129,32 +138,6 @@ pub fn muted<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
 /// Monospaced caption text — keys, payload previews, dense table cells.
 pub fn mono<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
     caption(s.into()).font(face::MONO).into()
-}
-
-/// A placeholder for a pane with nothing to show.
-///
-/// Takes an explanation, not just a noun: "no keys" invites the user to
-/// conclude the bus is quiet, which may be false (RFC 05 §3.1). Every call site
-/// says *why* it is empty and what would change it.
-pub fn empty_state<'a, M: 'a>(
-    headline: impl Into<String>,
-    why: impl Into<String>,
-) -> Element<'a, M> {
-    container(
-        column![
-            emphasis(headline.into()).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).text_muted()),
-            }),
-            body(why.into()).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).text_muted()),
-            }),
-        ]
-        .spacing(space::SM)
-        .align_x(iced::Alignment::Center),
-    )
-    .center_x(Length::Fill)
-    .padding(space::LG)
-    .into()
 }
 
 #[cfg(test)]
@@ -220,6 +203,20 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An empty state's icon is its kind's (#539), and no two kinds share
+    /// one — "not asked" and "asked, silence" must not look alike any more
+    /// than they may read alike.
+    #[test]
+    fn every_empty_kind_wears_its_own_icon() {
+        let icons: Vec<_> = EmptyKind::ALL.iter().map(|k| k.icon()).collect();
+        for (i, a) in icons.iter().enumerate() {
+            for b in &icons[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert_eq!(EmptyKind::NotAsked.icon(), Icon::NotAsked);
     }
 
     #[test]

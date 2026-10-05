@@ -61,7 +61,7 @@ fn msg(m: NodesMsg) -> Message {
 
 pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
     let sp = d.sp;
-    let mut col = column![kit::section_header("nodes", None)].spacing(sp.sm);
+    let mut col = column![kit::section_header("Nodes", None)].spacing(sp.sm);
 
     // The catalog line comes first, always, by name: "catalog dead" and
     // "no entities" must never look alike (D4 / RFC 04 §5).
@@ -77,14 +77,16 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
     });
 
     if !d.roster.is_seeded() {
-        col = col.push(kit::empty_state(
+        col = col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
             "no presence asked yet",
             "the roster seeds on connect from liveliness tokens (RFC 04 §5)",
         ));
         return col.into();
     }
     if d.roster.is_empty() {
-        col = col.push(kit::empty_state(
+        col = col.push(kit::empty(
+            kit::EmptyKind::Silent,
             "no liveliness tokens observed",
             "producers may be down, unreachable, or holding no tokens — \
              silence is not a verdict (RFC 05 §3.1)",
@@ -239,7 +241,8 @@ pub fn presence_section<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
-        return kit::empty_state(
+        return kit::empty(
+            kit::EmptyKind::Silent,
             "no liveliness token observed for this origin",
             "it may be down, unreachable, or holding no tokens — silence is not \
              a verdict (RFC 05 §3.1)",

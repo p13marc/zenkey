@@ -29,6 +29,7 @@ gauge
 hard-drive
 heart-pulse
 history
+hourglass
 inbox
 info
 key-round
@@ -57,7 +58,6 @@ send
 server
 settings
 share-2
-signal-zero
 square
 square-arrow-out-up-right
 stethoscope

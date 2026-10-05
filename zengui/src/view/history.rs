@@ -99,7 +99,8 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     let Some(key) = data.key else {
         return column![
             kit::section_header("History", None),
-            kit::empty_state(
+            kit::empty(
+                kit::EmptyKind::Unselected,
                 "Nothing selected",
                 "Select a key to record what it does. An explorer records nothing \
                  it was not asked to (#85), so history starts at selection and \
@@ -124,22 +125,24 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     col = col.push(kit::mono(key.to_string()));
 
     if !data.watched {
-        col = col.push(kit::empty_state(
+        // The one thing that would change it, in the empty state's own
+        // action slot (#539).
+        col = col.push(kit::empty_with(
+            kit::EmptyKind::NotAsked,
             "Not watched — nothing is being recorded",
             "History only exists for a key under an active watch, and no watch \
              covers this one. Watching it records from now on; the samples that \
              already went past are gone, not hidden.",
-        ));
-        col = col.push(
             kit::primary(kit::caption("watch this key"))
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(key.to_string())))
                 .padding(sp.xs),
-        );
+        ));
         return col;
     }
 
     let Some(rec) = data.recorder else {
-        return col.push(kit::empty_state(
+        return col.push(kit::empty(
+            kit::EmptyKind::NotAsked,
             "No recording for this key",
             "The recorder follows the selection; this one has not started yet.",
         ));
@@ -152,7 +155,8 @@ pub fn section<'a>(data: HistoryData<'a>) -> Column<'a, Message> {
     )));
 
     if rec.ring.is_empty() {
-        return col.push(kit::empty_state(
+        return col.push(kit::empty(
+            kit::EmptyKind::Silent,
             "No samples yet",
             "The watch is active and nothing has arrived on this key since it \
              was selected. That is not a statement about the bus (RFC 05 §3.1).",

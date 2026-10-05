@@ -1356,13 +1356,15 @@ fn tree_view<'a>(d: TreeData<'a>) -> Element<'a, Message> {
     let flat = d.flat;
     if flat.rows.is_empty() {
         if flat.filtered && flat.total_keys > 0 {
-            return kit::empty_state(
+            return kit::empty(
+                kit::EmptyKind::Filtered,
                 "No keys match",
                 "The filter hides every key — showing 0 of the tree's entries. \
                  Clear it to see them again.",
             );
         }
-        return kit::empty_state(
+        return kit::empty(
+            kit::EmptyKind::Silent,
             "Nothing observed yet",
             "An empty tree is not a verdict about the bus (RFC 05 §3.1) — \
              it may simply mean nothing has published on the current scope.",

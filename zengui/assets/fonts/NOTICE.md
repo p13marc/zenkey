@@ -18,5 +18,5 @@ modified version (glyph subset), as the ISC licence permits.
 97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872  Inter-Medium.ttf
 78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3  Inter-SemiBold.ttf
 fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a  JetBrainsMonoNL-Regular.ttf
-d5520c78cd820bdb84d2244bde3b2e79e01248e39f4d3e0eb37427603f5900a2  lucide.ttf
+21addfc63c2c39ef1a5f3f7d2583de72f845d2559caecf01c88ecd65e04027bb  lucide.ttf
 ```

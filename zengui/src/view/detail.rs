@@ -487,19 +487,27 @@ fn series_section<'a>(
 }
 
 pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
-    let mut col = Column::new().spacing(sp.xs);
+    let mut col = Column::new().spacing(sp.sm);
+    // The facts as fields (#539): an eyebrow over each value, wrapping to the
+    // width the section has — where they were one joined line. A field
+    // appears only when its fact exists, so absent stays absent rather than
+    // becoming a blank box.
+    let mut grid: Vec<Element<'_, Message>> = Vec::new();
     match &f.shape {
         KeyShape::V1(v) => {
-            col = col.push(kit::muted(format!(
-                "origin {} ({:?}) · class {}{}",
-                v.origin,
-                v.origin_kind,
-                v.class,
-                v.producer
-                    .as_deref()
-                    .map(|p| format!(" · producer {p}"))
-                    .unwrap_or_default(),
-            )));
+            grid.push(kit::field(
+                "ORIGIN",
+                row![
+                    kit::mono(v.origin.to_string()),
+                    kit::muted(format!("{:?}", v.origin_kind)),
+                ]
+                .spacing(sp.xs)
+                .align_y(iced::Alignment::Center),
+            ));
+            grid.push(kit::field("CLASS", kit::mono(v.class.to_string())));
+            if let Some(p) = v.producer.as_deref() {
+                grid.push(kit::field("PRODUCER", kit::mono(p.to_string())));
+            }
         }
         KeyShape::NotUnderBase => {
             col = col.push(kit::muted(
@@ -512,40 +520,41 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             )));
         }
     }
+    let mut after: Vec<Element<'_, Message>> = Vec::new();
     match &f.registration {
         Registration::Registered(s) => {
             col = col.push(kit::tone_badge(RegistrationTone::Registered, "registered"));
-            let mut meta = format!("subject {} · type {}", s.path, s.type_name);
+            grid.push(kit::field("SUBJECT", kit::mono(s.path.to_string())));
+            grid.push(kit::field("TYPE", kit::mono(s.type_name.to_string())));
             if let Some(u) = &s.unit {
-                meta.push_str(&format!(" · unit {u}"));
+                grid.push(kit::field("UNIT", kit::mono(u.to_string())));
             }
             if let Some(k) = &s.kind {
-                meta.push_str(&format!(" · kind {k}"));
+                grid.push(kit::field("KIND", kit::mono(k.to_string())));
             }
             if let Some(q) = &s.qos {
-                meta.push_str(&format!(" · qos {q}"));
+                grid.push(kit::field("QOS", kit::mono(q.to_string())));
             }
             if let Some(t) = s.ttl_s {
-                meta.push_str(&format!(" · ttl {t}s"));
+                grid.push(kit::field("TTL", kit::mono(format!("{t}s"))));
             }
             if let Some(e) = &s.encoding {
-                meta.push_str(&format!(" · encoding {e}"));
+                grid.push(kit::field("ENCODING", kit::mono(e.to_string())));
             }
             if let Some(w) = &s.when {
                 // RFC 08 §2 (v1.35): the gate, so silence reads as honest.
                 let tokens: Vec<String> = w.iter().map(zenkey::slice::Predicate::token).collect();
-                meta.push_str(&format!(" · when {}", tokens.join(" and ")));
+                grid.push(kit::field("WHEN", kit::mono(tokens.join(" and "))));
             }
             if let Some(e) = &s.exposure {
                 // RFC 08 §2 (v1.43): how far the value may travel.
-                meta.push_str(&format!(" · exposure {}", e.token()));
+                grid.push(kit::field("EXPOSURE", kit::mono(e.token().to_string())));
             }
-            col = col.push(kit::muted(meta));
             if let Some(n) = &s.gate_note {
-                col = col.push(kit::muted(format!("gate: {n}")));
+                after.push(kit::muted(format!("gate: {n}")));
             }
             if !s.vars.is_empty() {
-                col = col.push(kit::muted(
+                after.push(kit::muted(
                     s.vars
                         .iter()
                         .map(|(k, v)| format!("{k} = {v}"))
@@ -570,6 +579,12 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             ));
         }
         Registration::NotApplicable => {}
+    }
+    if !grid.is_empty() {
+        col = col.push(kit::fields(grid));
+    }
+    for e in after {
+        col = col.push(e);
     }
     col.into()
 }
@@ -621,9 +636,8 @@ fn hex_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
             bytes.len() - HEX_VIEW_BYTES
         )));
     }
-    iced::widget::container(col)
-        .width(Length::FillPortion(1))
-        .into()
+    // Set into the panel as an inset well (#539).
+    kit::inset(col).width(Length::FillPortion(1)).into()
 }
 
 /// How many `Invalid` violation sentences render before the list stops and
@@ -710,9 +724,8 @@ fn decoded_pane<'a>(
             }
         }
     }
-    iced::widget::container(col)
-        .width(Length::FillPortion(1))
-        .into()
+    // Set into the panel as an inset well (#539).
+    kit::inset(col).width(Length::FillPortion(1)).into()
 }
 
 #[cfg(test)]
