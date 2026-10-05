@@ -239,7 +239,13 @@ fn origin_sections<'a>(origin: &'a str, d: &InspectorData<'a>) -> Column<'a, Mes
         // The subject, restated in the pane. The one TITLE lives in the
         // location bar since #185.
         kit::emphasis(origin).font(face::MONO),
-        nodes::presence_section(d.roster, origin, joined.as_ref(), d.sp),
+        nodes::presence_section(
+            d.roster,
+            origin,
+            joined.as_ref(),
+            &crate::configure::producers(d.slices),
+            d.sp,
+        ),
         nodes::detail_section(d.node_detail, d.sp),
     ]
     .push(declared_subjects(origin, d))

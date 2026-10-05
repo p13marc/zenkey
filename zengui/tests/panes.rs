@@ -1275,7 +1275,8 @@ fn the_presence_row_says_unreadable_not_blank() {
             row("parallax", None),
         ],
     };
-    let mut ui = simulator::<Message, _, _>(presence_section(&roster, origin, Some(&joined), sp()));
+    let mut ui =
+        simulator::<Message, _, _>(presence_section(&roster, origin, Some(&joined), &[], sp()));
     assert!(
         ui.find(
             "introspect answered, slice unreadable (`application/json`: unreadable registry \
@@ -4241,5 +4242,63 @@ fn the_config_tool_drives_a_pending_change_and_asks_before_a_reach_one() {
             "I understand: this can cut the link to h-3fa9c2d41b7e. It rolls back unless confirmed."
         )
         .is_ok()
+    );
+}
+
+/// #481's entry points: a producer whose slice declares RFC 05 §5.1
+/// procedures gets "configure" on its presence row — and only that one: a
+/// link to a form nothing serves would be a promise the window cannot keep.
+#[test]
+fn a_configurable_producer_is_one_click_from_the_config_tool() {
+    use zengui::nodes::NodeRoster;
+    use zengui::view::nodes::{DetailState, NodesData, pane};
+
+    let radio = zenkey::slice::parse_slice(
+        r#"
+[registry]
+version = "1.0"
+app = "demo"
+convention = 1
+
+[producer]
+name = "radio"
+
+[[procedure]]
+path = "config/{device}"
+kind = "read"
+reply = "ConfigView"
+since = "1.0"
+description = "the read-back"
+"#,
+    )
+    .expect("a slice");
+    let slices = SliceSet::from_slices(vec![radio]);
+    let mut roster = NodeRoster::default();
+    roster.apply_transitions(
+        "",
+        &[
+            ("v1/h-3fa9c2d41b7e/state/radio/alive".to_string(), true),
+            ("v1/h-3fa9c2d41b7e/state/sysinfo/alive".to_string(), true),
+        ],
+        Instant::now(),
+    );
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+        slices: Some(&slices),
+    }));
+    assert!(ui.find("configure").is_ok(), "radio declares config/…");
+    let mut ui = simulator::<Message, _, _>(pane(NodesData {
+        sp: sp(),
+        roster: &roster,
+        selected: None,
+        detail: &DetailState::NotAsked,
+        slices: None,
+    }));
+    assert!(
+        ui.find("configure").is_err(),
+        "no registry, no claim that anything is configurable"
     );
 }

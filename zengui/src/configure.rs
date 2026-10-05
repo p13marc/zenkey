@@ -248,6 +248,9 @@ pub struct ConfigForm {
     pub sent_at: Option<Instant>,
     /// The last control verb's outcome, said under the pending change.
     pub control_note: Option<GroupNote>,
+    /// Resources this window has seen the producer echo on
+    /// `state/<p>/config/<r>` — the RESOURCE picker's offer.
+    pub resources: Vec<String>,
 }
 
 impl ConfigForm {
@@ -363,6 +366,45 @@ pub fn fresh_key() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     format!("zengui-{nanos:x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The configuration resource a key is the echo of (RFC 05 §5.1:
+/// `state/<producer>/config/<resource>`), read through the key's v1 facts —
+/// the grammar's reading, never a string match on the spelling.
+pub fn config_target(facts: &zenkey_fleet::KeyFacts) -> Option<ConfigTarget> {
+    let zenkey_fleet::KeyShape::V1(v) = &facts.shape else {
+        return None;
+    };
+    if v.class_kind != zenkey_fleet::model::facts::ClassKind::State {
+        return None;
+    }
+    match (v.producer.as_deref(), v.subject.as_slice()) {
+        (Some(producer), [config, resource]) if config == "config" => Some(ConfigTarget::new(
+            v.origin.clone(),
+            producer,
+            resource.clone(),
+        )),
+        _ => None,
+    }
+}
+
+/// The resources an origin's producer has been seen echoing — every
+/// observed key read through [`config_target`]. Run on a click, never per
+/// frame: it walks the facts cache.
+pub fn observed_resources(
+    facts: &zenkey_fleet::FactsCache,
+    origin: &str,
+    producer: &str,
+) -> Vec<String> {
+    let mut out: Vec<String> = facts
+        .keys()
+        .filter_map(|k| facts.get(k).and_then(config_target))
+        .filter(|t| t.origin == origin && t.producer == producer)
+        .map(|t| t.resource)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Producers whose slice declares a `config/…` procedure — the picker's
@@ -547,6 +589,35 @@ mod tests {
         assert_eq!(busy_token("no"), None);
         assert_eq!(seconds(" 60 "), Some(60));
         assert_eq!(seconds("0"), None);
+    }
+
+    /// #481: the echo of a configuration resource is read through the
+    /// key's v1 facts — the class, the producer, a two-chunk `config/<r>`
+    /// subject — never a string match, so a look-alike is no target.
+    #[test]
+    fn a_config_echo_key_names_its_resource_and_a_look_alike_does_not() {
+        use zenkey_fleet::KeyFacts;
+        let echo = "v1/h-3fa9c2d41b7e/state/radio/config/wlan0";
+        assert_eq!(
+            config_target(&KeyFacts::project("", echo)),
+            Some(ConfigTarget::new("h-3fa9c2d41b7e", "radio", "wlan0"))
+        );
+        for k in [
+            "v1/h-3fa9c2d41b7e/telemetry/radio/config/wlan0",
+            "v1/h-3fa9c2d41b7e/state/radio/config",
+            "v1/h-3fa9c2d41b7e/state/radio/config/wlan0/extra",
+            "demo/state/radio/config/wlan0",
+        ] {
+            assert_eq!(config_target(&KeyFacts::project("", k)), None, "{k}");
+        }
+        let mut facts = zenkey_fleet::FactsCache::default();
+        facts.ensure("", echo, None);
+        facts.ensure("", "v1/h-3fa9c2d41b7e/state/radio/config/eth0", None);
+        facts.ensure("", "v1/h-aaaaaaaaaaaa/state/radio/config/wlan9", None);
+        assert_eq!(
+            observed_resources(&facts, "h-3fa9c2d41b7e", "radio"),
+            ["eth0", "wlan0"]
+        );
     }
 
     #[test]

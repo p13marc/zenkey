@@ -71,6 +71,17 @@ parse; and a **command palette** (#75) — Ctrl+P for actions, Ctrl+K for observ
 keys, `?` for the shortcut map, which is rendered from the same table that
 dispatches it.
 
+A **Config tool** (#481) reads and changes a producer's configuration through
+RFC 05 §5.1 — the schema is the one the producer serves, so it works against a
+producer this build has never heard of. A `hot` group applies at once; a
+`reach` group, which can cut the link, leaves only with a rollback window and
+a person's yes, and is then driven — confirm, extend, cancel — with the
+producer's deadline shown verbatim beside this window's own count; a change
+made while one is pending joins it by its token (RFC v1.50), and `persist` is
+its own button because it is its own grant. Everything the producer did not
+say is drawn as not said: a value not read back is *unknown*, a sensitive one
+*write-only*, and silence after a write is *unknown outcome*, never a failure.
+
 No codec logic lives here. The publish form hands its body to
 `zenkey_fleet::prepare_publish` and renders what comes back — encoded, sent as
 typed, or sent raw — because a payload that shipped unencoded must never look
@@ -116,6 +127,13 @@ What to look at:
   with nothing written: RFC 07 §2.1 verifies before disk, not after transfer.
   The tier table above it is filled before any of that — a registry
   declaration is a capability, and the pane says so.
+
+- The **config** tool (the Workbench's "config", or "configure" on `probe`
+  in the nodes pane). Read `wlan0`: spray serves the RFC 05 §5.1 test double
+  — the same server zenctl's and the engine's live tests talk to — with a
+  group of each class. Change `queue` and it applies at once; change `link`
+  and it asks for a window and a yes, then waits armed: confirm it, or let
+  the window run out and watch the read-back roll it back.
 
 `examples/spray.rs` exists because neither zenkey nor zensight can emit
 non-conforming traffic — that is the point of them — so it is the only way to
