@@ -26,7 +26,7 @@ use crate::message::{
 };
 use crate::view::kit;
 use crate::view::theme::colors;
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{face, font, space};
 
 /// How many rows the overlay renders. A palette that draws a 50k-key list is
 /// the same bug as a tree that does.
@@ -368,8 +368,16 @@ fn list<'a>(
         body = body.push(
             kit::row_button(
                 row![
-                    kit::caption(if selected { "›" } else { " " }),
-                    kit::caption(label.clone()).font(iced::Font::MONOSPACE),
+                    // The cursor's mark holds its width when absent, so
+                    // the labels never shift as the cursor moves.
+                    if selected {
+                        Element::from(kit::icon_caption(kit::Icon::ChevronRight))
+                    } else {
+                        iced::widget::Space::new()
+                            .width(Length::Fixed(font::CAPTION))
+                            .into()
+                    },
+                    kit::caption(label.clone()).font(face::MONO),
                 ]
                 .spacing(space::SM),
                 selected,
@@ -479,7 +487,7 @@ fn help<'a>() -> Element<'a, Message> {
         body = body.push(
             row![
                 kit::caption(b.keys)
-                    .font(iced::Font::MONOSPACE)
+                    .font(face::MONO)
                     .width(Length::Fixed(90.0)),
                 kit::muted(b.what),
             ]

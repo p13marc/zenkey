@@ -179,24 +179,26 @@ fn pin_banner<'a>(sub: &'a SubjectState, slot: SlotId) -> Element<'a, Message> {
     kit::muted(line)
 }
 
-/// A dock's handle: its name (the drag surface), its `⇱` (tear off into a
+/// A dock's handle: its name (the drag surface), its tear-off icon (into a
 /// window, #186 — not on the Locator, which is the navigation itself) and
-/// its `×`. The focused dock's title reads on the pane surface; the rest
+/// its close icon. The focused dock's title reads on the pane surface; the rest
 /// stay muted.
 fn title_bar<'a>(role: DockRole, focused: bool) -> pane_grid::TitleBar<'a, Message> {
     let mut controls = row![].spacing(space::XS);
     if role != DockRole::Locator {
-        controls = controls.push(
-            kit::link(kit::caption("⇱"))
+        controls = controls.push(kit::tip(
+            kit::link(kit::icon_caption(kit::Icon::TearOff))
                 .padding([0.0, space::XS])
                 .on_press(Message::Workspace(WorkspaceMsg::TearOff(role))),
-        );
+            "tear off into a window",
+        ));
     }
-    controls = controls.push(
-        kit::link(kit::caption("×"))
+    controls = controls.push(kit::tip(
+        kit::link(kit::icon_caption(kit::Icon::Close))
             .padding([0.0, space::XS])
             .on_press(Message::Workspace(WorkspaceMsg::DockToggled(role))),
-    );
+        "close dock",
+    ));
     pane_grid::TitleBar::new(if focused {
         kit::caption(role.label())
     } else {

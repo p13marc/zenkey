@@ -46,7 +46,7 @@ use std::sync::Arc;
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
 use crate::view::theme::colors;
-use crate::view::tokens::{Spacing, font};
+use crate::view::tokens::{Spacing, face, font};
 
 /// How many send-log lines the pane keeps. Bounded on purpose: a 5 Hz stream
 /// left running overnight is 150k lines, and an explorer that grows without
@@ -627,7 +627,7 @@ fn log_view(form: &SendForm, sp: Spacing) -> Element<'_, Message> {
         format!("send log — {}", kit::plural(form.log.len(), "entry"))
     }));
     for line in &form.log {
-        let entry = kit::body(line.text.as_str()).font(iced::Font::MONOSPACE);
+        let entry = kit::body(line.text.as_str()).font(face::MONO);
         col = col.push(if line.ok {
             entry
         } else {

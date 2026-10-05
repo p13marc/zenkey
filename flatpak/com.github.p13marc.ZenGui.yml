@@ -50,6 +50,9 @@ modules:
       - cargo fetch --manifest-path Cargo.toml
       - cargo build --release -p zengui
       - install -Dm755 target/release/zengui ${FLATPAK_DEST}/bin/zengui
+      # The embedded faces' licences (#533): Inter and JetBrains Mono (OFL-1.1),
+      # Lucide (ISC).
+      - install -Dm644 -t ${FLATPAK_DEST}/share/licenses/com.github.p13marc.ZenGui zengui/assets/fonts/NOTICE.md zengui/assets/fonts/OFL-Inter.txt zengui/assets/fonts/OFL-JetBrainsMono.txt zengui/assets/fonts/LICENSE-lucide.txt
       - install -Dm644 flatpak/com.github.p13marc.ZenGui.desktop ${FLATPAK_DEST}/share/applications/com.github.p13marc.ZenGui.desktop
       - install -Dm644 flatpak/com.github.p13marc.ZenGui.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.github.p13marc.ZenGui.metainfo.xml
       - install -Dm644 flatpak/icons/hicolor/scalable/apps/com.github.p13marc.ZenGui.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.github.p13marc.ZenGui.svg

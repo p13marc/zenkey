@@ -28,7 +28,7 @@ use crate::view::theme::colors;
 // Chrome spacing (#192): this pane floats from the palette like Connect —
 // window chrome, not a dock — so it spends the `space::` constants and does
 // not take a density-resolved `Spacing`.
-use crate::view::tokens::{font, space};
+use crate::view::tokens::{face, font, space};
 
 /// The editor's draft state (owned by the app, like the Connect form).
 #[derive(Debug, Clone, Default)]
@@ -136,7 +136,7 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
 fn selector_row<'a>(sel: String) -> Element<'a, Message> {
     let spot = crate::scope::blind_spot(&sel);
     column![
-        kit::caption(sel).font(iced::Font::MONOSPACE),
+        kit::caption(sel).font(face::MONO),
         kit::muted(format!("  cannot see: {spot}")),
     ]
     .spacing(space::XS)
@@ -151,7 +151,7 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
                 kit::input("key expression, e.g. demo/**", sel)
                     .on_input(move |t| msg(ScopeMsg::RowChanged(i, t)))
                     .on_submit(msg(ScopeMsg::Apply))
-                    .font(iced::Font::MONOSPACE)
+                    .font(face::MONO)
                     .size(font::CAPTION),
                 kit::action(kit::caption("remove"))
                     .on_press(msg(ScopeMsg::RowRemoved(i)))

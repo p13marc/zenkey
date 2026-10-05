@@ -14,7 +14,7 @@ use crate::message::{Message, PaneMsg, Subject, SubjectMsg};
 use crate::nodes::{CatalogPresence, NodeRoster, ProducerPresence};
 use crate::view::kit;
 use crate::view::theme::{PresenceTone, colors};
-use crate::view::tokens::Spacing;
+use crate::view::tokens::{Spacing, face};
 
 /// The pane's interactions, nested per the `CallMsg` precedent.
 #[derive(Debug, Clone)]
@@ -129,7 +129,7 @@ fn origin_card<'a>(
     let mut body = column![].spacing(sp.xs);
 
     let header = row![
-        kit::link(kit::emphasis(origin).font(iced::Font::MONOSPACE))
+        kit::link(kit::emphasis(origin).font(face::MONO))
             .padding(iced::Padding::ZERO)
             // Straight to the workspace's subject rather than to this pane
             // (#181): a card is one of several ways to point the window at an

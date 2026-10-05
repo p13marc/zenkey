@@ -28,7 +28,7 @@ use crate::value::DecodedValue;
 use crate::view::kit;
 use crate::view::spark;
 use crate::view::theme::{RegistrationTone, SeriesTone, colors};
-use crate::view::tokens::Spacing;
+use crate::view::tokens::{Spacing, face};
 
 /// How much payload the hex view shows before truncating (with a note).
 const HEX_VIEW_BYTES: usize = 1024;
@@ -295,7 +295,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
     // The subject's key, restated where its facts are. The window's one
     // TITLE moved to the location bar (#185) — the bar is where "where am I"
     // is answered now — so this line is a key value, not a page title.
-    col = col.push(kit::emphasis(data.key).font(iced::Font::MONOSPACE));
+    col = col.push(kit::emphasis(data.key).font(face::MONO));
 
     // — Key facts: the ladder verdict, worded per rung.
     match data.facts {

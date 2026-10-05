@@ -44,6 +44,9 @@ fn main() -> iced::Result {
         Zengui::update,
         Zengui::view,
     )
+    // The bundled faces, the default font and the default size (#533) — the
+    // same `Settings` the shots harness renders with.
+    .settings(zengui::view::fonts::settings())
     .title(Zengui::title)
     .theme(Zengui::theme)
     .scale_factor(Zengui::scale_factor)

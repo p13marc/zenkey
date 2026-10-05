@@ -27,7 +27,7 @@ use crate::scope::ScopePreset;
 use crate::state::{Chrome, Deployment, Observation, SubjectState, Workspace};
 use crate::view::palette::{Overlay, PaletteMsg};
 use crate::view::replay::ReplayMsg;
-use crate::view::tokens::space;
+use crate::view::tokens::{face, space};
 use crate::view::{kit, tokens};
 
 /// Everything the breadcrumb shows, as plain data.
@@ -130,13 +130,13 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
 
     let mut bar = row![
         context_chip,
-        kit::muted("▸"),
+        kit::separator(),
         base_picker,
-        kit::muted("▸"),
+        kit::separator(),
         scope_picker,
         selectors_chip,
         observe,
-        kit::muted("▸"),
+        kit::separator(),
     ]
     .spacing(space::SM)
     .align_y(iced::Alignment::Center);
@@ -152,12 +152,12 @@ pub fn breadcrumb(d: LocationData<'_>) -> Element<'_, Message> {
             }
             bar = bar.push(match seg.select {
                 Some(subtree) => Element::from(
-                    kit::link(kit::caption(seg.label).font(iced::Font::MONOSPACE))
+                    kit::link(kit::caption(seg.label).font(face::MONO))
                         .on_press(Message::Subject(SubjectMsg::Select(subtree)))
                         .padding([0.0, space::XS]),
                 ),
                 // The final chunk: where the window is — the one TITLE (#191).
-                None => kit::title(seg.label).font(iced::Font::MONOSPACE).into(),
+                None => kit::title(seg.label).font(face::MONO).into(),
             });
         }
     }

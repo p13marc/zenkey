@@ -41,6 +41,7 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 iced_test = { workspace = true }
+ttf-parser = { workspace = true }
 # The `spray` example serves a protobuf descriptor set (#97) so the demo has a
 # subject only a served schema can decode.
 prost-reflect = { workspace = true }

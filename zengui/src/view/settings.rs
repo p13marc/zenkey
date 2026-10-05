@@ -322,8 +322,18 @@ pub fn pane(d: SettingsData<'_>) -> Element<'_, Message> {
         ))
         .style(muted),
     );
+    // The embedded faces are third-party works (#533): say so where a user
+    // looks at what the window is made of.
+    col = col.push(kit::caption("type"));
+    col = col.push(kit::body(FONTS_NOTICE).style(muted));
     col.into()
 }
+
+/// What the binary embeds and under which licences (#533) — the long form is
+/// `zengui/assets/fonts/NOTICE.md`, shipped beside every release binary.
+pub const FONTS_NOTICE: &str = "Inter and JetBrains Mono NL (SIL Open Font \
+    License 1.1), Lucide icons (ISC) — embedded, so every host draws the same \
+    type; see FONTS-NOTICE.md beside the binary";
 
 /// One labelled text box.
 fn input_row<'a>(

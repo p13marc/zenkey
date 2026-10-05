@@ -24,7 +24,7 @@ use crate::history::{HistoryEntry, HistoryRecorder};
 use crate::message::{Message, PaneMsg, SlotId, SubjectMsg};
 use crate::view::kit::{self, human_bytes};
 use crate::view::theme::colors;
-use crate::view::tokens::{CAPTION_LINE, Spacing};
+use crate::view::tokens::{CAPTION_LINE, Spacing, face};
 
 /// How many field changes one diff lists before the rest are counted.
 const MAX_CHANGES: usize = 50;
@@ -396,15 +396,17 @@ fn changes_view<'a>(d: &ValueDiff, sp: Spacing) -> Element<'a, Message> {
             Change::Added { path, new } => (format!("+ {path}  {}", brief(new)), Tone::Added),
             Change::Removed { path, old } => (format!("- {path}  {}", brief(old)), Tone::Removed),
         };
-        col = col.push(kit::caption(line).font(iced::Font::MONOSPACE).style(
-            move |theme: &iced::Theme| text::Style {
-                color: Some(match tone {
-                    Tone::Changed => colors(theme).warning(),
-                    Tone::Added => colors(theme).success(),
-                    Tone::Removed => colors(theme).danger(),
+        col = col.push(
+            kit::caption(line)
+                .font(face::MONO)
+                .style(move |theme: &iced::Theme| text::Style {
+                    color: Some(match tone {
+                        Tone::Changed => colors(theme).warning(),
+                        Tone::Added => colors(theme).success(),
+                        Tone::Removed => colors(theme).danger(),
+                    }),
                 }),
-            },
-        ));
+        );
     }
     if d.truncated > 0 {
         col = col.push(kit::muted(format!(
