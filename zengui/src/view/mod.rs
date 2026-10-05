@@ -113,6 +113,7 @@ pub mod send;
 pub mod settings;
 pub mod spark;
 pub mod status;
+pub mod syntax;
 pub mod theme;
 pub mod tokens;
 pub mod tree;

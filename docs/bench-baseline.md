@@ -350,3 +350,23 @@ are simply gone — `walk` spelled four owned `String`s per node (a `format!`, a
 chunk clone, the same path cloned twice into `RowShape`), and now spells none;
 a display string exists only for the ~40 rows a frame draws and the one row a
 click names. Criterion cannot count allocations; the type change is the proof.
+
+## zengui echo rows (#538), 2026-10-05
+
+The visual refresh's lists chunk moved echo's preview from plain text to
+syntax-coloured spans. The spans are read **once per sample at ingest**
+(`EchoLine::render`), never on a redraw — the #345 rule — so they cost per
+sample, and the frame's filter pass is untouched:
+
+| Bench | Cadence | Time |
+|---|---|---|
+| echo/admits_2k_unfiltered | frame | 8.56 µs (was 7.97 µs — noise) |
+| echo/admits_2k_keyexpr | frame | 191 µs (was 190 µs) |
+| echo/admits_2k_substring | frame | 123 µs (was 102 µs on the 2026-08 box) |
+| echo/render_one_json_sample | per sample | 4.73 µs (a ~300-char JSON document) |
+| echo/syntax_spans_one_preview | per sample | 0.88 µs of that |
+
+At the link's 512-sample batch cap the spans add at most ~0.45 ms per 250 ms
+tick. The row itself grew from 20 to 44 px (two lines that had been drawn in
+one row's height, unclipped), so a screenful now draws ~20 rows rather than
+~40 — fewer widgets per frame, not more.

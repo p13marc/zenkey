@@ -68,7 +68,7 @@ fn chip_frame<'a, M: 'a>(
 }
 
 /// A chip's vertical air (#535): a quarter of XS — one pixel.
-const CHIP_AIR: f32 = space::XS / 4.0;
+pub(crate) const CHIP_AIR: f32 = space::XS / 4.0;
 
 /// How tall a chip stands (#535): one caption line and its air — iced draws
 /// the hairline inside the bounds, so it costs no height.
@@ -77,9 +77,9 @@ pub const CHIP_HEIGHT: f32 = crate::view::tokens::CAPTION_LINE + 2.0 * CHIP_AIR;
 
 /// A data chip (#535): a size, a rate, an id, an encoding — mono on the
 /// raised step, muted. Data, not a verdict: no tone, no glyph.
-pub fn data_chip<'a, M: 'a>(s: impl Into<String>) -> Element<'a, M> {
+pub fn data_chip<'a, M: 'a>(s: impl iced::widget::text::IntoFragment<'a>) -> Element<'a, M> {
     chip_frame(
-        caption(s.into())
+        caption(s)
             .font(face::MONO)
             .style(|theme: &iced::Theme| text::Style {
                 color: Some(colors(theme).text_muted()),

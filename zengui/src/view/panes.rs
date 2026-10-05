@@ -19,7 +19,7 @@ use iced::widget::{column, pane_grid, row};
 use iced::{Element, Length};
 
 use crate::message::{Message, RightPane, SlotId, WorkspaceMsg};
-use crate::prefs::{Density, DockRole};
+use crate::prefs::{Density, DockRole, ThemeChoice};
 use crate::state::subject::SubjectSlot;
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
 use crate::view;
@@ -57,6 +57,7 @@ pub(crate) fn grid<'a>(
     tree: &'a TreeState,
     work: &'a Workspace,
     density: Density,
+    theme: ThemeChoice,
 ) -> Element<'a, Message> {
     pane_grid::PaneGrid::new(&work.docks.grid, move |pane, role, _maximized| {
         let focused = work.docks.focus == Some(pane);
@@ -66,8 +67,18 @@ pub(crate) fn grid<'a>(
         // A dock is a card on the well (#537): the panel, a hairline, the
         // card radius, and its body inset from the frame.
         pane_grid::Content::new(
-            iced::widget::container(body(dep, obs, sub, tree, work, *role, SlotId::FOLLOW, sp))
-                .padding(iced::Padding::ZERO.left(sp.sm).right(sp.sm).bottom(sp.sm)),
+            iced::widget::container(body(
+                dep,
+                obs,
+                sub,
+                tree,
+                work,
+                *role,
+                SlotId::FOLLOW,
+                sp,
+                theme,
+            ))
+            .padding(iced::Padding::ZERO.left(sp.sm).right(sp.sm).bottom(sp.sm)),
         )
         .title_bar(title_bar(*role, focused))
         .style(kit::dock_frame(focused))
@@ -104,6 +115,7 @@ fn body<'a>(
     role: DockRole,
     slot: SlotId,
     sp: Spacing,
+    theme: ThemeChoice,
 ) -> Element<'a, Message> {
     match role {
         DockRole::Locator => locator(dep, obs, sub, tree, work, sp),
@@ -114,7 +126,7 @@ fn body<'a>(
             let bound = sub.slot(slot).unwrap_or(&sub.follow);
             inspector(dep, obs, bound, work, sp)
         }
-        DockRole::Activity => activity(dep, obs, sub, work, sp),
+        DockRole::Activity => activity(dep, obs, sub, work, sp, theme),
         DockRole::Workbench => workbench(dep, sub, work, sp),
     }
 }
@@ -138,13 +150,14 @@ pub(crate) fn solo<'a>(
     role: DockRole,
     slot: SlotId,
     density: Density,
+    theme: ThemeChoice,
 ) -> Element<'a, Message> {
     let sp = Spacing::of(role.density(density));
     let mut col = column![].spacing(sp.sm);
     if role == DockRole::Inspector {
         col = col.push(pin_banner(sub, slot));
     }
-    iced::widget::container(col.push(body(dep, obs, sub, tree, work, role, slot, sp)))
+    iced::widget::container(col.push(body(dep, obs, sub, tree, work, role, slot, sp, theme)))
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(sp.md)
@@ -298,6 +311,7 @@ fn activity<'a>(
     sub: &'a SubjectState,
     work: &'a Workspace,
     sp: Spacing,
+    theme: ThemeChoice,
 ) -> Element<'a, Message> {
     view::activity::dock(view::activity::ActivityData {
         dock: &work.activity,
@@ -318,6 +332,7 @@ fn activity<'a>(
         replay: &work.replay,
         slices: dep.slices.as_deref(),
         retention: obs.retention,
+        theme,
         sp,
     })
 }

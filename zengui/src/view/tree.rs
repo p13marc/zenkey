@@ -1489,19 +1489,12 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
 
     let mut line = row![name].spacing(sp.xs).align_y(iced::Alignment::Center);
 
-    // Freshness dot (issue #65): green = seen just now, fades to dim.
+    // Freshness (issue #65), as a word since #538: "now", "12s", "4m" on a
+    // single-hue ramp. The dot it replaced said freshness by colour alone —
+    // green, then amber, verdict hues for something that is no verdict —
+    // and its `●` was the Registered badge's glyph in this same row.
     if let Some(age) = r.age_s {
-        line = line.push(
-            kit::caption("●").style(move |theme: &iced::Theme| text::Style {
-                color: Some(if age < 3.0 {
-                    colors(theme).success()
-                } else if age < 30.0 {
-                    colors(theme).warning()
-                } else {
-                    colors(theme).text_dim()
-                }),
-            }),
-        );
+        line = line.push(kit::freshness(age));
     }
 
     if let Some(role) = r.role {

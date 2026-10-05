@@ -53,6 +53,9 @@ pub(crate) struct ActivityData<'a> {
     /// `None` before a monitor exists, which is "not asked", not "empty"
     /// (O4).
     pub retention: Option<zenkey_fleet::RetentionStats>,
+    /// The theme the window renders in — echo's coloured previews resolve
+    /// their syntax colours from it (#538).
+    pub theme: crate::prefs::ThemeChoice,
     /// The dock's resolved spacing grid (#192).
     pub sp: Spacing,
 }
@@ -102,6 +105,7 @@ pub(crate) fn dock<'a>(d: ActivityData<'a>) -> Element<'a, Message> {
             d.next_seq,
             d.echo_scroll,
             d.verdicts,
+            d.theme,
             d.sp,
         )
         .into(),
