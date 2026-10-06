@@ -91,9 +91,13 @@ pub fn pane(d: ScopeEditorData<'_>) -> Element<'_, Message> {
     let mut col = column![
         kit::section_header("Scope selectors", None),
         kit::caption(format!("scope: {} — {}", d.scope.short(), d.scope.label())),
-        kit::body(D2_RULE).style(|theme: &iced::Theme| text::Style {
-            color: Some(colors(theme).text_muted()),
-        }),
+        // The rule users get wrong, set apart as the commentary it is (#559).
+        kit::callout(
+            crate::view::theme::Tone::Info,
+            kit::body(D2_RULE).style(|theme: &iced::Theme| text::Style {
+                color: Some(colors(theme).text_muted()),
+            }),
+        ),
     ]
     .spacing(space::SM);
 
@@ -106,11 +110,7 @@ pub fn pane(d: ScopeEditorData<'_>) -> Element<'_, Message> {
     if let Some(status) = &d.form.status {
         col = col.push(match status {
             Ok(s) => kit::muted(s.clone()),
-            Err(e) => kit::body(e.clone())
-                .style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                })
-                .into(),
+            Err(e) => kit::error(e.clone()),
         });
     }
     col.into()
@@ -132,14 +132,19 @@ fn resolved<'a>(mut col: Column<'a, Message>, d: &ScopeEditorData<'_>) -> Column
     )
 }
 
-/// One resolved selector and its blind spot.
+/// One resolved selector and its blind spot, set into an inset (#559): the
+/// selector is code, and what it cannot see belongs to it — grouped by the
+/// well, not by leading spaces.
 fn selector_row<'a>(sel: String) -> Element<'a, Message> {
     let spot = crate::scope::blind_spot(&sel);
-    column![
-        kit::caption(sel).font(face::MONO),
-        kit::muted(format!("  cannot see: {spot}")),
-    ]
-    .spacing(space::XS)
+    kit::inset(
+        column![
+            kit::caption(sel).font(face::MONO),
+            kit::muted(format!("cannot see: {spot}")),
+        ]
+        .spacing(space::XS),
+    )
+    .width(iced::Length::Fill)
     .into()
 }
 
@@ -163,12 +168,8 @@ fn editing<'a>(mut col: Column<'a, Message>, form: &'a ScopeForm) -> Column<'a, 
         // The per-keystroke verdict: an invalid row says why, a valid one
         // says what it cannot see — never both, never neither.
         col = col.push(match crate::scope::validate_selector(sel) {
-            Err(e) => Element::from(kit::body(format!("  {e}")).style(|theme: &iced::Theme| {
-                text::Style {
-                    color: Some(colors(theme).danger()),
-                }
-            })),
-            Ok(()) => kit::muted(format!("  cannot see: {}", crate::scope::blind_spot(sel))),
+            Err(e) => kit::error(e.to_string()),
+            Ok(()) => kit::muted(format!("cannot see: {}", crate::scope::blind_spot(sel))),
         });
     }
     col.push(

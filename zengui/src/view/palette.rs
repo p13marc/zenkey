@@ -668,7 +668,9 @@ fn selectors(scope: crate::view::scope_editor::ScopeEditorData<'_>) -> Element<'
 fn floated(content: Element<'_, Message>) -> Element<'_, Message> {
     kit::modal(
         column![
-            iced::widget::scrollable(content).height(Length::Fill),
+            iced::widget::scrollable(content)
+                .height(Length::Fill)
+                .spacing(space::XS),
             kit::muted("Esc closes"),
         ]
         .spacing(space::SM),

@@ -127,6 +127,26 @@ pub fn callout<'a, M: 'a>(
         .into()
 }
 
+/// A refusal or a failure, said one way everywhere (#559): the error mark
+/// and the words, in danger's ink, on a Negative callout. The words are the
+/// claim — usually the producer's or the validator's own, carried verbatim —
+/// and the mark is what survives when the colour does not.
+pub fn error<'a, M: 'a>(message: impl Into<String>) -> Element<'a, M> {
+    use crate::view::theme::{SeverityTone, Tone};
+    let ink = |theme: &iced::Theme| iced::widget::text::Style {
+        color: Some(colors(theme).tone(Tone::Negative)),
+    };
+    callout(
+        Tone::Negative,
+        iced::widget::row![
+            super::caption(SeverityTone::Error.glyph()).style(ink),
+            super::body(message.into()).style(ink),
+        ]
+        .spacing(space::SM)
+        .align_y(iced::Alignment::Center),
+    )
+}
+
 /// An inset well (#539): a payload's hex or its decoded document, set into
 /// the panel on the darker well with a hairline — the code block of the
 /// window. Returns the container so the caller can size it.
