@@ -18,7 +18,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Column, row};
-use zenkey_fleet::report::{DoctorSeverity, FieldReport};
+use zenkey_fleet::report::FieldReport;
 
 use crate::message::{Message, PaneMsg, SlotId};
 use crate::series::Series;
@@ -106,14 +106,6 @@ fn msg(slot: SlotId, m: FieldsMsg) -> Message {
     Message::Pane(PaneMsg::Fields(slot, m))
 }
 
-fn severity_tone(severity: DoctorSeverity) -> SeverityTone {
-    match severity {
-        DoctorSeverity::Error => SeverityTone::Error,
-        DoctorSeverity::Warning => SeverityTone::Warning,
-        DoctorSeverity::Info => SeverityTone::Info,
-    }
-}
-
 /// The Fields section for a key subject. `slot` is the subject slot the
 /// surface is bound to (#257) — the messages carry it home. `sp` is the
 /// dock's resolved spacing grid (#192): a section spends it, it never
@@ -130,14 +122,16 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     if !state.in_flight {
         run = run.on_press(msg(slot, FieldsMsg::Run));
     }
-    let window = kit::input("window (s)", &state.window)
+    // Labelled (#564): the box's pre-seeded value hid its placeholder, so
+    // "window (s)" was never on screen at all.
+    let window = kit::input("10", &state.window)
         .on_input(move |t| msg(slot, FieldsMsg::WindowChanged(t)))
         .size(font::CAPTION)
         .width(iced::Length::Fixed(80.0));
     col = col.push(kit::section_header(
         "Fields",
         Some(
-            row![run, window]
+            row![kit::eyebrow("WINDOW (S)"), window, run]
                 .spacing(sp.sm)
                 .align_y(iced::Alignment::Center)
                 .into(),
@@ -158,7 +152,7 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     let report = match report {
         Ok(r) => r,
         Err(e) => {
-            return col.push(kit::muted(format!("field observation failed: {e}")));
+            return col.push(kit::error(format!("field observation failed: {e}")));
         }
     };
 
@@ -193,15 +187,12 @@ pub fn section(state: &FieldsState, slot: SlotId, sp: Spacing) -> Column<'_, Mes
     }
 
     for f in &report.findings {
-        col = col.push(
-            row![
-                kit::badge_severity(severity_tone(f.severity), f.check.as_str()),
-                kit::mono(f.subject.clone()),
-            ]
-            .spacing(sp.sm)
-            .align_y(iced::Alignment::Center),
-        );
-        col = col.push(kit::muted(f.evidence.clone()));
+        col = col.push(kit::finding(
+            SeverityTone::of(f.severity),
+            f.check.as_str(),
+            f.subject.clone(),
+            f.evidence.clone(),
+        ));
     }
 
     let mut shown = 0usize;

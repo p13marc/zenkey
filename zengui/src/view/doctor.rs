@@ -35,11 +35,7 @@ pub enum DoctorMsg {
 }
 
 fn tone(severity: DoctorSeverity) -> SeverityTone {
-    match severity {
-        DoctorSeverity::Error => SeverityTone::Error,
-        DoctorSeverity::Warning => SeverityTone::Warning,
-        DoctorSeverity::Info => SeverityTone::Info,
-    }
+    SeverityTone::of(severity)
 }
 
 /// Wrap one of this pane's messages for the app (#176).
