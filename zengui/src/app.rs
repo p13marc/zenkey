@@ -217,6 +217,17 @@ impl Zengui {
         // Window geometry (issue #73; per window since #186): the main
         // window's size lands in the prefs, a torn-off dock's in the named
         // layout — `update::chrome` tells them apart by id.
+        // The Config tool's countdown (#481): a second's tick only while a
+        // change this window sent is armed — nothing ticks otherwise.
+        if self.work.bench.config_form.armed.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
+                    Message::Pane(crate::message::PaneMsg::Config(
+                        view::configure::ConfigMsg::Tick,
+                    ))
+                }),
+            );
+        }
         subs.push(iced::window::resize_events().map(|(id, size)| {
             Message::Chrome(ChromeMsg::WindowResized(id, size.width, size.height))
         }));

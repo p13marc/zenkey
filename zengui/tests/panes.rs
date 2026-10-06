@@ -4166,3 +4166,80 @@ fn the_config_tool_refuses_here_what_the_producer_would_refuse() {
         assert!(ui.find(words).is_ok(), "{words:?}");
     }
 }
+
+/// #481's confirmed commit, on screen: a pending change is armed, not a
+/// verdict — its verbs beside it and, when this window armed it, a count
+/// that names itself as this window's (the producer's deadline is the
+/// truth). While it is pending, every apply says it joins. With nothing
+/// pending, a reach group asks for its window and a person's yes.
+#[test]
+fn the_config_tool_drives_a_pending_change_and_asks_before_a_reach_one() {
+    use std::time::{Duration, Instant};
+    use zengui::configure::{Armed, ConfigForm, ConfigRead, ConfigTarget, Reply};
+    use zengui::view::configure::{ConfigData, pane};
+
+    let target = ConfigTarget::new("h-3fa9c2d41b7e", "radio", "wlan0");
+    let view = common::config_view();
+    let mut form = ConfigForm {
+        target: target.clone(),
+        read: Some(ConfigRead {
+            reply: Reply::Document(Box::new(view.clone())),
+            target: target.clone(),
+            at: Instant::now(),
+        }),
+        armed: Some(Armed {
+            token: "chg-2".into(),
+            sent: Instant::now(),
+            window: Duration::from_secs(60),
+            reread: false,
+        }),
+        ..ConfigForm::default()
+    };
+    form.drafts
+        .insert(("queue".into(), "fq".into()), "true".into());
+    fn render(form: &ConfigForm) -> iced_test::Simulator<'_, Message> {
+        simulator::<Message, _, _>(pane(ConfigData {
+            form,
+            producers: vec![],
+            origins: vec![],
+            session: true,
+            sp: Spacing::default(),
+        }))
+    }
+    let mut ui = render(&form);
+    for words in [
+        "confirm",
+        "cancel — undo now",
+        "extend",
+        "apply — joins chg-2",
+        "joins pending change chg-2 — its window covers this change too",
+        "persist",
+    ] {
+        assert!(ui.find(words).is_ok(), "{words:?}");
+    }
+    assert!(
+        ui.find("~60s left by this window's count, from the send — the producer's deadline above is the truth").is_ok()
+            || ui.find("~59s left by this window's count, from the send — the producer's deadline above is the truth").is_ok(),
+        "the count names itself as this window's"
+    );
+
+    drop(ui);
+
+    // Nothing pending: the reach group asks for a window and a yes.
+    let mut quiet = view;
+    quiet.pending = None;
+    form.read = Some(ConfigRead {
+        reply: Reply::Document(Box::new(quiet)),
+        target,
+        at: Instant::now(),
+    });
+    form.armed = None;
+    let mut ui = render(&form);
+    assert!(ui.find("CONFIRM WINDOW (S)").is_ok());
+    assert!(
+        ui.find(
+            "I understand: this can cut the link to h-3fa9c2d41b7e. It rolls back unless confirmed."
+        )
+        .is_ok()
+    );
+}

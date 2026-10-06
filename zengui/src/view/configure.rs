@@ -21,8 +21,8 @@ use zenkey::config::{ConfigView, GroupView, ParamClass, ParamKind, ParamView};
 use zenkey_fleet::report::CallReport;
 
 use crate::configure::{
-    ConfigAct, ConfigForm, ConfigRead, ConfigTarget, GroupNote, Reply, Slot, change_of,
-    class_words, kind_text, plain,
+    ConfigAct, ConfigForm, ConfigRead, ConfigTarget, GroupNote, Reply, Slot, Verb, change_of,
+    class_words, kind_text, plain, writable,
 };
 use crate::message::{Message, PaneMsg};
 use crate::services::ServiceError;
@@ -53,6 +53,16 @@ pub enum ConfigMsg {
     Preview(String),
     /// Drop a group's drafts and its last outcome.
     Discard(String),
+    /// The CONFIRM WINDOW field.
+    WindowChanged(String),
+    /// The EXTEND BY field.
+    ExtendChanged(String),
+    /// The person's yes to a change that can cut the link.
+    ConsentToggled(bool),
+    /// A control verb on a change, by its token.
+    Control(Verb, String),
+    /// The countdown's second — subscribed only while a change is armed.
+    Tick,
     /// A call landed.
     Answered(ConfigAct, Result<Arc<CallReport>, ServiceError>),
 }
@@ -241,37 +251,30 @@ fn document<'a>(
             kit::caption("the target was edited since this was read — this document is about the one above; read again"),
         ));
     }
+    let can_drive = form.in_flight.is_none() && !stale;
     if let Some(p) = &view.pending {
-        // Armed, not a verdict: the mode's tone (#544), the producer's own
-        // words for the deadline.
-        col = col.push(kit::callout(
-            Tone::Mode,
-            column![
-                row![
-                    kit::status(Tone::Mode, "pending change"),
-                    kit::data_chip(p.token.clone()),
-                ]
-                .spacing(sp.sm)
-                .align_y(iced::Alignment::Center),
-                kit::caption(format!(
-                    "on {} — rolls back at {} unless confirmed",
-                    p.groups.join(", "),
-                    p.deadline.as_deref().unwrap_or("(no deadline stated)")
-                )),
-            ]
-            .spacing(sp.xs),
-        ));
+        col = col.push(pending(p, form, can_drive, sp));
     }
     if let Some(l) = &view.last_change {
+        let mut persist = kit::secondary(kit::caption("persist"));
+        if can_drive {
+            persist = persist.on_press(msg(ConfigMsg::Control(Verb::Persist, l.token.clone())));
+        }
         col = col.push(
             row![
                 kit::eyebrow("LAST CHANGE"),
                 kit::data_chip(l.token.clone()),
                 kit::muted(format!("on {} — what persist takes", l.groups.join(", "))),
+                persist,
             ]
             .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
         );
+    }
+    if view.pending.is_none()
+        && let Some(note) = &form.control_note
+    {
+        col = col.push(note_view(note, sp));
     }
     if view.groups.is_empty() {
         col = col.push(kit::empty(
@@ -294,6 +297,82 @@ fn class_tone(class: ParamClass) -> Tone {
     }
 }
 
+/// A change pending on the resource (RFC 05 §5.1): armed, not a verdict —
+/// the mode's tone (#544) — with the producer's own deadline verbatim, this
+/// window's count from the send when it armed the change, and the verbs
+/// that drive it.
+fn pending<'a>(
+    p: &'a zenkey::config::PendingChange,
+    form: &'a ConfigForm,
+    can_drive: bool,
+    sp: Spacing,
+) -> Element<'a, Message> {
+    let mut inner = column![
+        row![
+            kit::status(Tone::Mode, "pending change"),
+            kit::data_chip(p.token.clone()),
+        ]
+        .spacing(sp.sm)
+        .align_y(iced::Alignment::Center),
+        kit::caption(format!(
+            "on {} — rolls back at {} unless confirmed",
+            p.groups.join(", "),
+            p.deadline.as_deref().unwrap_or("(no deadline stated)")
+        )),
+    ]
+    .spacing(sp.xs);
+    inner = inner.push(match form.armed.as_ref().filter(|a| a.token == p.token) {
+        Some(a) => {
+            let left = a.left(Instant::now());
+            kit::muted(if left.is_zero() {
+                "this window's count has run out — the read-back says whether it rolled back"
+                    .to_string()
+            } else {
+                format!(
+                    "~{}s left by this window's count, from the send — the producer's \
+                     deadline above is the truth",
+                    left.as_secs()
+                )
+            })
+        }
+        None => kit::muted(
+            "not armed from this window — the producer's deadline above is the only count",
+        ),
+    });
+    let token = p.token.clone();
+    let on = |verb: Verb| msg(ConfigMsg::Control(verb, token.clone()));
+    let mut confirm = kit::primary(kit::caption("confirm"));
+    let mut extend = kit::secondary(kit::caption("extend"));
+    let mut cancel = kit::danger(kit::caption("cancel — undo now"));
+    if can_drive {
+        confirm = confirm.on_press(on(Verb::Confirm));
+        cancel = cancel.on_press(on(Verb::Cancel));
+        if form.extend_secs().is_some() {
+            extend = extend.on_press(on(Verb::Extend));
+        }
+    }
+    let mut controls = row![
+        confirm,
+        kit::input("300", &form.extend_by)
+            .on_input(|s| msg(ConfigMsg::ExtendChanged(s)))
+            .size(font::CAPTION)
+            .width(Length::Fixed(72.0)),
+        kit::muted("s"),
+        extend,
+        cancel,
+    ]
+    .spacing(sp.sm)
+    .align_y(iced::Alignment::Center);
+    if let Some(ConfigAct::Control(verb)) = &form.in_flight {
+        controls = controls.push(kit::muted(format!("{}…", verb.word())));
+    }
+    inner = inner.push(controls);
+    if let Some(note) = &form.control_note {
+        inner = inner.push(note_view(note, sp));
+    }
+    kit::callout(Tone::Mode, inner)
+}
+
 /// One group: its name, its class in words, its parameters — and, when
 /// this tool may write it, an editor per parameter and the group's apply.
 fn group<'a>(
@@ -303,9 +382,11 @@ fn group<'a>(
     stale: bool,
     sp: Spacing,
 ) -> Element<'a, Message> {
-    // Reach groups are written with a rollback window (#481's confirmed
-    // commit); a contract group and an unknown class never are.
-    let editable = g.class == ParamClass::Hot && !stale && form.in_flight.is_none();
+    // Hot and reach groups are written here — a reach one with a rollback
+    // window and a person's yes; a contract group and an unknown class
+    // never are.
+    let writes = writable(g.class);
+    let editable = writes && !stale && form.in_flight.is_none();
     let mut col = column![
         row![
             kit::emphasis(g.name.clone()).font(face::MONO),
@@ -322,7 +403,7 @@ fn group<'a>(
              (RFC 05 §5.1) — read-only here",
         ));
     }
-    col = col.push(header(g.class == ParamClass::Hot, sp));
+    col = col.push(header(writes, sp));
     let errors = match change_of(view, &g.name, &form.drafts) {
         Ok(_) => Vec::new(),
         Err(errors) => errors,
@@ -335,7 +416,7 @@ fn group<'a>(
             .map(|(_, why)| why.clone());
         col = col.push(param(
             p,
-            (g.class == ParamClass::Hot).then(|| Editor {
+            writes.then(|| Editor {
                 group: &g.name,
                 draft: form.drafts.get(&slot).map(String::as_str),
                 enabled: editable,
@@ -344,7 +425,7 @@ fn group<'a>(
             sp,
         ));
     }
-    if g.class == ParamClass::Hot {
+    if writes {
         col = col.push(footer(view, g, form, editable, sp));
     }
     kit::card(col)
@@ -360,17 +441,58 @@ fn footer<'a>(
     sp: Spacing,
 ) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.sm);
+    let reach = g.class == ParamClass::Reach;
+    let joining = view.pending.as_ref().map(|p| p.token.as_str());
     let change = change_of(view, &g.name, &form.drafts);
-    let mut ready = false;
+    let (mut ready, mut previewable) = (false, false);
     if let Ok(mut change) = change
         && !change.values.is_empty()
     {
         change.expected_revision = Some(view.revision);
+        // As it will leave: joining the pending change, or a reach change
+        // with its window (RFC v1.50).
+        match joining {
+            Some(token) => change.token = Some(token.to_string()),
+            None if reach => change.confirm_s = form.window_secs(),
+            None => {}
+        }
         match view.schema().validate(&g.name, &change) {
             // The refusal the producer would send, before it is sent.
             Err(e) => col = col.push(kit::error(e.to_string())),
             Ok(()) => ready = true,
         }
+        change.dry_run = true;
+        previewable = view.schema().validate(&g.name, &change).is_ok();
+    }
+    if reach {
+        col = col.push(match joining {
+            Some(token) => kit::caption(format!(
+                "joins pending change {token} — its window covers this change too"
+            ))
+            .into(),
+            None => kit::form_field(
+                "CONFIRM WINDOW (S)",
+                kit::input("60", &form.window)
+                    .on_input(|s| msg(ConfigMsg::WindowChanged(s)))
+                    .size(font::CAPTION)
+                    .width(Length::Fixed(120.0)),
+                Some(
+                    "the producer undoes the change after this many seconds unless it is \
+                     confirmed — over the new link (RFC 05 §5.1)"
+                        .to_string(),
+                ),
+            ),
+        });
+        let mut yes = kit::check(form.consent)
+            .label(format!(
+                "I understand: this can cut the link to {}. It rolls back unless confirmed.",
+                form.target.origin.trim()
+            ))
+            .text_size(font::CAPTION);
+        if editable {
+            yes = yes.on_toggle(|b| msg(ConfigMsg::ConsentToggled(b)));
+        }
+        col = col.push(yes);
     }
     if let Some(note) = form.notes.get(&g.name) {
         col = col.push(note_view(note, sp));
@@ -380,11 +502,16 @@ fn footer<'a>(
         Some(ConfigAct::Preview(group)) if *group == g.name => Some("previewing…"),
         _ => None,
     };
-    let mut apply = kit::primary(kit::caption("apply"));
+    let mut apply = kit::primary(kit::caption(match joining {
+        Some(token) => format!("apply — joins {token}"),
+        None => "apply".to_string(),
+    }));
     let mut preview = kit::secondary(kit::caption("preview"));
     let mut discard = kit::ghost(kit::caption("discard"));
-    if editable && ready {
+    if editable && ready && (!reach || form.consent) {
         apply = apply.on_press(msg(ConfigMsg::Apply(g.name.clone())));
+    }
+    if editable && previewable {
         preview = preview.on_press(msg(ConfigMsg::Preview(g.name.clone())));
     }
     if editable && form.drafts.keys().any(|(group, _)| *group == g.name) {
@@ -435,6 +562,20 @@ fn note_view<'a>(note: &'a GroupNote, sp: Spacing) -> Element<'a, Message> {
                  producer answers it once (RFC 05 §5.1)",
             ),
         ),
+        GroupNote::Pending(token) => kit::callout(
+            Tone::Mode,
+            kit::caption(format!(
+                "sent — pending as {token}: the producer applies it and rolls it back unless \
+                 it is confirmed above"
+            )),
+        ),
+        GroupNote::Busy(token) => kit::callout(
+            Tone::Info,
+            kit::caption(format!(
+                "another change is pending ({token}) — read again; apply now joins it"
+            )),
+        ),
+        GroupNote::Done(text) => kit::callout(Tone::Info, kit::caption(text.clone())),
         GroupNote::Moved => kit::callout(
             Tone::Info,
             kit::caption(

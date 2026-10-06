@@ -1,13 +1,14 @@
 //! The Config tool's handler (#481): the form's edits, and the calls it
 //! sends — through the engine's `call`, the path `zenctl config` takes.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::Task;
+use zenkey::config::{ControlRequest, ParamClass, PendingReply};
 
 use crate::configure::{
-    ConfigAct, ConfigForm, ConfigRead, GroupNote, Reply, change_of, classify, fresh_key,
-    preview_edits,
+    Armed, ConfigAct, ConfigForm, ConfigRead, GroupNote, Reply, Verb, busy_token, change_of,
+    classify, fresh_key, preview_edits,
 };
 use crate::message::{Message, PaneMsg};
 use crate::services;
@@ -49,6 +50,29 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
         }
         ConfigMsg::Apply(group) => send(form, cx, group, false),
         ConfigMsg::Preview(group) => send(form, cx, group, true),
+        ConfigMsg::WindowChanged(s) => {
+            form.window = s;
+            Task::none()
+        }
+        ConfigMsg::ExtendChanged(s) => {
+            form.extend_by = s;
+            Task::none()
+        }
+        ConfigMsg::ConsentToggled(yes) => {
+            form.consent = yes;
+            Task::none()
+        }
+        ConfigMsg::Control(verb, token) => control(form, cx, verb, token),
+        // The countdown (#481): one re-read when this window's count runs
+        // out, so a rollback is seen — the producer's deadline, not this
+        // count, is what rolls the change back.
+        ConfigMsg::Tick => match form.armed.as_mut() {
+            Some(armed) if !armed.reread && armed.left(Instant::now()).is_zero() => {
+                armed.reread = true;
+                read(form, cx)
+            }
+            _ => Task::none(),
+        },
         ConfigMsg::Answered(act, result) => {
             form.in_flight = None;
             let reply = classify(&result);
@@ -62,6 +86,7 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
                     Task::none()
                 }
                 ConfigAct::Set(group) => landed_set(form, cx, group, reply),
+                ConfigAct::Control(verb) => landed_control(form, verb, reply),
                 ConfigAct::Preview(group) => {
                     let note = match reply {
                         Reply::Other(text) => match preview_edits(&text) {
@@ -117,6 +142,21 @@ fn send(form: &mut ConfigForm, cx: Ctx<'_>, group: String, dry_run: bool) -> Tas
     }
     change.expected_revision = Some(view.revision);
     change.dry_run = dry_run;
+    let reach = view.group(&group).map(|g| g.class) == Some(ParamClass::Reach);
+    // A change pending on the resource is joined, never raced: the set
+    // carries its token (RFC v1.50) and rides its window.
+    match view.pending.as_ref() {
+        Some(p) => change.token = Some(p.token.clone()),
+        None if reach => match form.window_secs() {
+            Some(s) => change.confirm_s = Some(s),
+            None => return Task::none(),
+        },
+        None => {}
+    }
+    // A change that can cut the link leaves with a person's yes (v1.48).
+    if reach && !dry_run && !form.consent {
+        return Task::none();
+    }
     if view.schema().validate(&group, &change).is_err() {
         return Task::none();
     }
@@ -138,8 +178,82 @@ fn send(form: &mut ConfigForm, cx: Ctx<'_>, group: String, dry_run: bool) -> Tas
         ConfigAct::Set(group.clone())
     };
     form.in_flight = Some(act.clone());
+    if !dry_run {
+        form.sent_at = Some(Instant::now());
+        // The yes was for this change.
+        form.consent = false;
+    }
     let procedure = form.target.set_path(&group);
     call(form, cx, session, procedure, Some(body), act)
+}
+
+/// Drive a change by its token (RFC 05 §5.1): each verb answers with the
+/// read-back after the act (v1.47).
+fn control(form: &mut ConfigForm, cx: Ctx<'_>, verb: Verb, token: String) -> Task<Message> {
+    if form.target.unaskable().is_some() || form.in_flight.is_some() {
+        return Task::none();
+    }
+    let Some(session) = cx.dep.session.clone() else {
+        return Task::none();
+    };
+    let mut request = ControlRequest::of(token);
+    if verb == Verb::Extend {
+        match form.extend_secs() {
+            Some(s) => request = request.extended_by(s),
+            None => return Task::none(),
+        }
+    }
+    let Ok(body) = serde_json::to_vec(&request) else {
+        return Task::none();
+    };
+    form.in_flight = Some(ConfigAct::Control(verb));
+    form.sent_at = Some(Instant::now());
+    let procedure = form.target.control_path(verb);
+    call(
+        form,
+        cx,
+        session,
+        procedure,
+        Some(body),
+        ConfigAct::Control(verb),
+    )
+}
+
+/// What a control verb came back as. The read-back becomes the document;
+/// the armed count follows the act.
+fn landed_control(form: &mut ConfigForm, verb: Verb, reply: Reply) -> Task<Message> {
+    match reply {
+        Reply::Document(view) => {
+            let note = match verb {
+                Verb::Confirm => {
+                    "confirmed — permanent until the next restart; persist makes it survive one"
+                }
+                Verb::Cancel => "cancelled — undone now",
+                Verb::Extend => "extended — the producer's new deadline is above",
+                Verb::Persist => "persisted — written to the producer's persisted layer",
+            };
+            match verb {
+                Verb::Confirm | Verb::Cancel => form.armed = None,
+                Verb::Extend => {
+                    let (secs, sent) = (form.extend_secs(), form.sent_at);
+                    if let (Some(armed), Some(s)) = (form.armed.as_mut(), secs) {
+                        armed.sent = sent.unwrap_or_else(Instant::now);
+                        armed.window = Duration::from_secs(s);
+                        armed.reread = false;
+                    }
+                }
+                Verb::Persist => {}
+            }
+            form.control_note = Some(GroupNote::Done(note.to_string()));
+            form.read = Some(ConfigRead {
+                reply: Reply::Document(view),
+                target: form.target.clone(),
+                at: Instant::now(),
+            });
+        }
+        other => form.control_note = Some(outcome_note(other)),
+    }
+    Task::none()
 }
 
 /// What a sent change came back as.
@@ -175,6 +289,38 @@ fn landed_set(form: &mut ConfigForm, cx: Ctx<'_>, group: String, reply: Reply) -
             // The key stays: the retry is the same change.
             form.notes.insert(group, GroupNote::Unknown);
             Task::none()
+        }
+        // A reach change answers before it is applied (RFC 05 §5.1): the
+        // token, and when it applies. The window is armed from the send, and
+        // the read-back asked — over the new link, which is the point.
+        Reply::Other(text) if serde_json::from_str::<PendingReply>(&text).is_ok() => {
+            let pending: PendingReply = serde_json::from_str(&text).expect("checked");
+            form.keys.remove(&group);
+            form.drafts.retain(|(g, _), _| *g != group);
+            form.notes
+                .insert(group, GroupNote::Pending(pending.token.clone()));
+            let joined = form
+                .armed
+                .as_ref()
+                .is_some_and(|a| a.token == pending.token);
+            if !joined && let Some(s) = form.window_secs() {
+                form.armed = Some(Armed {
+                    token: pending.token,
+                    sent: form.sent_at.unwrap_or_else(Instant::now),
+                    window: Duration::from_secs(s),
+                    reread: false,
+                });
+            }
+            read(form, cx)
+        }
+        // Another writer's change is pending: read it back, so the next
+        // apply joins it — by its token, said on the button — instead of
+        // racing it (RFC v1.50).
+        Reply::Refused { name, message } if name == "error/busy" => {
+            form.keys.remove(&group);
+            let token = busy_token(&message).unwrap_or("?").to_string();
+            form.notes.insert(group, GroupNote::Busy(token));
+            read(form, cx)
         }
         other => {
             form.keys.remove(&group);

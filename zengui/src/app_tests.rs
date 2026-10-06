@@ -2115,3 +2115,100 @@ async fn the_config_tool_applies_a_hot_change_and_refuses_an_unsound_one_unsent(
         Some(ParamValue::Integer(2000))
     );
 }
+
+/// #481's confirmed commit against the double: a reach change leaves only
+/// with a window and a person's yes, is answered with its token before it
+/// applies, and is armed from the send; a hot change made while it is
+/// pending joins it (RFC v1.50); confirm makes both the last change, and
+/// persist writes that to the producer's persisted layer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_config_tool_arms_joins_confirms_and_persists_a_reach_change() {
+    use crate::configure::Verb;
+    use crate::message::PaneMsg;
+    use crate::view::configure::ConfigMsg;
+    use zenkey::config::ValueSource;
+
+    const ORIGIN: &str = "h-c0f1c0f1c0f2";
+    let (client, double, _served, _live, _server) = config_producer(ORIGIN).await;
+    let mut app = test_app();
+    app.dep.session = Some(client);
+    config_open(&mut app, ORIGIN).await;
+
+    let config = |m| Message::Pane(PaneMsg::Config(m));
+    let sets = |double: &config_server::ConfigServer| {
+        double
+            .received()
+            .iter()
+            .filter(|p| p.ends_with("/set"))
+            .count()
+    };
+    let _ = app.update(config(ConfigMsg::Draft {
+        group: "link".into(),
+        param: "ssid".into(),
+        text: "field".into(),
+    }));
+
+    // No window, then no yes: nothing leaves either time.
+    let task = app.update(config(ConfigMsg::Apply("link".into())));
+    drive(&mut app, task).await;
+    let _ = app.update(config(ConfigMsg::WindowChanged("60".into())));
+    let task = app.update(config(ConfigMsg::Apply("link".into())));
+    drive(&mut app, task).await;
+    assert_eq!(sets(&double), 0, "a reach change needs a window and a yes");
+
+    // With both: answered with its token, armed, read back.
+    let _ = app.update(config(ConfigMsg::ConsentToggled(true)));
+    let task = app.update(config(ConfigMsg::Apply("link".into())));
+    drive(&mut app, task).await;
+    let form = &app.work.bench.config_form;
+    let token = form
+        .armed
+        .as_ref()
+        .expect("armed from the send")
+        .token
+        .clone();
+    assert!(!form.consent, "the yes was for that change");
+    let pending = form.view().unwrap().pending.clone().expect("pending");
+    assert_eq!(
+        (pending.token.as_str(), pending.groups.as_slice()),
+        (token.as_str(), &["link".to_string()][..])
+    );
+
+    // A hot change now joins it.
+    let _ = app.update(config(ConfigMsg::Draft {
+        group: "queue".into(),
+        param: "fq".into(),
+        text: "true".into(),
+    }));
+    let task = app.update(config(ConfigMsg::Apply("queue".into())));
+    drive(&mut app, task).await;
+    let view = app.work.bench.config_form.view().unwrap();
+    assert_eq!(
+        view.pending.as_ref().unwrap().groups,
+        ["link", "queue"],
+        "one change, two groups"
+    );
+
+    // Confirm: nothing pending, both groups the last change, disarmed.
+    let task = app.update(config(ConfigMsg::Control(Verb::Confirm, token.clone())));
+    drive(&mut app, task).await;
+    let form = &app.work.bench.config_form;
+    let view = form.view().unwrap();
+    assert!(view.pending.is_none());
+    let last = view.last_change.as_ref().expect("the confirmed change");
+    assert_eq!(
+        (last.token.as_str(), last.groups.as_slice()),
+        (
+            token.as_str(),
+            &["link".to_string(), "queue".to_string()][..]
+        )
+    );
+    assert!(form.armed.is_none());
+
+    // Persist it.
+    let task = app.update(config(ConfigMsg::Control(Verb::Persist, token)));
+    drive(&mut app, task).await;
+    let view = app.work.bench.config_form.view().unwrap();
+    let ssid = &view.group("link").unwrap().parameters[0];
+    assert_eq!(ssid.source, Some(ValueSource::Overlay));
+}
