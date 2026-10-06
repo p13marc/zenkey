@@ -1,6 +1,6 @@
 # 05 — Control Plane: `@rpc`
 
-**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40, v1.42, v1.47 and v1.48 — see [CHANGELOG.md](CHANGELOG.md)*
+**Status: v1.2 (ratified)** · normative chapter · *amended in v1.2, v1.25, v1.31, v1.38, v1.40, v1.42, v1.47, v1.48 and v1.50 — see [CHANGELOG.md](CHANGELOG.md)*
 
 All interaction — questions, instructions, downloads-of-detail — happens on
 the `@rpc` plane through **queryables** (request/reply), never through
@@ -343,14 +343,14 @@ that has nothing to configure declares none and owes nothing here.
 **Keys.** A resource `<r>` — a device, an interface, a namespace: the
 chunk an ACL grants by ([09 §3](09-operations.md)) — has:
 
-| Key | Kind | Carries |
-|---|---|---|
-| `@rpc/<producer>/config/<r>` | read | the read-back document (below) |
-| `@rpc/<producer>/config/<r>/<group>/set` | write, `fanout = "forbidden"` | a change to one group |
-| `@rpc/<producer>/config/<r>/confirm`, `/cancel`, `/extend` | write | `{token}` — the pending change's; `extend` adds `confirm_s`, the new window from now |
-| `@rpc/<producer>/config/<r>/persist` | write | `{token}` — the pending or last confirmed change's; **its own key**, so an ACL can allow a change and deny making it survive a restart |
-| `state/<producer>/config/<r>` | state, `transition` or stronger ([04 §3](04-planes.md)) | the read-back document, refreshed on every change |
-| `events/<producer>/config_change/<ulid>` | events, `low` | the change event (below) |
+| Key | Kind | Carries | Answered with |
+|---|---|---|---|
+| `@rpc/<producer>/config/<r>` | read | — | the read-back document (below) |
+| `@rpc/<producer>/config/<r>/<group>/set` | write, `fanout = "forbidden"` | a change to one group | hot: the read-back · reach: `{token, apply_at}`, before it is applied |
+| `@rpc/<producer>/config/<r>/confirm`, `/cancel`, `/extend` | write | `{token}` — the pending change's; `extend` adds `confirm_s`, the new window from now | the read-back after the act |
+| `@rpc/<producer>/config/<r>/persist` | write | `{token}` — the pending change's, or the read-back's `last_change.token`; **its own key**, so an ACL can allow a change and deny making it survive a restart | the read-back after the act |
+| `state/<producer>/config/<r>` | state, `transition` or stronger ([04 §3](04-planes.md)) | the read-back document, refreshed on every change | — |
+| `events/<producer>/config_change/<ulid>` | events, `low` | the change event (below) | — |
 
 **The schema is served, not documented.** The read-back document
 carries, beside every value, the declaration it satisfies: the resource's
@@ -375,7 +375,8 @@ group; a subset of its parameters is a change of those alone.
   `set` is the read-back document, never an echo of the request.
 - **reach** — decides whether the producer can reach the bus at all: a
   frequency, a network id, an APN. A `set` on a reach group MUST carry a
-  confirm window (`confirm_s`) and is answered `{token, apply_at}`
+  confirm window (`confirm_s`) — or the pending change's `token`, joining
+  a change that has one (below) — and is answered `{token, apply_at}`
   **before** it is applied, because the read-back would cross the link
   being changed: the caller observes `state/<producer>/config/<r>` over the
   new link, then confirms. This is §3's long-running idiom, and the reach
@@ -407,16 +408,21 @@ optional: `expected_revision`, refused if the document has since moved;
 an `idempotency_key`, so a retried request returns the first answer
 instead of applying twice — a lost reply is otherwise a doubled write;
 `dry_run`, which validates and reports what would change without
-touching the device; and `confirm_s`, which arms a rollback.
+touching the device; `confirm_s`, which arms a rollback; and `token`,
+which joins the pending change (below) instead of starting a change of
+its own.
 
 **Validation is the producer's, before its device sees anything**, and
 the reference validator (`zenkey::config::ConfigSchema::validate`) is
 what makes every producer refuse the same input in the same words: an
 unknown group or parameter is `error/not-found`; a wrong kind, an
-out-of-bounds value, a reach change without a window or a stale
-`expected_revision` is `error/invalid-args`; a contract group is the
-producer's `restart-required`; the device's own refusal is the producer's
-`device-refused`, with the device's words as the message.
+out-of-bounds value, a reach change with neither a window nor a token, a
+change carrying both, or a stale `expected_revision` is
+`error/invalid-args`; a contract group is the producer's
+`restart-required`; the device's own refusal is the producer's
+`device-refused`, with the device's words as the message. A `token` that
+names no pending change is `error/not-found` — the one refusal the
+validator cannot make, because it needs the producer's state.
 
 **Confirmed commit.** A change with `confirm_s` is applied and a
 deadline armed. `confirm` makes it permanent, `cancel` undoes it now,
@@ -431,12 +437,30 @@ construction, because a runtime change is not persisted.
 `confirm`, `cancel`, `extend` and `persist` each answer with the
 read-back document as it stands after the act (v1.47), so the caller sees
 the outcome without a second call; a token that names no pending change
-— for `persist`, no pending or last confirmed change — is
-`error/not-found`.
+— for `persist`, neither the pending change nor `last_change` (below) —
+is `error/not-found`.
+
+**Every applied change has a token** (v1.50). A `set` that applies is a
+change, and a change is named: a reach `set` and any `set` with a window
+mint the pending change's token; a `set` without a window mints one too,
+and is confirmed at once (outcome `applied`). The read-back carries
+**`last_change`** — `{token, groups}` — the most recent change made
+permanent at runtime: confirmed, or applied without a window. A pending
+change is never `last_change`, and a cancel or a rollback leaves it as it
+was. This is how a change made without a window survives a restart: read
+`last_change.token` back, then `persist` it — `persist` takes the pending
+change's token or `last_change.token`, and nothing older.
 
 **One pending change per resource.** A second writer is answered
-`error/busy` naming the pending token, unless it carries that token.
-This is [03 §1.5](03-grammar.md)'s single-writer rule, for configuration.
+`error/busy` naming the pending token, unless its `set` carries that
+token — and then it **joins** the pending change (v1.50): its group joins
+`pending.groups`, and it is confirmed, cancelled, persisted or rolled back
+with the change, as one. Joining does not move the deadline (`extend`
+does), and a joining `set` carries no `confirm_s` of its own — one change,
+one window. This is how a coupled change that spans two groups, a
+frequency in one and a network id in another, is applied and confirmed
+as one act. This is [03 §1.5](03-grammar.md)'s single-writer rule, for
+configuration.
 
 **Persistence is a separate, deniable act.** `persist` writes a confirmed
 change into the producer's own persisted layer — where and how is the
@@ -447,8 +471,8 @@ so divergence is visible without a second document.
 
 **Every change is an event**, shaped after
 [RFC 6470](https://www.rfc-editor.org/rfc/rfc6470.html)'s
-`netconf-config-change`: the resource, the new `revision`, the `token`
-if any, an `outcome` (`applied` | `confirmed` | `rolled-back` |
+`netconf-config-change`: the resource, the new `revision`, the change's
+`token`, an `outcome` (`applied` | `confirmed` | `rolled-back` |
 `partial`), the `edits` as `{parameter, old, new}` with sensitive values
 redacted, and the attribution — `actor` and `request_id` as the caller
 spelled them in the selector, and `claimed_source` as the transport

@@ -6,13 +6,17 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
-**Status: v1.49** (2026-10-03; ratified at v1.18, 2026-08-15; v1.0
+**Status: v1.50** (2026-10-05; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
 enforcement crate `zenkey`). The full amendment ledger — every version,
 what changed and what deliberately did not — is
 [CHANGELOG.md](CHANGELOG.md). The last three amendments, one line each:
 
+- **v1.50** (2026-10-05) — the change's name: a `set` carrying the
+  pending token joins that change; every applied change has a token, and
+  the read-back names the latest as `last_change`, which `persist` takes
+  (05 §5.1).
 - **v1.49** (2026-10-03) — principals on a face: a principal is bound by
   `cn` or zenoh `usrpwd` `user`; a face plans a user console or watch as a
   subject that repeats every face deny, because any matching subject's
@@ -22,10 +26,6 @@ what changed and what deliberately did not — is
   no class read ⇒ a windowed change asks consent as reach (05 §5.1); an
   empty scope is Unobservable, never exit 0 (13 §1.2); two empty bases
   are not one deployment (13 §4.3).
-- **v1.47** (2026-10-02) — what production found: an explorer opens its
-  session as a Zenoh client with multicast off unless its user's config
-  *states* otherwise, and refuses an endpoint that does not parse (09 §5);
-  `confirm`/`cancel`/`extend`/`persist` answer the read-back (05 §5.1).
 
 ---
 

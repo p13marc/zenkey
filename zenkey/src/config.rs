@@ -218,9 +218,13 @@ impl ConfigSchema {
     /// so every producer refuses the same things with the same words.
     ///
     /// In order: the group must exist; a `contract` group is refused at
-    /// runtime; a `reach` group needs a confirm window unless the change is
-    /// a dry run; every value names a declared parameter, is of its kind,
-    /// and is within its bounds. The first problem found is the error.
+    /// runtime; a change joining a pending one (`token`) carries no window
+    /// of its own; a `reach` group needs a confirm window — or a token, the
+    /// pending change's window then covering it (RFC v1.50) — unless the
+    /// change is a dry run; every value names a declared parameter, is of
+    /// its kind, and is within its bounds. The first problem found is the
+    /// error. Whether the token names the pending change is the producer's
+    /// to check: the schema holds no state.
     ///
     /// # Errors
     ///
@@ -231,12 +235,18 @@ impl ConfigSchema {
         let g = self
             .group(group)
             .ok_or_else(|| ConfigError::UnknownGroup(group.to_string()))?;
-        match g.class {
-            ParamClass::Contract => return Err(ConfigError::Contract(group.to_string())),
-            ParamClass::Reach if change.confirm_s.is_none() && !change.dry_run => {
-                return Err(ConfigError::ReachNeedsConfirm(group.to_string()));
-            }
-            ParamClass::Hot | ParamClass::Reach => {}
+        if g.class == ParamClass::Contract {
+            return Err(ConfigError::Contract(group.to_string()));
+        }
+        if change.token.is_some() && change.confirm_s.is_some() {
+            return Err(ConfigError::JoiningWithWindow(group.to_string()));
+        }
+        if g.class == ParamClass::Reach
+            && change.confirm_s.is_none()
+            && change.token.is_none()
+            && !change.dry_run
+        {
+            return Err(ConfigError::ReachNeedsConfirm(group.to_string()));
         }
         for (name, value) in &change.values {
             let spec = g
@@ -376,6 +386,10 @@ impl ValueSource {
 /// return the first answer instead of applying twice, because a lost reply
 /// is otherwise a doubled write. `dry_run` validates and reports without
 /// touching the device. `confirm_s` arms a rollback (`reach` requires it).
+/// `token` (RFC v1.50) **joins** the pending change instead: the group
+/// joins `pending.groups` and is confirmed, cancelled, persisted or rolled
+/// back with it, under its window — so a joining change carries no
+/// `confirm_s` of its own, and needs none on a `reach` group.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -402,6 +416,11 @@ pub struct ConfigChange {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub confirm_s: Option<u64>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub token: Option<String>,
 }
 
 impl ConfigChange {
@@ -413,6 +432,14 @@ impl ConfigChange {
             values: values.into_iter().map(|(k, v)| (k.into(), v)).collect(),
             ..ConfigChange::default()
         }
+    }
+
+    /// The same change, joining the pending change named by `token`
+    /// (RFC v1.50) rather than starting one of its own.
+    #[must_use]
+    pub fn joining(mut self, token: impl Into<String>) -> Self {
+        self.token = Some(token.into());
+        self
     }
 }
 
@@ -542,11 +569,70 @@ impl PendingChange {
     }
 }
 
+/// The most recent change made permanent at runtime (RFC v1.50): confirmed,
+/// or applied without a window. A pending change is never the last change,
+/// and a cancel or a rollback leaves it as it was. Its token is what
+/// `persist` takes when nothing is pending — how a change made without a
+/// window survives a restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[non_exhaustive]
+pub struct LastChange {
+    pub token: String,
+    pub groups: Vec<String>,
+}
+
+impl LastChange {
+    /// The last change by its token, over the groups it touched.
+    #[must_use]
+    pub fn new(
+        token: impl Into<String>,
+        groups: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        LastChange {
+            token: token.into(),
+            groups: groups.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The reply to a `set` on a `reach` group (RFC 05 §5.1): sent **before**
+/// the change is applied, because the read-back would cross the link being
+/// changed. `token` names the pending change for `confirm`, `cancel`,
+/// `extend`, `persist` and a joining `set`; `apply_at` is when it applies,
+/// spelled as the producer spells time — absent only from a producer that
+/// did not say, and then the caller knows only that it was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[non_exhaustive]
+pub struct PendingReply {
+    pub token: String,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub apply_at: Option<String>,
+}
+
+impl PendingReply {
+    /// A reply naming the pending change, applying at `apply_at`.
+    #[must_use]
+    pub fn new(token: impl Into<String>, apply_at: impl Into<String>) -> Self {
+        PendingReply {
+            token: token.into(),
+            apply_at: Some(apply_at.into()),
+        }
+    }
+}
+
 /// The read-back (RFC 05 §5.1): served by `config/{resource}`, echoed as
 /// `state/<producer>/config/{resource}` on `transition` QoS, and the reply to
 /// every hot `set`. Schema and values travel in one document, so a tool
 /// renders a form without knowing the producer, and one `revision` guards
-/// the next change.
+/// the next change. `last_change` (RFC v1.50) names the change `persist`
+/// takes when nothing is pending; a document from before it carries none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -559,6 +645,11 @@ pub struct ConfigView {
         serde(default, skip_serializing_if = "Option::is_none")
     )]
     pub pending: Option<PendingChange>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub last_change: Option<LastChange>,
     pub groups: Vec<GroupView>,
 }
 
@@ -570,6 +661,7 @@ impl ConfigView {
             resource: resource.into(),
             revision: 0,
             pending: None,
+            last_change: None,
             groups: schema
                 .groups
                 .iter()
@@ -666,6 +758,8 @@ pub struct Edit {
 pub struct ConfigChangeEvent {
     pub resource: String,
     pub revision: u64,
+    /// The change's token — every applied change has one since RFC v1.50;
+    /// optional on the wire because an event from before it carries none.
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -784,9 +878,14 @@ pub enum ConfigError {
     /// The group is `contract`: changed in the producer's startup
     /// configuration, applied by a restart.
     Contract(String),
-    /// The group is `reach` and the change carries no `confirm_s`: a change
-    /// that can cut the link is accepted only with a rollback armed.
+    /// The group is `reach` and the change carries neither `confirm_s` nor
+    /// the pending change's token: a change that can cut the link is
+    /// accepted only with a rollback armed.
     ReachNeedsConfirm(String),
+    /// The change joins a pending one (`token`) and carries a window of its
+    /// own: one change, one window — `extend` moves the deadline (RFC
+    /// v1.50).
+    JoiningWithWindow(String),
     /// The change was written against a revision that has since moved.
     StaleRevision { expected: u64, current: u64 },
     /// Another change is pending on this resource, and this one carries
@@ -811,6 +910,7 @@ impl ConfigError {
             }
             ConfigError::InvalidValue { .. }
             | ConfigError::ReachNeedsConfirm(_)
+            | ConfigError::JoiningWithWindow(_)
             | ConfigError::StaleRevision { .. } => Some("error/invalid-args"),
             ConfigError::Busy { .. } => Some("error/busy"),
             ConfigError::Contract(_) | ConfigError::Device(_) => None,
@@ -841,6 +941,11 @@ impl fmt::Display for ConfigError {
                 f,
                 "group {g:?} can cut the link this reply would travel on; send it with a \
                  confirm window (`confirm_s`), and confirm over the new link (RFC 05 §5.1)"
+            ),
+            ConfigError::JoiningWithWindow(g) => write!(
+                f,
+                "the change to group {g:?} joins a pending change and takes its window; drop \
+                 `confirm_s` (`extend` moves the deadline) (RFC 05 §5.1)"
             ),
             ConfigError::StaleRevision { expected, current } => write!(
                 f,
@@ -1051,9 +1156,26 @@ mod tests {
         let mut confirmed = apn.clone();
         confirmed.confirm_s = Some(120);
         assert_eq!(s.validate("link", &confirmed), Ok(()));
-        let mut dry = apn;
+        let mut dry = apn.clone();
         dry.dry_run = true;
         assert_eq!(s.validate("link", &dry), Ok(()));
+        // Joining a pending change is a window too (RFC v1.50)…
+        let joining = apn.clone().joining("chg-1");
+        assert_eq!(s.validate("link", &joining), Ok(()));
+        // …and the only one: a joining change brings none of its own.
+        let mut both = joining;
+        both.confirm_s = Some(60);
+        let err = s.validate("link", &both).unwrap_err();
+        assert_eq!(err, ConfigError::JoiningWithWindow("link".into()));
+        assert_eq!(err.reserved_error(), Some("error/invalid-args"));
+        assert!(err.to_string().contains("`extend` moves the deadline"));
+        let mut hot = change("tx_queue_len", ParamValue::Integer(100)).joining("chg-1");
+        hot.confirm_s = Some(60);
+        assert_eq!(
+            s.validate("queue", &hot),
+            Err(ConfigError::JoiningWithWindow("queue".into())),
+            "whatever the class"
+        );
     }
 
     #[test]
@@ -1119,6 +1241,11 @@ mod tests {
             json, r#"{"values":{"tx_queue_len":100}}"#,
             "absent guards are absent"
         );
+        let joining = ConfigChange::of([("apn", ParamValue::Text("iot".into()))]).joining("chg-3");
+        assert_eq!(
+            serde_json::to_string(&joining).unwrap(),
+            r#"{"values":{"apn":"iot"},"token":"chg-3"}"#
+        );
         let pin = Sensitive::new(String::from("1234"));
         assert_eq!(serde_json::to_string(&pin).unwrap(), "\"<redacted>\"");
         let back: Sensitive<String> = serde_json::from_str("\"1234\"").unwrap();
@@ -1177,5 +1304,41 @@ mod tests {
             bare,
             serde_json::json!({"resource": "wwan0", "revision": 8, "outcome": "rolled-back", "edits": []})
         );
+    }
+
+    /// RFC v1.50's three shapes, pinned: the read-back's `last_change`, the
+    /// reach reply, and a read-back from before either — which must still
+    /// read, with no last change, because a producer upgrades on its own
+    /// schedule.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn the_v1_50_shapes_are_the_rfcs_and_an_older_document_still_reads() {
+        let mut view = ConfigView::of("wwan0", &ConfigSchema::new());
+        view.revision = 4;
+        view.last_change = Some(LastChange::new("chg-2", ["queue"]));
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "resource": "wwan0",
+                "revision": 4,
+                "last_change": {"token": "chg-2", "groups": ["queue"]},
+                "groups": [],
+            })
+        );
+        assert_eq!(serde_json::from_value::<ConfigView>(json).unwrap(), view);
+
+        let older: ConfigView =
+            serde_json::from_str(r#"{"resource":"wwan0","revision":3,"groups":[]}"#).unwrap();
+        assert_eq!(older.last_change, None);
+        assert_eq!(older.pending, None);
+
+        let reply = PendingReply::new("chg-3", "2026-10-05T12:00:00Z");
+        assert_eq!(
+            serde_json::to_value(&reply).unwrap(),
+            serde_json::json!({"token": "chg-3", "apply_at": "2026-10-05T12:00:00Z"})
+        );
+        let unsaid: PendingReply = serde_json::from_str(r#"{"token":"chg-4"}"#).unwrap();
+        assert_eq!(unsaid.apply_at, None, "a producer that did not say");
     }
 }

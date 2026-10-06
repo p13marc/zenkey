@@ -25,6 +25,43 @@ The `Amends:` lines on pre-v1.25 entries were added mechanically in
 v1.25: each restates its entry's own record, agreeing with the chapter
 headers as the v1.22 status-line sweep audited them.
 
+> **v1.50 (2026-10-05, the change's name)** — the two wire questions
+> v1.47 and v1.48 left open (#518), decided with the maintainer when the
+> first GUI form for configuration was planned (#481): where a token rides
+> on a `set`, and how a change made without a window is persisted.
+>
+> **[05 §5.1](05-control-rpc.md).** The change request gains an optional
+> `token`; a `set` carrying the pending change's token **joins** it — its
+> group joins `pending.groups`, it is confirmed, cancelled, persisted and
+> rolled back with the change, the deadline does not move, and it carries
+> no window of its own (both is `error/invalid-args`). Carrying the token
+> satisfies a reach group's window requirement; a token naming no pending
+> change is `error/not-found`. "Unless it carries that token", which the
+> single-writer rule has said since v1.42, now has that meaning. **Every
+> applied change has a token**: a `set` without a window mints one and is
+> confirmed at once, and the read-back carries `last_change {token,
+> groups}` — the most recent change made permanent at runtime, never a
+> pending one, untouched by a cancel or a rollback. `persist` takes the
+> pending change's token or `last_change.token`. The keys table gains the
+> replies, and the change event's `token` is no longer "if any". The
+> reference types are `zenkey::config::{ConfigChange::token, LastChange,
+> ConfigView::last_change, PendingReply}` (zenkey 0.11.1, additive).
+>
+> **[09 §3](09-operations.md)** (errata, not counted below). The worked
+> slice's `persist` answered `"Ack"`; since v1.47 it answers the
+> read-back.
+>
+> **What deliberately did not change.** Revision semantics: `confirm` and
+> `persist` move no revision of their own, as before — a revision counts
+> what is running, and neither changes it. `idempotency_key`, whose replay
+> of the first answer covers a joining `set` like any other. The dry-run
+> reply, which names no token because it changes nothing. One pending
+> change per resource: joining is how two groups share it, not a second
+> one beside it. A coordinated change across producers stays out (§5.1's
+> own "deliberately not here").
+>
+> *Amends: 05.*
+
 > **v1.49 (2026-10-03, principals on a face)** — an operator authenticated
 > by user name, and the composition rule a face's grant needs, from the
 > second adopter's first authenticated face (zenoh-modem#153, #98; #529).

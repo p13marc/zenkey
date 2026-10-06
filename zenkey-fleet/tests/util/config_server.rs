@@ -34,9 +34,14 @@
 //!   reports the edits and touches nothing. A hot change answers with the
 //!   read-back; a reach change answers `{token, apply_at}`. A change with
 //!   `confirm_s` arms a pending change, one per resource — a second writer is
-//!   `error/busy`, naming the pending token.
+//!   `error/busy`, naming the pending token, unless its `set` carries that
+//!   token and so **joins** it (RFC v1.50): its group joins `pending.groups`,
+//!   its undo joins the change's, and the deadline stays. Every applied
+//!   change has a token; one applied without a window is confirmed at once
+//!   and becomes the read-back's `last_change`.
 //! - `confirm`, `cancel`, `extend`, `persist`: by token, each answering with
-//!   the read-back; an unknown token is `error/not-found`.
+//!   the read-back; an unknown token is `error/not-found`. `persist` takes
+//!   the pending change's token or `last_change.token`.
 //!
 //! **The deadline is honoured when the double is next asked**, not by a
 //! timer. A caller's only window on a producer is its replies, and the
@@ -57,7 +62,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use zenkey::config::{
     ConfigChange, ConfigError, ConfigGroup, ConfigSchema, ConfigView, ControlRequest, Edit,
-    ParamClass, ParamKind, ParamSpec, ParamValue, PendingChange, ValueSource,
+    LastChange, ParamClass, ParamKind, ParamSpec, ParamValue, PendingChange, PendingReply,
+    ValueSource,
 };
 use zenkey_fleet::bus::producer::{BringUp, ReservedError, Responder};
 use zenoh::query::Query;
@@ -89,6 +95,14 @@ struct Pending {
     undo: Vec<(Slot, (ParamValue, ValueSource))>,
 }
 
+/// The read-back's `last_change`, and the slots `persist` writes for it.
+#[derive(Debug, Clone)]
+struct Last {
+    token: String,
+    groups: Vec<String>,
+    slots: Vec<Slot>,
+}
+
 #[derive(Debug)]
 struct State {
     schema: ConfigSchema,
@@ -96,9 +110,10 @@ struct State {
     startup: BTreeMap<Slot, ParamValue>,
     revision: u64,
     pending: Option<Pending>,
-    /// The last confirmed change: its token, and the slots it touched —
-    /// what `persist` names when nothing is pending.
-    confirmed: Option<(String, Vec<Slot>)>,
+    /// The last change made permanent at runtime — confirmed, or applied
+    /// without a window (RFC v1.50): what `persist` names when nothing is
+    /// pending, and the read-back's `last_change`.
+    last: Option<Last>,
     next_token: u64,
     /// `idempotency_key` → the first answer, replayed on a retry.
     answered: HashMap<String, Answer>,
@@ -193,7 +208,7 @@ impl ConfigServer {
                 startup,
                 revision: 1,
                 pending: None,
-                confirmed: None,
+                last: None,
                 next_token: 1,
                 answered: HashMap::new(),
                 received: Vec::new(),
@@ -252,6 +267,15 @@ impl ConfigServer {
     /// The procedure paths received so far, in order.
     pub fn received(&self) -> Vec<String> {
         self.state.lock().expect("state").received.clone()
+    }
+
+    /// The read-back as the double would answer it now — for a caller that
+    /// serves the double's state as its own echo (spray's
+    /// `state/<p>/config/<r>`).
+    pub fn view(&self) -> ConfigView {
+        let mut st = self.state.lock().expect("state");
+        st.lapse(Instant::now());
+        st.view(&self.resource)
     }
 
     /// The running value of one parameter, as the double holds it.
@@ -411,6 +435,31 @@ impl State {
                 "edits": edits,
             }));
         }
+        let class = self.schema.group(group).map(|g| g.class);
+        // A set carrying a token joins the pending change it names (RFC
+        // v1.50) — and only that one: any other token is not-found.
+        if let Some(token) = &change.token {
+            if !self.pending.as_ref().is_some_and(|p| &p.token == token) {
+                return self.no_such(token);
+            }
+            let undo = self.apply(group, change);
+            let p = self.pending.as_mut().expect("checked");
+            for (slot, held) in undo {
+                // The change's undo keeps the value from before the change
+                // began, whichever set touched the slot first.
+                if !p.undo.iter().any(|(s, _)| *s == slot) {
+                    p.undo.push((slot, held));
+                }
+            }
+            if !p.groups.iter().any(|g| g == group) {
+                p.groups.push(group.to_string());
+            }
+            return if class == Some(ParamClass::Reach) {
+                self.pending_reply(token)
+            } else {
+                Answer::Value(self.view_json(resource))
+            };
+        }
         if let Some(p) = &self.pending {
             return refused(
                 &ConfigError::Busy {
@@ -419,6 +468,40 @@ impl State {
                 producer,
             );
         }
+        let undo = self.apply(group, change);
+        // Every applied change has a token (RFC v1.50).
+        let token = format!("chg-{}", self.next_token);
+        self.next_token += 1;
+        let Some(window) = change.confirm_s else {
+            // No window: confirmed at once, and the last change.
+            self.last = Some(Last {
+                token,
+                groups: vec![group.to_string()],
+                slots: undo.into_iter().map(|(slot, _)| slot).collect(),
+            });
+            return Answer::Value(self.view_json(resource));
+        };
+        let window = Duration::from_secs(window);
+        self.pending = Some(Pending {
+            token: token.clone(),
+            deadline: Instant::now() + window,
+            deadline_wall: SystemTime::now() + window,
+            groups: vec![group.to_string()],
+            undo,
+        });
+        if class == Some(ParamClass::Reach) {
+            self.pending_reply(&token)
+        } else {
+            Answer::Value(self.view_json(resource))
+        }
+    }
+
+    /// Write a change's values, returning what each slot held before.
+    fn apply(
+        &mut self,
+        group: &str,
+        change: &ConfigChange,
+    ) -> Vec<(Slot, (ParamValue, ValueSource))> {
         let mut undo = Vec::new();
         for (name, value) in &change.values {
             let slot = (group.to_string(), name.clone());
@@ -430,37 +513,24 @@ impl State {
             }
         }
         self.revision += 1;
-        let class = self.schema.group(group).map(|g| g.class);
-        let Some(window) = change.confirm_s else {
-            return Answer::Value(self.view_json(resource));
-        };
-        let token = format!("chg-{}", self.next_token);
-        self.next_token += 1;
-        let window = Duration::from_secs(window);
-        self.pending = Some(Pending {
-            token: token.clone(),
-            deadline: Instant::now() + window,
-            deadline_wall: SystemTime::now() + window,
-            groups: vec![group.to_string()],
-            undo,
-        });
-        if class == Some(ParamClass::Reach) {
-            // Answered before the read-back could cross the link being
-            // changed (RFC 05 §5.1): the token and when it applies.
-            Answer::Value(serde_json::json!({
-                "token": token,
-                "apply_at": rfc3339(SystemTime::now()),
-            }))
-        } else {
-            Answer::Value(self.view_json(resource))
-        }
+        undo
+    }
+
+    /// A reach change's reply, sent before the read-back could cross the
+    /// link being changed (RFC 05 §5.1): the token and when it applies.
+    fn pending_reply(&self, token: &str) -> Answer {
+        let reply = PendingReply::new(token, rfc3339(SystemTime::now()));
+        Answer::Value(serde_json::to_value(&reply).expect("a reply serializes"))
     }
 
     fn confirm(&mut self, token: &str, resource: &str) -> Answer {
         match self.pending.take_if(|p| p.token == token) {
             Some(p) => {
-                let slots = p.undo.into_iter().map(|(slot, _)| slot).collect();
-                self.confirmed = Some((p.token, slots));
+                self.last = Some(Last {
+                    token: p.token,
+                    groups: p.groups,
+                    slots: p.undo.into_iter().map(|(slot, _)| slot).collect(),
+                });
                 Answer::Value(self.view_json(resource))
             }
             None => self.no_such(token),
@@ -493,12 +563,12 @@ impl State {
     }
 
     /// Write the named change's values into the persisted layer: the
-    /// pending change's or the last confirmed one's (RFC 05 §5.1). The
+    /// pending change's or `last_change`'s (RFC 05 §5.1, v1.50). The
     /// double's persisted layer is the `overlay` source on the read-back.
     fn persist(&mut self, token: &str, resource: &str) -> Answer {
-        let slots: Vec<Slot> = match (&self.pending, &self.confirmed) {
+        let slots: Vec<Slot> = match (&self.pending, &self.last) {
             (Some(p), _) if p.token == token => p.undo.iter().map(|(s, _)| s.clone()).collect(),
-            (_, Some((t, slots))) if t == token => slots.clone(),
+            (_, Some(last)) if last.token == token => last.slots.clone(),
             _ => return self.no_such(token),
         };
         for slot in slots {
@@ -516,14 +586,23 @@ impl State {
         )
     }
 
-    /// The read-back document (RFC 05 §5.1), built as `zenkey::config`
-    /// builds it and filled from the running values.
+    /// The read-back document (RFC 05 §5.1), as JSON on the wire.
     fn view_json(&self, resource: &str) -> serde_json::Value {
+        serde_json::to_value(self.view(resource)).expect("a view serializes")
+    }
+
+    /// The read-back document, built as `zenkey::config` builds it and
+    /// filled from the running values.
+    fn view(&self, resource: &str) -> ConfigView {
         let mut view = ConfigView::of(resource, &self.schema);
         view.revision = self.revision;
         view.pending = self.pending.as_ref().map(|p| {
             PendingChange::new(p.token.clone(), p.groups.clone()).until(rfc3339(p.deadline_wall))
         });
+        view.last_change = self
+            .last
+            .as_ref()
+            .map(|l| LastChange::new(l.token.clone(), l.groups.clone()));
         for g in &mut view.groups {
             for p in &mut g.parameters {
                 let slot = (g.name.clone(), p.spec.name.clone());
@@ -534,7 +613,7 @@ impl State {
                 }
             }
         }
-        serde_json::to_value(&view).expect("a view serializes")
+        view
     }
 }
 
