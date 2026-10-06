@@ -5,14 +5,14 @@
 //! Never ambient: a doctor run fans real queries across the fleet, so it
 //! costs exactly one button press (the laziness ground rule).
 
-use iced::widget::{column, row, scrollable, text};
+use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::report::{DoctorFinding, DoctorSeverity};
 
 use crate::doctor::{DoctorState, finding_target};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::{SeverityTone, colors};
+use crate::view::theme::SeverityTone;
 use crate::view::tokens::{Spacing, font};
 
 /// The panel's interactions, nested per the `CallMsg` precedent.
@@ -70,10 +70,18 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         .on_toggle(|b| msg(DoctorMsg::DeepToggled(b)));
     // The listen window (#161): off by default — a passive phase still holds
     // subscribers open, and ambient cost is the thing this panel refuses.
-    let listen = kit::input("listen (s, empty = off)", &state.listen)
-        .on_input(|t| msg(DoctorMsg::ListenChanged(t)))
-        .size(font::CAPTION)
-        .width(Length::Fixed(140.0));
+    // Labelled (#565): the label survives typing, and "empty = off" is
+    // said beside the box rather than inside it.
+    let listen = row![
+        kit::eyebrow("LISTEN (S)"),
+        kit::input("30", &state.listen)
+            .on_input(|t| msg(DoctorMsg::ListenChanged(t)))
+            .size(font::CAPTION)
+            .width(Length::Fixed(80.0)),
+        kit::muted("empty = off"),
+    ]
+    .spacing(sp.xs)
+    .align_y(iced::Alignment::Center);
 
     // The schema cache's escape hatch lives here because it is the same kind
     // of thing as the run button: an explicit, costed re-ask, never ambient.
@@ -104,11 +112,7 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
     .spacing(sp.sm);
 
     if let Some(e) = &state.error {
-        col = col.push(kit::body(format!("doctor run failed: {e}")).style(
-            |theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            },
-        ));
+        col = col.push(kit::error(format!("doctor run failed: {e}")));
     }
 
     let Some(report) = state.current.as_deref() else {
@@ -148,7 +152,11 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
     // list is not a healthy fleet, and the panel says so in the engine's
     // words.
     if let Some(why) = &report.unobservable {
-        col = col.push(kit::muted(format!("unobservable — {why}")));
+        // The outline of a question that could not be asked (#565).
+        col = col.push(kit::callout(
+            crate::view::theme::Tone::Neutral,
+            kit::caption(format!("unobservable — {why}")),
+        ));
     }
 
     if let Some(d) = &state.delta {
@@ -207,9 +215,17 @@ pub fn section<'a>(state: &'a DoctorState, base: &'a str, sp: Spacing) -> Elemen
         if group.is_empty() {
             continue;
         }
-        // Sentence case like every section header (#539): "Error",
-        // "Warning", "Info" — the severity's own name.
-        list = list.push(kit::section_header(format!("{severity:?}"), None));
+        // Sentence case like every section header (#539), spelled here —
+        // never the enum's `Debug` name — and counted (#565).
+        let word = match severity {
+            DoctorSeverity::Error => "Error",
+            DoctorSeverity::Warning => "Warning",
+            DoctorSeverity::Info => "Info",
+        };
+        list = list.push(kit::section_header(
+            word,
+            Some(kit::count_pill(group.len().to_string())),
+        ));
         for (i, f) in group {
             list = list.push(finding_row(state, f, i, base, sp));
         }
@@ -243,20 +259,30 @@ fn finding_row<'a>(
     ]
     .spacing(sp.sm)
     .align_y(iced::Alignment::Center);
+    // "new" is news about the run, not a second warning (#565): a chip in
+    // commentary's tone, beside the finding's own severity badge.
     if is_new {
-        header = header.push(kit::badge_severity(SeverityTone::Warning, "new"));
+        header = header.push(kit::status_chip(crate::view::theme::Tone::Info, "new"));
     }
     if let Some(c) = &f.citation {
         header = header.push(iced::widget::space::horizontal());
-        header = header.push(kit::muted(c.clone()));
+        header = header.push(kit::data_chip(c.clone()));
     }
     let mut body = column![header, kit::muted(f.evidence.clone())].spacing(sp.xs);
     if finding_target(f, base).is_some() {
         body = body.push(
-            kit::secondary(kit::caption("go to subject"))
-                .padding([0.0, sp.xs])
+            kit::icon_button(kit::Icon::GoTo, Some("go to subject"))
                 .on_press(msg(DoctorMsg::FindingClicked(index))),
         );
     }
-    kit::card(body)
+    // An error's card wears danger's edge; the badge still says which.
+    let edge = if f.severity == DoctorSeverity::Error {
+        kit::Edge::Failed
+    } else {
+        kit::Edge::Put
+    };
+    kit::card(kit::edge_row(
+        edge,
+        iced::widget::container(body).padding(iced::Padding::ZERO.left(sp.sm)),
+    ))
 }

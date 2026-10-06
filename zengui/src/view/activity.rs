@@ -126,7 +126,7 @@ fn replay_stream<'a>(
     if let Some(path) = &r.replay_open {
         col = col.push(replay::open_row(path, sp));
         if let Some(note) = &r.replay_note {
-            col = col.push(kit::muted(format!("could not open: {note}")));
+            col = col.push(kit::error(format!("could not open: {note}")));
         }
     }
     // A parse in flight is its own state (#255, RFC 09 §5.1 O4): "loading"
@@ -137,9 +137,16 @@ fn replay_stream<'a>(
     match &r.replay {
         Some(state) => col = col.push(replay::scrubber(state, sp)),
         None if r.replay_open.is_none() && r.replay_loading.is_none() => {
-            col = col.push(kit::muted(
-                "no file open — the location bar's \"replay…\" opens a .zrec, \
-                 and \"record\" writes one from the current watches",
+            // An empty state with the one action that changes it (#565).
+            col = col.push(kit::empty_with(
+                kit::EmptyKind::NotAsked,
+                "No capture open",
+                "\"replay…\" opens a .zrec — and \"record\" writes one from the current watches",
+                kit::secondary(kit::labelled(kit::Icon::Open, "open a .zrec…"))
+                    .on_press(Message::Workspace(WorkspaceMsg::Replay(
+                        replay::ReplayMsg::OpenToggled,
+                    )))
+                    .padding(sp.xs),
             ));
         }
         None => {}
@@ -173,7 +180,7 @@ fn replay_stream<'a>(
     if let Some(path) = &r.snapshot_open {
         col = col.push(replay::snapshot_open_row(path, sp));
         if let Some(note) = &r.snapshot_note {
-            col = col.push(kit::muted(format!("could not open: {note}")));
+            col = col.push(kit::error(format!("could not open: {note}")));
         }
     }
     if let Some(path) = &r.snapshot_loading {
@@ -185,6 +192,7 @@ fn replay_stream<'a>(
         Some(s) => {
             col = col.push(
                 row![
+                    kit::icon_caption(kit::Icon::Save),
                     kit::muted(replay::snapshot_label(s)),
                     kit::secondary(kit::caption("close"))
                         .on_press(Message::Workspace(WorkspaceMsg::Replay(
