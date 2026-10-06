@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use iced::Length;
-use iced::widget::{Column, column, row, text};
+use iced::widget::{Column, column, row};
 use zenkey_fleet::{SampleView, SliceSet, WatchId};
 
 use super::kit;
@@ -262,11 +262,7 @@ pub fn section<'a>(
     col = col.push(controls);
 
     if let Some(e) = &state.error {
-        col = col.push(
-            kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
-                color: Some(super::theme::colors(theme).danger()),
-            }),
-        );
+        col = col.push(kit::error(e.to_string()));
     }
 
     if let Some(v) = &state.viewing {

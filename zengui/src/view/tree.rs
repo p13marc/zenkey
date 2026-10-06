@@ -1623,6 +1623,9 @@ fn fit<'a>(
     (row, need)
 }
 
+/// The pane width under which the indent halves (#566).
+const NARROW_PANE: f32 = 360.0;
+
 /// Pixels of indent per depth level.
 const INDENT: f32 = 14.0;
 
@@ -1637,7 +1640,14 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
         sp,
         width,
     } = cx;
-    let indent_w = r.depth as f32 * INDENT;
+    // A narrow pane spends less on depth (#566): at 14px a level, a
+    // seven-deep leaf in a 200px Locator had no room left for its name.
+    let per_level = if width < NARROW_PANE {
+        INDENT / 2.0
+    } else {
+        INDENT
+    };
+    let indent_w = r.depth as f32 * per_level;
     let body_w = width - indent_w - ROW_GUTTER;
     let tier = RowTier::for_body(body_w);
     let indent = iced::widget::Space::new().width(Length::Fixed(indent_w));

@@ -19,13 +19,13 @@
 //! and the user still owns what is in it.
 
 use iced::Element;
-use iced::widget::{Column, column, row, text};
+use iced::widget::{Column, column, row};
 use zenkey_fleet::report::{BlobHolder, BlobList, BlobProbeReport};
 
 use crate::blob::{BlobState, Fetch, Probe};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::{SeverityTone, colors};
+use crate::view::theme::SeverityTone;
 use crate::view::tokens::{Spacing, font};
 
 /// The pane's interactions, nested per the `DoctorMsg` precedent.
@@ -193,11 +193,7 @@ fn target_row(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
 
     match &state.target {
         Some(Err(e)) => {
-            col = col.push(
-                kit::body(e.to_string()).style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
-            );
+            col = col.push(kit::error(e.to_string()));
         }
         Some(Ok(t)) => {
             // Show both spellings the plane has, and which of them is
@@ -226,11 +222,7 @@ fn holders(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
             "nothing has been asked — this is \"not asked\", not \"nobody holds it\"",
         ),
         Probe::InFlight => kit::muted("probing every origin…"),
-        Probe::Failed(e) => kit::body(format!("probe failed: {e}"))
-            .style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            })
-            .into(),
+        Probe::Failed(e) => kit::error(format!("probe failed: {e}")),
         Probe::Done(report) => {
             let mut col = column![].spacing(sp.xs);
 
@@ -331,13 +323,15 @@ fn holder_row<'a>(
 
     let mut body = column![
         row![
-            kit::secondary(kit::caption(if selected {
-                "● selected"
-            } else {
-                "○ choose"
-            }))
-            .padding([0.0, sp.xs])
-            .on_press(msg(BlobMsg::HolderPicked(index))),
+            // A toggle chip (#566), lit when chosen: the word says which,
+            // where a hand-drawn ●/○ shared its glyphs with the
+            // registration badges.
+            kit::toggle_chip(
+                Some(kit::Icon::Check),
+                if selected { "selected" } else { "choose" },
+                selected,
+                msg(BlobMsg::HolderPicked(index)),
+            ),
             kit::mono(h.origin.clone()),
             kit::muted(summary),
         ]
@@ -450,11 +444,7 @@ fn fetch_form(state: &BlobState, sp: Spacing) -> Element<'_, Message> {
             }
         }
         Fetch::Failed(e) => {
-            col = col.push(
-                kit::body(format!("fetch failed: {e}")).style(|theme: &iced::Theme| text::Style {
-                    color: Some(colors(theme).danger()),
-                }),
-            );
+            col = col.push(kit::error(format!("fetch failed: {e}")));
         }
         Fetch::Inspecting => {
             // No chunk counts and no stop button: an inspection has neither.

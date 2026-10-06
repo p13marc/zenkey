@@ -17,7 +17,7 @@
 //! `Option` carries, and it is why the entity section is load-bearing rather
 //! than decoration.
 
-use iced::widget::{column, row, scrollable, text};
+use iced::widget::{column, row, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::report::StorageList;
 use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
@@ -25,7 +25,7 @@ use zenkey_fleet::{Coverage, CoverageRow, RouterInfo, StorageInfo};
 use crate::admin::{AdminState, AdminSweep, router_row_id, storage_row_id};
 use crate::message::{Message, PaneMsg};
 use crate::view::kit;
-use crate::view::theme::{CoverageTone, colors};
+use crate::view::theme::CoverageTone;
 use crate::view::tokens::Spacing;
 
 /// How many declared entities the list renders before it stops and says so.
@@ -77,11 +77,7 @@ pub fn pane(state: &AdminState, sp: Spacing) -> Element<'_, Message> {
     .spacing(sp.sm);
 
     if let Some(e) = &state.error {
-        col = col.push(
-            kit::body(format!("sweep failed: {e}")).style(|theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            }),
-        );
+        col = col.push(kit::error(format!("sweep failed: {e}")));
     }
 
     let Some(sweep) = state.sweep.as_deref() else {

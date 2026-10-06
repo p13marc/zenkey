@@ -304,10 +304,17 @@ pub fn section<'a>(
             .on_input(|t| msg(EchoMsg::FilterChanged(t)))
             .size(font::CAPTION)
             .width(Length::Fixed(170.0)),
-        kit::input("key expr, e.g. v1/*/state/**", &view.key_filter)
-            .on_input(|t| msg(EchoMsg::KeyFilterChanged(t)))
-            .size(font::CAPTION)
-            .width(Length::Fixed(190.0)),
+        // Labelled (#566): an example in the box, its name beside it.
+        row![
+            kit::eyebrow("KEY EXPR"),
+            kit::input("v1/*/state/**", &view.key_filter)
+                .on_input(|t| msg(EchoMsg::KeyFilterChanged(t)))
+                .font(face::MONO)
+                .size(font::CAPTION)
+                .width(Length::Fixed(170.0)),
+        ]
+        .spacing(sp.xs)
+        .align_y(iced::Alignment::Center),
         kit::ghost(kit::caption(if view.following {
             "pause"
         } else {
@@ -379,17 +386,16 @@ pub fn section<'a>(
     } else {
         iced::widget::scrollable(body)
             .height(Length::Fill)
+            // Embedded (#566, the tree's since #557): iced's opaque rail sat
+            // on the right-hand end of every row — the verdict chips.
+            .spacing(sp.xs)
             .on_scroll(|viewport| msg(EchoMsg::Scrolled(viewport.into())))
             .into()
     };
 
     let mut col = column![header];
     if let Some(err) = &view.key_filter_error {
-        col = col.push(kit::body(format!("key filter not applied: {err}")).style(
-            |theme: &iced::Theme| text::Style {
-                color: Some(colors(theme).danger()),
-            },
-        ));
+        col = col.push(kit::error(format!("key filter not applied: {err}")));
     }
     col = col.push(state_strip(ring, view, matched, drawn, next_seq));
     col = col.push(loss_strip(ring));
