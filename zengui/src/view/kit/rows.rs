@@ -19,6 +19,9 @@ pub enum Edge {
     /// because retirement is a fact, not a negative verdict. The row says
     /// "DELETE" in words too.
     Retired,
+    /// A write that failed (#562's send log): danger's edge, because the
+    /// act did not happen — and the row says why in words.
+    Failed,
 }
 
 /// A list row with a 3px leading edge (#538). The edge groups; the row's
@@ -34,6 +37,7 @@ pub fn edge_row<'a, M: 'a>(edge: Edge, content: impl Into<Element<'a, M>>) -> El
                     match edge {
                         Edge::Put => c.line(),
                         Edge::Retired => c.retired(),
+                        Edge::Failed => c.danger(),
                     }
                     .into(),
                 ),

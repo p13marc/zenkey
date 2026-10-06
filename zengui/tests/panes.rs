@@ -475,11 +475,16 @@ fn the_call_mode_labels_forbidden_fanout() {
             .is_ok(),
         "the declared call key is on screen, not left to be reconstructed"
     );
-    assert!(
-        ui.find("fanout forbidden · idempotent false · encoding — · since —")
-            .is_ok(),
-        "the declared shape rides the surface"
-    );
+    // The declared shape as fields since #562 (was one joined line):
+    // each value under its eyebrow, "—" where the registry is silent.
+    for (label, value) in [
+        ("FANOUT", "forbidden"),
+        ("IDEMPOTENT", "false"),
+        ("REPLY", "Ack"),
+    ] {
+        assert!(ui.find(label).is_ok(), "{label}");
+        assert!(ui.find(value).is_ok(), "{label} {value}");
+    }
 
     // Without a registry the pane says "not asked", not empty dropdowns.
     let empty = SendForm {
