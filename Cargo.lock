@@ -8367,7 +8367,7 @@ dependencies = [
 
 [[package]]
 name = "zenctl"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -8396,7 +8396,7 @@ dependencies = [
 
 [[package]]
 name = "zengui"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -9051,7 +9051,7 @@ dependencies = [
 
 [[package]]
 name = "zenwatch"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
