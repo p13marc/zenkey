@@ -38,9 +38,11 @@ pub enum ConfigMsg {
     ResourceChanged(String),
     /// Read the target's read-back.
     Read,
-    /// Point the form at a resource and read it — the entry points' message
-    /// (a node, an Inspector key), so arriving here is one act.
+    /// Point the form at a resource and read it.
     Open(ConfigTarget),
+    /// The entry points' message (a node's producer, an Inspector key):
+    /// show the tool, point it, and read — arriving here is one act.
+    Goto(ConfigTarget),
     /// A parameter's draft: what the user typed, or the segment they lit.
     Draft {
         group: String,
@@ -167,7 +169,11 @@ fn target_row<'a>(d: &ConfigData<'a>) -> Element<'a, Message> {
             ),
             kit::form_field(
                 "RESOURCE",
-                typed("wlan0", &t.resource, ConfigMsg::ResourceChanged),
+                with_picks(
+                    typed("wlan0", &t.resource, ConfigMsg::ResourceChanged).into(),
+                    d.form.resources.clone(),
+                    ConfigMsg::ResourceChanged,
+                ),
                 None,
             ),
         ]

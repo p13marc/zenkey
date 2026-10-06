@@ -29,10 +29,37 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
             form.target.resource = s;
             Task::none()
         }
-        ConfigMsg::Read => read(form, cx),
+        ConfigMsg::Read => {
+            refresh_resources(form, cx);
+            read(form, cx)
+        }
         ConfigMsg::Open(target) => {
             form.target = target;
+            refresh_resources(form, cx);
             read(form, cx)
+        }
+        // An entry point (a node's producer, an Inspector key): show the
+        // tool, point it, and read when the target is whole — a producer
+        // with no resource seen asks for one instead of guessing.
+        ConfigMsg::Goto(mut target) => {
+            if target.resource.is_empty() {
+                let seen = crate::configure::observed_resources(
+                    &cx.dep.facts,
+                    &target.origin,
+                    &target.producer,
+                );
+                if let [only] = seen.as_slice() {
+                    target.resource = only.clone();
+                }
+            }
+            form.target = target;
+            refresh_resources(form, cx);
+            Task::batch([
+                Task::done(Message::Workspace(
+                    crate::message::WorkspaceMsg::PaneSelected(crate::message::RightPane::Config),
+                )),
+                read(form, cx),
+            ])
         }
         ConfigMsg::Draft { group, param, text } => {
             form.drafts.insert((group.clone(), param), text);
@@ -103,6 +130,15 @@ pub(crate) fn update(form: &mut ConfigForm, msg: ConfigMsg, cx: Ctx<'_>) -> Task
             }
         }
     }
+}
+
+/// The RESOURCE picker's offer for the current origin and producer.
+fn refresh_resources(form: &mut ConfigForm, cx: Ctx<'_>) {
+    form.resources = crate::configure::observed_resources(
+        &cx.dep.facts,
+        form.target.origin.trim(),
+        form.target.producer.trim(),
+    );
 }
 
 /// Ask the target's read-back. Nothing leaves for a target that cannot be

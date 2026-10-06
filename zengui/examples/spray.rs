@@ -33,6 +33,10 @@
 //! cargo run -p zengui --example spray -- -c tcp/127.0.0.1:7447   # or join one
 //! ```
 
+/// The RFC 05 §5.1 config double (#481), shared with the test suites.
+#[path = "../../zenkey-fleet/tests/util/config_server.rs"]
+mod config_server;
+
 use std::time::Duration;
 
 use clap::Parser;
@@ -86,6 +90,62 @@ description = "a protobuf payload — decodable only via the served descriptor s
 # `fanout` are omitted because spray serves neither: a slice states capability,
 # and claiming one it does not have would be the lie the plane is modelled to
 # prevent.
+# The configuration convention (RFC 05 §5.1), served by the config double
+# below (#481) — RFC 09 §3's worked slice, so zengui's Config tool offers
+# this producer and the nodes pane links to it.
+[[procedure]]
+path = "config/{device}"
+kind = "read"
+reply = "ConfigView"
+idempotent = true
+since = "1.0"
+description = "the read-back: the served schema beside every running value (RFC 05 §5.1)"
+
+[[procedure]]
+path = "config/{device}/{group}/set"
+kind = "write"
+fanout = "forbidden"
+request = "ConfigChange"
+reply = "ConfigView"
+since = "1.0"
+description = "one group's change; hot answers the read-back, reach {token, apply_at}"
+
+[[procedure]]
+path = "config/{device}/confirm"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "ConfigView"
+since = "1.0"
+description = "make the pending change permanent"
+
+[[procedure]]
+path = "config/{device}/cancel"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "ConfigView"
+since = "1.0"
+description = "undo the pending change now"
+
+[[procedure]]
+path = "config/{device}/extend"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "ConfigView"
+since = "1.0"
+description = "move the pending change's deadline"
+
+[[procedure]]
+path = "config/{device}/persist"
+kind = "write"
+fanout = "forbidden"
+request = "ControlRequest"
+reply = "ConfigView"
+since = "1.0"
+description = "write the pending change, or the last one, into the persisted layer"
+
 [[blob]]
 tier = "artifact"
 endpoints = ["manifest", "slice", "have"]
@@ -471,6 +531,30 @@ async fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("queryable {key}: {e}"))?,
         );
     }
+
+    // ── RFC 05 §5.1, served (#481) ───────────────────────────────────────
+    //
+    // The configuration test double — the same file zenkey-fleet's
+    // lifecycle test, zenctl's live suite and zengui's app tests serve — as
+    // `probe`'s configuration, so the Config tool has a resource to read,
+    // change, arm and roll back. No alive token of its own: probe's is
+    // declared below with the others.
+    let config = config_server::ConfigServer::fixture("probe");
+    let mut up = zenkey_fleet::bus::producer::BringUp::new(&session);
+    config
+        .declare(&mut up, &with_base(&format!("v1/{host}/@rpc/probe")))
+        .await
+        .map_err(|e| anyhow::anyhow!("config procedures: {e}"))?;
+    let _config_served: Vec<_> = up
+        .without_alive()
+        .into_iter()
+        .map(|r| config.spawn(r))
+        .collect();
+    println!(
+        "serving: {} (config/{} — RFC 05 §5.1)",
+        with_base(&format!("v1/{host}/@rpc/probe/config/**")),
+        config_server::RESOURCE
+    );
 
     // ── the @blob plane (#68) ────────────────────────────────────────────
     //

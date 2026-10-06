@@ -508,6 +508,19 @@ pub(crate) fn facts_section(f: &KeyFacts, sp: Spacing) -> Element<'_, Message> {
             if let Some(p) = v.producer.as_deref() {
                 grid.push(kit::field("PRODUCER", kit::mono(p.to_string())));
             }
+            // The echo of a configuration resource (RFC 05 §5.1): the form
+            // that reads and changes it is one click away (#481).
+            if let Some(t) = crate::configure::config_target(f) {
+                let label = format!("configure {}", t.resource);
+                grid.push(
+                    kit::secondary(kit::labelled(kit::Icon::Config, label))
+                        .padding([0.0, sp.xs])
+                        .on_press(Message::Pane(PaneMsg::Config(
+                            crate::view::configure::ConfigMsg::Goto(t),
+                        )))
+                        .into(),
+                );
+            }
         }
         KeyShape::NotUnderBase => {
             col = col.push(kit::muted(

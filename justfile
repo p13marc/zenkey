@@ -41,6 +41,12 @@
 #     every section should say why it is empty, and the coverage table should
 #     read "coverage not judged" rather than "uncovered" — a registry that was
 #     never loaded has not told you a family is uncovered (RFC 09 §5.1 O4).
+#   * Open the config tool — the Workbench's "config", or "configure" on
+#     `probe` in the nodes pane. Read `wlan0`: spray serves the RFC 05 §5.1
+#     double, a group of each class. Change `queue` (hot) and it applies at
+#     once; change `link` (reach) and it leaves only with a window and a yes,
+#     then waits armed — confirm it, or let the window run out and watch the
+#     read-back roll it back. `transport` (contract) names the restart.
 #   * `just gui-demo-bounded` trips *both* bounds immediately: the status strip
 #     should read "N keys (+M retired — bound reached)" and, beside it,
 #     "facts: N cached (+M projections retired — cache bound reached)" — two

@@ -105,6 +105,8 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
 
     // MD between cards (#192): the rule, not a taste — SM is for inside one.
     let mut cards = column![].spacing(sp.md);
+    // Producers whose slice declares RFC 05 §5.1 procedures (#481).
+    let configurable = crate::configure::producers(d.slices);
     for (origin, producers) in d.roster.iter() {
         let selected = d.selected == Some(origin.as_str());
         cards = cards.push(origin_card(
@@ -113,6 +115,7 @@ pub fn pane(d: NodesData<'_>) -> Element<'_, Message> {
             selected,
             d.detail,
             joined.as_ref(),
+            &configurable,
             sp,
         ));
     }
@@ -126,6 +129,7 @@ fn origin_card<'a>(
     selected: bool,
     detail: &'a DetailState,
     joined: Option<&NodeList>,
+    configurable: &[String],
     sp: Spacing,
 ) -> Element<'a, Message> {
     let mut body = column![].spacing(sp.xs);
@@ -152,7 +156,7 @@ fn origin_card<'a>(
     .align_y(iced::Alignment::Center);
     body = body.push(header);
 
-    for row in presence_rows(origin, producers, joined, sp) {
+    for row in presence_rows(origin, producers, joined, configurable, sp) {
         body = body.push(row);
     }
 
@@ -175,6 +179,7 @@ fn presence_rows<'a>(
     origin: &'a str,
     producers: &'a std::collections::BTreeMap<String, ProducerPresence>,
     joined: Option<&NodeList>,
+    configurable: &[String],
     sp: Spacing,
 ) -> Vec<Element<'a, Message>> {
     producers
@@ -224,6 +229,20 @@ fn presence_rows<'a>(
             }
             r = r.push(iced::widget::space::horizontal());
             r = r.push(kit::muted(freshness));
+            // Only where the producer's slice declares RFC 05 §5.1
+            // procedures (#481): a link to a form nothing serves would be a
+            // promise this window cannot keep.
+            if configurable.iter().any(|c| c == producer) {
+                r = r.push(
+                    kit::secondary(kit::labelled(kit::Icon::Config, "configure"))
+                        .padding([0.0, sp.xs])
+                        .on_press(Message::Pane(PaneMsg::Config(
+                            crate::view::configure::ConfigMsg::Goto(
+                                crate::configure::ConfigTarget::new(origin, producer.as_str(), ""),
+                            ),
+                        ))),
+                );
+            }
             r.into()
         })
         .collect()
@@ -238,6 +257,7 @@ pub fn presence_section<'a>(
     roster: &'a NodeRoster,
     origin: &'a str,
     joined: Option<&NodeList>,
+    configurable: &[String],
     sp: Spacing,
 ) -> Element<'a, Message> {
     let Some((_, producers)) = roster.iter().find(|(o, _)| o.as_str() == origin) else {
@@ -249,7 +269,7 @@ pub fn presence_section<'a>(
         );
     };
     let mut col = column![].spacing(sp.xs);
-    for row in presence_rows(origin, producers, joined, sp) {
+    for row in presence_rows(origin, producers, joined, configurable, sp) {
         col = col.push(row);
     }
     col.into()
