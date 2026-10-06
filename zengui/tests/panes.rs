@@ -3976,3 +3976,103 @@ fn the_traffic_tab_never_reports_a_number_it_did_not_take() {
     );
     assert!(ui.find(REGISTERED).is_ok(), "the ranked key is on screen");
 }
+
+/// #481: the Config tool draws only what the producer served — every class
+/// in words, each value with its source and startup value, a pending change
+/// and the last one verbatim — and what the producer did not say is drawn
+/// as not said: a value not read back is *unknown*, a sensitive one
+/// *write-only*, and a sensitive value a producer wrongly sent never
+/// reaches the screen.
+#[test]
+fn the_config_tool_draws_the_served_schema_and_nothing_it_did_not_say() {
+    use std::time::Instant;
+    use zengui::configure::{ConfigForm, ConfigRead, ConfigTarget, Reply};
+    use zengui::view::configure::{ConfigData, pane};
+
+    let mut view = common::config_view();
+    // A producer that breaks the rule: the view must not repeat it.
+    view.groups[0].parameters[2].value = Some(zenkey::config::ParamValue::Text("hunter2".into()));
+    let target = ConfigTarget::new("h-3fa9c2d41b7e", "radio", "wlan0");
+    let form = ConfigForm {
+        target: target.clone(),
+        read: Some(ConfigRead {
+            reply: Reply::Document(Box::new(view)),
+            target,
+            at: Instant::now(),
+        }),
+        in_flight: None,
+    };
+    let mut ui = simulator::<Message, _, _>(pane(ConfigData {
+        form: &form,
+        producers: vec!["radio".into()],
+        origins: vec!["h-3fa9c2d41b7e".into()],
+        session: true,
+        sp: sp(),
+    }));
+    for words in [
+        "hot — applies at once",
+        "reach — can cut the link",
+        "contract — restart required",
+        "integer 1..=10000 packets",
+        "startup 1000",
+        "overlay",
+        "write-only",
+        "unknown",
+        "pending change",
+        "chg-2",
+        "on link — rolls back at 2026-10-05T12:00:00Z unless confirmed",
+        "LAST CHANGE",
+        "chg-1",
+    ] {
+        assert!(ui.find(words).is_ok(), "{words:?} must reach the screen");
+    }
+    assert!(
+        ui.find("hunter2").is_err(),
+        "a sensitive value is never drawn"
+    );
+}
+
+/// #481's empty states: never asked is not an empty configuration, silence
+/// is not a refusal, and a refusal carries the producer's words.
+#[test]
+fn the_config_tool_says_what_it_has_not_got() {
+    use std::time::Instant;
+    use zengui::configure::{ConfigForm, ConfigRead, ConfigTarget, Reply};
+
+    fn data(form: &ConfigForm, session: bool) -> iced_test::Simulator<'_, Message> {
+        simulator::<Message, _, _>(zengui::view::configure::pane(
+            zengui::view::configure::ConfigData {
+                form,
+                producers: vec![],
+                origins: vec![],
+                session,
+                sp: Spacing::default(),
+            },
+        ))
+    }
+    let form = ConfigForm::default();
+    assert!(data(&form, false).find("Not connected").is_ok());
+    assert!(data(&form, true).find("Not read yet").is_ok());
+
+    let target = ConfigTarget::new("h-a1b2c3d4e5f6", "radio", "eth9");
+    let landed = |reply| ConfigForm {
+        target: target.clone(),
+        read: Some(ConfigRead {
+            reply,
+            target: target.clone(),
+            at: Instant::now(),
+        }),
+        in_flight: None,
+    };
+    let silent = landed(Reply::Silent);
+    assert!(data(&silent, true).find("No reply").is_ok());
+    let refused = landed(Reply::Refused {
+        name: "error/not-found".into(),
+        message: "no resource eth9".into(),
+    });
+    assert!(
+        data(&refused, true)
+            .find("error/not-found — no resource eth9")
+            .is_ok()
+    );
+}

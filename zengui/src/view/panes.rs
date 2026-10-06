@@ -235,6 +235,7 @@ pub(crate) fn tool_icon(p: RightPane) -> kit::Icon {
         RightPane::Nodes => kit::Icon::Nodes,
         RightPane::Admin => kit::Icon::Admin,
         RightPane::Mesh => kit::Icon::Mesh,
+        RightPane::Config => kit::Icon::Config,
         RightPane::Inspector => kit::Icon::Inspector,
     }
 }
@@ -417,6 +418,19 @@ fn workbench<'a>(
         }),
         RightPane::Admin => view::admin::pane(&work.verdicts.admin, sp),
         RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
+        RightPane::Config => {
+            let form = &work.bench.config_form;
+            view::configure::pane(view::configure::ConfigData {
+                form,
+                producers: crate::configure::producers(dep.slices.as_deref()),
+                origins: crate::configure::origins(
+                    &work.verdicts.roster,
+                    form.target.producer.trim(),
+                ),
+                session: dep.session.is_some(),
+                sp,
+            })
+        }
         // Unreachable by construction — `PaneSelected(Inspector)` restores
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and

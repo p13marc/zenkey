@@ -77,6 +77,14 @@ pub const ALL: &[Scene] = &[
         build: workbench_mesh,
         landmark: "drag to pan · scroll to zoom · right-click resets",
     },
+    // The Config tool (#481), a read-back on screen: a change pending on
+    // the reach group, the last one on the hot group.
+    Scene {
+        name: "workbench-config",
+        size: DESKTOP,
+        build: workbench_config,
+        landmark: "reach — can cut the link",
+    },
     Scene {
         name: "traffic",
         size: DESKTOP,
@@ -403,6 +411,50 @@ fn workbench_mesh(theme: ThemeChoice) -> Zengui {
     send(
         &mut app,
         Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Mesh)),
+    );
+    app
+}
+
+fn workbench_config(theme: ThemeChoice) -> Zengui {
+    use zengui::configure::{ConfigAct, ConfigTarget};
+    use zengui::view::configure::ConfigMsg;
+    use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport};
+
+    let mut app = live(prefs(theme));
+    preset(&mut app, LayoutPreset::Diagnose);
+    send(
+        &mut app,
+        Message::Workspace(WorkspaceMsg::PaneSelected(RightPane::Config)),
+    );
+    // The target as the form holds it when the read lands — `Open` would
+    // also send the read, and its task is never run here.
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Config(ConfigMsg::Open(ConfigTarget::new(
+            "h-3fa9c2d41b7e",
+            "radio",
+            "wlan0",
+        )))),
+    );
+    let view = super::config_view();
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Config(ConfigMsg::Answered(
+            ConfigAct::Read,
+            Ok(Arc::new(CallReport {
+                key: "v1/h-3fa9c2d41b7e/@rpc/radio/config/wlan0".into(),
+                timeout_s: 5.0,
+                answers: vec![CallAnswer {
+                    origin: "h-3fa9c2d41b7e".into(),
+                    outcome: CallOutcome::Ok {
+                        value: Some(serde_json::to_value(&view).expect("a view serializes")),
+                        text: None,
+                    },
+                    attachment: None,
+                    attachment_bytes: None,
+                }],
+            })),
+        ))),
     );
     app
 }

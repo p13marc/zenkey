@@ -58,6 +58,7 @@ send
 server
 settings
 share-2
+sliders-horizontal
 square
 square-arrow-out-up-right
 stethoscope
