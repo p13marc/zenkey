@@ -780,6 +780,14 @@ async fn config_set_is_pending_and_confirm_applies_it() {
 
     let run = config_write(&bus, &["confirm", HOST, PRODUCER, "wlan0", &token]).await;
     exits(&run, 0);
+    // `confirm` answers with the read-back (RFC 05 §5.1, v1.47), drawn as
+    // the document it is — not as a generic call reply (#560).
+    assert_eq!(run.rows("parameter").len(), 4, "{run}");
+    assert_eq!(
+        run.rows("last_change")[0]["token"],
+        json!(token),
+        "a confirmed change is the last change (RFC v1.50)\n{run}"
+    );
     let after = config_get(&bus).await;
     assert!(
         pending(&after).is_none(),
@@ -871,6 +879,123 @@ async fn config_persist_writes_the_persisted_layer() {
     assert_eq!(
         [&q["value"], &q["source"]],
         [&json!(2500), &json!("overlay")]
+    );
+}
+
+/// `set --token` joins the pending change (RFC 05 §5.1, v1.50): a reach
+/// group rides the hot group's window, both are pending as one change, and
+/// one `cancel` undoes both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_set_with_a_token_joins_the_pending_change() {
+    let bus = Bus::up().await;
+    config_get(&bus).await;
+    let (_, token) = set_pending(&bus, "tx_queue_len=1800", "600", "live-join-1").await;
+
+    let joined = config_write(
+        &bus,
+        &[
+            "set",
+            HOST,
+            PRODUCER,
+            "wlan0",
+            "link",
+            "ssid=field",
+            "--token",
+            &token,
+            "--yes",
+            "--idempotency-key",
+            "live-join-2",
+        ],
+    )
+    .await;
+    exits(&joined, 0);
+    let during = config_get(&bus).await;
+    let p = pending(&during).expect("still pending");
+    assert_eq!(
+        [&p["token"], &p["groups"]],
+        [&json!(token), &json!(["queue", "link"])],
+        "{during}"
+    );
+    assert_eq!(param(&during, "ssid")["value"], json!("field"), "{during}");
+
+    let run = config_write(&bus, &["cancel", HOST, PRODUCER, "wlan0", &token]).await;
+    exits(&run, 0);
+    let after = config_get(&bus).await;
+    assert!(pending(&after).is_none(), "{after}");
+    assert_eq!(param(&after, "ssid")["value"], json!("lab"), "{after}");
+    assert_eq!(
+        param(&after, "tx_queue_len")["value"],
+        json!(1000),
+        "{after}"
+    );
+}
+
+/// `--token` and `--confirm` together are a usage error: a joining change
+/// takes the pending change's window, never its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_set_refuses_a_token_with_a_window_of_its_own() {
+    let bus = Bus::up().await;
+    // Refused by the parser, before a session opens: one run decides it.
+    let run = bus
+        .until(
+            &[
+                "config",
+                "set",
+                HOST,
+                PRODUCER,
+                "wlan0",
+                "queue",
+                "fq=true",
+                "--token",
+                "chg-1",
+                "--confirm",
+                "60",
+            ],
+            |_| true,
+        )
+        .await;
+    exits(&run, 2);
+    assert!(run.stderr.contains("cannot be used with"), "{run}");
+}
+
+/// `persist` with no token takes the read-back's `last_change` (RFC v1.50):
+/// the way a change made without a window survives a restart.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn config_persist_without_a_token_takes_the_last_change() {
+    let bus = Bus::up().await;
+    config_get(&bus).await;
+    let set = config_write(
+        &bus,
+        &[
+            "set",
+            HOST,
+            PRODUCER,
+            "wlan0",
+            "queue",
+            "tx_queue_len=1700",
+            "--idempotency-key",
+            "live-last",
+        ],
+    )
+    .await;
+    exits(&set, 0);
+    let last = set.rows("last_change");
+    assert_eq!(last.len(), 1, "a windowless change is named\n{set}");
+    assert_eq!(last[0]["groups"], json!(["queue"]), "{set}");
+
+    let run = config_write(&bus, &["persist", HOST, PRODUCER, "wlan0"]).await;
+    exits(&run, 0);
+    assert!(
+        run.stderr.contains(&format!(
+            "persisting last_change {}",
+            last[0]["token"].as_str().unwrap()
+        )),
+        "{run}"
+    );
+    let q = param(&run, "tx_queue_len");
+    assert_eq!(
+        [&q["value"], &q["source"]],
+        [&json!(1700), &json!("overlay")]
     );
 }
 

@@ -25,7 +25,9 @@ use zenkey_fleet::report::{CallOutcome, CallReport};
 use zenkey_fleet::{CallSpec, CallTarget};
 
 use crate::Bus;
-use crate::cli::{ConfigExtendArgs, ConfigGetArgs, ConfigSetArgs, ConfigTokenArgs};
+use crate::cli::{
+    ConfigExtendArgs, ConfigGetArgs, ConfigPersistArgs, ConfigSetArgs, ConfigTokenArgs,
+};
 use crate::exit::unaskable;
 use crate::render::{ConfigDocument, ConfigReport};
 
@@ -106,6 +108,14 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
     change.idempotency_key = cli.idempotency_key.clone();
     change.dry_run = cli.dry_run;
     change.confirm_s = cli.confirm;
+    change.token = cli.token.clone();
+    // The window this change is sent under: its own, or the pending
+    // change's it joins (RFC v1.50).
+    let window = match (&cli.token, cli.confirm) {
+        (Some(token), _) => Window::Joining(token.clone()),
+        (None, Some(s)) => Window::Secs(s),
+        (None, None) => Window::Secs(0),
+    };
 
     if let Some(view) = &view {
         // The producer's validator, run here with the producer's words: a
@@ -117,13 +127,7 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
             .map_err(|e| unaskable!("{e}"))?;
         let class = view.group(&cli.group).map(|g| g.class);
         if class == Some(ParamClass::Reach) && !cli.dry_run {
-            consent(
-                &cli.origin,
-                &cli.group,
-                Reach::Declared,
-                cli.confirm.unwrap_or(0),
-                cli.yes,
-            )?;
+            consent(&cli.origin, &cli.group, Reach::Declared, &window, cli.yes)?;
         }
     } else if !cli.dry_run {
         // No schema, so the class is unknown — and RFC 05 §5.1 makes the
@@ -136,8 +140,10 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
         // validation — `--no-validate`, or a read-back that met silence —
         // was the one that asked nothing. A dry run touches nothing either
         // way.
-        match cli.confirm {
-            Some(window) => consent(
+        // A token joins a change that has a window, so it is shaped like a
+        // reach change exactly as `--confirm` is (RFC v1.50).
+        if cli.confirm.is_some() || cli.token.is_some() {
+            consent(
                 &cli.origin,
                 &cli.group,
                 Reach::Unestablished(if cli.no_validate {
@@ -145,12 +151,11 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
                 } else {
                     "no read-back document was served"
                 }),
-                window,
+                &window,
                 cli.yes,
-            )?,
-            None => {
-                eprintln!("note: no `--confirm`: a reach group will refuse this (RFC 05 §5.1)")
-            }
+            )?;
+        } else {
+            eprintln!("note: no `--confirm`: a reach group will refuse this (RFC 05 §5.1)");
         }
     }
 
@@ -182,10 +187,69 @@ pub async fn cancel(cli: ConfigTokenArgs) -> Result<()> {
     control(cli, "cancel", None).await
 }
 
-/// `config persist`: write a confirmed change into the producer's persisted
-/// layer — its own key, its own grant (RFC 05 §5.1).
-pub async fn persist(cli: ConfigTokenArgs) -> Result<()> {
-    control(cli, "persist", None).await
+/// `config persist`: write a change into the producer's persisted layer —
+/// its own key, its own grant (RFC 05 §5.1). With no token, the read-back's
+/// `last_change` (v1.50): how a change made without a window survives a
+/// restart. Never the pending change by default — persisting what is not
+/// yet confirmed is a decision, so it takes its token.
+pub async fn persist(cli: ConfigPersistArgs) -> Result<()> {
+    let ConfigPersistArgs {
+        origin,
+        producer,
+        resource,
+        token,
+        bus,
+    } = cli;
+    let token = match token {
+        Some(token) => token,
+        None => {
+            let b = Bus::resolve(&bus)?;
+            let target = one_origin(&origin)?;
+            let view = read_back(&b, &target, &producer, &resource)
+                .await?
+                .ok_or_else(|| {
+                    unaskable!(
+                        "no token given, and {origin} served no read-back to take \
+                         `last_change` from — name the change's token"
+                    )
+                })?;
+            match (view.last_change, view.pending) {
+                (Some(last), _) => {
+                    eprintln!(
+                        "note: persisting last_change {} ({})",
+                        last.token,
+                        last.groups.join(", ")
+                    );
+                    last.token
+                }
+                (None, Some(p)) => {
+                    return Err(unaskable!(
+                        "the read-back names no last_change, and change {} is pending — \
+                         confirm it first, or persist it by its token",
+                        p.token
+                    ));
+                }
+                (None, None) => {
+                    return Err(unaskable!(
+                        "the read-back names no last_change: nothing has been changed at \
+                         runtime to persist (RFC 05 §5.1)"
+                    ));
+                }
+            }
+        }
+    };
+    control(
+        ConfigTokenArgs {
+            origin,
+            producer,
+            resource,
+            token,
+            bus,
+        },
+        "persist",
+        None,
+    )
+    .await
 }
 
 /// `config extend`: move a pending change's deadline.
@@ -203,7 +267,9 @@ async fn control(cli: ConfigTokenArgs, verb: &str, confirm_s: Option<u64>) -> Re
     let path = format!("config/{}/{verb}", cli.resource);
     let report = call(&bus, &target, &cli.producer, &path, Some(body), &[]).await?;
     let code = report.exit_code();
-    crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
+    // Each answers with the read-back after the act (RFC 05 §5.1, v1.47):
+    // drawn as the document it is, like `get`'s.
+    emit_read_back(&bus, report)?;
     exit(code)
 }
 
@@ -338,6 +404,26 @@ fn names<'a>(it: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
+/// The window a change is sent under, as the consent prompt names it.
+#[derive(Debug, Clone)]
+enum Window {
+    /// Its own `--confirm`.
+    Secs(u64),
+    /// The pending change's, which it joins (`--token`, RFC v1.50).
+    Joining(String),
+}
+
+impl Window {
+    fn phrase(&self) -> String {
+        match self {
+            Window::Secs(s) => format!("with a {s}s rollback window"),
+            Window::Joining(token) => {
+                format!("under pending change {token}'s rollback window")
+            }
+        }
+    }
+}
+
 /// Why a change needs a person's yes.
 #[derive(Debug, Clone, Copy)]
 enum Reach {
@@ -355,7 +441,8 @@ impl Reach {
             Reach::Declared => format!("group {group:?} is reach: it can cut the link to {origin}"),
             Reach::Unestablished(why) => format!(
                 "the class of group {group:?} could not be established ({why}), and a change \
-                 with --confirm is how a reach group is changed: it may cut the link to {origin}"
+                 with a window — --confirm, or --token joining one — is how a reach group is \
+                 changed: it may cut the link to {origin}"
             ),
         }
     }
@@ -365,7 +452,7 @@ impl Reach {
 /// with `--yes` from a script that has decided. Not at a terminal and not
 /// told: refused, as this tool's own refusal (exit 2) — never silently
 /// sent, never silently dropped.
-fn consent(origin: &str, group: &str, reach: Reach, window_s: u64, yes: bool) -> Result<()> {
+fn consent(origin: &str, group: &str, reach: Reach, window: &Window, yes: bool) -> Result<()> {
     if yes {
         return Ok(());
     }
@@ -376,8 +463,8 @@ fn consent(origin: &str, group: &str, reach: Reach, window_s: u64, yes: bool) ->
         ));
     }
     eprint!(
-        "{claim}. Apply with a {window_s}s rollback window, then confirm over the new link? \
-         [y/N] "
+        "{claim}. Apply {}, then confirm over the new link? [y/N] ",
+        window.phrase()
     );
     let mut line = String::new();
     std::io::stdin().read_line(&mut line)?;

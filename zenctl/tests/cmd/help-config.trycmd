@@ -15,7 +15,7 @@ Commands:
   confirm  Make a pending change permanent (on-bus)
   cancel   Undo a pending change now (on-bus)
   extend   Move a pending change's deadline (on-bus)
-  persist  Write a confirmed change into the producer's persisted configuration
+  persist  Write a change into the producer's persisted configuration
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -103,7 +103,7 @@ Options:
 $ zenctl config set --help
 Change one group of a resource, typed against the served schema (on-bus).
 
-The read-back is fetched first, so a value is read as the kind the producer declares and refused here — in the producer's own words — when the producer would refuse it. A `reach` group needs `--confirm` and a yes; a `contract` group is refused with the restart named.
+The read-back is fetched first, so a value is read as the kind the producer declares and refused here — in the producer's own words — when the producer would refuse it. A `reach` group needs `--confirm` — or `--token`, joining a pending change that has a window — and a yes; a `contract` group is refused with the restart named.
 
 Usage: zenctl config set [OPTIONS] <ORIGIN> <PRODUCER> <RESOURCE> <GROUP> <NAME=VALUE>...
 
@@ -128,7 +128,10 @@ Options:
           Validate and report what would change, without touching the device
 
       --confirm <SECS>
-          Arm a rollback: the change is undone after SECS unless confirmed. Required for a `reach` group
+          Arm a rollback: the change is undone after SECS unless confirmed. Required for a `reach` group, unless --token joins a change that has one
+
+      --token <TOKEN>
+          Join the pending change named by TOKEN (RFC 05 §5.1, v1.50): this group is applied under that change's window and confirmed, cancelled or rolled back with it — so it takes no --confirm of its own
 
       --expect-revision <N>
           Refuse the change if the document's revision has moved past this
@@ -143,7 +146,7 @@ Options:
           A request id for the change event's record, likewise claimed
 
       --yes
-          Send a `reach` change without being asked (for a script that has decided) — or a --confirm change to a group whose class no read-back established, which may be one
+          Send a `reach` change without being asked (for a script that has decided) — or a --confirm or --token change to a group whose class no read-back established, which may be one
 
       --no-validate
           Skip the read-back: values ride by their spelling and the producer judges the rest. With --confirm, the group may be reach, so --yes (or a terminal's yes) is asked for
@@ -449,11 +452,11 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl config persist --help
-Write a confirmed change into the producer's persisted configuration.
+Write a change into the producer's persisted configuration.
 
 Its own key, so an ACL grants it apart from the change (on-bus).
 
-Usage: zenctl config persist [OPTIONS] <ORIGIN> <PRODUCER> <RESOURCE> <TOKEN>
+Usage: zenctl config persist [OPTIONS] <ORIGIN> <PRODUCER> <RESOURCE> [TOKEN]
 
 Arguments:
   <ORIGIN>
@@ -465,8 +468,8 @@ Arguments:
   <RESOURCE>
           The resource the change is on
 
-  <TOKEN>
-          The change's token, as `set` answered it
+  [TOKEN]
+          The change's token: the pending change's, or `last_change`'s. Omitted, the read-back's `last_change` is persisted — the way a change made without a window survives a restart
 
 Options:
       --base <BASE>

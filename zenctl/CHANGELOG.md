@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased — config speaks RFC v1.50
+
+The configuration verbs catch up with RFC 05 §5.1 v1.50 (marcpardo/zenkey#518,
+#560). One argument became optional; nothing that worked before stops.
+
+| Invocation | Before | Now |
+|---|---|---|
+| `config set … --token T` | unknown flag (exit 2) | joins pending change `T`: the group rides its window and is confirmed, cancelled or rolled back with it; a reach group still asks for a yes, the prompt naming the window it joins |
+| `config set … --token T --confirm S` | — | exit 2: a joining change takes the pending change's window |
+| `config persist <o> <p> <r>` (no token) | exit 2: `<TOKEN>` required | persists the read-back's `last_change`, and says which on stderr; exit 2 when there is none (naming a pending change, if one is waiting to be confirmed) |
+| `config confirm`/`cancel`/`extend`/`persist` output | the reply drawn as a generic call reply (JSON in the table) | the read-back after the act, drawn as `config get` draws it — `parameter` rows, `pending` and `last_change` rows in NDJSON |
+| `config get`, `config set` | — | a `last_change` row (NDJSON) and `last change <token> on <groups>` on the table's head line, when the producer serves one |
+
 ## Unreleased — user principals, and principals on a face
 
 For a per-operator write grant on a constrained face (marcpardo/zenkey#529,
