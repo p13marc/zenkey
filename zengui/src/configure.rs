@@ -11,10 +11,11 @@
 //! as what it is rather than coerced into one — so the tool is as useful
 //! against a producer this build has never heard of as against the double.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use zenkey::config::{ConfigView, ParamClass, ParamKind};
+use zenkey::config::{ConfigChange, ConfigView, Edit, ParamClass, ParamKind, ParamValue};
 use zenkey_fleet::SliceSet;
 use zenkey_fleet::report::{CallOutcome, CallReport};
 
@@ -63,6 +64,11 @@ impl ConfigTarget {
     /// The read procedure, under `@rpc/<producer>/`.
     pub fn read_path(&self) -> String {
         format!("config/{}", self.resource.trim())
+    }
+
+    /// One group's write procedure.
+    pub fn set_path(&self, group: &str) -> String {
+        format!("config/{}/{group}/set", self.resource.trim())
     }
 }
 
@@ -120,9 +126,34 @@ pub struct ConfigRead {
 }
 
 /// What the form is waiting on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigAct {
     Read,
+    /// A group's change, sent.
+    Set(String),
+    /// A group's change as a dry run: what would change, nothing touched.
+    Preview(String),
+}
+
+/// A parameter's address: `(group, parameter)`.
+pub type Slot = (String, String);
+
+/// What the last write to a group came to — said under the group, in the
+/// producer's words where it gave any.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroupNote {
+    /// The change applied; the read-back on screen is the one it answered.
+    Applied { revision: u64 },
+    /// A dry run's report: what would change.
+    Preview(Vec<Edit>),
+    /// The producer refused, or the call failed: why.
+    Refused(String),
+    /// Nothing answered: whether it applied is unknown. The retry carries
+    /// the same idempotency key, so the producer answers it once.
+    Unknown,
+    /// The document had moved under the edit; it was read again and the
+    /// draft kept.
+    Moved,
 }
 
 /// The Config tool's state (#481), in the workbench: what the user typed
@@ -136,6 +167,15 @@ pub struct ConfigForm {
     pub read: Option<ConfigRead>,
     /// A call in flight, by act.
     pub in_flight: Option<ConfigAct>,
+    /// What the user typed, per parameter — kept across reads, so a re-read
+    /// after a moved revision does not throw an edit away.
+    pub drafts: BTreeMap<Slot, String>,
+    /// The last write's outcome, per group.
+    pub notes: BTreeMap<String, GroupNote>,
+    /// The idempotency key of a group's change whose outcome is unknown —
+    /// reused by the retry, so a lost reply never becomes a doubled write
+    /// (RFC 05 §5.1). Dropped once an answer is known.
+    pub keys: BTreeMap<String, String>,
 }
 
 impl ConfigForm {
@@ -152,6 +192,78 @@ impl ConfigForm {
     pub fn stale(&self) -> bool {
         self.read.as_ref().is_some_and(|r| r.target != self.target)
     }
+}
+
+/// A value as a person types it: text bare, everything else as displayed —
+/// what a draft is compared against.
+pub fn plain(v: &ParamValue) -> String {
+    match v {
+        ParamValue::Text(t) => t.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether a group's class lets this tool write it at all: `hot` and
+/// `reach`. A `contract` group is changed in the producer's startup
+/// configuration, and a class this build does not know is read-only.
+pub fn writable(class: ParamClass) -> bool {
+    matches!(class, ParamClass::Hot | ParamClass::Reach)
+}
+
+/// The change a group's drafts make (#481): the parameters whose draft
+/// differs from the running value — any non-empty draft of a sensitive one,
+/// whose running value is never shown — each typed against its declared
+/// kind. A draft that does not parse is that field's error, by name.
+pub fn change_of(
+    view: &ConfigView,
+    group: &str,
+    drafts: &BTreeMap<Slot, String>,
+) -> Result<ConfigChange, Vec<(String, String)>> {
+    let Some(g) = view.group(group) else {
+        return Ok(ConfigChange::default());
+    };
+    let mut values = Vec::new();
+    let mut errors = Vec::new();
+    for p in &g.parameters {
+        let Some(text) = drafts.get(&(group.to_string(), p.spec.name.clone())) else {
+            continue;
+        };
+        if p.spec.sensitive {
+            if text.is_empty() {
+                continue;
+            }
+        } else if p.value.as_ref().map(plain).as_deref() == Some(text.as_str()) {
+            continue;
+        }
+        match ParamValue::parse_as(&p.spec.kind, text) {
+            Ok(v) => values.push((p.spec.name.clone(), v)),
+            Err(why) => errors.push((p.spec.name.clone(), why)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(ConfigChange::of(values))
+    } else {
+        Err(errors)
+    }
+}
+
+/// A dry run's reply (RFC 05 §5.1): the edits it would make.
+pub fn preview_edits(text: &str) -> Option<Vec<Edit>> {
+    #[derive(serde::Deserialize)]
+    struct DryRun {
+        edits: Vec<Edit>,
+    }
+    serde_json::from_str::<DryRun>(text).ok().map(|d| d.edits)
+}
+
+/// A fresh idempotency key: unique per change this process sends.
+pub fn fresh_key() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!("zengui-{nanos:x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Producers whose slice declares a `config/…` procedure — the picker's
@@ -266,6 +378,48 @@ mod tests {
             text: None,
         }));
         assert!(matches!(classify(&other), Reply::Other(_)));
+    }
+
+    /// #481: only what changed is sent, typed against the declared kind; a
+    /// draft that does not parse is that field's error; a sensitive draft is
+    /// sent whenever it is not empty.
+    #[test]
+    fn a_change_carries_what_changed_typed_by_its_kind() {
+        use zenkey::config::{ConfigGroup, ConfigSchema, ParamSpec};
+        let schema = ConfigSchema::new().with(
+            ConfigGroup::new("queue", ParamClass::Hot, "q")
+                .with(ParamSpec::new(
+                    "len",
+                    ParamKind::Integer {
+                        min: Some(1),
+                        max: None,
+                        unit: None,
+                    },
+                    "l",
+                ))
+                .with(ParamSpec::new("fq", ParamKind::Bool, "f"))
+                .with(ParamSpec::new("psk", ParamKind::Text, "k").sensitive()),
+        );
+        let mut view = ConfigView::of("wlan0", &schema);
+        view.groups[0].parameters[0].value = Some(ParamValue::Integer(1000));
+        view.groups[0].parameters[1].value = Some(ParamValue::Bool(false));
+        let slot = |p: &str| ("queue".to_string(), p.to_string());
+        let mut drafts = BTreeMap::new();
+        drafts.insert(slot("len"), "1000".to_string());
+        drafts.insert(slot("fq"), "true".to_string());
+        drafts.insert(slot("psk"), String::new());
+        let change = change_of(&view, "queue", &drafts).unwrap();
+        assert_eq!(
+            change.values.into_iter().collect::<Vec<_>>(),
+            [("fq".to_string(), ParamValue::Bool(true))],
+            "an unchanged value and an empty secret are not sent"
+        );
+        drafts.insert(slot("len"), "lots".to_string());
+        drafts.insert(slot("psk"), "s3cret".to_string());
+        let errors = change_of(&view, "queue", &drafts).unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].0, "len");
+        assert!(fresh_key() != fresh_key());
     }
 
     #[test]
