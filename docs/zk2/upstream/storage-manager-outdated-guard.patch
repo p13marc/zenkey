@@ -1,0 +1,22 @@
+--- a/plugins/zenoh-plugin-storage-manager/src/storages_mgt/service.rs	2006-07-24 01:21:28.000000000 +0000
++++ b/plugins/zenoh-plugin-storage-manager/src/storages_mgt/service.rs	2026-10-07 22:42:23.990979595 +0000
+@@ -515,6 +515,9 @@
+             if new_event.timestamp > event.timestamp {
+                 return Some(cache_guard);
+             }
++            // zk2 spike patch (#601): the cache holds a newer (or equal) event
++            // for this key, e.g. a delete; the older one is outdated.
++            return None;
+         }
+ 
+         if let Some(replication_log) = &self.cache_latest.replication_log {
+@@ -704,7 +707,8 @@
+             latest_updates
+                 .write()
+                 .await
+-                .retain(|_, event| event.timestamp().get_time() < &time_limit);
++                // zk2 spike patch (#601): keep the events newer than the limit.
++                .retain(|_, event| event.timestamp().get_time() >= &time_limit);
+         }
+ 
+         tracing::trace!("End garbage collection of obsolete data-infos");

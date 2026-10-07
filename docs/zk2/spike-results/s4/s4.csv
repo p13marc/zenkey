@@ -1,0 +1,10 @@
+unix_s,zenoh,case,accepted,bad_accepted,attempts,replies,invalid,bytes,accept_ms,complete_ms,expected,pass
+1791411230,1.10.1,"one holder (camera.v1, 1.7 KB)",true,false,1,1,0,1761,1.0,1.1,accepted on attempt 1,true
+1791411230,1.10.1,"200 equal holders, BestMatching",true,false,1,1,0,1761,5.1,5.2,"accepted, exactly 1 reply",true
+1791411230,1.10.1,"200 equal holders, target All (for comparison)",true,false,1,200,0,352200,6.9,6.9,200 replies,true
+1791411230,1.10.1,a slow nearest holder (3 s); 3 good behind router 2,true,false,1,2,0,1761,1.3,1001.7,accepted (by the retry if the nearest is chosen); bad never accepted,true
+1791411230,1.10.1,a corrupt nearest holder; 3 good behind router 2,true,false,1,2,1,3522,1.5,1.5,accepted (by the retry if the nearest is chosen); bad never accepted,true
+1791411230,1.10.1,an unreachable nearest holder (SIGSTOP after convergence; warm fetch 0.9 ms); 3 good behind router 2,true,false,1,2,0,1761,1.1,1001.0,accepted by the retry,true
+1791411230,1.10.1,every holder corrupt (3),false,false,2,4,4,7044,11.7,11.7,unavailable after the retry; never accepted,true
+1791411230,1.10.1,the holder three routers away,true,false,1,1,0,1761,1.4,1.4,accepted on attempt 1,true
+1791411230,1.10.1,a constrained nearest holder (4 KB limit) for zs.sysinfo.v1 (83688 B); a gateway holder behind router 2,true,false,1,1,0,83688,6.4,8.7,accepted from the gateway,true

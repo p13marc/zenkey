@@ -30,27 +30,27 @@ sections below.
 | Item | Question | Lean (r3.3) | Spike | Verdict |
 |---|---|---|---|---|
 | Grammar | `zk2/` keys, kind tokens, namespaces, zenoh-ext | r3.3 §3.1 | S1 | **holds** (#597); one r3.2 §3.2 sentence corrected |
-| U-A | P3 or P2 for control and commanding | **Decided: P3** | S10, S11, S12 | **confirmed by S10 and S11** (#593, #594); S12 pending |
+| U-A | P3 or P2 for control and commanding | **Decided: P3** | S10, S11, S12 | **confirmed** by S10, S11 and S12 |
 | U-D | `@stream` as a kind token | Token | S3, S9 | S9: **no measurable cost**; S3 pending |
 | U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | **defaults hold**; `real_time` + express lost 0.6–4 % at 1–5 kHz with no gain, so express stays opt-in (S9) |
 | U-F | Decodability: two blessed kinds + others | As in §3.9 | S9 | **holds**: protobuf 126 ns, JSON 0.9 µs per message; raw over SHM for frames |
-| U-G | Many-reply operations in the core | Yes (O6) | S6 | pending |
-| U1 | State: producer + storage merged by timestamp | Merge | S5 | pending |
-| U2 | Clock discipline | HLC MUST + hold writes past the last stored timestamp | S5 | pending |
-| U3 | Tombstone window | Core default, annotation override | S5 | pending |
-| U4 | `complete` operation queryables | Keep | S6 | pending |
+| U-G | Many-reply operations in the core | Yes (O6) | S6 | **holds**; consolidation `None` is necessary (`Latest` keeps 1 of 10) |
+| U1 | State: producer + storage merged by timestamp | Merge | S5, S12 | **not met**: 10 of 42 wrong (4 from a storage-manager bug). Recommend an owner-authoritative GET, storage as `archive.v1`, and the upstream fix |
+| U2 | Clock discipline | HLC MUST + hold writes past the last stored timestamp | S5, S12 | **catch-up confirmed**; add a bound on clocks *ahead* (S12) |
+| U3 | Tombstone window | Core default, annotation override | S5 | 60 s default, with replication required for storages on state; ~100 B per tombstone |
+| U4 | `complete` operation queryables | Keep | S6 | keep `complete`, but **O1 is not at-most-once across routers**: reword it |
 | U5 | Token layout | Instance + interface tokens | S2 | pending |
 | U6 | Mandatory one-chunk `system` | Keep | S8 | on paper: holds ([`examples/zk2/shapes.md`](../../examples/zk2/shapes.md), #604) |
 | U7 | Bundle stability | Build once, embed, retention rule | S7 | pending |
-| U10 | Large collections | No paging in the core | S5 | pending |
+| U10 | Large collections | No paging in the core | S5 | **holds** to 100k keys (248–390 ms) |
 | U11 | Descriptor dynamics | Put + GET | S2 | pending |
-| U12 | Redundancy | Diagnose only | S6 | pending |
+| U12 | Redundancy | Diagnose only | S6 | **diagnose** (the token check) **and delegate** to `redundancy.v1` |
 | U13 | A constrained conformance level | Define it | S15 | pending |
 | U14 | `default_permission: deny` as a MUST | SHOULD | S14 | pending |
-| U15 | The storage-manager position | With U1 | S5 | pending |
-| U16, U19 | The `events` kind token | Yes (D3) | S5 | pending |
+| U15 | The storage-manager position | With U1 | S5 | **require a fixed version** (draft upstream report) |
+| U16, U19 | The `events` kind token | Yes (D3) | S5 | union replay works; the `retention` bound needs a time-series backend |
 | U18 | Device-as-service at SNMP scale | Device-as-service | S2 | pending |
-| U20 | `@state` for large populations | Yes (D3) | S2, S5 | pending |
+| U20 | `@state` for large populations | Yes (D3) | S2, S5 | S5: **confirmed** at 50k and 100k; S2 pending |
 | U21 | Allow rules under `default_permission: allow` | Not evaluated; compile to denies | S14 | pending |
 
 ## Harness (#591)
@@ -277,11 +277,49 @@ processes at the contract's 50 Hz, with its QoS. Raw data:
 cases, completes the evidence.
 
 ### S12 — store-and-forward (#595)
-*Pending. Runs with S5 (#601)*, as the issue requires: delete handling
-depends on the storage manager's tombstone findings. The matrix is
-`desired.v1` across a disconnect and a router restart, with storage on the
-ground and on the vehicle, and clock skew. Measures: convergence time,
-stale-command rejection, wrong answers. Decides U-A, U1, U2.
+
+**Verdict: store-and-forward converges, with zero stale plans applied.**
+- After the link heals, the vehicle converges in **1.4–1.6 s**: for one
+  change, for ten changes, and for a delete.
+- The two wrong answers are clock cases. U2's catch-up fixes the first;
+  the second needs a bound on clocks that run *ahead*.
+
+`spike s12`: `ground/fleet-mgr` owns `state plans/{vehicle}`, and
+`vehicle-01/executor` binds `{vehicle} = self`. The vehicle's router
+reaches the ground through a proxy, and cutting it takes the vehicle
+offline. The executor applies a plan only if its timestamp is newer
+(stale-command rejection). It re-reads on the fleet manager's presence and
+every 2 s (R7), and reports its observed revision on its own state key.
+There are two variants: storage on the ground, and storage on the vehicle.
+Each was run with the stock and with the patched storage manager (see S5).
+Raw data: [`spike-results/s12/`](spike-results/s12/),
+[`spike-results/s12-patched/`](spike-results/s12-patched/).
+
+| Phase | Result (both variants, stock and patched alike) |
+|---|---|
+| Offline: plan changed once / 10 times / deleted, then the link heals | Converged in 1,587 / 1,397 / 1,588 ms; the ground saw the observed revision 1.7–1.9 s after the heal |
+| Back online, then the executor restarts | Converged in 11 ms and 0 ms |
+| The fleet manager restarts 5 s behind, naive | **WRONG**: rev14 rejected as stale; never converged |
+| The same, with U2's catch-up | Converged in 11 ms |
+| A fleet manager 2 s ahead writes rev16, which a GET reads back at +2 s; 0.5 s later a right-clocked writer writes rev17 | **WRONG**: rev17 rejected as stale; the executor stays on rev16 until a write after the skew has passed (rev18: 11 ms) |
+| Stale revisions applied over the whole run | **0** |
+
+**What the numbers say:**
+- **The owner's presence decides.** With the fleet manager present, its
+  replies (and its tombstone) beat any storage, so the storage-manager bug
+  of S5 never surfaced: stock and patched results agree.
+- **A clock ahead is as harmful as a clock behind.** A router re-stamps a
+  future-dated *put*, but not a GET *reply*. The same revision therefore
+  carries two timestamps, and the future one makes the next right-clocked
+  write look stale.
+
+**For r4:**
+- **U2** must bound skew both ways. A producer never stamps at or below
+  the last stored timestamp (the catch-up), and never runs ahead of its
+  router's HLC delta. The runtime can detect the second by comparing its own
+  stamps with the router-stamped samples it receives.
+- **U-A:** P3 holds for store-and-forward. The executor's binding
+  `{vehicle} = self` is configuration.
 
 ### S13 — simulation and replay (#596)
 
@@ -373,16 +411,179 @@ Decides U5, U11, U18, U20.
 presence replay, descriptor and bundle fetch, time to first view.
 
 ### S4 — contract serving (#600)
-*Pending.* One, many, slow, unreachable and corrupt holders.
+
+**Verdict: the retrieval rule holds, with one change for r4.** Accept the
+first valid reply *as it arrives*. A client that waits for the GET to
+complete pays the full timeout whenever a routed holder is slow or
+unreachable. No bad hash was ever accepted.
+
+`spike s4`: holders in four modes (ok, slow, corrupt, and small-only, a
+constrained holder that cannot send more than 4 KB). The nearest holder sits on
+the client's router, the others behind a second one. The per-attempt timeout
+is 1 s. Raw data: [`spike-results/s4/`](spike-results/s4/).
+
+| Case | Accepted | Replies (invalid) | First valid | GET complete |
+|---|---|---|---|---|
+| One holder (`camera.v1`, 1,761 B) | yes, attempt 1 | 1 | 1.0 ms | 1.1 ms |
+| 200 equal holders, `BestMatching` | yes, attempt 1 | **1** | 5.1 ms | 5.2 ms |
+| 200 equal holders, `All` (for comparison) | yes | 200 (352,200 B) | 6.9 ms | 6.9 ms |
+| A slow nearest holder (3 s); 3 good behind router 2 | yes, attempt 1 | 2 | **1.3 ms** | 1,001.7 ms |
+| A corrupt nearest holder | yes, attempt 1 | 2 (1) | 1.5 ms | 1.5 ms |
+| An unreachable nearest holder (SIGSTOP after convergence) | yes, attempt 1 | 2 | 1.1 ms | 1,001 ms |
+| Every holder corrupt (3) | **no**, after the retry; never accepted | 4 (4) | — | 11.7 ms |
+| The holder three routers away | yes, attempt 1 | 1 | 1.4 ms | 1.4 ms |
+| A constrained nearest holder (4 KB limit), `zs.sysinfo.v1` (83,688 B); a gateway holder behind router 2 | yes, attempt 1 | 1 | 6.4 ms | 8.7 ms |
+
+**What the numbers say:**
+- **"Exactly one reply" is a routing optimisation only.** Equal holders on
+  one router gave 1 reply. Holders at different distances gave 2, because
+  `BestMatching` reached the nearest *and* one behind the next router. S6
+  shows the same per-router routing for operations.
+- **The location-free key works for constrained holders.** A gateway or
+  router-side holder serves what a pico participant cannot.
 
 ### S5 — state correctness (#601)
-*Pending.* Producer, storage, both, or stale; a restart with the clock
-behind; `reply_del`; wildcard GET at 1k and 10k; events storage. Decides U1,
-U2, U3, U10, U15, U16, U19, U20.
+
+**Verdict:** merging producer and storage replies by timestamp (`All` +
+`Latest`) gave **10 wrong answers in 42 cases** with the stock storage
+manager 1.10.1. Four of them are a **storage-manager bug**, and a one-line
+patch removes them. The six that remain are design-level, and each
+points at a rule.
+
+`spike s5`: the producer follows S1–S3 (it stamps every mutation, keeps a
+tombstone window, and answers deletes with `reply_del`), or deliberately
+breaks one rule. The storage router links zenoh-plugin-storage-manager 1.10.1
+statically (memory volume, GC period 3 s) and reaches the main router through
+a proxy that cuts the link. That is a real partition: SIGSTOP only buffers. The
+cases ran without replication, and with two aligned replicas. Raw data:
+[`spike-results/s5/`](spike-results/s5/) (stock) and
+[`spike-results/s5-patched/`](spike-results/s5-patched/).
+
+| Case | Without replication | With replication | Patched storage manager |
+|---|---|---|---|
+| Producer + storage; storage only | right, right | right, right | — |
+| Stale storage (missed v2 behind a cut link), producer present | right | right | — |
+| Stale storage, producer gone | **WRONG** (v1) | right (the replicas aligned) | WRONG without replication |
+| Producer restarts 5 s behind, naive | **WRONG** (v1) | right, **by accident** (the bug let the older put win) | WRONG in both modes |
+| The same, with U2's catch-up | right | right | right |
+| Producer 2 s ahead | right; the subscriber's timestamp is −2,000 ms, the GET reply's +0 ms | same | — |
+| Delete; the storage missed it; producer's tombstone in its window | right | right | — |
+| The same, after the producer's 10 s window | **WRONG** (v2 resurrected) | right | WRONG without replication |
+| Delete, then a late older put within 0.3 s, storage only | **WRONG** | **WRONG** | **right** |
+| The same after the GC tick | **WRONG** | right | **right** |
+| Wildcard delete, then a stale put (zenoh#2649) | **WRONG** (an empty value) | **WRONG** | **right** |
+| Producer does not stamp (S1 broken), stale storage | **WRONG** (v1) | right | WRONG without replication |
+| Events: replay GET of 1,000 occurrences from a union storage | right (4 ms) | — | — |
+| Events: the same bounded by `_time=[now(-1.2)..]` | **WRONG** (1,000, expected 500: the memory backend ignores `_time`) | — | WRONG |
+
+**The storage-manager bug** (draft upstream report:
+[`upstream/storage-manager-outdated-guard.md`](upstream/storage-manager-outdated-guard.md)).
+`guard_cache_if_latest` falls through when its cache holds a *newer* event
+for the key, a delete for example. The older put then passes the
+replication-log check (which lags) or the storage check (the entry is gone
+after a delete), so an outdated put is accepted and the key resurrected.
+Separately, the GC keeps the cache events *older* than the limit and drops
+the recent ones. With both patched, every storage-caused wrong answer
+disappears, including the wildcard-delete case (#2649 likely shares this
+root).
+
+**Scale** (producer + storage, wildcard GET):
+
+| Keys | `Latest` | `None` | Storage only | Producer memory |
+|---|---|---|---|---|
+| 1,000 `state` | 1,000 in 5 ms | 2,000 in 6 ms | 1,000 in 5 ms | +328 KiB |
+| 10,000 `state` | 10,000 in 40 ms | 20,000 in 36 ms | 10,000 in 21 ms | +1.7 MiB |
+| 50,000 `@state` | 50,000 in 170 ms | 100,000 in 166 ms | 50,000 in 125 ms | +5.1 MiB (~104 B per entry) |
+| 100,000 `@state` | 100,000 in 366 ms | 200,000 in 390 ms | 100,000 in 248 ms | — |
+
+State puts must use reliable + block (r3 §3.3). A first run with the
+default `put` (drop) lost 10,917 of 100,000 values on the way to the storage.
+
+**Verdicts for #605:**
+- **U1 (merge by timestamp).** The issue's bar, zero wrong answers in every
+  scenario, is **not met**. The stock storage manager accounts for 4 of the
+  10 wrong answers, and even patched, a storage answering alone can be
+  stale. The recommendation for r4:
+  - keep the merged GET, but make the **owner authoritative**: a storage is
+    an *archive* (`archive.v1`), consulted explicitly or marked as such, and
+    trusted alone only with replication on;
+  - require a storage manager with the fix, which makes **U15** "require a
+    fixed version";
+  - until a fixed version ships, keep storages off `state/**` wherever
+    deletes matter.
+- **U2 (clock rule).**
+  - **HLC MUST.**
+  - **Catch-up on restart:** never stamp at or below the last stored
+    timestamp of one's keys. It fixed the restart-behind case in every
+    variant.
+  - **A bound on clocks ahead,** within the router's HLC delta. Routers
+    re-stamp future puts but not GET replies, and S12 shows the harm.
+  - zenoh-pico participants cannot merge HLC timestamps, which is input for
+    #617.
+- **U3 (tombstone window).** The window protects only while it outlasts the
+  storage's staleness. Without replication, staleness is unbounded. The
+  recommended default is 60 s, with replication required for storages on
+  state. The memory cost is about 100 B per tombstone, the same as a value.
+- **U10 (large collections).** 100,000 keys come back in 248–390 ms on
+  loopback, so no paging is needed at these sizes. The modelling advice
+  stands for larger collections.
+- **U16/U19 (`events`).** The union storage replays correctly (1,000 in
+  4 ms). The `retention` bound cannot rely on `_time` with the memory
+  backend: it needs a time-series backend, or a consumer-side filter.
+- **U20 (`@state`):** confirmed at 50k and 100k.
 
 ### S6 — operations and ownership (#602)
-*Pending.* Two owners; replicated serving; failover; partition; replies =
-many. Decides U4, U12, U-G.
+
+**Verdict: O2, O6 and O7 hold. O1 does not.** A `complete` queryable plus a
+`BestMatching` call is **not** at-most-once across routers:
+- in a split-brain across two routers, **every call ran twice**;
+- on a single router, every call ran once.
+
+Exclusivity must therefore come from there being one serving instance,
+which redundancy delegates and zk2 diagnoses. The token check found every
+split-brain and flagged no standby.
+
+`spike s6`: servers are child processes that report each execution.
+Raw data, including the partition timeline:
+[`spike-results/s6/`](spike-results/s6/).
+
+| Group | Case | Result |
+|---|---|---|
+| Split-brain | 200 concrete calls, both instances on the client's router | A 200, B 0: **once each** |
+| Split-brain | The second instance behind router 2 | A 200, B 200: **all 200 calls executed twice**; 400 replies |
+| Split-brain | The token check (two alive instances of one service exposing one interface) | Found both cases |
+| Replicated | 100 calls over 3 replicas (r1 on the client's router, r2 and r3 behind router 2) | r1 100, r2 100, r3 0: one execution per router per call |
+| Replicated | The nearest replica is killed | 0 failed calls; first success 3.4 ms after the kill |
+| Replicated | The nearest replica hangs | 10/10 answered by the far replica; first reply in 1.3 ms |
+| Templated | A concrete call to h2's `interfaces/*/*/set` (a `complete` queryable over the template) | 1 reply; executions h1/h2/h3 = 0/1/0 |
+| Fan-in | `zk2/*/tc/tc.netif.v1/@op/diagnostics`, `All`, over exact-key `complete` queryables | 3 replies, one execution per host |
+| Fan-out (O2) | Non-concrete calls to a `fanout = "forbidden"` operation (one host; every host) | 0 values; 1 and 3 `fanout_forbidden` refusals; 0 executions |
+| Many replies (O6) | 2 servers × 5 replies on one key | `None` 10, `Monotonic` 10, **`Latest` 1, `Auto` 1** |
+| Partition | Server frozen (SIGSTOP) | Calls wait out the 1 s timeout until the 10 s lease (9 timeouts), then fail at once from 9.6 s |
+| Partition | After SIGCONT | First success at 22 ms |
+| Standby | Active + a standby holding its instance token only | 2 instances seen, **no finding**, 20/20 executions on the active |
+| Metadata (O7) | `{actor, request_id}` as a request attachment | Seen by the server, echoed on the reply |
+
+One of two runs showed a first post-SIGSTOP call failing at once. It did not
+reproduce, and the committed timeline shows the lease pattern.
+
+**Verdicts for #605:**
+- **U4 (`complete` queryables, O1):** keep `complete`. It routes concrete
+  calls, captures templated ones, and makes fan-in work. Reword O1: zk2
+  promises at-most-once **only with a single serving instance**.
+  `BestMatching` reaches one complete queryable per router, so a split-brain
+  across routers executes every call on each side.
+- **U12 (redundancy):** diagnose and delegate.
+  - zk2 detects split-brain from tokens: two alive instances of one service
+    exposing one interface.
+  - `redundancy.v1` owns exclusivity. ZenSight's claim protocol, where a
+    standby holds its instance token only, raised no finding and took no
+    calls.
+- **U-G (many replies):** in the core. O6's "consolidation `None`" is
+  necessary: `Latest` and `Auto` keep 1 of 10.
+- **Replicated serving** costs one execution per router per call, which is
+  harmless only for idempotent operations, as `serving = "replicated"`
+  already requires.
 
 ### S7 — bundle stability and classifier feasibility (#603)
 *Pending.* protox/protoc/buf determinism; the retention rule; WIRE_JSON on
