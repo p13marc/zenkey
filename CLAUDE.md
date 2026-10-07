@@ -207,6 +207,28 @@ not downstream.
 Graduated from the ZenSight monorepo in 2026-07; issue references like `#453`/`#475`
 point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
+## zk2 — the redesign in progress (epic #585)
+
+- **The design of record** is `docs/zk2/architecture.md` (proposal r3.2).
+  Its history (brief → r1 → review → r2) sits beside it, indexed by
+  `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x keeps r3's section
+  numbers. The r-number moves only through a reviewed revision carrying a
+  "what changed since rN" table.
+- **The v1 line.** v1 (`rfcs/`, frozen at v1.50) is maintained on the `v1`
+  branch (0.14.x patches, #587).
+- **`main` is the zk2 line, in the strangler layout (#615).** The v1 tools
+  pin `zenkey`/`zenkey-build` `=0.11.1` from crates.io until each one is
+  ported. zk2 reuses the crate names at 0.20.0. `zenkey-model` is new.
+- **Spike code** lives on branch `zk2-spike`, with its own `[workspace]`,
+  and is never merged. Only results and `docs/zk2/spike-report.md` land on
+  `main`.
+- **Decided 2026-10-07:**
+  - paradigm P3: a key is written only by the service that owns it, and
+    consumers bind roles to providers;
+  - tcgui is the pilot;
+  - adopter shapes are first-class: system = host (`hostid.v1`), and
+    device-as-service.
+
 ## Commands
 
 Zero warnings is a CI gate. `cargo test --workspace` includes fixture-tests
