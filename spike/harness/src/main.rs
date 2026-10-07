@@ -11,14 +11,11 @@
 //!   and writes a report row.
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Contract, load_path, load_str};
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, KindToken, ZkKey, data_key, parse};
@@ -28,6 +25,11 @@ use zk2rt::config::{Mode, Topo, free_port};
 use zk2rt::metrics::{Counting, csv_row, proc_sample};
 use zk2rt::mock::Mocker;
 use zk2rt::service::{Options, Service};
+
+mod procs;
+mod s1;
+
+use procs::{Proc, spawn};
 
 #[global_allocator]
 static ALLOC: Counting = Counting;
@@ -68,6 +70,14 @@ enum Cmd {
         /// Contract files; service i implements contract i mod len.
         contracts: Vec<PathBuf>,
     },
+    /// S1, grammar basics (#597): round trips, the key-algebra guard,
+    /// namespaces, advanced pub/sub, wildcard puts.
+    S1 {
+        #[arg(long, default_value = "results/s1")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+    },
     /// The smoke check: 2 routers, N services, one client; one report row.
     Smoke {
         #[arg(long, default_value_t = 10)]
@@ -87,6 +97,13 @@ async fn main() -> Result<()> {
             services(&topo, &system, count, synthetic.as_deref(), &contracts).await
         }
         Cmd::Smoke { services, results, contracts } => smoke(services, &results, &contracts).await,
+        Cmd::S1 { results, examples } => {
+            if s1::run(&results, &examples).await? {
+                Ok(())
+            } else {
+                bail!("S1: a case failed (see results/s1/summary.md)")
+            }
+        }
     }
 }
 
@@ -158,41 +175,6 @@ async fn services(
     tokio::signal::ctrl_c().await?;
     drop(running);
     Ok(())
-}
-
-/// A child process of this binary, killed on drop.
-struct Proc {
-    child: Child,
-    pid: u32,
-}
-
-impl Drop for Proc {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-    }
-}
-
-async fn spawn(args: &[String], wait: Duration) -> Result<Proc> {
-    let exe = std::env::current_exe()?;
-    let mut child = Command::new(exe)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true)
-        .spawn()?;
-    let pid = child.id().ok_or_else(|| anyhow!("no pid"))?;
-    let out = child.stdout.take().expect("piped");
-    let mut lines = BufReader::new(out).lines();
-    let line = tokio::time::timeout(wait, lines.next_line())
-        .await
-        .map_err(|_| anyhow!("{args:?}: not ready within {wait:?}"))??
-        .ok_or_else(|| anyhow!("{args:?}: exited before ready"))?;
-    if !line.starts_with("ready") {
-        bail!("{args:?}: said {line:?}");
-    }
-    // Keep draining stdout so the child never blocks on a full pipe.
-    tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
-    Ok(Proc { child, pid })
 }
 
 const SMOKE_HEADER: &[&str] = &[

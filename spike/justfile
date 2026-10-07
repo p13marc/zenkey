@@ -18,6 +18,11 @@ build:
 spike-smoke services="10": build
     {{spike}} smoke --services {{services}} --results results/smoke {{contracts}}
 
+# S1, grammar basics (#597): round trips over every example contract, the
+# key-algebra guard, namespaces x kind tokens, advanced pub/sub, wildcard puts.
+spike-s1: build
+    {{spike}} s1 --results results/s1 --examples ../examples/zk2
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean
