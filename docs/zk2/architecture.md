@@ -1,6 +1,6 @@
-# Zenkey v2: architecture proposal r3.2, a redesign driven by use cases
+# Zenkey v2: architecture proposal r3.3, a redesign driven by use cases
 
-*Proposal r3, 2026-10-07; **r3.1** after the issue review of the same day (§0.1), and **r3.2** after checking it against the three adopters (§0.2). r3.x keeps r3's section numbers, so citations of the form `r3 §x` stay valid. It supersedes r2 and §8 of the r1 analysis, and
+*Proposal r3, 2026-10-07; **r3.1** after the issue review of the same day (§0.1), **r3.2** after checking it against the three adopters (§0.2), and **r3.3** after the adopters' contract mappings (§0.3). r3.x keeps r3's section numbers, so citations of the form `r3 §x` stay valid. It supersedes r2 and §8 of the r1 analysis, and
 it is self-contained. It is not code. Zenoh facts were read in the zenoh
 1.10.1 source (Appendix B).*
 
@@ -135,6 +135,60 @@ Three profiles now have a reference implementation:
 
 **The adopters map** (§4.9–§4.11). Each adopter gets a mapping issue before fixtures are written.
 
+## 0.3 What r3.3 changed (the contract mappings, 2026-10-07)
+
+**The input.** The three adopters were mapped onto zk2 in the authoring format (`examples/zk2/`):
+- **tcgui:** #589; 4 gaps.
+- **zenoh-modem:** #623; 22 gaps, cited below as **Z1–Z22**.
+- **ZenSight:** #622; 24 gaps, cited as **G1–G24**. Their lists are in each mapping's README.
+
+They consolidate into the decisions below (D1–D26). **The authoring format moves to draft 1** (`examples/zk2/README.md`), and `zenkey-model` (#608) implements draft 1 and migrates every example to it.
+
+| # | Decision | Gaps | Where |
+|---|---|---|---|
+| D1 | **Template precedence.** Two templates under one kind token may not have the same *shape* (literal/parameter positions). Overlap is allowed, resolved most-literal-first chunk by chunk (literal > `{p}` > `{p...}`), which is v1's rule. A lint warns when overlapping templates have different types. The same shape under different kind tokens is allowed, because the keys differ. | G1, Z3 | §3.2 |
+| D2 | **Defaults.** `[defaults]` and `[defaults.<kind>]` in a contract set annotations, QoS and `encoding` for every resource, which may override them. Defaults are expanded *before* canonicalization, so the fingerprint is the same whether a value is defaulted or written out. | G11, Z4, tcgui 2 | §3.11 |
+| D3 | **Two kind tokens.** Events become their own **plain** token, `events`: a resource of `kind = "event"` publishes each occurrence on `…/events/<template>/<ulid>` (the ULID chunk is implicit), carries `rate` (`rare` \| `low` \| `burst(n/h)`) and `retention`, and its cardinality is rate × retention. Storages select `zk2/*/*/*/events/**`, as v1's events storage selected `v1/*/events/**`. Large populations get **`@state`** (`explicit = true` on state): they stay off ambient `state/**` selectors, and storages and consumers name them. The kind tokens are now `stream`, `@stream`, `state`, `@state`, `events`, `@op`. | G6, G7, Z2 | §3.1, §3.2 |
+| D4 | **One gate vocabulary:** `build:<n>`, `config:<n>`, `capability:<n>` (names `[a-z0-9][a-z0-9_.-]*`; v1's `CAP_BPF` becomes `cap_bpf`). The descriptor's cause uses the same three words, independently: it says why the resource is absent *here*, whatever the gate's kind. | G17, Z5 | §3.2, §3.10 |
+| D5 | **Encodings.** A jsonschema resource declares `encoding = "json"` (the default) or `"cbor"`; protobuf is binary. An attachment declares its own encoding, by the same rule (ZenSight's FrameMeta is pinned CBOR). Bytes are CBOR byte strings, or base64 in JSON. | G8, G9 | §3.9 |
+| D6 | **Raw families.** `{ raw = "video/*" }` is allowed. The sample's `Encoding` carries the concrete subtype, and `media_param = "codec"` may tie it to a template parameter. | G10 | §3.9 |
+| D7 | **Type references across files and interfaces.** `json:<Name>` resolves across the listed files, and names must be unique across them (lint). The qualified form is `json:<file-stem>#<Name>`. A cross-file `$ref` may point only at listed files, which are bundled. Profile types (`telemetry.v1.Point`, the alarm document) come from profile schema files listed like any other. A type's identity is (kind, name, artifact sha256). | G12, Z18 | §3.11 |
+| D8 | **A compact descriptor.** It lists the **capabilities held**, and as `unavailable` only resources whose absence is *not* implied by a missing gate capability. Exposure is the contract, minus resources gated on a missing capability, minus the listed exceptions. An instance may declare a lower `cardinality` than the contract's ceiling. The ≤ 1 KB target holds for zenoh-modem's union contract. | Z15, G2 | §3.10 |
+| D9 | **Continuity epochs.** (a) **Re-minting:** declare the new instance token, interface tokens and descriptor first, then undeclare the old ones (an overlap, never a gap); the runtime API is `Service::new_epoch()`. (b) **Per-member epochs:** a template may declare `epoch = "<param>"`, and the implementation then holds a member token `…/@zk/member/<iface>.v<N>/<value>/<epoch>` per member, cycled on discontinuity (containers, parallax streams, devices modelled as members). Device-as-service and member tokens are both legal; S2 sets the default (U18). (c) **Across constrained faces:** a counter that `link.v1` exposes carries its epoch in-band (`telemetry.v1`'s counter type has `epoch`), and where the epoch cannot be observed, a decrease is read as a reset. | Z1, Z16, G16 | §3.5 |
+| D10 | **Per-replier completion.** A `replies = "many"` operation may declare `summary = "<type>"`. Each replier then ends with exactly one summary reply (partial, scanned, cursor, `covers_from`), so the caller knows which replier finished and how completely. | G14 | §3.7 |
+| D11 | **Configuration** (recorded for `config.v1`): `set` replies with a discriminated union (the read-back, or `{token, apply_at}`), and a compact `status` resource serves constrained faces. The zk2 JSON Schema subset admits `oneOf` with a discriminator. | Z8, Z9 | §3.12 |
+| D12 | **Gate or interface?** A coherent optional plane with its own semantics and consumers (configuration, SDU data) is its own interface, and the interface's presence is the gate: "capability X ⇒ implements `config.v1`" needs no new field. Scattered optional readings are gates. zenoh-modem decides whether to split out its SDU plane before `modem.v3` freezes. | Z6, Z7 | §3.2 |
+| D13 | **ACL compilation per posture.** Under `default_permission: deny`, grants are allows: fail-closed, and recommended wherever the router can afford the enumeration. Under `allow` (zenoh-modem's faces), zenoh evaluates only denies, as read in its source (S14 to confirm). The generator therefore compiles each grant into denies of its complement: every declared operation or plane not granted, reads included. A later minor's new resources cross until regenerated (fail-open), so generation re-runs on every contract revision. | Z12, Z13 | §3.13 |
+| D14 | **`link.v1`** is contract defaults plus a deployment face policy that may expose per principal (an operator's `config.v1` view). Two zenoh limits are recorded: a face cannot tell two lanes of one link protocol apart (use distinct protocols or zids, or a router per radio), and downsampling needs one concrete rule per key, because a wildcard rule shares one timer. | Z10, Z11, Z20 | §3.12 |
+| D15 | **R7, restated.** Across a constrained face, liveness comes from the freshness of whatever `link.v1` exposes. Where nothing crosses (SBD), liveness is *unobservable*, and tools say so. | Z14 | §3.4 |
+| D16 | **`freshness.v1`** joins §3.12: `ttl_s` is the staleness horizon, and `ttl_s = 0` means never stale (operator intent, desired state). | G18 | §3.12 |
+| D17 | **Deprecation.** `deprecated = { since = <minor>, replaced_by = "<template>", reason = "…" }` is fingerprinted, and tools warn. A deprecated resource is still served until the next major (lint). | G19 | §3.11 |
+| D18 | **`views.v1`.** A presentation document is a content-addressed artifact, referenced from the contract by annotation (`views.document = "sha256:…"`), carried in the bundle's `extras`, and verified by its hash. Its scopes are (interface, template). | G20 | §3.12 |
+| D19 | **Profile vocabularies.** Each profile ships its annotation table. Until the profiles land, draft 1 of the format carries interim tables (freshness, timing, telemetry, link, arbitration, desired, alarms, media, views, redundancy). | G21 | #613 |
+| D20 | **History parameters.** `history = { depth = <n>, miss_detection_ms = <ms> }`, fingerprinted; `true` means depth 1. | G24 | §3.2 |
+| D21 | **No repeated parameters.** Operation request types SHOULD NOT repeat template parameters (lint). | tcgui 1 | §3.7 |
+| D22 | **`desired.v1`.** One template per document type. The binding names its target explicitly: `self.system` or `self.service`. | G5 | §3.12 |
+| D23 | **`alarms.v1`** fixes the host-scoped label exclusion normatively. References across services are structured fields (system, service, key), never dot-packed. Dotted service names are derived as `<parent>.<slug(device)>`, with a dot-free parent, split at the first dot. | G3, G4 | §3.5, §3.12 |
+| D24 | **Strays.** A parent service keeps families for data about devices it does not serve as services (`traps/{sender}`). Device services exist only by configuration. | G15 | §3.5 |
+| D26 | **One host-id salt for zk2.** v1 salts the machine-id hash per application, so one machine gets three different origins under tcgui, ZenSight and zenoh-modem. `hostid.v1` uses a single zk2-wide salt (`zk2-hostid-v1`), keeping the derivation and test-vector discipline, so a machine is **one system across every application**. Each adopter's v1 origin maps to its zk2 system name at port time (a migration table; ZenSight's catalog can publish it as aliases). | Z22 | §3.5, §3.12 |
+| D25 | **Large populations.** S5 seeds 50k and 100k by wildcard GET. U10's lean changes: large populations are `@state`, with paged or many-reply operations, or storage-backed GETs, sized by measurement. | G22 | §5 |
+
+**Deferred, minor:**
+- codegen name hints (G23) → #611;
+- a services-per-system bound (Z17): dropped, a deployment concern;
+- `claimed_source` (Z21) → O7's `actor`;
+- the Rust binding of jsonschema types, and schemars output versus the zk2 subset (Z19) → #611, with S7's corpus;
+- a pure consumer's manifest (tcgui 3): unchanged, its requirements are code plus binding configuration;
+- duplicated identity fields in payloads (tcgui 4): port time.
+
+**Confirmed by the mappings, not changed:**
+- the claim protocol fits instance tokens as the claim set, and the interface token as the incumbent (§3.8, §3.10);
+- rest parameters fit snmp, modbus, gnmi and netflow;
+- `cardinality` fits every v1 bound;
+- interface-keyed selectors remove a ZenSight GUI bug: instance-suffixed producers (`netring-2`) were silently missed;
+- device-as-service and capability gates express all 88 of zenoh-modem's gated entries;
+- no `@zk` traffic needs to cross the radio.
+
 ## 1. Use cases a foundation must carry
 
 | # | Use case | Needs | Typical load |
@@ -227,6 +281,8 @@ zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract b
 | `stream` | Plain: rides `zk2/<system>/**` | Recorders, link budgets, QoS overwrite |
 | `@stream` | Verbatim: must be named | Explicit consumers only. A system subscription or a link filter never pulls 100 MB/s by accident. |
 | `state` | Plain | Storage (`zk2/*/*/*/state/**`) for last-known values and store-and-forward |
+| `@state` *(r3.3)* | Verbatim: must be named | Large populations (catalog edges, pdns, desired documents); storages and consumers name them explicitly |
+| `events` *(r3.3)* | Plain | One key per occurrence (`…/events/<template>/<ulid>`); union storages (`zk2/*/*/*/events/**`) and bounded replay GETs |
 | `@op` | Verbatim | Calls only. No snapshot GET or `**` selector can invoke an operation. |
 
 **Properties by key algebra:**
@@ -254,7 +310,7 @@ An interface **provides** resources of three patterns:
   `tracks/{track}`) apply to all three. A wildcard GET over a state
   template lists the collection.
 - **Rest parameters (r3.2).** The last segment of a template may be `{name...}`. It matches one or more chunks, each slugged, for device-defined trees such as `devices/{device}/metrics/{metric...}`. The whole family has one type, which is why it is the last segment only.
-- **Occurrence-keyed streams (r3.2).** A stream template may end in `{occurrence}` (a lowercase ULID). Each sample is published once, with a one-shot put, on a fresh key. A storage then keeps the union, and a consumer replays with a wildcard GET bounded by a `retention` annotation. This is v1's sanctioned events exception, for logs that must survive. Everything else stays on stable keys (U16).
+- **Occurrence-keyed streams (r3.2; r3.3: now the `events` kind, D3).** A stream template may end in `{occurrence}` (a lowercase ULID). Each sample is published once, with a one-shot put, on a fresh key. A storage then keeps the union, and a consumer replays with a wildcard GET bounded by a `retention` annotation. This is v1's sanctioned events exception, for logs that must survive. Everything else stays on stable keys (U16).
 - **Typed attachments (r3.2).** A resource may declare `attachment = "<type>"`, for example video frame metadata. The attachment is fingerprinted with the contract and encoded like the payload.
 - **Cardinality (r3.2).** A templated resource declares `cardinality`, its expected population bound. Tools and conformance check it. This is the bus's low-cardinality discipline, kept from v1.
 - **Advanced pub/sub (r3.2).** zenoh-ext history and recovery are opt-in, on `stream` and `state` resources only. On a key under a verbatim chunk (`@stream`), zenoh-ext's `@adv` token parser cannot work.
@@ -304,7 +360,7 @@ optional    = false
 | R4 | A consumer compiled against interface `X.vN` binds to providers of *any* revision of `X.vN`, because FULL_TRANSITIVE compatibility guarantees it (§3.11). |
 | R5 | Presence lets a consumer wait for its bound providers (start-up ordering) and notice when they leave. |
 | R6 *(r3.1)* | A consumer discards any sample whose key expression is not concrete. Zenoh accepts puts on wildcard keys and delivers them with the publisher's key, so this filter costs one check per sample and stops injection by an over-granted principal. |
-| R7 *(r3.2)* | **Bindings never require presence.** A binding resolves statically from configuration; presence is an optimization (R5). Across a constrained face, where a deployment denies `@zk` traffic, a consumer binds statically and reads liveness from the provider's own state freshness (`health.v1`). |
+| R7 *(r3.2, r3.3)* | **Bindings never require presence.** A binding resolves statically from configuration; presence is an optimization (R5). Across a constrained face, where a deployment denies `@zk` traffic, a consumer binds statically and judges liveness from the freshness of whatever `link.v1` exposes. Where nothing crosses (SBD), liveness is *unobservable*, and tools say so (D15). |
 
 When several providers are bound, choosing between them belongs to the
 consumer. `arbitration.v1` standardizes policies such as priority with
@@ -380,7 +436,7 @@ commands (H, through `desired.v1`) and supervision (J) with one mechanism.
 | O3 | *(r3.2: `unavailable` carries `cause = build \| config \| capability` plus a reason, which restores v1's actionable split between `unsupported` (rebuild) and `gated` (reconfigure).)* The reply goes on the operation's own concrete key. Success is a value reply; failure is `reply_err` with the core envelope (`invalid_request`, `not_found`, `unavailable`, `forbidden`, `fanout_forbidden`, `busy`, `internal`, `app`). |
 | O4 | Only idempotent operations may be retried. |
 | O5 | An empty reply set is not a verdict. ACL refusals return empty since zenoh 1.3. Attribute silence through presence. |
-| **O6** | An operation may declare `replies = "many"`: zero or more value replies, then completion. These are native Zenoh semantics. Callers MUST use consolidation `None`. This covers listings, partial results and streamed answers. Work that outlives a query timeout belongs to `jobs.v1`. |
+| **O6** *(r3.3: + `summary`, D10)* | An operation may declare `replies = "many"`: zero or more value replies, then completion. These are native Zenoh semantics. Callers MUST use consolidation `None`. This covers listings, partial results and streamed answers. Work that outlives a query timeout belongs to `jobs.v1`. |
 | O7 *(r3.2)* | **Call metadata:** a request MAY carry a small attachment `{actor, request_id}`, which servers MAY record for audit. It is **claimed, never authentication**. Both adopters already pass these as selector parameters (U17). |
 
 ### 3.8 Ownership and serving
@@ -439,7 +495,7 @@ tokens carry no payload.
   revisions" becomes the selector `zk2/*/*/@zk/alive/nav.v2/**`, answered
   with zero payload.
 
-**Descriptor.** It is put on every change and answered on GET. It lists:
+**Descriptor** *(r3.3: compact form, D8: the capabilities held, plus exceptions only)*. It is put on every change and answered on GET. It lists:
 
 - the interfaces, each with its contract sha256 and minor, its exposed
   resources, and its unavailable optional resources with a cause
@@ -554,7 +610,8 @@ Re-cut by use case:
 | `hostid.v1` *(r3.2)* | J, all adopters | System names minted from the machine id: v1's `h-<12hex>` derivation, with test vectors |
 | `media.v1` *(r3.2)* | A | Codec tiers, the frame-age clock, receiver-driven adaptation, frame-metadata attachment (ZenSight parallax) |
 | `link.v1` *(r3.2)* | H | Per-resource exposure on constrained faces and downsampling, read by the face/ACL generator (zenoh-modem) |
-| `views.v1` *(r3.2)* | I | Presentation documents for generic UIs (ZenSight's `views`) |
+| `views.v1` *(r3.2, r3.3)* | I | Presentation documents for generic UIs (ZenSight's `views`): content-addressed artifacts referenced by annotation and carried in the bundle's `extras` (D18) |
+| `freshness.v1` *(r3.3)* | D, J | `ttl_s` is the staleness horizon; `0` means never stale (D16) |
 | `health.v1`, `telemetry.v1`, `alarms.v1` | J, E | Health interface; metric annotations (unit, counter/gauge, histogram); active alarms as state plus transitions. |
 | `lifecycle.v1` *(only if a use case proves it)* | B, C | Armed/disarmed or managed-component states. Not adopted by default. |
 
@@ -572,6 +629,8 @@ There are **no cross-principal write grants**: no command reaches a
 component except as a call or through its own bindings.
 
 Plain facts the spec states:
+
+- **grants compile per posture (r3.3, D13).** Under `default_permission: deny`, a grant is an allow. Under `allow`, it is compiled into denies of its complement, and regenerated on every contract revision;
 
 - **under `default_permission: allow`, a put on a wildcard key bypasses a
   deny rule on a concrete key it covers** (verified live, r3.1). P3's
@@ -802,7 +861,10 @@ The ones that decide the paradigm come first.
 | U15 *(r3.1)* | The storage-manager position: depend on it, require a fixed version, or no storage on `state/**` | Decided with U1 | S5 | `archive.v1` |
 | U16 *(r3.2)* | Occurrence-keyed streams in the core, or an `events.v1` profile | Core attribute (it changes key semantics and storage behaviour) | S5 (union storage, bounded replay GET) | Profile |
 | U17 *(r3.2)* | Call metadata (`actor`, `request_id`) as a core convention | Optional core attachment, claimed only | Spec draft | Left to `config.v1` and applications |
-| U18 *(r3.2)* | Device-as-service at ZenSight's SNMP scale (thousands of devices per poller): token and descriptor cost | Device-as-service, with interface tokens only where exposed | S2 (ZenSight shape) | Per-device presence as a template-scoped liveliness token under the parent service |
+| U19 *(r3.3)* | The `events` kind token, with cardinality = rate × retention | Yes (D3) | S5 (union storage, replay GET sizes) | Occurrence streams under `stream` plus an `events.v1` profile |
+| U20 *(r3.3)* | `@state` for large populations | Yes (D3) | S2, S5 (50k / 100k) | A verbatim system token for singleton services |
+| U21 *(r3.3)* | Does zenoh evaluate allow rules under `default_permission: allow`? (From source: it does not.) | It does not; compile grants into denies (D13) | S14 | n/a |
+| U18 *(r3.2; r3.3: member tokens, D9)* | Device-as-service at ZenSight's SNMP scale (thousands of devices per poller): token and descriptor cost | Device-as-service, with interface tokens only where exposed | S2 (ZenSight shape) | Per-device presence as a template-scoped liveliness token under the parent service |
 
 (r2's U9, profile binding, is now settled: `uses` in the contract plus
 `profiles` in the descriptor.)
