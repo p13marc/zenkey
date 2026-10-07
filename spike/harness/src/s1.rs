@@ -207,6 +207,7 @@ async fn namespace(ep: &str) -> Result<Vec<Row>> {
         listen: Vec::new(),
         connect: vec![ep.to_owned()],
         namespace: ns.map(str::to_owned),
+        shm: None,
     };
     let p = mk(Some("dep1")).open().await?;
     let c_ns = mk(Some("dep1")).open().await?;
@@ -333,7 +334,7 @@ async fn adv(ep: &str) -> Result<Vec<Row>> {
     let mut rows = Vec::new();
     for ns in [None, Some("dep1")] {
         let label = ns.map_or("no namespace".to_owned(), |n| format!("namespace {n}"));
-        let mk = || Topo { mode: Mode::Client, listen: Vec::new(), connect: vec![ep.to_owned()], namespace: ns.map(str::to_owned) };
+        let mk = || Topo { mode: Mode::Client, listen: Vec::new(), connect: vec![ep.to_owned()], namespace: ns.map(str::to_owned), shm: None };
         for tok in ["stream", "state", "@stream"] {
             // (a) History from a publisher already present: the subscriber's
             // initial query on `<key>/@adv/**`. No token key is parsed.

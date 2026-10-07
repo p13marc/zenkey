@@ -28,6 +28,10 @@ use zk2rt::service::{Options, Service};
 
 mod procs;
 mod s1;
+mod s10;
+mod s11;
+mod s13;
+mod s9;
 
 use procs::{Proc, spawn};
 
@@ -64,6 +68,17 @@ enum Cmd {
         /// variant of every topology.
         #[arg(long)]
         namespace: Option<String>,
+        /// Index of the first service (`svc-<first>`), so several service
+        /// processes can share one system.
+        #[arg(long, default_value_t = 0)]
+        first: usize,
+        /// A fixed service name (with `--count 1`), e.g. `tc` on each host.
+        #[arg(long)]
+        service_name: Option<String>,
+        /// Publish every stream resource at this rate, with (seq, stamp) in
+        /// the attachment.
+        #[arg(long)]
+        stream_hz: Option<f64>,
         /// `M:K`: M synthetic interfaces of K state resources each.
         #[arg(long)]
         synthetic: Option<String>,
@@ -77,6 +92,102 @@ enum Cmd {
         results: PathBuf,
         #[arg(long, default_value = "../examples/zk2")]
         examples: PathBuf,
+    },
+    /// S10, wildcard bindings (#593): fan-in, churn, a system wildcard,
+    /// injection, and the graph from descriptors.
+    S10 {
+        #[arg(long, default_value = "results/s10")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+    },
+    /// S11, control arbitration (#594): P3 bindings against the P2 sink.
+    S11 {
+        #[arg(long, default_value = "results/s11")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+    },
+    /// S11's commander child (spawned by `spike s11`).
+    #[command(hide = true)]
+    S11Cmd {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        p2: bool,
+        #[arg(long, default_value_t = 50.0)]
+        hz: f64,
+        #[arg(long, default_value_t = 0, allow_hyphen_values = true)]
+        skew_ms: i64,
+        #[arg(long)]
+        contract: PathBuf,
+    },
+    /// S13, simulation and replay by rebinding (#596).
+    S13 {
+        #[arg(long, default_value = "results/s13")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+        /// A v1 zenctl, for record and replay.
+        #[arg(long, env = "ZENCTL", default_value = "zenctl")]
+        zenctl: PathBuf,
+    },
+    /// S13's detector child.
+    #[command(hide = true)]
+    S13Detector {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        bindings: PathBuf,
+        #[arg(long, default_value_t = 2.0)]
+        secs: f64,
+    },
+    /// S13's clock.v1 sketch.
+    #[command(hide = true)]
+    S13Clock {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long, default_value_t = 1.0)]
+        speed: f64,
+    },
+    /// S9, the typed layer's cost over raw zenoh (#592).
+    S9 {
+        #[arg(long, default_value = "results/s9")]
+        results: PathBuf,
+        /// About a second per case, for checking the harness.
+        #[arg(long)]
+        quick: bool,
+        /// Only the cases whose name contains this.
+        #[arg(long)]
+        only: Option<String>,
+        /// Repetitions of the whole matrix, interleaved.
+        #[arg(long, default_value_t = 1)]
+        repeat: usize,
+    },
+    /// How much zenoh-shm locks for a pool and one allocation.
+    #[command(hide = true)]
+    ShmProbe { pool: usize, alloc: usize },
+    /// S9's receiver child (spawned by `spike s9`).
+    #[command(hide = true)]
+    S9Recv {
+        #[arg(long, default_value = "client")]
+        mode: Mode,
+        #[arg(long)]
+        listen: Vec<String>,
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        shm: bool,
+        #[arg(long)]
+        key: String,
+        #[arg(long, value_enum)]
+        kind: s9::Kind,
+        #[arg(long)]
+        count: usize,
     },
     /// The smoke check: 2 routers, N services, one client; one report row.
     Smoke {
@@ -92,11 +203,41 @@ enum Cmd {
 async fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Router { listen, connect } => router(listen, connect).await,
-        Cmd::Services { connect, mode, system, count, namespace, synthetic, contracts } => {
-            let topo = Topo { mode, listen: Vec::new(), connect, namespace };
-            services(&topo, &system, count, synthetic.as_deref(), &contracts).await
+        Cmd::Services { connect, mode, system, count, namespace, first, service_name, stream_hz, synthetic, contracts } => {
+            let topo = Topo { mode, listen: Vec::new(), connect, namespace, shm: None };
+            let opts = ServicesOpts { first, service_name, stream_hz };
+            services(&topo, &system, count, synthetic.as_deref(), &contracts, &opts).await
         }
         Cmd::Smoke { services, results, contracts } => smoke(services, &results, &contracts).await,
+        Cmd::S9 { results, quick, only, repeat } => s9::run(&results, quick, only.as_deref(), repeat).await,
+        Cmd::ShmProbe { pool, alloc } => s9::shm_probe(pool, alloc),
+        Cmd::S9Recv { mode, listen, connect, shm, key, kind, count } => {
+            s9::recv(mode, listen, connect, shm, key, kind, count).await
+        }
+        Cmd::S10 { results, examples } => {
+            if s10::run(&results, &examples).await? {
+                Ok(())
+            } else {
+                bail!("S10: a case failed (see results/s10/summary.md)")
+            }
+        }
+        Cmd::S11 { results, examples } => {
+            if s11::run(&results, &examples).await? {
+                Ok(())
+            } else {
+                bail!("S11: a case failed (see results/s11/summary.md)")
+            }
+        }
+        Cmd::S11Cmd { connect, name, p2, hz, skew_ms, contract } => s11::commander(connect, name, p2, hz, skew_ms, &contract).await,
+        Cmd::S13 { results, examples, zenctl } => {
+            if s13::run(&results, &examples, &zenctl).await? {
+                Ok(())
+            } else {
+                bail!("S13: a case failed (see results/s13/summary.md)")
+            }
+        }
+        Cmd::S13Detector { connect, namespace, bindings, secs } => s13::detector(connect, namespace, bindings, secs).await,
+        Cmd::S13Clock { connect, speed } => s13::clock(connect, speed).await,
         Cmd::S1 { results, examples } => {
             if s1::run(&results, &examples).await? {
                 Ok(())
@@ -108,7 +249,7 @@ async fn main() -> Result<()> {
 }
 
 async fn router(listen: Vec<String>, connect: Vec<String>) -> Result<()> {
-    let s = Topo { mode: Mode::Router, listen, connect, namespace: None }.open().await?;
+    let s = Topo { mode: Mode::Router, listen, connect, namespace: None, shm: None }.open().await?;
     println!("ready {}", s.zid());
     tokio::signal::ctrl_c().await?;
     Ok(())
@@ -147,12 +288,20 @@ fn instance_id(i: usize) -> InstanceId {
     InstanceId::from_u64(mix)
 }
 
+/// How a `spike services` process names and drives its services.
+struct ServicesOpts {
+    first: usize,
+    service_name: Option<String>,
+    stream_hz: Option<f64>,
+}
+
 async fn services(
     topo: &Topo,
     system: &str,
     count: usize,
     synth: Option<&str>,
     files: &[PathBuf],
+    opts: &ServicesOpts,
 ) -> Result<()> {
     let contracts = match synth {
         Some(s) => synthetic(s)?,
@@ -162,9 +311,10 @@ async fn services(
         bail!("no contracts");
     }
     let mut running = Vec::with_capacity(count);
-    for i in 0..count {
+    for i in opts.first..opts.first + count {
         let session = topo.open().await?;
-        let addr = Addr::new(system, &format!("svc-{i}"))?;
+        let name = opts.service_name.clone().unwrap_or_else(|| format!("svc-{i}"));
+        let addr = Addr::new(system, &name)?;
         let c = &contracts[i % contracts.len()];
         let s = Service::start(session, addr, instance_id(i), std::slice::from_ref(c), &Options::default())
             .await
@@ -172,7 +322,30 @@ async fn services(
         running.push(s);
     }
     println!("ready {count}");
+    let running = Arc::new(running);
+    let mut ticker = None;
+    if let Some(hz) = opts.stream_hz {
+        let r = running.clone();
+        ticker = Some(tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / hz));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut seq = 0u64;
+            loop {
+                tick.tick().await;
+                for s in r.iter() {
+                    let _ = s.tick_streams(seq).await;
+                }
+                seq += 1;
+            }
+        }));
+    }
     tokio::signal::ctrl_c().await?;
+    // A clean exit: stop publishing, then undeclare everything (tokens
+    // first, by the Service's field order) before the process ends.
+    if let Some(t) = ticker {
+        t.abort();
+        let _ = t.await;
+    }
     drop(running);
     Ok(())
 }

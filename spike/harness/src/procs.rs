@@ -8,10 +8,19 @@ use anyhow::{Result, anyhow, bail};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
-/// A child process of this binary, killed on drop.
+/// A child process of this binary, killed on drop. Its stdout lines after
+/// `ready` arrive on [`Proc::line`].
 pub struct Proc {
     child: Child,
     pub pid: u32,
+    lines: tokio::sync::mpsc::UnboundedReceiver<String>,
+}
+
+impl Proc {
+    /// The child's next stdout line, or `None` on timeout or exit.
+    pub async fn line(&mut self, wait: Duration) -> Option<String> {
+        tokio::time::timeout(wait, self.lines.recv()).await.ok().flatten()
+    }
 }
 
 impl Drop for Proc {
@@ -39,8 +48,13 @@ pub async fn spawn(args: &[String], wait: Duration) -> Result<Proc> {
         bail!("{args:?}: said {line:?}");
     }
     // Keep draining stdout so the child never blocks on a full pipe.
-    tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
-    Ok(Proc { child, pid })
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok(Some(l)) = lines.next_line().await {
+            let _ = tx.send(l);
+        }
+    });
+    Ok(Proc { child, pid, lines: rx })
 }
 
 /// A router on a free loopback port, connected to `connect`.

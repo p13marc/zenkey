@@ -14,7 +14,7 @@ license = "MIT"
 [workspace.dependencies]
 # Pinned to the latest release (checked 2026-10-07). Every number in the
 # report is against this version.
-zenoh = { version = "=1.10.1", features = ["unstable"] }
+zenoh = { version = "=1.10.1", features = ["unstable", "shared-memory"] }
 zenoh-ext = { version = "=1.10.1", features = ["unstable"] }
 zenkey-model = { path = "../zenkey-model" }
 zk2rt = { path = "rt" }

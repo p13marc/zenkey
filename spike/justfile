@@ -23,6 +23,27 @@ spike-smoke services="10": build
 spike-s1: build
     {{spike}} s1 --results results/s1 --examples ../examples/zk2
 
+# S9, the typed layer's cost (#592): control messages at 100 Hz-5 kHz and
+# 4 MB frames at 30 Hz, typed against raw, QoS, SHM; plus micro-benchmarks.
+spike-s9: build
+    {{spike}} s9 --results results/s9 --repeat 3
+
+# S10, wildcard bindings (#593): fan-in 1 -> 10 -> 100, churn (clean, kill -9,
+# SIGSTOP as a cut), */tc, injection, and the graph from descriptors.
+spike-s10: build
+    {{spike}} s10 --results results/s10 --examples ../examples/zk2
+
+# S11, control arbitration (#594): takeover, silence, crash, dead-man, safety,
+# skew; P3 bindings against the P2 @in sink.
+spike-s11: build
+    {{spike}} s11 --results results/s11 --examples ../examples/zk2
+
+# S13, simulation and replay (#596): rebinding by configuration, zenctl
+# record/replay into a `replay` prefix, and a clock.v1 sketch at 1x, 0x, 2x.
+# ZENCTL names a v1 zenctl (default: the one on PATH).
+spike-s13: build
+    {{spike}} s13 --results results/s13 --examples ../examples/zk2
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean

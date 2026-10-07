@@ -71,6 +71,8 @@ pub struct Service {
     pub served: Vec<(String, KindToken, String)>,
     store: Store,
     publishers: BTreeMap<String, Publisher<'static>>,
+    /// Mock payloads of the stream resources, by key, for [`Service::tick_streams`].
+    streams: BTreeMap<String, Payload>,
     // Tokens first: they are undeclared first on drop.
     _tokens: Vec<LivelinessToken>,
     _queryables: Vec<Queryable<()>>,
@@ -138,6 +140,7 @@ impl Service {
         let mut queryables = Vec::new();
         let mut publishers = BTreeMap::new();
         let mut served = Vec::new();
+        let mut streams = BTreeMap::new();
         let mut interfaces = Vec::new();
         let mut capabilities = std::collections::BTreeSet::new();
 
@@ -172,6 +175,9 @@ impl Service {
                                 .express(d.express)
                                 .await
                                 .map_err(|e| anyhow!("publisher {key}: {e}"))?;
+                            if r.kind == Kind::Stream {
+                                streams.insert(key.as_str().to_owned(), mocker.payload(&d.type_, d.encoding)?);
+                            }
                             if r.kind == Kind::State {
                                 if r.token == KindToken::ExplicitState {
                                     has_xstate = true;
@@ -312,6 +318,7 @@ impl Service {
             served,
             store,
             publishers,
+            streams,
             _tokens: tokens,
             _queryables: queryables,
             session,
@@ -326,6 +333,27 @@ impl Service {
         p.delete().timestamp(ts).await.map_err(|e| anyhow!("delete {key}: {e}"))?;
         let ke = OwnedKeyExpr::try_from(key.to_owned()).map_err(|e| anyhow!("{e}"))?;
         self.store.lock().unwrap().insert(ke, Entry::Tombstone { ts, at: Instant::now() });
+        Ok(())
+    }
+
+    /// Publishes one sample on every stream resource. The attachment carries
+    /// the sequence number and the send time (16 bytes, little endian), so a
+    /// consumer can count gaps, duplicates and latency without decoding.
+    pub async fn tick_streams(&self, seq: u64) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let mut att = seq.to_le_bytes().to_vec();
+        att.extend_from_slice(&now.to_le_bytes());
+        for (k, p) in &self.streams {
+            let publ = &self.publishers[k];
+            publ.put(p.bytes.clone())
+                .encoding(p.encoding.clone())
+                .attachment(att.clone())
+                .await
+                .map_err(|e| anyhow!("put {k}: {e}"))?;
+        }
         Ok(())
     }
 

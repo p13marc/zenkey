@@ -43,6 +43,9 @@ pub struct Topo {
     pub connect: Vec<String>,
     /// The session namespace (the deployment prefix), if any.
     pub namespace: Option<String>,
+    /// Shared memory on or off (`transport/shared_memory/enabled`); `None`
+    /// keeps zenoh's default (on, with the feature built in).
+    pub shm: Option<bool>,
 }
 
 impl Topo {
@@ -53,6 +56,7 @@ impl Topo {
             listen: Vec::new(),
             connect: connect.to_vec(),
             namespace: None,
+            shm: None,
         }
     }
 
@@ -71,6 +75,9 @@ impl Topo {
         }
         if !self.connect.is_empty() {
             set(&mut c, "connect/endpoints", &list(&self.connect))?;
+        }
+        if let Some(on) = self.shm {
+            set(&mut c, "transport/shared_memory/enabled", if on { "true" } else { "false" })?;
         }
         if let Some(ns) = &self.namespace {
             set(&mut c, "namespace", &serde_json::to_string(ns)?)?;
