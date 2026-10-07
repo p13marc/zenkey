@@ -1,0 +1,15 @@
+# A sample binding configuration for the tcgui frontend (r3 §3.4 R1; the shape is recommended, not normative: U-B).
+# The frontend implements no interface: it is a pure consumer, visible through its instance token only.
+service = "tcgui-frontend"          # its system is the operator workstation's host id
+
+[bindings.netif]
+interface = "tc.netif.v1"
+providers = ["*/tc"]                # every system's tc service: a wildcard at the system position
+
+[bindings.netem]
+interface = "tc.netem.v1"
+providers = ["*/tc"]
+
+[bindings.scenario]
+interface = "tc.scenario.v1"
+providers = ["*/tc"]

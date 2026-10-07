@@ -1,0 +1,18 @@
+syntax = "proto3";
+package geo.v1;
+
+message ElevationRequest {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+}
+
+message Elevation {
+  double altitude_m = 1;
+  string tile = 2;
+}
+
+message TileInfo {
+  string tile = 1;
+  uint64 revision = 2;
+  uint64 bytes = 3;
+}

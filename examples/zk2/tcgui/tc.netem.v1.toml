@@ -1,0 +1,59 @@
+# tcgui pilot (#589): netem/TC configuration, plug, statistics and the apply audit trail.
+[interface]
+name    = "tc.netem"
+major   = 1
+minor   = 0
+summary = "TC/netem on the interfaces of one host"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources."config/{ns}/{iface}"]
+kind        = "state"
+type        = "json:TcConfigUpdate"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "The applied TC/netem configuration echo; a delete means cleared."
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."qdisc/{ns}/{iface}"]
+kind        = "stream"
+type        = "json:TcStatisticsUpdate"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+
+[resources."plug/{ns}/{iface}"]
+kind        = "state"
+type        = "json:PlugState"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Plug (stall) state; a delete means not plugged."
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."applied/{occurrence}"]
+kind        = "stream"
+type        = "json:TcAppliedEvent"
+reliability = "reliable"
+congestion  = "block"
+retention   = "7d"
+cardinality = 100000
+doc         = "Immutable audit record of one TC apply: one key per record, kept by a storage, replayed by a bounded GET."
+
+[resources."config/{ns}/{iface}/set"]
+kind        = "operation"
+request     = "json:TcRequest"
+response    = "json:TcResponse"
+error       = "json:TcError"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Apply or clear TC/netem on one interface."
+
+[resources."plug/{ns}/{iface}/set"]
+kind        = "operation"
+request     = "json:TcPlugRequest"
+response    = "json:PlugResponse"
+error       = "json:TcError"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Buffer, release one, release, set limit, or remove one interface's plug."

@@ -1,0 +1,20 @@
+syntax = "proto3";
+package detections.v1;
+
+message Box {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+}
+
+message Object {
+  string label = 1;
+  float score = 2;
+  Box box = 3;
+}
+
+message Objects {
+  uint64 frame_sequence = 1; // the camera frame these came from
+  repeated Object objects = 2;
+}

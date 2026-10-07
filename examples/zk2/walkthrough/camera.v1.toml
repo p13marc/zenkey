@@ -1,0 +1,20 @@
+# A high-rate stream kept off ambient selectors (r3 §4.1, Appendix A).
+[interface]
+name    = "camera"
+major   = 1
+minor   = 0
+summary = "One camera"
+
+[schemas]
+protobuf = ["proto/camera/v1/camera.proto"]
+
+[resources.image]
+kind       = "stream"
+explicit   = true
+type       = { raw = "image/jpeg" }
+attachment = "camera.v1.FrameMeta"
+priority   = "data_low"
+
+[resources.info]
+kind = "state"
+type = "camera.v1.Info"
