@@ -1,0 +1,726 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "modem.json",
+  "$comment": "zenoh-modem modem.v3 (#623). Field names and types follow modem-contract/src/documents.rs and registry/types.toml (v2.14); ParamValue follows zenkey 0.11's zenkey::config. Open content model, as v1's served schemas (zenoh-modem architecture.md §4.6). At port time schemars generates this file from the Rust types and the generated file is committed (contract-crate.md).",
+  "$defs": {
+    "Counter": {
+      "description": "A monotonic count, published as a bare JSON number (v1 `Counter`, Rust u64). A decrease is a reset, legitimate only across a continuity epoch (r3.2 §3.5). Values above 2^53 lose precision in readers that parse JSON numbers as doubles.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "Gauge": {
+      "description": "An integer reading that may go down or below zero (v1 `Gauge`, Rust i64).",
+      "type": "integer"
+    },
+    "Measure": {
+      "description": "A real in the resource's `telemetry.unit` (v1 `Measure`, Rust f64): a dBm has a sign and a fraction. The Rust side carries milli-units; the wire carries the unit.",
+      "type": "number"
+    },
+    "Duplex": {
+      "description": "Whether the medium can transmit and receive at once.",
+      "type": "string",
+      "enum": [
+        "full",
+        "half"
+      ]
+    },
+    "Framing": {
+      "description": "How a module splits an SDU into frames on the air, as it declares it (#159).",
+      "type": "object",
+      "properties": {
+        "frame": {
+          "description": "Bytes per air frame.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "arq": {
+          "description": "The module's per-frame ARQ: `none`, `bounded(n)` or `unbounded`.",
+          "type": "string"
+        },
+        "frames_per_max_sdu": {
+          "description": "Frames the largest SDU becomes.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "required": [
+        "frame",
+        "arq",
+        "frames_per_max_sdu"
+      ]
+    },
+    "Capabilities": {
+      "description": "What the medium behind a device can carry.",
+      "type": "object",
+      "properties": {
+        "tx_max_sdu": {
+          "description": "Largest SDU the medium will transmit, in bytes.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "rx_max_sdu": {
+          "description": "Largest SDU the medium will deliver, in bytes.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "reliable": {
+          "description": "Whether the medium delivers in order and without loss.",
+          "type": "boolean"
+        },
+        "duplex": {
+          "$ref": "#/$defs/Duplex"
+        },
+        "max_batch_size": {
+          "description": "The largest `batch_size` Zenoh may be configured with (tx_max_sdu + the 2-byte length prefix).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "framing": {
+          "description": "Explicitly null for a module that sends an SDU as one frame: always present, so 'does not frame' differs from 'did not say'.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Framing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "listen_before_talk": {
+          "description": "Whether the radio runs channel activity detection before every transmission (#165).",
+          "type": "boolean"
+        },
+        "sdu_time_ms": {
+          "description": "Milliseconds one full-size SDU costs the medium at the rate it can sustain, a duty budget included (#151); explicitly null where it cannot say.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "tx_max_sdu",
+        "rx_max_sdu",
+        "reliable",
+        "duplex",
+        "max_batch_size",
+        "framing",
+        "listen_before_talk",
+        "sdu_time_ms"
+      ]
+    },
+    "Lane": {
+      "description": "One lane, in full.",
+      "type": "object",
+      "properties": {
+        "lane": {
+          "description": "The lane's own rendering: endpoint, reliability and rank.",
+          "type": "string"
+        },
+        "endpoint": {
+          "description": "Which remote it reaches: an addressing identifier, never a proof of identity (I5).",
+          "type": "string"
+        },
+        "reliable": {
+          "description": "Whether it promises ordered, loss-free delivery.",
+          "type": "boolean"
+        },
+        "rank": {
+          "description": "Scheduling rank; lower is more urgent.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "path": {
+          "description": "Where its socket lives.",
+          "type": "string"
+        },
+        "connected": {
+          "description": "Whether Zenoh is attached to it right now.",
+          "type": "boolean"
+        },
+        "backlog_bytes": {
+          "description": "Bytes Zenoh wrote to this lane's socket that the driver has not read yet (#151); absent where unmeasurable.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "transport": {
+          "description": "The socket kind (#175): `unix-stream`, `tcp` or `unix-dgram`.",
+          "type": "string"
+        },
+        "queue_bound_batches": {
+          "description": "Batches the socket holds below Zenoh's scheduler once the driver stops reading (#151); absent where unknown.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "lane",
+        "endpoint",
+        "reliable",
+        "rank",
+        "path",
+        "connected",
+        "transport"
+      ]
+    },
+    "EndpointLane": {
+      "description": "One lane, as an endpoint document names it: deliberately reduced (documents.rs:181-195).",
+      "type": "object",
+      "properties": {
+        "lane": {
+          "type": "string"
+        },
+        "connected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "lane",
+        "connected"
+      ]
+    },
+    "LinkState": {
+      "description": "state `sdu/link`: what one device's medium is and what it carries.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "description": "The local device (the service name, repeated as a structured field).",
+          "type": "string"
+        },
+        "ttl_s": {
+          "description": "Seconds this document stays fresh; refreshed at half this.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "lanes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Lane"
+          }
+        }
+      },
+      "required": [
+        "device",
+        "ttl_s",
+        "capabilities",
+        "lanes"
+      ]
+    },
+    "LaneTable": {
+      "description": "op `sdu/lanes`: the same facts as LinkState, on demand.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "lanes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Lane"
+          }
+        }
+      },
+      "required": [
+        "device",
+        "capabilities",
+        "lanes"
+      ]
+    },
+    "EndpointState": {
+      "description": "state `sdu/endpoint/{endpoint}`: one remote, and its lanes.",
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "description": "The medium's name for this remote (I5: addressing, not identity).",
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        },
+        "lanes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EndpointLane"
+          }
+        }
+      },
+      "required": [
+        "endpoint",
+        "device",
+        "lanes"
+      ]
+    },
+    "SecurityState": {
+      "description": "state `security`: properties, never a boolean (I6). There is no `encrypted` field.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "provider": {
+          "description": "Who provides link security, if anyone (`none`).",
+          "type": "string"
+        },
+        "scope": {
+          "description": "What it covers.",
+          "type": "string"
+        },
+        "guarantees": {
+          "description": "The properties it guarantees, named individually.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "authenticated_principal": {
+          "description": "The principal the far side authenticated as; explicitly null, never absent.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "provider",
+        "scope",
+        "guarantees",
+        "authenticated_principal",
+        "note"
+      ]
+    },
+    "Oper": {
+      "description": "state `oper`: RFC 2863's operational status, typed (#121).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "status": {
+          "description": "`up` | `down` | `notPresent` | `unknown`.",
+          "type": "string"
+        },
+        "admin": {
+          "description": "`up` | `down`: radio silence is `down` here, distinct from a failure.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why, in the device's words, when it is not `up`.",
+          "type": "string"
+        },
+        "recoverable": {
+          "description": "Whether the device expects to come back on its own.",
+          "type": "boolean"
+        },
+        "last_change_ms": {
+          "description": "Epoch ms of the last status change, by the device's clock.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "uptime_s": {
+          "description": "Seconds since this driver started.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "boot_id": {
+          "description": "One id per driver start.",
+          "type": "string"
+        },
+        "clock_synced": {
+          "description": "Whether the wall clock here is believed synchronised.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device",
+        "status",
+        "admin",
+        "recoverable",
+        "uptime_s",
+        "boot_id",
+        "clock_synced"
+      ]
+    },
+    "Identity": {
+      "description": "state `identity`: RFC 8348's fields and the equipment identifier. Never a subscriber identifier (IMSI, ICCID, MSISDN): I5.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "mfg_name": {
+          "type": "string"
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "serial_num": {
+          "type": "string"
+        },
+        "hardware_rev": {
+          "type": "string"
+        },
+        "firmware_rev": {
+          "type": "string"
+        },
+        "software_rev": {
+          "type": "string"
+        },
+        "imei": {
+          "description": "The bearer's equipment identifier: addressing, never identity (I5).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device"
+      ]
+    },
+    "RadioState": {
+      "description": "state `radio`: where a bearer stands with its network (#123).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "registration": {
+          "description": "`idle` | `home` | `searching` | `denied` | `roaming` | `unknown`.",
+          "type": "string"
+        },
+        "access_technology": {
+          "description": "ModemManager's spelling, lowercase: `lte`, `5gnr`, `iridium`, …",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "registration"
+      ]
+    },
+    "DestinationState": {
+      "description": "state `destination/{destination}`: one neighbour a netdev's radio reports (#137); deleted when the radio reports it gone. Units are in the field names.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "destination": {
+          "description": "The radio's name for it as the key chunk spells it (DLEP: the MAC, lowercase hex with hyphens).",
+          "type": "string"
+        },
+        "addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "rx_rate_bps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tx_rate_bps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rx_max_rate_bps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tx_max_rate_bps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "latency_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources_pct": {
+          "type": "number"
+        },
+        "rx_quality_pct": {
+          "type": "number"
+        },
+        "tx_quality_pct": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "device",
+        "destination"
+      ]
+    },
+    "OperChange": {
+      "description": "stream `oper_change/{occurrence}`: the operational status changed (#121).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "event_id": {
+          "description": "The occurrence chunk of the key, repeated.",
+          "type": "string"
+        },
+        "at_ms": {
+          "description": "Epoch ms, as the driver's clock had it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "status": {
+          "description": "The status after the change.",
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "occurrences": {
+          "description": "Transitions folded into this one under the rate floor; 1 when none.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "device",
+        "event_id",
+        "at_ms",
+        "status",
+        "reason",
+        "occurrences"
+      ]
+    },
+    "IdentityChange": {
+      "description": "stream `identity_change/{occurrence}`: the device behind a name changed (#122).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "before": {
+          "$ref": "#/$defs/Identity"
+        },
+        "after": {
+          "$ref": "#/$defs/Identity"
+        },
+        "occurrences": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "device",
+        "event_id",
+        "at_ms",
+        "before",
+        "after",
+        "occurrences"
+      ]
+    },
+    "DeviceFault": {
+      "description": "stream `device_fault/{occurrence}`: the medium's own words, verbatim.",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lane": {
+          "description": "The lane it concerns; explicitly null when device-wide.",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edge": {
+          "description": "`raised` or `cleared`: edge-triggered, never a repeat.",
+          "type": "string"
+        },
+        "detail": {
+          "description": "The medium's own words.",
+          "type": "string"
+        },
+        "occurrences": {
+          "description": "Transitions this event stands for, itself included.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "device",
+        "event_id",
+        "at_ms",
+        "lane",
+        "edge",
+        "detail",
+        "occurrences"
+      ]
+    },
+    "ParamValue": {
+      "description": "One parameter value, untagged: the configuration plane's three kinds (zenkey::config::ParamValue). Duplicated from config.v1's schema: draft 0 cannot reference another interface's types (README gap 18).",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ActionRequest": {
+      "description": "op `action/{name}` request: the action's arguments, by name.",
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ParamValue"
+          },
+          "default": {}
+        }
+      },
+      "required": []
+    },
+    "ActionOutcome": {
+      "description": "op `action/{name}` reply: what it did and what it cost.",
+      "type": "object",
+      "properties": {
+        "detail": {
+          "description": "One line in the device's words.",
+          "type": "string"
+        },
+        "cost": {
+          "description": "What it cost, by unit: {\"sessions\": 1, \"messages_received\": 2}.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "default": {}
+        }
+      },
+      "required": [
+        "detail"
+      ]
+    },
+    "ActionEvent": {
+      "description": "stream `action_event/{occurrence}`: an operator action ran, or was refused. Attribution is caller-claimed (O7 call metadata), never authentication (I5).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ParamValue"
+          }
+        },
+        "outcome": {
+          "description": "`ok` | `refused` | `failed`.",
+          "type": "string"
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "detail": {
+          "type": "string"
+        },
+        "actor": {
+          "description": "The caller's claimed actor (v1 `?actor=`, zk2 O7 attachment).",
+          "type": "string"
+        },
+        "request_id": {
+          "description": "The caller's claimed request id.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "event_id",
+        "at_ms",
+        "action",
+        "outcome",
+        "detail"
+      ]
+    },
+    "ModemError": {
+      "description": "The `app` error detail of modem.v3's operations, in the core envelope (O3). v1's [[error]] entries: `action-refused` is modem.v3's; `restart-required` and `device-refused` belong to config.v1's set (config.v1-binding.md).",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "action-refused"
+          ]
+        },
+        "detail": {
+          "description": "The device's words.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ]
+    },
+    "Empty": {
+      "description": "The request of an operation that takes nothing (v1 read procedures had no body).",
+      "type": "object",
+      "properties": {}
+    }
+  }
+}

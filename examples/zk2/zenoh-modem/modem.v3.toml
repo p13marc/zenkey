@@ -1,0 +1,925 @@
+# zenoh-modem's management contract under zk2 (#623): modem-contract/registry/modem.toml
+# v2.14, mapped in the draft-0 authoring format (../README.md).
+#
+# Device-as-service (r3.2 §3.5, §4.10): one service per device, so v1's `device/{device}/`
+# prefix is gone from every template; the device is the service.
+#   Key:  zk2/<host-id>/<device>/modem.v3/{stream|state|@op}/<resource>   (system = host id, hostid.v1)
+#   e.g.  zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/sdu/dropped_total
+#
+# What is not here, on purpose (README.md maps every v1 entry):
+# - v1's configuration plane (`config/{device}`, `…/{group}/set`, confirm, cancel, extend, persist,
+#   the echo, `config_change`): 8 entries, all `capability:config`, now the `config.v1` interface
+#   that each device service with a configuration plane also implements (config.v1-binding.md);
+# - `sensor`, `describe`, `introspect` and the two `alive` tokens: the descriptor, the contract
+#   bundle and the instance/interface tokens (r3 §3.10).
+#
+# Counts: 86 resources (73 streams, 7 states, 4 occurrence-keyed streams, 2 operations); 80 of them
+# optional with a `capability:` gate. With config.v1's 8, that is v1's 88 gated entries.
+#
+# QoS, written per resource because draft 0 has no interface defaults (README gap 4):
+# - telemetry keeps v1's `sampled` profile: best_effort, drop (the stream defaults) and data_low;
+# - states keep v1's `refreshed` profile: best_effort, drop, data. Each document is re-put every
+#   ttl_s/2 (freshness.v1), which heals a lost put, and the owner's GET is the truth (S2);
+# - the occurrence-keyed streams keep v1's `transition` profile: reliable, block, data.
+#
+# Exposure: link.v1's default is `host` (never crosses a constrained face). Only the four v1
+# `exposure = "link"` streams say otherwise; the faces and their rates are deployment (link.md).
+
+[interface]
+name    = "modem"
+major   = 3
+minor   = 0
+summary = "One modem device on a host: what its medium carries and loses, what it measures, what it is"
+uses    = ["telemetry.v1", "freshness.v1", "link.v1"]
+
+[schemas]
+jsonschema = ["schemas/modem.json"]
+
+# --- telemetry: the SDU plane ------------------------------------------------------------------
+[resources."sdu/tx_sdus_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the medium accepted for transmission, ARQ retries included"
+
+[resources."sdu/tx_bytes_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+doc         = "payload bytes across transmitted SDUs"
+
+[resources."sdu/rx_sdus_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the medium delivered"
+
+[resources."sdu/rx_bytes_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+doc         = "payload bytes across delivered SDUs"
+
+# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+[resources."sdu/dropped_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter", "link.exposure" = "link" }
+doc         = "SDUs the medium accepted and then failed to deliver, where it can tell"
+
+[resources."sdu/tx_failed_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "transmissions the medium refused, retries included — a radio under strain, not data lost"
+
+[resources."sdu/rx_unroutable_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "batches the medium delivered for a lane this driver does not have — a backend that synthesised the wrong LaneKey, not a peer that left"
+
+[resources."sdu/rx_oversize_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the medium delivered that exceeded the rx_max_sdu it declared — a backend contract violation, not a misconfigured peer"
+
+[resources."sdu/tx_oversize_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "batches the medium refused as larger than it can transmit — this node's zenoh batch_size exceeds tx_max_sdu + 2, and the established link carries nothing"
+
+[resources."sched/dropped_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "best-effort batches the medium refused, and so lost"
+
+[resources."sched/stale_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "batches discarded because the transport that produced them had already gone"
+
+[resources."sched/peerless_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "batches the medium delivered for a lane with no transport attached"
+
+# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+[resources."sched/queue_depth"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "telemetry.kind" = "gauge", "link.exposure" = "link" }
+doc         = "batches accepted from Zenoh and not yet handed to the medium — the pipeline M3 sized"
+
+# gate: a driver that reads its own end of each lane socket
+[resources."sched/lane_backlog_bytes"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:lane_backlog"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "By" }
+doc         = "bytes Zenoh has written to the lane sockets that the driver has not read yet, summed over the device's lanes"
+
+# gate: a lane driver over a medium that states what a full SDU costs it, sustained
+[resources."sched/lane_backlog_drain_ms"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = ["capability:lane_backlog", "capability:sdu_time"]
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "ms" }
+doc         = "how long the medium would take to send what waits unread in the lane sockets, at the rate it can sustain"
+
+# --- telemetry: what the module frames (#159) --------------------------------------------------
+# gate: a module that declares how it frames an SDU on the air (#159)
+[resources."air/tx_frames_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:framing"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the module keyed up, retries included — against sdu/tx_sdus_total, how many frames an SDU is costing on this link"
+
+# gate: a module that declares how it frames an SDU on the air (#159)
+[resources."air/rx_frames_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:framing"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames that arrived, counted as their SDUs are delivered"
+
+# gate: a radio that listens before it talks (#165)
+[resources."air/cad_deferrals_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:lbt"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "transmissions the radio put off because it heard another radio when it listened before talking (#165): collisions that did not happen"
+
+# gate: a radio that listens before it talks (#165)
+[resources."air/cad_forced_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:lbt"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "transmissions made with the channel still busy after the last allowed deferral: a radio that never speaks is not a radio, and these are the frames that may have collided"
+
+# --- telemetry: what a layer refuses (#157, #158) ----------------------------------------------
+# gate: a device with an aead layer configured (#158)
+[resources."layer/aead/auth_failures_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_aead"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the aead layer refused because their tag did not verify, or they were malformed — a forgery, a corrupted frame, or a peer with another key"
+
+# gate: a device with an aead layer configured (#158)
+[resources."layer/aead/replays_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_aead"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the aead layer refused as replays: a counter already seen, older than the window, or below the persisted floor"
+
+# gate: a device with an aead layer configured (#158)
+[resources."layer/aead/unknown_key_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_aead"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the aead layer refused for naming a key id this node does not accept — a peer that rotated alone"
+
+# gate: a device with an aead layer configured (#158)
+[resources."layer/aead/send_key_id"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_aead"
+annotations = { "telemetry.kind" = "gauge" }
+doc         = "the key id this node seals under now; after `aead_rotate` it is the new id until the startup configuration is edited to match"
+
+# gate: a device with an address layer configured (#160)
+[resources."layer/address/foreign_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_address"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames heard on the shared channel that were for another node, or too short to carry an address — dropped and never delivered; on a shared channel the normal case, not a fault"
+
+# gate: a device with an address layer configured (#160)
+[resources."layer/address/unknown_source_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_address"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames for this node from an address not under `peers` — refused and counted; a node this one was never told about, or a forged source, which only an `aead` layer above can tell apart"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/repair_frames_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "repair frames the `fec` layer sent: `r` for every block of `k` SDUs, or for a partial block flushed after its quiet (#161)"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/repaired_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the `fec` layer recovered from repair — losses the radio had, which the lane did not"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/unrecoverable_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the `fec` layer gave up on: a gap no repair closed before the hold passed or the next block began; every one a loss the receiver can prove"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/late_repair_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "repair that arrived after its block had been given up on"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/unused_repair_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "repair for a block that had already arrived whole — the normal case when nothing was lost"
+
+# gate: a device with an fec layer configured (#161)
+[resources."layer/fec/malformed_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fec"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the `fec` layer refused as not its own: a header it does not parse, a block that changed size midway, symbols of two lengths (#173)"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/fragments_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "tiles the `fragment` layer sent: an SDU of *s* bytes over frames of *f* is ⌈(s + 4) / (f − 2)⌉ of them (#162)"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/reassembled_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "packets the `fragment` layer reassembled whole, their RCS verified"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/rcs_failures_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "packets whose reassembly check failed — a tile lost or corrupted, and the packet refused with it; what loss amplification looks like from the receiver"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/timeouts_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "reassemblies dropped because no tile arrived within the inactivity timeout"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/oversize_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "reassemblies refused for growing past the configured mtu: a sender with a larger one, or a tile stream that lost its All-1"
+
+# gate: a device with a fragment layer configured (#162)
+[resources."layer/fragment/malformed_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_fragment"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "tiles the `fragment` layer refused as not its own: another rule, an FCN No-ACK never sends, a last tile too short for its RCS (#173)"
+
+# gate: a device with a compress layer configured (#163)
+[resources."layer/compress/compressed_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_compress"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs the `compress` layer sent compressed: it won by more than its header (#163)"
+
+# gate: a device with a compress layer configured (#163)
+[resources."layer/compress/stored_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_compress"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "SDUs sent as they were, because compression did not win — keepalives, and anything already dense; one byte of header each"
+
+# gate: a device with a compress layer configured (#163)
+[resources."layer/compress/bytes_saved_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_compress"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "bytes the layer kept off the air, headers counted: what the dictionary is worth on this traffic"
+
+# gate: a device with a compress layer configured (#163)
+[resources."layer/compress/dictionary_mismatch_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_compress"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames compressed with a dictionary this node does not hold — the two ends have different files — refused, never mis-decoded"
+
+# gate: a device with a compress layer configured (#163)
+[resources."layer/compress/malformed_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:layer_compress"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the layer could not decode: not its header, or a body zstd refused within the mtu"
+
+# --- telemetry: what the medium spends ---------------------------------------------------------
+# gate: a medium that accounts channel occupancy: airtime-billed services, the simulator
+[resources."air/airtime_ms_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:airtime"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "ms" }
+doc         = "channel occupancy the medium has paid for, retries included — the bill on a service billed in airtime rather than per message"
+
+# gate: a medium with its own ARQ that counts it
+[resources."air/retransmits_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:retransmits"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "transmissions the medium made only because an earlier attempt was lost — the modem's own ARQ, working"
+
+# gate: a per-message service that charges for the whole slot
+[resources."air/bytes_wasted_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:slot_accounting"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+doc         = "slot bytes paid for and not used — what a per-message service charges for and the payload did not fill"
+
+# gate: a medium that reports frames it received and could not accept
+[resources."air/rx_errors_total"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:rx_errors"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "frames the medium received and could not accept: collision, overrun, CRC or header failure. Distinct from sdu/dropped_total, which is accepted-then-lost on transmit"
+
+# gate: a medium under a duty-cycle or contact-window budget
+# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+[resources."air/duty_cycle_available"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:duty_cycle"
+annotations = { "telemetry.kind" = "gauge", "link.exposure" = "link" }
+doc         = "1 when the medium would take an SDU now, 0 when it is waiting for a window or a duty-cycle budget"
+
+# gate: a medium under a duty-cycle or contact-window budget
+# v1 exposure = "link": may cross an RF face, downsampled (link.md)
+[resources."air/duty_cycle_wait_ms"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:duty_cycle"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "ms", "link.exposure" = "link" }
+doc         = "milliseconds until the medium would transmit again, when it would not now — the number that tells duty-cycle-limited apart from radio-dead; absent when the snapshot has expired"
+
+# --- telemetry: what the medium measures -------------------------------------------------------
+# gate: a device that reports signal on a 0-5 scale: an Iridium terminal
+[resources."radio/signal_bars"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:signal_bars"
+annotations = { "telemetry.kind" = "gauge" }
+doc         = "received signal strength on the device's own 0-5 scale — absent until the device has measured it: 0 is a reading (no signal, on Iridium's scale), never a placeholder"
+
+# --- The kernel's interface counters (#130) ----------------------------------------------------
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/in_octets"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+doc         = "bytes received — RFC 8343 in-octets (Linux rx_bytes)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/out_octets"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter", "telemetry.unit" = "By" }
+doc         = "bytes transmitted — RFC 8343 out-octets (tx_bytes)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/in_errors"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "inbound packets with errors — RFC 8343 in-errors (rx_errors)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/out_errors"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "outbound packets that failed — RFC 8343 out-errors (tx_errors)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/in_discards"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "inbound packets discarded without error — RFC 8343 in-discards (rx_dropped)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/out_discards"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "outbound packets discarded without error — RFC 8343 out-discards (tx_dropped)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/in_multicast_pkts"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "multicast packets received — RFC 8343 in-multicast-pkts (multicast)"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/in_pkts"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "packets received, unicast and multicast together — NOT RFC 8343, which splits them and counts broadcast, which Linux does not"
+
+# gate: a device whose data plane is the kernel's: a network interface the driver reads from
+# sysfs
+[resources."if/out_pkts"]
+kind        = "stream"
+type        = "json:Counter"
+priority    = "data_low"
+optional    = true
+gate        = "capability:netdev"
+annotations = { "telemetry.kind" = "counter" }
+doc         = "packets transmitted — NOT RFC 8343 (tx_packets)"
+
+# gate: a netdev the driver reads from the kernel itself, whose queue disciplines it can see
+[resources."if/qdisc_backlog_bytes"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:qdisc"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "By" }
+doc         = "bytes queued in the interface's queue disciplines now, not yet sent"
+
+# gate: a netdev the driver reads from the kernel itself, whose queue disciplines it can see
+[resources."if/qdisc_backlog_pkts"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:qdisc"
+annotations = { "telemetry.kind" = "gauge" }
+doc         = "packets queued in the interface's queue disciplines now"
+
+# --- The IP-bearer vocabulary (#123) -----------------------------------------------------------
+# gate: a device that measures received signal strength: a cellular modem, an SX1262
+[resources."radio/rssi"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:rssi"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+doc         = "received signal strength, dBm — absent until the device has measured it"
+
+# gate: an LTE or NR modem
+[resources."radio/rsrp"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:rsrp"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dBm" }
+doc         = "reference signal received power, dBm"
+
+# gate: an LTE or NR modem
+[resources."radio/rsrq"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:rsrq"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dB" }
+doc         = "reference signal received quality, dB"
+
+# gate: a device that measures signal-to-noise: a cellular modem, an SX1262
+[resources."radio/snr"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:snr"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "dB" }
+doc         = "signal-to-noise ratio, dB"
+
+# gate: a device that reports a bit or block error rate
+[resources."radio/error_rate"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:error_rate"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+doc         = "error rate, percent"
+
+# gate: a bearer that reports its data rate (DLEP RFC 8175 §13.7, a cellular modem's bearer)
+[resources."link/rx_rate"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:data_rate"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "bit/s" }
+doc         = "current receive data rate, bit/s"
+
+# gate: a bearer that reports its data rate (DLEP RFC 8175 §13.8)
+[resources."link/tx_rate"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:data_rate"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "bit/s" }
+doc         = "current transmit data rate, bit/s"
+
+# gate: a bearer that reports its data rate (DLEP RFC 8175 §13.5)
+[resources."link/rx_max_rate"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:data_rate"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "bit/s" }
+doc         = "maximum receive data rate, bit/s"
+
+# gate: a bearer that reports its data rate (DLEP RFC 8175 §13.6)
+[resources."link/tx_max_rate"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:data_rate"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "bit/s" }
+doc         = "maximum transmit data rate, bit/s"
+
+# gate: a bearer that reports its latency (DLEP RFC 8175 §13.9)
+[resources."link/latency"]
+kind        = "stream"
+type        = "json:Gauge"
+priority    = "data_low"
+optional    = true
+gate        = "capability:latency"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "us" }
+doc         = "latency, microseconds"
+
+# gate: a bearer that reports resources (DLEP RFC 8175 §13.10)
+[resources."link/resources"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:resources"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+doc         = "resources available on the link, percent"
+
+# gate: a bearer that reports relative link quality (DLEP RFC 8175 §13.11)
+[resources."link/rx_quality"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:link_quality"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+doc         = "relative receive link quality, percent"
+
+# gate: a bearer that reports relative link quality (DLEP RFC 8175 §13.12)
+[resources."link/tx_quality"]
+kind        = "stream"
+type        = "json:Measure"
+priority    = "data_low"
+optional    = true
+gate        = "capability:link_quality"
+annotations = { "telemetry.kind" = "gauge", "telemetry.unit" = "%" }
+doc         = "relative transmit link quality, percent"
+
+# --- state -------------------------------------------------------------------------------------
+[resources."sdu/link"]
+kind        = "state"
+type        = "json:LinkState"
+reliability = "best_effort"
+congestion  = "drop"
+optional    = true
+gate        = "capability:sdu"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "medium capabilities, the lane table, and the batch_size an operator must configure"
+
+[resources."sdu/endpoint/{endpoint}"]
+kind        = "state"
+type        = "json:EndpointState"
+reliability = "best_effort"
+congestion  = "drop"
+params      = { endpoint = "string" }
+cardinality = 64
+optional    = true
+gate        = "capability:sdu"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "one remote reachable over the medium, and the lanes toward it"
+
+# gate: a netdev whose radio reports its neighbours: a DLEP radio
+[resources."destination/{destination}"]
+kind        = "state"
+type        = "json:DestinationState"
+reliability = "best_effort"
+congestion  = "drop"
+params      = { destination = "string" }
+cardinality = 64
+optional    = true
+gate        = "capability:destinations"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "one neighbour the device's radio reports it can reach, and the radio's metrics toward it"
+
+[resources.security]
+kind        = "state"
+type        = "json:SecurityState"
+reliability = "best_effort"
+congestion  = "drop"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "security properties in force — provider, scope and the specific guarantees, never a boolean"
+
+[resources.oper]
+kind        = "state"
+type        = "json:Oper"
+reliability = "best_effort"
+congestion  = "drop"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "operational status after RFC 2863 — status, admin, reason, whether it is recoverable — with the clock facts a reader needs to order events from a node whose clock is wrong"
+
+[resources.identity]
+kind        = "state"
+type        = "json:Identity"
+reliability = "best_effort"
+congestion  = "drop"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "what the device is: manufacturer, model, serial, hardware and firmware revisions, and its equipment identifier — never a subscriber identifier"
+
+# gate: a bearer that registers with a network: a cellular modem, an SBD terminal
+[resources.radio]
+kind        = "state"
+type        = "json:RadioState"
+reliability = "best_effort"
+congestion  = "drop"
+optional    = true
+gate        = "capability:registration"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "network registration and access technology, as the bearer reports them"
+
+# --- events ------------------------------------------------------------------------------------
+# occurrence-keyed: a reader that arrives after the radio died must still learn it, and when (v1
+# RFC 04 §1.3). v1 rate = "rare": at most 1/h, the rest folded into `occurrences`, so 7d holds
+# at most 168 per device.
+[resources."oper_change/{occurrence}"]
+kind        = "stream"
+type        = "json:OperChange"
+reliability = "reliable"
+congestion  = "block"
+retention   = "7d"
+cardinality = 168
+doc         = "the device's operational status changed — a transition a superseded document cannot preserve"
+
+# occurrence-keyed: the device's own words are the one thing that says what is wrong, and `oper`
+# keeps only the latest reason. v1 rate = "low": at most 60/h (FAULT_FLOOR), so 1d holds at most
+# 1,440. Edge-triggered raised/cleared: alarms.v1 is the later option.
+[resources."device_fault/{occurrence}"]
+kind        = "stream"
+type        = "json:DeviceFault"
+reliability = "reliable"
+congestion  = "block"
+retention   = "1d"
+cardinality = 1440
+doc         = "the device's own words about a failure — the string a DeviceError::Device carried"
+
+# occurrence-keyed: a swapped terminal under a running driver is a security-relevant record a
+# late reader needs. v1 rate = "rare", so 7d holds at most 168.
+[resources."identity_change/{occurrence}"]
+kind        = "stream"
+type        = "json:IdentityChange"
+reliability = "reliable"
+congestion  = "block"
+retention   = "7d"
+cardinality = 168
+doc         = "the device behind a name changed under a running driver: a terminal swapped, a firmware updated (#122)"
+
+# gate: a device that offers operator actions
+# occurrence-keyed: the record of a decision an operator made, or of a script refused rather
+# than billed, is for readers other than the caller (who has the reply). v1 rate =
+# "burst(600/h)": the ceiling, not the typical rate, which `action_interval_s` bounds per
+# device; 1d x 600/h = 14,400 is the contract's worst case.
+[resources."action_event/{occurrence}"]
+kind        = "stream"
+type        = "json:ActionEvent"
+reliability = "reliable"
+congestion  = "block"
+retention   = "1d"
+cardinality = 14400
+optional    = true
+gate        = "capability:actions"
+doc         = "an operator action ran or was refused: the action, its arguments, the outcome, what it cost, and the caller-claimed attribution"
+
+# --- operations --------------------------------------------------------------------------------
+# v1's `describe` and `introspect` are the contract bundle (zk2/@zk/contract/modem.v3/<sha256>),
+# and its five `config/{device}…` procedures are config.v1's (config.v1-binding.md).
+
+[resources."sdu/lanes"]
+kind        = "operation"
+request     = "json:Empty"
+response    = "json:LaneTable"
+idempotent  = true
+optional    = true
+gate        = "capability:sdu"
+doc         = "every lane on a device, its QoS, its socket and whether Zenoh is attached"
+
+# gate: a device that offers operator actions: an Iridium terminal's mailbox check
+# v1 [[error]] action-refused rides the core `app` envelope as ModemError; v1's guards map to
+# the core codes: not in the device's list → not_found, outside the startup allowlist →
+# unavailable (cause config), inside action_interval_s or while another runs → busy.
+[resources."action/{name}"]
+kind        = "operation"
+params      = { name = "string" }
+cardinality = 8
+request     = "json:ActionRequest"
+response    = "json:ActionOutcome"
+error       = "json:ModemError"
+fanout      = "forbidden"
+optional    = true
+gate        = "capability:actions"
+doc         = "run one operator action on the device, now, and report what it did and what it cost — refused outside the startup allowlist, inside its minimum interval, and while another runs"
