@@ -52,6 +52,15 @@ See the [zenkey crate README](zenkey/README.md) for the full adoption story.
 
 ## Status
 
+**v1 is frozen. zk2 is in design.**
+- **The redesign.** zenkey's next major is zk2: typed, introspectable
+  interface contracts over Zenoh, for application architectures and not
+  only observability. Its design record is in [`docs/zk2/`](docs/zk2/README.md)
+  (epic [#585](https://git.marcpardo.eu/marcpardo/zenkey/issues/585)).
+- **v1 stays maintained.** The v1 convention below is frozen at RFC v1.50 and
+  maintained on the `v1` branch as 0.14.x patch releases. Existing adopters
+  stay on zenkey 0.11.x and zenkey-fleet 0.18.x until they port.
+
 The convention is at **v1.50 (ratified at v1.18, 2026-08-15)**; see the
 [RFC index](rfcs/00-index.md) for the amendment ledger. Deployed by
 [ZenSight](https://github.com/p13marc/zensight) (reference profile, ch. 11)
