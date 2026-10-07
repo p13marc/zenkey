@@ -1,0 +1,23 @@
+# The zk2 spike's recipes (#591). Run from the repository root with
+# `just -f spike/justfile <recipe>`, or from spike/. Each spike-<group>
+# recipe writes CSV rows and a markdown summary under results/<group>/.
+# Release builds only: numbers from a debug build are not numbers.
+
+set working-directory := "."
+
+spike := "target/release/spike"
+
+# The example contracts the mock services implement (#608, #589).
+contracts := "../examples/zk2/walkthrough/*.toml ../examples/zk2/tcgui/tc.*.toml"
+
+build:
+    cargo build --release -p spike
+
+# Two routers, 10 mock services from the example contracts, one client:
+# presence, a descriptor, a contract by hash, a state GET, a call, one row.
+spike-smoke services="10": build
+    {{spike}} smoke --services {{services}} --results results/smoke {{contracts}}
+
+# Reclaim the build tree (it is large, and the disk is shared).
+clean:
+    cargo clean

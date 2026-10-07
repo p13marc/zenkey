@@ -1,0 +1,35 @@
+# The zk2 spike (#591, r3 §7): throwaway code whose output is measured
+# numbers. It is its own workspace, so main's zero-warning CI never sees it,
+# and it lives on branch `zk2-spike`, which is never merged. Results and
+# docs/zk2/spike-report.md reach `main` through docs PRs.
+[workspace]
+resolver = "3"
+members = ["rt", "harness"]
+
+[workspace.package]
+edition = "2024"
+publish = false
+license = "MIT"
+
+[workspace.dependencies]
+# Pinned to the latest release (checked 2026-10-07). Every number in the
+# report is against this version.
+zenoh = { version = "=1.10.1", features = ["unstable"] }
+zenoh-ext = { version = "=1.10.1", features = ["unstable"] }
+zenkey-model = { path = "../zenkey-model" }
+zk2rt = { path = "rt" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+prost-reflect = "0.16"
+ciborium = "0.2"
+
+# Measurements use release builds. No debug info: a built tree is large, and
+# the disk is shared.
+[profile.release]
+debug = false
+
+[profile.dev]
+debug = false

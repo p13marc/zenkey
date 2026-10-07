@@ -1,0 +1,17 @@
+[package]
+name = "zk2rt"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "A throwaway zk2 runtime over zenkey-model, for the spike only (#591)"
+
+[dependencies]
+zenoh.workspace = true
+zenkey-model.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+prost-reflect.workspace = true
+ciborium.workspace = true
