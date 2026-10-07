@@ -450,7 +450,7 @@ at 2,400 bit/s; one 220 B SDU takes 0.73 s.
 | 1 | `query …/rf0/config.v1/@op/set/radio`: 46 B key, `ConfigChange` with `confirm_s = 120`, `expected_revision`, `idempotency_key`, O7 `{actor, request_id}` | 1 SDU |
 | 2 | reply `{token, apply_at, deadline}`, 114 B | 1 SDU |
 | 3 | apply at `apply_at`; the link drops; the far end retunes itself, locally | — |
-| 4 | link re-established: re-declaration of what the far side subscribes to, the four link streams = 236 B of keys ([`link.md`](link.md) §5) | 0.79 s |
+| 4 | link re-established: re-declaration of what the far side subscribes to, the four link streams = 236 B of keys ([`link.md`](link.md) §6) | 0.79 s |
 | 5 | GET `…/rf0/config.v1/state/status` (proposed, about 319 B), or `state/view` (about 1,286 B) | 2 SDUs, or 6 |
 | 6 | `query …/rf0/config.v1/@op/confirm` `{token}`; its reply is the read-back (RFC v1.47) | 1 + 6 SDUs |
 | — | `persist`: refused at the router; a local operator persists | — |

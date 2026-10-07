@@ -59,7 +59,9 @@ select     = { link_protocols = ["unixsock-stream"] }   # never `interfaces`: a 
 class      = "constrained"
 expose     = "link"                               # resources with link.exposure = "link" may cross
 interval_s = 60                                   # egress, one downsampling rule per (system, service, resource)
+```
 
+```toml
 # faces/zenohd-sat0.toml: the SBD terminal and its ground gateway (v1: --link-interval none)
 system   = "h-71c0e2a9d4b3"
 services = ["sat0"]
