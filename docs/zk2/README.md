@@ -33,6 +33,14 @@ observability shape.
 
 ## v1
 
+**Patch flow for the v1 line:**
+1. Fix on a branch cut from `v1`, and open the PR against `v1`. CI runs there.
+2. The maintainer tags `0.14.N` on `v1`. The release lane triggers on bare
+   tags, whatever the branch.
+3. Dispatch the crates lane with `ref: "0.14.N"`, never `main`.
+4. Production source builds track `--branch v1`, or pin the latest `0.14.N`
+   tag.
+
 - **Frozen.** The v1 convention is frozen at RFC v1.50: errata only.
 - **Maintained.** v1 is maintained on the `v1` branch, released as 0.14.x
   patches (#587).
