@@ -1,11 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "zenkey",
-    "zenkey-build",
     "zenkey-fleet",
     "zenkey-explorer-config",
-    "fixture-tests",
     "report-fixtures",
     "zenctl",
     "zengui",
@@ -160,8 +157,14 @@ json5 = "1.0"
 serde_yaml = "0.9"
 
 # Internal
-zenkey = { version = "0.11.1", path = "zenkey" }
-zenkey-build = { version = "0.11.1", path = "zenkey-build" }
+# The strangler layout (#615). `main` is the zk2 line. The v1 tools
+# (zenkey-fleet, zenctl, zengui, zenwatch) build against the v1 libraries
+# pinned from crates.io until each one is ported. The v1 sources live on the
+# `v1` branch, which releases 0.14.x patches. zk2 re-creates these crate
+# names at 0.20.0; two `zenkey` packages coexist then, because 0.x minors
+# are semver-incompatible.
+zenkey = { version = "=0.11.1" }
+zenkey-build = { version = "=0.11.1" }
 zenkey-fleet = { version = "0.18.0", path = "zenkey-fleet" }
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }

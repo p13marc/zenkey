@@ -8421,10 +8421,11 @@ dependencies = [
 [[package]]
 name = "zenkey"
 version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d869bc5fe1cfd8c83a310c5f0b4ff7a2f1723c5437889c7849c0bae84bb3e0e7"
 dependencies = [
  "base64 0.23.1",
  "ciborium",
- "criterion",
  "dirs 7.0.0",
  "jsonschema",
  "kdl",
@@ -8444,6 +8445,8 @@ dependencies = [
 [[package]]
 name = "zenkey-build"
 version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953b5f759fc17349203379a51398939ee26f2ce8c4a445cad2fb1e33d28e186b"
 dependencies = [
  "serde_json",
  "thiserror 2.0.20",
@@ -8459,16 +8462,6 @@ dependencies = [
  "dirs 7.0.0",
  "serde",
  "toml 1.1.4+spec-1.1.0",
-]
-
-[[package]]
-name = "zenkey-fixture-tests"
-version = "0.11.1"
-dependencies = [
- "criterion",
- "serde_json",
- "zenkey",
- "zenkey-build",
 ]
 
 [[package]]

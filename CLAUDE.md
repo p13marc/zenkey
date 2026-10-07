@@ -199,10 +199,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   retained. `synced: not asked` and the other unasked poles are stated in
   every message and ride the published `ZenwatchDoctor.report` verbatim.
 
-Plus `fixture-tests/` (unpublished): the ZenSight registry snapshot compiled
-through zenkey-build — the codegen regression corpus. **Do not add features
-there**; it exists so a codegen change that breaks generated code fails here,
-not downstream.
+**Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
+described above, and the `fixture-tests` crate, now live on the **`v1`
+branch**. On `main` the v1 tools build against `zenkey`/`zenkey-build`
+`=0.11.1` from crates.io (`[workspace.dependencies]`). `fixture-tests/registry`
+(+ `registry-kdl/`) stays on `main` as test data that the tools' tests read.
+The `registry-conventions` skill describes the v1 registry format.
 
 Graduated from the ZenSight monorepo in 2026-07; issue references like `#453`/`#475`
 point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
@@ -231,8 +233,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## Commands
 
-Zero warnings is a CI gate. `cargo test --workspace` includes fixture-tests
-(the codegen round-trip).
+Zero warnings is a CI gate. (The fixture-tests codegen round-trip now runs on
+the `v1` branch; see the strangler note above.)
 
 ```bash
 cargo run -p zenctl -- node list --base zensight -c tcp/127.0.0.1:7447
