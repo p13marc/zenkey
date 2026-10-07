@@ -400,11 +400,12 @@ rules: [
   // No subscription and no refresh of any device state crosses, the config view included.
   { id: "ops-deny-state-push", permission: "deny", flows: ["egress", "ingress"],
     messages: ["put", "delete", "declare_subscriber", "declare_queryable"],
-    key_exprs: ["zk2/h-3fa9c2d41b7e/rf0/*/state/**", "zk2/h-3fa9c2d41b7e/sat0/*/state/**"] },
-  // GET only rf0's config.v1 view and status: deny the GET of everything else.
+    key_exprs: ["zk2/*/*/modem.v3/state/**",
+                "zk2/h-3fa9c2d41b7e/rf0/*/state/**", "zk2/h-3fa9c2d41b7e/sat0/*/state/**"] },
+  // GET only rf0's config.v1 view and status: deny the GET of everything else the face denies.
   { id: "ops-deny-state-get", permission: "deny", flows: ["egress", "ingress"],
     messages: ["query", "reply"],
-    key_exprs: ["zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/**",
+    key_exprs: ["zk2/*/*/modem.v3/state/**",
                 "zk2/h-3fa9c2d41b7e/rf0/health.v1/state/**",
                 "zk2/h-3fa9c2d41b7e/sat0/*/state/**"] },
 ],
