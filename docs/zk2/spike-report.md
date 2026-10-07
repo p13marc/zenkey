@@ -28,6 +28,7 @@ sections below.
 
 | Item | Question | Lean (r3.3) | Spike | Verdict |
 |---|---|---|---|---|
+| Grammar | `zk2/` keys, kind tokens, namespaces, zenoh-ext | r3.3 §3.1 | S1 | **holds** (#597); one r3.2 §3.2 sentence corrected |
 | U-A | P3 or P2 for control and commanding | **Decided: P3** | S11, S12 | pending (confirmation) |
 | U-D | `@stream` as a kind token | Token | S3, S9 | pending |
 | U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | pending |
@@ -111,9 +112,48 @@ timing-profile behaviour under simulated time.
 ## Protocol spikes (EY, FA)
 
 ### S1 — grammar basics (#597)
-*Pending.* Round trips; namespaces × verbatim chunks; an advanced publisher
-on `zk2/…`; wildcard puts and the consumer-side filter; the key-algebra
-guard.
+
+**Verdict: the grammar holds.** It has no `@v1`-class trap, and S1 changes
+no rule of the grammar. One sentence of r3.2 §3.2 is corrected for r4:
+under `@stream`, zenoh-ext's initial history query works; what fails is
+every path that parses the `@adv` token key. That is the real reason
+E019 forbids `history` on explicit resources.
+
+`just -f spike/justfile spike-s1`: 50 cases per run. Three runs, all
+passing. Raw data: [`spike-results/s1/`](spike-results/s1/).
+
+| Group | Case | Result |
+|---|---|---|
+| Round trips | All 24 example contracts. Every resource is built with slugged values (`ETH0`, `a/b`, `10.0.0.1`, `über`, `-`) and events get a ULID chunk. Plus instance, interface, member and contract keys. | **2,226 keys, 0 failures.** Every key parses and resolves to its own template with the same unslugged values. |
+| Guard, offline | `zk2/<system>/**` and `zk2/**` over 2,030 plain and 196 verbatim or control keys | **0 violations** |
+| Guard, live | A subscriber on `zk2/g/**`, with puts on `stream`, `state`, `events`, `@stream`, `@state` | It receives `stream`, `state` and `events` only |
+| | A GET on `zk2/g/**` against a state queryable and an `@op` queryable | It reaches state, never `@op` |
+| | A liveliness GET on `zk2/g/**`, then on `zk2/g/*/@zk/**` | No token, then the instance token |
+| Namespace | A producer in namespace `dep1` × `stream`, `@stream`, `state`, `@state`, `@op`, `@zk` (16 cases) | **All hold:** the key is stripped for `dep1` consumers, prefixed (`dep1/zk2/…`) for un-namespaced ones, and invisible to namespace `dep2`. `dep1/zk2/**` sees no verbatim token, so the guard holds under a prefix too. |
+| Advanced pub/sub (a) | History from a publisher already present (the subscriber's initial query on `<key>/@adv/**`) | **5/5** on `stream`, `state` and `@stream`, with and without a namespace |
+| Advanced pub/sub (b) | A late-joining publisher, found by parsing its `@adv` liveliness token | **5/5** on `stream` and `state`; **0/5 on `@stream`**. Same with and without a namespace. |
+| `@adv` tokens | `<key>/@adv/pub/<zid>/…`, one per advanced publisher | The zk2 parser refuses them. `**` never crosses `@adv`, so zk2 presence selectors do not see them. |
+| Wildcard put | A put on `…/stream/*` and on `…/@stream/*` | Each reaches a concrete subscriber, which sees the **wildcard** key |
+| R6 filter | `is_wild()` on a 66-byte concrete key, 10⁷ checks | 10.0–11.2 ns per sample |
+
+**Why (b) fails under `@stream`.** zenoh-ext 1.10.1 parses advanced-publisher
+tokens with the format `${remaining:**}/@adv/${entity:*}/${zid:*}/${eid:*}/${meta:**}`
+(`advanced_cache.rs:40`). `**` cannot match a verbatim chunk, so the parse
+fails for any key containing `@stream`. Two paths depend on that parse:
+late-publisher detection (`advanced_subscriber.rs:1039`) and heartbeat
+recovery (`advanced_subscriber.rs:1298`). The initial query never parses a
+key, which is why (a) works.
+
+**For r4:**
+- §3.2's advanced pub/sub sentence becomes: "Under a verbatim chunk, history
+  from publishers already present works, but late-publisher detection and
+  heartbeat recovery do not. zk2 therefore allows history on plain `stream`
+  and `state` only."
+- R6 is confirmed necessary. A wildcard put reaches concrete subscribers
+  and presents its wildcard key, and the filter costs about 10 ns per
+  sample.
+- Namespaces work with every kind token. The key fixtures of #607 need no
+  change.
 
 ### S2 — liveliness scaling (#598)
 *Pending.* 100 / 1k / 10k / 50k tokens; layouts; 2+ routers; the ZenSight
