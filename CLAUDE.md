@@ -209,7 +209,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## zk2 — the redesign in progress (epic #585)
 
-- **The design of record** is `docs/zk2/architecture.md` (proposal r3.2).
+- **The design of record** is `docs/zk2/architecture.md` (proposal r3.3; contracts in `examples/zk2/`, authoring format draft 1).
   Its history (brief → r1 → review → r2) sits beside it, indexed by
   `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x keeps r3's section
   numbers. The r-number moves only through a reviewed revision carrying a
