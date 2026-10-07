@@ -32,9 +32,14 @@ mod s10;
 mod s11;
 mod s12;
 mod s13;
+mod s14;
+mod s15;
+mod s2;
+mod s3;
 mod s4;
 mod s5;
 mod s6;
+mod s7;
 mod s9;
 mod storage_router;
 
@@ -58,6 +63,10 @@ enum Cmd {
         listen: Vec<String>,
         #[arg(long)]
         connect: Vec<String>,
+        /// A JSON object of config overrides, `{ "path/in/config": value }`
+        /// (an ACL, a usrpwd dictionary).
+        #[arg(long)]
+        extra_config: Option<PathBuf>,
     },
     /// N mock services, until killed. Prints `ready <n>` once all are up.
     Services {
@@ -159,6 +168,64 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         speed: f64,
     },
+    /// S14, the ownership ACL on a live router (#616).
+    S14 {
+        #[arg(long, default_value = "results/s14")]
+        results: PathBuf,
+    },
+    /// S15, a zenoh-pico participant as a zk2 owner (#617).
+    S15 {
+        #[arg(long, default_value = "results/s15")]
+        results: PathBuf,
+        /// The built `zk2_pico` binary.
+        #[arg(long, default_value = "s15/build/zk2_pico")]
+        pico: PathBuf,
+    },
+    /// S2, presence at fleet scale (#598).
+    S2 {
+        #[arg(long, default_value = "results/s2")]
+        results: PathBuf,
+        #[arg(long)]
+        quick: bool,
+    },
+    /// S2's default-handler liveliness GET child.
+    #[command(hide = true)]
+    S2Get {
+        #[arg(long)]
+        connect: Vec<String>,
+        /// Watch presence first, until this many tokens are known.
+        #[arg(long, default_value_t = 0)]
+        subscribe_first: usize,
+    },
+    /// S2's token-holder child.
+    #[command(hide = true)]
+    S2Tokens {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long, value_enum)]
+        layout: s2::Layout,
+        #[arg(long)]
+        services: usize,
+        #[arg(long, default_value_t = 0)]
+        first: usize,
+        #[arg(long, default_value_t = 5)]
+        interfaces: usize,
+        #[arg(long, default_value_t = 0)]
+        members: usize,
+        #[arg(long, default_value_t = 1)]
+        sessions: usize,
+        #[arg(long, default_value_t = 0.0)]
+        churn_hz: f64,
+        #[arg(long)]
+        descriptor: bool,
+    },
+    /// S3, discovery over constrained links (#599).
+    S3 {
+        #[arg(long, default_value = "results/s3")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+    },
     /// S4, contract retrieval by hash against bad holders (#600).
     S4 {
         #[arg(long, default_value = "results/s4")]
@@ -231,6 +298,18 @@ enum Cmd {
         #[arg(long)]
         replication: bool,
     },
+    /// S7, bundle stability and classifier feasibility (#603).
+    S7 {
+        #[arg(long, default_value = "results/s7")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+        #[arg(long, default_value = "s7/matrix")]
+        matrix: PathBuf,
+        /// The `buf` binary (1.73.0 was used).
+        #[arg(long, env = "BUF", default_value = "buf")]
+        buf: PathBuf,
+    },
     /// S9, the typed layer's cost over raw zenoh (#592).
     S9 {
         #[arg(long, default_value = "results/s9")]
@@ -282,7 +361,7 @@ enum Cmd {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Router { listen, connect } => router(listen, connect).await,
+        Cmd::Router { listen, connect, extra_config } => router(listen, connect, extra_config).await,
         Cmd::Services { connect, mode, system, count, namespace, first, service_name, stream_hz, synthetic, contracts } => {
             let topo = Topo { mode, listen: Vec::new(), connect, namespace, shm: None };
             let opts = ServicesOpts { first, service_name, stream_hz };
@@ -324,6 +403,14 @@ async fn main() -> Result<()> {
         }
         Cmd::S13Detector { connect, namespace, bindings, secs } => s13::detector(connect, namespace, bindings, secs).await,
         Cmd::S13Clock { connect, speed } => s13::clock(connect, speed).await,
+        Cmd::S2 { results, quick } => s2::run(&results, quick).await,
+        Cmd::S14 { results } => s14::run(&results).await.map(|_| ()),
+        Cmd::S3 { results, examples } => s3::run(&results, &examples).await,
+        Cmd::S15 { results, pico } => s15::run(&results, &pico).await,
+        Cmd::S2Get { connect, subscribe_first } => s2::get_child(connect, subscribe_first).await,
+        Cmd::S2Tokens { connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor } => {
+            s2::tokens(connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor).await
+        }
         Cmd::S4 { results, examples } => {
             if s4::run(&results, &examples).await? {
                 Ok(())
@@ -332,6 +419,7 @@ async fn main() -> Result<()> {
             }
         }
         Cmd::S4Holder { connect, mode, count, contract } => s4::holder(connect, &contract, mode, count).await,
+        Cmd::S7 { results, examples, matrix, buf } => s7::run(&results, &examples, &matrix, &buf).await,
         Cmd::S6 { results } => {
             if s6::run(&results).await? {
                 Ok(())
@@ -357,8 +445,16 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn router(listen: Vec<String>, connect: Vec<String>) -> Result<()> {
-    let s = Topo { mode: Mode::Router, listen, connect, namespace: None, shm: None }.open().await?;
+async fn router(listen: Vec<String>, connect: Vec<String>, extra: Option<PathBuf>) -> Result<()> {
+    let topo = Topo { mode: Mode::Router, listen, connect, namespace: None, shm: None };
+    let mut c = topo.config()?;
+    if let Some(p) = extra {
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p)?)?;
+        for (k, val) in v.as_object().ok_or_else(|| anyhow!("--extra-config is a JSON object"))? {
+            c.insert_json5(k, &val.to_string()).map_err(|e| anyhow!("config {k}: {e}"))?;
+        }
+    }
+    let s = zenoh::open(c).await.map_err(|e| anyhow!("open router: {e}"))?;
     println!("ready {}", s.zid());
     tokio::signal::ctrl_c().await?;
     Ok(())

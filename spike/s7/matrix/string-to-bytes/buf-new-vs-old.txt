@@ -1,0 +1,1 @@
+new/m.proto:9:3:Field "3" with name "frame" on message "Pose" changed type from "string" to "bytes". See https://developers.google.com/protocol-buffers/docs/proto3#updating for wire compatibility rules and https://developers.google.com/protocol-buffers/docs/proto3#json for JSON compatibility rules.

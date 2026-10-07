@@ -22,3 +22,6 @@ flatbuffers = "25"
 ciborium.workspace = true
 toml = "1"
 zenoh-plugin-storage-manager = { version = "=1.10.1", default-features = false }
+protox = "0.9"
+prost-types = "0.14"
+prost-reflect.workspace = true

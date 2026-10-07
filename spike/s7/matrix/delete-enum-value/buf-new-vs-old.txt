@@ -1,0 +1,2 @@
+new/m.proto:12:1:Previously present enum value "2" on enum "Kind" was deleted without reserving the name "KIND_B".
+new/m.proto:12:1:Previously present enum value "2" on enum "Kind" was deleted without reserving the number "2".

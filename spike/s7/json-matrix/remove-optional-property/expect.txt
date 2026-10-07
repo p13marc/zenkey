@@ -1,0 +1,1 @@
+compatible under the zk2 rule (writers send only declared properties); literal containment says breaking

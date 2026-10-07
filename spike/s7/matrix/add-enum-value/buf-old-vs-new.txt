@@ -1,0 +1,2 @@
+old/m.proto:12:1:Previously present enum value "3" on enum "Kind" was deleted without reserving the name "KIND_C".
+old/m.proto:12:1:Previously present enum value "3" on enum "Kind" was deleted without reserving the number "3".

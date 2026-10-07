@@ -1,0 +1,1 @@
+old/m.proto:7:3:Field "4" with name "seq" on message "Pose" changed type from "int64" to "int32". See https://developers.google.com/protocol-buffers/docs/proto3#updating for wire compatibility rules and https://developers.google.com/protocol-buffers/docs/proto3#json for JSON compatibility rules.

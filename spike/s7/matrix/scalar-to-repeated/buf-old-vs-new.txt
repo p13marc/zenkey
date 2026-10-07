@@ -1,0 +1,1 @@
+old/m.proto:7:3:Field "4" with name "seq" on message "Pose" changed cardinality from "repeated" to "optional with implicit presence".

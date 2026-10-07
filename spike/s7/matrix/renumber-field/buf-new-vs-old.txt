@@ -1,0 +1,2 @@
+new/m.proto:3:1:Previously present field "3" with name "frame" on message "Pose" was deleted without reserving the name "frame".
+new/m.proto:3:1:Previously present field "3" with name "frame" on message "Pose" was deleted without reserving the number "3".

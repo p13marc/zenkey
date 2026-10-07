@@ -1,0 +1,1 @@
+new/m.proto:9:48:Field "4" with name "seq" on message "Pose" moved from outside to inside a oneof.

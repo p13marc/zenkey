@@ -1,0 +1,9 @@
+thruster-l:pw-thruster-l
+teleop:pw-teleop
+autopilot:pw-autopilot
+safety:pw-safety
+tc-h1:pw-tc-h1
+tc-h2:pw-tc-h2
+frontend:pw-frontend
+fleet-mgr:pw-fleet-mgr
+executor:pw-executor

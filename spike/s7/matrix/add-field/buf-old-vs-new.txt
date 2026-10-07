@@ -1,0 +1,2 @@
+old/m.proto:3:1:Previously present field "9" with name "z" on message "Pose" was deleted without reserving the name "z".
+old/m.proto:3:1:Previously present field "9" with name "z" on message "Pose" was deleted without reserving the number "9".

@@ -1,0 +1,2 @@
+new/m.proto:9:3:Field "3" with name "frame_id" on message "Pose" changed option "json_name" from "frame" to "frameId".
+new/m.proto:9:10:Field "3" on message "Pose" changed name from "frame" to "frame_id".

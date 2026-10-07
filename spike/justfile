@@ -64,6 +64,30 @@ spike-s5: build
 spike-s12: build
     {{spike}} s12 --results results/s12
 
+# S2, presence at fleet scale (#598): 100 to 50k tokens in three layouts,
+# the ZenSight shape, U18, a router restart, a silent move, churn, D9a.
+spike-s2: build
+    {{spike}} s2 --results results/s2
+
+# S14, the ownership ACL (#616): P3 grants under default deny, the same
+# allows under default allow (U21), and denies of the complement (D13).
+spike-s14: build
+    {{spike}} s14 --results results/s14
+
+# S7, bundle stability (#603): determinism (protox, protoc, buf), the WIRE_JSON
+# classifiers against `buf breaking`, and Python rfc8785 verifying the
+# bundles. BUF names buf 1.73.0; RFC8785 the directory holding the rfc8785
+# package (unpacked from its wheel).
+spike-s7: build
+    {{spike}} s7 --results results/s7 --examples ../examples/zk2 --matrix s7/matrix
+    python3 -I s7/verify_bundles.py ${RFC8785} results/s7/bundles ../spec/conformance/contracts | tee results/s7/python.txt
+
+# S3, constrained links (#599): a shaping proxy (delay line + bandwidth cap)
+# between vehicle and ground routers; presence, descriptors, bundles, state,
+# @stream isolation, first view, declaration cost, coverage-gap flaps.
+spike-s3: build
+    {{spike}} s3 --results results/s3 --examples ../examples/zk2
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean

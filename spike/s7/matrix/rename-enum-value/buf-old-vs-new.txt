@@ -1,0 +1,1 @@
+old/m.proto:12:56:Enum value "2" on enum "Kind" changed name from "KIND_BETA" to "KIND_B".

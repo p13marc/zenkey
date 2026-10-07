@@ -1,0 +1,1 @@
+new/m.proto:9:21:Field "3" with name "frame" on message "Pose" changed option "json_name" from "frame" to "frameId".
