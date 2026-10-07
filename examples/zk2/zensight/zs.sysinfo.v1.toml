@@ -891,7 +891,7 @@ type        = "json:telemetry.v1.Point"
 params      = { card = "string" }
 cardinality = 16
 optional    = true
-gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver"]
+gate        = ["build:nvml", "config:collect.gpu", "capability:nvidia-driver"]
 doc         = "percentage of the sample period the GPU MEMORY CONTROLLER was busy (#954). Distinct from VRAM occupancy: this is what separates a memory-bound workload from a compute-bound one. NVML only \u2014 `--features nvml`; no kernel driver exposes it. Gate: NVML only: no kernel driver exposes memory-controller utilisation (#954)"
 
 [resources."gpu/{card}/ecc_volatile_uncorrected"]
@@ -900,7 +900,7 @@ type        = "json:telemetry.v1.Point"
 params      = { card = "string" }
 cardinality = 16
 optional    = true
-gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
+gate        = ["build:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
 doc         = "uncorrected (double-bit) device-memory ECC errors since the driver loaded (#954). UNCORRECTED, not corrected: a corrected error is the hardware working. NVML only, and absent on a card with ECC disabled. Gate: NVML only, on a card with ECC enabled (#954)"
 
 [resources."gpu/{card}/ecc_aggregate_uncorrected"]
@@ -909,7 +909,7 @@ type        = "json:telemetry.v1.Point"
 params      = { card = "string" }
 cardinality = 16
 optional    = true
-gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
+gate        = ["build:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
 doc         = "uncorrected device-memory ECC errors over the lifetime of the device (#954). NVML only. Gate: NVML only, on a card with ECC enabled (#954)"
 
 [resources."gpu/{card}/process/{pid}/vram_bytes"]
@@ -918,5 +918,5 @@ type        = "json:telemetry.v1.Point"
 params      = { card = "string", pid = "string" }
 cardinality = 32
 optional    = true
-gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver"]
+gate        = ["build:nvml", "config:collect.gpu", "capability:nvidia-driver"]
 doc         = "VRAM held by one process on this card (#954). NVML only. Capped at 32 rows per card, largest first \u2014 one key per pid per card is otherwise an unbounded family keyed by something that changes every few seconds. Gate: NVML only: per-process attribution has no sysfs equivalent (#954)"

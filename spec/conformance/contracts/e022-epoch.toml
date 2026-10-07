@@ -1,0 +1,11 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources."a/{x...}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { x = "path" }
+cardinality = 2
+epoch = "x"

@@ -218,3 +218,4 @@ features:
         cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
     done
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+    ./scripts/check-model-zenoh-free.sh

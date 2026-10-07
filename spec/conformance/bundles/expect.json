@@ -1,0 +1,45 @@
+{
+  "cases": {
+    "duplicate-key.bundle.json": {
+      "error": "json",
+      "ok": false
+    },
+    "extra-hash.bundle.json": {
+      "error": "extra_hash",
+      "ok": false
+    },
+    "format.bundle.json": {
+      "error": "format",
+      "ok": false
+    },
+    "missing-schema.bundle.json": {
+      "error": "missing_schema",
+      "ok": false
+    },
+    "restrictions.bundle.json": {
+      "error": "restrictions",
+      "ok": false
+    },
+    "schema-hash-protobuf.bundle.json": {
+      "error": "schema_hash",
+      "ok": false
+    },
+    "schema-hash.bundle.json": {
+      "error": "schema_hash",
+      "ok": false
+    },
+    "schema-kind.bundle.json": {
+      "error": "schema_kind",
+      "ok": false
+    },
+    "unlisted-schema.bundle.json": {
+      "error": "unlisted_schema",
+      "ok": false
+    },
+    "valid.bundle.json": {
+      "fingerprint": "sha256:87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348",
+      "ok": true
+    }
+  },
+  "description": "Bundle verification (r3 §3.11). `valid.bundle.json` verifies, with the fingerprint given; every other file is refused with the tag given (zenkey_model::bundle::BundleError::tag). Built from `seed.toml`."
+}

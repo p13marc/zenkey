@@ -1,0 +1,16 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources."flow/{x}"]
+kind = "stream"
+type = "json:Point"
+params = { x = "string" }
+cardinality = 8
+
+[resources."flow/total"]
+kind = "stream"
+type = "json:Status"

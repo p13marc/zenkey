@@ -45,16 +45,17 @@ history     = true
 annotations = { "freshness.ttl_s" = 7200 }
 doc         = "Subnet-discovery report (#541): unconfigured SNMP responders proposed for onboarding (opt-in sweep). v1 kept it on an AdvancedPublisher cache_only(1)."
 
-[resources."strays/{sender}/{occurrence}"]
-kind        = "stream"
+[resources."strays/{sender}"]
+kind        = "event"
 type        = "json:EventRecord"
 params      = { sender = "string" }
-cardinality = 100000
-reliability = "reliable"
-congestion  = "block"
-retention   = "7d"
+cardinality = 64
+rate        = "burst(1000/h)"
+retention   = "1d"
 doc         = """
 Traps from senders that resolve to no configured target, keyed by the sender address (v1 keyed
 EVERY trap by its slugged sender IP, zensight-sensor-snmp/src/trap.rs:298-299). Device services are
-created from configuration only, never from network input; r3.2 has no rule for this yet (Gap G15).
-v1's ip_slug replaced '.' and ':' with '-'; here {sender} is slugged injectively."""
+created from configuration only, never from network input; the parent keeps the stray family (D24).
+v1's ip_slug replaced '.' and ':' with '-'; here {sender} is slugged injectively.
+cardinality = 64 bounds the unconfigured senders (a migration placeholder for the poller's real
+bound); retention is 1d, not the targets' 7d, because strays are a triage queue, not a record."""

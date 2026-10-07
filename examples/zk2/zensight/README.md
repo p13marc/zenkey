@@ -1,9 +1,9 @@
 # ZenSight, mapped onto zk2 (#622)
 
 ZenSight is the reference adopter of v1. This directory maps it onto zk2 r3.2
-(`docs/zk2/architecture.md`) in the draft-0 authoring format
-([`../README.md`](../README.md)). It is a paper exercise: nothing here is
-built, and `zenkey-model` (#608) will validate it once it exists.
+(`docs/zk2/architecture.md`), first in the draft-0 authoring format and now in
+draft 1 ([`../README.md`](../README.md)). It is a paper exercise: nothing here
+is built, and `zenkey-model` (#608) validates every file.
 
 **Verdict.** r3.2 carries ZenSight. All 22 registries map, family by family,
 onto two shapes: *system = host* (`hostid.v1`) and *device-as-service*. Every
@@ -17,6 +17,20 @@ ZenSight does today:
 - no key-level selector for occurrence streams (G6);
 - fleet populations reaching every state subscriber (G7);
 - no per-replier completion for many-reply fan-out (G14).
+
+**Draft 1 (#608).** #608 migrated the contracts to draft 1, and `zenkey-model`
+now validates all twelve with no finding:
+- `zs.snmp`'s `traps` and `zs.snmp_poller`'s `strays/{sender}` are
+  `kind = "event"` (D3, G6), with v1's declared `burst(1000/h)`;
+- `zs.sysinfo`'s `feature:nvml` gates are `build:nvml` (D4, G17);
+- `zs.parallax`'s video is the raw family `video/*`, tied to `{codec}` by
+  `media_param` (D6, G10), which replaces the `media.codec_param` annotation;
+- FrameMeta is `attachment_encoding = "cbor"` (D5, G8).
+
+The interim `media.v1` vocabulary now includes the keys this mapping needed
+(`tier_param`, `control`, `receiver_report`). The self-check and the gaps
+below are the draft-0 record, kept as written; r3.3 §0.3 says where each gap
+went.
 
 The rest are missing vocabulary or ergonomics.
 

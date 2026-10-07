@@ -1,0 +1,18 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources.status]
+kind = "state"
+type = "json:Status"
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.ping]
+kind = "operation"
+request = "google.protobuf.Empty"
+response = "json:Status"

@@ -2,9 +2,14 @@
 
 These are contracts written in the **zk2 authoring format**: the walkthrough
 interfaces of `docs/zk2/architecture.md` (r3.3) and the three adopters'
-mappings. They are design artifacts. `zenkey-model` (#608) validates,
-canonicalizes, fingerprints and bundles them, and migrates any file still
-in draft 0 to draft 1.
+mappings. They are design artifacts, all in draft 1. `zenkey-model` (#608)
+validates, canonicalizes, fingerprints and bundles every one of them, and
+requires each to load without a single finding
+(`zenkey-model/tests/examples.rs`). To check one by hand:
+
+```bash
+cargo run -p zenkey-model --example zk2-check -- examples/zk2/walkthrough/nav.v2.toml
+```
 
 | Directory | What it is | Issue |
 |---|---|---|
@@ -16,11 +21,14 @@ in draft 0 to draft 1.
 
 ## The authoring format (draft 1, r3.3)
 
-**Draft 1** applies r3.3's decisions (D1–D25, `docs/zk2/architecture.md`
-§0.3) to draft 0, which the three mappings were written in. `zenkey-model`
-turns it into `spec/contract.schema.json` plus lints (#608, #607), and
-anything that work corrects is fixed here in the same change. **Changes from
-draft 0 are marked ✱.**
+**Draft 1** applies r3.3's decisions (D1–D26, `docs/zk2/architecture.md`
+§0.3) to draft 0, which the mappings were first written in. `zenkey-model`
+implements it (#608): [`spec/contract.schema.json`](../../spec/contract.schema.json)
+is generated from its authoring types, and its lints carry stable codes
+(`zenkey_model::diag::CODES`, one fixture per code in
+[`spec/conformance/contracts/`](../../spec/conformance/contracts/)). **Changes
+from draft 0 are marked ✱.** What implementing it settled is listed
+[at the end](#what-implementing-draft-1-settled-608).
 
 ### One file per interface major
 
@@ -174,7 +182,7 @@ profile must be listed in `uses`.
 | `arbitration.v1` | `policy` (`priority` \| `freshest` \| `lease`) |
 | `desired.v1` | `target_param` (template parameter naming the target), `target` (`self.system` \| `self.service`) |
 | `alarms.v1` | `severity_default`; the key recipe is fixed by the profile, not annotated |
-| `media.v1` | `tiers` (list), `frame_clock` (`capture` \| `encode`) |
+| `media.v1` | `tiers` (list), `tier_param` (template parameter naming the tier), `frame_clock` (`capture` \| `encode`, or the FrameMeta clock field), `control` and `receiver_report` (bool: mark the stream-control and receiver-feedback operations) |
 | `views.v1` | `document` (`sha256:…` of a presentation artifact carried in the bundle's `extras`) |
 | `redundancy.v1` | `election` (`claim` \| `external`) |
 
@@ -184,3 +192,37 @@ profile must be listed in `uses`.
   policy (which may widen `link.v1` exposure per principal).
 - **Instance facts:** the capabilities held, the unavailable exceptions, a
   lower cardinality. These are the descriptor's.
+
+### What implementing draft 1 settled (#608)
+
+Writing `zenkey-model` turned these open points into rules. The examples
+follow them, and the fixtures pin them.
+
+- **Protobuf sources.** `[schemas] proto_include` lists the import roots,
+  relative to the contract (default: `proto/` when it exists, else the
+  contract's directory). A message resolves to the *listed* file that
+  defines it; a type defined only by an imported file must be listed too.
+  `google.protobuf.*` is always available.
+- **Encodings exist only for JSON Schema types.** On a protobuf or raw
+  type, `encoding` is ignored with a warning (W103), and so is
+  `attachment_encoding`. **An operation takes `encoding` too**, and it
+  applies to every JSON Schema type the operation names (request,
+  response, error, summary).
+- **Cross-file `$ref` in a bundle** resolves by the referenced file's stem,
+  so stems are unique per contract (E024).
+- **`cardinality` is for templates with parameters** (E014 otherwise). On
+  an event it bounds the template's own parameters, and the key population
+  is cardinality × rate × retention.
+- **A rest parameter's type is `path`, and `path` is only a rest
+  parameter's** (E012).
+- **Defaults apply where their field is legal:** `[defaults] history = true`
+  skips `@stream`, events and operations. A field in `[defaults.<kind>]`
+  that the kind does not take is an error (E014, E019).
+- **Small rules:**
+  - `retention` is `<n>s|m|h|d|w`;
+  - `history.depth` is at least 1 (E034);
+  - `summary` needs `replies = "many"` (E033);
+  - `deprecated.since` cannot exceed `minor` (E031);
+  - a requirement's `cardinality` defaults to `"one"`, and `resources = []` is refused (E030).
+- **Annotation keys are checked** against the interim vocabularies above
+  (W105).

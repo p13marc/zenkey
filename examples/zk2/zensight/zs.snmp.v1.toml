@@ -61,22 +61,20 @@ type        = "json:OutletCapability"
 annotations = { "freshness.ttl_s" = 900 }
 doc         = "The outlet-control gate as seen by this device: the switch, the allowlist and the reason nothing is permitted. Published even when actions are off, so 'off' is an answer and not a silence (v1 action/capability)."
 
-# --- occurrence stream (v1's only events-class subject) ---
+# --- event (v1's only events-class subject; draft 1: the events kind, D3) ---
 
-[resources."traps/{occurrence}"]
-kind        = "stream"
+[resources.traps]
+kind        = "event"
 type        = "json:EventRecord"
-cardinality = 100000
-reliability = "reliable"
-congestion  = "block"
+rate        = "burst(1000/h)"
 retention   = "7d"
 doc         = """
-Translated trap/inform records (#535), one fresh ULID key per notification, published once with a
-one-shot put (r3.2 §3.2); a storage keeps the union and a consumer replays with a bounded wildcard GET.
-v1: events/snmp/{device}/trap/{id}, QoS reliable + block (QosClass::Event).
-v1 declared rate = burst(1000/h), and draft 0 has no field for it. cardinality has no defined
-meaning on an {occurrence} template (Gap G6). retention = 7d is new: v1's events storage had no GC
-(configs/router-events-storage.json5:95).
+Translated trap/inform records (#535), one fresh ULID key per notification (…/events/traps/<ulid>),
+published once with a one-shot put; a storage keeps the union and a consumer replays with a bounded
+wildcard GET. v1: events/snmp/{device}/trap/{id}, QoS reliable + block (QosClass::Event), which is
+the events kind's default. rate = burst(1000/h) is v1's declared rate (G6, now a field), so the
+population is at most 1000/h x 7d = 168,000 keys. retention = 7d is new: v1's events storage had no
+GC (configs/router-events-storage.json5:95).
 Only traps whose sender resolves to this configured target land here. v1 keyed every trap by the
 slugged sender IP (zensight-sensor-snmp/src/trap.rs:298-299), so unmatched senders go to the
 poller's strays/{sender}/{occurrence} (Gap G15)."""

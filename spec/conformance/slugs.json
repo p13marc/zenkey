@@ -1,0 +1,107 @@
+{
+  "description": "Chunk slugging (ported from v1, RFC 03 §2): `slug` cases give a value and its canonical chunk (which must unslug back to the value); `unslug` cases give a chunk and its value, or null when the chunk is not a canonical slug.",
+  "slug": [
+    {
+      "expect": "eth0",
+      "value": "eth0"
+    },
+    {
+      "expect": "x-_x45_x54_x480",
+      "value": "ETH0"
+    },
+    {
+      "expect": "10.0.0.1",
+      "value": "10.0.0.1"
+    },
+    {
+      "expect": "x-fe80_x3a_x3a1",
+      "value": "fe80::1"
+    },
+    {
+      "expect": "x-a_x2fb",
+      "value": "a/b"
+    },
+    {
+      "expect": "x-a_x20b",
+      "value": "a b"
+    },
+    {
+      "expect": "x-x-foo",
+      "value": "x-foo"
+    },
+    {
+      "expect": "x-x_x2d",
+      "value": "x-"
+    },
+    {
+      "expect": "x--lead",
+      "value": "-lead"
+    },
+    {
+      "expect": "x-trail_x2d",
+      "value": "trail-"
+    },
+    {
+      "expect": "a..b",
+      "value": "a..b"
+    },
+    {
+      "expect": "x-_xc3_xbcber",
+      "value": "über"
+    },
+    {
+      "expect": "x-_xe6_x97_xa5_xe6_x9c_xac",
+      "value": "日本"
+    },
+    {
+      "expect": "x-_x5f",
+      "value": "_"
+    },
+    {
+      "expect": "a_b-c.d",
+      "value": "a_b-c.d"
+    },
+    {
+      "expect": "0",
+      "value": "0"
+    },
+    {
+      "expect": "ce0.2",
+      "value": "ce0.2"
+    }
+  ],
+  "unslug": [
+    {
+      "chunk": "eth0",
+      "expect": "eth0"
+    },
+    {
+      "chunk": "x-_x45_x54_x480",
+      "expect": "ETH0"
+    },
+    {
+      "chunk": "Eth0",
+      "expect": null
+    },
+    {
+      "chunk": "x-",
+      "expect": null
+    },
+    {
+      "chunk": "x-_x4",
+      "expect": null
+    },
+    {
+      "chunk": "x-_xzz",
+      "expect": null
+    },
+    {
+      "chunk": "x-eth0",
+      "expect": null
+    },
+    {
+      "chunk": "a b",
+      "expect": null
+    }
+  ]
+}

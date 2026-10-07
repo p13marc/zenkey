@@ -1,0 +1,40 @@
+[interface]
+name = "seed"
+major = 1
+minor = 7
+summary = "documentation is not fingerprinted"
+uses = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources.status]
+kind = "state"
+doc = "nor is this"
+type = "json:Status"
+encoding = "json"
+reliability = "best_effort"
+congestion = "drop"
+priority = "data"
+express = false
+history = false
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.position]
+kind = "stream"
+type = "json:seed#Point"
+reliability = "best_effort"
+congestion = "drop"
+priority = "data"
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources.ping]
+kind = "operation"
+request = "json:Empty"
+response = "json:Ack"
+idempotent = true
+fanout = "forbidden"
+serving = "exclusive"
+replies = "one"
+priority = "interactive_high"
+annotations = { "freshness.ttl_s" = 60 }

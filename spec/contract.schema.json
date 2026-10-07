@@ -1,0 +1,934 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContractFile",
+  "description": "One contract file: one interface major.",
+  "type": "object",
+  "properties": {
+    "defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DefaultsSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "interface": {
+      "$ref": "#/$defs/InterfaceSection"
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Requirement"
+      },
+      "default": {}
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ResourceSpec"
+      },
+      "default": {}
+    },
+    "schemas": {
+      "$ref": "#/$defs/SchemasSection",
+      "default": {
+        "jsonschema": [],
+        "proto_include": null,
+        "protobuf": []
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "interface"
+  ],
+  "$defs": {
+    "Congestion": {
+      "type": "string",
+      "enum": [
+        "drop",
+        "block"
+      ]
+    },
+    "DefaultsBlock": {
+      "description": "The fields `[defaults]` may set (r3.3 D2).",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "attachment_encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "congestion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Congestion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "express": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fanout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fanout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Priority"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reliability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reliability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Replies"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serving": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Serving"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "DefaultsSection": {
+      "description": "`[defaults]` and `[defaults.<kind>]`.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "attachment_encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "congestion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Congestion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultsBlock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "express": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fanout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fanout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idempotent": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultsBlock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Priority"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reliability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reliability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Replies"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "serving": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Serving"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultsBlock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultsBlock"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Deprecated": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "replaced_by": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "since": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "since"
+      ]
+    },
+    "Encoding": {
+      "type": "string",
+      "enum": [
+        "json",
+        "cbor"
+      ]
+    },
+    "Fanout": {
+      "type": "string",
+      "enum": [
+        "forbidden",
+        "allowed"
+      ]
+    },
+    "Gate": {
+      "description": "`gate = \"capability:rssi\"` or a list of them (AND).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "History": {
+      "description": "`history = true` or `{ depth = <n>, miss_detection_ms = <ms> }`.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/HistoryParams"
+        }
+      ]
+    },
+    "HistoryParams": {
+      "type": "object",
+      "properties": {
+        "depth": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "miss_detection_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "depth"
+      ]
+    },
+    "InterfaceSection": {
+      "description": "`[interface]`.",
+      "type": "object",
+      "properties": {
+        "major": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "minor": {
+          "description": "Informative; CI keeps it monotonic; not in the fingerprint.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "name": {
+          "description": "`[a-z][a-z0-9_]*` segments joined by `.`; never ending in `.v<int>`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "Documentation; not in the fingerprint.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "uses": {
+          "description": "Profiles whose annotations the contract uses (`freshness.v1`, …).",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "major"
+      ]
+    },
+    "Kind": {
+      "type": "string",
+      "enum": [
+        "stream",
+        "state",
+        "event",
+        "operation"
+      ]
+    },
+    "ParamType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "uint",
+        "path"
+      ]
+    },
+    "Priority": {
+      "description": "Zenoh's seven priorities, by name.",
+      "type": "string",
+      "enum": [
+        "real_time",
+        "interactive_high",
+        "interactive_low",
+        "data_high",
+        "data",
+        "data_low",
+        "background"
+      ]
+    },
+    "RawType": {
+      "type": "object",
+      "properties": {
+        "media_param": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "raw": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "raw"
+      ]
+    },
+    "Reliability": {
+      "type": "string",
+      "enum": [
+        "best_effort",
+        "reliable"
+      ]
+    },
+    "Replies": {
+      "type": "string",
+      "enum": [
+        "one",
+        "many"
+      ]
+    },
+    "RequireCardinality": {
+      "type": "string",
+      "enum": [
+        "one",
+        "many"
+      ]
+    },
+    "Requirement": {
+      "description": "`[requires.<role>]`.",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "cardinality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequireCardinality"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "doc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "interface": {
+          "description": "The required interface, `<name>.v<major>`.",
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false
+        },
+        "resources": {
+          "description": "What is consumed; default: everything.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "interface"
+      ]
+    },
+    "ResourceSpec": {
+      "description": "`[resources.\"<template>\"]`: every field any kind may carry. Which ones\na kind accepts is checked by the lints (E014).",
+      "type": "object",
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "attachment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attachment_encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cardinality": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "congestion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Congestion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deprecated": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Deprecated"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "doc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Encoding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "epoch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "explicit": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "express": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "fanout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fanout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "history": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "idempotent": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "optional": {
+          "type": "boolean",
+          "default": false
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ParamType"
+          },
+          "default": {}
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Priority"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "reliability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reliability"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "replies": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Replies"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "retention": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "serving": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Serving"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TypeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    "SchemasSection": {
+      "description": "`[schemas]`.",
+      "type": "object",
+      "properties": {
+        "jsonschema": {
+          "description": "JSON Schema 2020-12 files (the zk2 subset), definitions under `$defs`.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "proto_include": {
+          "description": "Include roots for protobuf imports, relative to the contract's\ndirectory. Default: `[\"proto\"]` when that directory exists, else `[\".\"]`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "protobuf": {
+          "description": "`.proto` files, relative to the contract's directory. proto2/proto3.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Serving": {
+      "type": "string",
+      "enum": [
+        "exclusive",
+        "replicated"
+      ]
+    },
+    "TypeRef": {
+      "description": "A type reference: `\"pkg.Message\"`, `\"json:Name\"`, `\"json:stem#Name\"`,\nor `{ raw = \"<media type>\", media_param = \"<param>\" }`.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/RawType"
+        }
+      ]
+    }
+  }
+}

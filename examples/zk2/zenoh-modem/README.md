@@ -34,6 +34,15 @@ format or profile addition. Three hold only in part:
 
 The 22 gaps below each come with their evidence and a proposed correction.
 
+**Draft 1 (#608).** The mapping was written in draft 0. #608 migrated it to draft 1, and
+`zenkey-model` now validates it with no finding:
+- the four `{occurrence}` streams are `kind = "event"` (D3), with v1's declared rates: `oper_change`
+  and `identity_change` are `rare`, `device_fault` is `low`, and `action_event` is `burst(600/h)`;
+- the QoS written on every resource moved into `[defaults.stream]` and `[defaults.state]` (D2).
+  That removed 87 lines, and the fingerprint did not change: D2's promise, checked on a real contract.
+
+The gaps below are the draft-0 record, kept as written; r3.3 §0.3 says where each one went.
+
 ## r3.2's claims, checked
 
 | Claim (`docs/zk2/architecture.md`) | Verdict | Where |
