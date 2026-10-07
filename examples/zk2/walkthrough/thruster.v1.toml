@@ -1,0 +1,36 @@
+# What an actuator provides, and what it requires (r3 §4.2, Appendix A).
+[interface]
+name    = "thruster"
+major   = 1
+minor   = 0
+summary = "One thruster"
+uses    = ["arbitration.v1"]
+
+[schemas]
+protobuf = ["proto/thruster/v1/thruster.proto"]
+
+[resources.status]
+kind = "state"
+type = "thruster.v1.Status"
+
+[resources.telemetry]
+kind = "stream"
+type = "thruster.v1.Telemetry"
+
+[resources.arm]
+kind       = "operation"
+request    = "thruster.v1.ArmRequest"
+response   = "thruster.v1.Status"
+idempotent = true
+
+[resources.disarm]
+kind       = "operation"
+request    = "google.protobuf.Empty"
+response   = "thruster.v1.Status"
+idempotent = true
+
+[requires.cmd]
+interface   = "twist_cmd.v1"
+resources   = ["cmd"]
+cardinality = "many"
+annotations = { "arbitration.policy" = "priority" }

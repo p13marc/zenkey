@@ -1,0 +1,17 @@
+syntax = "proto3";
+package thruster.v1;
+
+message Status {
+  bool armed = 1;
+  string active_commander = 2; // the bound provider currently obeyed
+}
+
+message Telemetry {
+  double rpm = 1;
+  double current_a = 2;
+  double temperature_c = 3;
+}
+
+message ArmRequest {
+  string reason = 1;
+}

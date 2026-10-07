@@ -1,0 +1,19 @@
+# What a commander provides (r3 §4.2, Appendix A).
+[interface]
+name    = "twist_cmd"
+major   = 1
+minor   = 0
+summary = "Velocity commands from one commander"
+uses    = ["timing.v1"]
+
+[schemas]
+protobuf = ["proto/twist_cmd/v1/twist_cmd.proto"]
+
+[resources.cmd]
+kind        = "stream"
+type        = "twist_cmd.v1.Twist"
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 20, "timing.deadline_ms" = 100, "timing.lifespan_ms" = 100 }

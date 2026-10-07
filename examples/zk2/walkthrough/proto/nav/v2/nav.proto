@@ -1,0 +1,43 @@
+syntax = "proto3";
+package nav.v2;
+
+message Position {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+  double altitude_m = 3;
+  double horizontal_accuracy_m = 4;
+  uint64 measured_at_ns = 5; // acquisition time, not publication time
+}
+
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  MODE_INITIALIZING = 1;
+  MODE_TRACKING = 2;
+  MODE_DEAD_RECKONING = 3;
+  MODE_FAILED = 4;
+}
+
+message Status {
+  Mode mode = 1;
+  string reason = 2;
+}
+
+message Origin {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+  double altitude_m = 3;
+}
+
+message SetOriginRequest {
+  Origin origin = 1;
+}
+
+message NavError {
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_NOT_INITIALIZED = 1;
+    CODE_OUT_OF_RANGE = 2;
+  }
+  Code code = 1;
+  string detail = 2;
+}

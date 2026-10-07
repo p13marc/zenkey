@@ -1,0 +1,16 @@
+syntax = "proto3";
+package camera.v1;
+
+message FrameMeta {
+  uint64 captured_at_ns = 1;
+  uint64 sequence = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+}
+
+message Info {
+  string model = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  double fps = 4;
+}

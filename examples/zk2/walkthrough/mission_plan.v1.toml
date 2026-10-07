@@ -1,0 +1,23 @@
+# A durable command, owned by its author and keyed by target (r3 §4.3, Appendix A).
+[interface]
+name    = "mission_plan"
+major   = 1
+minor   = 0
+summary = "Mission plans authored for vehicles"
+uses    = ["desired.v1"]
+
+[schemas]
+protobuf = ["proto/mission_plan/v1/mission_plan.proto"]
+
+[resources."plans/{vehicle}"]
+kind        = "state"
+type        = "mission_plan.v1.Plan"
+params      = { vehicle = "string" }
+cardinality = 1000
+annotations = { "desired.target_param" = "vehicle" }
+
+[resources.list]
+kind     = "operation"
+request  = "mission_plan.v1.ListRequest"
+response = "mission_plan.v1.PlanSummary"
+replies  = "many"

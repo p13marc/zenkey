@@ -1,0 +1,47 @@
+# tcgui pilot (#589): the host's network interfaces, as one tc backend sees them.
+# Key: zk2/<host-id>/tc/tc.netif.v1/{state|stream|@op}/…  (system = host id, hostid.v1)
+[interface]
+name    = "tc.netif"
+major   = 1
+minor   = 0
+summary = "Network namespaces and interfaces of one host, and their control"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources.namespaces]
+kind = "state"
+type = "json:Namespaces"
+doc  = "The network namespaces this backend manages (was SensorDoc.namespaces)."
+
+[resources."interfaces/{ns}/{iface}"]
+kind        = "state"
+type        = "json:NetworkInterface"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "One interface; a delete means the NIC is gone, is_up = false means disabled."
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."bandwidth/{ns}/{iface}"]
+kind        = "stream"
+type        = "json:BandwidthUpdate"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+
+[resources."interfaces/{ns}/{iface}/set"]
+kind        = "operation"
+request     = "json:InterfaceControlRequest"
+response    = "json:InterfaceControlResponse"
+error       = "json:TcError"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Enable or disable one interface. Kernel side effect: the backend also holds an out-of-bus lock (r3 §3.8)."
+
+[resources.diagnostics]
+kind       = "operation"
+request    = "json:DiagnosticsRequest"
+response   = "json:DiagnosticsResponse"
+idempotent = true
+fanout     = "allowed"
+doc        = "Run interface/TC diagnostics; callable across hosts (zk2/*/tc/tc.netif.v1/@op/diagnostics)."

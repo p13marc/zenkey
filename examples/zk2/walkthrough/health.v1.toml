@@ -1,0 +1,27 @@
+# A standard contract every service SHOULD implement (r3 §3.5, §4.7; health.v1 profile).
+[interface]
+name    = "health"
+major   = 1
+minor   = 0
+summary = "The health of one service"
+uses    = ["freshness.v1"]
+
+[schemas]
+protobuf = ["proto/health/v1/health.proto"]
+
+[resources.status]
+kind        = "state"
+type        = "health.v1.Status"
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."checks/{check}"]
+kind        = "state"
+type        = "health.v1.Check"
+params      = { check = "string" }
+cardinality = 64
+
+[resources.faults]
+kind        = "stream"
+type        = "health.v1.Fault"
+reliability = "reliable"
+congestion  = "block"

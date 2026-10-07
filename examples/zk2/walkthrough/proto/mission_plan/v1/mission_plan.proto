@@ -1,0 +1,24 @@
+syntax = "proto3";
+package mission_plan.v1;
+
+message Waypoint {
+  double latitude_deg = 1;
+  double longitude_deg = 2;
+  double speed_mps = 3;
+}
+
+message Plan {
+  uint64 revision = 1;
+  repeated Waypoint waypoints = 2;
+  uint64 valid_until_ns = 3; // a stale plan is rejected (desired.v1)
+}
+
+message ListRequest {
+  string vehicle_prefix = 1;
+}
+
+message PlanSummary {
+  string vehicle = 1;
+  uint64 revision = 2;
+  uint32 waypoint_count = 3;
+}

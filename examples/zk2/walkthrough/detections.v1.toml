@@ -1,0 +1,18 @@
+# A perception stage: consumes a camera, provides detections (r3 §4.1).
+[interface]
+name    = "detections"
+major   = 1
+minor   = 0
+summary = "Objects detected in a bound camera's images"
+
+[schemas]
+protobuf = ["proto/detections/v1/detections.proto"]
+
+[resources.objects]
+kind = "stream"
+type = "detections.v1.Objects"
+
+[requires.input]
+interface   = "camera.v1"
+resources   = ["image"]
+cardinality = "one"

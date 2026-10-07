@@ -1,0 +1,42 @@
+# The navigation solution of one vehicle (r3 §4, Appendix A).
+[interface]
+name    = "nav"
+major   = 2
+minor   = 1
+summary = "Navigation solution of one vehicle"
+uses    = ["freshness.v1", "timing.v1"]
+
+[schemas]
+protobuf = ["proto/nav/v2/nav.proto"]
+
+[resources.position]
+kind        = "stream"
+type        = "nav.v2.Position"
+doc         = "Fused position fix, published at the solution rate."
+annotations = { "timing.period_ms" = 100, "timing.lifespan_ms" = 500 }
+
+[resources.status]
+kind        = "state"
+type        = "nav.v2.Status"
+annotations = { "freshness.ttl_s" = 5 }
+
+[resources.origin]
+kind = "state"
+type = "nav.v2.Origin"
+doc  = "The local tangent plane origin in use."
+
+[resources.set_origin]
+kind       = "operation"
+request    = "nav.v2.SetOriginRequest"
+response   = "nav.v2.Origin"
+error      = "nav.v2.NavError"
+idempotent = true
+timeout_ms = 2000
+
+[resources.reset]
+kind     = "operation"
+request  = "google.protobuf.Empty"
+response = "google.protobuf.Empty"
+optional = true
+gate     = "capability:reset_line"
+doc      = "Hardware reset of the inertial unit; absent where the line is not wired."

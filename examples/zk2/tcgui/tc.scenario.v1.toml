@@ -1,0 +1,56 @@
+# tcgui pilot (#589): the scenario and preset libraries, and scenario execution per interface.
+[interface]
+name    = "tc.scenario"
+major   = 1
+minor   = 0
+summary = "Network scenarios and presets, and their execution on interfaces"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources."scenarios/{id}"]
+kind        = "state"
+type        = "json:NetworkScenario"
+params      = { id = "string" }
+cardinality = 1000
+doc         = "One library entry; a delete means removed. A wildcard GET lists the library (replaces v1's List/Get requests)."
+
+[resources."presets/{id}"]
+kind        = "state"
+type        = "json:CustomPreset"
+params      = { id = "string" }
+cardinality = 1000
+
+[resources."execution/{ns}/{iface}"]
+kind        = "state"
+type        = "json:ScenarioExecutionUpdate"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Execution status, keyed by interface (never by a run id)."
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."scenarios/put"]
+kind     = "operation"
+request  = "json:ScenarioPut"
+response = "json:ScenarioAck"
+error    = "json:TcError"
+doc      = "Add or update one scenario (v1's Add/Update)."
+
+[resources."scenarios/{id}/remove"]
+kind        = "operation"
+request     = "json:Empty"
+response    = "json:ScenarioAck"
+error       = "json:TcError"
+params      = { id = "string" }
+cardinality = 1000
+idempotent  = true
+
+[resources."execution/{ns}/{iface}/control"]
+kind        = "operation"
+request     = "json:ExecutionControl"
+response    = "json:ExecutionAck"
+error       = "json:TcError"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Start, stop, pause or resume a scenario on one interface (v1's Status/ListActive become state reads)."

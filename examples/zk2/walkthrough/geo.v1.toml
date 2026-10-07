@@ -1,0 +1,22 @@
+# A stateless lookup served by several replicas (r3 §3.8, Appendix A).
+[interface]
+name    = "geo"
+major   = 1
+minor   = 0
+summary = "Terrain lookups"
+
+[schemas]
+protobuf = ["proto/geo/v1/geo.proto"]
+
+[resources.elevation]
+kind       = "operation"
+request    = "geo.v1.ElevationRequest"
+response   = "geo.v1.Elevation"
+serving    = "replicated"
+idempotent = true
+
+[resources."tiles/{tile}"]
+kind        = "state"
+type        = "geo.v1.TileInfo"
+params      = { tile = "string" }
+cardinality = 100000

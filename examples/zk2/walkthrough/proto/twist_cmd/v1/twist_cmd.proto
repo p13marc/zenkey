@@ -1,0 +1,9 @@
+syntax = "proto3";
+package twist_cmd.v1;
+
+message Twist {
+  double linear_x_mps = 1;
+  double linear_y_mps = 2;
+  double angular_z_radps = 3;
+  uint64 issued_at_ns = 4;
+}
