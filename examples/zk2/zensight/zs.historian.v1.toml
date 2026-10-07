@@ -1,0 +1,74 @@
+# The site historian: durable telemetry history as a computed answer (#898; historian.toml registry
+# 1.0: framework state + 6 procedures, 4 errors).
+# Key:        zk2/<host-id>/historian/zs.historian.v1/@op/<op>
+# Fleet call: zk2/*/*/zs.historian.v1/@op/range   target All, consolidation None (O2, O6)
+#             v1: v1/*/@rpc/historian/range (zensight/src/app.rs:8047-8053)
+#
+# Several historians may run (one per site, one per host). Each answers from what it ingested, on
+# its own concrete key, and the caller merges per series, as in v1. A historian is an ordinary
+# host service; no claim protocol is involved.
+# Ingest is introspection-driven: the historian subscribes to every stream whose contract
+# `uses = ["telemetry.v1"]` and whose resource is typed telemetry.v1.Point, i.e.
+# zk2/*/*/<iface>/stream/** for each such interface. It also reads occurrence streams and
+# zk2/*/*/alarms.v1/state/alarms/* for the timeline. See README "Consumer side". v1 subscribed
+# v1/*/telemetry/** (zensight-historian/src/ingest.rs:97).
+#
+# A series is named (system, service, interface, resource): the key minus the kind chunk,
+# derivable from a sample alone. A catalog merge or a correlator outage cannot move it. v1 named it
+# (origin, producer, subject) and persisted "<origin>/<producer>/<subject>" as the store key
+# (zensight-store/src/lib.rs:777), which has to be migrated.
+# The historian publishes no telemetry of its own (RFC 11 §2). Its numbers ride health.v1 and `stats`.
+
+[interface]
+name    = "zs.historian"
+major   = 1
+minor   = 0
+summary = "Bounded, aggregated range queries over durable fleet telemetry history"
+
+[schemas]
+jsonschema = ["schemas/zs.common.json", "schemas/zs.historian.v1.json"]
+
+[resources.range]
+kind       = "operation"
+request    = "json:RangeRequest"
+response   = "json:RangeSeries"
+error      = "json:HistorianError"
+replies    = "many"
+fanout     = "allowed"
+idempotent = true
+doc        = """
+Bounded history for a set of series: zero or more replies, ONE PER SERIES, then completion (O6).
+`step` is clamped to a tier and the served step_s is stated per series. covers_from says when the
+tier cannot reach back to `from`. agg defaults by kind: counter -> rate, gauge -> avg, bool -> max.
+Fan-out allowed: the caller asks every historian at once and merges per series, first reply wins
+(zensight/src/history.rs:97-129). Under fan-out the caller cannot tell a historian that finished
+from one that timed out, because completion is per query (Gap G14)."""
+
+[resources.series]
+kind       = "operation"
+request    = "json:SeriesRequest"
+response   = "json:SeriesInfo"
+error      = "json:HistorianError"
+replies    = "many"
+fanout     = "allowed"
+idempotent = true
+doc        = "The series this historian holds for a selector, one per reply: the listing a caller needs before it can ask a sensible range question."
+
+[resources.timeline]
+kind       = "operation"
+request    = "json:TimelineRequest"
+response   = "json:TimelineEntry"
+error      = "json:HistorianError"
+replies    = "many"
+fanout     = "allowed"
+idempotent = true
+doc        = "Durable occurrences (traps) and alarm transitions, newest first; the cursor is after_uid (the logs pattern, #908)."
+
+[resources.stats]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:HistorianStats"
+error      = "json:HistorianError"
+idempotent = true
+fanout     = "allowed"
+doc        = "Store metrics: series count, rows per tier, database bytes, dropped samples, last prune. HistorianStats.historian goes (the reply key names the historian)."

@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.sysinfo.v1.json",
+  "$comment": "sysinfo's own documents, faithful to zensight-common/src/gpu.rs, timesync.rs and query_detail.rs (ProcessRecord, LatencyReport). Telemetry points are telemetry.v1.json's.",
+  "$defs": {
+    "GpuInfo": {
+      "type": "object",
+      "properties": {
+        "card": {
+          "description": "Repeats the key's {card} (migration debt).",
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "pci_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "pci_addr": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "card",
+        "vendor"
+      ]
+    },
+    "TimesyncStatus": {
+      "type": "object",
+      "properties": {
+        "synchronised": {
+          "type": "boolean"
+        },
+        "source": {
+          "description": "The time daemon consulted (chrony, timesyncd, ntpd, none).",
+          "type": "string"
+        },
+        "offset_ms": {
+          "type": "number"
+        },
+        "stratum": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "reference": {
+          "type": "string"
+        },
+        "last_update_age_s": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "synchronised",
+        "source"
+      ]
+    },
+    "ProcessesRequest": {
+      "description": "Was the selector parameters ?sort=cpu|mem|io;top=N.",
+      "type": "object",
+      "properties": {
+        "sort": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "mem",
+            "io"
+          ]
+        },
+        "top": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ProcessRecord": {
+      "type": "object",
+      "properties": {
+        "pid": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "cpu": {
+          "type": "number"
+        },
+        "rss": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "vsz": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threads": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "state": {
+          "type": "string"
+        },
+        "io_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "io_write": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cmdline": {
+          "description": "Scrubbed of secret-looking argv values and truncated (#302).",
+          "type": "string"
+        },
+        "exe": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ppid": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cgroup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_time": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "pid",
+        "name",
+        "cpu",
+        "rss",
+        "vsz",
+        "threads",
+        "state",
+        "io_read",
+        "io_write",
+        "uid"
+      ]
+    },
+    "HistBucket": {
+      "type": "object",
+      "properties": {
+        "le_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "le_us",
+        "count"
+      ]
+    },
+    "LatencyHistogram": {
+      "description": "query_detail.rs `Histogram` (renamed here: telemetry.v1.Histogram is a different shape).",
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistBucket"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p95_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p99_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_us": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "unit",
+        "buckets",
+        "total",
+        "p50_us",
+        "p95_us",
+        "p99_us",
+        "max_us"
+      ]
+    },
+    "LatencyReport": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "description": "False when the eBPF collector could not load; the histograms are then empty.",
+          "type": "boolean"
+        },
+        "window_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runqlat": {
+          "$ref": "#/$defs/LatencyHistogram"
+        },
+        "biolatency": {
+          "$ref": "#/$defs/LatencyHistogram"
+        }
+      },
+      "required": [
+        "available",
+        "window_secs",
+        "runqlat",
+        "biolatency"
+      ]
+    }
+  }
+}

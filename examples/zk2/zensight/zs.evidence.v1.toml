@@ -1,0 +1,76 @@
+# ZenSight's identity evidence, an interface every producer implements (r3.2 §4.9).
+# v1: state/<producer>/evidence/{self, device/{device}, names/{ip_slug}, relation/{relation_id}}
+#     (common tokens evidence_self / evidence_device / evidence_names / evidence_relation, RFC 04 §1.4).
+# Key:        zk2/<system>/<service>/zs.evidence.v1/state/<resource>
+# Example:    zk2/h-3fa9c2d41b7e/pve/zs.evidence.v1/state/relation/r-f5f9a2edb9601155
+# Fleet-wide: zk2/*/*/zs.evidence.v1/state/**   (the correlator's union: one subscription where v1
+#             needed two overlapping ones, zensight-correlator/src/subscriber.rs:45-63)
+#
+# relation_id (byte-exact, RFC 11 §3.3): "r-" ++ lowercase_hex(fnv1a_64(utf8(
+#     kind ++ 0x1f ++ repr(from) ++ 0x1f ++ repr(to)))),
+#   repr(claim) = host_id "|" device "|" ips "|" macs "|" name, ips and macs joined by "," in
+#   ascending byte order, an absent field empty.
+#   Test vector: kind hosts, from {host_id: h-3fa9c2d41b7e}, to {device: vm-101, name: db01}
+#   -> r-f5f9a2edb9601155.
+#
+# Every resource is optional. Device services (snmp.router01, bmc.<chassis>) publish no `self`,
+# because the poller service already claims the host. Most producers publish no device, names or
+# relation evidence. The per-producer bounds differ by two orders of magnitude (Gap G2).
+
+[interface]
+name    = "zs.evidence"
+major   = 1
+minor   = 0
+summary = "Identity claims a service makes about its own host and about what it observes"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zs.evidence.v1.json"]
+
+[resources.self]
+kind        = "state"
+type        = "json:HostEvidence"
+optional    = true
+history     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+The publishing service's claim about its own host (observer absent). history = true is
+v1's AdvancedPublisher cache_only(1) on every evidence key (zensight-sensor-core/src/runner.rs:739)."""
+
+[resources."device/{device}"]
+kind        = "state"
+type        = "json:HostEvidence"
+params      = { device = "string" }
+cardinality = 4096
+optional    = true
+history     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+A claim about an observed device (observer set): a polled SNMP device, a guest, a container, a
+camera, a wire-observed asset. v1 bounds: snmp 64, parallax 64, bmc 256, netlink 256,
+container 512, pve 512, logs 4096, netring 4096."""
+
+[resources."names/{ip}"]
+kind        = "state"
+type        = "json:NameObservation"
+params      = { ip = "string" }
+cardinality = 4096
+optional    = true
+history     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+A passive-DNS observation for one IP (netring), population-budgeted. The key now carries the
+injective zk2 slug of the address (10.0.0.7 stays as it is; an IPv6 address is escaped), not
+v1's lossy ip_slug, which replaces '.' and ':' with '-' (zensight-common/src/keyexpr.rs:967)."""
+
+[resources."relation/{relation_id}"]
+kind        = "state"
+type        = "json:RelationshipEvidence"
+params      = { relation_id = "string" }
+cardinality = 1024
+optional    = true
+history     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+A claim that two things are connected (pve, container, probe, netlink). The catalog concludes
+edges from these. Tombstoned when the claim stops."""

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alarms.v1.json",
+  "$comment": "The alarms.v1 profile's document (r3.2 §3.12). Generic: it carries no producer, host or source field, because the key names the publisher (system, service). Derived from ZenSight's Alert (zensight-common/src/alert.rs:100-147) with `source`, `protocol` and `kind` removed; ZenSight's `kind` rides `category`, which is NOT hashed into the key.",
+  "$defs": {
+    "alarms.v1.Alarm": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "description": "Unix epoch ms of the latest STATE TRANSITION (raised, escalated, resolved). It does not move while an alarm keeps firing or on a content refresh; an escalation moves it. Acknowledgements and timelines key off it (zensight-common/src/ack.rs, the historian's timeline uid).",
+          "type": "integer"
+        },
+        "observed_at_ms": {
+          "description": "Present only on a content refresh of a still-firing alarm; always >= timestamp. Absent reads as 'not refreshed', never 'not observed'.",
+          "type": "integer"
+        },
+        "rule": {
+          "description": "Stable rule identifier. The first input of the key recipe.",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/alarms.v1.Severity"
+        },
+        "state": {
+          "$ref": "#/$defs/alarms.v1.State"
+        },
+        "summary": {
+          "description": "One human-readable line.",
+          "type": "string"
+        },
+        "category": {
+          "description": "Free text naming what produced the alarm (ZenSight: anomaly | expectation | sensor_health). Not part of the key.",
+          "type": "string"
+        },
+        "labels": {
+          "description": "Structured context. Every label that is not host-scoped is a discriminating label and enters the key recipe.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "timestamp",
+        "rule",
+        "severity",
+        "state",
+        "summary"
+      ]
+    },
+    "alarms.v1.Severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critical"
+      ]
+    },
+    "alarms.v1.State": {
+      "type": "string",
+      "enum": [
+        "firing",
+        "resolved"
+      ]
+    }
+  }
+}

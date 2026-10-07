@@ -1,0 +1,60 @@
+# The SNMP poller itself: what belongs to the process, not to one device (device-as-service, r3.2 §3.5).
+# v1: the poller-wide part of snmp.toml: state `discovery`, procedures `targets` / `targets/set`,
+#     the `@desired` topic snmp/targets, and the trap receiver.
+# Key:      zk2/<host-id>/snmp/zs.snmp_poller.v1/{stream|state|@op}/<resource>
+# Example:  zk2/h-3fa9c2d41b7e/snmp/zs.snmp_poller.v1/state/targets
+#
+# The `snmp` service also implements health.v1, alarms.v1 (poller-level alerts: unreachable target
+# set, budget), zs.evidence.v1 (`self`), zs.thresholds.v1 (`applied/targets` lives there),
+# zs.artifacts.v1 and views.v1. It hosts no device telemetry.
+
+[interface]
+name    = "zs.snmp_poller"
+major   = 1
+minor   = 0
+summary = "An SNMP poller: its target set, subnet discovery and traps from unconfigured senders"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json"]
+
+[resources.targets]
+kind        = "state"
+type        = "json:SnmpTargets"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+The target set being polled right now, credentials omitted (v1 `targets` read). Every target is a
+device service snmp.<slug(name)>. Adding a target creates a service; removing one ends it."""
+
+[resources."targets/set"]
+kind       = "operation"
+request    = "json:SnmpTargets"
+response   = "json:Ack"
+idempotent = true
+fanout     = "forbidden"
+doc        = """
+Replace the target set without a restart. Validated before apply (names unique, slug-safe and
+non-empty; credential names known), else invalid_request and the previous set keeps polling.
+Fan-out forbidden, as in v1. The desired author's `targets.snmp` document is the other writer;
+applied/targets in zs.thresholds.v1 says which one won."""
+
+[resources.discovery]
+kind        = "state"
+type        = "json:DiscoveryReport"
+history     = true
+annotations = { "freshness.ttl_s" = 7200 }
+doc         = "Subnet-discovery report (#541): unconfigured SNMP responders proposed for onboarding (opt-in sweep). v1 kept it on an AdvancedPublisher cache_only(1)."
+
+[resources."strays/{sender}/{occurrence}"]
+kind        = "stream"
+type        = "json:EventRecord"
+params      = { sender = "string" }
+cardinality = 100000
+reliability = "reliable"
+congestion  = "block"
+retention   = "7d"
+doc         = """
+Traps from senders that resolve to no configured target, keyed by the sender address (v1 keyed
+EVERY trap by its slugged sender IP, zensight-sensor-snmp/src/trap.rs:298-299). Device services are
+created from configuration only, never from network input; r3.2 has no rule for this yet (Gap G15).
+v1's ip_slug replaced '.' and ':' with '-'; here {sender} is slugged injectively."""

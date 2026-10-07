@@ -1,0 +1,569 @@
+# netring, the wire-level flow / L7 / NDR sensor (zensight-common/registry/netring.toml, registry 1.5:
+# 75 telemetry, 9 state, 30 procedures, 22 gated entries, 3 blob tiers).
+# Key:        zk2/<host-id>/netring/zs.netring.v1/{stream|state|@op}/<resource>
+# Example:    zk2/h-3fa9c2d41b7e/netring/zs.netring.v1/stream/flow/red/p95_ms
+# All hosts:  zk2/*/*/zs.netring.v1/stream/**  (v1's GUI plan spelled v1/*/telemetry/netring/** and so
+#             missed a second instance `netring-2`, zensight/src/view/plan.rs:114; the interface chunk
+#             does not have that problem)
+#
+# What lives elsewhere:
+# - the population state (the "budgets"): evidence/names/{ip} (4096) and evidence/device/{device}
+#   (4096) are zs.evidence.v1 resources this service exposes; alarms are alarms.v1 (64).
+# - packet captures: the files are artifacts. The artifact/{kind} state, artifact/request|cancel|status
+#   and the @blob artifact/tree/store tiers become zs.artifacts.v1, a job (jobs.v1) whose Ready state
+#   carries a blob.v1 reference (holder system, holder service, hash). That contract is not written in
+#   this cut. `captures` below lists the files; a CaptureRecord still carries v1's key prefix
+#   (migration debt).
+# - thresholds and applied/{topic}: zs.thresholds.v1.
+#
+# Telemetry is a mechanical transcription. One change removes the only template overlap (Gap G1;
+# netring.toml:124 vs :236): capture/{source}/... -> capture/sources/{source}/...,
+# so that capture/focus/... and capture/disk/... can never be read as a source named focus or disk.
+#
+# Listing procedures become many-reply operations (O6). Three of the 15 are written here (flows,
+# talkers, captures). The other 12 (tls, matrix, elephant_flows, dns, http, quic, ssh, encrypted_dns,
+# ja4h, assets, ipfix, bandwidth) take the same shape: request = their selector parameters,
+# response = one record, replies = many, fanout allowed, and their v1 `when` as optional + gate.
+
+[interface]
+name    = "zs.netring"
+major   = 1
+minor   = 0
+summary = "Wire-level flow, L7 and NDR telemetry of one host's capture points, and its controls"
+uses    = ["telemetry.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.netring.v1.json"]
+
+# --- configuration topics: state for the current value, an operation to replace it ---
+# v1 served the current value as a read procedure (`<topic>`) and the change as `<topic>/set`, both
+# typed TopicStatus/…Config, which v1 never gave a schema (schema.rs:227-231): typed raw JSON here.
+
+[resources.detectors]
+kind        = "state"
+type        = { raw = "application/json" }
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "Current detector configuration (runtime detection tuning). v1 TopicStatus, declared-only."
+
+[resources."detectors/set"]
+kind       = "operation"
+request    = { raw = "application/json" }
+response   = "json:Ack"
+idempotent = true
+fanout     = "allowed"
+doc        = "Apply a detector configuration (v1 DetectorConfig, declared-only)."
+
+[resources.capture_filter]
+kind        = "state"
+type        = { raw = "application/json" }
+optional    = true
+gate        = "config:capture_focus.enabled"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "Current reloadable packet-tier BPF filter."
+
+[resources."capture_filter/set"]
+kind       = "operation"
+request    = { raw = "application/json" }
+response   = "json:Ack"
+idempotent = true
+fanout     = "allowed"
+optional   = true
+gate       = "config:capture_focus.enabled"
+doc        = "Replace the capture filter (v1 FilterConfig, declared-only)."
+
+[resources.threat_intel]
+kind        = "state"
+type        = { raw = "application/json" }
+optional    = true
+gate        = "config:threat"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "Current IOC/YARA threat-intel configuration."
+
+[resources."threat_intel/set"]
+kind       = "operation"
+request    = { raw = "application/json" }
+response   = "json:Ack"
+idempotent = true
+fanout     = "allowed"
+optional   = true
+gate       = "config:threat"
+doc        = "Hot-reload the threat-intel set (v1 ThreatIntelConfig, declared-only)."
+
+[resources.capture_disk]
+kind        = "state"
+type        = "json:CaptureDiskStatus"
+optional    = true
+gate        = "config:capture.to_disk.mode"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "Capture-to-disk status: mode, ring occupancy, retention, last event."
+
+[resources."capture_disk/set"]
+kind       = "operation"
+request    = "json:CaptureDiskCommand"
+response   = "json:Ack"
+idempotent = false
+fanout     = "allowed"
+optional   = true
+gate       = "config:capture.to_disk.mode"
+doc        = "capture_now (fire the pre-trigger ring, not idempotent) or set_capture (hot-switch the mode). v1 kept this on fan-out allowed."
+
+# --- listings (many replies) ---
+
+[resources.flows]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:FlowRecord"
+replies    = "many"
+idempotent = true
+fanout     = "allowed"
+doc        = "The flow ring, one flow per reply. Per-flow data never rides a stream (RFC 04 R3)."
+
+[resources.talkers]
+kind       = "operation"
+request    = "json:TopRequest"
+response   = "json:TalkerRecord"
+replies    = "many"
+idempotent = true
+fanout     = "allowed"
+optional   = true
+gate       = "config:collect.talkers"
+doc        = "Per-source rolling rate, top N."
+
+[resources.captures]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:CaptureRecord"
+replies    = "many"
+idempotent = true
+fanout     = "allowed"
+optional   = true
+gate       = "config:capture.to_disk.mode"
+doc        = "The capture-to-disk file index. Fetching a file goes through zs.artifacts.v1 and blob.v1."
+
+# --- telemetry ---
+
+
+[resources."flow/started_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows started"
+
+[resources."flow/ended_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows ended"
+
+[resources."flow/active"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows currently active"
+
+[resources."flow/bytes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "bytes across flows"
+
+[resources."flow/packets_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "packets across flows"
+
+[resources."flow/retransmits_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "retransmits across flows"
+
+[resources."flow/reassembly_gaps_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "holes skipped in reassembled TCP byte streams across ended flows (capture loss the parsers saw); only flows with a reassembling L7 parser count"
+
+[resources."flow/reassembly_gap_bytes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+annotations = { "telemetry.unit" = "By" }
+doc         = "bytes missing from reassembled TCP byte streams across ended flows; only flows with a reassembling L7 parser count"
+
+[resources."flow/by_l4/{proto}/bytes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { proto = "string" }
+cardinality = 8
+doc         = "bytes by L4 protocol"
+
+[resources."flow/by_l4/{proto}/flows_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { proto = "string" }
+cardinality = 8
+doc         = "flows by L4 protocol"
+
+[resources."tcp/closed_fin_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows closed by FIN"
+
+[resources."tcp/closed_rst_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows closed by RST"
+
+[resources."tcp/closed_idle_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "flows closed by idle timeout"
+
+[resources."tcp/resets_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "RSTs observed"
+
+[resources."tcp/refused_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "connection refusals"
+
+[resources."capture/sources/{source}/packets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "packets captured (v1: capture/{source}/packets)"
+
+[resources."capture/sources/{source}/drops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "capture drops (v1: capture/{source}/drops)"
+
+[resources."capture/sources/{source}/drop_rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "drop rate (v1: capture/{source}/drop_rate)"
+
+[resources."capture/sources/{source}/freezes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "AF_PACKET ring freezes (v1: capture/{source}/freezes)"
+
+[resources."capture/sources/{source}/dedup_dropped"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "duplicate frames the source's dedup filter dropped before anything counted them; absent when no filter is armed (v1: capture/{source}/dedup_dropped)"
+
+[resources."capture/sources/{source}/xdp/rx_dropped"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "AF_XDP rx dropped (v1: capture/{source}/xdp/rx_dropped)"
+
+[resources."capture/sources/{source}/xdp/rx_invalid_descs"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "invalid rx descriptors (v1: capture/{source}/xdp/rx_invalid_descs)"
+
+[resources."capture/sources/{source}/xdp/rx_ring_full"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "rx ring full (v1: capture/{source}/xdp/rx_ring_full)"
+
+[resources."capture/sources/{source}/xdp/rx_fill_ring_empty_descs"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "fill ring empty (v1: capture/{source}/xdp/rx_fill_ring_empty_descs)"
+
+[resources."capture/sources/{source}/xdp/tx_invalid_descs"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "invalid tx descriptors (v1: capture/{source}/xdp/tx_invalid_descs)"
+
+[resources."capture/sources/{source}/xdp/tx_ring_empty_descs"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 64
+doc         = "tx ring empty (v1: capture/{source}/xdp/tx_ring_empty_descs)"
+
+[resources."capture/sources/{source}/shed/new_flows_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "flows shed under load (v1: capture/{source}/shed/new_flows_total)"
+
+[resources."capture/sources/{source}/shed/sampled_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "flows sampled under load (v1: capture/{source}/shed/sampled_total)"
+
+[resources."capture/sources/{source}/shed/active"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { source = "string" }
+cardinality = 32
+doc         = "load shedding engaged (v1: capture/{source}/shed/active)"
+
+[resources."capture/focus/packets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "packets matching the focus filter"
+
+[resources."capture/focus/bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "bytes matching the focus filter"
+
+[resources."capture/disk/mode"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "capture-to-disk mode (text)"
+
+[resources."capture/disk/ring_packets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "packets in the disk ring"
+
+[resources."capture/disk/ring_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "bytes in the disk ring"
+
+[resources."capture/disk/retained_files"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "retained capture files"
+
+[resources."capture/disk/retained_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "retained bytes on disk"
+
+[resources."capture/disk/dropped"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "packets dropped by the disk writer"
+
+[resources."capture/disk/evictions"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "files evicted by retention"
+
+[resources."capture/disk/triggers"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "capture triggers fired"
+
+[resources."capture/events"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "capture-to-disk lifecycle events (text value, `event` label)"
+
+[resources."capture/backend"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "the capture backend in use (text; AF_PACKET | AF_XDP | pcap)"
+
+[resources."dns/queries_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "DNS queries"
+
+[resources."dns/unanswered_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "queries with no response"
+
+[resources."dns/query_rtt_p50_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "query RTT p50"
+
+[resources."dns/query_rtt_p95_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "query RTT p95"
+
+[resources."dns/query_rtt_p99_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "query RTT p99"
+
+[resources."dns/responses_by_rcode/{rcode}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { rcode = "string" }
+cardinality = 32
+doc         = "responses by rcode; the leaf is `<rcode>_total` (noerror|nxdomain|servfail|refused|...)"
+
+[resources."dns/encrypted/dot"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "DNS-over-TLS detections"
+
+[resources."dns/encrypted/doq"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "DNS-over-QUIC detections"
+
+[resources."dns/encrypted/doh"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "DNS-over-HTTPS detections"
+
+[resources."dns/encrypted/unknown_resolver"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "resolvers not on the allowlist"
+
+[resources."dns/encrypted/distinct"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "distinct encrypted-DNS resolvers"
+
+[resources."http/requests_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "HTTP requests"
+
+[resources."http/status_2xx_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "2xx responses"
+
+[resources."http/status_3xx_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "3xx responses"
+
+[resources."http/status_4xx_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "4xx responses"
+
+[resources."http/status_5xx_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "5xx responses"
+
+[resources."http/latency_p50_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "request latency p50"
+
+[resources."http/latency_p95_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "request latency p95"
+
+[resources."http/methods/{method}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { method = "string" }
+cardinality = 32
+doc         = "requests by method; the leaf is `<method>_total`. The method comes off the wire (capped at 32 distinct)"
+
+[resources."icmp/unreachable_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "ICMP unreachable"
+
+[resources."icmp/time_exceeded_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "ICMP time exceeded"
+
+[resources."icmp/mtu_signal_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "ICMP fragmentation-needed (PMTUD)"
+
+[resources."icmp/by_kind/{kind}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { kind = "string" }
+cardinality = 32
+doc         = "ICMP errors by kind; the leaf is `<kind>_total`"
+
+[resources."tls/handshakes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "TLS handshakes"
+
+[resources."tls/distinct_fingerprints"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "distinct JA4 fingerprints"
+
+[resources."tls/pq_ratio"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "share of handshakes offering post-quantum key exchange"
+
+[resources."quic/distinct_sni"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "distinct QUIC SNIs"
+
+[resources."ssh/distinct_hassh"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "distinct SSH HASSH fingerprints"
+
+[resources."assets/discovered"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "assets in the observed inventory"
+
+[resources."bandwidth/{app}/bytes_per_sec"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { app = "string" }
+cardinality = 32
+doc         = "wire-level throughput by application class (top 20)"
+
+[resources."anomaly/{kind}/total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { kind = "string" }
+cardinality = 64
+doc         = "detector firings by kind; {kind} is the detector slug from the netring crate + enabled feature detectors"
+
+[resources."parser/{parser}/{reason}/closed_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { parser = "string", reason = "string" }
+cardinality = 128
+doc         = "L7 parsers that stopped early on a flow that went on: {parser} is the flowscope parser slug, {reason} parse_error|parser_done|stream_gap|buffer_overflow; closes at the flow's own end are not counted"
+
+[resources."parser/{parser}/{reason}/side_stopped_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { parser = "string", reason = "string" }
+cardinality = 64
+doc         = "L7 parsers that stopped reading one side of a flow (a gap they could not bridge, or the side's buffer cap) and kept parsing the other"
+
+[resources."flow/red/{quantile}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { quantile = "string" }
+cardinality = 5
+annotations = { "telemetry.unit" = "ms" }
+doc         = "flow-lifetime RED quantiles from the capture path"

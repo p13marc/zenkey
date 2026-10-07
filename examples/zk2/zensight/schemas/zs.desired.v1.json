@@ -1,0 +1,1172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.desired.v1.json",
+  "$comment": "The documents the fleet desired-state author publishes, one type per template (Gap G5). Faithful to zensight-common/src/{systemd,hostspec,netlink,logs,targets,probe,desired}.rs; ThresholdsConfig is zs.common.json's and SnmpTargets zs.snmp.v1.json's, both listed by the contract. Severity and ComparisonOp are reached by a relative cross-file $ref to zs.common.json, which draft 0 does not specify (Gap G12). The never-list (desired.rs: no secrets, nothing a sensor needs to reach the bus) is a controller-side lint that no schema expresses.",
+  "$defs": {
+    "ServiceActiveExpectation": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit"
+      ]
+    },
+    "TargetActiveExpectation": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ]
+    },
+    "TimerExpectation": {
+      "type": "object",
+      "properties": {
+        "timer": {
+          "type": "string"
+        },
+        "within_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded_within_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "timer"
+      ]
+    },
+    "RestartRateExpectation": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "type": "string"
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "unit",
+        "max",
+        "window_secs"
+      ]
+    },
+    "SystemdExpectations": {
+      "description": "systemd.rs ExpectationsConfig (renamed: hostspec has a type of the same name). Every field is serde-defaulted.",
+      "type": "object",
+      "properties": {
+        "eval_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "services_active": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ServiceActiveExpectation"
+          }
+        },
+        "targets_active": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TargetActiveExpectation"
+          }
+        },
+        "timers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TimerExpectation"
+          }
+        },
+        "restart_rates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RestartRateExpectation"
+          }
+        },
+        "forbid_failed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MountExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "is_bind_of": {
+          "type": "string"
+        },
+        "fstype": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "FileExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "newer_than_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "size_within_pct_of_previous": {
+          "type": "number"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "ListenProto": {
+      "type": "string",
+      "enum": [
+        "tcp",
+        "udp",
+        "both"
+      ]
+    },
+    "ListeningExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "proto": {
+          "$ref": "#/$defs/ListenProto"
+        },
+        "addr": {
+          "type": "string"
+        },
+        "dual_stack": {
+          "type": "boolean"
+        },
+        "forbid": {
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "port"
+      ]
+    },
+    "SymlinkExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "target"
+      ]
+    },
+    "AbsentExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "ContentExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "contains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "PermsExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ]
+    },
+    "HostspecExpectations": {
+      "description": "hostspec.rs ExpectationsConfig (registry name HostspecExpectations). Every field is serde-defaulted.",
+      "type": "object",
+      "properties": {
+        "eval_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MountExpectation"
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileExpectation"
+          }
+        },
+        "listening": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ListeningExpectation"
+          }
+        },
+        "symlinks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SymlinkExpectation"
+          }
+        },
+        "absent": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AbsentExpectation"
+          }
+        },
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContentExpectation"
+          }
+        },
+        "perms": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PermsExpectation"
+          }
+        }
+      }
+    },
+    "SocketExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "listen": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "established_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "forbid_listen": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "LinkExpectation": {
+      "type": "object",
+      "properties": {
+        "iface": {
+          "type": "string"
+        },
+        "up": {
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "iface"
+      ]
+    },
+    "NeighborExpectation": {
+      "type": "object",
+      "properties": {
+        "ip": {
+          "type": "string"
+        },
+        "reachable": {
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ip"
+      ]
+    },
+    "RouteExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "default_present": {
+          "type": "boolean"
+        },
+        "default_via": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "MetricExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "op": {
+          "$ref": "zs.common.json#/$defs/ComparisonOp"
+        },
+        "value": {
+          "type": "number"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "metric",
+        "op",
+        "value"
+      ]
+    },
+    "RateExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "max_increase_per_min": {
+          "type": "number"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "metric",
+        "max_increase_per_min"
+      ]
+    },
+    "DeliveryFloorExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "floor": {
+          "type": "number"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "floor"
+      ]
+    },
+    "RouteFlapExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "max_flaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "max_flaps"
+      ]
+    },
+    "RuleSense": {
+      "type": "string",
+      "enum": [
+        "forbid",
+        "require"
+      ]
+    },
+    "RuleExpectation": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "priority": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "table": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sense": {
+          "$ref": "#/$defs/RuleSense"
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "for_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "NetlinkExpectations": {
+      "description": "netlink.rs NetlinkExpectations. Every field is serde-defaulted. `metric` fields name v1 subject paths (migration debt, as ThresholdRule.metric).",
+      "type": "object",
+      "properties": {
+        "eval_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sockets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SocketExpectation"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LinkExpectation"
+          }
+        },
+        "neighbors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NeighborExpectation"
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteExpectation"
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MetricExpectation"
+          }
+        },
+        "rates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RateExpectation"
+          }
+        },
+        "delivery": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeliveryFloorExpectation"
+          }
+        },
+        "route_flaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteFlapExpectation"
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RuleExpectation"
+          }
+        }
+      }
+    },
+    "LogMatch": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "min_severity": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 255
+        },
+        "facility": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "app": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "template_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "LogThreshold": {
+      "description": "logs.rs Threshold.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "within_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "count",
+        "within_secs"
+      ]
+    },
+    "RateLimit": {
+      "type": "object",
+      "properties": {
+        "max_fires": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "per_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "max_fires",
+        "per_secs"
+      ]
+    },
+    "LogRule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match": {
+          "$ref": "#/$defs/LogMatch"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogThreshold"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "severity": {
+          "$ref": "zs.common.json#/$defs/Severity"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "labels_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rate_limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "LogRulesConfig": {
+      "type": "object",
+      "properties": {
+        "eval_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "include_builtins": {
+          "type": "boolean"
+        },
+        "include_kernel_builtins": {
+          "type": "boolean"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LogRule"
+          }
+        }
+      }
+    },
+    "ProbeKind": {
+      "type": "string",
+      "enum": [
+        "http",
+        "tls",
+        "dns",
+        "tcp",
+        "icmp",
+        "certfile",
+        "burst",
+        "ntp"
+      ]
+    },
+    "ProbeTarget": {
+      "description": "deny_unknown_fields. The file-config target minus `headers`, which stays on the host.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ProbeKind"
+        },
+        "target": {
+          "type": "string"
+        },
+        "interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expect_status": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        },
+        "expect_body": {
+          "type": "string"
+        },
+        "follow_redirects": {
+          "type": "boolean"
+        },
+        "allow_offhost_redirect": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spacing_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transport": {
+          "type": "string"
+        },
+        "server_name": {
+          "type": "string"
+        },
+        "inspect_untrusted": {
+          "type": "boolean"
+        },
+        "resolver": {
+          "type": "string"
+        },
+        "expect_addrs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "ProbeTargets": {
+      "type": "object",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProbeTarget"
+          }
+        }
+      }
+    },
+    "DesiredOverride": {
+      "type": "object",
+      "properties": {
+        "system": {
+          "description": "Target host's system name. v1 `host`.",
+          "type": "string"
+        },
+        "service": {
+          "description": "Target service. v1 `producer`.",
+          "type": "string"
+        },
+        "topic": {
+          "description": "The document type's literal chunk: thresholds, targets.snmp, expectations.systemd, ...",
+          "type": "string"
+        },
+        "doc": {
+          "description": "The document, overlaid last; null removes the override. v1 serde_json::Value: an open schema, whose place in the zk2 jsonschema subset S7 must decide."
+        },
+        "by": {
+          "description": "From the O7 call-metadata actor, never from the body.",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "at": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "system",
+        "service",
+        "topic"
+      ]
+    },
+    "DesiredError": {
+      "description": "v1 error/desired/not-durable: the override could not be written to the overrides file, so it would vanish at restart. Refused rather than acknowledged.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "not_durable"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ]
+    }
+  }
+}

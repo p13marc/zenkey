@@ -1,0 +1,452 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.parallax.v1.json",
+  "$comment": "parallax's documents, faithful to zensight-common/src/stream.rs and discovery.rs. FrameMeta is CBOR on the wire and pinned byte for byte by a conformance corpus shared with the parallax repository (stream.rs:97-131): field order and the omission of absent timestamps are wire shape. This schema cannot express either rule, and draft 0 does not say how an attachment is encoded when the payload is raw (Gap G8).",
+  "$defs": {
+    "FrameMeta": {
+      "type": "object",
+      "properties": {
+        "keyframe": {
+          "type": "boolean"
+        },
+        "pts_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dts_ns": {
+          "description": "Omitted when equal to pts_ns (a producer-side elision).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "description": "Monotonic per stream; a gap means dropped frames.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "keyframe",
+        "sequence",
+        "width",
+        "height"
+      ]
+    },
+    "TierSpec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "max_height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bitrate_kbps": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "fps",
+        "bitrate_kbps"
+      ]
+    },
+    "StreamDescriptor": {
+      "description": "Capability-bearing catalogue entry (#507): native geometry and the tiers on offer, without opening the stream.",
+      "type": "object",
+      "properties": {
+        "stream": {
+          "type": "string"
+        },
+        "codecs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fps": {
+          "type": "number"
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TierSpec"
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "codecs",
+        "active"
+      ]
+    },
+    "TierApplied": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bitrate_kbps": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "fps",
+        "bitrate_kbps"
+      ]
+    },
+    "TierStatus": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "string"
+        },
+        "applied": {
+          "$ref": "#/$defs/TierApplied"
+        },
+        "viewers": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "tier",
+        "applied",
+        "viewers"
+      ]
+    },
+    "StreamEndReason": {
+      "description": "Internally tagged on `type`, snake_case.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "closed",
+                "idle",
+                "superseded",
+                "shutdown",
+                "source_ended",
+                "stalled"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "failed"
+            },
+            "node": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "failed_open"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ]
+        }
+      ]
+    },
+    "StreamEnd": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "description": "A ladder rung's name, or `preview`.",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/StreamEndReason"
+        }
+      },
+      "required": [
+        "tier",
+        "reason"
+      ]
+    },
+    "StreamStatus": {
+      "type": "object",
+      "properties": {
+        "stream": {
+          "description": "Repeats the key's {stream} (migration debt).",
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TierStatus"
+          }
+        },
+        "last_end": {
+          "$ref": "#/$defs/StreamEnd"
+        }
+      },
+      "required": [
+        "stream",
+        "open"
+      ]
+    },
+    "StreamControl": {
+      "description": "Internally tagged on `type`, snake_case. v1 wrapped it in Command<T> {id?, body}; the correlation id becomes the O7 call-metadata request_id.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "open_stream"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "codec": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stream"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "close_stream"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "codec": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stream"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "request_keyframe"
+            },
+            "stream": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stream"
+          ]
+        }
+      ]
+    },
+    "MediaReceiverReport": {
+      "description": "Receiver feedback for one @stream key (RFC 07 §1.1): a snapshot with cumulative counters, so a retry repeats a statement. Timing fields absent = not measured.",
+      "type": "object",
+      "properties": {
+        "stream": {
+          "type": "string"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "consumer_id": {
+          "type": "string"
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "received_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lost_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoded_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interarrival_jitter_ms": {
+          "type": "number"
+        },
+        "frame_age_ms": {
+          "description": "Observed skewed latency; may be negative.",
+          "type": "number"
+        },
+        "frame_age_max_ms": {
+          "type": "number"
+        },
+        "decoder_queue_depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_keyframe_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "since_last_keyframe_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "stream",
+        "consumer_id",
+        "interval_ms",
+        "received_frames",
+        "lost_frames",
+        "dropped_frames",
+        "decoded_frames",
+        "last_sequence"
+      ]
+    },
+    "StreamDiscoveryReport": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "discovered": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveredStream"
+          }
+        }
+      },
+      "required": [
+        "timestamp"
+      ]
+    },
+    "DiscoveredStream": {
+      "type": "object",
+      "properties": {
+        "via": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "suggested": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "via",
+        "address",
+        "suggested"
+      ]
+    }
+  }
+}

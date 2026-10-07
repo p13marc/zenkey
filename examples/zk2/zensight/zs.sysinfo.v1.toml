@@ -1,0 +1,922 @@
+# sysinfo, the host metrics producer: the "literal telemetry" case (zensight-common/registry/sysinfo.toml,
+# registry 1.9: 136 telemetry + 9 state subjects, 9 procedures, 7 gated entries).
+# Key:        zk2/<host-id>/sysinfo/zs.sysinfo.v1/{stream|state|@op}/<resource>
+# Example:    zk2/h-3fa9c2d41b7e/sysinfo/zs.sysinfo.v1/stream/memory/usage_percent
+# All hosts:  zk2/*/*/zs.sysinfo.v1/stream/**   (the interface chunk, so `sysinfo-2` or a
+#             per-computer `sysinfo.c2` is included: r3.2 §0.2, shapes.md row 9)
+#
+# The service also implements health.v1 (../walkthrough/health.v1.toml), alarms.v1, zs.evidence.v1
+# (self only), zs.thresholds.v1 and zs.artifacts.v1 (jobs.v1 + blob.v1, not written in this cut).
+# v1's framework rows map there; `sensor`, `introspect` and `describe` are deleted (descriptor,
+# bundle). See README "Mapping".
+#
+# Telemetry is a mechanical transcription (one resource per v1 subject, the v1 description as doc,
+# `when` -> optional + gate). Four renames, all to remove template overlap (Gap G1):
+#   {cpu}/times/{component}            -> cpus/{cpu}/times/{component}
+#   {cpu}/schedstat/run_delay_ns_total -> cpus/{cpu}/schedstat/run_delay_ns_total
+#   cpu/{core}/usage                   -> cpu/cores/{core}/usage
+#   cpu/{core}/frequency               -> cpu/cores/{core}/frequency
+# In v1, `cpu/times/usage` matched both cpu/{core}/usage and cpu/times/{component}, and
+# `cpu/times/user` matched {cpu}/times/{component} too. v1 resolved them by most-literal-first
+# precedence (rfcs/08-registry.md:33); draft 0 has no precedence rule, so the overlaps have to go.
+# QoS: zk2 stream defaults (best_effort, drop, data). v1's `sampled` profile was data_low; restating
+# it on 136 resources is what interface-level defaults would avoid (Gap G11). No `history`: RFC 11 §1's
+# target posture for telemetry is the baseline tier.
+# No resource declares telemetry.kind: v1 sysinfo declares none, and telemetry.v1.Point's tag
+# self-describes the value (r3.2 §4.9: "no back-fill").
+
+[interface]
+name    = "zs.sysinfo"
+major   = 1
+minor   = 0
+summary = "Host CPU, memory, disk, network, sensors and GPU metrics of one host"
+uses    = ["telemetry.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.sysinfo.v1.json"]
+
+# --- state ---
+
+[resources."gpu/{card}"]
+kind        = "state"
+type        = "json:GpuInfo"
+params      = { card = "string" }
+cardinality = 16
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "GPU inventory from the kernel's DRM sysfs (#954): vendor, driver, PCI id and product name where the driver publishes them."
+
+[resources.timesync]
+kind        = "state"
+type        = "json:TimesyncStatus"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "The host's own clock discipline (#959): synchronised or not, offset, stratum, reference."
+
+# --- operations (v1 read procedures; selector parameters become request fields) ---
+
+[resources.processes]
+kind       = "operation"
+request    = "json:ProcessesRequest"
+response   = "json:ProcessRecord"
+replies    = "many"
+idempotent = true
+fanout     = "allowed"
+doc        = "Top processes, one reply per process (O6). The per-pid detail that is never streamed (the retired process/{rank}/* family, #1070). Fan-out allowed: v1 reads defaulted to allowed."
+
+[resources.latency]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:LatencyReport"
+idempotent = true
+fanout     = "allowed"
+doc        = "eBPF runqlat/biolatency saturation histograms over the last window. Not gated: a build without eBPF answers available = false, as v1 does."
+
+# --- telemetry ---
+
+
+[resources."system/uptime"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "seconds since boot"
+
+[resources."system/load"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "1-minute load average"
+
+[resources."system/boot_time"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "boot timestamp (unix seconds)"
+
+[resources."system/processes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "process count"
+
+[resources."system/processes_zombie"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "zombie process count"
+
+[resources."system/saturation_score"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "composite saturation score (0-100)"
+
+[resources."system/health_state"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "derived host health state"
+
+[resources."system/context_switches_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "context switches since boot"
+
+[resources."system/forks_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "forks since boot"
+
+[resources."system/procs_running"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "run-queue depth"
+
+[resources."system/procs_blocked"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "processes blocked on I/O"
+
+[resources."system/file_descriptors_used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "file handles in use"
+
+[resources."system/file_descriptors_max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "file-handle ceiling (fs.file-max)"
+
+[resources."system/file_descriptors_used_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "file-handle occupancy"
+
+[resources."system/entropy_avail"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "available entropy bits"
+
+[resources."cpu/usage"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "host CPU utilisation (percent)"
+
+[resources."cpu/cores/{core}/usage"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { core = "string" }
+cardinality = 512
+doc         = "per-core utilisation (percent) (v1: cpu/{core}/usage)"
+
+[resources."cpu/cores/{core}/frequency"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { core = "string" }
+cardinality = 512
+doc         = "per-core clock (MHz) (v1: cpu/{core}/frequency)"
+
+[resources."cpu/times/{component}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { component = "string" }
+cardinality = 8
+doc         = "host CPU time by component (user|nice|system|idle|iowait|irq|softirq|steal)"
+
+[resources."cpu/schedstat/run_delay_ns_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "host runqueue delay (ns, cumulative)"
+
+[resources."cpus/{cpu}/times/{component}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { cpu = "string", component = "string" }
+cardinality = 4096
+doc         = "per-CPU time by component; {cpu} is the /proc/stat row name (cpu0, cpu1, ...) (v1: {cpu}/times/{component})"
+
+[resources."cpus/{cpu}/schedstat/run_delay_ns_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { cpu = "string" }
+cardinality = 512
+doc         = "per-CPU runqueue delay (ns, cumulative) (v1: {cpu}/schedstat/run_delay_ns_total)"
+
+[resources."memory/total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "total RAM (bytes)"
+
+[resources."memory/used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "used RAM (bytes)"
+
+[resources."memory/available"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "available RAM (bytes)"
+
+[resources."memory/usage_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "RAM occupancy"
+
+[resources."memory/swap_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "total swap (bytes)"
+
+[resources."memory/swap_used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "used swap (bytes)"
+
+[resources."memory/swap_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "swap occupancy"
+
+[resources."memory/cached"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "page cache (bytes)"
+
+[resources."memory/buffers"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "buffer cache (bytes)"
+
+[resources."memory/slab"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "slab allocator (bytes)"
+
+[resources."memory/dirty"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "dirty pages (bytes)"
+
+[resources."memory/writeback"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "pages under writeback (bytes)"
+
+[resources."memory/oom_kills_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "OOM kills since boot"
+
+[resources."memory/page_faults_major_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "major faults since boot"
+
+[resources."memory/page_faults_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "all faults since boot"
+
+[resources."memory/paging_in_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "pages swapped in"
+
+[resources."memory/paging_out_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "pages swapped out"
+
+[resources."memory/pgpgin_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "blocks paged in"
+
+[resources."memory/pgpgout_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "blocks paged out"
+
+[resources."smart/{device}/critical_warning"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe critical-warning bitfield (0 = healthy)"
+
+[resources."smart/{device}/available_spare"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe normalized spare capacity remaining, percent"
+
+[resources."smart/{device}/available_spare_threshold"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "the threshold available_spare must stay above"
+
+[resources."smart/{device}/percentage_used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe wear estimate, percent of rated endurance used"
+
+[resources."smart/{device}/media_errors_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe lifetime unrecovered media errors"
+
+[resources."smart/{device}/power_on_hours"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "drive lifetime power-on hours"
+
+[resources."smart/{device}/unsafe_shutdowns_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe lifetime unsafe shutdowns"
+
+[resources."smart/{device}/data_units_read_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe lifetime data units read (1 unit = 512000 bytes)"
+
+[resources."smart/{device}/data_units_written_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "NVMe lifetime data units written (1 unit = 512000 bytes)"
+
+[resources."smart/{device}/reallocated_sectors_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "ATA attribute 5: lifetime reallocated sectors"
+
+[resources."smart/{device}/pending_sectors"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "ATA attribute 197: sectors currently pending reallocation"
+
+[resources."smart/{device}/crc_errors_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 16
+doc         = "ATA attribute 199: lifetime UDMA CRC errors"
+
+[resources."memory/edac/{controller}/correctable_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { controller = "string" }
+cardinality = 16
+doc         = "ECC correctable errors per memory controller"
+
+[resources."memory/edac/{controller}/uncorrectable_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { controller = "string" }
+cardinality = 16
+doc         = "ECC uncorrectable errors per memory controller"
+
+[resources."disk/{mount}/total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "filesystem size (bytes)"
+
+[resources."disk/{mount}/used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "used (bytes)"
+
+[resources."disk/{mount}/available"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "available (bytes)"
+
+[resources."disk/{mount}/usage_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "occupancy"
+
+[resources."disk/{mount}/inodes_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "inode count"
+
+[resources."disk/{mount}/inodes_used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "inodes used"
+
+[resources."disk/{mount}/inodes_free"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "inodes free"
+
+[resources."disk/{mount}/inode_used_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { mount = "string" }
+cardinality = 512
+doc         = "inode occupancy"
+
+[resources."disk/{device}/io/read_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "bytes read"
+
+[resources."disk/{device}/io/write_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "bytes written"
+
+[resources."disk/{device}/io/read_ops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "read operations"
+
+[resources."disk/{device}/io/write_ops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "write operations"
+
+[resources."disk/{device}/io/time_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "time spent in I/O (ms)"
+
+[resources."disk/{device}/io/util_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "device utilisation"
+
+[resources."disk/{device}/io/queue_depth"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "average queue depth"
+
+[resources."disk/{device}/io/read_rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "read throughput (B/s)"
+
+[resources."disk/{device}/io/write_rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "write throughput (B/s)"
+
+[resources."disk/{device}/io/read_iops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "read IOPS"
+
+[resources."disk/{device}/io/write_iops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { device = "string" }
+cardinality = 512
+doc         = "write IOPS"
+
+[resources."disk/md/{array}/state"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { array = "string" }
+cardinality = 64
+doc         = "array state"
+
+[resources."disk/md/{array}/degraded"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { array = "string" }
+cardinality = 64
+doc         = "array is degraded"
+
+[resources."disk/md/{array}/failed_disks"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { array = "string" }
+cardinality = 64
+doc         = "members flagged failed"
+
+[resources."disk/md/{array}/total_disks"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { array = "string" }
+cardinality = 64
+doc         = "configured members"
+
+[resources."disk/md/{array}/active_disks"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { array = "string" }
+cardinality = 64
+doc         = "working members"
+
+[resources."network/{iface}/rx_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "bytes received"
+
+[resources."network/{iface}/tx_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "bytes sent"
+
+[resources."network/{iface}/rx_packets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "packets received"
+
+[resources."network/{iface}/tx_packets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "packets sent"
+
+[resources."network/{iface}/rx_errors"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "receive errors"
+
+[resources."network/{iface}/tx_errors"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "transmit errors"
+
+[resources."network/{iface}/rx_rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "receive throughput (B/s)"
+
+[resources."network/{iface}/tx_rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "transmit throughput (B/s)"
+
+[resources."network/{iface}/rx_dropped"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "receive drops"
+
+[resources."network/{iface}/rx_fifo"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "receive FIFO overruns"
+
+[resources."network/{iface}/rx_frame"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "receive framing errors"
+
+[resources."network/{iface}/multicast"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "multicast frames"
+
+[resources."network/{iface}/tx_dropped"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "transmit drops"
+
+[resources."network/{iface}/tx_fifo"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "transmit FIFO underruns"
+
+[resources."network/{iface}/tx_colls"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "collisions"
+
+[resources."network/{iface}/tx_carrier"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { iface = "string" }
+cardinality = 1024
+doc         = "carrier losses"
+
+[resources."network/tcp/retrans_segs_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "TCP segments retransmitted"
+
+[resources."network/tcp/listen_overflows_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "accept-queue overflows"
+
+[resources."network/tcp/listen_drops_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "SYN drops"
+
+[resources."network/sockets/used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sockets in use"
+
+[resources."network/sockets/tcp_inuse"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "TCP sockets in use"
+
+[resources."network/sockets/tcp_mem_pages"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "TCP memory (kernel pages)"
+
+[resources."network/sockets/udp_inuse"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "UDP sockets in use"
+
+[resources."network/softnet/processed_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "packets processed"
+
+[resources."network/softnet/dropped_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "backlog drops"
+
+[resources."network/softnet/squeezed_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "budget exhaustions"
+
+[resources."network/conntrack/count"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "conntrack entries"
+
+[resources."network/conntrack/max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "conntrack table size"
+
+[resources."network/conntrack/utilization_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "conntrack occupancy"
+
+[resources."tcp/{state}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { state = "string" }
+cardinality = 16
+doc         = "TCP sockets by state (the 11 kernel states, plus `total`)"
+
+[resources."pressure/{resource}/{stat}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { resource = "string", stat = "string" }
+cardinality = 32
+doc         = "PSI per resource (cpu|memory|io): {some,full}_avg{10,60,300} and {some,full}_total_us \u2014 scope and window ride the leaf together"
+
+[resources."cgroup/cpu/nr_throttled"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "throttled enforcement periods"
+
+[resources."cgroup/cpu/throttled_usec"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "time throttled (us)"
+
+[resources."cgroup/memory/current"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "current usage (bytes)"
+
+[resources."cgroup/memory/max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "hard limit (bytes)"
+
+[resources."cgroup/memory/used_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "occupancy against the limit"
+
+[resources."cgroup/memory/oom_kills_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "processes OOM-killed in this cgroup"
+
+[resources."cgroup/memory/oom_total"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "times the cgroup hit its limit"
+
+[resources."cgroup/{resource}/pressure/{stat}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { resource = "string", stat = "string" }
+cardinality = 32
+doc         = "cgroup PSI per resource: {some,full}_avg10 and {some,full}_total_us"
+
+[resources."sensors/{chip}/{label}/temp"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { chip = "string", label = "string" }
+cardinality = 256
+doc         = "temperature (C)"
+
+[resources."sensors/{chip}/{label}/critical"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { chip = "string", label = "string" }
+cardinality = 256
+doc         = "critical threshold (C)"
+
+[resources."sensors/{chip}/{label}/max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { chip = "string", label = "string" }
+cardinality = 256
+doc         = "max threshold (C)"
+
+[resources."sensors/{chip}/{label}/rpm"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { chip = "string", label = "string" }
+cardinality = 256
+doc         = "fan speed (RPM)"
+
+[resources."power/rapl/{zone}/watts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { zone = "string" }
+cardinality = 16
+doc         = "RAPL power draw per zone (package-0, core, ...)"
+
+[resources."battery/{name}/capacity"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { name = "string" }
+cardinality = 8
+doc         = "charge (percent)"
+
+[resources."battery/{name}/status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { name = "string" }
+cardinality = 8
+doc         = "charging status"
+
+[resources."gpu/{card}/utilisation_pct"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "GPU busy percentage (#954). amdgpu's gpu_busy_percent; ABSENT on i915/xe, which expose no equivalent without perf counters \u2014 a zero would say the GPU is idle"
+
+[resources."gpu/{card}/vram_used_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "VRAM in use, from the driver's own accounting (#954)"
+
+[resources."gpu/{card}/vram_total_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "total VRAM the driver reports (#954)"
+
+[resources."gpu/{card}/temp_celsius"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "GPU temperature, converted from the kernel's millidegrees (#954)"
+
+[resources."gpu/{card}/power_watts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "average GPU power draw, converted from the kernel's microwatts (#954)"
+
+[resources."gpu/{card}/fan_rpm"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "GPU fan speed where a fan is reported (#954)"
+
+[resources."gpu/{card}/clock_mhz"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+doc         = "current GPU clock; hwmon freq1_input where present, else the i915/xe GT node (#954)"
+
+[resources."gpu/{card}/memory_utilisation_pct"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+optional    = true
+gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver"]
+doc         = "percentage of the sample period the GPU MEMORY CONTROLLER was busy (#954). Distinct from VRAM occupancy: this is what separates a memory-bound workload from a compute-bound one. NVML only \u2014 `--features nvml`; no kernel driver exposes it. Gate: NVML only: no kernel driver exposes memory-controller utilisation (#954)"
+
+[resources."gpu/{card}/ecc_volatile_uncorrected"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+optional    = true
+gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
+doc         = "uncorrected (double-bit) device-memory ECC errors since the driver loaded (#954). UNCORRECTED, not corrected: a corrected error is the hardware working. NVML only, and absent on a card with ECC disabled. Gate: NVML only, on a card with ECC enabled (#954)"
+
+[resources."gpu/{card}/ecc_aggregate_uncorrected"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string" }
+cardinality = 16
+optional    = true
+gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver", "capability:ecc"]
+doc         = "uncorrected device-memory ECC errors over the lifetime of the device (#954). NVML only. Gate: NVML only, on a card with ECC enabled (#954)"
+
+[resources."gpu/{card}/process/{pid}/vram_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { card = "string", pid = "string" }
+cardinality = 32
+optional    = true
+gate        = ["feature:nvml", "config:collect.gpu", "capability:nvidia-driver"]
+doc         = "VRAM held by one process on this card (#954). NVML only. Capped at 32 rows per card, largest first \u2014 one key per pid per card is otherwise an unbounded family keyed by something that changes every few seconds. Gate: NVML only: per-process attribution has no sysfs equivalent (#954)"

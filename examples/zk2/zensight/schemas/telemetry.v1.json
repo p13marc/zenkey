@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "telemetry.v1.json",
+  "$comment": "The telemetry.v1 profile's self-describing point (r3.2 §4.9), written in the jsonschema kind because ZenSight's wire is serde's internally tagged TelemetryValue in CBOR (zensight-common/src/telemetry.rs:105-134, RFC 11 §4). r3.2 imagines a protobuf oneof: see Gaps G12/G13. Every contract that carries points lists THIS file unchanged, so the type identity (the file's sha256) is shared. Compared with v1's TelemetryPoint, `source` and `metric` are gone: they repeated the key's system/service and resource (r3.2 §3.11).",
+  "$defs": {
+    "telemetry.v1.Point": {
+      "description": "One measurement. The series is named by the key: (system, service, interface, resource).",
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "description": "Unix epoch milliseconds when the measurement was taken (not when it was published).",
+          "type": "integer"
+        },
+        "value": {
+          "$ref": "#/$defs/telemetry.v1.Value"
+        },
+        "labels": {
+          "description": "Context that is not identity: an OID, an interface description, the original (unslugged) gNMI path.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "unit": {
+          "description": "UCUM-style unit (By, By/s, 1/s, %, s). Absent means unknown, never dimensionless. The resource's telemetry.unit annotation, when declared, is authoritative.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "timestamp",
+        "value"
+      ]
+    },
+    "telemetry.v1.Value": {
+      "description": "Internally tagged: {\"type\": <kind>, \"value\": ...}. The tag is the resource's telemetry.kind spelled on the wire (boolean for bool). A resource without telemetry.kind (the rest-parameter families) is self-described by this tag alone.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "counter"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "gauge"
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "boolean"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "binary"
+            },
+            "value": {
+              "description": "serde's Vec<u8>: an array of byte values in both JSON and CBOR, not a CBOR byte string (Gap G9).",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "histogram"
+            },
+            "value": {
+              "$ref": "#/$defs/telemetry.v1.Histogram"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ]
+        }
+      ]
+    },
+    "telemetry.v1.Histogram": {
+      "description": "Fixed buckets, cumulative since the producer's instance started (RFC 11 §4; zensight-common/src/histogram.rs). counts is per bucket, NOT cumulative, one longer than buckets, overflow last. buckets restate the resource's telemetry.buckets bit for bit; +Inf is implicit.",
+      "type": "object",
+      "properties": {
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sum": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "buckets",
+        "counts",
+        "count",
+        "sum"
+      ]
+    }
+  }
+}

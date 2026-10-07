@@ -1,0 +1,950 @@
+# One polled SNMP device, as a service of its own: the device-as-service shape (r3.2 §0.2, §3.5).
+# v1: snmp.toml (registry 1.14: 127 telemetry, 10 state, 1 events, 14 procedures, 4 gated) put the
+#     device in the first subject chunk of one producer: telemetry/snmp/<device>/<metric...>.
+# zk2: the poller process hosts one service per configured target, named snmp.<slug(target name)>,
+#      plus its own service `snmp` (zs.snmp_poller.v1: targets, discovery, stray traps).
+# Key:        zk2/<host-id>/snmp.<device>/zs.snmp.v1/{stream|state|@op}/<resource>
+# Example:    zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/if/3/in_octets.rate
+#             zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/metrics/system/sys_uptime
+#             zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/traps/01jgxqz4yqk8v6txw3m9f2a7cd
+# All devices: zk2/*/*/zs.snmp.v1/stream/**  ;  device presence: zk2/*/*/@zk/alive/zs.snmp.v1/**
+#
+# The instance id is the device's continuity epoch: the poller mints a new instance for the service
+# when sysUpTime rewinds, which is what v1 did by cycling device/<device>/alive
+# (zensight-sensor-snmp/src/poller.rs:397). Counters reset only across an instance change.
+# The name derivation snmp.<slug(name)> is not written down anywhere in r3.2. Target names allow
+# '.' and capitals (targets.rs:179), and AlertRef splits on dots (Gap G4).
+#
+# Each device service also implements alarms.v1 (v1's device alerts move here from the poller's
+# single alert family), zs.evidence.v1 (`device/{device}` for its own claim, no `self`),
+# zs.thresholds.v1 and views.v1. health.v1 is per device; v1 had a single producer health with
+# devices_total/responding.
+#
+# Telemetry is a mechanical transcription: v1's `{device}/` prefix dropped, the catch-all moved
+# under its own literal so it no longer overlaps the 126 typed columns (Gap G1; v1 snmp.toml:15):
+#   {device}/{metric...}  ->  metrics/{metric...}
+# A metric is published under exactly one of the two: a typed column if it matches one, else the
+# catch-all. Trap counters (v1 {device}/trap/<name>) ride metrics/trap/<name>.
+# Cardinalities are v1's, which bound the WHOLE poller (up to 64 devices). Per device they are
+# lower, and draft 0 has no per-instance value (Gap G2).
+
+[interface]
+name    = "zs.snmp"
+major   = 1
+minor   = 0
+summary = "One SNMP-polled device: its metric tree, interface table, traps and outlet control"
+uses    = ["telemetry.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.snmp.v1.json"]
+
+# --- state ---
+
+[resources.interfaces]
+kind        = "state"
+type        = "json:InterfaceTable"
+history     = true
+annotations = { "freshness.ttl_s" = 300 }
+doc         = "The joined ifTable/ifXTable (#529): decoded statuses, HC-preferred counters, derived rates. v1: state/snmp/{device}/interfaces, on an AdvancedPublisher cache_only(1) (zensight-sensor-snmp/src/main.rs:222)."
+
+[resources."outlets/last"]
+kind        = "state"
+type        = "json:OutletStatus"
+optional    = true
+gate        = "config:actions.enabled"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "The most recent outlet outcome. v1's `action` read procedure answered null when nothing had run; as state, 'nothing has run' is simply an absent resource."
+
+[resources."outlets/capability"]
+kind        = "state"
+type        = "json:OutletCapability"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "The outlet-control gate as seen by this device: the switch, the allowlist and the reason nothing is permitted. Published even when actions are off, so 'off' is an answer and not a silence (v1 action/capability)."
+
+# --- occurrence stream (v1's only events-class subject) ---
+
+[resources."traps/{occurrence}"]
+kind        = "stream"
+type        = "json:EventRecord"
+cardinality = 100000
+reliability = "reliable"
+congestion  = "block"
+retention   = "7d"
+doc         = """
+Translated trap/inform records (#535), one fresh ULID key per notification, published once with a
+one-shot put (r3.2 §3.2); a storage keeps the union and a consumer replays with a bounded wildcard GET.
+v1: events/snmp/{device}/trap/{id}, QoS reliable + block (QosClass::Event).
+v1 declared rate = burst(1000/h), and draft 0 has no field for it. cardinality has no defined
+meaning on an {occurrence} template (Gap G6). retention = 7d is new: v1's events storage had no GC
+(configs/router-events-storage.json5:95).
+Only traps whose sender resolves to this configured target land here. v1 keyed every trap by the
+slugged sender IP (zensight-sensor-snmp/src/trap.rs:298-299), so unmatched senders go to the
+poller's strays/{sender}/{occurrence} (Gap G15)."""
+
+# --- operations ---
+
+[resources."outlets/{outlet}/cycle"]
+kind        = "operation"
+request     = "json:Empty"
+response    = "json:OutletStatus"
+params      = { outlet = "string" }
+cardinality = 2048
+optional    = true
+gate        = "config:actions.enabled"
+idempotent  = false
+fanout      = "forbidden"
+doc         = """
+Power-cycle one PDU outlet (#956). v1 action/set took OutletAction {device, outlet, verb} with fanout
+allowed; the device is now the service and the outlet is a template parameter, so the request
+repeats neither (tcgui gap 1) and each outlet is separately grantable. Fan-out is now FORBIDDEN:
+zk2/*/*/zs.snmp.v1/@op/outlets/*/cycle would reach every PDU in the fleet. The allowlist, the
+separate write credential and the verified PDU profile are still checked per call. A refusal is
+`unavailable` with cause config (v1 error/gated). The caller's identity comes from the O7
+call-metadata `actor` and goes to the host audit trail (#957)."""
+
+[resources."outlets/history"]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:OutletStatus"
+replies    = "many"
+idempotent = true
+fanout     = "allowed"
+optional   = true
+gate       = "config:actions.enabled"
+doc        = "The bounded ring of recent outlet outcomes, one reply each (v1 `actions`)."
+
+# --- telemetry ---
+
+
+[resources."metrics/{metric...}"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { metric = "path" }
+cardinality = 10000
+doc         = "polled device metric tree (v1: {device}/{metric...})"
+
+[resources."if/{index}/index"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface index (ifIndex) (v1: {device}/if/{index}/index)"
+
+[resources."if/{index}/descr"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface description (ifDescr) (v1: {device}/if/{index}/descr)"
+
+[resources."if/{index}/type"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface type (ifType / IANAifType) (v1: {device}/if/{index}/type)"
+
+[resources."if/{index}/mtu"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface MTU (v1: {device}/if/{index}/mtu)"
+
+[resources."if/{index}/speed"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "nominal interface speed (bps, ifSpeed) (v1: {device}/if/{index}/speed)"
+
+[resources."if/{index}/phys_address"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface MAC address (ifPhysAddress) (v1: {device}/if/{index}/phys_address)"
+
+[resources."if/{index}/admin_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "desired interface state (ifAdminStatus) (v1: {device}/if/{index}/admin_status)"
+
+[resources."if/{index}/oper_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "current interface state (ifOperStatus) (v1: {device}/if/{index}/oper_status)"
+
+[resources."if/{index}/last_change"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "last status change (ifLastChange, TimeTicks) (v1: {device}/if/{index}/last_change)"
+
+[resources."if/{index}/in_octets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes received (ifInOctets, 32-bit) (v1: {device}/if/{index}/in_octets)"
+
+[resources."if/{index}/in_octets.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes received (ifInOctets, 32-bit) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/in_octets.rate)"
+
+[resources."if/{index}/in_ucast_pkts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "unicast packets received (ifInUcastPkts) (v1: {device}/if/{index}/in_ucast_pkts)"
+
+[resources."if/{index}/in_ucast_pkts.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "unicast packets received (ifInUcastPkts) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/in_ucast_pkts.rate)"
+
+[resources."if/{index}/in_discards"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "inbound packets discarded (ifInDiscards) (v1: {device}/if/{index}/in_discards)"
+
+[resources."if/{index}/in_discards.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "inbound packets discarded (ifInDiscards) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/in_discards.rate)"
+
+[resources."if/{index}/in_errors"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "inbound packets with errors (ifInErrors) (v1: {device}/if/{index}/in_errors)"
+
+[resources."if/{index}/in_errors.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "inbound packets with errors (ifInErrors) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/in_errors.rate)"
+
+[resources."if/{index}/out_octets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes sent (ifOutOctets, 32-bit) (v1: {device}/if/{index}/out_octets)"
+
+[resources."if/{index}/out_octets.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes sent (ifOutOctets, 32-bit) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/out_octets.rate)"
+
+[resources."if/{index}/out_ucast_pkts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "unicast packets sent (ifOutUcastPkts) (v1: {device}/if/{index}/out_ucast_pkts)"
+
+[resources."if/{index}/out_ucast_pkts.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "unicast packets sent (ifOutUcastPkts) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/out_ucast_pkts.rate)"
+
+[resources."if/{index}/out_discards"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "outbound packets discarded (ifOutDiscards) (v1: {device}/if/{index}/out_discards)"
+
+[resources."if/{index}/out_discards.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "outbound packets discarded (ifOutDiscards) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/out_discards.rate)"
+
+[resources."if/{index}/out_errors"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "outbound packets with errors (ifOutErrors) (v1: {device}/if/{index}/out_errors)"
+
+[resources."if/{index}/out_errors.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "outbound packets with errors (ifOutErrors) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/if/{index}/out_errors.rate)"
+
+[resources."ifx/{index}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "interface name (ifName) (v1: {device}/ifx/{index}/name)"
+
+[resources."ifx/{index}/alias"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "operator-assigned interface alias (ifAlias) (v1: {device}/ifx/{index}/alias)"
+
+[resources."ifx/{index}/high_speed"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "nominal interface speed (Mbps, ifHighSpeed) (v1: {device}/ifx/{index}/high_speed)"
+
+[resources."ifx/{index}/hc_in_octets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes received (ifHCInOctets, 64-bit) (v1: {device}/ifx/{index}/hc_in_octets)"
+
+[resources."ifx/{index}/hc_in_octets.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes received (ifHCInOctets, 64-bit) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/ifx/{index}/hc_in_octets.rate)"
+
+[resources."ifx/{index}/hc_out_octets"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes sent (ifHCOutOctets, 64-bit) (v1: {device}/ifx/{index}/hc_out_octets)"
+
+[resources."ifx/{index}/hc_out_octets.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 4096
+doc         = "bytes sent (ifHCOutOctets, 64-bit) \u2014 derived per-second rate (poller sibling, Gauge) (v1: {device}/ifx/{index}/hc_out_octets.rate)"
+
+[resources."cpu/{index}/load"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "per-processor load, 1-minute average (hrProcessorLoad) (v1: {device}/cpu/{index}/load)"
+
+[resources."ip/{index}/addr"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "interface IP address (ipAdEntAddr) (v1: {device}/ip/{index}/addr)"
+
+[resources."ip/{index}/if_index"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "the ifIndex this address is bound to (ipAdEntIfIndex) (v1: {device}/ip/{index}/if_index)"
+
+[resources."ip/{index}/netmask"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "subnet mask for this address (ipAdEntNetMask) (v1: {device}/ip/{index}/netmask)"
+
+[resources."storage/{index}/index"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "storage index (hrStorageIndex) (v1: {device}/storage/{index}/index)"
+
+[resources."storage/{index}/type"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "storage type OID (hrStorageType) (v1: {device}/storage/{index}/type)"
+
+[resources."storage/{index}/descr"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "storage description (hrStorageDescr) (v1: {device}/storage/{index}/descr)"
+
+[resources."storage/{index}/allocation_units"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "allocation unit size in bytes (hrStorageAllocationUnits) (v1: {device}/storage/{index}/allocation_units)"
+
+[resources."storage/{index}/size"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "total size in allocation units (hrStorageSize) (v1: {device}/storage/{index}/size)"
+
+[resources."storage/{index}/used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "used space in allocation units (hrStorageUsed) (v1: {device}/storage/{index}/used)"
+
+[resources."nas/system/status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "Synology systemStatus: Normal(1) Failed(2) \u2014 Failed means a volume has crashed (v1: {device}/nas/system/status)"
+
+[resources."nas/system/temperature_c"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "appliance temperature in degrees C (v1: {device}/nas/system/temperature_c)"
+
+[resources."nas/system/power_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "Normal(1) Failed(2) \u2014 one of the power supplies has failed (v1: {device}/nas/system/power_status)"
+
+[resources."nas/system/fan_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "Normal(1) Failed(2) \u2014 one of the chassis fans stopped (v1: {device}/nas/system/fan_status)"
+
+[resources."nas/system/cpu_fan_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "Normal(1) Failed(2) \u2014 one of the CPU fans stopped (v1: {device}/nas/system/cpu_fan_status)"
+
+[resources."nas/system/model"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "appliance model name (v1: {device}/nas/system/model)"
+
+[resources."nas/system/firmware"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "appliance firmware / DSM version (v1: {device}/nas/system/firmware)"
+
+[resources."nas/array/{index}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "RAID group name (Synology raidName) or ZFS pool name (TrueNAS zpoolDescr) (v1: {device}/nas/array/{index}/name)"
+
+[resources."nas/array/{index}/status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "the appliance's own array verdict. Synology: Normal(1), Degrade(11), Crashed(12), and 2..10 are TRANSITIONS (repairing, migrating, expanding, creating, syncing, parity-checking, assembling, cancelling) that the rules deliberately do not treat as faults (v1: {device}/nas/array/{index}/status)"
+
+[resources."nas/array/{index}/free_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "Synology raidFreeSize (v1: {device}/nas/array/{index}/free_bytes)"
+
+[resources."nas/array/{index}/total_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "Synology raidTotalSize (v1: {device}/nas/array/{index}/total_bytes)"
+
+[resources."nas/array/{index}/hotspare_count"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "Synology raidHotspareCnt (v1: {device}/nas/array/{index}/hotspare_count)"
+
+[resources."nas/disk/{index}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "disk id as the appliance names it (Synology diskID, QNAP hdDescr) (v1: {device}/nas/disk/{index}/name)"
+
+[resources."nas/disk/{index}/model"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "disk model string (v1: {device}/nas/disk/{index}/model)"
+
+[resources."nas/disk/{index}/status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "Synology: Normal(1) Initialized(2) NotInitialized(3) are all working disks, SystemPartitionFailed(4) and Crashed(5) are not. QNAP: ready(0); invalid(-6) and rwError(-9) are faults, while noDisk(-5) is an EMPTY BAY and unknown(-4) is the appliance declining to say (v1: {device}/nas/disk/{index}/status)"
+
+[resources."nas/disk/{index}/temperature_c"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "disk temperature in degrees C (v1: {device}/nas/disk/{index}/temperature_c)"
+
+[resources."nas/disk/{index}/remaining_life_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "Synology diskRemainLife \u2014 SSD wear headroom (v1: {device}/nas/disk/{index}/remaining_life_percent)"
+
+[resources."nas/disk/{index}/smart_info"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "QNAP hdSmartInfo, the appliance's SMART summary string (v1: {device}/nas/disk/{index}/smart_info)"
+
+[resources."nas/pool/{index}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "ZFS pool name (TrueNAS zpoolDescr) (v1: {device}/nas/pool/{index}/name)"
+
+[resources."nas/pool/{index}/allocation_units"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "bytes per unit for the size/used/available columns below (zpoolAllocationUnits) (v1: {device}/nas/pool/{index}/allocation_units)"
+
+[resources."nas/pool/{index}/size"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "pool size in allocation units (zpoolSize) (v1: {device}/nas/pool/{index}/size)"
+
+[resources."nas/pool/{index}/used"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "pool space used in allocation units (zpoolUsed) (v1: {device}/nas/pool/{index}/used)"
+
+[resources."nas/pool/{index}/available"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "pool space available in allocation units (zpoolAvailable) (v1: {device}/nas/pool/{index}/available)"
+
+[resources."nas/pool/{index}/health"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "zpoolHealth: online(0) degraded(1) faulted(2) offline(3) unavail(4) removed(5) \u2014 for a pool, every non-online state is a fault (v1: {device}/nas/pool/{index}/health)"
+
+[resources."nas/pool/{index}/read_ops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "zpoolReadOps (v1: {device}/nas/pool/{index}/read_ops)"
+
+[resources."nas/pool/{index}/read_ops.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "derived per-second rate of the counter above (v1: {device}/nas/pool/{index}/read_ops.rate)"
+
+[resources."nas/pool/{index}/write_ops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "zpoolWriteOps (v1: {device}/nas/pool/{index}/write_ops)"
+
+[resources."nas/pool/{index}/write_ops.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "derived per-second rate of the counter above (v1: {device}/nas/pool/{index}/write_ops.rate)"
+
+[resources."nas/pool/{index}/read_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "zpoolReadBytes (v1: {device}/nas/pool/{index}/read_bytes)"
+
+[resources."nas/pool/{index}/read_bytes.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "derived per-second rate of the counter above (v1: {device}/nas/pool/{index}/read_bytes.rate)"
+
+[resources."nas/pool/{index}/write_bytes"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "zpoolWriteBytes (v1: {device}/nas/pool/{index}/write_bytes)"
+
+[resources."nas/pool/{index}/write_bytes.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "derived per-second rate of the counter above (v1: {device}/nas/pool/{index}/write_bytes.rate)"
+
+[resources."nas/volume/{index}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "QNAP sysVolumeDescr (v1: {device}/nas/volume/{index}/name)"
+
+[resources."nas/volume/{index}/filesystem"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "QNAP sysVolumeFS (v1: {device}/nas/volume/{index}/filesystem)"
+
+[resources."nas/volume/{index}/total_size_text"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "QNAP sysVolumeTotalSize. TEXT, not a number: QNAP serves it as a DisplayString (\"2.75 TB\"). Parsing a vendor's free-form size string is how a monitor starts reporting confident wrong numbers, so the capacity RULE runs on hrStorage instead, which QNAP serves properly (v1: {device}/nas/volume/{index}/total_size_text)"
+
+[resources."nas/volume/{index}/free_size_text"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "QNAP sysVolumeFreeSize \u2014 text, see above (v1: {device}/nas/volume/{index}/free_size_text)"
+
+[resources."nas/volume/{index}/status_text"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "QNAP sysVolumeStatus \u2014 text, see above; no rule reads it because its vocabulary is undocumented (v1: {device}/nas/volume/{index}/status_text)"
+
+[resources."system/descr"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysDescr \u2014 the device's own description string (v1: {device}/system/descr)"
+
+[resources."system/object_id"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysObjectID, the vendor OID the profile matcher selects on (v1: {device}/system/object_id)"
+
+[resources."system/uptime"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysUpTime in seconds (TimeTicks/100); a step backwards is what fires `device_rebooted` (v1: {device}/system/uptime)"
+
+[resources."system/contact"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysContact (v1: {device}/system/contact)"
+
+[resources."system/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysName (v1: {device}/system/name)"
+
+[resources."system/location"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "sysLocation (v1: {device}/system/location)"
+
+[resources."sensor/{index}/type"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "ENTITY-SENSOR-MIB entPhySensorType: what physical quantity this row measures (v1: {device}/sensor/{index}/type)"
+
+[resources."sensor/{index}/scale"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "entPhySensorScale \u2014 the decimal exponent the value is expressed in (v1: {device}/sensor/{index}/scale)"
+
+[resources."sensor/{index}/value"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "entPhySensorValue, in the units `type` and `scale` name between them (v1: {device}/sensor/{index}/value)"
+
+[resources."sensor/{index}/oper_status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "entPhySensorOperStatus: ok(1) unavailable(2) nonoperational(3) \u2014 2 and 3 mean the reading beside it is NOT a measurement (v1: {device}/sensor/{index}/oper_status)"
+
+[resources."ifx/{index}/hc_in_ucast_pkts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "ifHCInUcastPkts (v1: {device}/ifx/{index}/hc_in_ucast_pkts)"
+
+[resources."ifx/{index}/hc_in_ucast_pkts.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "derived per-second rate of the counter above (v1: {device}/ifx/{index}/hc_in_ucast_pkts.rate)"
+
+[resources."ifx/{index}/hc_out_ucast_pkts"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "ifHCOutUcastPkts (v1: {device}/ifx/{index}/hc_out_ucast_pkts)"
+
+[resources."ifx/{index}/hc_out_ucast_pkts.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 1024
+doc         = "derived per-second rate of the counter above (v1: {device}/ifx/{index}/hc_out_ucast_pkts.rate)"
+
+[resources."ups/ident/manufacturer"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "UPS manufacturer name (upsIdentManufacturer) (v1: {device}/ups/ident/manufacturer)"
+
+[resources."ups/ident/model"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "UPS model name (upsIdentModel) (v1: {device}/ups/ident/model)"
+
+[resources."ups/ident/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "operator-assigned UPS name (upsIdentName) (v1: {device}/ups/ident/name)"
+
+[resources."ups/battery/status"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "unknown(1) normal(2) low(3) depleted(4) \u2014 upsBatteryStatus; the `ups_battery_low` rule reads 3 and 4, and deliberately not 1 (v1: {device}/ups/battery/status)"
+
+[resources."ups/battery/seconds_on_battery"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "seconds since the UPS last switched to battery, 0 on mains (upsSecondsOnBattery) (v1: {device}/ups/battery/seconds_on_battery)"
+
+[resources."ups/battery/minutes_remaining"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "the UPS's own runtime estimate (upsEstimatedMinutesRemaining) \u2014 absent on a UPS that does not implement it, never zero (v1: {device}/ups/battery/minutes_remaining)"
+
+[resources."ups/battery/charge_percent"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "remaining battery charge (upsEstimatedChargeRemaining) (v1: {device}/ups/battery/charge_percent)"
+
+[resources."ups/battery/voltage_dv"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "battery voltage in TENTHS of a volt DC, as RFC 1628 defines it (upsBatteryVoltage) \u2014 the suffix says so rather than the value being silently rescaled (v1: {device}/ups/battery/voltage_dv)"
+
+[resources."ups/battery/current_da"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "battery current in tenths of an amp DC (upsBatteryCurrent) (v1: {device}/ups/battery/current_da)"
+
+[resources."ups/battery/temperature_c"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "battery temperature in degrees C (upsBatteryTemperature) (v1: {device}/ups/battery/temperature_c)"
+
+[resources."ups/input/line_bads"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "count of times input went out of tolerance (upsInputLineBads) (v1: {device}/ups/input/line_bads)"
+
+[resources."ups/input/line_bads.rate"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "derived per-second rate of the counter above (v1: {device}/ups/input/line_bads.rate)"
+
+[resources."ups/input/{line}/frequency_dhz"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "input frequency in tenths of a hertz (upsInputFrequency) (v1: {device}/ups/input/{line}/frequency_dhz)"
+
+[resources."ups/input/{line}/voltage_v"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "input RMS volts (upsInputVoltage) (v1: {device}/ups/input/{line}/voltage_v)"
+
+[resources."ups/input/{line}/current_da"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "input current in tenths of an amp (upsInputCurrent) (v1: {device}/ups/input/{line}/current_da)"
+
+[resources."ups/input/{line}/true_power_w"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "input true power in watts (upsInputTruePower) (v1: {device}/ups/input/{line}/true_power_w)"
+
+[resources."ups/output/source"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "other(1) none(2) normal(3) bypass(4) battery(5) booster(6) reducer(7) \u2014 upsOutputSource; anything but 3 fires `ups_on_battery`, bypass included, because a bypassed load is an unprotected one (v1: {device}/ups/output/source)"
+
+[resources."ups/output/frequency_dhz"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "output frequency in tenths of a hertz (upsOutputFrequency) (v1: {device}/ups/output/frequency_dhz)"
+
+[resources."ups/output/{line}/voltage_v"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "output RMS volts (upsOutputVoltage) (v1: {device}/ups/output/{line}/voltage_v)"
+
+[resources."ups/output/{line}/current_da"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "output current in tenths of an amp (upsOutputCurrent) (v1: {device}/ups/output/{line}/current_da)"
+
+[resources."ups/output/{line}/power_w"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "output true power in watts (upsOutputPower) (v1: {device}/ups/output/{line}/power_w)"
+
+[resources."ups/output/{line}/percent_load"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { line = "string" }
+cardinality = 512
+doc         = "output load as a percentage of capacity (upsOutputPercentLoad) (v1: {device}/ups/output/{line}/percent_load)"
+
+[resources."ups/alarms_present"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "number of alarms the UPS is currently asserting (upsAlarmsPresent) (v1: {device}/ups/alarms_present)"
+
+[resources."pdu/outlet/{outlet}/name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "outlet label as the PDU reports it. {outlet} is the table index VERBATIM \u2014 one integer on an APC or Raritan, two (`unit.outlet`) on an Eaton, whose outlet tables are indexed by both (v1: {device}/pdu/outlet/{outlet}/name)"
+
+[resources."pdu/outlet/{outlet}/metered_name"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "the same outlet's label from the metered table, where a PDU serves switched and metered tables with different labels (v1: {device}/pdu/outlet/{outlet}/metered_name)"
+
+[resources."pdu/outlet/{outlet}/state"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "outlet on/off as the vendor spells it: APC off(1) on(2), Eaton off(0) on(1) pendingOff(2) pendingOn(3), Raritan off(0) on(1) cycling(2). The rules normalise it; the raw value is published so a transition is distinguishable from an outage (v1: {device}/pdu/outlet/{outlet}/state)"
+
+[resources."pdu/outlet/{outlet}/current_da"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "per-outlet current in tenths of an amp (APC rPDU2OutletMeteredStatusCurrent) (v1: {device}/pdu/outlet/{outlet}/current_da)"
+
+[resources."pdu/outlet/{outlet}/current_ma"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "per-outlet current in MILLIAMPS (Eaton outletCurrent, Raritan outletCurrent) \u2014 a different family from the APC one on purpose: two scales under one name is a wrong number waiting to be summed (v1: {device}/pdu/outlet/{outlet}/current_ma)"
+
+[resources."pdu/outlet/{outlet}/power_w"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { outlet = "string" }
+cardinality = 2048
+doc         = "per-outlet power in watts (APC rPDU2OutletMeteredStatusPower) (v1: {device}/pdu/outlet/{outlet}/power_w)"
+
+[resources."pdu/device/{index}/load_state"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 128
+doc         = "lowLoad(1) normal(2) nearOverload(3) overload(4) notsupported(5) \u2014 the PDU's own verdict against a rating this sensor does not know (APC rPDU2DeviceStatusLoadState). 5 is not a verdict and sets nothing (v1: {device}/pdu/device/{index}/load_state)"
+
+[resources."pdu/device/{index}/power_dkw"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 128
+doc         = "whole-PDU power in tenths of a kilowatt (APC rPDU2DeviceStatusPower) (v1: {device}/pdu/device/{index}/power_dkw)"
+
+[resources."pdu/input/{index}/current_ma"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "PDU inlet current in milliamps (Eaton inputCurrent) (v1: {device}/pdu/input/{index}/current_ma)"
+
+[resources."pdu/input/{index}/percent_load"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { index = "string" }
+cardinality = 512
+doc         = "PDU inlet load as a percentage (Eaton inputCurrentPercentLoad) (v1: {device}/pdu/input/{index}/percent_load)"
