@@ -1,0 +1,48 @@
+# S5 — state correctness (#601)
+
+Written by `spike s5`; the latest run (`unix_s` 1791412278), zenoh 1.10.1 with zenoh-plugin-storage-manager 1.10.1 (memory volume, GC period 3 s). GETs are target `All`, consolidation `Latest`. **10 wrong answers** in 42 rows.
+
+| Group | Case | Expected | Got | Wrong | Note |
+|---|---|---|---|---|---|
+| basic | producer + storage, one put [no-repl] | v1 | v1 |  | 1 reply after Latest; 0.7 ms |
+| basic | storage only (producer gone) [no-repl] | v1 | v1 |  |  |
+| stale | stale storage (missed v2 behind a cut link), producer present [no-repl] | v2 | v2 |  | replies: "v2" (ts now-6.0s), "v1" (ts now-6.6s) |
+| stale | stale storage, producer gone [no-repl] | v2 | v1 | **WRONG** | replies: "v1" (ts now-6.9s) |
+| clock | producer restarts 5 s behind, naive [no-repl] | v2 | v1 | **WRONG** | replies: "v2" (ts now-5.3s), "v1" (ts now-0.6s) |
+| clock | producer restarts 5 s behind, with U2's catch-up (never stamp at or below the last stored timestamp) [no-repl] | v2 | v2 |  | replies: "v2" (ts now-0.6s), "v2" (ts now-0.6s) |
+| clock | producer 2 s ahead: the value read [no-repl] | v1 | v1 |  | subscriber's timestamp -2000 ms, GET reply's +0 ms, relative to the producer's stamp |
+| delete | delete, then GET (producer's reply_del + storage) [no-repl] | (deleted / absent) | (deleted / absent) |  |  |
+| delete | the storage missed the delete; producer's tombstone in its window [no-repl] | (deleted / absent) | (deleted / absent) |  | replies: del (ts now-6.0s), "v2" (ts now-6.6s) |
+| delete | the same, after the producer's 10 s tombstone window [no-repl] | (deleted / absent) | v2 | **WRONG** | U3: the window must outlast storage staleness |
+| gc | delete, then a late older put within 0.3 s, storage only [no-repl] | (deleted / absent) | v0-late | **WRONG** | replies: "v0-late" (ts now-0.9s) |
+| gc | delete, then a late older put after the GC tick (7s), storage only [no-repl] | (deleted / absent) | v0-late | **WRONG** | replies: "v0-late" (ts now-7.6s) |
+| gc | wildcard delete of items/*, then a stale put on items/a, storage only (zenoh#2649) [no-repl] | (deleted / absent) |  | **WRONG** | replies: "" (ts now-0.6s) |
+| stamping | producer does not stamp (S1 broken), stale storage [no-repl] | v2 | v1 | **WRONG** | replies: "v2" (unstamped), "v1" (ts now-6.6s) |
+| scale | wildcard GET over 1000 `state` keys, producer + storage, consolidation Latest | 1000 | 1000 replies in 5 ms |  | producer RSS +328 KiB for 1000 entries |
+| scale | wildcard GET over 1000 `state` keys, producer + storage, consolidation None | 1000 (or 2x: two repliers) | 2000 replies in 6 ms |  | producer RSS +328 KiB for 1000 entries |
+| scale | wildcard GET over 1000 `state` keys, storage only | 1000 | 1000 replies in 5 ms |  |  |
+| scale | wildcard GET over 10000 `state` keys, producer + storage, consolidation Latest | 10000 | 10000 replies in 40 ms |  | producer RSS +1704 KiB for 10000 entries |
+| scale | wildcard GET over 10000 `state` keys, producer + storage, consolidation None | 10000 (or 2x: two repliers) | 20000 replies in 36 ms |  | producer RSS +1704 KiB for 10000 entries |
+| scale | wildcard GET over 10000 `state` keys, storage only | 10000 | 10000 replies in 21 ms |  |  |
+| scale | wildcard GET over 50000 `@state` keys, producer + storage, consolidation Latest | 50000 | 50000 replies in 170 ms |  | producer RSS +5188 KiB for 50000 entries |
+| scale | wildcard GET over 50000 `@state` keys, producer + storage, consolidation None | 50000 (or 2x: two repliers) | 100000 replies in 166 ms |  | producer RSS +5188 KiB for 50000 entries |
+| scale | wildcard GET over 50000 `@state` keys, storage only | 50000 | 50000 replies in 125 ms |  |  |
+| scale | wildcard GET over 100000 `@state` keys, producer + storage, consolidation Latest | 100000 | 100000 replies in 366 ms |  | producer RSS +0 KiB for 100000 entries |
+| scale | wildcard GET over 100000 `@state` keys, producer + storage, consolidation None | 100000 (or 2x: two repliers) | 200000 replies in 390 ms |  | producer RSS +0 KiB for 100000 entries |
+| scale | wildcard GET over 100000 `@state` keys, storage only | 100000 | 100000 replies in 248 ms |  |  |
+| events | 1000 occurrences, union storage: replay GET of zk2/h-1/snmp/zs.snmp.v1/events/traps/* | 1000 | 1000 in 4 ms |  |  |
+| events | the same, bounded by time: ?_time=[now(-1.2)..] (half the traps are older than 1.5 s) | 500 | 1000 | **WRONG** | retention as a replay bound |
+| basic | producer + storage, one put [repl] | v1 | v1 |  | 1 reply after Latest; 0.6 ms |
+| basic | storage only (producer gone) [repl] | v1 | v1 |  |  |
+| stale | stale storage (missed v2 behind a cut link), producer present [repl] | v2 | v2 |  | replies: "v2" (ts now-6.0s), "v2" (ts now-6.0s), "v2" (ts now-6.0s) |
+| stale | stale storage, producer gone [repl] | v2 | v2 |  | replies: "v2" (ts now-6.3s), "v2" (ts now-6.3s) |
+| clock | producer restarts 5 s behind, naive [repl] | v2 | v2 |  | replies: "v2" (ts now-5.3s), "v2" (ts now-5.3s), "v2" (ts now-5.3s) |
+| clock | producer restarts 5 s behind, with U2's catch-up (never stamp at or below the last stored timestamp) [repl] | v2 | v2 |  | replies: "v2" (ts now-0.6s), "v2" (ts now-0.6s), "v2" (ts now-0.6s) |
+| clock | producer 2 s ahead: the value read [repl] | v1 | v1 |  | subscriber's timestamp -2000 ms, GET reply's +0 ms, relative to the producer's stamp |
+| delete | delete, then GET (producer's reply_del + storage) [repl] | (deleted / absent) | (deleted / absent) |  |  |
+| delete | the storage missed the delete; producer's tombstone in its window [repl] | (deleted / absent) | (deleted / absent) |  | replies: del (ts now-6.0s) |
+| delete | the same, after the producer's 10 s tombstone window [repl] | (deleted / absent) | (deleted / absent) |  | U3: the window must outlast storage staleness |
+| gc | delete, then a late older put within 0.3 s, storage only [repl] | (deleted / absent) | v0-late | **WRONG** | replies: "v0-late" (ts now-0.9s), "v0-late" (ts now-0.9s) |
+| gc | delete, then a late older put after the GC tick (7s), storage only [repl] | (deleted / absent) | (deleted / absent) |  | replies:  |
+| gc | wildcard delete of items/*, then a stale put on items/a, storage only (zenoh#2649) [repl] | (deleted / absent) |  | **WRONG** | replies: "" (ts now-0.6s), "" (ts now-0.6s) |
+| stamping | producer does not stamp (S1 broken), stale storage [repl] | v2 | v2 |  | replies: "v2" (unstamped), "v2" (ts now-6.0s), "v2" (ts now-6.0s) |
