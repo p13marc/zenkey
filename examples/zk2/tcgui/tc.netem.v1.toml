@@ -31,14 +31,12 @@ cardinality = 1024
 doc         = "Plug (stall) state; a delete means not plugged."
 annotations = { "freshness.ttl_s" = 60 }
 
-[resources."applied/{occurrence}"]
-kind        = "stream"
-type        = "json:TcAppliedEvent"
-reliability = "reliable"
-congestion  = "block"
-retention   = "7d"
-cardinality = 100000
-doc         = "Immutable audit record of one TC apply: one key per record, kept by a storage, replayed by a bounded GET."
+[resources.applied]
+kind      = "event"
+type      = "json:TcAppliedEvent"
+rate      = "low"
+retention = "7d"
+doc       = "Immutable audit record of one TC apply: one key per record (zk2/<host>/tc/tc.netem.v1/events/applied/<ulid>), kept by a union storage, replayed by a bounded GET."
 
 [resources."config/{ns}/{iface}/set"]
 kind        = "operation"

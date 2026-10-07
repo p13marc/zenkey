@@ -19,7 +19,7 @@ observability shape.
 | [`r1-analysis.md`](r1-analysis.md) | Part 1: the review request sent to the brief's author. Part 2: **r1**, an independent analysis of the brief against the v1 repository and prior art. |
 | [`r1-review.md`](r1-review.md) | The brief author's review of r1. Every ruling is kept; the wording is condensed. |
 | [`r2.md`](r2.md) | **r2**: r1 revised by that review. Adds the `zk2/` grammar major, exclusive-by-default ownership, normative state timestamps, hash-verified contract retrieval, behavioural profiles. |
-| [`architecture.md`](architecture.md) | **The design of record: r3.2.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). |
+| [`architecture.md`](architecture.md) | **The design of record: r3.3.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). r3.3 folds in the gaps found by mapping their contracts (D1–D25). |
 
 ## Rules for this directory
 

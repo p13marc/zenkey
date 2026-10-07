@@ -22,7 +22,7 @@ Example keys, for host `h-3fa9c2d41b7e`, namespace `default`, interface `eth0`:
 zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/state/config/default/eth0
 zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/@op/config/default/eth0/set
 zk2/h-3fa9c2d41b7e/tc/tc.netif.v1/stream/bandwidth/default/eth0
-zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/stream/applied/01jgxqz4yqk8v6txw3m9f2a7cd
+zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/events/applied/01jgxqz4yqk8v6txw3m9f2a7cd
 zk2/*/tc/tc.netif.v1/@op/diagnostics                 (fan-out, target All)
 zk2/h-3fa9c2d41b7e/tc/@zk/alive/tc.netem.v1/<instance>/<fp16>
 ```
@@ -40,7 +40,7 @@ zk2/h-3fa9c2d41b7e/tc/@zk/alive/tc.netem.v1/<instance>/<fp16>
 | state `config/{ns}/{iface}` | `tc.netem.v1` state `config/{ns}/{iface}` |
 | telemetry `qdisc/{ns}/{iface}` | `tc.netem.v1` stream `qdisc/{ns}/{iface}` |
 | state `plug/{ns}/{iface}` | `tc.netem.v1` state `plug/{ns}/{iface}` |
-| events `applied/{ulid}` | `tc.netem.v1` **occurrence-keyed stream** `applied/{occurrence}`, reliable, `retention = "7d"` |
+| events `applied/{ulid}` | `tc.netem.v1` **event** `applied` (`kind = "event"`, `rate = "low"`, `retention = "7d"`; key `…/events/applied/<ulid>`, r3.3 D3) |
 | proc `config/{ns}/{iface}/set` | `tc.netem.v1` op `config/{ns}/{iface}/set` |
 | proc `plug/{ns}/{iface}/set` | `tc.netem.v1` op `plug/{ns}/{iface}/set` |
 | state `scenario/{id}` | `tc.scenario.v1` state `scenarios/{id}`. A wildcard GET lists the library. |
