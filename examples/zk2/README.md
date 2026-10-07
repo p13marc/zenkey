@@ -155,6 +155,7 @@ interface   = "twist_cmd.v1"
 resources   = ["cmd"]          # what is consumed (default: everything)
 cardinality = "many"           # "one" | "many"
 optional    = false
+doc         = "Velocity commands, arbitrated by priority."   # ✱ documentation (G23); not in the fingerprint
 annotations = { "arbitration.policy" = "priority" }
 ```
 
