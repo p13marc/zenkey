@@ -1,0 +1,30 @@
+[package]
+name = "zenkey-model"
+version = "0.20.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+authors.workspace = true
+description = "zk2 keys and contracts without a Zenoh session: the key grammar, the contract authoring format, canonical form, fingerprints and bundles"
+# Not on crates.io until the zk2 core spec is accepted (#606, #615).
+publish = false
+
+[dependencies]
+zenoh-keyexpr = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+base64 = { workspace = true }
+schemars = { workspace = true }
+prost = { workspace = true }
+prost-reflect = { workspace = true }
+prost-types = "0.14"
+protox = "0.9"
+# RFC 8785 (JCS): validated nightly against cyberphone's 100M-number corpus
+# (#608, the 2026-10-07 library survey). Canonical contracts are restricted
+# to ASCII identifiers and integers within ±(2^53−1), so every JCS
+# implementation — this one and Python's `rfc8785` — agrees on them.
+serde_json_canonicalizer = "0.3"

@@ -1,0 +1,75 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["timing.v1"]
+
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources.position]
+kind = "stream"
+type = "json:Point"
+attachment = "json:Meta"
+attachment_encoding = "cbor"
+history = { depth = 4, miss_detection_ms = 500 }
+annotations = { "timing.period_ms" = 100 }
+
+[resources."frames/{camera}/{codec}"]
+kind = "stream"
+explicit = true
+type = { raw = "video/*", media_param = "codec" }
+params = { camera = "string", codec = "string" }
+cardinality = 8
+
+[resources."tracks/{track}"]
+kind = "state"
+explicit = true
+type = "json:Point"
+encoding = "cbor"
+params = { track = "uint" }
+cardinality = 50000
+epoch = "track"
+
+[resources."metrics/{metric...}"]
+kind = "state"
+type = "json:Status"
+params = { metric = "path" }
+cardinality = 200
+optional = true
+gate = ["config:metrics", "build:metrics"]
+
+[resources.changed]
+kind = "event"
+type = "json:Status"
+rate = "burst(60/h)"
+retention = "7d"
+
+[resources.old_status]
+kind = "state"
+type = "json:Status"
+deprecated = { since = 0, replaced_by = "changed", reason = "superseded by the event" }
+
+[resources."rename/{name}"]
+kind = "operation"
+request = "json:Ack"
+response = "json:Ack"
+params = { name = "string" }
+cardinality = 16
+
+[resources.list]
+kind = "operation"
+request = "json:Empty"
+response = "json:Point"
+summary = "json:Page"
+replies = "many"
+idempotent = true
+serving = "replicated"
+fanout = "allowed"
+timeout_ms = 2000
+
+[requires.cmd]
+interface = "twist_cmd.v1"
+resources = ["cmd"]
+cardinality = "many"
+doc = "documentation"

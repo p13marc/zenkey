@@ -139,6 +139,9 @@ jobs:
       - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features validate-json --locked
       - run: cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+      # zenkey-model is session-free (#608): zenoh-keyexpr, and no other
+      # zenoh crate.
+      - run: ./scripts/check-model-zenoh-free.sh
 
   msrv:
     runs-on: ubuntu-24.04

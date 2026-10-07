@@ -1,0 +1,7 @@
+{
+  "$defs": {
+    "Bad": {
+      "$ref": "missing.json#/$defs/X"
+    }
+  }
+}

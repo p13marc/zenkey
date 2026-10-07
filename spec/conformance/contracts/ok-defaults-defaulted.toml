@@ -1,0 +1,31 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[defaults]
+annotations = { "freshness.ttl_s" = 60 }
+
+[defaults.state]
+reliability = "best_effort"
+congestion = "drop"
+
+[defaults.operation]
+idempotent = true
+
+[resources.status]
+kind = "state"
+type = "json:Status"
+
+[resources.position]
+kind = "stream"
+type = "json:Point"
+
+[resources.ping]
+kind = "operation"
+request = "json:Empty"
+response = "json:Ack"

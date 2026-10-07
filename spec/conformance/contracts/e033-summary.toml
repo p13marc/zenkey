@@ -1,0 +1,12 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources.a]
+kind = "operation"
+request = "json:Empty"
+response = "json:Ack"
+summary = "json:Page"

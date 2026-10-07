@@ -1,0 +1,13 @@
+{
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

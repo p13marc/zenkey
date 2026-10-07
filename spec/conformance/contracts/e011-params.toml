@@ -1,0 +1,10 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources."a/{x}"]
+kind = "stream"
+type = { raw = "text/plain" }
+params = { y = "string" }
+cardinality = 2

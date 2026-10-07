@@ -1,0 +1,248 @@
+{
+  "cases": {
+    "e000-not-toml": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e000-unknown-field": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e001-interface": {
+      "codes": [
+        "E001"
+      ],
+      "fingerprint": null
+    },
+    "e002-uses": {
+      "codes": [
+        "E002"
+      ],
+      "fingerprint": null
+    },
+    "e010-template": {
+      "codes": [
+        "E010"
+      ],
+      "fingerprint": null
+    },
+    "e011-params": {
+      "codes": [
+        "E011",
+        "E011"
+      ],
+      "fingerprint": null
+    },
+    "e012-path": {
+      "codes": [
+        "E012"
+      ],
+      "fingerprint": null
+    },
+    "e013-cardinality": {
+      "codes": [
+        "E013"
+      ],
+      "fingerprint": null
+    },
+    "e014-field": {
+      "codes": [
+        "E014"
+      ],
+      "fingerprint": null
+    },
+    "e015-required": {
+      "codes": [
+        "E015"
+      ],
+      "fingerprint": null
+    },
+    "e016-gate-optional": {
+      "codes": [
+        "E016"
+      ],
+      "fingerprint": null
+    },
+    "e017-gate-syntax": {
+      "codes": [
+        "E017"
+      ],
+      "fingerprint": null
+    },
+    "e018-replicated": {
+      "codes": [
+        "E018"
+      ],
+      "fingerprint": null
+    },
+    "e019-history": {
+      "codes": [
+        "E019"
+      ],
+      "fingerprint": null
+    },
+    "e020-annotation": {
+      "codes": [
+        "E020",
+        "E020"
+      ],
+      "fingerprint": null
+    },
+    "e021-shape": {
+      "codes": [
+        "E021"
+      ],
+      "fingerprint": null
+    },
+    "e022-epoch": {
+      "codes": [
+        "E022"
+      ],
+      "fingerprint": null
+    },
+    "e023-type": {
+      "codes": [
+        "E023",
+        "E023",
+        "E023"
+      ],
+      "fingerprint": null
+    },
+    "e024-ambiguous": {
+      "codes": [
+        "E024"
+      ],
+      "fingerprint": null
+    },
+    "e025-media-param": {
+      "codes": [
+        "E025"
+      ],
+      "fingerprint": null
+    },
+    "e026-rate": {
+      "codes": [
+        "E026",
+        "E026"
+      ],
+      "fingerprint": null
+    },
+    "e027-ascii": {
+      "codes": [
+        "E027"
+      ],
+      "fingerprint": null
+    },
+    "e028-integer": {
+      "codes": [
+        "E028"
+      ],
+      "fingerprint": null
+    },
+    "e029-schema": {
+      "codes": [
+        "E029",
+        "E029"
+      ],
+      "fingerprint": null
+    },
+    "e030-requirement": {
+      "codes": [
+        "E030",
+        "E030",
+        "E030"
+      ],
+      "fingerprint": null
+    },
+    "e031-deprecated": {
+      "codes": [
+        "E031",
+        "E031"
+      ],
+      "fingerprint": null
+    },
+    "e032-ref-dangling": {
+      "codes": [
+        "E032"
+      ],
+      "fingerprint": null
+    },
+    "e032-ref-outside": {
+      "codes": [
+        "E032"
+      ],
+      "fingerprint": null
+    },
+    "e033-summary": {
+      "codes": [
+        "E033"
+      ],
+      "fingerprint": null
+    },
+    "e034-history-depth": {
+      "codes": [
+        "E034"
+      ],
+      "fingerprint": null
+    },
+    "ok-defaults-defaulted": {
+      "codes": [],
+      "fingerprint": "sha256:22ad11b3439f67716e76aeb199542544e61dc7f38391ff2010bcdabdf4d78c7e"
+    },
+    "ok-defaults-spelled": {
+      "codes": [],
+      "fingerprint": "sha256:22ad11b3439f67716e76aeb199542544e61dc7f38391ff2010bcdabdf4d78c7e"
+    },
+    "ok-json-qualified": {
+      "codes": [],
+      "fingerprint": "sha256:d7508020c2029d31d5cfa85e7ded560e4ce04e7e58d7b24ef072a7099d967d9c"
+    },
+    "ok-kinds": {
+      "codes": [],
+      "fingerprint": "sha256:e3a6363e1d0ea06c664456f556362b60038dd75d0acc386c118c1db19c69a09a"
+    },
+    "ok-minimal": {
+      "codes": [],
+      "fingerprint": "sha256:8c7493396b63865ef028879e04c641c76fd18178f4d6a6cac8c166f7b94c8577"
+    },
+    "ok-protobuf-well-known": {
+      "codes": [],
+      "fingerprint": "sha256:c92e57c394dcb9795ecdf665ea4cf72ccd1c28e71ea76c3ba555cd765f8db72f"
+    },
+    "w101-overlap": {
+      "codes": [
+        "W101"
+      ],
+      "fingerprint": "sha256:5856dc7360a247287f6d10f7bef9b6e10def35eef934fcd7372b5253c47b003f"
+    },
+    "w102-repeat": {
+      "codes": [
+        "W102"
+      ],
+      "fingerprint": "sha256:f49844e664dc1ec8f2d5e85638516f3ca47f36e0acbfd76efff0436eacf986b8"
+    },
+    "w103-encoding": {
+      "codes": [
+        "W103"
+      ],
+      "fingerprint": "sha256:64d3487b766aaca8b3ca78c38a94bb272a9532aef3a90cc9fbf62e3c40cd6f89"
+    },
+    "w104-minor": {
+      "codes": [
+        "W104"
+      ],
+      "fingerprint": "sha256:b661ea20132d9de4f8a45fae30d9d6005186f87bdaf6c3e3a21355bc35822d18"
+    },
+    "w105-vocabulary": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:f9e5bc2589dddc2496b5aa05bf270b246dbc2a12cba2bf5037e476d23d9ee522"
+    }
+  },
+  "description": "Contract lints, canonical forms and fingerprints. For each `<stem>.toml`: the sorted diagnostic codes (zenkey_model::diag::CODES) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."
+}

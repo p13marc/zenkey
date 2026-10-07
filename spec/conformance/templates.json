@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "chunks": [
+        "flow",
+        "duration_p50_ms"
+      ],
+      "expect": {
+        "bindings": {},
+        "winner": "flow/duration_p50_ms"
+      },
+      "templates": [
+        "flow/{x}",
+        "flow/duration_p50_ms",
+        "flow/{x...}"
+      ]
+    },
+    {
+      "chunks": [
+        "flow",
+        "other"
+      ],
+      "expect": {
+        "bindings": {
+          "x": [
+            "other"
+          ]
+        },
+        "winner": "flow/{x}"
+      },
+      "templates": [
+        "flow/{x}",
+        "flow/duration_p50_ms",
+        "flow/{x...}"
+      ]
+    },
+    {
+      "chunks": [
+        "flow",
+        "a",
+        "b"
+      ],
+      "expect": {
+        "bindings": {
+          "x": [
+            "a",
+            "b"
+          ]
+        },
+        "winner": "flow/{x...}"
+      },
+      "templates": [
+        "flow/{x}",
+        "flow/duration_p50_ms",
+        "flow/{x...}"
+      ]
+    },
+    {
+      "chunks": [
+        "flow"
+      ],
+      "expect": null,
+      "templates": [
+        "flow/{x}",
+        "flow/duration_p50_ms",
+        "flow/{x...}"
+      ]
+    },
+    {
+      "chunks": [
+        "a",
+        "b",
+        "c"
+      ],
+      "expect": {
+        "bindings": {
+          "y": [
+            "c"
+          ]
+        },
+        "winner": "a/b/{y}"
+      },
+      "templates": [
+        "a/{x}/c",
+        "a/b/{y}"
+      ]
+    },
+    {
+      "chunks": [
+        "devices",
+        "x-_x45_x54_x480",
+        "metrics",
+        "if",
+        "3"
+      ],
+      "expect": {
+        "bindings": {
+          "device": [
+            "ETH0"
+          ],
+          "metric": [
+            "if",
+            "3"
+          ]
+        },
+        "winner": "devices/{device}/metrics/{metric...}"
+      },
+      "templates": [
+        "devices/{device}/metrics/{metric...}"
+      ]
+    },
+    {
+      "chunks": [
+        "interfaces",
+        "Eth0"
+      ],
+      "expect": null,
+      "templates": [
+        "interfaces/{iface}"
+      ]
+    }
+  ],
+  "description": "Template matching and most-literal-first precedence (r3.3 D1). `expect` is the winning template with its unslugged bindings, or null when none matches."
+}

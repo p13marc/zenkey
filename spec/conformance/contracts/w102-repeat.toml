@@ -1,0 +1,13 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+[schemas]
+jsonschema = ["schemas/seed.json"]
+
+[resources."rename/{name}"]
+kind = "operation"
+request = "json:Rename"
+response = "json:Ack"
+params = { name = "string" }
+cardinality = 16

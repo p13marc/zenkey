@@ -1,0 +1,19 @@
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/seed.json", "schemas/other.json"]
+
+[resources.local]
+kind = "stream"
+type = "json:seed#Point"
+
+[resources.geo]
+kind = "stream"
+type = "json:other#Point"
+
+[resources.track]
+kind = "stream"
+type = "json:Track"

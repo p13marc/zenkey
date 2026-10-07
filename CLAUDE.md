@@ -221,6 +221,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 - **`main` is the zk2 line, in the strangler layout (#615).** The v1 tools
   pin `zenkey`/`zenkey-build` `=0.11.1` from crates.io until each one is
   ported. zk2 reuses the crate names at 0.20.0. `zenkey-model` is new.
+- **`zenkey-model/`** (MIT, unpublished until #606) is zk2's session-free
+  half (#608): keys, templates, the authoring format (draft 1) and its
+  lints with stable codes (`diag::CODES`), the canonical form, fingerprints,
+  bundles and `.history`. It depends on `zenoh-keyexpr` and no other zenoh
+  crate (`scripts/check-model-zenoh-free.sh`). `tests/examples.rs` requires
+  every contract in `examples/zk2/` to load with **no finding at all**.
+- **`spec/`** holds what every implementation must agree on:
+  `contract.schema.json`, generated from `zenkey-model`'s authoring types,
+  and `conformance/` fixtures. Both are checked by
+  `zenkey-model/tests/conformance.rs`. After an intended change, run
+  `ZK2_BLESS=1 cargo test -p zenkey-model --test conformance` and read the
+  diff: a bless claims every changed expectation is right.
 - **Spike code** lives on branch `zk2-spike`, with its own `[workspace]`,
   and is never merged. Only results and `docs/zk2/spike-report.md` land on
   `main`.

@@ -35,21 +35,22 @@ jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs
 [resources."streams/{stream}/video/{codec}/{tier}"]
 kind        = "stream"
 explicit    = true
-type        = { raw = "video/*" }
+type        = { raw = "video/*", media_param = "codec" }
 attachment  = "json:FrameMeta"
+attachment_encoding = "cbor"
 params      = { stream = "string", codec = "string", tier = "string" }
 cardinality = 128
 reliability = "best_effort"
 congestion  = "drop"
 priority    = "interactive_high"
-annotations = { "media.codec_param" = "codec", "media.tier_param" = "tier", "media.frame_clock" = "pts_ns" }
+annotations = { "media.tier_param" = "tier", "media.frame_clock" = "pts_ns" }
 doc         = """
 Encoded video, one access unit per sample, the FrameMeta sidecar as the Zenoh attachment. QoS is
 v1's `frame` profile (best-effort, drop, interactive-high, no express: RFC 04 §3). A stale frame is
 worthless and the encoder must never block.
-`{ raw = "video/*" }` is a type FAMILY: the concrete codec is the {codec} chunk and the sample's
-Encoding (video/h264). Draft 0 shows only concrete media types (Gap G10). FrameMeta is canonical
-CBOR (stream.rs:97-131); 'encoded like the payload' says nothing when the payload is raw (Gap G8).
+`{ raw = "video/*" }` is a type FAMILY (D6): the concrete codec is the sample's Encoding
+(video/h264), tied to the {codec} chunk by media_param. FrameMeta is canonical CBOR
+(stream.rs:97-131), hence attachment_encoding = "cbor" (D5).
 Cardinality is v1's estimate: streams 16 x codecs 2 x tiers 3, rounded up."""
 
 [resources."streams/{stream}/preview/jpeg"]
@@ -57,6 +58,7 @@ kind        = "stream"
 explicit    = true
 type        = { raw = "image/jpeg" }
 attachment  = "json:FrameMeta"
+attachment_encoding = "cbor"
 params      = { stream = "string" }
 cardinality = 16
 reliability = "best_effort"

@@ -1,0 +1,232 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "form": "data",
+        "iface": "nav.v2",
+        "resource": [
+          "position"
+        ],
+        "service": "nav",
+        "system": "vehicle-01",
+        "token": "stream"
+      },
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/position"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "camera.v1",
+        "resource": [
+          "frames",
+          "front"
+        ],
+        "service": "camera",
+        "system": "vehicle-01",
+        "token": "@stream"
+      },
+      "key": "zk2/vehicle-01/camera/camera.v1/@stream/frames/front"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "resource": [
+          "oper"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "state"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/state/oper"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "zs.snmp.v1",
+        "resource": [
+          "devices",
+          "core-sw1",
+          "ifaces",
+          "x-_x45_x54_x480"
+        ],
+        "service": "snmp",
+        "system": "h-3fa9c2d41b7e",
+        "token": "@state"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/snmp/zs.snmp.v1/@state/devices/core-sw1/ifaces/x-_x45_x54_x480"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "modem.v3",
+        "resource": [
+          "oper_change",
+          "01j9zk6q6x5m2f4a8c0d3e7b9h"
+        ],
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e",
+        "token": "events"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/oper_change/01j9zk6q6x5m2f4a8c0d3e7b9h"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "nav.v2",
+        "resource": [
+          "reset"
+        ],
+        "service": "nav",
+        "system": "vehicle-01",
+        "token": "@op"
+      },
+      "key": "zk2/vehicle-01/nav/nav.v2/@op/reset"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "acme.twist_cmd.v1",
+        "resource": [
+          "cmd"
+        ],
+        "service": "teleop",
+        "system": "acme",
+        "token": "stream"
+      },
+      "key": "zk2/acme/teleop/acme.twist_cmd.v1/stream/cmd"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "nav.v2",
+        "resource": [
+          "metrics",
+          "if",
+          "3",
+          "in_octets"
+        ],
+        "service": "nav",
+        "system": "vehicle-01",
+        "token": "stream"
+      },
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/metrics/if/3/in_octets"
+    },
+    {
+      "expect": {
+        "form": "instance",
+        "instance": "0123456789abcdef",
+        "service": "nav",
+        "system": "vehicle-01"
+      },
+      "key": "zk2/vehicle-01/nav/@zk/instance/0123456789abcdef"
+    },
+    {
+      "expect": {
+        "form": "alive",
+        "fp16": "fedcba9876543210",
+        "iface": "nav.v2",
+        "instance": "0123456789abcdef",
+        "service": "nav",
+        "system": "vehicle-01"
+      },
+      "key": "zk2/vehicle-01/nav/@zk/alive/nav.v2/0123456789abcdef/fedcba9876543210"
+    },
+    {
+      "expect": {
+        "epoch": "0123456789abcdef",
+        "form": "member",
+        "iface": "zs.parallax.v1",
+        "member": "cam0",
+        "service": "parallax",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/parallax/@zk/member/zs.parallax.v1/cam0/0123456789abcdef"
+    },
+    {
+      "expect": {
+        "form": "contract",
+        "iface": "nav.v2",
+        "sha256": "9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+      },
+      "key": "zk2/@zk/contract/nav.v2/9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953"
+    },
+    {
+      "expect": null,
+      "key": "v1/vehicle-01/nav/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/stream"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v02/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v1.v2/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/Nav.v2/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/streams/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/events/oper_change"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/events/oper_change/01J9ZK6Q6X5M2F4A8C0D3E7B9H"
+    },
+    {
+      "expect": null,
+      "key": "zk2/Vehicle-01/nav/nav.v2/stream/position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/*"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/**"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/position/"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/nav.v2/stream/-position"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/@zk/instance/0123"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/@zk/instance/0123456789ABCDEF"
+    },
+    {
+      "expect": null,
+      "key": "zk2/vehicle-01/nav/@zk/bogus/0123456789abcdef"
+    },
+    {
+      "expect": null,
+      "key": "zk2/@zk/contract/nav.v2/abc"
+    },
+    {
+      "expect": null,
+      "key": "zk2/@zk/alive/nav.v2/0123456789abcdef/0123456789abcdef"
+    }
+  ],
+  "description": "zk2 keys (r3.3 §3.1). `expect` is the parse, or null when the key is refused. Every accepted key must build back to exactly the same string."
+}
