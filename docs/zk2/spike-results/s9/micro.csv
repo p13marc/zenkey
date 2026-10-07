@@ -1,0 +1,10 @@
+unix_s,zenoh,measure,value
+1791410453,1.10.1,encoded bytes: protobuf,29.0
+1791410453,1.10.1,encoded bytes: json,99.0
+1791410453,1.10.1,encoded bytes: cbor,72.0
+1791410453,1.10.1,ns encode+decode: protobuf (prost),126.1
+1791410453,1.10.1,ns encode+decode: json (serde_json),894.1
+1791410453,1.10.1,ns encode+decode: cbor (ciborium),1046.2
+1791410453,1.10.1,ns twist() itself (stamp + build),43.1
+1791410453,1.10.1,"ns put, 64 B, no subscriber",278.7
+1791410453,1.10.1,"ns put + new_timestamp() (the state writer), 64 B",272.5

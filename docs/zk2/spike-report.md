@@ -18,6 +18,7 @@ Rules:
 | Routers | The harness's own binary (`spike router`): zenoh 1.10.1 sessions in router mode. A spike that needs plugins records the `zenohd` it built. |
 | Host | AMD Ryzen 5 PRO 3600, 6 vCPU, Linux 6.12.107 (cloud VM); rustc 1.98.1; release builds |
 | Transport | TCP on loopback unless a section says otherwise |
+| Limits | RLIMIT_MEMLOCK 8 MiB (hard). It bounds zenoh SHM pools: see S9 |
 | Code | Branch `zk2-spike`, `spike/` (never merged): `zk2rt`, a throwaway runtime over `zenkey-model`, and the `spike` harness |
 | Raw data | `spike/results/<group>/` on `zk2-spike`, copied here to [`spike-results/`](spike-results/) by each docs PR |
 
@@ -29,10 +30,10 @@ sections below.
 | Item | Question | Lean (r3.3) | Spike | Verdict |
 |---|---|---|---|---|
 | Grammar | `zk2/` keys, kind tokens, namespaces, zenoh-ext | r3.3 §3.1 | S1 | **holds** (#597); one r3.2 §3.2 sentence corrected |
-| U-A | P3 or P2 for control and commanding | **Decided: P3** | S11, S12 | pending (confirmation) |
-| U-D | `@stream` as a kind token | Token | S3, S9 | pending |
-| U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | pending |
-| U-F | Decodability: two blessed kinds + others | As in §3.9 | S9 | pending |
+| U-A | P3 or P2 for control and commanding | **Decided: P3** | S10, S11, S12 | **confirmed by S10 and S11** (#593, #594); S12 pending |
+| U-D | `@stream` as a kind token | Token | S3, S9 | S9: **no measurable cost**; S3 pending |
+| U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | **defaults hold**; `real_time` + express lost 0.6–4 % at 1–5 kHz with no gain, so express stays opt-in (S9) |
+| U-F | Decodability: two blessed kinds + others | As in §3.9 | S9 | **holds**: protobuf 126 ns, JSON 0.9 µs per message; raw over SHM for frames |
 | U-G | Many-reply operations in the core | Yes (O6) | S6 | pending |
 | U1 | State: producer + storage merged by timestamp | Merge | S5 | pending |
 | U2 | Clock discipline | HLC MUST + hold writes past the last stored timestamp | S5 | pending |
@@ -84,30 +85,237 @@ Every exchange is on one loopback host, with no load.
 ## Paradigm spikes (EZ)
 
 ### S9 — typed-layer overhead (#592)
-*Pending.* Matrix: 1 kHz control messages; 4 MB frames at 30 Hz, with and
-without SHM; typed handles against raw zenoh. Measures: latency, p99 jitter,
-throughput, CPU, allocations per sample. Decides U-D, U-E, U-F.
+
+**Verdict:**
+- **The typed path costs 126 ns per control message.** End-to-end latency on
+  this host cannot resolve that against its noise.
+- **Raw `@stream` frames over SHM are zero-copy end to end.**
+- **The QoS defaults hold, and `express` must not become one.**
+- **zenoh's SHM falls back silently under a default memlock limit.**
+
+`spike s9 --repeat 3`: 26 cases, three interleaved repetitions, plus
+micro-benchmarks. Raw data and the median table:
+[`spike-results/s9/`](spike-results/s9/).
+
+**Control messages** (a twist command through one router; p50 and p99 in
+µs, median of three runs, with the p99 range):
+
+| Case | p50 | p99 (range) | received |
+|---|---|---|---|
+| raw, 1 kHz, defaults | 212 | 3,911 (2,791–4,480) | 15,000/15,000 |
+| protobuf, 1 kHz, defaults | 182 | 2,269 (1,030–4,757) | 15,000/15,000 |
+| protobuf, 1 kHz, `real_time` + express | 203 | 4,950 (1,556–7,061) | **14,860/15,000** |
+| raw, 5 kHz, defaults | 160 | 2,205 (449–3,697) | 60,000/60,000 |
+| raw, 5 kHz, `real_time` + express | 172 | 3,315 (2,714–4,103) | **57,599/60,000** |
+| protobuf, 1 kHz, defaults, on `@stream` | 198 | 1,950 (1,345–3,296) | 15,000/15,000 |
+| protobuf, 1 kHz, defaults, under 4 MB @ 30 Hz | 203 | 2,331 (1,594–7,046) | 15,000/15,000 |
+| protobuf, 1 kHz, `real_time` + express, under 4 MB @ 30 Hz | 200 | 2,390 (1,611–5,140) | 14,868/15,000 |
+
+**Micro-benchmarks:**
+
+| Measure | Value |
+|---|---|
+| Encode + decode, protobuf (prost) | 126 ns (29 B: proto3 omits the four zero fields; the raw path sends 64 B) |
+| Encode + decode, JSON (serde_json) | 894 ns (99 B) |
+| Encode + decode, CBOR (ciborium) | 1,046 ns (72 B) |
+| A put, 64 B | 279 ns |
+| A put with an explicit `new_timestamp()` (the state writer) | 273 ns |
+
+**4 MB frames at 30 Hz** (p50 / p99 in µs, median of three runs):
+
+| Path | p50 | p99 | Receive allocation per frame | Arrived contiguous |
+|---|---|---|---|---|
+| raw, router, no SHM | 4,989 | 19,425 | 8.40 MB | 0/150 |
+| protobuf `bytes`, router, no SHM | 5,722 | 16,014 | 12.59 MB | 0/150 |
+| raw, peer, no SHM | 2,824 | 16,689 | 8.40 MB | 0/150 |
+| raw, peer, SHM with zenoh's defaults | 2,528 | 15,812 | 8.40 MB (**0/450 as SHM**) | 0/150 |
+| raw, peer, implicit SHM with a 6 MiB pool | 716 | 2,884 | 0.08 MB (447/450 as SHM) | 149/150 |
+| raw, peer, explicit SHM (written in place) | **273** | 2,027 | **0.02 MB** | 149/149 |
+| flatbuffer, peer, explicit SHM | 786 | 3,347 | 0.02 MB | 150/150 |
+| protobuf `bytes`, peer, explicit SHM | 1,236 | 3,377 | 4.21 MB | 150/150 |
+
+**What the numbers say:**
+- **The ≤ 5 % p99 budget cannot be measured here.** End-to-end p99 for small
+  messages is 1.5–5 ms on this VM, and repetitions of the same case vary by a
+  factor of up to 4. Raw and typed cases overlap entirely.
+- **The deterministic cost can be measured.** prost encode + decode costs
+  126 ns, under 0.1 % of the 150–400 µs p50. Allocations are the same on
+  both paths: about 3 per received message and 4 per sent one.
+- **The budget for r4 is therefore restated as a per-message cost:** ≤ 1 µs
+  of CPU on the typed path for control-size messages. That is measurable on
+  any host. The ≤ 5 % p99 target should be re-run on a quiet,
+  CPU-isolated host.
+- **Zero added copies holds for raw over SHM.** The producer writes into the
+  SHM buffer and the consumer reads it in place: 0.02 MB allocated per frame,
+  against 8.4 MB without SHM, where frames arrive fragmented and are
+  reassembled. p50 is 273 µs against 2.8 ms.
+- **A flatbuffer is zero-copy only on the read side.** The builder writes
+  into its own buffer, which is then copied into SHM. Zero copies need the
+  generated code to build in place, with a flatbuffers allocator over the
+  SHM buffer. That is a codegen requirement (#611).
+- **protobuf `bytes` pays one copy on each side,** so it is not a type for
+  SHM frames.
+- **zenoh-shm 1.10.1 `mlock`s every segment it creates or maps,** both pool
+  and metadata (`shm/unix.rs:291`). The cost is the pool plus 1,280 KiB of
+  metadata on the first allocation (`spike shm-probe`), on both sides.
+- **The consequence on a host with RLIMIT_MEMLOCK = 8 MiB** (this one's hard
+  limit, and a common default): zenoh's implicit 16 MiB pool cannot be
+  created, and SHM **silently** falls back to TCP (0/450 as SHM).
+- **A metadata allocation that cannot be locked panics.** It is an `unwrap`
+  at `metadata/storage.rs:31`.
+- **Deployment guidance:** set the memlock limit to at least the pool plus
+  2 MiB, or size the pool to fit, and make tools report the fallback.
+- **The router hop costs about 2 ms of p50 on a 4 MB frame** (5.0 ms against
+  2.8 ms peer to peer).
+- **The state writer's explicit timestamp is free:** 273 ns against 279 ns.
+
+**Verdicts:**
+- **U-D (`@stream` as a token):** it costs nothing measurable. p50 is 198 µs
+  against 182 µs, and p99 is within noise. The token stays; S3 confirms that
+  infrastructure can use it.
+- **U-E (QoS defaults):**
+  - **The §3.3 defaults hold.** `data` with no express delivered every
+    sample at 100 Hz–5 kHz.
+  - **`real_time` + express lost samples** (best_effort, drop): 0.6–1.0 % at
+    1 kHz and 3.5–4.0 % at 5 kHz. It gave no p50 or p99 gain on loopback,
+    including under 4 MB @ 30 Hz contention.
+  - **`express` therefore stays opt-in,** and `twist_cmd.v1`'s
+    `real_time` + express is re-examined in S3, where link contention could
+    make priority matter.
+- **U-F (decodability):** **holds.**
+  - protobuf is the default for control: 126 ns.
+  - JSON is affordable for documents and configuration, even at kHz rates
+    (0.9 µs).
+  - raw over SHM is the frame path.
+
+**Not measured:** cross-host latency. The spike has a single VM.
 
 ### S10 — wildcard bindings (#593)
-*Pending.* 1 → 100 producers bound by `vehicle-01/*`, joining and leaving
-through presence. Measures: fan-in correctness, join latency, memory.
-Decides U-A, R1, R5.
+
+**Verdict: wildcard bindings hold.**
+- Fan-in is correct under churn.
+- The leave latency is known, and the lease bounds a network cut.
+- The descriptor's binding record is enough to draw the graph.
+
+`spike s10`: 23 cases, all passing. Raw data:
+[`spike-results/s10/`](spike-results/s10/).
+
+| Case | Result |
+|---|---|
+| R5 start-up wait | The first bound provider's token appeared 11 ms after its spawn, and its first sample 12 ms after |
+| Fan-in 1 → 10 → 100 (`detections.v1` bound to `vehicle-01/*`) | 1/1, 10/10, 100/100 producers seen and delivering. Join to first sample, median: 1.2, 11.1, 89 ms (maximum 295 ms; bounded by the 10 Hz publish period with 90 producers starting at once) |
+| Steady: 100 producers × 10 Hz × 5 s | 5,000 samples, **0 gaps, 0 duplicates** |
+| A `nav.v2` producer on the same system | 0 samples delivered to the `detections.v1` binding |
+| Leave: clean exit | 4–8 ms |
+| Leave: `kill -9` | 3–7 ms |
+| Leave: network cut (SIGSTOP; only the lease can tell) | 9,961–10,047 ms (zenoh's 10 s lease) |
+| After SIGCONT | 5/5 back within 52 ms; the 100 long-lived producers all kept delivering |
+| `*/tc` on 2, then 5 hosts | 2/2 and 5/5 systems answering, and the same number of interface tokens |
+| Injection: 10 puts on `zk2/vehicle-01/*/detections.v1/stream/objects` | 10/10 discarded by the R6 filter |
+| Graph from descriptors + interface tokens | 100 edges drawn, 100 producers delivering, **0 differ** |
+| Descriptor with one wildcard binding | 222 B; 1 binding record found across all descriptors |
+| Consumer RSS for 100 producers | +664 KiB |
+
+**For r4:**
+- **R5/R7:** a binding resolves at once and needs no presence. A consumer
+  that waits on presence starts within one token propagation (11 ms here).
+- **A network cut is detected at the lease, not before.** That is 10 s by
+  default; deployments that need faster detection tune the lease.
+- **R3 is sufficient.** A tool reading only descriptors and tokens drew
+  exactly the data-flow graph.
 
 ### S11 — control arbitration (#594)
-*Pending.* Teleop, autopilot and safety on priority + deadline; a commander
-crash; the dead-man stop. Measures: switch-over latency, missed-deadline
-detection, false stops. Decides U-A, U-E.
+
+**Verdict: consumer-side arbitration meets a 50 Hz control loop's needs.
+P3 is confirmed over the P2 fallback.**
+
+`spike s11`: two actuators bind `twist_cmd.v1` as `cmd` to
+`[safety, teleop, autopilot]`. The deadline and lifespan (100 ms each) come
+from the contract's `timing.v1` annotations. Commanders run as separate
+processes at the contract's 50 Hz, with its QoS. Raw data:
+[`spike-results/s11/`](spike-results/s11/).
+
+| Case | P3 (bindings) | P2 (`@in` sink) |
+|---|---|---|
+| Teleop takes over: first teleop send to the switch | 0.26 / 0.27 ms (l / r) | 0.33 / 0.34 ms |
+| The two actuators switch within | 0.02 ms | 0.01 ms |
+| Teleop silent (SIGSTOP): last command to autopilot resuming | 101.2 / 100.1 ms, by the deadline | 102.2 / 101.1 ms, by the deadline |
+| Teleop crash (`kill -9`): signal to autopilot | 4.9 / 5.0 ms, **by liveliness** | 3.8 / 3.8 ms, by liveliness |
+| All silent: last command to the dead-man stop | 101.5 / 100.4 ms | 101.5 / 100.4 ms |
+| Safety preempts, from its spawn | 7.5 ms | 9.2 ms |
+| False stops over the whole scenario | **0** | **0** |
+| CPU of the process holding both actuators (2 ms evaluation tick each) | 7.0 % of one core | 7.7 % |
+| Clock skew of −250 ms and +250 ms: a sender-clock lifespan check | rejects 100/100 and 100/100 of the skewed samples | — |
+| The same skew, receive-clock deadline | Follows the skewed commander correctly | — |
+
+**What the numbers say:**
+- **Takeover costs one sample's latency.**
+- **Silence is detected at the deadline plus the evaluation tick**
+  (100–102 ms).
+- **A crash is detected by liveliness long before the deadline** (4–5 ms).
+- **The dead-man stop fires at the deadline, with no false stops.**
+- **P2 times the same.** It loses on structure: a commander must address every
+  actuator, and the sender's identity is *claimed* in the payload, where P3
+  gets it from the key that only the commander may write (ownership, R6).
+
+**`arbitration.v1` needs these rules:**
+1. A binding is an ordered list of providers: the priority.
+2. Each role has a deadline, from `timing.v1` on the contract, which a binding may tighten.
+3. Arbitration is evaluated on every receive and on a timer of at most deadline/50 (2 ms here), against the **receiver's monotonic clock**.
+4. A liveliness delete drops a provider at once.
+5. No fresh provider produces the dead-man output, a defined safe value.
+6. A source's identity comes from its key, never from the payload.
+
+**`timing.v1` needs these rules:**
+- `period` is the expected rate.
+- `deadline` runs on the receiver's clock.
+- `lifespan` checked against the **sender's** stamp needs synchronized
+  clocks. At ±250 ms of skew it rejected every sample of a healthy
+  commander. So it is either dropped or bounded by the HLC's maximum delta.
+
+**U-A:** P3, confirmed by S10 and S11. S12 (#595), with #601's tombstone
+cases, completes the evidence.
 
 ### S12 — store-and-forward (#595)
-*Pending.* `desired.v1` across a disconnect and a router restart, with
-storage on the ground and on the vehicle, and clock skew. Measures:
-convergence time, stale-command rejection, wrong answers. Decides U-A, U1,
-U2.
+*Pending. Runs with S5 (#601)*, as the issue requires: delete handling
+depends on the storage manager's tombstone findings. The matrix is
+`desired.v1` across a disconnect and a router restart, with storage on the
+ground and on the vehicle, and clock skew. Measures: convergence time,
+stale-command rejection, wrong answers. Decides U-A, U1, U2.
 
 ### S13 — simulation and replay (#596)
-*Pending.* Rebinding sources to a simulator and to a replay with no code
-change; simulated time through `clock.v1`. Measures: pass/fail, and
-timing-profile behaviour under simulated time.
+
+**Verdict: switching the source needed zero code changes in every case.** One
+detector binary was rebound by configuration alone. One case is blocked, and
+the block is in the v1 tool: v1's `zenctl replay` cannot republish zk2 keys
+into a namespace.
+
+`spike s13`: 10 cases, all passing (the `zenctl replay` row records the
+block). Raw data, including the binding files and the `.zrec`:
+[`spike-results/s13/`](spike-results/s13/).
+
+| Case | Result |
+|---|---|
+| `input` → `vehicle-01/cam-front` (`real.bindings.toml`) | 20 frames from it, 0 from any other source, its `info` state answered |
+| `input` → `vehicle-01/replay-cam` | 20 / 0 / 1 |
+| `input` → `sim-1/cam-front` | 20 / 0 / 1 |
+| v1 `zenctl record zk2/vehicle-01/cam-front/camera.v1/@stream/image` (zenctl 0.11.0) | Works: the explicit stream is named, not `**` |
+| v1 `zenctl replay --base replay` | **Blocked.** `--base` re-prefixes v1 keys only, so zk2 rows are republished verbatim on the live keys, and 0 frames reach namespace `replay`. A namespaced `--zenoh-config` is refused by design (RFC 09 §5). |
+| A namespace-aware replay: capture, then republish through a session in namespace `replay` | 30 captured, 30 received by the detector in `replay`, bound to the *original* address |
+| `clock.v1` at 1×: a commander silent, 100 ms deadline on the bound clock | Missed 101 ms of wall time after the last command |
+| `clock.v1` paused | No miss in 3 s of wall time |
+| `clock.v1` at 2× | Missed 55 ms of wall time after the last command (100 ms simulated) |
+
+**For r4 and the tools:**
+- **R1 holds.** A consumer's sources are its binding file.
+- **Replay into a deployment namespace works** when the replayer's session
+  carries the namespace. The zk2 `zenctl` (#612) needs `replay --namespace`.
+  v1's refusal of namespaced sessions protects an explorer's view of the
+  wire, and it does not apply to a replayer.
+- **`clock.v1`** (this spike's sketch: simulated time in ns on a stream at
+  100 Hz) works for deadlines. Its granularity is the clock's tick, so the
+  profile must state the tick. Consumers then either extrapolate between
+  ticks or accept tick granularity.
 
 ## Protocol spikes (EY, FA)
 

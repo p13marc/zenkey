@@ -1,0 +1,4 @@
+# The detector's bindings: configuration, never code (R1).
+[bind.input]
+interface = "camera.v1"
+providers = ["vehicle-01/cam-front"]
