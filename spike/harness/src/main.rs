@@ -31,6 +31,8 @@ mod s1;
 mod s10;
 mod s11;
 mod s13;
+mod s4;
+mod s6;
 mod s9;
 
 use procs::{Proc, spawn};
@@ -154,6 +156,49 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         speed: f64,
     },
+    /// S4, contract retrieval by hash against bad holders (#600).
+    S4 {
+        #[arg(long, default_value = "results/s4")]
+        results: PathBuf,
+        #[arg(long, default_value = "../examples/zk2")]
+        examples: PathBuf,
+    },
+    /// S4's holder child.
+    #[command(hide = true)]
+    S4Holder {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long, value_enum)]
+        mode: s4::HolderMode,
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        contract: PathBuf,
+    },
+    /// S6, operations and ownership (#602).
+    S6 {
+        #[arg(long, default_value = "results/s6")]
+        results: PathBuf,
+    },
+    /// S6's server child.
+    #[command(hide = true)]
+    S6Server {
+        #[arg(long)]
+        connect: Vec<String>,
+        #[arg(long)]
+        key: String,
+        #[arg(long, value_enum, default_value = "ok")]
+        mode: s6::ServerMode,
+        #[arg(long)]
+        fanout_forbidden: bool,
+        #[arg(long, default_value_t = 1)]
+        replies: u32,
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+        complete: bool,
+        #[arg(long)]
+        instance_token: Option<String>,
+        #[arg(long)]
+        alive_token: Option<String>,
+    },
     /// S9, the typed layer's cost over raw zenoh (#592).
     S9 {
         #[arg(long, default_value = "results/s9")]
@@ -168,6 +213,9 @@ enum Cmd {
         #[arg(long, default_value_t = 1)]
         repeat: usize,
     },
+    /// The bundle size of each contract file.
+    #[command(hide = true)]
+    BundleSizes { contracts: Vec<PathBuf> },
     /// How much zenoh-shm locks for a pool and one allocation.
     #[command(hide = true)]
     ShmProbe { pool: usize, alloc: usize },
@@ -211,6 +259,12 @@ async fn main() -> Result<()> {
         Cmd::Smoke { services, results, contracts } => smoke(services, &results, &contracts).await,
         Cmd::S9 { results, quick, only, repeat } => s9::run(&results, quick, only.as_deref(), repeat).await,
         Cmd::ShmProbe { pool, alloc } => s9::shm_probe(pool, alloc),
+        Cmd::BundleSizes { contracts } => {
+            for c in load_contracts(&contracts)? {
+                println!("{:>8} {}", zenkey_model::bundle::Bundle::build(&c).to_bytes().len(), c.iface);
+            }
+            Ok(())
+        }
         Cmd::S9Recv { mode, listen, connect, shm, key, kind, count } => {
             s9::recv(mode, listen, connect, shm, key, kind, count).await
         }
@@ -238,6 +292,24 @@ async fn main() -> Result<()> {
         }
         Cmd::S13Detector { connect, namespace, bindings, secs } => s13::detector(connect, namespace, bindings, secs).await,
         Cmd::S13Clock { connect, speed } => s13::clock(connect, speed).await,
+        Cmd::S4 { results, examples } => {
+            if s4::run(&results, &examples).await? {
+                Ok(())
+            } else {
+                bail!("S4: a case failed (see results/s4/summary.md)")
+            }
+        }
+        Cmd::S4Holder { connect, mode, count, contract } => s4::holder(connect, &contract, mode, count).await,
+        Cmd::S6 { results } => {
+            if s6::run(&results).await? {
+                Ok(())
+            } else {
+                bail!("S6: a case failed (see results/s6/summary.md)")
+            }
+        }
+        Cmd::S6Server { connect, key, mode, fanout_forbidden, replies, complete, instance_token, alive_token } => {
+            s6::server(connect, key, mode, fanout_forbidden, replies, complete, instance_token, alive_token).await
+        }
         Cmd::S1 { results, examples } => {
             if s1::run(&results, &examples).await? {
                 Ok(())

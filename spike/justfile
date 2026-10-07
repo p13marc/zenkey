@@ -44,6 +44,16 @@ spike-s11: build
 spike-s13: build
     {{spike}} s13 --results results/s13 --examples ../examples/zk2
 
+# S4, contract retrieval by hash (#600): one and 200 holders; slow, corrupt
+# and unreachable nearest holders; three routers; a constrained holder.
+spike-s4: build
+    {{spike}} s4 --results results/s4 --examples ../examples/zk2
+
+# S6, operations and ownership (#602): split-brain, replicas, templated and
+# fan-in queryables, fan-out refusal, many replies, partition, standby, metadata.
+spike-s6: build
+    {{spike}} s6 --results results/s6
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean
