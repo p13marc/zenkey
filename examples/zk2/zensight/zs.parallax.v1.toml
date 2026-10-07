@@ -49,7 +49,7 @@ v1's `frame` profile (best-effort, drop, interactive-high, no express: RFC 04 §
 worthless and the encoder must never block.
 `{ raw = "video/*" }` is a type FAMILY: the concrete codec is the {codec} chunk and the sample's
 Encoding (video/h264). Draft 0 shows only concrete media types (Gap G10). FrameMeta is canonical
-CBOR (stream.rs:105-131); 'encoded like the payload' says nothing when the payload is raw (Gap G8).
+CBOR (stream.rs:97-131); 'encoded like the payload' says nothing when the payload is raw (Gap G8).
 Cardinality is v1's estimate: streams 16 x codecs 2 x tiers 3, rounded up."""
 
 [resources."streams/{stream}/preview/jpeg"]

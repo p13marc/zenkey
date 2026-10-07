@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "zs.parallax.v1.json",
-  "$comment": "parallax's documents, faithful to zensight-common/src/stream.rs and discovery.rs. FrameMeta is CBOR on the wire and pinned byte for byte by a conformance corpus shared with the parallax repository (stream.rs:105-131): field order and the omission of absent timestamps are wire shape. This schema cannot express either rule, and draft 0 does not say how an attachment is encoded when the payload is raw (Gap G8).",
+  "$comment": "parallax's documents, faithful to zensight-common/src/stream.rs and discovery.rs. FrameMeta is CBOR on the wire and pinned byte for byte by a conformance corpus shared with the parallax repository (stream.rs:97-131): field order and the omission of absent timestamps are wire shape. This schema cannot express either rule, and draft 0 does not say how an attachment is encoded when the payload is raw (Gap G8).",
   "$defs": {
     "FrameMeta": {
       "type": "object",
