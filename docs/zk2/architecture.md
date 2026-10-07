@@ -139,10 +139,10 @@ Three profiles now have a reference implementation:
 
 **The input.** The three adopters were mapped onto zk2 in the authoring format (`examples/zk2/`):
 - **tcgui:** #589; 4 gaps.
-- **zenoh-modem:** #623; 21 gaps, cited below as **Z1–Z21**.
+- **zenoh-modem:** #623; 22 gaps, cited below as **Z1–Z22**.
 - **ZenSight:** #622; 24 gaps, cited as **G1–G24**. Their lists are in each mapping's README.
 
-They consolidate into the decisions below. **The authoring format moves to draft 1** (`examples/zk2/README.md`), and `zenkey-model` (#608) implements draft 1 and migrates every example to it.
+They consolidate into the decisions below (D1–D26). **The authoring format moves to draft 1** (`examples/zk2/README.md`), and `zenkey-model` (#608) implements draft 1 and migrates every example to it.
 
 | # | Decision | Gaps | Where |
 |---|---|---|---|
@@ -170,6 +170,7 @@ They consolidate into the decisions below. **The authoring format moves to draft
 | D22 | **`desired.v1`.** One template per document type. The binding names its target explicitly: `self.system` or `self.service`. | G5 | §3.12 |
 | D23 | **`alarms.v1`** fixes the host-scoped label exclusion normatively. References across services are structured fields (system, service, key), never dot-packed. Dotted service names are derived as `<parent>.<slug(device)>`, with a dot-free parent, split at the first dot. | G3, G4 | §3.5, §3.12 |
 | D24 | **Strays.** A parent service keeps families for data about devices it does not serve as services (`traps/{sender}`). Device services exist only by configuration. | G15 | §3.5 |
+| D26 | **One host-id salt for zk2.** v1 salts the machine-id hash per application, so one machine gets three different origins under tcgui, ZenSight and zenoh-modem. `hostid.v1` uses a single zk2-wide salt (`zk2-hostid-v1`), keeping the derivation and test-vector discipline, so a machine is **one system across every application**. Each adopter's v1 origin maps to its zk2 system name at port time (a migration table; ZenSight's catalog can publish it as aliases). | Z22 | §3.5, §3.12 |
 | D25 | **Large populations.** S5 seeds 50k and 100k by wildcard GET. U10's lean changes: large populations are `@state`, with paged or many-reply operations, or storage-backed GETs, sized by measurement. | G22 | §5 |
 
 **Deferred, minor:**
