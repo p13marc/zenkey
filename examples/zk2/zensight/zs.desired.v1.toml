@@ -1,0 +1,111 @@
+# The fleet desired-state author: per-host runtime policy as state of the author, keyed by target.
+# v1: desired.toml (registry 1.6; service origin @desired, implemented by zensight-desired's
+#     policy compiler): 21 state subjects {host}/<producer>/<topic> over 7 types, 3 procedures,
+#     1 error, 1 gated entry. ttl_s = 0 everywhere: policy never ages out; it is replaced or deleted
+#     (a delete reverts the target to its file baseline).
+# Key:      zk2/fleet/desired/zs.desired.v1/state/desired/<host>/<service>/<document>
+# Example:  zk2/fleet/desired/zs.desired.v1/state/desired/h-3fa9c2d41b7e/systemd/expectations.systemd
+#           zk2/fleet/desired/zs.desired.v1/state/desired/h-3fa9c2d41b7e/snmp/targets.snmp
+#
+# This is desired.v1 exactly as r3.2 §3.12 and walkthrough/mission_plan.v1 describe it: the author
+# owns the keys (P3, no cross-principal write), a storage keeps desired/** (S5), and a target binds
+# its own slice. Targets reconcile on connect and by periodic re-seed GET (S4; v1 refresh_secs =
+# 300), then report what is in force in their own applied/{topic} (zs.thresholds.v1), with
+# desired_timestamp as the observed revision.
+#
+# ONE TEMPLATE PER DOCUMENT TYPE. v1's {host}/<producer>/<topic> carried 7 types in one family
+# (zensight-common/src/desired.rs topics()). A zk2 template has one type, and the target's service
+# name is a deployment fact, so the type cannot hang off `<producer>`. The last chunk is therefore
+# a literal naming the document type, qualified by the target interface where one topic name has
+# several types (expectations x3, targets x2) (Gap G5).
+# The target is a (system, service) pair: desired.target_param names two parameters here. The
+# walkthrough's mission_plan.v1 uses a single string, and R2's `self` has to say which identity each
+# one binds to (Gap G5).
+#
+# Single writer under redundancy.v1 with the claim protocol, exactly as zs.catalog.v1 (a
+# policy-compiler standby holds its instance token only). The compiler's process identity is the
+# host service `policy-compiler` (v1 policy-compiler.toml: framework only).
+# No `history`. v1's publisher was plain and only the sensor side used an AdvancedSubscriber
+# (zensight-sensor-core/src/desired.rs:274-279). Durability is the storage plus S4.
+# Cardinality: v1's 10000 hosts per subject. thresholds spans 15 producers, so its template bound
+# is 15 x 10000.
+
+[interface]
+name    = "zs.desired"
+major   = 1
+minor   = 0
+summary = "Fleet runtime policy for every host's services, as documents keyed by target"
+uses    = ["desired.v1", "redundancy.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json", "schemas/zs.desired.v1.json"]
+
+[resources."desired/{host}/{service}/thresholds"]
+kind        = "state"
+type        = "json:ThresholdsConfig"
+params      = { host = "string", service = "string" }
+cardinality = 150000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "The threshold rule set for one service of one host: bmc, container, gnmi, hostspec, logs, modbus, netflow, netlink, netring, parallax, probe, pve, snmp, sysinfo, systemd. Read by that service's zs.thresholds.v1 requirement."
+
+[resources."desired/{host}/{service}/targets.snmp"]
+kind        = "state"
+type        = "json:SnmpTargets"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "The SNMP target set for one poller (#936): name, address, a credential NAME into the host's file config, profile, OID group. Each target becomes a device service snmp.<slug(name)>."
+
+[resources."desired/{host}/{service}/targets.probe"]
+kind        = "state"
+type        = "json:ProbeTargets"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "The synthetic-probe target set for one prober (#936), minus `headers`, which stays on the host."
+
+[resources."desired/{host}/{service}/expectations.systemd"]
+kind        = "state"
+type        = "json:SystemdExpectations"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "systemd unit expectations (#277): services and targets active, timer freshness and success, restart rates."
+
+[resources."desired/{host}/{service}/expectations.netlink"]
+kind        = "state"
+type        = "json:NetlinkExpectations"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "netlink expectations (#113, #323): sockets, links, neighbours, routes, rates, delivery floors, route flaps, policy rules."
+
+[resources."desired/{host}/{service}/expectations.hostspec"]
+kind        = "state"
+type        = "json:HostspecExpectations"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "hostspec assertions (#821): mounts, files, listeners, symlinks, absent paths, content, permissions."
+
+[resources."desired/{host}/{service}/rules.logs"]
+kind        = "state"
+type        = "json:LogRulesConfig"
+params      = { host = "string", service = "string" }
+cardinality = 10000
+annotations = { "desired.target_param" = ["host", "service"], "freshness.ttl_s" = 0 }
+doc         = "The log sentinel ruleset (#543): pattern -> alarm rules with windowed thresholds and rate limits."
+
+[resources."override/set"]
+kind       = "operation"
+request    = "json:DesiredOverride"
+response   = "json:Ack"
+error      = "json:DesiredError"
+idempotent = true
+fanout     = "forbidden"
+optional   = true
+gate       = "config:allow_overrides"
+doc        = """
+Record a per-host override in the controller's overrides file and re-plan; doc = null removes it.
+It never edits the hand-written policy. The author comes from the O7 call-metadata actor. Idempotent:
+re-sending the same override stores the same entry (v1 left idempotent undeclared)."""

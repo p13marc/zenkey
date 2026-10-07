@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.netring.v1.json",
+  "$comment": "netring's documents. FlowRecord, TalkerRecord, CaptureRecord and NameInfo are faithful to zensight-common/src/query_detail.rs. CaptureDiskStatus/CaptureDiskCommand are written from zensight-sensor-netring/src/command.rs:581-615, sensor-local types that v1 served only as a description stub (zensight-common/src/schema.rs:213-214). The other declared-only v1 types (TopicStatus, DetectorConfig, FilterConfig, ThreatIntelConfig) are typed `{ raw = \"application/json\" }` in the contract, honestly opaque until someone writes their schema.",
+  "$defs": {
+    "TopRequest": {
+      "description": "Was the selector parameter ?top=N.",
+      "type": "object",
+      "properties": {
+        "top": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "NameInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "provenance"
+      ]
+    },
+    "FlowRecord": {
+      "type": "object",
+      "properties": {
+        "src": {
+          "type": "string"
+        },
+        "dst": {
+          "type": "string"
+        },
+        "proto": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        },
+        "community_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "directed": {
+          "type": "boolean"
+        },
+        "bytes_initiator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_responder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packets_initiator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packets_responder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dst_names": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NameInfo"
+          }
+        }
+      },
+      "required": [
+        "src",
+        "dst",
+        "proto",
+        "bytes",
+        "packets",
+        "duration_ms",
+        "reason"
+      ]
+    },
+    "TalkerRecord": {
+      "type": "object",
+      "properties": {
+        "src": {
+          "type": "string"
+        },
+        "bytes_per_sec": {
+          "type": "number"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NameInfo"
+          }
+        }
+      },
+      "required": [
+        "src",
+        "bytes_per_sec"
+      ]
+    },
+    "CaptureRecord": {
+      "description": "One capture-to-disk file. Its bytes are delivered as an artifact (zs.artifacts.v1 on jobs.v1 + blob.v1).",
+      "type": "object",
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string"
+        },
+        "trigger_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_ms": {
+          "type": "integer"
+        },
+        "end_ms": {
+          "type": "integer"
+        },
+        "artifact_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifact_prefix": {
+          "description": "MIGRATION DEBT: a concrete v1 key prefix v1/<origin>/@blob/artifact (query_detail.rs:292). blob.v1 delivery references carry (holder system, holder service, hash), never a key prefix (r3.2 §3.12).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifact_root": {
+          "description": "The blob's BLAKE3 root (zenkey::ContentHash, 8-128 hex).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires_ms": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "filename",
+        "bytes",
+        "mode"
+      ]
+    },
+    "CaptureDiskMode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "rotating",
+        "triggered"
+      ]
+    },
+    "CaptureDiskCommand": {
+      "description": "Internally tagged on `type`, snake_case.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "capture_now"
+            },
+            "tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "set_capture"
+            },
+            "mode": {
+              "$ref": "#/$defs/CaptureDiskMode"
+            }
+          },
+          "required": [
+            "type",
+            "mode"
+          ]
+        }
+      ]
+    },
+    "CaptureDiskStatus": {
+      "type": "object",
+      "properties": {
+        "armed": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "ring_packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ring_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_total_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evictions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "triggers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_event": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "armed",
+        "mode",
+        "recording",
+        "ring_packets",
+        "ring_bytes",
+        "retained_files",
+        "retained_bytes",
+        "max_files",
+        "max_total_bytes",
+        "dropped",
+        "evictions",
+        "triggers",
+        "last_event"
+      ]
+    }
+  }
+}

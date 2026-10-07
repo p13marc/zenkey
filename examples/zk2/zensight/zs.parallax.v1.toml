@@ -1,0 +1,243 @@
+# parallax, live video: V4L2/RTSP/test sources -> H.264 tiers + JPEG previews (parallax.toml, registry 1.12:
+# 17 telemetry, 10 state, 10 procedures, 2 [[media]] entries, 3 gated).
+# Key:      zk2/<host-id>/parallax/zs.parallax.v1/{@stream|stream|state|@op}/<resource>
+# Example:  zk2/h-3fa9c2d41b7e/parallax/zs.parallax.v1/@stream/streams/cam0/video/h264/high
+#           zk2/h-3fa9c2d41b7e/parallax/zs.parallax.v1/state/streams/cam0
+# v1:       v1/<origin>/@media/parallax/cam0/video/h264/high (frames, FrameMeta attachment)
+#
+# The video is an explicit stream: the verbatim @stream token keeps frames off every ambient
+# selector (zk2/<host>/** never pulls video), which is what v1's verbatim @media plane did. A viewer
+# names exactly one tier key; there is deliberately no tier wildcard (RFC 07 §1).
+# No `history` on @stream (zenoh-ext's @adv parser cannot work under a verbatim chunk, r3.2 §3.2).
+# media.v1 (r3.2 §0.2: codec tiers, the frame-age clock, receiver-driven adaptation, the frame-
+# metadata attachment) supplies the annotations below. Its vocabulary is not written yet, so these
+# keys are this mapping's guesses (Gap G21).
+#
+# Device tokens: v1 declared one per stream (zensight-sensor-parallax/src/main.rs:79, hotplug.rs:95),
+# cycled on reopen, so a stream's stats counters had their own continuity epoch. Here the streams are a
+# {stream} template inside one service, and the epoch is the whole service's instance (Gap G16). The
+# alternative is a service per camera, parallax.cam0.
+# The service also implements health.v1, alarms.v1, zs.evidence.v1 (self + device/{camera}),
+# zs.thresholds.v1 and zs.artifacts.v1.
+
+[interface]
+name    = "zs.parallax"
+major   = 1
+minor   = 0
+summary = "Live video streams of one host: codec tiers, previews, status and receiver feedback"
+uses    = ["media.v1", "telemetry.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.parallax.v1.json"]
+
+# --- explicit streams (v1 [[media]]) ---
+
+[resources."streams/{stream}/video/{codec}/{tier}"]
+kind        = "stream"
+explicit    = true
+type        = { raw = "video/*" }
+attachment  = "json:FrameMeta"
+params      = { stream = "string", codec = "string", tier = "string" }
+cardinality = 128
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "interactive_high"
+annotations = { "media.codec_param" = "codec", "media.tier_param" = "tier", "media.frame_clock" = "pts_ns" }
+doc         = """
+Encoded video, one access unit per sample, the FrameMeta sidecar as the Zenoh attachment. QoS is
+v1's `frame` profile (best-effort, drop, interactive-high, no express: RFC 04 §3). A stale frame is
+worthless and the encoder must never block.
+`{ raw = "video/*" }` is a type FAMILY: the concrete codec is the {codec} chunk and the sample's
+Encoding (video/h264). Draft 0 shows only concrete media types (Gap G10). FrameMeta is canonical
+CBOR (stream.rs:105-131); 'encoded like the payload' says nothing when the payload is raw (Gap G8).
+Cardinality is v1's estimate: streams 16 x codecs 2 x tiers 3, rounded up."""
+
+[resources."streams/{stream}/preview/jpeg"]
+kind        = "stream"
+explicit    = true
+type        = { raw = "image/jpeg" }
+attachment  = "json:FrameMeta"
+params      = { stream = "string" }
+cardinality = 16
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "interactive_high"
+doc         = "JPEG previews of one stream (keyframe = true on every frame)."
+
+# --- state ---
+
+[resources."streams/{stream}"]
+kind        = "state"
+type        = "json:StreamStatus"
+params      = { stream = "string" }
+cardinality = 16
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+The normative catalogue and status of one stream: open, per-tier applied parameters and viewers,
+why the last tier stopped. A closed stream keeps its document with open = false; it is tombstoned
+only on removal from config (RFC 11 §5), or a UI would lose the catalogue of openable streams. A
+wildcard GET on streams/* lists the catalogue."""
+
+[resources.discovery]
+kind        = "state"
+type        = "json:StreamDiscoveryReport"
+history     = true
+annotations = { "freshness.ttl_s" = 7200 }
+doc         = "Camera discovery (#410): mDNS/WS-Discovery responders that are not configured streams, proposed for adoption. Propose-only."
+
+# --- operations ---
+
+[resources.catalogue]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:StreamDescriptor"
+replies    = "many"
+idempotent = true
+doc        = """
+v1 `streams` (RFC 11 §5.1: profile-local, kept): native geometry, codecs and the tiers on offer, one
+descriptor per reply. The state documents above stay the normative catalogue. This adds
+capabilities the status document does not carry."""
+
+[resources.control]
+kind        = "operation"
+request     = "json:StreamControl"
+response    = "json:Ack"
+idempotent  = false
+fanout      = "allowed"
+annotations = { "media.control" = true }
+doc         = """
+open_stream / close_stream / request_keyframe on one tier (v1 stream/set, Command<StreamControl>).
+Per-viewer quality is chosen by which tier key a viewer subscribes to, never by a command.
+Fan-out allowed as in v1."""
+
+[resources.report]
+kind        = "operation"
+request     = "json:MediaReceiverReport"
+response    = "json:Ack"
+idempotent  = true
+annotations = { "media.receiver_report" = true }
+doc         = """
+Receiver feedback for one @stream key (RFC 07 §1.1). It informs only: this producer never re-tunes a
+tier from a report. It keeps the latest per (consumer_id, stream, tier) and publishes the
+streams/{stream}/rx/{tier}/* aggregates. v1 declared rate = burst(3600/h) on the procedure and
+enforced it with error/busy; draft 0 has no rate field, on operations or streams (Gap G6)."""
+
+# --- telemetry: stream stats and the receiver-feedback aggregates ---
+
+
+[resources."streams/advertised"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+doc         = "streams in this host's catalogue"
+
+[resources."streams/{stream}/stats/fps"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "frames per second (v1: {stream}/stats/fps)"
+
+[resources."streams/{stream}/stats/kbps"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "encoded bitrate (v1: {stream}/stats/kbps)"
+
+[resources."streams/{stream}/stats/drops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "buffers a profile's AppSink shed because the egress task did not pull in time, read from AppSinkHandle::stats().total_dropped and folded as a delta per profile incarnation; covers video tiers AND the preview since 1.9, and is NOT transport loss (congestion dies inside Zenoh's queue, upstream of every counter here) (v1: {stream}/stats/drops)"
+
+[resources."streams/{stream}/stats/rc_drops"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "frames the encoder's rate control swallowed to hold the tier's bitrate cap; disjoint from drops (a swallowed frame produces no buffer at all, so it never reaches the sink) (v1: {stream}/stats/rc_drops)"
+
+[resources."streams/{stream}/stats/sink_queue"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "deepest AppSink backlog across the stream's open profiles at tick time (0..SINK_QUEUE); the queue that precedes shedding, so a reading at the cap proves a real backlog while a 0 does not disprove one (v1: {stream}/stats/sink_queue)"
+
+[resources."streams/{stream}/stats/viewers"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "subscribers on the @media plane (v1: {stream}/stats/viewers)"
+
+[resources."streams/{stream}/stats/encode_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "encode time per frame (v1: {stream}/stats/encode_ms)"
+
+[resources."streams/{stream}/stats/encode_p95_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "95th-percentile encode time per frame, from the encoder's own histogram; all-time for the tier's encoder incarnation, not an interval figure like encode_ms (v1: {stream}/stats/encode_p95_ms)"
+
+[resources."streams/{stream}/stats/encode_p99_ms"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string" }
+cardinality = 64
+doc         = "99th-percentile encode time per frame; see encode_p95_ms (v1: {stream}/stats/encode_p99_ms)"
+
+[resources."streams/{stream}/rx/{tier}/consumers"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "consumers with a live report on this tier. A LOWER BOUND on viewers, not a viewer count: a viewer that never reports is invisible here. See stats/viewers for the publisher-side count (v1: {stream}/rx/{tier}/consumers)"
+
+[resources."streams/{stream}/rx/{tier}/loss_pct_max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "worst lost/(received+lost) across live reports on this tier (v1: {stream}/rx/{tier}/loss_pct_max)"
+
+[resources."streams/{stream}/rx/{tier}/loss_pct_p50"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "median lost/(received+lost) across live reports on this tier (v1: {stream}/rx/{tier}/loss_pct_p50)"
+
+[resources."streams/{stream}/rx/{tier}/frame_age_ms_max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "max reported frame age; observed skewed latency (RFC 07 Section 1.3), negatives published unclamped, omitted entirely when no consumer measured one (v1: {stream}/rx/{tier}/frame_age_ms_max)"
+
+[resources."streams/{stream}/rx/{tier}/frame_age_ms_p50"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "median reported frame age; same clock and same omission rule as frame_age_ms_max (v1: {stream}/rx/{tier}/frame_age_ms_p50)"
+
+[resources."streams/{stream}/rx/{tier}/decode_queue_max"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "max reported decoder queue depth; omitted when no consumer has a queue to report (v1: {stream}/rx/{tier}/decode_queue_max)"
+
+[resources."streams/{stream}/rx/{tier}/decode_queue_p50"]
+kind        = "stream"
+type        = "json:telemetry.v1.Point"
+params      = { stream = "string", tier = "string" }
+cardinality = 64
+doc         = "median reported decoder queue depth; same omission rule (v1: {stream}/rx/{tier}/decode_queue_p50)"

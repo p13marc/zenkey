@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.snmp.v1.json",
+  "$comment": "SNMP documents for zs.snmp.v1 (device services) and zs.snmp_poller.v1 (the poller service). Faithful to zensight-common/src/interfaces.rs, event.rs, outlet.rs, discovery.rs and targets.rs. Fields that repeat the key's service (device) are kept and flagged as migration debt.",
+  "$defs": {
+    "InterfaceTable": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        },
+        "device": {
+          "description": "Repeats the service's device (migration debt).",
+          "type": "string"
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InterfaceEntry"
+          }
+        }
+      },
+      "required": [
+        "timestamp",
+        "device",
+        "interfaces"
+      ]
+    },
+    "InterfaceEntry": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "descr": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "admin_status": {
+          "$ref": "#/$defs/IfStatus"
+        },
+        "oper_status": {
+          "$ref": "#/$defs/IfStatus"
+        },
+        "speed_bits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mac": {
+          "type": "string"
+        },
+        "counters": {
+          "$ref": "#/$defs/InterfaceCounters"
+        },
+        "rates": {
+          "$ref": "#/$defs/InterfaceRates"
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
+    "IfStatus": {
+      "description": "serde externally tagged: a unit variant is a string, Other(i32) is {\"other\": n}.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "testing",
+            "unknown",
+            "dormant",
+            "not_present",
+            "lower_layer_down"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "other": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "other"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "InterfaceCounters": {
+      "type": "object",
+      "properties": {
+        "in_octets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_octets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_packets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_discards": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_discards": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "InterfaceRates": {
+      "type": "object",
+      "properties": {
+        "in_octets_per_sec": {
+          "type": "number"
+        },
+        "out_octets_per_sec": {
+          "type": "number"
+        },
+        "in_packets_per_sec": {
+          "type": "number"
+        },
+        "out_packets_per_sec": {
+          "type": "number"
+        },
+        "in_errors_per_sec": {
+          "type": "number"
+        },
+        "out_errors_per_sec": {
+          "type": "number"
+        },
+        "in_discards_per_sec": {
+          "type": "number"
+        },
+        "out_discards_per_sec": {
+          "type": "number"
+        }
+      }
+    },
+    "EventRecord": {
+      "description": "A translated trap or inform (zensight-common/src/event.rs). `id` repeats the key's occurrence; `source` and `protocol` repeat the service (migration debt).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Lowercase ULID, equal to the key's {occurrence}.",
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "protocol": {
+          "description": "v1 Protocol enum token (snmp).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "trap/<trap name>.",
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "alert_key": {
+          "type": "string"
+        },
+        "fields": {
+          "description": "Translated varbinds plus notification metadata.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "source",
+        "protocol",
+        "kind",
+        "severity",
+        "summary"
+      ]
+    },
+    "OutletVerb": {
+      "type": "string",
+      "enum": [
+        "cycle"
+      ]
+    },
+    "OutletStatus": {
+      "description": "outlet.rs OutletStatus. `device` and `outlet` repeat the key (migration debt).",
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "outlet": {
+          "type": "string"
+        },
+        "verb": {
+          "$ref": "#/$defs/OutletVerb"
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "refused_by": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "state_before": {
+          "type": "string"
+        },
+        "state_after": {
+          "type": "string"
+        },
+        "reboot_duration_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "string"
+        },
+        "ts_unix": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device",
+        "outlet",
+        "verb",
+        "accepted",
+        "ts_unix"
+      ]
+    },
+    "OutletCapability": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allow_outlets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verbs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutletVerb"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "allow_outlets",
+        "verbs"
+      ]
+    },
+    "DiscoveryReport": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        },
+        "scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "discovered": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveredDevice"
+          }
+        }
+      },
+      "required": [
+        "timestamp",
+        "scanned"
+      ]
+    },
+    "DiscoveredDevice": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "credentials": {
+          "description": "A credential NAME into the host's file config, never a secret.",
+          "type": "string"
+        },
+        "sys_object_id": {
+          "type": "string"
+        },
+        "sys_name": {
+          "type": "string"
+        },
+        "sys_descr": {
+          "type": "string"
+        },
+        "matched_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggested": {
+          "description": "Suggested target name, which would become the device service's name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "suggested"
+      ]
+    },
+    "SnmpTargets": {
+      "type": "object",
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SnmpTarget"
+          }
+        }
+      }
+    },
+    "SnmpTarget": {
+      "description": "deny_unknown_fields. `name` is validated against [A-Za-z0-9._-] (targets.rs:179): it becomes the device service name snmp.<slug(name)>, and dots and capitals are legal (Gap G4).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "address": {
+          "type": "string"
+        },
+        "credentials": {
+          "description": "A credential NAME; the wire never carries a community string or passphrase.",
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "oid_group": {
+          "type": "string"
+        },
+        "poll_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "address",
+        "credentials"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

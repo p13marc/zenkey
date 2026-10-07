@@ -1,0 +1,186 @@
+# The identity catalog: fusion outputs plus operator intent, a single-writer fleet singleton.
+# v1: catalog.toml (registry 1.5; service origin @catalog, implemented by zensight-correlator):
+#     8 state families, 9 procedures, 3 errors, 6 gated entries.
+# Key:      zk2/fleet/catalog/zs.catalog.v1/{state|@op}/<resource>
+# Example:  zk2/fleet/catalog/zs.catalog.v1/state/edges/e-2879d4667f9d946d
+#           zk2/fleet/catalog/zs.catalog.v1/state/acks/h-3fa9c2d41b7e/netlink/a659f813308ad1da
+# `fleet` is a logical system (shapes.md row 4). Every correlator process also runs its own host
+# service `correlator` (health.v1, alarms.v1, zs.evidence.v1 self): v1's correlator.toml.
+#
+# SINGLE WRITER UNDER redundancy.v1. ZenSight's claim protocol (zensight-common/src/service_guard.rs)
+# is the reference r3.2 names, and it maps onto core presence without new keys:
+#   - claim: every candidate's instance token zk2/fleet/catalog/@zk/instance/<instance> is its claim.
+#     v1 declared v1/@catalog/state/claim/<zid> (keyexpr.rs:724, hand-built).
+#   - incumbent: whoever holds the interface token zk2/fleet/catalog/@zk/alive/zs.catalog.v1/**. A
+#     standby exposes nothing of zs.catalog.v1, so it holds no interface token (r3.2 §3.8, §3.10).
+#     v1 used v1/@catalog/state/alive.
+#   - a live incumbent wins whatever its id, and never steps down for a lower claim.
+#   - with no incumbent, the lexically lowest live instance id wins (v1: zid). This breaks ties
+#     between simultaneous starts; it is not a standing entitlement.
+#   - an unreadable claim set means stand by, never "sole candidate" (service_guard.rs:185-200).
+#   - election and presence are two steps: the winner declares the interface token only once its
+#     queryables serve (alive => callable, r3.2 §3.10 start-up order).
+#   - a standby keeps polling the incumbent every 2 s (STANDBY_POLL) and campaigns again when the
+#     interface token drops.
+# Split brain after a partition heals means two instances exposing the same exclusive resources.
+# That is a finding diagnosed from descriptors (§3.8); there is no fencing epoch here (v1 had none).
+# Draft 0 attaches annotations to resources only, so nothing below can say "the whole interface is
+# single-writer". `uses` lists redundancy.v1 and the descriptor's `profiles` carries it (Gap G11).
+#
+# Population budgets (cardinality) are v1's. pdns (100k) and edges (50k) now sit on a plain system,
+# so `zk2/*/*/*/state/**` reaches them; v1's verbatim @catalog origin kept them off `v1/*/state/**`
+# (entity.rs:44-48, "D4") (Gap G7).
+# Writes are gated by config:allow_operator_assertions. The actor is the O7 call-metadata `actor`
+# (v1: ?actor=, zensight/src/app.rs:4449). It is claimed, not authenticated.
+
+[interface]
+name    = "zs.catalog"
+major   = 1
+minor   = 0
+summary = "Fused host identity, topology, incidents and operator intent for the whole fleet"
+uses    = ["redundancy.v1", "freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zs.catalog.v1.json"]
+
+# --- state: the catalog's conclusions ---
+
+[resources."entities/{entity_id}"]
+kind        = "state"
+type        = "json:HostEntity"
+params      = { entity_id = "string" }
+cardinality = 10000
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "One merged host entity, re-emitted about every 60 s, tombstoned on retire or merge."
+
+[resources."aliases/{old_id}"]
+kind        = "state"
+type        = "json:AliasRecord"
+params      = { old_id = "string" }
+cardinality = 1000
+annotations = { "freshness.ttl_s" = 31536000 }
+doc         = "Old entity id -> current entity id after a merge or upgrade (RFC 06 §5.4). Kept a year, so a consumer holding a stale id can re-point after a long absence."
+
+[resources."pdns/{ip}"]
+kind        = "state"
+type        = "json:PdnsRecord"
+params      = { ip = "string" }
+cardinality = 100000
+annotations = { "freshness.ttl_s" = 86400 }
+doc         = "Accumulated IP <-> name record. History is a storage capture (configs/router-pdns-influxdb-storage.json5). The key uses the injective zk2 slug of the IP, not v1's ip_slug."
+
+[resources."edges/{edge_id}"]
+kind        = "state"
+type        = "json:Edge"
+params      = { edge_id = "string" }
+cardinality = 50000
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "A resolved relationship between two endpoints (#915), concluded from zs.evidence.v1 relation claims and tombstoned when the last observer stops claiming it."
+
+[resources."incidents/{incident_id}"]
+kind        = "state"
+type        = "json:Incident"
+params      = { incident_id = "string" }
+cardinality = 10000
+annotations = { "freshness.ttl_s" = 900 }
+doc         = "Firing alarms grouped by entity (#922). Tombstoned when no member is firing. The timeline is history (the historian's), deliberately not here."
+
+# --- state: operator intent (v1 ttl_s = 0: never ages out) ---
+
+[resources."assertions/{id}"]
+kind        = "state"
+type        = "json:OperatorAssertion"
+params      = { id = "string" }
+cardinality = 1000
+annotations = { "freshness.ttl_s" = 0 }
+doc         = "An operator's identity assertion (link / unlink, RFC 06 §5.4): operator evidence, strong, never ages out. freshness.ttl_s = 0 means never, a convention freshness.v1 still has to state (Gap G18)."
+
+[resources."acks/{system}/{service}/{alert_key}"]
+kind        = "state"
+type        = "json:AlertAck"
+params      = { system = "string", service = "string", alert_key = "string" }
+cardinality = 10000
+annotations = { "freshness.ttl_s" = 0 }
+doc         = """
+An acknowledgement of one firing alarm, keyed by the alarm's own coordinates. v1 keyed it by one
+dot-packed chunk ack/<origin>.<producer>.<alert_key> because a key cannot nest in a key. A
+three-parameter template needs no packing and survives dotted service names (Gap G4).
+Tombstoned on resolve and on a re-fire."""
+
+[resources."silences/{id}"]
+kind        = "state"
+type        = "json:Silence"
+params      = { id = "string" }
+cardinality = 1000
+annotations = { "freshness.ttl_s" = 0 }
+doc         = "A suppression window (matchers, starts_at, ends_at, author). It holds across re-fires, which is what a maintenance window means. Tombstoned at ends_at or by unsilence."
+
+# --- operations ---
+
+[resources.link]
+kind       = "operation"
+request    = "json:LinkRequest"
+response   = "json:OperatorAssertion"
+error      = "json:CatalogError"
+idempotent = true
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Assert that two systems are one host (a reinstall minted a new host id)."
+
+[resources.unlink]
+kind       = "operation"
+request    = "json:LinkRequest"
+response   = "json:OperatorAssertion"
+error      = "json:CatalogError"
+idempotent = true
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Assert that two systems are NOT one host, retiring any link; a standing veto on the merge rules."
+
+[resources.ack]
+kind       = "operation"
+request    = "json:AckRequest"
+response   = "json:AlertAck"
+error      = "json:CatalogError"
+idempotent = true
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Acknowledge a firing alarm. Refused with app error not_firing when nothing fires for that ref: an ack for a problem nobody has is a suppression waiting to happen."
+
+[resources.unack]
+kind       = "operation"
+request    = "json:AckRequest"
+response   = "json:AlertAck"
+error      = "json:CatalogError"
+idempotent = true
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Retire an acknowledgement. Unacking what is not acked is a no-op, not an error."
+
+[resources.silence]
+kind       = "operation"
+request    = "json:SilenceRequest"
+response   = "json:Silence"
+error      = "json:CatalogError"
+idempotent = false
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Open a suppression window. Validated first: at least one matcher, ends_at after starts_at, every regex compiles."
+
+[resources.unsilence]
+kind       = "operation"
+request    = "json:IdRequest"
+response   = "json:Silence"
+error      = "json:CatalogError"
+idempotent = true
+optional   = true
+gate       = "config:allow_operator_assertions"
+doc        = "Close a suppression window early."
+
+[resources.names]
+kind       = "operation"
+request    = "json:NamesRequest"
+response   = "json:NameVal"
+replies    = "many"
+idempotent = true
+doc        = "On-demand name resolution for one IP, one provenance-tagged name per reply."
