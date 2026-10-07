@@ -34,7 +34,7 @@ jobs:
       # The gutter gate (#195): a multi-line string that lost its trailing `\`
       # keeps the source indentation *in the string*, so the user reads a
       # sentence with a hole in it. Seven shipped before anything looked.
-      - run: python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey/src zenkey-explorer-config/src zenwatch/src
+      - run: python3 scripts/check-prose.py zenctl/src zenkey-fleet/src zengui/src zenkey-explorer-config/src zenwatch/src
       # One report, three renderings, and exactly one place that decides which
       # (#198). Cheap, and it runs before the compiler like the gutter gate.
       - run: ./scripts/check-render-seam.sh
@@ -110,7 +110,6 @@ jobs:
           cache-targets: false
       - run: cargo build --workspace --all-targets --locked
       - run: cargo test --workspace --locked
-      - run: cargo test -p zenkey --all-features --locked
       # Benches are a gate, not decoration: the baseline in
       # docs/bench-baseline.md is only worth reading if the code behind it
       # still compiles. Building them is cheap here (warm target dir) and
@@ -140,13 +139,6 @@ jobs:
       - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features validate-json --locked
       - run: cargo bench -p zenkey-fleet --no-default-features --no-run --locked
-      # zenkey-build runs in consumers' build scripts, and its manifest
-      # promises the dependency graph stays light — so the exporters (#208)
-      # and the TOML → KDL migrator (#374) are behind features, and every
-      # side of them has to build.
-      - run: cargo check -p zenkey-build --locked
-      - run: cargo test -p zenkey-build --features export --locked
-      - run: cargo test -p zenkey-build --features migrate --locked
 
   msrv:
     runs-on: ubuntu-24.04

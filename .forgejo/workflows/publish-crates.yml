@@ -55,8 +55,12 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           for crate in zenkey zenkey-build zenkey-fleet; do
+            # The strangler layout (#615): on `main` the v1 libraries come
+            # from crates.io and are not in the tree, so a crate this tree
+            # does not build is skipped. On `v1`, all three are present.
             version=$(cargo metadata --no-deps --format-version 1 \
-              | python3 -c "import sys,json;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'))")
+              | python3 -c "import sys,json;print(next((p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'), ''))")
+            if [ -z "$version" ]; then echo "$crate is not in this tree — skipping"; continue; fi
             code=$(curl -sS -o /dev/null -w '%{http_code}' \
               -A 'zenkey-release-lane (https://git.marcpardo.eu/marcpardo/zenkey)' \
               "https://crates.io/api/v1/crates/$crate/$version")

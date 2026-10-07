@@ -36,4 +36,4 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 # `HostId::parse` for the explicit pairs, and nothing that needs the zenoh
 # stack — same discipline as the line above: no default features.
-zenkey = { path = "../zenkey", default-features = false }
+zenkey = { version = "=0.11.1", default-features = false }
