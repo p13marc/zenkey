@@ -47,6 +47,16 @@ everywhere else:
 cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --tag 0.12.0 --locked
 ```
 
+**The v1 line.** This zenctl reads the v1 convention, which is frozen at RFC
+v1.50 and maintained on the `v1` branch as 0.14.x patch releases. To build
+the newest v1 patches from source, track the branch rather than a tag:
+
+```bash
+cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --branch v1 --locked
+```
+
+`main` is the zk2 line (`docs/zk2/`).
+
 `--locked` builds against the release's own `Cargo.lock`, the dependency set
 that release was tested with; leave it out and cargo resolves fresh versions.
 The toolchain is **Rust 1.98** (the workspace `rust-version`, pinned by
