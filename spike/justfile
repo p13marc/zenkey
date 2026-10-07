@@ -54,6 +54,16 @@ spike-s4: build
 spike-s6: build
     {{spike}} s6 --results results/s6
 
+# S5, state correctness (#601): producer + storage under staleness, clocks,
+# deletes, the storage GC, zenoh#2649, scale to 100k keys, events storage.
+spike-s5: build
+    {{spike}} s5 --results results/s5
+
+# S12, store-and-forward (#595): offline changes, deletes, restarts, clock
+# skew; storage on the ground and on the vehicle.
+spike-s12: build
+    {{spike}} s12 --results results/s12
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean

@@ -14,7 +14,7 @@ license = "MIT"
 [workspace.dependencies]
 # Pinned to the latest release (checked 2026-10-07). Every number in the
 # report is against this version.
-zenoh = { version = "=1.10.1", features = ["unstable", "shared-memory"] }
+zenoh = { version = "=1.10.1", features = ["unstable", "shared-memory", "internal", "plugins"] }
 zenoh-ext = { version = "=1.10.1", features = ["unstable"] }
 zenkey-model = { path = "../zenkey-model" }
 zk2rt = { path = "rt" }
@@ -33,3 +33,8 @@ debug = false
 
 [profile.dev]
 debug = false
+
+# S5 (#601): a locally patched storage manager, to confirm the root cause of
+# the resurrections. Comment out to run the stock 1.10.1.
+# [patch.crates-io]
+# zenoh-plugin-storage-manager = { path = "patches/zenoh-plugin-storage-manager-1.10.1" }

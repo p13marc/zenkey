@@ -21,3 +21,4 @@ bytes = "1"
 flatbuffers = "25"
 ciborium.workspace = true
 toml = "1"
+zenoh-plugin-storage-manager = { version = "=1.10.1", default-features = false }

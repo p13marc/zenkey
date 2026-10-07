@@ -30,10 +30,13 @@ mod procs;
 mod s1;
 mod s10;
 mod s11;
+mod s12;
 mod s13;
 mod s4;
+mod s5;
 mod s6;
 mod s9;
+mod storage_router;
 
 use procs::{Proc, spawn};
 
@@ -199,6 +202,35 @@ enum Cmd {
         #[arg(long)]
         alive_token: Option<String>,
     },
+    /// S5, state correctness with producer and storage (#601).
+    S5 {
+        #[arg(long, default_value = "results/s5")]
+        results: PathBuf,
+    },
+    /// S12, store-and-forward commanding (#595).
+    S12 {
+        #[arg(long, default_value = "results/s12")]
+        results: PathBuf,
+        /// Which storage manager build this binary links (stock or patched).
+        #[arg(long, default_value = "stock")]
+        storage: String,
+    },
+    /// A router with the storage manager linked in, memory storages.
+    StorageRouter {
+        #[arg(long)]
+        listen: Vec<String>,
+        #[arg(long)]
+        connect: Vec<String>,
+        /// `name=keyexpr`, repeatable.
+        #[arg(long)]
+        storage: Vec<String>,
+        #[arg(long, default_value_t = 30)]
+        gc_period: u64,
+        #[arg(long, default_value_t = 86400)]
+        gc_lifespan: u64,
+        #[arg(long)]
+        replication: bool,
+    },
     /// S9, the typed layer's cost over raw zenoh (#592).
     S9 {
         #[arg(long, default_value = "results/s9")]
@@ -309,6 +341,11 @@ async fn main() -> Result<()> {
         }
         Cmd::S6Server { connect, key, mode, fanout_forbidden, replies, complete, instance_token, alive_token } => {
             s6::server(connect, key, mode, fanout_forbidden, replies, complete, instance_token, alive_token).await
+        }
+        Cmd::S5 { results } => s5::run(&results).await.map(|_| ()),
+        Cmd::S12 { results, storage } => s12::run(&results, &storage).await.map(|_| ()),
+        Cmd::StorageRouter { listen, connect, storage, gc_period, gc_lifespan, replication } => {
+            storage_router::run(listen, connect, storage, gc_period, gc_lifespan, replication).await
         }
         Cmd::S1 { results, examples } => {
             if s1::run(&results, &examples).await? {

@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod metrics;
 pub mod mock;
+pub mod proxy;
 pub mod service;
 
 /// The zenoh release every number is measured against (the workspace pin).
