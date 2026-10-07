@@ -1,0 +1,2 @@
+unix_s,zenoh,routers,services,instance_tokens,alive_tokens,presence_ms,descriptor_bytes,contract,contract_bytes,contract_attempts,contract_fetch_ms,state_key,state_get_ms,state_has_timestamp,state_wildcard_replies,op_key,call_ms,client_allocs,client_alloc_bytes,router_a_rss_kib,router_b_rss_kib,services_rss_kib,ok
+1791408734,1.10.1,2,10,10,10,0.3,306,camera.v1 sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98,1761,1,0.60,zk2/smoke/svc-0/camera.v1/state/info,0.52,true,24,zk2/smoke/svc-2/geo.v1/@op/elevation,0.57,2799,640567,13756,14744,18744,true

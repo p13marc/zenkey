@@ -20,6 +20,7 @@ observability shape.
 | [`r1-review.md`](r1-review.md) | The brief author's review of r1. Every ruling is kept; the wording is condensed. |
 | [`r2.md`](r2.md) | **r2**: r1 revised by that review. Adds the `zk2/` grammar major, exclusive-by-default ownership, normative state timestamps, hash-verified contract retrieval, behavioural profiles. |
 | [`architecture.md`](architecture.md) | **The design of record: r3.3.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). r3.3 folds in the gaps found by mapping their contracts (D1–D25). |
+| [`spike-report.md`](spike-report.md) | **The spike report** (in progress): the environment, the decisions table that #605 settles, and one section per spike, filled by its issue. Raw data is in [`spike-results/`](spike-results/), copied from branch `zk2-spike`. |
 
 ## Rules for this directory
 
