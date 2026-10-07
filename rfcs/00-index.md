@@ -6,6 +6,10 @@ control, and bandwidth policy all fall out of the grammar instead of being
 re-implemented per consumer. Written application-neutrally; **ZenSight** is
 the reference application and supplies the worked examples.
 
+> **Frozen at v1.50 (2026-10-07).** This convention now takes errata only.
+> It is maintained on the `v1` branch as 0.14.x patch releases. New work is
+> zk2, the redesign on `main` (`docs/zk2/`).
+
 **Status: v1.50** (2026-10-05; ratified at v1.18, 2026-08-15; v1.0
 2026-07-12; adopted for ZenSight, migration tracked in
 [#453](https://github.com/p13marc/zensight/issues/453) with the
