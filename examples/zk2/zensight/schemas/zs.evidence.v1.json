@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.evidence.v1.json",
+  "$comment": "Identity evidence (RFC 06 §4), faithful to zensight-common/src/evidence.rs and relation.rs. `sensor` and `source` repeat the publishing service and are kept for now as migration debt (README); `host_id` is the hostid.v1 system name of the host claimed.",
+  "$defs": {
+    "HostEvidence": {
+      "type": "object",
+      "properties": {
+        "sensor": {
+          "description": "Publishing producer. Repeats the key's service (migration debt).",
+          "type": "string"
+        },
+        "source": {
+          "description": "The host or device this claim is about, as the sensor names it.",
+          "type": "string"
+        },
+        "observer": {
+          "description": "Set when the claim is about someone else (observer role). Absent = a self-report; only self-reports bind a system to an entity.",
+          "type": "string"
+        },
+        "host_id": {
+          "type": "string"
+        },
+        "boot_id": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "fqdn": {
+          "type": "string"
+        },
+        "ips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "macs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "vendor": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "container_id": {
+          "type": "string"
+        },
+        "cloud": {
+          "$ref": "#/$defs/CloudFacts"
+        },
+        "last_updated": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sensor",
+        "source",
+        "last_updated"
+      ]
+    },
+    "CloudFacts": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "account": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "instance_id"
+      ]
+    },
+    "NameObservation": {
+      "type": "object",
+      "properties": {
+        "observer": {
+          "type": "string"
+        },
+        "ip": {
+          "description": "The real address; the key carries its slug.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "provenance": {
+          "description": "dns_a, dns_ptr, sni, mdns, ...",
+          "type": "string"
+        },
+        "last_seen": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "observer",
+        "ip",
+        "name",
+        "provenance",
+        "last_seen"
+      ]
+    },
+    "RelationKind": {
+      "description": "Closed vocabulary (RFC 11 §3.3). Only the containment kinds propagate failure; l2_adjacent never does.",
+      "type": "string",
+      "enum": [
+        "hosts",
+        "runs",
+        "gateway_of",
+        "probes",
+        "l2_adjacent"
+      ]
+    },
+    "EndpointClaim": {
+      "type": "object",
+      "properties": {
+        "host_id": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        },
+        "ips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "macs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "RelationshipEvidence": {
+      "type": "object",
+      "properties": {
+        "sensor": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RelationKind"
+        },
+        "from": {
+          "$ref": "#/$defs/EndpointClaim"
+        },
+        "to": {
+          "$ref": "#/$defs/EndpointClaim"
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "last_updated": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sensor",
+        "source",
+        "kind",
+        "from",
+        "to",
+        "last_updated"
+      ]
+    }
+  }
+}

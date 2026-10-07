@@ -1,0 +1,65 @@
+# Operator-authored threshold rules, an interface every ZenSight producer implements (#928, #931).
+# v1: @rpc/<producer>/thresholds (read) + thresholds/set (write, fanout allowed) in 15 registries,
+#     state/<producer>/applied/{topic} in 15, and @desired/state/{host}/<producer>/thresholds.
+# Key:        zk2/<system>/<service>/zs.thresholds.v1/{state|@op}/<resource>
+# Example:    zk2/h-3fa9c2d41b7e/snmp.router01/zs.thresholds.v1/@op/set
+# Fleet push: zk2/*/*/zs.thresholds.v1/@op/set   (fan-out allowed, as v1 declared it: G2 "explicit,
+#             deliberate" operator push)
+#
+# Three writers, as in v1: the file baseline, the desired author (bound below), and `set`.
+# `applied/{topic}` says which one won. The rule is last writer wins by arrival.
+
+[interface]
+name    = "zs.thresholds"
+major   = 1
+minor   = 0
+summary = "The threshold rules a service evaluates against its own telemetry, and what is in force"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zs.common.json"]
+
+[resources.thresholds]
+kind        = "state"
+type        = "json:ThresholdsConfig"
+reliability = "reliable"
+congestion  = "block"
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+The rule set currently evaluated (v1: the `thresholds` read procedure). A read becomes state,
+so reading needs no call grant (the tcgui pilot's split)."""
+
+[resources.set]
+kind       = "operation"
+request    = "json:ThresholdsConfig"
+response   = "json:Ack"
+idempotent = true
+fanout     = "allowed"
+doc        = """
+Replace the rule set wholesale (there is deliberately no `add`). Validated before apply (metric
+globs, operators, durations, unique names). A bad set is refused with invalid_request and the
+previous set keeps running. Idempotent because the set sent is the set that runs. v1 did not
+declare it idempotent, but the semantics were always replace-whole."""
+
+[resources."applied/{topic}"]
+kind        = "state"
+type        = "json:AppliedConfig"
+params      = { topic = "string" }
+cardinality = 8
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+The effective-config marker for EVERY reconcilable topic of this service, not only thresholds
+(snmp: targets; systemd, netlink, hostspec: expectations; logs: rules). It is published at
+startup and on every change, so drift between desired and effective is visible before any
+desired document exists. This is desired.v1's 'target reports what it observed', with
+desired_timestamp as the observed revision."""
+
+# The fleet author's document for this service. Bound at deployment to fleet/desired, with {host}
+# and {service} bound to the implementer's own system and service (R2; Gap G5: `self` is
+# ambiguous when a template carries both). Optional: the per-sensor kill switch
+# (desired.enabled = false) leaves it unbound. (Draft 0 has no `doc` on a requirement.)
+[requires.desired]
+interface   = "zs.desired.v1"
+resources   = ["desired/{host}/{service}/thresholds"]
+cardinality = "one"
+optional    = true

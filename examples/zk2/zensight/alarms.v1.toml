@@ -1,0 +1,59 @@
+# The alarms.v1 profile's standard contract (r3.2 §3.12, §4.9), as ZenSight implements it.
+# Every ZenSight service implements it (v1: state/<producer>/alert/{alert_key}, 22 registries).
+# Key:       zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>
+# Example:   zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da
+# Fleet-wide: zk2/*/*/alarms.v1/state/alarms/*   (one major per subscription, r3.2 §3.1)
+#
+# THE KEY RECIPE (byte-exact; RFC 11 §3.1 as ZenSight ships it, zensight-common/src/alert.rs:198-305,
+# computed by zenkey::alert::alert_key):
+#
+#   input     = rule ++ ( "\n" ++ name ++ "=" ++ value )*   one term per discriminating label,
+#                                                          ascending by name, byte (memcmp) order
+#   alert_key = lowercase_hex(fnv1a_64(utf8(input)))       16 chars, all 64 bits
+#
+#   FNV-1a 64: offset basis 0xcbf29ce484222325, prime 0x100000001b3.
+#   Host-scoped labels are removed BEFORE sorting: the label named `host`, and every label whose
+#   name starts with `host.` (ZenSight's declared vocabulary, alert.rs:285-305; see Gap G3 for why
+#   this contract has to fix the set rather than let each implementer declare it).
+#   The publisher's system and service never enter the input: they are already in the key, which is
+#   what makes the same alarm on two hosts the same resource under two systems.
+#   Framing: label names contain neither "\n" nor "="; label values and the rule contain no "\n".
+#   ZenSight does not refuse an input that violates this: it substitutes "_" for each offending byte
+#   (an empty rule becomes "unnamed") and hashes that, so a firing and its resolve still agree.
+#
+#   Test vector (MUST reproduce): rule `link_down`, labels {peer: r2, port: eth0, host: h-3fa9c2d41b7e}
+#   input = "link_down\npeer=r2\nport=eth0"
+#         (27 bytes: 6c696e6b5f646f776e 0a 706565723d7232 0a 706f72743d65746830)
+#   alert_key = a659f813308ad1da
+#
+# Lifecycle (S1-S3): put firing -> put resolved -> delete (tombstone). A re-raise after a resolve is
+# a new transition with a later timestamp.
+
+[interface]
+name    = "alarms"
+major   = 1
+minor   = 0
+summary = "The active alarms of one service, one state resource per alarm"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/alarms.v1.json"]
+
+[resources."alarms/{alert_key}"]
+kind        = "state"
+type        = "json:alarms.v1.Alarm"
+params      = { alert_key = "string" }
+cardinality = 256
+reliability = "reliable"
+congestion  = "block"
+priority    = "interactive_high"
+express     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+One alarm, keyed by the recipe above. QoS is v1's `alert` profile (reliable, block,
+interactive-high, express), the one family that takes express (RFC 04 §3).
+Cardinality is the widest v1 per-producer bound (bmc 256; correlator 32, sysinfo 64,
+snmp 64, gnmi 128). One contract has to carry one number for every implementer
+(Gap G2). The value is 16 lowercase hex characters, which the slug rule leaves as they
+are. freshness.ttl_s keeps v1's 900 s staleness bound. In zk2, an owner that is
+absent (S6) already retires the alarm on the consumer side, without waiting for the TTL."""

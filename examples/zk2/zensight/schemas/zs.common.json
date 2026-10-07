@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zs.common.json",
+  "$comment": "ZenSight types shared by several contracts: zs.thresholds.v1 and zs.desired.v1 must agree on ThresholdsConfig, so both list this file unchanged (Gap G12). Faithful to zensight-common/src/threshold.rs, comparison.rs, alert.rs (AlertSeverity) and desired.rs (AppliedConfig).",
+  "$defs": {
+    "Empty": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "Ack": {
+      "description": "A write landed. v1 declared Ack without a schema ('ad-hoc JSON on the wire', zensight-common/src/schema.rs:225). In zk2 success is a value reply and failure a reply_err (O3), so nothing but an optional note remains.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "Severity": {
+      "description": "AlertSeverity; serde default warning.",
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critical"
+      ]
+    },
+    "ComparisonOp": {
+      "description": "Serialized in PascalCase (no serde rename); default GreaterThan.",
+      "type": "string",
+      "enum": [
+        "GreaterThan",
+        "GreaterOrEqual",
+        "LessThan",
+        "LessOrEqual",
+        "Equal",
+        "NotEqual"
+      ]
+    },
+    "ThresholdsConfig": {
+      "description": "The whole rule set one service evaluates, set wholesale (#928, #931). Every field is serde-defaulted.",
+      "type": "object",
+      "properties": {
+        "default_for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default_recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ThresholdRule"
+          }
+        }
+      }
+    },
+    "ThresholdRule": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Stable identity; becomes the alarm rule `threshold:<name>`.",
+          "type": "string"
+        },
+        "metric": {
+          "description": "Glob over the resource path the service publishes (`if/*/in_errors.rate`). Under zk2 the paths change (the device leaves for the service name, rest families move under metrics/), so v1 rule sets need rewriting (migration debt).",
+          "type": "string"
+        },
+        "labels": {
+          "description": "Label globs, all of which must match. v1 proxies matched `source` here; a device service no longer needs to.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "op": {
+          "$ref": "#/$defs/ComparisonOp"
+        },
+        "value": {
+          "type": "number"
+        },
+        "clear": {
+          "description": "Value hysteresis, on the quiet side of value.",
+          "type": "number"
+        },
+        "for_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recover_after_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "metric",
+        "value"
+      ]
+    },
+    "AppliedSource": {
+      "type": "string",
+      "enum": [
+        "file",
+        "desired",
+        "rpc"
+      ]
+    },
+    "RejectedDesired": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "description": "The rejected sample's HLC timestamp, when it carried one.",
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "error"
+      ]
+    },
+    "AppliedConfig": {
+      "description": "What is actually in force for one reconcilable topic, and why (desired.v1's observed revision: desired_timestamp).",
+      "type": "object",
+      "properties": {
+        "topic": {
+          "description": "Repeats the key's {topic} (migration debt; tcgui gap 1).",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/AppliedSource"
+        },
+        "applied_at": {
+          "type": "integer"
+        },
+        "desired_timestamp": {
+          "description": "HLC timestamp of the applied desired sample (source = desired only).",
+          "type": "string"
+        },
+        "effective_json": {
+          "description": "The document in force, JSON-encoded as a string. Its real type is the topic's.",
+          "type": "string"
+        },
+        "last_rejected": {
+          "$ref": "#/$defs/RejectedDesired"
+        }
+      },
+      "required": [
+        "topic",
+        "source",
+        "applied_at",
+        "effective_json"
+      ]
+    }
+  }
+}

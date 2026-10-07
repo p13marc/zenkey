@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "views.v1.json",
+  "$comment": "The views.v1 profile's presentation document, faithful to ZenSight's views.toml v1 (zensight-common/src/views.rs) with ONE change: ViewHeader.producer becomes `interface`, and a panel may name another `interface`. In v1 a scope was a subject pattern of one producer's slice. In zk2 a service implements several interfaces, so a scope is a template prefix of a named interface major. Closed, structural, no expressions: anything conditional is a Rhai slot the GUI evaluates.",
+  "$defs": {
+    "ViewSet": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "$ref": "#/$defs/ViewHeader"
+        },
+        "panel": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Panel"
+          }
+        }
+      },
+      "required": [
+        "view"
+      ],
+      "additionalProperties": false
+    },
+    "ViewHeader": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "description": "Of this format: \"1\".",
+          "type": "string"
+        },
+        "interface": {
+          "description": "The interface major whose templates the panels scope by default (was `producer`), e.g. zs.bmc.v1.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "group_by": {
+          "description": "One card per binding of this template variable, or the literal `service` for one card per device service (v1's `{device}` / `{chassis}` under device-as-service).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "interface"
+      ],
+      "additionalProperties": false
+    },
+    "Slot": {
+      "description": "A literal ($var binds a template variable) or a Rhai script.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "rhai": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "rhai"
+          ]
+        }
+      ]
+    },
+    "Limit": {
+      "description": "A sibling field name (the publisher's own limit), or a literal that admits whose it is.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "const": {
+              "type": "number"
+            },
+            "declared_by": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "const",
+            "declared_by"
+          ]
+        }
+      ]
+    },
+    "Grade": {
+      "type": "object",
+      "properties": {
+        "reading": {
+          "type": "string"
+        },
+        "warning": {
+          "$ref": "#/$defs/Limit"
+        },
+        "critical": {
+          "$ref": "#/$defs/Limit"
+        },
+        "absent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reading"
+      ],
+      "additionalProperties": false
+    },
+    "Sort": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "rhai": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "rhai"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "by": {
+              "type": "string"
+            },
+            "dir": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          "required": [
+            "by"
+          ]
+        }
+      ]
+    },
+    "Stale": {
+      "type": "object",
+      "properties": {
+        "after_s": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "after_s"
+      ],
+      "additionalProperties": false
+    },
+    "Link": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "view": {
+          "type": "string"
+        },
+        "filter": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "field",
+        "view"
+      ],
+      "additionalProperties": false
+    },
+    "Action": {
+      "description": "A write operation on a row: an operation template of the panel's interface (was a v1 procedure path).",
+      "type": "object",
+      "properties": {
+        "procedure": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "procedure",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "Panel": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "table",
+            "facts",
+            "document",
+            "chart",
+            "reply",
+            "custom"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "interface": {
+          "description": "zk2 addition: the interface major this panel scopes, when not the header's.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "A template prefix up to its last variable, possibly extended by literal chunks selecting a field subtree (`thermal/{sensor}`). Sibling resources under it form one row family.",
+          "type": "string"
+        },
+        "join": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hide": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "$ref": "#/$defs/Slot"
+        },
+        "show": {
+          "$ref": "#/$defs/Slot"
+        },
+        "note": {
+          "$ref": "#/$defs/Slot"
+        },
+        "aggregate": {
+          "$ref": "#/$defs/Slot"
+        },
+        "sort": {
+          "$ref": "#/$defs/Sort"
+        },
+        "top_n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sparkline": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grade": {
+          "$ref": "#/$defs/Grade"
+        },
+        "stale": {
+          "$ref": "#/$defs/Stale"
+        },
+        "format": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Slot"
+          }
+        },
+        "schema": {
+          "description": "document: the type name, default the resource's.",
+          "type": "string"
+        },
+        "procedure": {
+          "description": "reply: the read operation whose response renders the panel.",
+          "type": "string"
+        },
+        "page": {
+          "type": "boolean"
+        },
+        "link": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Link"
+          }
+        },
+        "action": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "scope"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

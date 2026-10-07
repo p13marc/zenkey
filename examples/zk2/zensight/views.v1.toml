@@ -1,0 +1,29 @@
+# The views.v1 profile's standard contract (r3.2 §3.12): how a generic UI should show a service.
+# v1: @rpc/<producer>/views (read, reply ViewSet) in 8 registries (bmc, container, gnmi, modbus,
+#     netflow, probe, pve, snmp), each document bundled in zensight-common/registry/views/<p>.toml.
+# Key:        zk2/<system>/<service>/views.v1/state/views
+# Fleet-wide: zk2/*/*/views.v1/state/views   (a state GET replaces the GUI's
+#             `v1/*/@rpc/*/views` querier sweep, zensight/src/app.rs:8455-8463)
+#
+# Served as state by every instance, because the format has nowhere else to put it. A view
+# belongs to an INTERFACE, not an instance: it is static per build and identical on every host.
+# The natural home is the contract bundle, as a document excluded from the fingerprint (Gap G20).
+
+[interface]
+name    = "views"
+major   = 1
+minor   = 0
+summary = "Presentation documents for generic UIs"
+
+[schemas]
+jsonschema = ["schemas/views.v1.json"]
+
+[resources.views]
+kind = "state"
+type = "json:ViewSet"
+doc  = """
+One document per service. Its panels scope template prefixes of the service's interfaces
+(the header's interface by default): `zs.pve.v1` + `guest/{vmid}` joined with
+`backup/{vmid}`. Under device-as-service the device variable leaves the scope:
+bmc's `{chassis}/thermal/{sensor}` becomes `thermal/{sensor}` on service bmc.<chassis>, and
+`group_by = "{chassis}"` becomes `group_by = "service"`."""
