@@ -115,6 +115,9 @@
     "ok-minimal": {
       "codes": []
     },
+    "ok-tokenless": {
+      "codes": []
+    },
     "ok-unknown-revision": {
       "codes": []
     }

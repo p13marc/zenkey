@@ -1,8 +1,7 @@
 # zk2 core specification
 
-**Version 0.1, draft of 2026-10-08.** Status: for acceptance (#606). Until
-it is accepted, it may change without an amendment record. After that, every
-change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
+**Version 0.1, accepted on 2026-10-08** (#606). Every change from here goes
+through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -392,7 +391,7 @@ each document, checked against the fixture contract. `[F: descriptors/]`
   "service": "vehicle-01/navigation",
   "instance": "3fa9c2d41b7e0012",
   "interfaces": [
-    {"iface": "nav.v2", "contract": "sha256:…", "minor": 1,
+    {"iface": "nav.v2", "contract": "sha256:…", "minor": 1, "token": true,
      "unavailable": [{"resource": "state/covariance", "cause": "capability", "reason": "no IMU"}],
      "cardinality": {"state/tracks/{track}": 50}}
   ],
@@ -421,6 +420,8 @@ each document, checked against the fixture contract. `[F: descriptors/]`
   A listed resource that is not an optional resource of the contract is an
   error (D005). One that a missing capability already implies is a warning
   (D006). `[F: descriptors/d005-*, d006-implied]`
+- **`token`** is `false` for an interface in the owner's tokenless set
+  (§8.1), and `true` otherwise, which is the default.
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
   `<kind token>/<template>`. It MUST NOT raise it. `[F: descriptors/d007-*]`
 - **`requires`** lists each role with its bindings and parameter bindings
@@ -745,9 +746,22 @@ Liveliness tokens carry no payload; everything is in the key.
   `[Sc: presence.md §1]`
 - **Interface token,** at `…/@zk/alive/<iface>/<instance>/<fp16>`. An
   owner MUST hold one per interface **of which it currently exposes at least
-  one resource**, and none otherwise (open item U22, §13). "Who implements `nav.v2`" is
-  the liveliness selector `zk2/*/*/@zk/alive/nav.v2/**`.
-  `[Sc: presence.md §1]`
+  one resource**, and none otherwise, except for its **tokenless set**.
+  "Who implements `nav.v2`" is the liveliness selector
+  `zk2/*/*/@zk/alive/nav.v2/**`. `[Sc: presence.md §1]`
+- **The tokenless set** (U22, decided at acceptance).
+  - A deployment MAY configure an owner with interfaces for which it holds
+    no interface token. These SHOULD be the interfaces every service of the
+    deployment implements: `health.v1` and the rest of a framework set.
+  - The owner's descriptor marks each such interface `"token": false`
+    (§3.3).
+  - Their providers are found through instance tokens and descriptors, not
+    through a token selector. The split-brain check (§6) does not cover
+    them.
+  - This is how a deployment above the presence budget (§8.3) cuts its
+    multiplier. ZenSight's shape falls from about 42k tokens to about 12k.
+
+  `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]`
 - **Member token,** at `…/@zk/member/<iface>/<member>/<epoch>`, for the
   template that declares `epoch`. An interface has at most one such
   template, because the key carries no template
@@ -1353,14 +1367,13 @@ above, with these relaxations and additions:
 
 ## 13. Open items
 
-These are the maintainer's to decide, at the acceptance of this version or
-later. Each changes a rule above; until it is decided, the rule stands as
-written.
+The items left open by the design, with their state at acceptance. A
+decision that changes a rule lands as an amendment.
 
 | # | Question | Lean | Rule affected |
 |---|---|---|---|
-| U22 | A deployment above the presence budget (§8.3): how does it cut the per-service token multiplier (1 instance token + one per interface)? | An interface every service implements (`health.v1`, the framework set) declares no interface token, and its providers are found through instance tokens and descriptors. The cost is that "who implements X" for those interfaces needs descriptors, and the split-brain check (§6) narrows. | §8.1 interface tokens |
-| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | Measure zenoh 1.10.1's `gateway.south` regions, which place a far router south by zid, interface or region name, so that declarations reach it only on interest | §8.5 attachment |
+| U22 | Cutting the per-service token multiplier above the presence budget | **Decided at acceptance (2026-10-08):** a deployment-configured tokenless set, recommended for the framework interfaces every service implements; the descriptor records it (§8.1, §3.3) | §8.1 |
+| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Decided at acceptance:** measure zenoh 1.10.1's `gateway.south` regions, which place a far router south by zid, interface or region name, before `link.v1` (#613). The amendment that follows the measurement settles the rule. | §8.5 attachment |
 
 ---
 

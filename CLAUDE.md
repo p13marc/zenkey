@@ -248,7 +248,11 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   - O1 holds only while one instance serves; `redundancy.v1` owns
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
-  - the draft upstream reports in `docs/zk2/upstream/` are not filed.
+  - the draft upstream reports in `docs/zk2/upstream/` are not filed;
+  - `spec/core.md` v0.1 is accepted (changes go through
+    `spec/CHANGELOG.md`). U22 is a deployment-configured tokenless set of
+    interfaces (descriptor `"token": false`), and U23 (`gateway.south`) is
+    to be measured.
 
 ## Commands
 
