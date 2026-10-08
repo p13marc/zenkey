@@ -41,7 +41,9 @@ queryable per member, on `h2` one queryable over the template, and on `h3`
 one queryable over the template that refuses every call with `busy`.
 
 **Steps.**
-1. Call `zk2/h1/tc/tc.v1/@op/interfaces/*/set`, then `zk2/*/tc/…`.
+1. Call `zk2/h1/tc/tc.v1/@op/interfaces/*/set`, then `zk2/*/tc/…`, then
+   `zk2/*/tc/tc.v1/@op/interfaces/ETH0/set`, whose parameter chunk is not a
+   canonical slug either.
 2. Call `@op/diagnostics` on `zk2/*/tc/…` with `All` + `None`.
 3. Call `zk2/*/tc/tc.v1/@op/interfaces/*/reset` with `All` + `None`.
 4. Call `zk2/*/tc/tc.v1/@op/interfaces/ETH0/reset`, whose parameter chunk
@@ -51,9 +53,14 @@ one queryable over the template that refuses every call with `busy`.
    and response), served by one queryable over the template. Its handler
    names `p1`, sends two values, then tries to name `p2`. Call
    `zk2/h1/scan/scan.v1/@op/ports/*/scan` with `All` + `None`.
+6. **Nothing sent.** The same operation (no `summary`), served over the
+   template by a handler that names no member and sends nothing. Call it
+   the same way.
 
 **Expected.**
-1. One, then three `fanout_forbidden` refusals, and 0 executions.
+1. One, then three, then three `fanout_forbidden` refusals, and 0
+   executions. The last is O2's, not `invalid_request`: O2 comes first
+   (core §5.1, "The order of refusals").
 2. One reply per host.
 3. From `h1`, two value replies, on `…/interfaces/eth0/reset` and
    `…/interfaces/eth1/reset`. From `h2`, one value reply, on the key of the
@@ -67,6 +74,8 @@ one queryable over the template that refuses every call with `busy`.
 5. Two values, both on `…/ports/p1/scan`, and none on any other key:
    naming `p2` is refused to the handler. A template-wide server answers
    for one member per call, whatever `replies` is (core §5.1).
+6. No value and no envelope: zero values, then completion. Sending nothing
+   needs no member (core §5.1, "Answering").
 
 ## §3 Replies and errors (O3, §5.2)
 

@@ -3,6 +3,58 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.9 — 2026-10-08: the order of an owner's refusals, and a scenario 0.8 got wrong (#670)
+
+The Python implementation's round against 0.8 (PR #669) found three things,
+and one reference bug. They are resolved as before: **the reference's
+behaviour becomes the rule**, unless it is a bug. Here the bug was in the
+reference's interop example, and is fixed with it. Each rule is pinned by a
+scenario step that the reference runs as a test.
+
+**Changed: rules stated.**
+- **The order of refusals (F-74, §5.1, "Answering").** Before any handler
+  runs, an owner refuses a call for the first of these that applies:
+  1. a key expression that is not concrete, on an operation that forbids
+     fan-out (`fanout_forbidden`, O2);
+  2. an operation not exposed now (`unavailable`, O3);
+  3. a key that names no member (`invalid_request`).
+
+  O2 and §5.1 both claimed a wildcard call to a fan-out-forbidden template
+  whose parameter chunk is not canonical. The reference checks O2 first,
+  and so did zk2py. `operations.md §2` step 1 now makes that call.
+- **Sending nothing needs no member (F-76, §5.1, "Answering").** Only a
+  reply needs a key. A server over a template whose handler names no
+  member and sends nothing ends the call as zero values, then completion,
+  when no `summary` is declared. When one is declared, it is answered
+  `internal`, as any `many` handler without its summary is. This is the
+  reference's behaviour and zk2py's guess. `operations.md §2` step 6 pins
+  it.
+
+**Changed: a scenario 0.8 got wrong.**
+- **presence.md §6 step 3 (F-75).** It read `zk2/**`. By §1.3's guard, that
+  selects no control token, so its "no token" could never fail, timeout or
+  not. It now reads `zk2/*/*/@zk/instance/*` with an owner present: the open
+  read holds the token, and the held read is empty with `Timeout`. The
+  reference test it mirrors had the same flaw, and is fixed the same way.
+  zk2py already read both.
+
+**Changed: the reference was wrong, and is fixed with this amendment.**
+- **The interop owner example exposed templated operations it did not
+  serve.** `zenkey/examples/owner.rs` declared queryables only for
+  operations without template parameters. Calls to the templated ones it
+  exposed were silent, which breaks O1 and §8.2's "exposed" (alive ⇒
+  callable). These were zk2py's 2 XFAILs in `py-live`.
+  - **The fix:** it now serves every operation, a templated one over the
+    whole template (§5.1). A call whose key binds the parameter is echoed
+    on that member's key. An echo to a fan-out that leaves the parameter
+    unbound names no member, and is refused `internal`, as §5.1 says.
+  - **The test:** `owner_example.rs` checks both.
+
+**Deliberately not changed.**
+- **No new error code** for a fan-out that leaves a parameter unbound on a
+  server that cannot name a member. `internal` stays, because the server is
+  the one that could not answer, and §5.1 already says so.
+
 ## 0.8 — 2026-10-08: a refused presence read, and what implementing 0.7 found (#664)
 
 Two sources, 10 items:

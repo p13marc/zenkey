@@ -1,7 +1,7 @@
 # owner_example.rs: what the interop owner example (`examples/owner.rs`)
-# serves — a raw state holding `ok`, an echo, and an operation of JSON
-# Schema types with no `error` type, which it refuses `app` without a
-# detail.
+# serves — a raw state holding `ok`, an echo, an echo over a template
+# (#670: everything exposed is callable), and an operation of JSON Schema
+# types with no `error` type, which it refuses `app` without a detail.
 [interface]
 name = "interop"
 major = 1
@@ -18,6 +18,14 @@ type = { raw = "text/plain" }
 kind = "operation"
 request = { raw = "text/plain" }
 response = { raw = "text/plain" }
+
+[resources."ports/{port}/echo"]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+params = { port = "string" }
+cardinality = 8
+fanout = "allowed"
 
 [resources.typed]
 kind = "operation"

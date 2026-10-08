@@ -29,10 +29,15 @@
 //!   the value `ok`, stamped (S1), answered on GET (S2), and put before the
 //!   tokens, so a GET made the moment they appear finds it (§8.2, "State
 //!   values", F-68);
-//! - an operation with no template parameters is served: a `raw` request
-//!   and response echo the request; any other types refuse with `app` and no
-//!   detail (O3, §5.2), since this owner decodes no schema, and an
-//!   operation with no `error` type has no detail to send (F-65).
+//! - every operation is served, so everything exposed is callable (§8.2,
+//!   "Exposed"; #670): a `raw` request and response echo the request; any
+//!   other types refuse with `app` and no detail (O3, §5.2), since this
+//!   owner decodes no schema, and an operation with no `error` type has no
+//!   detail to send (F-65). An operation with template parameters is served
+//!   over the whole template (§5.1): a call whose key binds every parameter
+//!   answers for that member, and an echo to a fan-out that leaves one
+//!   unbound names no member, so it is refused `internal`, as §5.1 says of
+//!   a server that cannot name one.
 //!
 //! Capabilities named by `capability:` gates are all held, so gated
 //! resources are exposed too.
@@ -145,10 +150,13 @@ pub async fn run(
                 {
                     states.push(b.declare_state_writer(&iface, &name, &none).await?);
                 }
-                Body::Operation(o) if !r.template.has_params() => {
+                Body::Operation(o) => {
                     let echo = raw(&o.request) && raw(&o.response);
+                    // Over the whole template when it has parameters (§5.1),
+                    // else on the operation's one key.
+                    let values = (!r.template.has_params()).then_some(&none);
                     servers.push(
-                        b.serve(&iface, &name, Some(&none), move |call| async move {
+                        b.serve(&iface, &name, values, move |call| async move {
                             if !echo {
                                 // §5.2: `app` from any operation, and no detail
                                 // where there is no `error` type to carry one.
