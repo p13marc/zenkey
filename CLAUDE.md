@@ -125,15 +125,22 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   deployment namespace — `--namespace` (alias `--base`) resolves flag > env
   `ZENCTL_BASE` > the active named context (`zenctl context create …`) >
   **empty**; raw verbs and `namespace list` stay un-namespaced. The v1 verbs
-  not yet ported still read `--registry <dir>` TOMLs.
+  not yet ported still read `--registry <dir>` TOMLs. FJ5's acts and reads go
+  through the runtime's own client and consumer: `call` (one address
+  `BestMatching`, a fan-out only to `fanout = "allowed"`, refused before
+  anything is sent otherwise), `get state` (the owner's S4 GET, or
+  `--last-known <archive>`, never shown as current) beside the raw `get
+  <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
+  `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
-  list|show|call`, `iface list|show`, `schema show`, `namespace list`,
+  list|show`, `iface list|show`, `schema show`, `namespace list`,
   `config get|set|confirm|cancel|extend|persist`, `storage`, `acl`,
   `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
-  (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
-  `timeline`, `snapshot`, `graph`, `export`, `serve`, `gen`, `scout`);
+  (`get` and `get state`, `call`, `watch`, `echo`, `pub`, `rate`, `field`,
+  `record`, `replay`, `timeline`, `snapshot`, `graph`, `export`, `serve`,
+  `gen`, `scout`);
   `compat` compares two contract revisions offline, exit-coded like a
   judgement; a **judgement**
   is exit-coded (`check
