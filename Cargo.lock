@@ -8807,7 +8807,6 @@ dependencies = [
  "zblob",
  "zenkey 0.11.1",
  "zenkey 0.20.0",
- "zenkey-build 0.11.1",
  "zenkey-model",
  "zenkey-report-fixtures",
  "zenoh",

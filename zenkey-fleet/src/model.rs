@@ -4,13 +4,12 @@
 //! One rule places a module here: *it can do its job from values already in
 //! hand*. Nothing below takes a session. A key becomes a described key
 //! ([`facts`]), a set of served slices becomes a queryable registry
-//! ([`registry`]) and a set of rows ([`project`]), a stream of samples
-//! becomes rates and latencies ([`stats`]) or a tree ([`tree`], [`skeleton`]),
-//! two payloads become a diff ([`diff`]), a payload plus a schema becomes a
-//! rendering ([`decode`]), a sample on the alert plane becomes an alert
-//! transition ([`alert`]), the admin space's declared readers become a
-//! ranked consumer list ([`consumers`]), a window of samples becomes a
-//! lane-partitioned ordering on a stated clock ([`timeline`]), a fan-in's
+//! ([`registry`]), a stream of samples becomes rates and latencies
+//! ([`stats`]) or a tree ([`tree`], [`skeleton`]), two payloads become a diff
+//! ([`diff`]), a payload plus a schema becomes a rendering ([`decode`]), a
+//! sample on the alert plane becomes an alert transition ([`alert`]), a
+//! window of samples becomes a lane-partitioned ordering on a stated clock
+//! ([`timeline`]), a fan-in's
 //! replies become snapshot rows ([`snapshot`]), two snapshots become one
 //! comparison ([`snapshot_diff`]), two deployments' hosts become one
 //! alignment ([`origin_map`]), a sample seen after a call becomes a
@@ -46,7 +45,6 @@ pub mod alert;
 pub mod bounded;
 pub mod catalog;
 pub mod compat;
-pub mod consumers;
 pub mod diff;
 pub mod examples;
 pub mod export;
@@ -54,7 +52,6 @@ pub mod facts;
 pub mod impact;
 pub mod jsonschema;
 pub mod origin_map;
-pub mod project;
 pub mod prom;
 pub mod registry;
 pub mod render;
@@ -71,5 +68,3 @@ pub mod tree;
 
 #[cfg(feature = "decode")]
 pub mod decode;
-#[cfg(feature = "decode")]
-pub mod infer;

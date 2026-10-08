@@ -3,7 +3,7 @@
 //! and `service show`.
 //!
 //! v1's `service` domain is the `@rpc` plane of a producer
-//! ([`crate::report::ServiceList`]), and FJ4 retires it with the v1 noun.
+//! (v1's `service list|info`), which FJ4 retired with the v1 noun.
 //! This one is named for where its evidence comes from: liveliness tokens,
 //! then the descriptor each instance serves. Two sources, and every row
 //! keeps them apart — a token's `fp16` beside a descriptor's fingerprint —

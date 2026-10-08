@@ -3,7 +3,7 @@
 //! contract says — `iface show`.
 //!
 //! v1's `interface` domain is a *type* seen across producers
-//! ([`crate::report::InterfaceShow`]); a zk2 interface is a contract, named
+//! (v1's `interface show`, retired at FJ4); a zk2 interface is a contract, named
 //! `<name>.v<major>`, and this is its view. Providers come from interface
 //! tokens and, for the tokenless set (U22), from descriptors only, so an
 //! instance whose descriptor did not answer is listed under `undescribed`:

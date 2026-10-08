@@ -33,7 +33,6 @@
 pub mod admin;
 pub mod blob;
 pub mod contracts;
-pub mod discover;
 pub mod monitor;
 pub mod presence;
 pub mod producer;

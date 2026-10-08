@@ -39,7 +39,7 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, `blob`,
-//!   `roster`, `discover`, `producer`, `body`, and zk2's `presence` and
+//!   `roster`, `producer`, `body`, and zk2's `presence` and
 //!   `contracts`. The RFC 05 §2.1 fan-in
 //!   discipline lives here exactly once, in [`bus::query::fleet_get`] (moved
 //!   verbatim from zenctl — target `All`, consolidation `None`, attribution
@@ -180,8 +180,7 @@ pub use judge::kind::{KeyKind, KindObservation, judge_kind};
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
     DEFAULT_MAX_PRODUCERS, DecodedSample, DescribedSchema, Rendering, SchemaStore, Sealed,
-    StoreBounds, decode_sample, prewarm, schema_drift, schema_dump, schema_rows_for_type,
-    totality_gaps,
+    StoreBounds, decode_sample, prewarm, schema_drift, totality_gaps,
 };
 /// The traits [`watchdog`] is driven through (#397), re-exported so a
 /// consumer needs them in scope without taking a direct dependency on
@@ -205,15 +204,14 @@ pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 pub use zenkey::schema::validate::{NotValidated, Verdict};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, attach_tokens, consumers,
+    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, attach_tokens,
     declared_entities, declared_entities_within, declared_entity_selectors, mesh_links,
-    origin_attachments, render_dot, routers, state_coverage, storages, subject_impact, topology,
+    origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
 #[cfg(feature = "blob")]
 #[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
 pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
 pub use bus::blob::{BlobTarget, blob_list, declared_by};
-pub use bus::discover::{AliveToken, discover_bases};
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
     StampProvenance, StreamItem, WatchId,
@@ -227,8 +225,7 @@ pub use bus::query::{
     state_snapshot,
 };
 pub use bus::roster::{
-    BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, node_info, node_rows,
-    roster, token_identity,
+    BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, roster, token_identity,
 };
 pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
@@ -241,7 +238,7 @@ pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, WriteAct, call,
     call_traced, check_concrete, check_fanout, check_retire, declare_publication,
 };
-pub use judge::budget::{BudgetObservation, join_budget};
+pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
 pub use judge::doctor_delta::doctor_delta;
 pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
@@ -278,14 +275,6 @@ pub use model::compat::compat;
 pub use model::render::{
     Member, render as render_payload, render_with as render_payload_with, resolved_revision,
 };
-// Registry inference (#225, RFC 08 §6.1): the observation, the inference,
-// and the draft emitter a frontend writes files from.
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use model::infer::{
-    InferObservation, Provenance, draft_file_names, draft_schema_files, infer, to_draft_toml,
-    to_draft_types_toml,
-};
 pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
@@ -321,7 +310,6 @@ pub use model::acl::{
     AclOptions, check_acl, explain_acl, plan_acl, plan_face, to_json5 as acl_plan_json5,
 };
 pub use model::alert::alert_transition;
-pub use model::consumers::{SubjectTarget, declaring_sessions, join_consumers, subject_target};
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::export::{
     DEFAULT_MAX_SERIES, DoctorRun, ExportLedger, FIELD_CAP, FoldInputs, Observed, PayloadVerdict,
@@ -348,17 +336,16 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
-    ConformReport, ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport,
-    DeclaredEntities, DeclaredEntity, DiscoveredBase, DoctorDelta, DoctorReport, DriftVerdict,
-    EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, Fault,
-    FieldReport, Freshness, GenPlanEntry, GenReport, HelloView, ImpactReport, InferReport,
-    InferredProducer, InferredSubject, InferredType, Judgement, LatencyReport, LatencySummary,
-    MeshLink, NodeInfo, OriginAttachment, ProducerInfo, RecordReport, RenderSource, ReplayReport,
-    RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
-    SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
-    TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
-    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
+    ConformReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity,
+    DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind,
+    ExpectReport, ExportSnapshot, Fault, FieldReport, GenPlanEntry, GenReport, HelloView,
+    ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink, OriginAttachment,
+    RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
+    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport,
+    SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport,
+    TotalityGap, TraceReport, ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader,
+    judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
