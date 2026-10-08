@@ -81,15 +81,17 @@ sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
 descriptors    36 passed     0 failed
-errors         38 passed     0 failed
-compat         89 passed     0 failed
+errors         42 passed     0 failed
+compat         97 passed     0 failed
 examples       97 passed     0 failed
-total         502 passed     0 failed
+total         514 passed     0 failed
 ```
 
-The figures are against `core.md` 0.6.
-- Amendment 0.5 resolved F-01 to F-55, and 0.6 resolved F-56 to F-63.
-- 0.5 decided 13 of zk2py's guesses the other way, and 0.6 three more.
+The figures are against `core.md` 0.7.
+- Amendments 0.5, 0.6 and 0.7 resolved F-01 to F-70.
+- They decided 13, 3 and 1 of zk2py's guesses the other way.
+- 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
+  `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 
 zk2py now follows the stated rules; `SPEC-FINDINGS.md` says, per finding,
 how.
@@ -175,6 +177,37 @@ Every wait is the 1 s that §8.1 gives a conformance run.
   `app` refusals), the descriptor and bundle holders, then its tokens. It
   refuses to start with an unbound required role (§3.2).
 
+**Since 0.7.** The owner exposes what 0.7's §8.2 calls exposed. Step 2
+runs first, so a refusal declares nothing; it refuses what the rule
+refuses. Every resource it is not told to withhold is exposed:
+- a state by its state queryables and, when parameterless, a publisher. A
+  raw state holds `ok` from the start, put before the tokens; any other
+  holds no value;
+- a stream by its publisher;
+- an event, and any template with no member, by nothing more;
+- an operation by a `complete` queryable on its key or over its template.
+  Over a template, a well-formed member is `not_found` and a key naming no
+  member `invalid_request`.
+
+A capability-gated resource whose capability it lacks is implied absent,
+and its operation answers `unavailable`. The first descriptor is put in
+step 3, before the bundles' queryables.
+
+Three more zk2py-owner runs follow 0.7's scenarios through a router R1 of
+the runner's own:
+- state.md §1: S1 against an unstamped control put, and the tick;
+- presence.md §1: a call, a state GET, the descriptor and the bundle at the
+  moment the tokens appear, the first descriptor seen by a data subscriber,
+  and a template with no member;
+- presence.md §2 steps 4 and 5, each with its control.
+
+**Known deviations.** 0.7 records fixes the Rust owner example still owes.
+The runner reports them as XFAIL (or XPASS once met), not as failures:
+- an `app` envelope with a detail for an operation that declares no
+  `error` type (F-65);
+- the state value put after the tokens (F-68). The first-sight GET often
+  wins the race, so this shows as XPASS.
+
 The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
 whose state zk2py GETs and whose operations it calls. It also adds two
 zk2py-owner runs:
@@ -183,8 +216,8 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 113 passed, 0 failed`. Exit codes are as for the
-static runner.
+Result: `live interop: 129 passed, 0 failed, 2 known deviations of the Rust
+owner example`. Exit codes are as for the static runner.
 
 **§8.1's handler rule in zenoh-python.**
 - Every liveliness GET passes a `zenoh.handlers.Callback`, whose callback
@@ -218,8 +251,8 @@ The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
   - the scenarios other than presence.md, retrieval.md and parts of
     state.md and operations.md.
 
-  zk2py's owner serves parameterless raw state and parameterless
-  operations only.
+  zk2py's owner holds values only for parameterless raw state, answers
+  only parameterless operations meaningfully, and has no template members.
 - **Building bundles with extras.** The spec names no source for the
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
