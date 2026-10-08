@@ -202,7 +202,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 **Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
 described above, and the `fixture-tests` crate, now live on the **`v1`
 branch**. On `main` the v1 tools build against `zenkey`/`zenkey-build`
-`=0.11.1` from crates.io (`[workspace.dependencies]`). `fixture-tests/registry`
+`=0.11.1` from crates.io (`[workspace.dependencies]`). Since FJ1 (#612)
+zengui and zenwatch also pin `zenkey-fleet =0.18.0` from crates.io, while
+the in-tree `zenkey-fleet` is 0.20.0 (`publish = false`), being ported to
+zk2 for zenctl, which depends on it by path. `fixture-tests/registry`
 (+ `registry-kdl/`) stays on `main` as test data that the tools' tests read.
 The `registry-conventions` skill describes the v1 registry format.
 
@@ -314,6 +317,18 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
       `"token": false`);
     - U23 is settled by measurement: a far site's router sits in a
       `gateway.south` region of the near router, with the `@zk` deny.
+
+- **Decided 2026-10-08 (FJ, the tools' port, #612):**
+  - zenctl's resolved verbs open a session in the deployment namespace
+    (`--namespace`, `--base` an alias); raw verbs and the admin space stay
+    un-namespaced;
+  - `retire` is dropped; `pub` refuses zk2 data keys (exit 2) and still
+    writes foreign keys;
+  - profile-backed features (`config`, `blob`, `export`, the kind and budget
+    checks, alerts) go dark on `main` until their profiles exist (#613); the
+    `v1` branch keeps them;
+  - no zenctl, zengui or zenwatch release from `main` until FJ9; fixes ship
+    from `v1`.
 
 ## Commands
 
