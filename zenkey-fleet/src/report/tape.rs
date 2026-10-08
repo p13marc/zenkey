@@ -150,13 +150,20 @@ pub struct ReplayReport {
     pub header: ZrecHeader,
     pub dry_run: bool,
     pub speed: f64,
+    /// The deployment namespace the replay published into, through a
+    /// session in it, each key moved from the capture's base (#612, FJ5).
+    /// Absent: every key published as recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
     /// Rows published (dry run: rows that would have been).
     pub published: u64,
     /// Tombstones sent (dry run: would have been).
     pub tombstones: u64,
     /// Rows that could not be parsed — counted, never skipped.
     pub malformed: u64,
-    /// Delete rows the retire gate refused.
+    /// Rows a gate refused: deletes the retire gate refused, wildcards, keys
+    /// outside the capture's base under `namespace`, and a zk2 service's
+    /// own keys where it runs (P3).
     pub refused: u64,
     /// Samples the *capture* missed (summed from the file's drop records):
     /// this replay is a partial view and says so (O6).

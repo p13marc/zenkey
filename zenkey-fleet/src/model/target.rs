@@ -261,7 +261,7 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
             Error::unaskable(
                 &what,
                 format!(
-                    "is not JSON ({e}); a {} request is given as JSON",
+                    "not JSON ({e}); a {} request is given as JSON",
                     kind_word(ty)
                 ),
             )
@@ -298,7 +298,7 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
                 )
             })?;
             let msg = DynamicMessage::deserialize(desc, &value).map_err(|e| {
-                Error::unaskable(&what, format!("is not a {name} in its JSON form: {e}"))
+                Error::unaskable(&what, format!("not a {name} in its JSON form: {e}"))
             })?;
             Ok(zk2::prost::Message::encode_to_vec(&msg))
         }
@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(back, serde_json::json!({"up": true}));
         let e = encode_request(&rev, &set, b"{not json").unwrap_err();
         assert!(e.is_unaskable());
-        assert!(e.to_string().contains("is not JSON"), "{e}");
+        assert!(e.to_string().contains("not JSON"), "{e}");
 
         let go = plan_call(&rev, t.clone(), "go", Bindings::new()).unwrap();
         let bytes = encode_request(&rev, &go, br#"{"x": 1.5, "frame": "map"}"#).unwrap();
@@ -421,7 +421,7 @@ mod tests {
         want.extend_from_slice(&[0x12, 3, b'm', b'a', b'p']);
         assert_eq!(bytes, want);
         let e = encode_request(&rev, &go, br#"{"nope": 1}"#).unwrap_err();
-        assert!(e.to_string().contains("is not a m.v1.Go"), "{e}");
+        assert!(e.to_string().contains("not a m.v1.Go"), "{e}");
 
         let blob = plan_call(&rev, t, "blob", Bindings::new()).unwrap();
         assert_eq!(

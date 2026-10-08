@@ -790,6 +790,7 @@ pub fn replay_report() -> ReplayReport {
         header: header(),
         dry_run: true,
         speed: 1.0,
+        namespace: None,
         published: 4_800,
         tombstones: 20,
         malformed: 2,

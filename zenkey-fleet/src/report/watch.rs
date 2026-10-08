@@ -40,9 +40,9 @@ pub enum WatchEvent {
     /// A value, rendered through the contract's type, and its attachment
     /// through the declared attachment type when one rode along.
     Put {
-        payload: PayloadRendering,
+        payload: Box<PayloadRendering>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        attachment: Option<PayloadRendering>,
+        attachment: Option<Box<PayloadRendering>>,
     },
     /// A delete: on state, the key's retirement. Not an empty value.
     Delete,
@@ -115,7 +115,7 @@ mod tests {
             values: [("iface".to_owned(), vec!["eth0".to_owned()])].into(),
             timestamp: None,
             event: WatchEvent::Put {
-                payload: payload.clone(),
+                payload: Box::new(payload.clone()),
                 attachment: None,
             },
         };

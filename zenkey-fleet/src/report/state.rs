@@ -84,7 +84,7 @@ pub struct StateRow {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum StateValue {
     /// The key's value, rendered through the contract's type.
-    Value { payload: PayloadRendering },
+    Value { payload: Box<PayloadRendering> },
     /// Deleted: a `reply_del` within the owner's tombstone window (S3), or
     /// a tombstone an archive holds. Not an empty value.
     Deleted,
@@ -146,7 +146,7 @@ mod tests {
             rows: vec![StateRow {
                 key: key.into(),
                 value: StateValue::Value {
-                    payload: payload(key),
+                    payload: Box::new(payload(key)),
                 },
                 timestamp: Some(Stamp {
                     time: "2026-10-08T12:00:00.000000000Z".into(),

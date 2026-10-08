@@ -131,7 +131,7 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
                 zk2::state::Current::Value { key, sample } => StateRow {
                     timestamp: sample.timestamp().map(stamp),
                     value: StateValue::Value {
-                        payload: payload(revision, &key, &sample, Member::Type),
+                        payload: Box::new(payload(revision, &key, &sample, Member::Type)),
                     },
                     key,
                     confirmed: None,
@@ -222,13 +222,13 @@ pub async fn last_known(
                 Some(bytes) => {
                     let encoding = lk.encoding.as_ref().map(ToString::to_string);
                     StateValue::Value {
-                        payload: render_with(
+                        payload: Box::new(render_with(
                             revision,
                             &origin,
                             Member::Type,
                             encoding.as_deref(),
                             bytes,
-                        ),
+                        )),
                     }
                 }
                 None => StateValue::Deleted,
@@ -319,11 +319,16 @@ pub async fn watch(
             let event = match d.sample.kind() {
                 SampleKind::Delete => WatchEvent::Delete,
                 SampleKind::Put => WatchEvent::Put {
-                    payload: payload(&rev, &key, &d.sample, Member::Type),
-                    attachment: d
-                        .sample
-                        .attachment()
-                        .map(|a| render_with(&rev, &key, Member::Attachment, None, &a.to_bytes())),
+                    payload: Box::new(payload(&rev, &key, &d.sample, Member::Type)),
+                    attachment: d.sample.attachment().map(|a| {
+                        Box::new(render_with(
+                            &rev,
+                            &key,
+                            Member::Attachment,
+                            None,
+                            &a.to_bytes(),
+                        ))
+                    }),
                 },
             };
             let sample = WatchSample {
