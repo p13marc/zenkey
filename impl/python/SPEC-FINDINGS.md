@@ -6,19 +6,15 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Five rounds.**
+**Six rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
-- Amendment 0.5 resolved all of F-01 to F-55.
 - F-56 to F-63 were found against 0.5.
-- **Amendment 0.6 resolves all of F-56 to F-63.** Each carries a "Status
-  at 0.6" line.
-- **F-64 to F-70 are new**, found against 0.6 while building the rest of
-  the live half:
-  - a state GET (S4);
-  - a call with its value or envelope decoded (O1–O5, §5.2);
-  - an owner (§8.2) that the Rust `consume` example reads.
+- F-64 to F-70 were found against 0.6, with the rest of the live half.
+- Amendments 0.5, 0.6 and 0.7 resolved F-01 to F-70. Each entry carries a
+  status line naming its amendment.
+- **F-71 to F-73 are new**, found against 0.7.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -28,16 +24,18 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.6:** 70 entries.
+**Counts at 0.7:** 73 entries.
 - F-01 to F-55: resolved by 0.5.
-- F-56 to F-63: resolved by 0.6; none left unresolved.
-  - 0.6 overturned three of zk2py's guesses: F-57, F-60 and F-62. zk2py
-    followed 0.5 there, and built the dangling `$ref`.
-  - It confirmed four: F-56, F-58, F-59 and F-63.
-  - F-61's rule is stated, and zk2py's own owner follows it. The Rust owner
-    example, still its own router, cannot be watched that way.
-- F-64 to F-70: **new**, 2 ambiguity, 5 gap (one observed on the reference
-  owner).
+- F-56 to F-63: resolved by 0.6.
+- F-64 to F-70: resolved by 0.7; none left unresolved.
+  - 0.7 confirmed six of zk2py's guesses: F-64, F-65, F-66, F-67, F-68 and
+    F-69.
+  - It overturned one, F-70 (exposed). F-67's place for the put was refined
+    too.
+  - The Rust owner example has not caught up with 0.7 on F-65 and F-68, nor
+    on F-69's setup. The runner reports those as known deviations, not
+    failures.
+- F-71 to F-73: **new**, 2 ambiguity, 1 gap.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
@@ -107,13 +105,16 @@ by the spec section that now states the rule.
 | F-61 | gap | resolved by 0.6 | §3.2, presence.md §2 step 4 (0.5) | "No instance token appears" cannot be observed when the refusing owner is its own router. |
 | F-62 | contradiction | resolved by 0.6 | §9.6 against §9.4 (0.5) | One id for identical files, under the *last* name, breaks a bundle `$ref` to the first file's stem. |
 | F-63 | ambiguity | resolved by 0.6 | descriptor.schema.json, §3.3, §9.1 (0.5) | `uint64` is bounded for contracts but not for descriptors' `cardinality`. |
-| F-64 | ambiguity | **new** | §5.1 O1–O3 | A `replies = "one"` call names no consolidation. |
-| F-65 | gap (observed) | **new** | §5.2 | An `app` envelope for an operation with no `error` type, or a raw one, in JSON: what `detail` is. |
-| F-66 | ambiguity | **new** | §4.3 minting | "Plus one tick": which unit? |
-| F-67 | ambiguity | **new** | §3.3, §8.2 | Is the first descriptor a "change" to put, and where in the bring-up order? |
-| F-68 | gap | **new** | §8.2, §4.2 | When an owner puts its first state value, relative to its tokens. |
-| F-69 | gap | **new** | §4.2 S1, state.md §1 | "A router stamp would carry the router's": not observable when the owner is the router. |
-| F-70 | gap | **new** | §8.2 step 2 | What "exposed" means for a state resource, or a templated one, at start-up. |
+| F-64 | ambiguity | resolved by 0.7 | §5.1 O1–O3 | A `replies = "one"` call names no consolidation. |
+| F-65 | gap (observed) | resolved by 0.7 | §5.2 | An `app` envelope for an operation with no `error` type, or a raw one, in JSON: what `detail` is. |
+| F-66 | ambiguity | resolved by 0.7 | §4.3 minting | "Plus one tick": which unit? |
+| F-67 | ambiguity | resolved by 0.7 | §3.3, §8.2 | Is the first descriptor a "change" to put, and where in the bring-up order? |
+| F-68 | gap | resolved by 0.7 | §8.2, §4.2 | When an owner puts its first state value, relative to its tokens. |
+| F-69 | gap | resolved by 0.7 | §4.2 S1, state.md §1 | "A router stamp would carry the router's": not observable when the owner is the router. |
+| F-70 | gap | resolved by 0.7 | §8.2 step 2 | What "exposed" means for a state resource, or a templated one, at start-up. |
+| F-71 | ambiguity | **new** | §7.3 the nullable form (0.7) | "The null schema, whose type is exactly null": is `{"type": ["null"]}` one? |
+| F-72 | ambiguity | **new** | §9.8 inside undecided keywords (0.7) | "A $ref back to a target already being followed is compared as written": its text, or its target? |
+| F-73 | gap | **new** | state.md §1 step 3 (0.7) | "Faster than its clock advances" cannot be arranged by a tester; the tick path went unexercised. |
 
 ---
 
@@ -1460,6 +1461,8 @@ implementation had to guess.
 
 ### F-64 · ambiguity · §5.1 O1–O3: the consolidation of a single-reply call
 
+**Status at 0.7: resolved by 0.7.** §5.1 O1: a concrete call MUST set `BestMatching` and `None`. zk2py's guess was the rule.
+
 O2 gives a fan-out call target `All` and consolidation `None`, and O6
 gives a `replies = "many"` call consolidation `None`. O1 implies target
 `BestMatching` for a concrete call. Nothing names the consolidation of the
@@ -1473,6 +1476,8 @@ is, lowest.
 value or an envelope is seen as it arrives (`live.call`).
 
 ### F-65 · gap (observed) · §5.2: `app`, and what `detail` is, in a JSON envelope
+
+**Status at 0.7: resolved by 0.7.** §5.2: any operation may refuse with `app`; with no `error` type there is no detail, with one it is optional, and a raw type's is base64 text in a JSON envelope. zk2py's owner sends `app` without a detail, as the rule says. The Rust owner example still sends an empty detail on `@op/refuse`, a fix 0.7 records for the runtime: the runner reports it as a known deviation (XFAIL).
 
 > "`detail` | a value, bytes, or null | With `app` only: the operation's
 > declared `error` type, as a value inline (JSON, CBOR) or as its encoded
@@ -1504,6 +1509,8 @@ decodes for the Rust owner's JSON operation, and records the code.
 
 ### F-66 · ambiguity · §4.3 minting: "plus one tick"
 
+**Status at 0.7: resolved by 0.7.** §4.3: a tick is the timestamp type's smallest step, one NTP64 unit, and any larger step, zenoh-python's 1 ns included, keeps S7. zk2py's guess was allowed.
+
 > "An owner therefore mints each state timestamp as the greater of
 > `Session::new_timestamp()` and the last timestamp it issued plus one
 > tick, with its session's zid as the id."
@@ -1516,6 +1523,8 @@ is 1 ns, about four of NTP64's units.
 keeps S7's "never at or below the last", which is what the rule protects.
 
 ### F-67 · ambiguity · §3.3 and §8.2: the descriptor's first put
+
+**Status at 0.7: resolved by 0.7.** §3.3, §8.2 step 3: the first descriptor is put when its queryable is declared, before the contract queryables and any token. zk2py now puts it there; it used to come after the contract queryables.
 
 > §3.3: "The owner MUST put the descriptor on its instance key whenever it
 > changes, and MUST answer a GET there with the current one."
@@ -1533,6 +1542,8 @@ stamped, after step 3 and before the tokens.
 
 ### F-68 · gap · §8.2 and §4.2: the first state value against the tokens
 
+**Status at 0.7: resolved by 0.7.** §8.2 "State values": a value held at start SHOULD be put before step 4. zk2py's guess was the rule. The Rust owner example still puts after starting (a fix 0.7 records); the runner's first-sight GET reports it as a known deviation, which a race can hide (XPASS).
+
 §8.2's order makes "alive ⇒ callable" hold for operations: queryables come
 before tokens. A state resource's first *value* has no place in that order.
 An owner that declares its publisher and state queryable (step 1), then its
@@ -1547,6 +1558,8 @@ That was after presence and the descriptor GET, though, so the runner does
 not test the moment the token appears.
 
 ### F-69 · gap · §4.2 S1 and `state.md` §1: an owner stamp that cannot be told from a router's
+
+**Status at 0.7: resolved by 0.7.** §4.2 "Observing S1" and state.md §1: the owner and the consumer are clients of a router with timestamping on, against an unstamped control put. zk2py's owner now follows it in full (`run_python_s1`). The Rust owner example is still its own router, so its S1 check proves only the process's id.
 
 > state.md §1: "Every sample, the delete included, carries a timestamp
 > whose id is the owner session's zid. A router stamp would carry the
@@ -1567,6 +1580,8 @@ one too.
 
 ### F-70 · gap · §8.2 step 2: what "exposed" means at start-up
 
+**Status at 0.7: resolved by 0.7.** §8.2 "Exposed": what serves a resource is declared; a state's value is not needed, and a template with no member is exposed by its template. zk2py's guess (a value needed; a required template refused) was overturned. zk2py now exposes every resource it is not told to withhold: states by their queryables and publisher (a raw one holds `ok`, others no value), streams by their publisher, events and templates by nothing more, and operations by a queryable on the key or over the template. Step 2 refuses what the rule refuses.
+
 > §8.2: "2. validate that every required resource is exposed"; §2.3: "An
 > owner MUST expose every required one, or not start (§8.2)."
 
@@ -1583,3 +1598,55 @@ count as exposed.
 state, once its publisher, queryable and value exist, and a parameterless
 operation, once its queryable exists. It serves nothing templated, so it
 refuses to start for a contract with a required templated resource.
+
+## New at 0.7 (#609)
+
+Found while following 0.7: `just py-conformance` passes 514 of 514.
+`just py-live` passes 129 of 129, with 2 known deviations of the Rust owner
+example.
+
+### F-71 · ambiguity · §7.3 (0.7): what "the null schema" is
+
+> "holding two branches in either order: the null schema, whose `type` is
+> exactly `null` and which holds nothing else that carries meaning, and any
+> schema S"
+
+`type` may be a string or a list (§7.3 keeps `type` as JSON Schema has it).
+So `{"type": ["null"]}` admits exactly null too, but is it "exactly
+`null`"? No fixture has one. A generator writing the list form would make
+the same `Option` a nullable form for one implementation and a plain
+`anyOf` for another, whose classes then differ (compatible or review).
+**Resolved:** a guess. zk2py takes only the string `"null"`
+(`compat._is_null_schema`).
+
+### F-72 · ambiguity · §9.8 (0.7): a recursive `$ref` "compared as written"
+
+> "A `$ref` back to a target already being followed is compared as written,
+> which ends a recursive type"
+
+"As written" could mean the `$ref`'s text, or the target it names. Two
+revisions can spell one target two ways:
+- `#/$defs/Node` in the defining file;
+- `nodes.json#/$defs/Node` from another file.
+
+By text they differ, so the change is review. By target nothing changed.
+No fixture has a recursive type inside `oneOf`/`anyOf`/`prefixItems`.
+**Resolved:** a guess. zk2py compares such a `$ref` by its target, written
+as `<stem>.json#<pointer>`, so a respelling is no change
+(`compat.written`).
+
+### F-73 · gap · `state.md` §1 step 3 (0.7): a precondition a tester cannot arrange
+
+> "3. The owner puts v3 and v4 back to back, faster than its clock
+> advances. … v4's timestamp is greater than v3's, by at least one tick"
+
+Whether two puts land within one clock reading is the owner's timing,
+which a black-box tester cannot force. zk2py's owner, put through
+zenoh-python, issued v3 and v4 53 µs apart. The HLC had advanced, so the
+"plus one tick" branch of §4.3's minting never ran, and the check passed
+without testing it. The scenario does not say how a run shows the branch
+was taken, nor whether a run that did not take it counts.
+**Resolved:** the runner checks what the scenario expects (v4 > v3 by at
+least a tick). It reports the gap in nanoseconds, which shows the branch
+was not exercised. zk2py's minting branch is exercised only by its own
+logic, not by a test here.

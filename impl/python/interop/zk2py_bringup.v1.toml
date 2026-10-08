@@ -1,0 +1,33 @@
+# zk2py's contract for the bring-up scenario (presence.md §1, core §8.2):
+# a required state the owner holds a value for at start, an operation, and
+# a required templated state with no member yet, exposed by its template.
+# It must load with no finding at all.
+[interface]
+name    = "zk2py_bringup"
+major   = 1
+minor   = 0
+summary = "zk2py's bring-up scenario interface"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.echo]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { track = "string" }
+cardinality = 8
+
+# A templated operation, served over its template with no member (O1, O-4):
+# a well-formed member is not_found, a key naming no member invalid_request.
+[resources."reset/{track}"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { track = "string" }
+cardinality = 8
