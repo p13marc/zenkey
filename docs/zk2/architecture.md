@@ -429,9 +429,12 @@ caller's QoS, so the caller applies it.
 1–5 kHz on loopback, with no latency gain. It is a fingerprinted contract
 field, so the contract author opts in, and SHOULD do so only on
 measurement. The walkthrough's `twist_cmd.v1` keeps it as the example of
-opting in. State writes MUST keep the state defaults (`reliable` +
+opting in. State writes SHOULD keep the state defaults (`reliable` +
 `block`): with a dropping put, 10,917 of 100,000 values never reached a
-storage (spike S5).
+storage (spike S5). *(r4 erratum, #606: r4 said MUST. zenoh-modem's
+best-effort state, re-put every `ttl_s/2` and read by the owner's GET, is a
+legitimate pattern. An archive recording it can miss values between
+re-puts.)*
 
 Timing (period, deadline, lifespan) is `timing.v1` (§3.12). It stays a
 profile only because it needs synchronized clocks and runtime support that
