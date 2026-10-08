@@ -138,15 +138,17 @@ fn routers<'a>(rows: &'a [RouterInfo], state: &'a AdminState, sp: Spacing) -> El
             .spacing(sp.sm)
             .align_y(iced::Alignment::Center),
             kit::muted(if r.locators.is_empty() {
-                // Normal on zenoh 1.10+: loopback listen endpoints are
-                // filtered from the admin doc (eclipse-zenoh/zenoh#2671,
-                // #155) — said only when this node's own version says the
-                // filter applies, so an older doc's blank stays a blank.
+                // Can be normal on zenoh 1.10+: loopback listen endpoints
+                // may be filtered from the admin doc (all of them on 1.10.0,
+                // eclipse-zenoh/zenoh#2671; from 1.10.1, only those an
+                // unspecified listener resolves to; #155) — said only when
+                // this node's own version says the filter applies, so an
+                // older doc's blank stays a blank.
                 if r.version
                     .as_deref()
                     .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
                 {
-                    "no locators listed — zenoh 1.10+ omits loopback listen endpoints \
+                    "no locators listed — zenoh 1.10+ may omit loopback listen endpoints \
                      from the admin doc"
                         .to_string()
                 } else {

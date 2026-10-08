@@ -566,7 +566,9 @@ pub fn attach_tokens(base: &str, entities: &[DeclaredEntity]) -> Vec<OriginAttac
 /// Whether a node's admin root doc filters loopback endpoints out of its
 /// `locators` — true from zenoh 1.10.0 (eclipse-zenoh/zenoh#2671, the
 /// loopback scouting fix: the root doc switched to
-/// `get_locators_noloopback()`). Judged from the leading `major.minor`
+/// `get_locators_noloopback()`). From 1.10.1 the filter covers only the
+/// loopback addresses an unspecified listener resolves to, so the answer
+/// reads "may omit", never "omits". Judged from the leading `major.minor`
 /// of the version string the doc itself declares; a version that does
 /// not parse answers `false` — "cannot say", never a claim (O4).
 ///
@@ -587,9 +589,10 @@ pub fn admin_doc_omits_loopback(version: &str) -> bool {
 /// as an edge, and every zid that is *only* mentioned as a
 /// heard-of-not-queryable node.
 ///
-/// Where a root doc declares no locators — since zenoh 1.10.0 that is the
-/// normal answer for a loopback-only node (eclipse-zenoh/zenoh#2671
-/// filters loopback endpoints from the root doc) — the join corroborates
+/// Where a root doc declares no locators — zenoh 1.10.0's answer for every
+/// loopback-only node (eclipse-zenoh/zenoh#2671), and 1.10.1's for a node
+/// whose unspecified listener resolves to loopback only (an explicit
+/// loopback listener is declared again) — the join corroborates
 /// from session links instead: the node-side endpoint of each reported
 /// link lands in [`TopologyNode::locators_via_links`], kept apart from
 /// `locators` because it is link evidence, not a listen-endpoint claim.

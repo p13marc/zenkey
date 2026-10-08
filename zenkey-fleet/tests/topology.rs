@@ -62,26 +62,26 @@ async fn an_answering_peer_becomes_a_node_and_its_sessions_become_edges() {
         .expect("the serving peer answered as a node");
     assert!(server.answered);
     assert_eq!(server.whatami, "peer");
-    // zenoh 1.10 filters loopback endpoints out of the root doc
-    // (eclipse-zenoh/zenoh#2671 — deliberate, the loopback scouting fix),
-    // and this fixture listens on 127.0.0.1 only, so the honest root-doc
-    // answer is *no locators*. If this assertion ever fails, upstream
-    // changed its mind about the filter — re-read #155 before trusting
-    // root-doc locators again.
+    // The root doc's locators, version by version (#155):
+    // - 1.10.0 filtered every loopback endpoint out (eclipse-zenoh/zenoh#2671),
+    //   so this loopback-only fixture declared none;
+    // - 1.10.1 (`zenoh-link-commons`' `get_locators_impl`) excludes loopback
+    //   only when resolving an *unspecified* listener (`0.0.0.0`). An
+    //   explicit `127.0.0.1` listener, this fixture's, is a real listen
+    //   address and is declared again, which is what the join was written
+    //   for (1.9's "locators ride out").
+    // If this fails again, upstream moved the filter: re-read #155.
     assert!(
-        server.locators.is_empty(),
-        "a loopback-only 1.10 node declares no root-doc locators: {:?}",
+        server.locators.iter().any(|l| l.contains(&listen_addr)),
+        "a 1.10.1 node declares its explicit loopback listener: {:?}",
         server.locators
     );
-    // The join corroborates from the session link instead: the server-side
-    // endpoint of the reported link is the listen address — labelled link
-    // evidence, kept out of `locators`, never an invented listen claim.
+    // Link evidence is the fallback for a root doc that declares nothing
+    // (1.10.0 here, or an unspecified listener resolved to loopback only):
+    // with the root doc speaking, it stays out of the way.
     assert!(
-        server
-            .locators_via_links
-            .iter()
-            .any(|l| l.contains(&listen_addr)),
-        "the listen endpoint rides out as link evidence: {:?}",
+        server.locators_via_links.is_empty(),
+        "no link evidence beside declared locators: {:?}",
         server.locators_via_links
     );
 

@@ -106,15 +106,15 @@ impl Render for RouterList {
                 // A router whose admin document omits its version is not one
                 // we failed to ask (O4).
                 Cell::asked(r.version.clone()),
-                // Empty is normal on zenoh 1.10+ (loopback endpoints are
-                // filtered from the admin doc, eclipse-zenoh/zenoh#2671):
+                // Empty can be normal on zenoh 1.10+ (loopback endpoints may
+                // be filtered from the admin doc, eclipse-zenoh/zenoh#2671):
                 // stated per-row so a blank never reads as unreachable.
                 Cell::text(if r.locators.is_empty() {
                     if r.version
                         .as_deref()
                         .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
                     {
-                        "no locators listed (zenoh 1.10+ omits loopback listen endpoints)"
+                        "no locators listed (zenoh 1.10+ may omit loopback listen endpoints)"
                             .to_string()
                     } else {
                         "no locators listed".to_string()
@@ -278,8 +278,8 @@ impl Render for TopologyView<'_> {
                     self.report.nodes.len(),
                     self.report.nodes.iter().filter(|x| !x.answered).count()
                 ))];
-                // An answered 1.10+ node declaring no locators is the
-                // normal loopback-only answer, not a reachability gap —
+                // An answered 1.10+ node declaring no locators may be the
+                // filtered loopback answer, not a reachability gap —
                 // said out loud so the empty column reads as what it is.
                 if self.report.nodes.iter().any(|x| {
                     x.answered
@@ -289,10 +289,12 @@ impl Render for TopologyView<'_> {
                             .is_some_and(zenkey_fleet::admin_doc_omits_loopback)
                 }) {
                     notes.push(Note::coverage(
-                        "a root doc listing no locators is normal on zenoh 1.10+: \
-                         loopback listen endpoints are filtered from the admin doc \
-                         (eclipse-zenoh/zenoh#2671); a \"via session link\" address \
-                         is what a live link used, not a listen-endpoint claim",
+                        "a root doc listing no locators can be normal on zenoh 1.10+: \
+                         loopback listen endpoints may be filtered from the admin doc \
+                         (all of them on 1.10.0, eclipse-zenoh/zenoh#2671; from 1.10.1, \
+                         only those an unspecified listener resolves to); a \
+                         \"via session link\" address is what a live link used, \
+                         not a listen-endpoint claim",
                     ));
                 }
                 notes
@@ -309,8 +311,8 @@ impl Render for TopologyView<'_> {
 }
 
 /// The locator column for an answered node: root-doc locators verbatim;
-/// where the doc declared none (normal on zenoh 1.10+ loopback-only nodes,
-/// eclipse-zenoh/zenoh#2671), the link-corroborated endpoints ride with
+/// where the doc declared none (possible on zenoh 1.10+ loopback-only
+/// nodes, eclipse-zenoh/zenoh#2671), the link-corroborated endpoints ride with
 /// their provenance labelled — never folded into the locator claim — and
 /// a node no link names says so rather than rendering blank.
 fn locator_cell(n: &zenkey_fleet::TopologyNode) -> String {
