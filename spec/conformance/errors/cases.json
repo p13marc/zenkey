@@ -371,6 +371,52 @@
    "expect": {
     "refused": "decode"
    }
+  },
+  {
+   "name": "json-app-no-detail",
+   "encoding": "application/json",
+   "text": "{\"code\": \"app\", \"message\": \"plan rejected\"}",
+   "expect": {
+    "code": "app",
+    "message": "plan rejected",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "json-app-raw-detail",
+   "encoding": "application/json",
+   "text": "{\"code\": \"app\", \"message\": \"camera fault\", \"detail\": \"/9j/4A==\"}",
+   "expect": {
+    "code": "app",
+    "message": "camera fault",
+    "cause": null,
+    "detail": "/9j/4A=="
+   }
+  },
+  {
+   "name": "pb-app-no-detail",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a03617070120872656a6563746564",
+   "expect": {
+    "code": "app",
+    "message": "rejected",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "pb-app-empty-detail",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a03617070120872656a65637465642200",
+   "expect": {
+    "code": "app",
+    "message": "rejected",
+    "cause": null,
+    "detail": {
+     "bytes_hex": ""
+    }
+   }
   }
  ]
 }
