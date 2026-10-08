@@ -26,6 +26,14 @@ pub struct ServiceConfig {
     /// Role bindings, by role name (R1, R2).
     #[serde(default)]
     pub bindings: BTreeMap<String, Binding>,
+    /// The tombstone window, in seconds (S3): 60 unless set. For state an
+    /// archive records, at least the longest outage expected between them.
+    #[serde(default)]
+    pub tombstone_window_s: Option<u64>,
+    /// A router-stamped key this owner watches to detect its own clock
+    /// running ahead (§4.3, "Ahead"). Unset: no detection.
+    #[serde(default)]
+    pub clock_reference: Option<String>,
     /// Facts about this run that live in the descriptor only (§1.5): host,
     /// build, and anything else the deployment records.
     #[serde(default)]
@@ -55,6 +63,8 @@ impl ServiceConfig {
             tokenless: BTreeSet::new(),
             capabilities: BTreeSet::new(),
             bindings: BTreeMap::new(),
+            tombstone_window_s: None,
+            clock_reference: None,
             meta: BTreeMap::new(),
         }
     }

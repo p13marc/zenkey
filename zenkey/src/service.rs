@@ -41,6 +41,7 @@ use crate::descriptor;
 use crate::error::{Error, Result, zenoh};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
+use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
 use crate::writer::{EventWriter, Writer};
 
 /// One implemented interface, and what this instance does with it.
@@ -75,6 +76,10 @@ pub struct ServiceBuilder {
     instance: InstanceId,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
+    minter: Arc<Minter>,
+    store: Arc<Store>,
+    /// Interfaces whose state this service answers GETs for (S2).
+    state_ifaces: BTreeSet<IfaceId>,
 }
 
 fn mint() -> InstanceId {
@@ -101,13 +106,60 @@ impl ServiceBuilder {
     /// freshly minted instance id (§1.5).
     #[must_use]
     pub fn new(session: &zenoh::Session, config: ServiceConfig) -> Self {
+        let window = config
+            .tombstone_window_s
+            .map_or(DEFAULT_WINDOW, std::time::Duration::from_secs);
         Self {
             session: session.clone(),
             config,
             instance: mint(),
             impls: Vec::new(),
             roles: Vec::new(),
+            minter: Arc::new(Minter::new(session)),
+            store: Arc::new(Store::new(window)),
+            state_ifaces: BTreeSet::new(),
         }
+    }
+
+    /// The service's state stamp minter (§4.3): catch-up before the first
+    /// write goes through it.
+    #[must_use]
+    pub fn minter(&self) -> &Arc<Minter> {
+        &self.minter
+    }
+
+    /// A [`StateWriter`] on a state member: stamped puts and deletes (S1),
+    /// answered by the service's state queryables (S2, S3), which `start`
+    /// declares for this interface. Exposes the resource.
+    pub async fn declare_state_writer(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<StateWriter> {
+        let key = self.key(iface, resource, values)?;
+        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
+            return Err(Error::Contract(format!(
+                "{iface} {resource:?} is not state"
+            )));
+        }
+        self.expose(iface, resource)?;
+        self.state_ifaces.insert(iface.clone());
+        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values).await?;
+        Ok(StateWriter::new(
+            w,
+            Arc::clone(&self.store),
+            Arc::clone(&self.minter),
+        ))
+    }
+
+    /// Answers state GETs for `iface` (S2) although its writers come later,
+    /// through [`Service::state_writer`].
+    pub fn serve_state(&mut self, iface: &IfaceId) -> Result<&mut Self> {
+        find(&self.impls, iface)?;
+        self.state_ifaces.insert(iface.clone());
+        Ok(self)
     }
 
     /// The instance id this service will come up with.
@@ -344,13 +396,24 @@ impl ServiceBuilder {
             members: BTreeMap::new(),
             descriptor_q: None,
             contract_qs: Vec::new(),
+            state_qs: BTreeMap::new(),
+            clock: None,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
             instance: self.instance,
             impls: self.impls,
             roles: self.roles,
+            minter: self.minter,
+            store: self.store,
         };
+        // 1. (continued) The state queryables, with the other resources.
+        for iface in &self.state_ifaces {
+            svc.ensure_state_server(iface).await?;
+        }
+        if let Some(key) = svc.config.clock_reference.clone() {
+            svc.clock = Some(ClockGuard::start(&svc.session, &key, Arc::clone(&svc.minter)).await?);
+        }
         // 3. The descriptor, then the contracts.
         let (q, current) = svc.serve_descriptor(&svc.instance.clone()).await?;
         svc.descriptor = current;
@@ -462,12 +525,16 @@ pub struct Service {
     members: BTreeMap<(IfaceId, String), (InstanceId, LivelinessToken)>,
     descriptor_q: Option<Queryable<()>>,
     contract_qs: Vec<Queryable<()>>,
+    state_qs: BTreeMap<IfaceId, Vec<Queryable<()>>>,
+    clock: Option<ClockGuard>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
     instance: InstanceId,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
+    minter: Arc<Minter>,
+    store: Arc<Store>,
 }
 
 impl Service {
@@ -510,6 +577,67 @@ impl Service {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
         Writer::declare(&self.session, key.into_keyexpr(), &r, values).await
+    }
+
+    /// A [`StateWriter`] on a member of an exposed state resource, for
+    /// templates whose members appear while the service runs. The
+    /// interface's state queryables are declared on first use.
+    pub async fn state_writer(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<StateWriter> {
+        let r = self.exposed(iface, resource)?;
+        if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
+            return Err(Error::Contract(format!(
+                "{iface} {resource:?} is not state"
+            )));
+        }
+        self.ensure_state_server(iface).await?;
+        let key = self.key(iface, resource, values)?;
+        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values).await?;
+        Ok(StateWriter::new(
+            w,
+            Arc::clone(&self.store),
+            Arc::clone(&self.minter),
+        ))
+    }
+
+    /// The service's state stamp minter (§4.3).
+    #[must_use]
+    pub fn minter(&self) -> &Arc<Minter> {
+        &self.minter
+    }
+
+    /// Declares `iface`'s state queryables, once: one over `state/**` and
+    /// one over `@state/**` where the contract has such resources (S2).
+    async fn ensure_state_server(&mut self, iface: &IfaceId) -> Result<()> {
+        if self.state_qs.contains_key(iface) {
+            return Ok(());
+        }
+        let s = find(&self.impls, iface)?;
+        let mut qs = Vec::new();
+        for token in [KindToken::State, KindToken::ExplicitState] {
+            if !s.imp.contract().resources.iter().any(|r| r.token == token) {
+                continue;
+            }
+            let ke = OwnedKeyExpr::try_from(format!(
+                "zk2/{}/{}/{iface}/{token}/**",
+                self.config.address.system, self.config.address.service
+            ))
+            .map_err(zenoh)?;
+            let store = Arc::clone(&self.store);
+            qs.push(
+                self.session
+                    .declare_queryable(ke)
+                    .callback(move |q| store.answer(&q))
+                    .await
+                    .map_err(zenoh)?,
+            );
+        }
+        self.state_qs.insert(iface.clone(), qs);
+        Ok(())
     }
 
     /// An [`EventWriter`] on a member of an exposed event.

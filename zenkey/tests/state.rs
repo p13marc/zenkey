@@ -1,5 +1,9 @@
-//! `spec/scenarios/state.md` (spec §4, §2.6). §8 (events replay) is the
-//! streams chunk's (#619); the state rules S1–S7 join it with #620.
+//! `spec/scenarios/state.md` §1–§9 (spec §4, §2.6).
+//!
+//! Common setup: an owner `ground/fleet-mgr` with the state template
+//! `plans/{vehicle}`; a consumer `vehicle-01/executor` bound with
+//! `{vehicle} = self.system`. Routers R1 (ground) and R2 (vehicle) are
+//! linked through a [`common::Link`] the archive scenarios cut and heal.
 
 mod common;
 
@@ -7,10 +11,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use common::{T, client, config, contract, eventually, imp, router};
-use zenkey::ServiceBuilder;
+use common::{T, client, config, contract, eventually, imp, link_to, router, router_via};
+use zenkey::archive::{self, Archive, ArchiveConfig, Recorded};
+use zenkey::consumer::Consumer;
 use zenkey::model::grammar::IfaceId;
 use zenkey::model::template::Bindings;
+use zenkey::state::{Current, StateGet, StateWriter, ValueOrder};
+use zenkey::{Service, ServiceBuilder};
 use zenoh::Wait;
 use zenoh::bytes::Encoding;
 use zenoh::key_expr::OwnedKeyExpr;
@@ -115,4 +122,531 @@ async fn s8_events_replay() {
         got.iter()
             .all(|d| d.sample.payload().to_bytes().starts_with(b"new"))
     );
+}
+
+fn plan() -> IfaceId {
+    "mission_plan.v1".parse().unwrap()
+}
+
+fn vehicle(v: &str) -> Bindings {
+    [("vehicle".to_owned(), vec![v.to_owned()])].into()
+}
+
+const ORIGIN: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01";
+
+/// The owner, serving `plans/{vehicle}`, with writers for `vehicles`.
+async fn fleet_mgr(
+    s: &zenoh::Session,
+    window_s: Option<u64>,
+    vehicles: &[&str],
+) -> (Service, BTreeMap<String, StateWriter>) {
+    let mut cfg = config("ground/fleet-mgr");
+    cfg.tombstone_window_s = window_s;
+    let mut b = ServiceBuilder::new(s, cfg);
+    b.implement(imp("mission_plan.v1")).unwrap();
+    b.expose(&plan(), "state/plans/{vehicle}").unwrap();
+    b.serve_state(&plan()).unwrap();
+    let mut svc = b.start().await.unwrap();
+    let mut w = BTreeMap::new();
+    for v in vehicles {
+        w.insert(
+            (*v).to_owned(),
+            svc.state_writer(&plan(), "state/plans/{vehicle}", &vehicle(v))
+                .await
+                .unwrap(),
+        );
+    }
+    (svc, w)
+}
+
+/// A consumer of `plan`, bound to the fleet manager, with `{vehicle} =
+/// self.system` when `own_slice`.
+async fn executor(s: &zenoh::Session, own_slice: bool) -> (Service, Consumer) {
+    let mut cfg = config("vehicle-01/executor").bind("plan", &["ground/fleet-mgr"]);
+    if own_slice {
+        cfg.bindings
+            .get_mut("plan")
+            .unwrap()
+            .params
+            .insert("vehicle".to_owned(), "self.system".to_owned());
+    }
+    let mut b = ServiceBuilder::new(s, cfg);
+    b.require("plan", plan(), false);
+    let svc = b.start().await.unwrap();
+    let c = svc
+        .consumer("plan", Arc::new(contract("mission_plan.v1")))
+        .unwrap();
+    (svc, c)
+}
+
+async fn answered(c: &Consumer, values: Option<&Bindings>) -> Vec<Current> {
+    match c.get("state/plans/{vehicle}", values, T).await.unwrap() {
+        StateGet::Answered(v) => v,
+        StateGet::Silent => panic!("the owner did not answer"),
+    }
+}
+
+/// §1: every mutation, the delete included, carries the owner's stamp,
+/// increasing; a GET after v2 returns v2 with v2's stamp.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s1_stamped_mutations() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let got: Arc<Mutex<Vec<Sample>>> = Arc::default();
+    let g = Arc::clone(&got);
+    let _sub = c
+        .subscribe("state/plans/{vehicle}", move |d| {
+            g.lock().unwrap().push(d.sample)
+        })
+        .await
+        .unwrap();
+    let w = &w["vehicle-01"];
+    eventually("subscribed", || async {
+        w.writer().matching().await.unwrap()
+    })
+    .await;
+    let t1 = w.put("v1").await.unwrap();
+    let t2 = w.put("v2").await.unwrap();
+    let now = answered(&c, None).await;
+    assert_eq!(now.len(), 1);
+    assert!(
+        matches!(&now[0], Current::Value { sample, .. } if &*sample.payload().to_bytes() == b"v2")
+    );
+    assert_eq!(now[0].timestamp(), Some(t2), "v2 with v2's stamp");
+    let t3 = w.delete().await.unwrap();
+    eventually("three mutations", || async {
+        got.lock().unwrap().len() == 3
+    })
+    .await;
+    let got = got.lock().unwrap();
+    let stamps: Vec<_> = got
+        .iter()
+        .map(|s| *s.timestamp().expect("stamped"))
+        .collect();
+    assert_eq!(stamps, [t1, t2, t3]);
+    assert!(stamps.windows(2).all(|p| p[0] < p[1]));
+    let zid = owner.zid().to_string();
+    assert!(
+        stamps.iter().all(|t| t.get_id().to_string() == zid),
+        "the owner's zid, not a router's"
+    );
+    assert_eq!(got[2].kind(), zenoh::sample::SampleKind::Delete);
+}
+
+/// §2: within the window, a deleted key answers `reply_del` with the
+/// deletion's stamp, alone and inside the collection.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s2_deletes_inside_the_window_and_the_collection() {
+    let (_r1, ep) = router(None).await;
+    let (_mgr, w) = fleet_mgr(&client(&ep).await, None, &["a", "b"]).await;
+    let (_ex, c) = executor(&client(&ep).await, false).await;
+    w["a"].put("pa").await.unwrap();
+    w["b"].put("pb").await.unwrap();
+    let del = w["b"].delete().await.unwrap();
+    let b = answered(&c, Some(&vehicle("b"))).await;
+    assert!(
+        matches!(&b[..], [Current::Deleted { timestamp: Some(t), .. }] if *t == del),
+        "{b:?}"
+    );
+    let all = answered(&c, None).await;
+    let by_key: BTreeMap<&str, &Current> = all.iter().map(|c| (c.key(), c)).collect();
+    assert_eq!(by_key.len(), 2);
+    assert!(matches!(
+        by_key["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/a"],
+        Current::Value { .. }
+    ));
+    assert!(matches!(
+        by_key["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/b"],
+        Current::Deleted { .. }
+    ));
+}
+
+/// §3 (step 2): the consumer's GET (`All` + `Latest`, set explicitly by
+/// `Consumer::get`) is answered by the owner alone. Step 1, the storage
+/// finding read from the routers' admin space, is a tool's (`zenctl
+/// doctor`, #612).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s3_the_owner_is_authoritative() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let t = w["vehicle-01"].put("mine").await.unwrap();
+    let now = answered(&c, None).await;
+    assert_eq!(now.len(), 1, "one answer: the owner's");
+    assert_eq!(now[0].timestamp(), Some(t));
+    assert_eq!(t.get_id().to_string(), owner.zid().to_string());
+}
+
+/// Two sites: the ground (R1) with the owner, the vehicle (R2) with its
+/// archive and the executor, linked by a cuttable link.
+struct Sites {
+    link: common::Link,
+    ground: zenoh::Session,
+    vehicle: zenoh::Session,
+    _routers: (zenoh::Session, zenoh::Session),
+}
+
+async fn sites() -> Sites {
+    let (r1, ep1) = router(None).await;
+    let link = link_to(&ep1).await;
+    let (r2, ep2) = router_via(&link).await;
+    Sites {
+        ground: client(&ep1).await,
+        vehicle: client(&ep2).await,
+        link,
+        _routers: (r1, r2),
+    }
+}
+
+fn recorded(selector: &str) -> Recorded {
+    Recorded {
+        owner: common::addr("ground/fleet-mgr"),
+        selector: selector.to_owned(),
+        implementation: imp("mission_plan.v1"),
+    }
+}
+
+async fn vehicle_archive(s: &zenoh::Session, peers: &[&str]) -> Archive {
+    Archive::start(
+        s,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![recorded(ORIGIN)],
+            peers: peers.iter().map(|p| common::addr(p)).collect(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+async fn wait_owner_seen(s: &zenoh::Session, present: bool) {
+    eventually(
+        if present {
+            "the owner is visible"
+        } else {
+            "the owner is gone"
+        },
+        || async {
+            zenkey::presence::liveliness_keys(s, "zk2/ground/fleet-mgr/@zk/instance/*", T)
+                .await
+                .unwrap()
+                .is_empty()
+                != present
+        },
+    )
+    .await;
+}
+
+/// §4: with the link cut, the owner is silent; the archive gives v3 with
+/// its stamp and type identity, as last-known.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s4_last_known_from_an_archive() {
+    let x = sites().await;
+    let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
+    let arch = vehicle_archive(&x.vehicle, &[]).await;
+    let (_ex, c) = executor(&x.vehicle, true).await;
+    wait_owner_seen(&x.vehicle, true).await;
+    eventually("the archive records", || async {
+        w["vehicle-01"].put("v2").await.unwrap();
+        arch.confirmed(ORIGIN) == Some(true)
+    })
+    .await;
+    // v3, once, and the archive holding exactly it before the cut.
+    let t3 = Some(w["vehicle-01"].put("v3").await.unwrap());
+    eventually("the archive recorded v3", || async {
+        archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
+            .await
+            .unwrap()
+            .is_some_and(|l| l.timestamp == t3)
+    })
+    .await;
+    x.link.cut();
+    wait_owner_seen(&x.vehicle, false).await;
+    assert!(matches!(
+        c.get("state/plans/{vehicle}", None, T).await.unwrap(),
+        StateGet::Silent
+    ));
+    let lk = archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
+        .await
+        .unwrap()
+        .expect("the archive answers");
+    assert_eq!(lk.value.as_deref(), Some(&b"v3"[..]));
+    assert_eq!(lk.timestamp, t3);
+    assert_eq!(lk.identity["iface"], "mission_plan.v1");
+    assert_eq!(
+        lk.identity["contract"],
+        zenkey::Implementation::new(contract("mission_plan.v1"))
+            .fingerprint()
+            .to_string()
+    );
+    assert_eq!(lk.identity["type"]["kind"], "raw");
+}
+
+/// §5: alignment after reconnect drops a key only on a `reply_del`, keeps
+/// it unconfirmed on an empty reply set, and aligns from an owner-side
+/// archive while the owner is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_alignment_after_reconnect() {
+    let lk = |s: &zenoh::Session| {
+        let s = s.clone();
+        async move {
+            archive::last_known(&s, &common::addr("vehicle-01/archive"), ORIGIN, T)
+                .await
+                .unwrap()
+        }
+    };
+    // 1. Deleted during the cut, within W: dropped after the heal.
+    {
+        let x = sites().await;
+        let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
+        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        wait_owner_seen(&x.vehicle, true).await;
+        eventually("recorded", || async {
+            w["vehicle-01"].put("p").await.unwrap();
+            arch.confirmed(ORIGIN) == Some(true)
+        })
+        .await;
+        x.link.cut();
+        wait_owner_seen(&x.vehicle, false).await;
+        w["vehicle-01"].delete().await.unwrap();
+        x.link.heal();
+        eventually("dropped on the owner's reply_del", || async {
+            lk(&x.vehicle).await.is_some_and(|l| l.value.is_none())
+        })
+        .await;
+    }
+    // 2. The same, but the archive's read is refused once: nothing dropped,
+    //    served unconfirmed.
+    {
+        let x = sites().await;
+        let (_mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
+        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        wait_owner_seen(&x.vehicle, true).await;
+        eventually("recorded", || async {
+            w["vehicle-01"].put("p").await.unwrap();
+            arch.confirmed(ORIGIN) == Some(true)
+        })
+        .await;
+        x.link.cut();
+        wait_owner_seen(&x.vehicle, false).await;
+        w["vehicle-01"].delete().await.unwrap();
+        // The access control refuses the archive's reads, its retries included.
+        arch.refuse_next_reads(u32::MAX);
+        x.link.heal();
+        eventually("kept, unconfirmed", || async {
+            arch.confirmed(ORIGIN) == Some(false)
+        })
+        .await;
+        let l = lk(&x.vehicle).await.expect("still served");
+        assert_eq!(l.value.as_deref(), Some(&b"p"[..]));
+        assert!(!l.confirmed);
+    }
+    // 3. The owner is gone; an archive on its side recorded the delete.
+    {
+        let x = sites().await;
+        let (mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
+        let _ground_arch = Archive::start(
+            &x.ground,
+            ArchiveConfig {
+                service: config("ground/archive"),
+                records: vec![recorded(
+                    "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*",
+                )],
+                peers: vec![],
+                unconfirmed_horizon: None,
+            },
+        )
+        .await
+        .unwrap();
+        let arch = vehicle_archive(&x.vehicle, &["ground/archive"]).await;
+        wait_owner_seen(&x.vehicle, true).await;
+        eventually("recorded", || async {
+            w["vehicle-01"].put("p").await.unwrap();
+            arch.confirmed(ORIGIN) == Some(true)
+        })
+        .await;
+        x.link.cut();
+        wait_owner_seen(&x.vehicle, false).await;
+        w["vehicle-01"].delete().await.unwrap();
+        drop(w);
+        mgr.close().await.unwrap();
+        x.link.heal();
+        eventually("dropped on the owner-side archive's reply_del", || async {
+            lk(&x.vehicle).await.is_some_and(|l| l.value.is_none())
+        })
+        .await;
+    }
+}
+
+/// §6: a delete during an outage longer than the window is answered after
+/// the heal only when the window covers the outage.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s6_a_window_shorter_than_the_outage() {
+    for (window, dropped) in [(5u64, true), (1u64, false)] {
+        let x = sites().await;
+        let (_mgr, w) = fleet_mgr(&x.ground, Some(window), &["vehicle-01"]).await;
+        let arch = vehicle_archive(&x.vehicle, &[]).await;
+        wait_owner_seen(&x.vehicle, true).await;
+        eventually("recorded", || async {
+            w["vehicle-01"].put("p").await.unwrap();
+            arch.confirmed(ORIGIN) == Some(true)
+        })
+        .await;
+        x.link.cut();
+        wait_owner_seen(&x.vehicle, false).await;
+        w["vehicle-01"].delete().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        x.link.heal();
+        wait_owner_seen(&x.vehicle, true).await;
+        let lk = || async {
+            archive::last_known(&x.vehicle, &common::addr("vehicle-01/archive"), ORIGIN, T)
+                .await
+                .unwrap()
+                .unwrap()
+        };
+        if dropped {
+            eventually(
+                "W covers the outage: dropped on the owner's reply_del",
+                || async { lk().await.value.is_none() },
+            )
+            .await;
+        } else {
+            eventually("aligned, unconfirmed", || async {
+                arch.confirmed(ORIGIN) == Some(false)
+            })
+            .await;
+            // The retries run their course; no evidence ever comes.
+            tokio::time::sleep(Duration::from_secs(4)).await;
+            let l = lk().await;
+            assert_eq!(
+                l.value.as_deref(),
+                Some(&b"p"[..]),
+                "W = {window}s: no evidence, kept"
+            );
+            assert!(!l.confirmed);
+        }
+    }
+}
+
+/// A session with a pinned zid, as an owner that must catch up uses.
+async fn pinned(ep: &str, id: &str) -> zenoh::Session {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", "\"client\"").unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
+        .unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
+        .unwrap();
+    c.insert_json5("id", &format!("\"{id}\"")).unwrap();
+    zenoh::open(c).await.unwrap()
+}
+
+/// §7: catch-up keeps one id's stamps increasing across a restart with the
+/// clock behind; a new epoch is accepted under its new id; an owner ahead of
+/// its router stops writing state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_clocks() {
+    let (_r1, ep) = router(None).await;
+    let key = ORIGIN;
+    // 1. Catch-up: rev 10, a restart 5 s behind, the record read, rev 11.
+    let mut order = ValueOrder::new();
+    let (t10, record) = {
+        let s = pinned(&ep, "a1b2c3d4e5f60718").await;
+        let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+        let t = w["vehicle-01"].put("rev10").await.unwrap();
+        let rec = mgr.minter().last().unwrap();
+        drop(w);
+        mgr.close().await.unwrap();
+        s.close().await.unwrap();
+        (t, rec)
+    };
+    assert!(order.accept(key, &t10));
+    let t11 = {
+        let s = pinned(&ep, "a1b2c3d4e5f60718").await;
+        let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+        mgr.minter().simulate_offset(-5000);
+        mgr.minter().catch_up(record);
+        let t = w["vehicle-01"].put("rev11").await.unwrap();
+        drop(w);
+        mgr.close().await.unwrap();
+        t
+    };
+    assert_eq!(t11.get_id(), t10.get_id());
+    assert!(t11 > t10, "above rev 10's stamp");
+    assert!(order.accept(key, &t11), "the consumer applies it");
+
+    // 2. New epoch: no record, a fresh zid, 5 s behind.
+    let s = client(&ep).await;
+    let (mgr, w) = fleet_mgr(&s, None, &["vehicle-01"]).await;
+    mgr.minter().simulate_offset(-5000);
+    let t11b = w["vehicle-01"].put("rev11").await.unwrap();
+    assert_ne!(t11b.get_id(), t10.get_id(), "a new timestamp id");
+    assert!(t11b.get_time() < t11.get_time(), "older by the clock");
+    assert!(
+        order.accept(key, &t11b),
+        "the first value under a new id is accepted"
+    );
+    drop(w);
+    mgr.close().await.unwrap();
+
+    // 3. Ahead: 2 s ahead of the router, which stamps a heartbeat.
+    let hb = client(&ep).await;
+    let s = client(&ep).await;
+    let mut cfg = config("ground/fleet-mgr");
+    cfg.clock_reference = Some("clock/heartbeat".to_owned());
+    let mut b = ServiceBuilder::new(&s, cfg);
+    b.implement(imp("mission_plan.v1")).unwrap();
+    b.minter().simulate_offset(2000);
+    let w = b
+        .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
+        .await
+        .unwrap();
+    let mgr = b.start().await.unwrap();
+    eventually("the drift is detected", || async {
+        hb.put("clock/heartbeat", "tick").await.unwrap();
+        mgr.minter().is_ahead()
+    })
+    .await;
+    assert!(
+        matches!(w.put("late").await, Err(zenkey::Error::ClockAhead)),
+        "state writes stop"
+    );
+}
+
+/// §9: an archive that holds a delete refuses an older put arriving late.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_an_archives_backend_refuses_an_outdated_put() {
+    let (_r1, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
+    let arch_s = client(&ep).await;
+    let arch = vehicle_archive(&arch_s, &[]).await;
+    let w = &w["vehicle-01"];
+    let t1 = Arc::new(Mutex::new(None));
+    eventually("recorded v1", || async {
+        *t1.lock().unwrap() = Some(w.put("v1").await.unwrap());
+        arch.confirmed(ORIGIN) == Some(true)
+    })
+    .await;
+    let t1 = t1.lock().unwrap().unwrap();
+    w.delete().await.unwrap();
+    eventually("recorded the delete", || async {
+        archive::last_known(&arch_s, &common::addr("vehicle-01/archive"), ORIGIN, T)
+            .await
+            .unwrap()
+            .is_some_and(|l| l.value.is_none())
+    })
+    .await;
+    // An older put (T0 < T2) reaches the archive late.
+    let t0 = zenoh::time::Timestamp::new(*t1.get_time() - 1, *t1.get_id());
+    owner.put(ORIGIN, "v0").timestamp(t0).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let l = archive::last_known(&arch_s, &common::addr("vehicle-01/archive"), ORIGIN, T)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(l.value.is_none(), "a tombstone, never the older value");
 }

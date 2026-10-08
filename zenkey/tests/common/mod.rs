@@ -119,3 +119,81 @@ where
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+/// A link between two routers that a test can cut and heal: a TCP proxy on
+/// an ephemeral port. Cutting closes every forwarded connection and refuses
+/// new ones until healed, so zenoh sees the link drop at once.
+pub struct Link {
+    endpoint: String,
+    cut: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
+    _accept: tokio::task::JoinHandle<()>,
+}
+
+impl Link {
+    /// The endpoint the downstream router connects to.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn cut(&self) {
+        self.cut.store(true, std::sync::atomic::Ordering::SeqCst);
+        for c in self.conns.lock().unwrap().drain(..) {
+            c.abort();
+        }
+    }
+
+    pub fn heal(&self) {
+        self.cut.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// A [`Link`] forwarding to `upstream` (`tcp/127.0.0.1:<port>`).
+pub async fn link_to(upstream: &str) -> Link {
+    use std::sync::atomic::Ordering;
+    let target = upstream.trim_start_matches("tcp/").to_owned();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
+    let cut = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let conns: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Default::default();
+    let (c, cs) = (std::sync::Arc::clone(&cut), std::sync::Arc::clone(&conns));
+    let accept = tokio::spawn(async move {
+        while let Ok((mut down, _)) = listener.accept().await {
+            if c.load(Ordering::SeqCst) {
+                continue;
+            }
+            let Ok(mut up) = tokio::net::TcpStream::connect(&target).await else {
+                continue;
+            };
+            let h = tokio::spawn(async move {
+                let _ = tokio::io::copy_bidirectional(&mut down, &mut up).await;
+            });
+            cs.lock().unwrap().push(h.abort_handle());
+        }
+    });
+    Link {
+        endpoint,
+        cut,
+        conns,
+        _accept: accept,
+    }
+}
+
+/// A router connected to `upstream` through `link`, retrying fast after a
+/// cut (100 ms, at most 500 ms between attempts).
+pub async fn router_via(link: &Link) -> (zenoh::Session, String) {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"router\"").unwrap();
+    c.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")
+        .unwrap();
+    c.insert_json5("connect/endpoints", &format!("[\"{}\"]", link.endpoint()))
+        .unwrap();
+    c.insert_json5(
+        "connect/retry",
+        "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
+    )
+    .unwrap();
+    let r = zenoh::open(c).await.expect("router");
+    let ep = bound(&r).await;
+    (r, ep)
+}
