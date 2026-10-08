@@ -41,13 +41,14 @@ use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
 use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId, ZkKey};
-use zenkey_model::schema::TypeId;
+use zenkey_model::schema::{ArtifactData, TypeId};
 
 use crate::report::{
     Asked, BindingGraph, ContractAnswer, ContractSource, ContractView, DescriptorAnswer, GraphEdge,
-    GraphNode, GraphRole, IfaceConsumer, IfaceProvider, IfaceRevision, IfaceSighting, IfaceView,
-    InstanceRef, InstanceSighting, MemberSighting, RequirementView, ResourceBody, ResourceView,
-    SchemaArtifact, ServiceListing, ServiceSighting, TypeView,
+    GraphNode, GraphRole, IfaceConsumer, IfaceListing, IfaceProvider, IfaceRevision, IfaceSighting,
+    IfaceSummary, IfaceView, InstanceRef, InstanceSighting, MemberSighting, NamespaceListing,
+    NamespaceSighting, RequirementView, ResourceBody, ResourceView, SchemaArtifact, SchemaDocument,
+    SchemaMember, SchemaView, ServiceListing, ServiceSighting, ServiceView, TypeView,
 };
 
 // ─── what presence brought back ─────────────────────────────────────────────
@@ -271,6 +272,230 @@ impl Revision {
                 .collect(),
         }
     }
+
+    /// `schema show`: every member's type and the artifacts they live in,
+    /// for the whole revision or one resource — named in full
+    /// (`stream/bandwidth/{ns}/{iface}`) or by its template when only one
+    /// resource has it. With `documents`, each artifact's document rides
+    /// along ([`SchemaDocument::document`]).
+    ///
+    /// The error is a sentence naming the resources there are: a resource
+    /// the revision does not declare is the caller's input to fix.
+    pub fn schema_view(
+        &self,
+        resource: Option<&str>,
+        documents: bool,
+    ) -> Result<SchemaView, String> {
+        let c = &*self.contract;
+        let selected: Vec<&Resource> = match resource {
+            None => c.resources.iter().collect(),
+            Some(want) => {
+                let exact: Vec<&Resource> = c
+                    .resources
+                    .iter()
+                    .filter(|r| zk2::implementation::resource_name(r) == want)
+                    .collect();
+                let by_template: Vec<&Resource> = c
+                    .resources
+                    .iter()
+                    .filter(|r| r.template.as_str() == want)
+                    .collect();
+                match (exact.as_slice(), by_template.as_slice()) {
+                    ([r], _) | ([], [r]) => vec![*r],
+                    ([], []) => {
+                        let names: Vec<String> = c
+                            .resources
+                            .iter()
+                            .map(zk2::implementation::resource_name)
+                            .collect();
+                        return Err(format!(
+                            "{} declares no resource {want:?}; it declares: {}",
+                            c.iface,
+                            names.join(", ")
+                        ));
+                    }
+                    (_, several) => {
+                        let names: Vec<String> = several
+                            .iter()
+                            .map(|r| zk2::implementation::resource_name(r))
+                            .collect();
+                        return Err(format!(
+                            "{want:?} is the template of more than one resource of {}: {} — \
+                             name one with its kind token",
+                            c.iface,
+                            names.join(", ")
+                        ));
+                    }
+                }
+            }
+        };
+        let members: Vec<SchemaMember> = selected.iter().flat_map(|r| members_of(r)).collect();
+        let wanted: BTreeSet<&str> = match resource {
+            None => c.artifacts.keys().map(String::as_str).collect(),
+            Some(_) => members
+                .iter()
+                .filter_map(|m| m.type_.schema.as_deref())
+                .collect(),
+        };
+        let artifacts = c
+            .artifacts
+            .iter()
+            .filter(|(id, _)| wanted.contains(id.as_str()))
+            .map(|(id, a)| SchemaDocument {
+                id: id.clone(),
+                kind: a.kind.as_str().to_owned(),
+                name: a.name.clone(),
+                document: if documents {
+                    Asked::Asked(artifact_document(&a.data))
+                } else {
+                    Asked::NotAsked
+                },
+            })
+            .collect();
+        Ok(SchemaView {
+            iface: c.iface.to_string(),
+            fingerprint: self.fingerprint.to_string(),
+            source: self.source,
+            resource: selected
+                .first()
+                .filter(|_| resource.is_some())
+                .map(|r| zk2::implementation::resource_name(r)),
+            members,
+            artifacts,
+        })
+    }
+}
+
+/// Every member of a resource that names a type, in the spec's order.
+fn members_of(r: &Resource) -> Vec<SchemaMember> {
+    let resource = zk2::implementation::resource_name(r);
+    let named: Vec<(&str, Option<&TypeId>)> = match &r.body {
+        Body::Data(d) => vec![
+            ("type", Some(&d.type_)),
+            ("attachment", d.attachment.as_ref()),
+        ],
+        Body::Operation(o) => vec![
+            ("request", Some(&o.request)),
+            ("response", Some(&o.response)),
+            ("error", o.error.as_ref()),
+            ("summary", o.summary.as_ref()),
+        ],
+    };
+    named
+        .into_iter()
+        .filter_map(|(member, t)| {
+            Some(SchemaMember {
+                resource: resource.clone(),
+                member: member.to_owned(),
+                type_: type_view(t?),
+            })
+        })
+        .collect()
+}
+
+/// An artifact as a document a person or a script can read: a JSON Schema
+/// as it is carried, a protobuf descriptor set as its files, messages and
+/// enums. A set that does not decode says so in the document, never by
+/// vanishing.
+fn artifact_document(data: &ArtifactData) -> serde_json::Value {
+    match data {
+        ArtifactData::Json(v) => v.clone(),
+        ArtifactData::Protobuf(bytes) => match prost_reflect::DescriptorPool::decode(&bytes[..]) {
+            Ok(pool) => serde_json::json!({
+                "files": pool.files().map(|f| serde_json::json!({
+                    "name": f.name(),
+                    "package": f.package_name(),
+                    "messages": f.messages().flat_map(|m| message_docs(&m)).collect::<Vec<_>>(),
+                    "enums": f.enums().map(|e| enum_doc(&e)).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+            }),
+            Err(e) => serde_json::json!({ "unreadable": e.to_string() }),
+        },
+    }
+}
+
+/// One message and every message and enum nested in it, flattened by full
+/// name. A map's synthetic entry message is not a message anyone wrote, so
+/// it is folded into its field's `map<K, V>` type instead.
+fn message_docs(m: &prost_reflect::MessageDescriptor) -> Vec<serde_json::Value> {
+    let fields: Vec<serde_json::Value> = m
+        .fields()
+        .map(|f| {
+            let mut doc = serde_json::json!({
+                "name": f.name(),
+                "number": f.number(),
+                "type": field_type(&f),
+            });
+            let label = if f.is_map() {
+                None
+            } else if f.is_list() {
+                Some("repeated")
+            } else if f.cardinality() == prost_reflect::Cardinality::Required {
+                Some("required")
+            } else if f.supports_presence() && f.containing_oneof().is_none() {
+                Some("optional")
+            } else {
+                None
+            };
+            if let Some(label) = label {
+                doc["label"] = label.into();
+            }
+            if let Some(o) = f.containing_oneof() {
+                doc["oneof"] = o.name().into();
+            }
+            doc
+        })
+        .collect();
+    let mut out = vec![serde_json::json!({ "name": m.full_name(), "fields": fields })];
+    for e in m.child_enums() {
+        out.push(enum_doc(&e));
+    }
+    for child in m.child_messages().filter(|c| !c.is_map_entry()) {
+        out.extend(message_docs(&child));
+    }
+    out
+}
+
+fn enum_doc(e: &prost_reflect::EnumDescriptor) -> serde_json::Value {
+    serde_json::json!({
+        "name": e.full_name(),
+        "values": e.values().map(|v| serde_json::json!({"name": v.name(), "number": v.number()})).collect::<Vec<_>>(),
+    })
+}
+
+fn field_type(f: &prost_reflect::FieldDescriptor) -> String {
+    use prost_reflect::Kind;
+    fn scalar(k: &Kind) -> String {
+        match k {
+            Kind::Double => "double".into(),
+            Kind::Float => "float".into(),
+            Kind::Int32 => "int32".into(),
+            Kind::Int64 => "int64".into(),
+            Kind::Uint32 => "uint32".into(),
+            Kind::Uint64 => "uint64".into(),
+            Kind::Sint32 => "sint32".into(),
+            Kind::Sint64 => "sint64".into(),
+            Kind::Fixed32 => "fixed32".into(),
+            Kind::Fixed64 => "fixed64".into(),
+            Kind::Sfixed32 => "sfixed32".into(),
+            Kind::Sfixed64 => "sfixed64".into(),
+            Kind::Bool => "bool".into(),
+            Kind::String => "string".into(),
+            Kind::Bytes => "bytes".into(),
+            Kind::Message(m) => m.full_name().to_owned(),
+            Kind::Enum(e) => e.full_name().to_owned(),
+        }
+    }
+    if f.is_map()
+        && let Kind::Message(entry) = f.kind()
+    {
+        return format!(
+            "map<{}, {}>",
+            scalar(&entry.map_entry_key_field().kind()),
+            scalar(&entry.map_entry_value_field().kind())
+        );
+    }
+    scalar(&f.kind())
 }
 
 /// A resolved type as the report names it.
@@ -502,6 +727,34 @@ impl ContractSet {
                     message: e.to_string(),
                 }],
             ),
+        }
+    }
+
+    /// Loads whatever `path` is: an authoring file (`*.toml`), a directory
+    /// holding authoring files, or else a `.history` root (§9.7). What a
+    /// directory of authoring files is not — a bindings file beside them —
+    /// is a problem, reported as [`ContractSet::load_dir`] reports it.
+    pub fn load_path(path: &Path) -> (ContractSet, Vec<LoadProblem>) {
+        if path.is_file() {
+            return ContractSet::load_files(&[path]);
+        }
+        let authoring = std::fs::read_dir(path).is_ok_and(|rd| {
+            rd.flatten().any(|e| {
+                let p = e.path();
+                p.is_file() && p.extension().is_some_and(|x| x == "toml")
+            })
+        });
+        if authoring {
+            ContractSet::load_dir(path)
+        } else {
+            ContractSet::load_history(path)
+        }
+    }
+
+    /// Adds every revision of `other`; one already held is kept.
+    pub fn extend(&mut self, other: ContractSet) {
+        for (key, r) in other.revisions {
+            self.revisions.entry(key).or_insert(r);
         }
     }
 
@@ -781,6 +1034,118 @@ impl Catalog {
         }
     }
 
+    /// `service show`: one address, as [`Catalog::services`] shows it. An
+    /// address presence did not show has no instances, and the view says
+    /// whether the read was complete enough for that to mean anything.
+    pub fn service(&self, addr: &Addr) -> ServiceView {
+        let want = addr.to_string();
+        let found = self
+            .services()
+            .services
+            .into_iter()
+            .find(|s| s.address == want);
+        let (instances, members) = found.map_or((vec![], vec![]), |s| (s.instances, s.members));
+        ServiceView {
+            address: want,
+            selector: self.selector.clone(),
+            complete: self.complete,
+            instances,
+            members,
+            unparsed: self.unparsed.clone(),
+        }
+    }
+
+    /// `iface list`: every interface a token or a descriptor names as
+    /// provided, or a descriptor's role requires, with who and at which
+    /// revisions.
+    pub fn ifaces(&self) -> IfaceListing {
+        #[derive(Default)]
+        struct Seen {
+            providers: BTreeSet<String>,
+            consumers: BTreeSet<String>,
+            revisions: BTreeSet<String>,
+            tokenless: bool,
+        }
+        let mut by: BTreeMap<String, Seen> = BTreeMap::new();
+        for (addr, instances) in &self.services {
+            for inst in instances.values() {
+                for row in iface_rows(inst) {
+                    let seen = by.entry(row.iface).or_default();
+                    seen.providers.insert(addr.to_string());
+                    seen.revisions.extend(row.contract);
+                    seen.tokenless |= row.tokenless;
+                }
+                let requires = inst
+                    .descriptor
+                    .as_ref()
+                    .and_then(DescriptorRead::descriptor)
+                    .map(|d| d.requires.as_slice())
+                    .unwrap_or_default();
+                for r in requires {
+                    by.entry(r.interface.clone())
+                        .or_default()
+                        .consumers
+                        .insert(addr.to_string());
+                }
+            }
+        }
+        IfaceListing {
+            selector: self.selector.clone(),
+            complete: self.complete,
+            interfaces: by
+                .into_iter()
+                .map(|(iface, s)| IfaceSummary {
+                    iface,
+                    providers: s.providers.into_iter().collect(),
+                    consumers: s.consumers.into_iter().collect(),
+                    revisions: s.revisions.into_iter().collect(),
+                    tokenless: s.tokenless,
+                })
+                .collect(),
+            undescribed: self.undescribed(),
+        }
+    }
+
+    /// Every fingerprint the descriptors name for `iface`, across every
+    /// address: what an `<iface>@<prefix>` is resolved against.
+    pub fn fingerprints_of(&self, iface: &IfaceId) -> BTreeSet<Fingerprint> {
+        self.services
+            .keys()
+            .flat_map(|addr| self.revisions_of(addr, iface))
+            .collect()
+    }
+
+    /// `iface show <iface>@<fingerprint>`: [`Catalog::iface`] narrowed to
+    /// one revision — the providers whose descriptor names it, or whose
+    /// token carries its prefix when no descriptor was read — and that
+    /// revision's contract even when no provider names it now.
+    pub fn iface_at(
+        &self,
+        iface: &IfaceId,
+        fingerprint: &Fingerprint,
+        contracts: &dyn Contracts,
+    ) -> IfaceView {
+        let mut view = self.iface(iface, contracts);
+        let full = fingerprint.to_string();
+        let prefix = fingerprint.hex().fp16().to_string();
+        view.providers.retain(|p| match &p.contract {
+            Some(c) => *c == full,
+            None => p.token.as_deref() == Some(prefix.as_str()),
+        });
+        view.revisions.retain(|r| r.fingerprint == full);
+        if view.revisions.is_empty() {
+            view.revisions.push(IfaceRevision {
+                fingerprint: full,
+                providers: vec![],
+                contract: contracts
+                    .state(iface, fingerprint)
+                    .map(|s| s.answer())
+                    .into(),
+            });
+        }
+        view
+    }
+
     /// `iface show`: who provides `iface` at which revision, who requires
     /// it, and each revision's contract as `contracts` has it. An empty
     /// [`ContractSet`] asks nothing, and every contract is then absent.
@@ -944,6 +1309,53 @@ impl Catalog {
                 })
             })
             .collect()
+    }
+}
+
+/// `namespace list`: the instance tokens of one un-namespaced read, by the
+/// namespace each sits under — the chunks before its last six, which are
+/// `zk2/<system>/<service>/@zk/instance/<id>`. A key whose last six chunks
+/// are not an instance token is kept verbatim in `unparsed`.
+pub fn namespaces(
+    selector: impl Into<String>,
+    keys: &[String],
+    complete: bool,
+) -> NamespaceListing {
+    let mut by: BTreeMap<String, (BTreeSet<String>, usize)> = BTreeMap::new();
+    let mut unparsed = Vec::new();
+    for key in keys {
+        let chunks: Vec<&str> = key.split('/').collect();
+        let parsed = chunks
+            .len()
+            .checked_sub(6)
+            .map(|at| chunks.split_at(at))
+            .and_then(
+                |(ns, token)| match zenkey_model::grammar::parse(&token.join("/")) {
+                    Ok(ZkKey::Instance { addr, .. }) => Some((ns.join("/"), addr)),
+                    _ => None,
+                },
+            );
+        match parsed {
+            Some((ns, addr)) => {
+                let (services, instances) = by.entry(ns).or_default();
+                services.insert(addr.to_string());
+                *instances += 1;
+            }
+            None => unparsed.push(key.clone()),
+        }
+    }
+    NamespaceListing {
+        selector: selector.into(),
+        complete,
+        namespaces: by
+            .into_iter()
+            .map(|(namespace, (services, instances))| NamespaceSighting {
+                namespace,
+                services: services.into_iter().collect(),
+                instances,
+            })
+            .collect(),
+        unparsed,
     }
 }
 
@@ -1119,6 +1531,180 @@ mod tests {
         let i = &listing.services[0].instances[0];
         assert!(!i.instance_token, "known by its interface token alone");
         assert_eq!(i.interfaces.len(), 2);
+    }
+
+    /// `namespace list`'s projection: the prefix before the last six chunks
+    /// is the namespace (empty at the bus root), and a key whose tail is not
+    /// an instance token is kept, verbatim.
+    #[test]
+    fn namespaces_are_the_prefix_before_the_instance_token() {
+        let inst = "8f3a5c2e9b1d4f70";
+        let keys: Vec<String> = [
+            format!("zk2/host-a/tc/@zk/instance/{inst}"),
+            format!("site/prod/zk2/host-a/tc/@zk/instance/{inst}"),
+            format!("site/prod/zk2/host-a/tc/@zk/instance/{}", "0".repeat(16)),
+            format!("site/prod/zk2/host-b/tc/@zk/instance/{inst}"),
+            "short/key".to_owned(),
+            "x/zk2/host-a/tc/@zk/instance/NOT-HEX".to_owned(),
+        ]
+        .into();
+        let l = namespaces("**/zk2/*/*/@zk/instance/*", &keys, true);
+        let got: Vec<(&str, Vec<&str>, usize)> = l
+            .namespaces
+            .iter()
+            .map(|n| {
+                (
+                    n.namespace.as_str(),
+                    n.services.iter().map(String::as_str).collect(),
+                    n.instances,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("", vec!["host-a/tc"], 1),
+                ("site/prod", vec!["host-a/tc", "host-b/tc"], 3),
+            ]
+        );
+        assert_eq!(l.unparsed.len(), 2, "{:?}", l.unparsed);
+    }
+
+    /// `iface list`: a provider by token and descriptor, a tokenless one, and
+    /// an interface only required — each named once, with who and where.
+    #[test]
+    fn ifaces_name_providers_consumers_and_revisions() {
+        let (a, b) = ("8f3a5c2e9b1d4f70", "0000000000000002");
+        let mut o = observed(&[
+            &format!("zk2/host-a/tc/@zk/instance/{a}"),
+            &format!(
+                "zk2/host-a/tc/@zk/alive/tc.netif.v1/{a}/{}",
+                &NETIF_FP[..16]
+            ),
+            &format!("zk2/ws-01/gui/@zk/instance/{b}"),
+        ]);
+        let health = "cd".repeat(32);
+        o.descriptors = Some(BTreeMap::from([
+            (
+                ("host-a/tc".parse().expect("addr"), a.parse().expect("id")),
+                DescriptorRead::Served(Box::new(descriptor(
+                    "host-a/tc",
+                    a,
+                    json!({"interfaces": [
+                        {"iface": "tc.netif.v1", "contract": format!("sha256:{NETIF_FP}"), "minor": 1},
+                        {"iface": "health.v1", "contract": format!("sha256:{health}"), "minor": 0, "token": false},
+                    ]}),
+                ))),
+            ),
+            (
+                ("ws-01/gui".parse().expect("addr"), b.parse().expect("id")),
+                DescriptorRead::Served(Box::new(descriptor(
+                    "ws-01/gui",
+                    b,
+                    json!({"requires": [
+                        {"role": "netif", "interface": "tc.netif.v1", "bindings": ["*/tc"]},
+                        {"role": "scenario", "interface": "tc.scenario.v1", "bindings": ["*/tc"]},
+                    ]}),
+                ))),
+            ),
+        ]));
+        let c = Catalog::new(&o);
+        let l = c.ifaces();
+        let rows: Vec<(&str, usize, usize, usize, bool)> = l
+            .interfaces
+            .iter()
+            .map(|i| {
+                (
+                    i.iface.as_str(),
+                    i.providers.len(),
+                    i.consumers.len(),
+                    i.revisions.len(),
+                    i.tokenless,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("health.v1", 1, 0, 1, true),
+                ("tc.netif.v1", 1, 1, 1, false),
+                ("tc.scenario.v1", 0, 1, 0, false),
+            ]
+        );
+
+        // One revision: its providers; another nobody names: no providers,
+        // and its contract not asked (an empty set asks nothing).
+        let netif: IfaceId = "tc.netif.v1".parse().expect("iface");
+        let fp = Fingerprint::parse(&format!("sha256:{NETIF_FP}")).expect("fp");
+        let at = c.iface_at(&netif, &fp, &ContractSet::new());
+        assert_eq!(at.providers.len(), 1);
+        assert_eq!(at.consumers.len(), 1);
+        let other = Fingerprint::parse(&format!("sha256:{}", "e".repeat(64))).expect("fp");
+        let at = c.iface_at(&netif, &other, &ContractSet::new());
+        assert!(at.providers.is_empty());
+        assert_eq!(at.revisions.len(), 1);
+        assert!(at.revisions[0].contract.is_not_asked());
+        assert_eq!(c.fingerprints_of(&netif), BTreeSet::from([fp]));
+
+        let view = c.service(&"ws-01/gui".parse().expect("addr"));
+        assert_eq!(view.instances.len(), 1);
+        let none = c.service(&"ws-02/gui".parse().expect("addr"));
+        assert!(none.instances.is_empty() && none.complete);
+    }
+
+    /// `schema show`: the whole revision names every artifact; one resource
+    /// names its members' types and only the artifacts they live in, a
+    /// protobuf set read as messages; a template alone finds its resource,
+    /// and one the revision does not declare is refused with the list.
+    #[test]
+    fn a_schema_view_reads_the_bundle_s_artifacts() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2/walkthrough/camera.v1.toml");
+        let (set, problems) = ContractSet::load_path(&path);
+        assert!(problems.is_empty(), "{problems:?}");
+        let r = set.iter().next().expect("camera.v1");
+
+        let whole = r.schema_view(None, false).expect("whole");
+        assert!(whole.resource.is_none());
+        assert_eq!(whole.artifacts.len(), 1);
+        assert!(whole.artifacts[0].document.is_not_asked());
+
+        let image = r.schema_view(Some("image"), true).expect("by template");
+        assert_eq!(image.resource.as_deref(), Some("@stream/image"));
+        let members: Vec<(&str, &str, &str)> = image
+            .members
+            .iter()
+            .map(|m| {
+                (
+                    m.member.as_str(),
+                    m.type_.kind.as_str(),
+                    m.type_.name.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            members,
+            [
+                ("type", "raw", "image/jpeg"),
+                ("attachment", "protobuf", "camera.v1.FrameMeta")
+            ]
+        );
+        let Asked::Asked(doc) = &image.artifacts[0].document else {
+            panic!("a named resource carries its documents");
+        };
+        let messages: Vec<&str> = doc["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .flat_map(|f| f["messages"].as_array().into_iter().flatten())
+            .filter_map(|m| m["name"].as_str())
+            .collect();
+        assert!(messages.contains(&"camera.v1.FrameMeta"), "{doc}");
+
+        let refused = r
+            .schema_view(Some("nope"), false)
+            .expect_err("not declared");
+        assert!(refused.contains("@stream/image"), "{refused}");
     }
 
     /// A silent descriptor is an answer of its own, and the instance is

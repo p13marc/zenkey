@@ -37,12 +37,14 @@
 //! 1. [`Unaskable`] — an input **this tool itself refuses**, before the bus is
 //!    ever asked. Wrapped into the `anyhow` chain, recognised by
 //!    [`code_for`], and rendered like any other error. This is the seam that
-//!    moved `--context`/`--qos`/class/`--fault`/`$*` from 1 to 2. Its sibling
-//!    [`NoSession`] rides the same seam for a session that never opened.
+//!    moved `--context`/`--qos`/class/`--fault`/`$*` from 1 to 2. Its siblings
+//!    ride the same seam: [`NoSession`] for a session that never opened, and
+//!    [`Unanswered`] for a question nothing on the bus answered (a zk2
+//!    revision no holder serves, FJ4).
 //! 2. [`asked`] — the verdict verbs' pre-run guard. `check expect`, `check
 //!    cutover`, `check retired`, `check probe`, `check conform`, `check
-//!    schema` and `why` give their 0 **and their 1** meanings, so a `?` on
-//!    their setup path would *claim a verdict the run never reached*. Every
+//!    schema`, `compat` and `why` give their 0 **and their 1** meanings, so a
+//!    `?` on their setup path would *claim a verdict the run never reached*. Every
 //!    pre-run failure of theirs — resolution, session, registry, the
 //!    observation itself — lands on the reserved 2 instead.
 //! 3. [`verdict`] — the engine's own projection,
@@ -54,8 +56,7 @@
 //!
 //! ## Acts keep their 1
 //!
-//! `pub`, `retire`, `replay`, `gen`, `blob fetch` and `registry migrate` *do*
-//! something. "Could
+//! `pub`, `retire`, `replay`, `gen` and `blob fetch` *do* something. "Could
 //! not be proven" has no meaning for an act — either it went out or it did
 //! not — so their failures are 1, and only an input **they** refuse is a 2.
 //!
@@ -130,8 +131,36 @@ impl std::error::Error for NoSession {
     }
 }
 
+/// Asked, and nothing could answer — the 2 of a silence (#612, FJ4).
+///
+/// A zk2 noun asked about one thing — a revision, an interface — can find
+/// that nothing on the bus answers for it: no holder serves the bundle, no
+/// descriptor names a revision, presence shows nobody. That is the "silence
+/// under a fan-out" this module already reserves a 2 for, as a type on the
+/// same seam as [`Unaskable`] and [`NoSession`], so the verb returns it like
+/// any error instead of spelling an exit of its own.
+#[derive(Debug)]
+pub struct Unanswered(pub String);
+
+impl std::fmt::Display for Unanswered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Unanswered {}
+
+/// Build an [`Unanswered`] error, as [`unaskable!`] builds its sibling.
+macro_rules! unanswered {
+    ($($arg:tt)*) => {
+        ::anyhow::Error::new($crate::exit::Unanswered(format!($($arg)*)))
+    };
+}
+pub(crate) use unanswered;
+
 /// The exit code an error chain deserves: [`NO_VERDICT`] when anything in it
-/// is an [`Unaskable`] or a [`NoSession`], [`FINDING`] otherwise.
+/// is an [`Unaskable`], a [`NoSession`] or an [`Unanswered`], [`FINDING`]
+/// otherwise.
 ///
 /// Called from `main`, once, so the choice is made in exactly one place.
 pub fn code_for(err: &anyhow::Error) -> i32 {
@@ -140,6 +169,8 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
         c.is::<Unaskable>()
             // …a session that never opened, which asked nothing (#503)…
             || c.is::<NoSession>()
+            // …a question nothing on the bus answered (FJ4)…
+            || c.is::<Unanswered>()
             // …and the engine's, which it now states in its own type
             // (#348). Before that, an engine failure carried no marker at
             // all, so *every* one of them landed on FINDING — which is how
@@ -149,12 +180,6 @@ pub fn code_for(err: &anyhow::Error) -> i32 {
             // refusals of the caller's input; it had nowhere to say so.
             || c.downcast_ref::<zenkey_fleet::Error>()
                 .is_some_and(zenkey_fleet::Error::is_unaskable)
-            || c.downcast_ref::<zenkey_build::Error>()
-                .is_some_and(zenkey_build::Error::is_unaskable)
-            // …and a migration's (#374): a refused input is a 2, a
-            // migration attempted and failed keeps an act's 1.
-            || c.downcast_ref::<zenkey_build::migrate::MigrateError>()
-                .is_some_and(zenkey_build::migrate::MigrateError::is_unaskable)
     });
     if unaskable { NO_VERDICT } else { FINDING }
 }
@@ -289,21 +314,12 @@ mod tests {
         );
     }
 
-    /// A migration is an act (#374): its refused input is a 2, and a
-    /// migration attempted and failed keeps the 1.
+    /// FJ4: a question nothing answered — a revision no holder serves — is
+    /// the 2 of a silence, however it is wrapped.
     #[test]
-    fn a_migration_refusal_is_a_two_and_its_failure_a_one() {
-        use zenkey_build::migrate::MigrateError;
-        let refused = anyhow::Error::new(MigrateError::Refused {
-            file: "t.toml".into(),
-            message: "no KDL spelling".into(),
-        });
-        assert_eq!(code_for(&refused), NO_VERDICT);
-        let failed = anyhow::Error::new(MigrateError::Unfaithful {
-            file: "t.toml".into(),
-            message: "the two trees differ".into(),
-        });
-        assert_eq!(code_for(&failed), FINDING);
+    fn an_unanswered_question_is_a_two() {
+        let err = unanswered!("no holder serves tc.netif.v1@abab").context("schema show");
+        assert_eq!(code_for(&err), NO_VERDICT);
     }
 
     /// The projection is the engine's, not a copy: assert the three poles

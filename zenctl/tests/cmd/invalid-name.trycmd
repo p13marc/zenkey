@@ -39,33 +39,6 @@ For more information, try '--help'.
 ```
 
 ```console
-$ zenctl service info MyApp
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl service info probe Ping
-? 2
-error: invalid value 'Ping' for '[PROCEDURE]': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl service list --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
 $ zenctl bench rpc h-0123456789ab MyApp
 ? 2
 error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk, nor `-` for a service origin — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
@@ -201,33 +174,6 @@ For more information, try '--help'.
 ```
 
 ```console
-$ zenctl schema show MyApp
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl topic list --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl registry export --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
 $ zenctl blob list --producer MyApp
 ? 2
 error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
@@ -265,13 +211,52 @@ Error: producer `-` stands for no producer chunk, which only a service origin (`
 
 ```
 
-`node info` takes an origin id and refuses a hostname (RFC 06 §6) — a refusal
-of the input, so the same 2. It used to be a 1, the code reserved for a
-finding.
+zk2's names are refused at the same edge (#612, FJ4): a service address is
+`<system>/<service>`, each a plain chunk, and an interface is
+`<name>.v<major>`, optionally `@` a fingerprint or a prefix of one — lowercase
+hex, `sha256:` optional. The model's own parsers decide, so the refusal is the
+grammar's, not a second spelling of it.
 
 ```console
-$ zenctl node info MyHost
+$ zenctl service show MyHost/tc
 ? 2
-Error: "MyHost" is not an origin id — a hostname must be resolved to its origin first (RFC 06 §6); `zenctl node list` shows the roster
+error: invalid value 'MyHost/tc' for '<SYSTEM/SERVICE>': system "MyHost" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+For more information, try '--help'.
 
 ```
+
+```console
+$ zenctl service show host-a
+? 2
+error: invalid value 'host-a' for '<SYSTEM/SERVICE>': "host-a" is not a zk2 key: an address is <system>/<service>
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl iface show TcNetif
+? 2
+error: invalid value 'TcNetif' for '<IFACE[@FP]>': interface "TcNetif" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl schema show tc.netif.v1@XYZ
+? 2
+error: invalid value 'tc.netif.v1@XYZ' for '<IFACE[@FP]>': "XYZ" is not a fingerprint: 1 to 64 lowercase hex digits, `sha256:` optional
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl service list --system Host-A --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: Host-A: system "Host-A" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+```
+

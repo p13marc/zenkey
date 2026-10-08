@@ -50,11 +50,11 @@ mod impls;
 pub use impls::RateView;
 pub use impls::local::{
     CacheAction, CacheReport, CachedSlice, ContextAction, ContextList, ContextRow, ContextShow,
-    GenPlan, GetReport, KeyCanon, KeyOp, KeyRelation, LintReport, LockReport, MigrateReport,
-    MigratedFile, SchemaCheck, SchemaCheckVerdict,
+    GenPlan, GetReport, KeyCanon, KeyOp, KeyRelation, SchemaCheck, SchemaCheckVerdict,
 };
 pub use impls::observations::TopologyView;
 pub use impls::storage::refusal_notes;
+pub use impls::zk2::graph_dot;
 pub use impls::{ConfigDocument, ConfigReport};
 pub mod style;
 pub mod table;

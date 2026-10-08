@@ -18,9 +18,10 @@ authors.workspace = true
 [features]
 default = ["decode"]
 decode = ["zenkey/decode"]
-# The direct prost-reflect dep is for gen's descriptor-driven synthesis
-# (#162); the codec itself lives in zenkey.
-decode-protobuf = ["zenkey/decode-protobuf", "dep:prost-reflect"]
+# The codec itself lives in zenkey. prost-reflect is a plain dependency
+# since FJ4: zk2's `schema show` reads a bundle's descriptor sets, and
+# zenkey-model already links it, so it costs nothing.
+decode-protobuf = ["zenkey/decode-protobuf"]
 decode-cdr = ["zenkey/decode-cdr"]
 # Real JSON Schema validation behind decode verdicts (#159) — forwarded so
 # both explorers judge payloads, while a bare library consumer pays nothing.
@@ -49,7 +50,9 @@ zenkey = { workspace = true, features = ["schema"] }
 zk2 = { package = "zenkey", path = "../zenkey" }
 zenkey-model = { path = "../zenkey-model" }
 zblob = { workspace = true, optional = true }
-prost-reflect = { workspace = true, optional = true }
+# gen's descriptor-driven synthesis (#162), and the descriptor sets zk2's
+# `schema show` reads (FJ4).
+prost-reflect = { workspace = true }
 zenoh = { workspace = true }
 zenoh-ext = { workspace = true }
 tokio = { workspace = true }
@@ -93,10 +96,6 @@ toml = { workspace = true }
 # *is* (#201). A dev-dependency cycle — this crate depends on that one — which
 # cargo permits because the dev edge is cut when building the dependency.
 zenkey-report-fixtures = { workspace = true }
-# The draft a `registry infer` run writes must be refused by the build lint
-# and admitted by `allow_drafts` (RFC 08 §6.1, #225) — the loop the tests
-# close with the real lint rather than a re-statement of it.
-zenkey-build = { workspace = true }
 # `test-util` on top of the workspace features: paused time, so a cancellation
 # window is an exact number of milliseconds rather than a race (#328).
 tokio = { workspace = true, features = ["test-util"] }

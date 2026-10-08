@@ -1,0 +1,118 @@
+`schema show` (#612, FJ4): one zk2 revision's schema artifacts, as its bundle
+carries them (spec §9.5), and which resource member names which type.
+
+Every case here answers from `--contracts` alone, so the session is never
+opened — which is why it can sit beside a dead bus and still answer. The
+`--zenoh-config` below points at one, and nothing fails.
+
+The whole revision: every member's type, and each artifact by id, kind and
+name. A raw type names a media type and no schema.
+
+```console
+$ zenctl schema show tc.netif.v1 --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --format table
+tc.netif.v1 sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0  (history)
+  @op/diagnostics                  request   json:DiagnosticsRequest        sha256:b1e64344ce96a422…
+  @op/diagnostics                  response  json:DiagnosticsResponse       sha256:b1e64344ce96a422…
+  @op/interfaces/{ns}/{iface}/set  request   json:InterfaceControlRequest   sha256:b1e64344ce96a422…
+  @op/interfaces/{ns}/{iface}/set  response  json:InterfaceControlResponse  sha256:b1e64344ce96a422…
+  @op/interfaces/{ns}/{iface}/set  error     json:TcError                   sha256:b1e64344ce96a422…
+  state/interfaces/{ns}/{iface}    type      json:NetworkInterface          sha256:b1e64344ce96a422…
+  state/namespaces                 type      json:Namespaces                sha256:b1e64344ce96a422…
+  stream/bandwidth/{ns}/{iface}    type      json:BandwidthUpdate           sha256:b1e64344ce96a422…
+
+jsonschema tc  sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e
+the documents themselves: add --full, or name a resource
+
+```
+
+One resource — named by its template, since only one resource has it — implies
+its documents. A protobuf artifact is a descriptor set, shown as the messages
+it defines; the JSON Schema and ndjson forms carry the same thing as data.
+
+```console
+$ zenctl schema show camera.v1 image --contracts ../examples/zk2/walkthrough/camera.v1.toml --format table
+camera.v1 sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98  (file)
+  @stream/image  type        raw image/jpeg
+  @stream/image  attachment  camera.v1.FrameMeta  sha256:287bf0fa9f9251ed…
+
+protobuf camera/v1/camera.proto  sha256:287bf0fa9f9251ed04a459d784019ede72c7aacb27cd9bf25ece4b98e54917fb
+  // camera/v1/camera.proto (package camera.v1)
+  message camera.v1.FrameMeta {
+    uint64 captured_at_ns = 1;
+    uint64 sequence = 2;
+    uint32 width = 3;
+    uint32 height = 4;
+  }
+  message camera.v1.Info {
+    string model = 1;
+    uint32 width = 2;
+    uint32 height = 3;
+    double fps = 4;
+  }
+a raw type names a media type and no schema: its bytes are not a tool's to read (spec §7.2)
+
+```
+
+```console
+$ zenctl schema show camera.v1 @stream/image --contracts ../examples/zk2/.history --format ndjson
+{"fingerprint":"sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98","iface":"camera.v1","notes":[{"text":"a raw type names a media type and no schema: its bytes are not a tool's to read (spec §7.2)"}],"report":"schema-show","resource":"@stream/image","source":"history"}
+{"member":"type","resource":"@stream/image","row":"member","type":{"kind":"raw","name":"image/jpeg"}}
+{"member":"attachment","resource":"@stream/image","row":"member","type":{"kind":"protobuf","name":"camera.v1.FrameMeta","schema":"sha256:287bf0fa9f9251ed04a459d784019ede72c7aacb27cd9bf25ece4b98e54917fb"}}
+{"document":{"files":[{"enums":[],"messages":[{"fields":[{"name":"captured_at_ns","number":1,"type":"uint64"},{"name":"sequence","number":2,"type":"uint64"},{"name":"width","number":3,"type":"uint32"},{"name":"height","number":4,"type":"uint32"}],"name":"camera.v1.FrameMeta"},{"fields":[{"name":"model","number":1,"type":"string"},{"name":"width","number":2,"type":"uint32"},{"name":"height","number":3,"type":"uint32"},{"name":"fps","number":4,"type":"double"}],"name":"camera.v1.Info"}],"name":"camera/v1/camera.proto","package":"camera.v1"}]},"id":"sha256:287bf0fa9f9251ed04a459d784019ede72c7aacb27cd9bf25ece4b98e54917fb","kind":"protobuf","name":"camera/v1/camera.proto","row":"artifact"}
+a raw type names a media type and no schema: its bytes are not a tool's to read (spec §7.2)
+
+```
+
+A directory of authoring files is loaded whole; a file in it that is not a
+contract — the frontend's bindings — is said on stderr and skipped.
+
+```console
+$ zenctl schema show tc.netem.v1 --contracts ../examples/zk2/tcgui --format table
+contracts: ../examples/zk2/tcgui/frontend.bindings.toml: error[E000] file: TOML parse error at line 5, column 2   | 5 | [bindings.netif]   |  ^^^^^^^^ unknown field `bindings`, expected one of `interface`, `defaults`, `schemas`, `resources`, `requires`
+tc.netem.v1 sha256:30b491116ef6a534a3533741dc4003fe332c52ec84fcadcbd5dfa6f1be866245  (file)
+  @op/config/{ns}/{iface}/set  request   json:TcRequest           sha256:b1e64344ce96a422…
+  @op/config/{ns}/{iface}/set  response  json:TcResponse          sha256:b1e64344ce96a422…
+  @op/config/{ns}/{iface}/set  error     json:TcError             sha256:b1e64344ce96a422…
+  @op/plug/{ns}/{iface}/set    request   json:TcPlugRequest       sha256:b1e64344ce96a422…
+  @op/plug/{ns}/{iface}/set    response  json:PlugResponse        sha256:b1e64344ce96a422…
+  @op/plug/{ns}/{iface}/set    error     json:TcError             sha256:b1e64344ce96a422…
+  events/applied               type      json:TcAppliedEvent      sha256:b1e64344ce96a422…
+  state/config/{ns}/{iface}    type      json:TcConfigUpdate      sha256:b1e64344ce96a422…
+  state/plug/{ns}/{iface}      type      json:PlugState           sha256:b1e64344ce96a422…
+  stream/qdisc/{ns}/{iface}    type      json:TcStatisticsUpdate  sha256:b1e64344ce96a422…
+
+jsonschema tc  sha256:b1e64344ce96a42218cc0ed0f45d72d6f601c46c6639d39c67a78e686d28054e
+the documents themselves: add --full, or name a resource
+
+```
+
+## Refused, exit 2
+
+A resource the revision does not declare is the input's mistake, and the
+refusal lists the ones it does:
+
+```console
+$ zenctl schema show camera.v1 nope --contracts ../examples/zk2/.history
+? 2
+Error: camera.v1 declares no resource "nope"; it declares: @stream/image, state/info
+
+```
+
+Two revisions held and no fingerprint to choose between them:
+
+```console
+$ zenctl schema show tc.netif.v1 --contracts ../examples/zk2/.history --contracts tests/cmd/fixtures/zk2/review/tc.netif.v1.toml
+? 2
+Error: tc.netif.v1 has 2 revisions here: sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0, sha256:94b92cc2ff1b030af3323e84ebf172c283af30d3b8dcfd21550a1738dd05f792 — name one with tc.netif.v1@<fingerprint>
+
+```
+
+A `--contracts` path that loads nothing at all:
+
+```console
+$ zenctl schema show tc.netif.v1 --contracts tests/cmd/fixtures/zk2/schemas
+? 2
+contracts: tc.json: directory: not an interface directory <name>.v<major>
+Error: --contracts tests/cmd/fixtures/zk2/schemas: no contract loaded from it (see above)
+
+```

@@ -1,6 +1,6 @@
 //! `zenctl scout` — raw Hello listing at the scouting layer (#116).
 //!
-//! `base list` answers "which deployments hold liveliness tokens or storages",
+//! `namespace list` answers "which deployments hold zk2 instance tokens",
 //! which presumes a working session. Scouting answers the earlier questions:
 //! "is anything out there at all" and "is multicast scouting working on this
 //! segment". The two are independent signals; neither replaces the other.

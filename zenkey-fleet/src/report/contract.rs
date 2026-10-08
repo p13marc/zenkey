@@ -9,6 +9,9 @@
 //! its kind and name. Documentation (`doc`, `summary`, `minor`) is not in a
 //! bundle (§9.5), so it is present only for a contract loaded from its
 //! authoring file — absent, never empty.
+//!
+//! `compat` (#612, FJ4) is here too: the classifier's verdict on two
+//! revisions (§9.8), each side named by where it was read from.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +20,8 @@ use zenkey_model::authoring::{
     Congestion, Deprecated, Encoding, Fanout, HistoryParams, Kind, ParamType, Priority,
     Reliability, Replies, RequireCardinality, Serving,
 };
+
+use crate::report::{Asked, Judgement};
 
 /// One contract revision.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -191,6 +196,134 @@ pub enum ContractSource {
     History,
     /// Built from an authoring file.
     File,
+    /// Read from a bundle file named on its own (`*.bundle.json`, §9.6).
+    Bundle,
+}
+
+/// `schema show`: the schema artifacts one revision's bundle carries, and
+/// which resource member names which type in them (§7.1, §9.5).
+///
+/// The bundle is the whole source: a tool that was never compiled against
+/// the contract reads its types from here, so this is what it can know.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SchemaView {
+    /// `<name>.v<major>`.
+    pub iface: String,
+    /// `sha256:` + 64 lowercase hex digits.
+    pub fingerprint: String,
+    pub source: ContractSource,
+    /// The resource asked about, `<kind token>/<template>`; absent when the
+    /// whole revision was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<String>,
+    /// Every member's type, by resource then member. A raw type names no
+    /// artifact: the contract says its bytes are not a tool's to read.
+    pub members: Vec<SchemaMember>,
+    /// The artifacts those types live in — every artifact, for the whole
+    /// revision — by id.
+    pub artifacts: Vec<SchemaDocument>,
+}
+
+/// One member of one resource, and the type it names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SchemaMember {
+    /// `<kind token>/<template>`.
+    pub resource: String,
+    /// `type`, `attachment`, `request`, `response`, `error` or `summary`.
+    pub member: String,
+    #[serde(rename = "type")]
+    pub type_: TypeView,
+}
+
+/// One schema artifact, and its document when it was asked for.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SchemaDocument {
+    /// `sha256:…` over the artifact.
+    pub id: String,
+    /// `protobuf` or `jsonschema`.
+    pub kind: String,
+    /// The protobuf file name or the JSON Schema file stem.
+    pub name: String,
+    /// The JSON Schema document as the bundle carries it, or the protobuf
+    /// descriptor set read as its files, messages and enums (the bundle
+    /// carries the set's bytes, which are not a document anyone reads).
+    /// Absent when not asked for.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub document: Asked<serde_json::Value>,
+}
+
+/// How a change is judged (§9.8): the classifier's three classes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatClass {
+    Compatible,
+    /// A human accepts it.
+    Review,
+    /// CI refuses it.
+    Breaking,
+}
+
+impl CompatClass {
+    /// The class as it serializes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CompatClass::Compatible => "compatible",
+            CompatClass::Review => "review",
+            CompatClass::Breaking => "breaking",
+        }
+    }
+}
+
+/// `compat <old> <new>`: the compatibility classifier's verdict on one
+/// change (§9.8), both directions, with every review and breaking finding.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CompatReport {
+    pub old: CompatSide,
+    pub new: CompatSide,
+    /// The worst class found; `compatible` when there is no finding.
+    pub class: CompatClass,
+    /// Every review and breaking change.
+    pub findings: Vec<CompatFinding>,
+    /// Warnings that do not change the class (`field_deleted_unreserved`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<CompatFinding>,
+}
+
+impl CompatReport {
+    /// The verdict on the RFC 13 core. The judged claim is the finding, so
+    /// a review or breaking change is `Established` and a compatible one
+    /// `NotEstablished`: exit 1 and exit 0, through the one projection.
+    pub fn to_judgement(&self) -> Judgement {
+        match self.class {
+            CompatClass::Compatible => Judgement::NotEstablished {
+                reason: "compatible: no review or breaking change".into(),
+            },
+            CompatClass::Review | CompatClass::Breaking => Judgement::Established,
+        }
+    }
+}
+
+/// One side of a comparison: what was named, and the revision it resolved
+/// to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompatSide {
+    /// As given: a path, or `<iface>[@<fingerprint>]`.
+    pub input: String,
+    pub source: ContractSource,
+    /// The interface the revision declares, `<name>.v<major>`.
+    pub iface: String,
+    pub fingerprint: String,
+}
+
+/// One judged change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CompatFinding {
+    pub class: CompatClass,
+    /// The classifier's stable rule name (`field_renamed`, …).
+    pub rule: String,
+    /// Where: `resources."<template>"`, a field path, a role.
+    pub at: String,
+    pub detail: String,
 }
 
 #[cfg(test)]
@@ -353,6 +486,136 @@ mod tests {
                     "schemas": [{"id": "sha256:00", "kind": "jsonschema", "name": "tc"}],
                 },
             })
+        );
+    }
+
+    /// The document `schema show --format json` prints: a member names its
+    /// type, a raw type names no artifact, and an artifact's document is
+    /// absent unless it was asked for.
+    #[test]
+    fn schema_view_json_shape_is_pinned() {
+        let view = SchemaView {
+            iface: "camera.v1".into(),
+            fingerprint: format!("sha256:{}", "ab".repeat(32)),
+            source: ContractSource::History,
+            resource: Some("@stream/image".into()),
+            members: vec![
+                SchemaMember {
+                    resource: "@stream/image".into(),
+                    member: "type".into(),
+                    type_: TypeView {
+                        kind: "raw".into(),
+                        name: "image/jpeg".into(),
+                        schema: None,
+                    },
+                },
+                SchemaMember {
+                    resource: "@stream/image".into(),
+                    member: "attachment".into(),
+                    type_: TypeView {
+                        kind: "protobuf".into(),
+                        name: "camera.v1.FrameMeta".into(),
+                        schema: Some("sha256:01".into()),
+                    },
+                },
+            ],
+            artifacts: vec![
+                SchemaDocument {
+                    id: "sha256:01".into(),
+                    kind: "protobuf".into(),
+                    name: "camera/v1/camera.proto".into(),
+                    document: Asked::Asked(json!({"files": []})),
+                },
+                SchemaDocument {
+                    id: "sha256:02".into(),
+                    kind: "jsonschema".into(),
+                    name: "info".into(),
+                    document: Asked::NotAsked,
+                },
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&view).expect("serialize"),
+            json!({
+                "iface": "camera.v1",
+                "fingerprint": format!("sha256:{}", "ab".repeat(32)),
+                "source": "history",
+                "resource": "@stream/image",
+                "members": [
+                    {"resource": "@stream/image", "member": "type", "type": {"kind": "raw", "name": "image/jpeg"}},
+                    {
+                        "resource": "@stream/image",
+                        "member": "attachment",
+                        "type": {"kind": "protobuf", "name": "camera.v1.FrameMeta", "schema": "sha256:01"},
+                    },
+                ],
+                "artifacts": [
+                    {"id": "sha256:01", "kind": "protobuf", "name": "camera/v1/camera.proto", "document": {"files": []}},
+                    {"id": "sha256:02", "kind": "jsonschema", "name": "info"},
+                ],
+            })
+        );
+    }
+
+    /// The document `compat --format json` prints, and its verdict: a
+    /// finding is the claim, so review and breaking are established.
+    #[test]
+    fn compat_report_json_shape_is_pinned() {
+        let side = |input: &str, source, fp: &str| CompatSide {
+            input: input.into(),
+            source,
+            iface: "tc.netif.v1".into(),
+            fingerprint: format!("sha256:{}", fp.repeat(32)),
+        };
+        let report = CompatReport {
+            old: side("tc.netif.v1@abab", ContractSource::Bus, "ab"),
+            new: side("tc.netif.v1.toml", ContractSource::File, "cd"),
+            class: CompatClass::Breaking,
+            findings: vec![CompatFinding {
+                class: CompatClass::Breaking,
+                rule: "resource_removed".into(),
+                at: "resources.namespaces".into(),
+                detail: "removed".into(),
+            }],
+            warnings: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&report).expect("serialize"),
+            json!({
+                "old": {
+                    "input": "tc.netif.v1@abab",
+                    "source": "bus",
+                    "iface": "tc.netif.v1",
+                    "fingerprint": format!("sha256:{}", "ab".repeat(32)),
+                },
+                "new": {
+                    "input": "tc.netif.v1.toml",
+                    "source": "file",
+                    "iface": "tc.netif.v1",
+                    "fingerprint": format!("sha256:{}", "cd".repeat(32)),
+                },
+                "class": "breaking",
+                "findings": [{
+                    "class": "breaking",
+                    "rule": "resource_removed",
+                    "at": "resources.namespaces",
+                    "detail": "removed",
+                }],
+            })
+        );
+        assert_eq!(report.to_judgement(), Judgement::Established);
+        let clean = CompatReport {
+            class: CompatClass::Compatible,
+            findings: vec![],
+            ..report
+        };
+        assert!(matches!(
+            clean.to_judgement(),
+            Judgement::NotEstablished { .. }
+        ));
+        assert_eq!(
+            serde_json::to_value(ContractSource::Bundle).expect("serialize"),
+            json!("bundle")
         );
     }
 
