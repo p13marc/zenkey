@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use zenkey_model::authoring::Kind;
 use zenkey_model::bundle::{Bundle, BundleError};
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Contract, Resource};
@@ -273,6 +274,72 @@ impl Revision {
         }
     }
 
+    /// The resource `want` names among those of `kinds` (every kind when
+    /// empty): `<kind token>/<template>` (`stream/bandwidth/{ns}/{iface}`,
+    /// `@op/diagnostics`), or its template alone when only one such resource
+    /// has it. What `schema show`, `call`, `get state` and `watch` take.
+    ///
+    /// The error is a sentence naming the resources there are: a resource
+    /// the revision does not declare is the caller's input to fix.
+    pub fn resource(&self, want: &str, kinds: &[Kind]) -> Result<&Resource, String> {
+        let c = &*self.contract;
+        let eligible = |r: &&Resource| kinds.is_empty() || kinds.contains(&r.kind);
+        let exact: Vec<&Resource> = c
+            .resources
+            .iter()
+            .filter(eligible)
+            .filter(|r| zk2::implementation::resource_name(r) == want)
+            .collect();
+        let by_template: Vec<&Resource> = c
+            .resources
+            .iter()
+            .filter(eligible)
+            .filter(|r| r.template.as_str() == want)
+            .collect();
+        let what = match kinds {
+            [] => "resource".to_owned(),
+            ks => format!(
+                "{} resource",
+                ks.iter()
+                    .map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            ),
+        };
+        match (exact.as_slice(), by_template.as_slice()) {
+            ([r], _) | ([], [r]) => Ok(*r),
+            ([], []) => {
+                let names: Vec<String> = c
+                    .resources
+                    .iter()
+                    .filter(eligible)
+                    .map(zk2::implementation::resource_name)
+                    .collect();
+                Err(if names.is_empty() {
+                    format!("{} declares no {what}", c.iface)
+                } else {
+                    format!(
+                        "{} declares no {what} {want:?}; it declares: {}",
+                        c.iface,
+                        names.join(", ")
+                    )
+                })
+            }
+            (_, several) => {
+                let names: Vec<String> = several
+                    .iter()
+                    .map(|r| zk2::implementation::resource_name(r))
+                    .collect();
+                Err(format!(
+                    "{want:?} is the template of more than one resource of {}: {} — \
+                     name one with its kind token",
+                    c.iface,
+                    names.join(", ")
+                ))
+            }
+        }
+    }
+
     /// `schema show`: every member's type and the artifacts they live in,
     /// for the whole revision or one resource — named in full
     /// (`stream/bandwidth/{ns}/{iface}`) or by its template when only one
@@ -289,45 +356,7 @@ impl Revision {
         let c = &*self.contract;
         let selected: Vec<&Resource> = match resource {
             None => c.resources.iter().collect(),
-            Some(want) => {
-                let exact: Vec<&Resource> = c
-                    .resources
-                    .iter()
-                    .filter(|r| zk2::implementation::resource_name(r) == want)
-                    .collect();
-                let by_template: Vec<&Resource> = c
-                    .resources
-                    .iter()
-                    .filter(|r| r.template.as_str() == want)
-                    .collect();
-                match (exact.as_slice(), by_template.as_slice()) {
-                    ([r], _) | ([], [r]) => vec![*r],
-                    ([], []) => {
-                        let names: Vec<String> = c
-                            .resources
-                            .iter()
-                            .map(zk2::implementation::resource_name)
-                            .collect();
-                        return Err(format!(
-                            "{} declares no resource {want:?}; it declares: {}",
-                            c.iface,
-                            names.join(", ")
-                        ));
-                    }
-                    (_, several) => {
-                        let names: Vec<String> = several
-                            .iter()
-                            .map(|r| zk2::implementation::resource_name(r))
-                            .collect();
-                        return Err(format!(
-                            "{want:?} is the template of more than one resource of {}: {} — \
-                             name one with its kind token",
-                            c.iface,
-                            names.join(", ")
-                        ));
-                    }
-                }
-            }
+            Some(want) => vec![self.resource(want, &[])?],
         };
         let members: Vec<SchemaMember> = selected.iter().flat_map(|r| members_of(r)).collect();
         let wanted: BTreeSet<&str> = match resource {

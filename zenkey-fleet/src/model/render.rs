@@ -168,16 +168,7 @@ pub fn render_with(
     // zenoh's default, `zenoh/bytes`, is "unsaid", not "bytes on purpose":
     // the contract speaks next (§7.2's order).
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
-    let rendered = match decode::decode(revision.bundle(), ty, encoding, bytes) {
-        Decoded::Value(value) => Rendered::Value {
-            declared: decode::declared(ty),
-            value,
-        },
-        Decoded::Opaque { media_type, .. } => Rendered::Opaque { media_type },
-        Decoded::Undecodable {
-            declared, reason, ..
-        } => Rendered::Undecodable { declared, reason },
-    };
+    let rendered = rendered(ty, decode::decode(revision.bundle(), ty, encoding, bytes));
     PayloadRendering {
         key: key.to_owned(),
         size: bytes.len(),
@@ -189,6 +180,71 @@ pub fn render_with(
             values,
         }),
         rendered,
+    }
+}
+
+/// The model's decode, as the report spells it.
+fn rendered(ty: &serde_json::Value, d: Decoded) -> Rendered {
+    match d {
+        Decoded::Value(value) => Rendered::Value {
+            declared: decode::declared(ty),
+            value,
+        },
+        Decoded::Opaque { media_type, .. } => Rendered::Opaque { media_type },
+        Decoded::Undecodable {
+            declared, reason, ..
+        } => Rendered::Undecodable { declared, reason },
+    }
+}
+
+/// An `app` envelope's detail (§5.2), rendered through operation `r`'s
+/// declared `error` type: a JSON or CBOR envelope's value as carried, a
+/// protobuf envelope's bytes decoded as the message, a raw type's base64
+/// text shown as its media type. An operation that declares no `error`
+/// type has no detail to send, and one that arrives anyway is rendered
+/// structurally, saying so.
+pub fn render_detail(
+    revision: &Revision,
+    r: &zenkey_model::contract::Resource,
+    detail: &zenkey_model::envelope::Detail,
+) -> Rendered {
+    use zenkey_model::envelope::Detail;
+    let ty = decode::type_of(
+        revision.bundle(),
+        r.token.as_str(),
+        r.template.as_str(),
+        Member::Error.as_str(),
+    );
+    match (ty, detail) {
+        (Some(ty), Detail::Bytes(bytes)) => rendered(
+            ty,
+            decode::decode(revision.bundle(), ty, Some("application/protobuf"), bytes),
+        ),
+        (Some(ty), Detail::Value(_)) if ty["kind"] == "raw" => Rendered::Opaque {
+            media_type: decode::declared(ty),
+        },
+        (Some(ty), Detail::Value(value)) => Rendered::Value {
+            declared: decode::declared(ty),
+            value: value.clone(),
+        },
+        (None, detail) => {
+            let why = Unresolved::NoMember {
+                resource: zk2::implementation::resource_name(r),
+                member: Member::Error.as_str().to_owned(),
+            };
+            match detail {
+                Detail::Value(v) => Rendered::Structural {
+                    why,
+                    value: Some(v.clone()),
+                    text: serde_json::to_string(v).unwrap_or_default(),
+                },
+                Detail::Bytes(b) => Rendered::Structural {
+                    why,
+                    value: structural_value(b),
+                    text: structural(b),
+                },
+            }
+        }
     }
 }
 

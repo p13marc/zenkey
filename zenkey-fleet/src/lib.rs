@@ -273,7 +273,20 @@ pub use model::catalog::{
 };
 pub use model::compat::compat;
 pub use model::render::{
-    Member, render as render_payload, render_with as render_payload_with, resolved_revision,
+    Member, render as render_payload, render_detail, render_with as render_payload_with,
+    resolved_revision,
+};
+// zk2's acts and reads through a contract (#612, FJ5): planned and refused
+// without a session (`model::target`), then made through the runtime's
+// `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
+pub use bus::consume::{
+    StateRead, WATCH_BUFFER, Watch, get_state, last_known as last_known_state, stamp,
+    watch as watch_resource,
+};
+pub use bus::operation::{OperationCall, call as call_operation};
+pub use model::target::{
+    CallPlan, OwnedKey, Target as ResolvedTarget, check_values, encode_request, owned_key,
+    plan_call, resource as resolve_resource,
 };
 pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence

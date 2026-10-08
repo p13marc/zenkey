@@ -52,7 +52,11 @@
 //! interface across a deployment — v1's `interface` is a type across
 //! producers), `graph` (the binding graph, R3), `contract` (a revision's
 //! view, and what asking for it found) and `payload` (a sample rendered
-//! through its contract, or honestly without one). Their type names do not
+//! through its contract, or honestly without one). FJ5 added the acts and
+//! the reads through a contract: `operation` (a call, its answer and its
+//! silence — v1's `call` is the `@rpc` plane), `state` (the owner's current
+//! state or an archive's last-known one, never confused) and `watch` (a
+//! subscription's samples and how it ended). Their type names do not
 //! collide with v1's, so the flat namespace holds both generations.
 
 mod acl;
@@ -78,6 +82,7 @@ mod iface;
 mod impact;
 mod judgement;
 mod node;
+mod operation;
 mod payload;
 mod presence;
 mod rate;
@@ -87,11 +92,13 @@ mod schema;
 mod scout;
 mod seed;
 mod snapshot;
+mod state;
 mod storage;
 mod tape;
 mod timeline;
 mod topic;
 mod trace;
+mod watch;
 mod why;
 
 pub use acl::*;
@@ -117,6 +124,7 @@ pub use iface::*;
 pub use impact::*;
 pub use judgement::*;
 pub use node::*;
+pub use operation::*;
 pub use payload::*;
 pub use presence::*;
 pub use rate::*;
@@ -126,9 +134,11 @@ pub use schema::*;
 pub use scout::*;
 pub use seed::*;
 pub use snapshot::*;
+pub use state::*;
 pub use storage::*;
 pub use tape::*;
 pub use timeline::*;
 pub use topic::*;
 pub use trace::*;
+pub use watch::*;
 pub use why::*;
