@@ -231,3 +231,14 @@ py-conformance:
     protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.conformance spec/conformance
+
+# The owner example, then the live runner over it. Reuses target/py-venv
+# (eclipse-zenoh 1.10.1 is pinned in impl/python/requirements.txt).
+# The Python live interop runner (#609, #610) against the Rust owner example.
+py-live:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    cargo build -q -p zenkey --example owner
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.live_interop

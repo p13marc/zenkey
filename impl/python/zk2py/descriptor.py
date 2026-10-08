@@ -38,7 +38,7 @@ only" (``descriptors/expect.json``).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from . import jcs
 from .contract import Contract
@@ -48,9 +48,14 @@ from .shape import Checker, load_schema
 FORMAT = "zk2-descriptor/0.1"
 
 
-def check_descriptor(data: bytes, contract: Contract, spec_dir: Path | None = None) -> list[str]:
-    """The sorted D… codes of one descriptor document, checked against one
-    contract (§3.3)."""
+def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
+                     spec_dir: Path | None = None) -> list[str]:
+    """The sorted D… codes of one descriptor document, checked against the
+    contracts the checker holds (§3.3): each interface entry against the
+    contract of the same interface, syntax only when it holds none."""
+    if isinstance(contracts, Contract):
+        contracts = [contracts]
+    held_contracts = {c.interface: c for c in contracts}
     codes: list[str] = []
     try:
         doc = jcs.loads(data)
@@ -82,7 +87,8 @@ def check_descriptor(data: bytes, contract: Contract, spec_dir: Path | None = No
         if not well_formed:
             codes.append("D003")
         ifaces.append(iface)
-        if iface != contract.interface or not well_formed:
+        contract = held_contracts.get(iface)
+        if contract is None or not well_formed:
             # Another contract: syntax only. A malformed fingerprint is D003
             # alone, not also D004 (descriptors/d003-fingerprint;
             # SPEC-FINDINGS F-05).
