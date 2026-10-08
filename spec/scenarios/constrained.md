@@ -58,3 +58,18 @@ profile; 1 KB 24 s.*
 returns it whole.
 
 *Spike S15: the pico's descriptor was answered.*
+
+## §6 A far router in a south region (§8.5, U23)
+
+**Setup.** As §1, but the ground keeps a router of its own, with
+`region_name = "ground"`. The vehicle router's `gateway.south` lists its
+clients and peers, and the region `ground`. The `@zk` deny is on the face.
+
+**Expected.**
+- The vehicle's 200 tokens put about 0.5 KB on the link, and none of their
+  key strings.
+- A ground client's subscriber and state GET on the vehicle's data work.
+- Without the south region (router to router), the same deny leaves every
+  key string on the link.
+
+*Spike S3, U23 addendum: 506 B and 0 keys, against 11,330 B and 201.*

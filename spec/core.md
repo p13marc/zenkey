@@ -1,7 +1,8 @@
 # zk2 core specification
 
-**Version 0.1, accepted on 2026-10-08** (#606). Every change from here goes
-through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
+**Version 0.2** (0.1 accepted on 2026-10-08, #606; amended the same day:
+U23). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
+amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -833,14 +834,24 @@ only the two facts.
     declarations still cross, key strings included (zenoh 1.10.1).
   - A session that is a **client** of the near router receives only the
     declarations its interests ask for.
-- **A deployment SHOULD attach one far-side session, or a gateway session,
-  as a client, with a `@zk` deny on the face.** A gateway:
+- **A deployment SHOULD attach the far side in one of two shapes, with a
+  `@zk` deny on the face** *(0.2, U23)*:
+  - **A far router in a south region** of the near router: the far router
+    names its region (`region_name`), and the near router lists that name in
+    `gateway.south`, while keeping its own clients and peers south. Declarations
+    then cross on interest, and the deny keeps the denied families off the
+    link: 200 denied tokens cost 506 B, against 11.3 KB router to router.
+    The far site keeps its own router and clients.
+    `[Sc: constrained.md §6]`
+  - **One far-side session, or a gateway session, as a client** of the near
+    router.
+
+  A gateway:
   - is the only session on its side that talks across the face;
   - is a principal of its own;
   - never answers or republishes on the near side's keys, and re-keys what
     it relays under its own address.
 
-  A far side with several sessions, or with its own router, is open (U23).
   `[Sc: constrained.md §1]`
 - **A batch SHOULD take at most a third of the lease to cross the face.**
   - At 2,400 bit/s with the 10 s lease, 1 KB batches qualify, and zenoh's
@@ -1359,7 +1370,7 @@ above, with these relaxations and additions:
 | Namespace (§1.6) | The deployment prefix written literally in keys |
 | Descriptor (§3.3) | MUST fit one fragment (4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE`) `[Sc: constrained.md §5]` |
 | Bundles (§8.4) | Served by a gateway holder where the device cannot receive or hold them. A zenoh-pico 1.10.1 owner sent 100 KB replies, so the limit is on receiving. |
-| Faces (§8.5) | Attached as a client, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled. Presence never crosses. |
+| Faces (§8.5) | The far side attached as a client or as a south region, with batches within the lease, `@zk` denied, and `@stream` denied unless downsampled. Presence never crosses. |
 
 `[Sc: constrained.md]`
 
@@ -1373,7 +1384,7 @@ decision that changes a rule lands as an amendment.
 | # | Question | Lean | Rule affected |
 |---|---|---|---|
 | U22 | Cutting the per-service token multiplier above the presence budget | **Decided at acceptance (2026-10-08):** a deployment-configured tokenless set, recommended for the framework interfaces every service implements; the descriptor records it (§8.1, §3.3) | §8.1 |
-| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Decided at acceptance:** measure zenoh 1.10.1's `gateway.south` regions, which place a far router south by zid, interface or region name, before `link.v1` (#613). The amendment that follows the measurement settles the rule. | §8.5 attachment |
+| U23 | The far side of a constrained face when it is more than one session: a site with its own router, or a service commanding many vehicles | **Settled by amendment 0.2:** the far router is placed in a `gateway.south` region of the near router, with the `@zk` deny. Measured: 506 B for 200 denied tokens, against 11.3 KB router to router (spike S3, U23 addendum) | §8.5 attachment |
 
 ---
 
