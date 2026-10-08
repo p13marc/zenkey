@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "path": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hop"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "Hop": {
+      "type": "object",
+      "properties": {
+        "hop": {
+          "type": "string"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hop"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The rest of the route, or where it ends."
+        }
+      },
+      "required": [
+        "hop"
+      ],
+      "description": "One hop of a route, and the rest of it."
+    }
+  },
+  "$ref": "#/$defs/Status"
+}

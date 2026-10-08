@@ -170,7 +170,7 @@ pub fn render_with(
     let encoding = encoding.filter(|e| *e != "zenoh/bytes");
     let rendered = match decode::decode(revision.bundle(), ty, encoding, bytes) {
         Decoded::Value(value) => Rendered::Value {
-            declared: declared(ty),
+            declared: decode::declared(ty),
             value,
         },
         Decoded::Opaque { media_type, .. } => Rendered::Opaque { media_type },
@@ -189,18 +189,6 @@ pub fn render_with(
             values,
         }),
         rendered,
-    }
-}
-
-/// A canonical type reference in the authoring spelling: the message name
-/// for protobuf, `json:<name>` for a JSON Schema type, the media type for a
-/// raw one.
-fn declared(ty: &serde_json::Value) -> String {
-    let name = ty["name"].as_str().unwrap_or_default();
-    match ty["kind"].as_str() {
-        Some("jsonschema") => format!("json:{name}"),
-        Some("raw") => ty["media_type"].as_str().unwrap_or_default().to_owned(),
-        _ => name.to_owned(),
     }
 }
 

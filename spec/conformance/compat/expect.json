@@ -154,6 +154,16 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/jsonschema/anyof-recursive-described": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/anyof-recursive-renamed": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
   "payload/jsonschema/boolean-property": {
    "class": "review",
    "type": "json:Status",
@@ -211,6 +221,11 @@
   },
   "payload/jsonschema/nullable-inner-retyped": {
    "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-null-as-list": {
+   "class": "compatible",
    "type": "json:Status",
    "warnings": []
   },

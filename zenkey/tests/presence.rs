@@ -707,3 +707,46 @@ async fn a_read_that_ends_at_its_timeout_says_so() {
     assert_eq!(held.errors, ["zenoh/string: Timeout"]);
     assert!(held.keys.is_empty(), "possibly incomplete, never absence");
 }
+
+/// Core §8.1 (0.8): a liveliness GET the router's access control refuses is
+/// answered like one that matched nothing, with no error reply. The read is
+/// complete and empty, the same as an absent provider's. The controls: the
+/// router's own read of the same selector (no face, so no rule) holds the
+/// token, and the tool's read of the instance tokens, which the rule leaves
+/// alone, is answered. The rule acts on the query's ingress at the router;
+/// on `egress` alone, measured, it refuses nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_read_looks_complete_and_empty() {
+    let acl = r#"{
+        enabled: true,
+        default_permission: "allow",
+        rules: [{
+            id: "no-alive-reads",
+            messages: ["liveliness_query"],
+            flows: ["ingress"],
+            permission: "deny",
+            key_exprs: ["zk2/*/*/@zk/alive/**"],
+        }],
+        subjects: [{ id: "anyone" }],
+        policies: [{ rules: ["no-alive-reads"], subjects: ["anyone"] }],
+    }"#;
+    let alive = "zk2/*/*/@zk/alive/**";
+    let (r1, ep) = common::router_with(None, &[("access_control", acl)]).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let (b, _held) = nav_builder(&owner, "p1/nav", &[]).await;
+    let svc = b.start().await.unwrap();
+    eventually("the router holds the interface token", || async {
+        keys(&r1, alive).await.len() == 1
+    })
+    .await;
+
+    let instance = presence::liveliness_read(&tool, "zk2/*/*/@zk/instance/*", T)
+        .await
+        .unwrap();
+    assert!(instance.complete, "{instance:?}");
+    assert_eq!(instance.keys, [svc.instance_key().unwrap().to_string()]);
+    let refused = presence::liveliness_read(&tool, alive, T).await.unwrap();
+    assert!(refused.complete, "answered, not timed out: {refused:?}");
+    assert!(refused.errors.is_empty(), "no error reply: {refused:?}");
+    assert!(refused.keys.is_empty(), "{refused:?}");
+}

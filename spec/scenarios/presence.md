@@ -141,3 +141,31 @@ tokenless set; each also implements `nav.v2`.
 - Each descriptor marks `health.v1` with `"token": false`.
 - A tool lists the `health.v1` providers from instance tokens and
   descriptors, and finds all 100.
+
+## §6 Possibly incomplete, and refused (§8.1)
+
+**Setup.** One router R1 whose access control, under `allow`, denies
+`liveliness_query` on the ingress flow for `zk2/*/*/@zk/alive/**`. An owner
+and a tool are clients of R1. A second tool reaches R1 through a link
+whose router-to-client direction the test can stall.
+
+**Steps.**
+1. The owner starts. Wait until R1's own session reads its interface
+   token: R1 has no face of its own, so no rule applies to it.
+2. The tool reads `zk2/*/*/@zk/instance/*`, then `zk2/*/*/@zk/alive/**`.
+3. The second tool reads `zk2/**` with the link flowing, then again with
+   R1's replies held back past the read's timeout.
+
+**Expected.**
+1. R1 reads the token.
+2. The instance read holds the owner's instance token, and no error reply.
+   The alive read is answered: a final reply, no token and no error reply,
+   the same as a selector no token matches. A tool cannot tell it from
+   absence (core §8.1, "A refused read").
+3. The first read ends with no error reply. The second ends with the error
+   reply `Timeout` and no token, and the tool reports it as possibly
+   incomplete, never as absence.
+
+*Measured (0.8) on zenoh 1.10.1, with the reference runtime: as above.
+The same deny on the `egress` flow alone refused nothing: the alive read
+held the token.*
