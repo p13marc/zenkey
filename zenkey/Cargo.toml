@@ -21,6 +21,11 @@ zenoh = { workspace = true }
 # liveliness subscriber, zenoh#2678). zenoh implements `IntoHandler` for a
 # flume pair, and its sender drops when the query finalizes: completion.
 flume = "0.11"
+# zenoh runs on tokio; the runtime's timeouts use it too.
+tokio = { workspace = true }
+zenoh-ext = { workspace = true }
+ciborium = { workspace = true }
+libc = "0.2"
 rand = "0.9"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,4 +33,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "typed_path"
+harness = false
