@@ -3,6 +3,169 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.6 — 2026-10-08: the findings against 0.5, and the archive's gaps (#609, #620)
+
+The Python implementation (#609) was rewritten from 0.5, and found 8 more
+places where the spec was silent, ambiguous or said two things: F-56 to
+F-63. The runtime's state chunk (#620), the first implementation of §4.4,
+found 4 gaps of its own: G-1 to G-4. Each is resolved as 0.5's were:
+- **the reference's behaviour becomes the rule**, stated where a reader
+  looks for it; or,
+- **where that behaviour was a bug**, the Rust is fixed, and the corrected
+  rule is stated.
+
+A fixture pins every static rule a fixture can check: 4 contract cases,
+1 bundle, 6 descriptors, 3 error envelopes and 2 compatibility cases. No
+existing expectation changed. The live rules land in their scenarios.
+
+**Changed: the reference was wrong, and is fixed.**
+- **One id, one name (F-62, the contradiction).** Two listed JSON Schema
+  files whose JCS bytes are equal share an id. The canonical form listed
+  that id once, under the later file's name, while a bundle `$ref` names an
+  artifact by stem (§9.4). So a contract could lint clean and build a
+  bundle whose `$ref` resolved to nothing: `a.json` and `b.json` identical,
+  `c.json` referring to `a.json#/$defs/X`, gave a bundle with the stems
+  `b` and `c` only. The Rust builder did exactly this.
+  - **The rule:** a later listed file with an earlier one's id is E024,
+    once, and is not loaded, as a later file with a taken stem already
+    was. Ids are compared, not file bytes: reordered members or other
+    whitespace are the same document. In a contract with no E024 and no
+    E032, every bundle `$ref` resolves (§9.4).
+  - **Why this rule.** It is the smallest of the three the finding named
+    that removes the contradiction:
+    - *Keeping the first name* fixes a `$ref` to the first file and breaks
+      one to the later file, so a contract could still lint clean and
+      build a dangling `$ref`.
+    - *Listing the id under every name* changes the canonical form's
+      shape, makes §9.7's retention identity ambiguous (it replaces each id
+      by its artifact's one name), and needs new mechanism in every
+      builder and classifier.
+    - *E024* reuses a code that already means "two listed files collide on
+      what a bundle keys by", and its cascade. It changes no other
+      contract's canonical form or fingerprint, and no fixture, example or
+      test contract has two such files: every contract under
+      `examples/zk2/`, `spec/conformance/`, `zenkey/tests/contracts/` and
+      `impl/python/interop/` was checked. A contract that wanted both names
+      lists the file once, and refers to it by that name.
+  - **The reader's half.** The classifier resolved a `$ref` whose file
+    part named no artifact in the referencing document instead, silently.
+    Such a `$ref`, or one whose pointer resolves to nothing, is now
+    `schema_unreadable` (review), like a descriptor set that does not
+    decode (§9.8).
+- **CBOR integers (F-58).** "An integer outside 64 bits" was read as
+  outside the signed range: 2^63 to 2^64−1 were `decode`, although the
+  reference's own encoder writes a `u64` detail that way, and JSON
+  decoding holds it. An integer now decodes from −2^63 to 2^64−1, and
+  only CBOR's −2^64 to −2^63−1 is `decode` (§5.2).
+- **A peer archive's pattern (G-3).** Aligning from an owner-side archive
+  read the peer's keys through the recorded selector's archive form. A
+  wildcard there also matches a slugged verbatim chunk, which the selector
+  itself never does, so the read could bring in explicit state the archive
+  was never configured to record. A reply now counts only when the
+  selector selects its decoded origin (§4.4).
+
+**Changed: rules stated, by section.**
+- **No ceiling (G-1, §2.2, §4.4).** §4.4 said `archive.v1` "declares no
+  ceiling", while E013 requires a `cardinality` on a templated resource;
+  the runtime wrote 4294967295 and called it a placeholder. That value is
+  now the convention: a template whose population no contract can fix
+  declares 2^32−1, which reads "no ceiling", and a tool never budgets with
+  it. The authoring format does not change. The runtime's comment cites
+  the rule.
+- **Retention (F-56, §2.6, E026).** The seconds are an unsigned 64-bit
+  integer: above 2^64−1 is E026, and 2^63 s, which a signed reading would
+  refuse, reaches the canonical form and is E028 there.
+- **An unbound required role, observed (F-61, §3.2).** The finding's
+  runner watched an owner that was its own router, so the refusal was
+  judged on silence. A tester watches through a router that outlives the
+  owner, against a control run that does show the token;
+  `presence.md §2` says how.
+- **The descriptor (§3.3).**
+  - *Repeats (F-57).* A repeated capability or profile is one D008 or D010
+    for the whole list, however many values repeat; a malformed value
+    counts at each occurrence as well, so `["A", "A"]` gives three.
+  - *Integers (F-63).* `format` is a bound in a descriptor too, and there
+    `uint64` is 0 to 2^64−1: a `cardinality` of 2^64 is D000, and 2^64−1
+    above the contract's bound is D007.
+- **Archives (§4.4).**
+  - *The pattern (G-3).* An origin selector's archive form drops `zk2`,
+    keeps `*` and `**`, and slugs every other chunk; a `$*` chunk has no
+    form.
+  - *Reachable* is judged by the owner's instance token, and a peer
+    archive's token appearing triggers alignment too. Peers are read in
+    turn, the first with a reply that counts wins.
+  - *Retrying (G-2), a SHOULD.* An owner's token can arrive before the
+    route to its state queryable, and a read then returns empty. An
+    archive repeats an alignment that left keys unconfirmed, a bounded
+    number of times. The reference makes 5 attempts. `state.md §5` step 2
+    now refuses every read, retries included.
+  - *Confirmation (G-4).* A value from the owner is confirmed. One from a
+    peer keeps the peer's flag, unconfirmed when the attachment is absent
+    or unreadable. A peer's `reply_del` is positive evidence. A reply at
+    the held timestamp can confirm a key, never unconfirm it.
+- **The error envelope (F-58, §5.2):** the CBOR integer range above.
+- **When the wait for presence starts (F-59, §8.1).** From the later of the
+  tool's session connecting and the owner's launch. Where the owner is the
+  tool's router, that is the connection.
+- **Bundles (F-62, §9.4, §9.6).** A bundle whose `$ref` names no artifact,
+  such as 0.5's rule built for two identical files, still verifies:
+  verification checks hashes, not content.
+- **Compatibility (F-60, §9.8).** `oneof_branch_added` needs a `oneOf` on
+  both sides. Adding the keyword where there was none, or removing it, is
+  `undecided_changed` (review): an absent `oneOf` is no constraint, not
+  zero branches.
+
+**Where the Python implementation's guess and the stated rule differ** (it
+was right to guess; these are now decided): repeats are one D008 or D010
+for the list, not one per repeated value (F-57); a `oneOf` added where
+there was none is review, not breaking (F-60); two listed files with one
+id are E024, where zk2py followed 0.5 and built the dangling `$ref`
+(F-62); and a refusal is watched through a router of the runner's own,
+with a control (F-61). zk2py's guesses on F-56, F-58, F-59 and F-63 are
+the stated rules.
+
+**Deliberately not changed:**
+- **No existing expectation.** Every fixture of 0.5 keeps its expected
+  value; the fixes change behaviour only on inputs no fixture had.
+- **The verifier does not resolve `$ref`s.** A bundle 0.5 built for two
+  identical files stays verifiable, so a history holding one still passes
+  §9.7's check. The lint keeps new ones from being built, and the
+  classifier reads an old one's `$ref` as unreadable.
+- **`descriptor.schema.json` gets no `maximum` for `uint64`.** 2^64−1 has
+  no exact double, so a validator that reads numbers as doubles could not
+  hold the bound; `format` is the bound, as §3.3 says. (0.5 added `maximum`
+  to `contract.schema.json`'s `uint32` fields, which every reader holds.)
+- **JSON envelope numbers** get no range rule. Only CBOR, whose integer
+  type has a range of its own, needed one.
+- **Removing a `oneOf`** loosens what a writer may send, as a branch added
+  does, but it was not measured, so it stays review: the asymmetry
+  paragraph leaves unmeasured changes to a human.
+- **The authoring format** (G-1): the convention is a value, not a new
+  spelling. `archive.v1` stays a profile (#613); the runtime's minimal
+  contract keeps its value and its fingerprint.
+- **No timeout values in the core** (F-59). The starting instant binds the
+  scenarios, like their 1 s.
+- **The retry's figures** (G-2). The core asks for a bound, and states the
+  reference's 5 attempts as informative.
+- **The owner example (#610)** is still its own router. A runner following
+  `presence.md §2` step 4 needs it as a client of R1, which is the
+  runtime's change to make, not the spec's.
+
+| Id | Resolution |
+|---|---|
+| F-56 | Rule stated (§2.6, E026: unsigned); fixtures `e026-retention-range`, `e028-retention` |
+| F-57 | Rule stated (§3.3: once for the list, per malformed occurrence); fixtures `d008-two-repeated-values`, `d008-malformed-twice`, `d010-two-repeated-values`, `d010-malformed-twice` |
+| F-58 | Rust fixed (CBOR integers −2^63 to 2^64−1); rule stated (§5.2); 3 `errors/` cases |
+| F-59 | Rule stated (§8.1: the later of the connection and the launch) |
+| F-60 | Rule stated (§9.8: review); fixtures `oneof-keyword-added`, `oneof-keyword-removed` |
+| F-61 | Rule stated (§3.2: watch through a router that stays up, with a control); scenario `presence.md §2` rewritten |
+| F-62 | Rust fixed (E024 for a taken id; the classifier's dangling `$ref` is `schema_unreadable`); rules stated (§9.4, §9.6, §9.8); fixtures `contracts/e024-identical`, `bundles/ref-names-no-artifact` |
+| F-63 | Rule stated (§3.3: `uint64` is 0 to 2^64−1, D000 outside); fixtures `d000-cardinality-range`, `d007-cardinality-max` |
+| G-1 | Rule stated (§2.2: 2^32−1 is "no ceiling"; §4.4); fixture `ok-cardinality-no-ceiling`; `archive.rs`'s comment cites it |
+| G-2 | SHOULD added (§4.4: bounded retry); scenario `state.md §5` |
+| G-3 | Rust fixed (a peer's reply counts only for a selected origin); rule stated (§4.4: the archive form) |
+| G-4 | Rule stated (§4.4: a peer's `confirmed` kept, its `reply_del` positive evidence); scenario `state.md §5` step 3 |
+
 ## 0.5 — 2026-10-08: the second implementation's findings (#609, #607)
 
 The Python implementation (#609) was written from `spec/` alone, and passes

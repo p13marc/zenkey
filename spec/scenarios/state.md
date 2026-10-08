@@ -59,19 +59,26 @@ GETs the owner.
 **Steps.**
 1. With the link cut, the owner deletes the plan within W. The link heals
    within W.
-2. The same, but the access control refuses the archive's GET once, so the
-   reply set is empty.
+2. The same, but the access control refuses the archive's GETs for the
+   whole alignment, its retries included (core §4.4), so every reply set
+   is empty.
 3. The link stays cut and the owner stops. An archive on the owner's side
    still records the plan's deletion.
 
 **Expected.**
 1. The archive re-reads the owner's collection before serving it as
    confirmed. The owner answers the plan with a `reply_del`, and the archive
-   drops it.
-2. The empty reply set drops nothing. The archive keeps serving the plan,
-   with `confirmed: false`.
+   drops it. Should the owner's token arrive before the route to its state
+   queryable, the first read returns empty, and a retry drops the plan.
+2. The empty reply sets drop nothing, however often the archive retries.
+   The archive keeps serving the plan, with `confirmed: false`.
 3. When the link heals, the vehicle's archive aligns from the owner-side
-   archive, which answers with the `reply_del`, and drops the plan.
+   archive, reading it through the collection's archive form (core §4.4).
+   That archive answers with the `reply_del`, which is positive evidence,
+   and the vehicle's archive drops the plan.
+
+*The reference (`zenkey/tests/state.rs`) refuses every read in step 2: a
+refusal of one read alone would be healed by the retry.*
 
 ## §6 A window shorter than the outage (S3)
 

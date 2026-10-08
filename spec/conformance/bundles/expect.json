@@ -94,5 +94,5 @@
       "ok": true
     }
   },
-  "description": "Bundle verification (core.md §9.6). `valid.bundle.json` verifies, with the fingerprint given; every other file is refused with the tag given, from §9.6's table of steps. Built from `seed.toml`."
+  "description": "Bundle verification (core.md §9.6). Each file verifies, with the fingerprint given (`ok`), or is refused with the tag given, from §9.6's table of steps. Built from `seed.toml`: `valid.bundle.json` is its bundle, and every other file a variation of it."
 }
