@@ -63,6 +63,10 @@ pub struct InterfaceEntry {
     pub contract: String,
     /// The contract's informative minor.
     pub minor: u64,
+    /// Whether the instance holds this interface's token. `false` for an
+    /// interface in the deployment's tokenless set (U22, spec §8.1).
+    #[serde(default = "yes")]
+    pub token: bool,
     /// Optional resources that are absent here although no missing
     /// capability implies it.
     #[serde(default)]
@@ -355,6 +359,10 @@ fn check_exposure(
             Some(_) => {}
         }
     }
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// A resource named `<kind token>/<template>`.

@@ -1193,8 +1193,8 @@ table).
 | U20 *(r3.3)* | `@state` for large populations | **r4: yes.** Per-entity tokens break down between 15k and 50k (S2); 100k `@state` keys read in ≤ 366 ms with owner + storage (S5) | S2, S5 | A verbatim system token for singleton services |
 | U21 *(r3.3)* | Does zenoh evaluate allow rules under `default_permission: allow`? | **r4: it does not**, confirmed live; D13's complement denies work (S14) | S14 | n/a |
 | U18 *(r3.2; r3.3: member tokens, D9)* | Device-as-service at ZenSight's SNMP scale (thousands of devices per poller): token and descriptor cost | **r4: device-as-service to about 5,000 devices per domain** (15k tokens, 3.3 s); member tokens above (S2) | S2 | Per-device presence as a template-scoped liveliness token under the parent service |
-| **U22** *(r4)* | A deployment above the presence budget: how does it cut the per-service multiplier (1 instance + one token per interface)? | An interface every service implements (`health.v1`, the framework set) declares no interface token. Its providers are found through instance tokens and descriptors. Costs, as §3.10 exceptions: "who implements X" for those interfaces needs descriptors, not a token selector; the split-brain token check (§3.8) narrows to the other interfaces; and alive ⇒ callable holds per instance, not per interface, for them. ZenSight's shape would fall from about 42k tokens to about 12k (§4.9) | Spec review (#606), with ZenSight's shape re-measured | Instance tokens only, with interfaces read from descriptors |
-| **U23** *(r4)* | The far side of a constrained face when it is more than one session: a ground site with its own router, or a service commanding many vehicles (§4.3) | Measure zenoh 1.10.1's `gateway.south` regions: a far router placed south by zid, interface or region name, so that declarations reach it only on interest | A spike follow-up before `link.v1` (#613) | One gateway session per link (§3.10), re-keying what it relays under its own address |
+| **U22** *(r4)* | A deployment above the presence budget: how does it cut the per-service multiplier (1 instance + one token per interface)? | **Decided 2026-10-08, at the spec's acceptance:** a deployment-configured tokenless set, recommended for the framework interfaces every service implements. The descriptor marks them `"token": false`, and their providers are found through instance tokens and descriptors. A contract-level flag was rejected: it would have changed every fingerprint (spec §8.1) | Spec review (#606) | Instance tokens only, with interfaces read from descriptors |
+| **U23** *(r4)* | The far side of a constrained face when it is more than one session: a ground site with its own router, or a service commanding many vehicles (§4.3) | **Decided 2026-10-08:** measure zenoh 1.10.1's `gateway.south` regions (a far router placed south by zid, interface or region name), before `link.v1` (#613) | A spike follow-up | One gateway session per link, re-keying what it relays under its own address |
 
 (r2's U9, profile binding, is now settled: `uses` in the contract plus
 `profiles` in the descriptor.)
@@ -1217,6 +1217,7 @@ table).
 | 9 *(r4)* | Operation exclusivity (O1) | **Decided 2026-10-08:** at most once only while one instance serves; split-brain diagnosed from tokens; exclusivity in `redundancy.v1` (§3.7). |
 | 10 *(r4)* | Protobuf compatibility | **Decided 2026-10-08:** WIRE semantics with renumber detection; JSON-name and enum-name changes are review (§3.11). |
 | 11 *(r4)* | Upstream reports | **Decided 2026-10-08:** the two drafts in `docs/zk2/upstream/` are not filed. |
+| 12 | The core spec | **Accepted 2026-10-08:** `spec/core.md` v0.1 (#606), with U22 decided and U23 to be measured. |
 
 ---
 

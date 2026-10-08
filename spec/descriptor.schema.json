@@ -99,6 +99,11 @@
           "format": "uint64",
           "minimum": 0
         },
+        "token": {
+          "description": "Whether the instance holds this interface's token. `false` for an\ninterface in the deployment's tokenless set (U22, spec §8.1).",
+          "type": "boolean",
+          "default": true
+        },
         "unavailable": {
           "description": "Optional resources that are absent here although no missing\ncapability implies it.",
           "type": "array",
