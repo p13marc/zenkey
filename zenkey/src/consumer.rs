@@ -73,7 +73,7 @@ impl Provider {
                 .is_none_or(|s| s == addr.service.as_str())
     }
 
-    fn chunks(&self) -> (&str, &str) {
+    pub(crate) fn chunks(&self) -> (&str, &str) {
         (
             self.system.as_deref().unwrap_or("*"),
             self.service.as_deref().unwrap_or("*"),
