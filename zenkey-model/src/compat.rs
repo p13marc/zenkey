@@ -887,14 +887,30 @@ const BOUNDS: &[&str] = &[
     "maxItems",
 ];
 
-/// A schema without its annotations, recursively: what a change inside an
-/// undecided keyword is compared on.
+/// A schema without its annotations, at every schema position
+/// ([`crate::schema::visit_schemas`]'s): what a change inside an undecided
+/// keyword is compared on. Property names and data (`enum`, `const`) are
+/// kept as written, so a property named `title` is not an annotation. An
+/// array is a list of schemas (the value of `oneOf`, `anyOf`,
+/// `prefixItems`).
 fn strip(v: &Value) -> Value {
     match v {
         Value::Object(m) => Value::Object(
             m.iter()
                 .filter(|(k, _)| !ANNOTATIONS.contains(&k.as_str()))
-                .map(|(k, x)| (k.clone(), strip(x)))
+                .map(|(k, x)| {
+                    let x = match (k.as_str(), x) {
+                        ("properties" | "$defs", Value::Object(subs)) => {
+                            Value::Object(subs.iter().map(|(n, s)| (n.clone(), strip(s))).collect())
+                        }
+                        (
+                            "prefixItems" | "oneOf" | "anyOf" | "items" | "additionalProperties",
+                            sub,
+                        ) => strip(sub),
+                        (_, x) => x.clone(),
+                    };
+                    (k.clone(), x)
+                })
                 .collect(),
         ),
         Value::Array(a) => Value::Array(a.iter().map(strip).collect()),
@@ -929,26 +945,49 @@ fn required(s: &Value) -> BTreeSet<String> {
 
 impl<'a> JsonCx<'a> {
     /// Follows `$ref` to its target, and the document the target lives in.
+    /// A `$ref`'s file part names an artifact by the stem of its last path
+    /// segment (spec §9.4): a bundle keeps no paths. Keywords beside a
+    /// `$ref` (other than `$defs`) are added to its target, the outermost
+    /// taking the place of the target's own, so a change beside a `$ref` is
+    /// compared like any other.
     fn deref(&self, s: &Value, doc: &'a Value, old: bool) -> (Value, &'a Value) {
         let mut cur = s.clone();
         let mut doc = doc;
+        let mut beside: Vec<Map<String, Value>> = Vec::new();
         for _ in 0..32 {
             let Some(r) = cur.get("$ref").and_then(Value::as_str).map(str::to_owned) else {
                 break;
             };
+            if let Value::Object(m) = &cur {
+                let sib: Map<String, Value> = m
+                    .iter()
+                    .filter(|(k, _)| !matches!(k.as_str(), "$ref" | "$defs"))
+                    .map(|(k, x)| (k.clone(), x.clone()))
+                    .collect();
+                if !sib.is_empty() {
+                    beside.push(sib);
+                }
+            }
             let (file, ptr) = r.split_once('#').unwrap_or((r.as_str(), ""));
             if !file.is_empty() {
-                let stem = file
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(file)
-                    .trim_end_matches(".json");
+                let base = file.rsplit('/').next().unwrap_or(file);
+                let stem = base.strip_suffix(".json").unwrap_or(base);
                 let docs = if old { &self.old_docs } else { &self.new_docs };
                 if let Some(d) = docs.get(stem) {
                     doc = d;
                 }
             }
             cur = doc.pointer(ptr).cloned().unwrap_or(Value::Null);
+        }
+        if !beside.is_empty() && cur != Value::Bool(false) {
+            let mut merged = match cur {
+                Value::Object(m) => m,
+                _ => Map::new(),
+            };
+            for sib in beside.into_iter().rev() {
+                merged.extend(sib);
+            }
+            cur = Value::Object(merged);
         }
         (cur, doc)
     }
@@ -974,6 +1013,19 @@ impl<'a> JsonCx<'a> {
         let (o, doc_o) = self.deref(so, doc_o, true);
         let (n, doc_n) = self.deref(sn, doc_n, false);
         let (o, n) = (&o, &n);
+        // A boolean schema (`true` accepts anything, `false` nothing) is not
+        // compared keyword by keyword: any change to or from one is review.
+        if o.is_boolean() || n.is_boolean() {
+            if o != n {
+                v.push(
+                    Class::Review,
+                    "boolean_schema_changed",
+                    at,
+                    "a boolean schema changed",
+                );
+            }
+            return;
+        }
         if types(o) != types(n) {
             v.push(
                 Class::Breaking,
@@ -1074,6 +1126,24 @@ impl<'a> JsonCx<'a> {
                     "a required property added",
                 );
             }
+        }
+        // A required name with no property on either side still binds:
+        // the member must be present, whatever its value.
+        for name in ro.symmetric_difference(&rn) {
+            if po.contains_key(name) || pn.contains_key(name) {
+                continue;
+            }
+            let rule = if rn.contains(name) {
+                "required_added"
+            } else {
+                "required_removed"
+            };
+            v.push(
+                Class::Breaking,
+                rule,
+                &format!("{at}.{name}"),
+                "a required name without a property",
+            );
         }
         // Members: a schema on both sides is compared; a boolean or absent
         // one on both is open or closed, which tolerant readers ignore; a
@@ -1180,4 +1250,77 @@ fn default_json_name(name: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::contract::load_str;
+
+    /// A one-type revision over a JSON Schema document, as the `compat/`
+    /// fixtures wrap theirs.
+    fn rev(dir: &Path, doc: &Value) -> Revision {
+        std::fs::write(dir.join("t.json"), doc.to_string()).unwrap();
+        let src = "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n[schemas]\njsonschema = [\"t.json\"]\n\
+                   [resources.s]\nkind = \"state\"\ntype = \"json:T\"\n";
+        let l = load_str(src, dir, None);
+        Revision::of(&l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+    }
+
+    fn class(old: &Value, new: &Value) -> &'static str {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("zk2-compat-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (o, n) = (rev(&dir, old), rev(&dir, new));
+        std::fs::remove_dir_all(&dir).unwrap();
+        compare(&o, &n).class().as_str()
+    }
+
+    fn doc(t: &Value) -> Value {
+        json!({"$defs": {"T": t, "U": {"type": "integer"}}})
+    }
+
+    #[test]
+    fn keywords_beside_a_ref_are_compared() {
+        let a = doc(&json!({"type": "object", "properties": {"n": {"$ref": "#/$defs/U"}}}));
+        let b = doc(
+            &json!({"type": "object", "properties": {"n": {"$ref": "#/$defs/U", "maximum": 3}}}),
+        );
+        assert_eq!(class(&a, &b), "breaking");
+        assert_eq!(class(&b, &b), "compatible");
+        let inline =
+            doc(&json!({"type": "object", "properties": {"n": {"type": "integer", "maximum": 3}}}));
+        assert_eq!(class(&b, &inline), "compatible");
+    }
+
+    #[test]
+    fn boolean_schemas_are_review() {
+        let t = |p: Value| doc(&json!({"type": "object", "properties": {"p": p}}));
+        assert_eq!(class(&t(json!(true)), &t(json!(false))), "review");
+        assert_eq!(class(&t(json!(true)), &t(json!({}))), "review");
+        assert_eq!(class(&t(json!(false)), &t(json!(false))), "compatible");
+    }
+
+    #[test]
+    fn a_required_name_without_a_property_binds() {
+        let t = |r: Value| doc(&json!({"type": "object", "required": r}));
+        assert_eq!(class(&t(json!(["a"])), &t(json!([]))), "breaking");
+        assert_eq!(class(&t(json!([])), &t(json!(["a"]))), "breaking");
+        assert_eq!(class(&t(json!(["a"])), &t(json!(["a"]))), "compatible");
+    }
+
+    #[test]
+    fn property_names_inside_oneof_are_not_annotations() {
+        let t = |ty: &str| {
+            doc(&json!({"oneOf": [{"type": "object", "properties": {"title": {"type": ty}}}]}))
+        };
+        assert_eq!(class(&t("string"), &t("integer")), "review");
+        let d = |text: &str| doc(&json!({"oneOf": [{"type": "string", "description": text}]}));
+        assert_eq!(class(&d("a"), &d("b")), "compatible");
+    }
 }

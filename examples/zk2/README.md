@@ -8,7 +8,18 @@ requires each to load without a single finding
 (`zenkey-model/tests/examples.rs`). To check one by hand:
 
 ```bash
-cargo run -p zenkey-model --example zk2-check -- examples/zk2/walkthrough/nav.v2.toml
+cargo run -p zenkey-model --bin zk2 -- contract lint examples/zk2/walkthrough/nav.v2.toml
+```
+
+**Their history.** [`.history/`](.history/) is the history root (`spec/core.md`
+§9.7) of every example in this tree, whatever its directory: a contract's
+history is `.history/<iface>/`, found by its interface id. The same test
+requires every example's current revision to be published there, and to be
+`compatible` with every earlier revision of its interface. After an
+intended change, publish the new revision:
+
+```bash
+cargo run -p zenkey-model --bin zk2 -- contract bundle <file> --history examples/zk2/.history
 ```
 
 | Directory | What it is | Issue |

@@ -1,0 +1,12 @@
+{
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "load": {
+          "$ref": "types.json#/$defs/Load"
+        }
+      }
+    }
+  }
+}

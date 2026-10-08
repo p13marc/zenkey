@@ -11,7 +11,17 @@ FULL_TRANSITIVE class in [`expect.json`](expect.json) (`core.md` §9.8).
 | `transitive/<case>/` | `v1`, `v2`, `v3`, each a protobuf directory or a `.json` | Wrapped like the payload cases. `v3` is checked against the history `[v1, v2]`, and `against` gives its class against each |
 
 The wrapping contract, with `<kind>` `protobuf` or `jsonschema` and
-`<artifact>` the case's file:
+`<artifact>` the case's file. It sits in the directory that holds its
+artifact, which fixes the import root and so the protobuf file's name
+(`core.md` §9.4):
+- a protobuf revision is wrapped in its own directory (`old/`, `new/`,
+  `v1/`…), listing `m.proto`, so the artifact is named `m.proto` on both
+  sides and `same_revision` can hold;
+- a JSON Schema revision is wrapped in the case directory, listing
+  `old.json`, `new.json` or `v1.json`…
+
+A runner may write the wrapper to a file there, or load its text as if it
+were there.
 
 ```toml
 [interface]
@@ -27,8 +37,10 @@ type = "<type from expect.json>"
 
 Each entry in `expect.json` holds:
 - `class`: `compatible`, `review` or `breaking`, or `invalid` when the new
-  revision must not load (its only error is E037);
-- `warnings`: the warning names, in the order the classifier reports them;
+  revision must not load. An `invalid` case's new revision fails with E037
+  alone; its old revision loads, as every revision of every other case
+  does;
+- `warnings`: the warning rule names, sorted and deduplicated;
 - `same_revision`, where present: §9.7's retention identity.
 
 ## Where the protobuf verdicts depart from `buf`
@@ -55,6 +67,11 @@ Every other case agrees: `doc-only` (ok), and `move-into-oneof`,
 `scalar-to-repeated`, `renumber-field`, `reserved-reused`,
 `proto2-required-added`, `proto2-required-removed`,
 `proto2-optional-to-required` (breaking).
+
+The protobuf cases added by amendment 0.5 (`move-between-oneofs`,
+`proto2-default-changed`, `packed-option`, `message-renamed`,
+`enum-value-renumbered`, `proto2-to-proto3`, `nested-type-added`) were not
+measured with buf.
 
 ## Rule names and buf's
 

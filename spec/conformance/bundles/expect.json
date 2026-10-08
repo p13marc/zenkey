@@ -1,11 +1,19 @@
 {
   "cases": {
+    "base64-unpadded.bundle.json": {
+      "error": "shape",
+      "ok": false
+    },
     "contract-schemas-not-a-list.bundle.json": {
       "error": "shape",
       "ok": false
     },
     "duplicate-key.bundle.json": {
       "error": "json",
+      "ok": false
+    },
+    "extra-entry-member.bundle.json": {
+      "error": "shape",
       "ok": false
     },
     "extra-hash.bundle.json": {
@@ -33,12 +41,28 @@
       "error": "shape",
       "ok": false
     },
+    "no-extras.bundle.json": {
+      "fingerprint": "sha256:87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348",
+      "ok": true
+    },
     "not-utf8.bundle.json": {
       "error": "shape",
       "ok": false
     },
     "restrictions.bundle.json": {
       "error": "restrictions",
+      "ok": false
+    },
+    "schema-data-big-integer.bundle.json": {
+      "error": "schema_hash",
+      "ok": false
+    },
+    "schema-entry-member.bundle.json": {
+      "error": "shape",
+      "ok": false
+    },
+    "schema-entry-not-object.bundle.json": {
+      "error": "schema_kind",
       "ok": false
     },
     "schema-hash-protobuf.bundle.json": {
@@ -66,5 +90,5 @@
       "ok": true
     }
   },
-  "description": "Bundle verification (r3 §3.11). `valid.bundle.json` verifies, with the fingerprint given; every other file is refused with the tag given (zenkey_model::bundle::BundleError::tag). Built from `seed.toml`."
+  "description": "Bundle verification (core.md §9.6). `valid.bundle.json` verifies, with the fingerprint given; every other file is refused with the tag given, from §9.6's table of steps. Built from `seed.toml`."
 }

@@ -1,0 +1,16 @@
+# nan and inf are TOML floats with no JSON form: one E028 per value (§9.5).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["freshness.v1"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = nan }
+
+[resources.b]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = [1, -inf] }

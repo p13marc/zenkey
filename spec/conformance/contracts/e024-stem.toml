@@ -1,0 +1,18 @@
+# Two listed files with one stem: E024 once, on the later file, which is not
+# loaded. `json:seed#Point` resolves in the first; `json:seed#Other`, which
+# only the second defines, does not (E023) (§9.2, §9.4).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/seed.json", "schemas/dup/seed.json"]
+
+[resources.a]
+kind = "stream"
+type = "json:seed#Point"
+
+[resources.b]
+kind = "stream"
+type = "json:seed#Other"

@@ -5,6 +5,11 @@
         "D000"
       ]
     },
+    "d000-minor-float": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-unknown-field": {
       "codes": [
         "D000"
@@ -71,6 +76,11 @@
         "D007"
       ]
     },
+    "d007-zero": {
+      "codes": [
+        "D007"
+      ]
+    },
     "d008-capability": {
       "codes": [
         "D008"
@@ -101,6 +111,11 @@
         "D010"
       ]
     },
+    "d010-twice": {
+      "codes": [
+        "D010"
+      ]
+    },
     "not-json": {
       "codes": [
         "D000"
@@ -118,9 +133,12 @@
     "ok-tokenless": {
       "codes": []
     },
-    "ok-unknown-revision": {
+    "ok-unchecked": {
+      "codes": []
+    },
+    "ok-unknown-interface": {
       "codes": []
     }
   },
-  "description": "<name>.json → the sorted D… codes check() reports against contracts/nav.v2.toml. A document whose interface names another contract is checked for syntax only."
+  "description": "<name>.json → the sorted D… codes of the descriptor checks (core.md §3.3, the D-code table), against contracts/nav.v2.toml. An interface whose contract is not supplied (any but nav.v2 here) is checked for syntax only."
 }

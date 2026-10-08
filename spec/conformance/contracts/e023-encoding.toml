@@ -1,0 +1,11 @@
+# W103 is judged on resolved types only: a type that does not resolve says
+# nothing about whether a JSON Schema type takes `encoding` (§9.2).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.a]
+kind = "stream"
+type = "json:Nope"
+encoding = "cbor"

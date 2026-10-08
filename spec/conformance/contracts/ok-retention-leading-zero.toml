@@ -1,0 +1,13 @@
+# A retention's count may have leading zeros: the canonical form holds
+# seconds, so "07d" is 604800 like "7d" (§2.6, §9.5). A rate's count may
+# not, because the canonical form holds its text.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.applied]
+kind = "event"
+type = { raw = "text/plain" }
+rate = "burst(12/h)"
+retention = "07d"

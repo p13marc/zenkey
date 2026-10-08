@@ -165,7 +165,25 @@
         "a/{x...}",
         "a/{x}"
       ]
+    },
+    {
+      "chunks": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "bindings": {
+          "x": [
+            "b"
+          ]
+        },
+        "winner": "a/{x}"
+      },
+      "templates": [
+        "a/{x}",
+        "a/{y}"
+      ]
     }
   ],
-  "description": "Template matching and most-literal-first precedence (r3.3 D1). `expect` is the winning template with its unslugged bindings, or null when none matches."
+  "description": "Template matching and precedence (core.md §2.2): match, then rank, most literal first. `expect` is the winning template with its unslugged bindings, or null when none matches. Parameter types play no part in matching. Two templates that rank alike (the same shape, which a contract refuses as E021) leave the first listed the winner."
 }

@@ -267,7 +267,34 @@
         "system": "s"
       },
       "key": "zk2/s/svc/@zk/member/media.v1/front/3fa9c2d41b7e0012"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "log.v1",
+        "resource": [
+          "applied",
+          "8zzzzzzzzzzzzzzzzzzzzzzzzz"
+        ],
+        "service": "svc",
+        "system": "s",
+        "token": "events"
+      },
+      "key": "zk2/s/svc/log.v1/events/applied/8zzzzzzzzzzzzzzzzzzzzzzzzz"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "nav.v2",
+        "resource": [
+          "x-eth0"
+        ],
+        "service": "svc",
+        "system": "s",
+        "token": "stream"
+      },
+      "key": "zk2/s/svc/nav.v2/stream/x-eth0"
     }
   ],
-  "description": "zk2 keys (r3.3 §3.1). `expect` is the parse, or null when the key is refused. Every accepted key must build back to exactly the same string."
+  "description": "zk2 keys (core.md §1.1, §1.2). `expect` is the parse, or null when the key is refused. A key is parsed without a contract, so only the lexical rules apply: a resource chunk is any plain chunk. Every accepted key must build back to exactly the same string."
 }

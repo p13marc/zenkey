@@ -30,7 +30,10 @@
 else.
 
 **Expected.** The tool draws every edge (consumer role → provider). Each
-edge matches a provider actually delivering to that consumer.
+edge matches a provider actually delivering to that consumer. A role that
+an owner's configuration leaves unbound, optional ones included, is in its
+descriptor with `"bindings": []`, so the tool also sees the edges a contract
+declares and nothing serves (core §3.2).
 
 *Spike S10: 100 edges drawn, 0 differing from the deliveries.*
 

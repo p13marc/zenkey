@@ -399,6 +399,72 @@ fn bless_bundles(dir: &Path) {
         json!({"ok": false, "error": "fingerprint", "expect_fingerprint": other}),
     ));
 
+    // Step 7: absent `schemas` or `extras` means empty.
+    let mut v = valid.clone();
+    v.as_object_mut().unwrap().remove("extras");
+    out.push((
+        "no-extras.bundle.json",
+        jcs(&v),
+        json!({"ok": true, "fingerprint": fp}),
+    ));
+
+    // Step 9: base64 is RFC 4648 §4, padded.
+    let data = valid["schemas"][&proto_id]["data"].as_str().unwrap();
+    assert!(
+        data.ends_with('='),
+        "the seed's descriptor set needs padding"
+    );
+    let mut v = valid.clone();
+    v["schemas"][&proto_id]["data"] = json!(data.trim_end_matches('='));
+    out.push((
+        "base64-unpadded.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+
+    // Step 9: an entry holds `kind` and `data`, nothing else; one that is not
+    // an object has no `kind`.
+    let mut v = valid.clone();
+    v["schemas"][&json_id]["signature"] = json!("unverified");
+    out.push((
+        "schema-entry-member.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+    let mut v = valid.clone();
+    v["schemas"][&json_id] = json!([]);
+    out.push((
+        "schema-entry-not-object.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "schema_kind"}),
+    ));
+
+    // Step 9: a JSON Schema document holding an integer beyond 2^53−1 has
+    // no id, even under an id hashed over its exact digits.
+    let mut big = valid["schemas"][&json_id]["data"].clone();
+    big["$defs"]["Big"] = json!({"maximum": 9_007_199_254_740_993_u64});
+    let exact_id = zenkey_model::schema::sha256_id(&serde_json::to_vec(&big).unwrap());
+    let text = String::from_utf8(jcs(&valid))
+        .unwrap()
+        .replace(&json_id, &exact_id);
+    let mut v: Value = serde_json::from_str(&text).unwrap();
+    v["schemas"][&exact_id]["data"] = big;
+    out.push((
+        "schema-data-big-integer.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "schema_hash"}),
+    ));
+
+    // Step 10: an extra holds `media_type` and `data`, nothing else.
+    let mut v = valid.clone();
+    v["extras"]["sha256:".to_owned() + &"0".repeat(64)] =
+        json!({"media_type": "application/json", "data": {}, "signature": "x"});
+    out.push((
+        "extra-entry-member.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+
     let mut cases = serde_json::Map::new();
     for (name, bytes, want) in out {
         std::fs::write(dir.join(name), bytes).unwrap();

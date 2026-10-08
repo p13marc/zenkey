@@ -1,0 +1,11 @@
+[interface]
+name    = "m"
+major   = 1
+minor   = 0
+
+[schemas]
+jsonschema = ["old/types.json"]
+
+[resources.status]
+kind = "state"
+type = { raw = "application/octet-stream" }

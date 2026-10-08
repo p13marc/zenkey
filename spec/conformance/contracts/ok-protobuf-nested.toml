@@ -1,0 +1,15 @@
+# A nested message is a message: `seed.v1.Outer.Inner` resolves to the
+# listed file that defines it. With no `proto_include` and no `proto/`
+# directory, the import root is the contract's directory, so the artifact
+# is named `schemas/nested.proto` (§9.4).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+protobuf = ["schemas/nested.proto"]
+
+[resources.a]
+kind = "stream"
+type = "seed.v1.Outer.Inner"

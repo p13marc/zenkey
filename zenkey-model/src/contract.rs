@@ -231,13 +231,13 @@ pub fn load_path(path: &Path) -> Loaded {
 #[must_use]
 pub fn load_str(text: &str, dir: &Path, file_name: Option<&str>) -> Loaded {
     let mut report = Report::default();
-    let parsed = toml::from_str(text).map(|f| (f, crate::toml10::first_toml11(text)));
+    let parsed = toml::from_str(text).map(|f| (f, crate::toml10::first_beyond_toml10(text)));
     let file: ContractFile = match parsed {
         Ok((_, Some((line, what)))) => {
             report.push(Diagnostic::error(
                 "E000",
                 "file",
-                format!("line {line}: {what} is TOML 1.1; a contract is TOML 1.0 (spec §9.1)"),
+                format!("line {line}: {what} is not TOML 1.0, which a contract is (spec §9.1)"),
             ));
             return Loaded {
                 contract: None,
@@ -257,7 +257,7 @@ pub fn load_str(text: &str, dir: &Path, file_name: Option<&str>) -> Loaded {
     let contract = resolve(&file, dir, file_name, &mut report);
     let contract = if report.has_errors() { None } else { contract };
     if let Some(c) = &contract {
-        crate::canonical::check_restrictions(&crate::canonical::canonical(c), &mut report);
+        crate::canonical::check_contract_restrictions(&crate::canonical::canonical(c), &mut report);
     }
     let contract = if report.has_errors() { None } else { contract };
     Loaded { contract, report }
@@ -600,9 +600,7 @@ fn check_annotations(
 /// A TOML datetime reaches serde as an object with this private key.
 fn has_datetime(v: &Value) -> bool {
     match v {
-        Value::Object(m) => {
-            m.contains_key("$__toml_private_datetime") || m.values().any(has_datetime)
-        }
+        Value::Object(m) => m.contains_key(a::DATETIME) || m.values().any(has_datetime),
         Value::Array(a) => a.iter().any(has_datetime),
         _ => false,
     }
@@ -857,12 +855,14 @@ fn resolve_data(
         cx,
     );
     let base = cx.base.clone();
+    // W103 is judged on resolved types only: a type that is missing (E015)
+    // or does not resolve (E023, E024) says nothing about its kind.
     let encoding = match &type_ {
         Some(t) if t.is_json() => Some(
             pick(spec.encoding.as_ref(), kd, &base, |b| b.encoding.as_ref())
                 .unwrap_or(Encoding::Json),
         ),
-        _ => {
+        Some(_) => {
             if spec.encoding.is_some() {
                 cx.report.push(Diagnostic::warning(
                     "W103",
@@ -872,6 +872,7 @@ fn resolve_data(
             }
             None
         }
+        None => None,
     };
     let attachment_encoding = match &attachment {
         Some(t) if t.is_json() => Some(
@@ -880,6 +881,7 @@ fn resolve_data(
             })
             .unwrap_or(Encoding::Json),
         ),
+        None if spec.attachment.is_some() => None,
         _ => {
             if spec.attachment_encoding.is_some() {
                 cx.report.push(Diagnostic::warning(
@@ -1033,13 +1035,24 @@ fn resolve_op(
     let any_json = [&request, &response, &error, &summary]
         .into_iter()
         .any(|t| t.as_ref().is_some_and(TypeId::is_json));
+    // As for data, W103 waits for every type to resolve.
+    let unresolved = [
+        (&spec.request, &request),
+        (&spec.response, &response),
+        (&spec.error, &error),
+        (&spec.summary, &summary),
+    ]
+    .iter()
+    .any(|(written, resolved)| written.is_some() && resolved.is_none())
+        || request.is_none()
+        || response.is_none();
     let encoding = if any_json {
         Some(
             pick(spec.encoding.as_ref(), kd, &base, |b| b.encoding.as_ref())
                 .unwrap_or(Encoding::Json),
         )
     } else {
-        if spec.encoding.is_some() {
+        if spec.encoding.is_some() && !unresolved {
             cx.report.push(Diagnostic::warning(
                 "W103",
                 at,
@@ -1181,19 +1194,25 @@ fn resolve_requirement(role: &str, req: &a::Requirement, cx: &mut Ctx<'_>) -> Op
 
 /// Checks across a set of contracts: one file per interface id (E036), and
 /// every requirement naming resources its interface declares, when that
-/// interface is in the set (E035).
+/// interface is in the set (E035). The set is taken in the order given (a
+/// directory's files in name order): E036 falls on each later declaration,
+/// and E035 checks against the first (spec §9.2).
 #[must_use]
 pub fn check_set(contracts: &[&Contract]) -> Report {
     let mut report = Report::default();
     let mut by_id: BTreeMap<String, &Contract> = BTreeMap::new();
     for c in contracts {
-        let id = c.iface.to_string();
-        if by_id.insert(id.clone(), c).is_some() {
-            report.push(Diagnostic::error(
-                "E036",
-                "interface",
-                format!("{id} is declared twice"),
-            ));
+        match by_id.entry(c.iface.to_string()) {
+            std::collections::btree_map::Entry::Occupied(e) => {
+                report.push(Diagnostic::error(
+                    "E036",
+                    "interface",
+                    format!("{} is declared twice", e.key()),
+                ));
+            }
+            std::collections::btree_map::Entry::Vacant(e) => {
+                e.insert(c);
+            }
         }
     }
     for c in contracts {
@@ -1314,6 +1333,65 @@ mod tests {
         );
         assert_eq!(codes("[interface]\nname = \"t\"\nmajor = 1\n"), ["W104"]);
         assert_eq!(codes("[interface]\nname = \"t\"\n"), ["E000"]);
+    }
+
+    /// W103 is judged on resolved types: an unresolved one (E023) says
+    /// nothing about whether a JSON Schema type takes the encoding.
+    #[test]
+    fn w103_waits_for_the_types() {
+        let op = |types: &str| {
+            codes(&format!(
+                "{HEAD}[resources.\"a\"]\nkind = \"operation\"\n{types}\nencoding = \"cbor\"\n"
+            ))
+        };
+        assert_eq!(
+            codes(&format!(
+                "{HEAD}[resources.\"a\"]\nkind = \"stream\"\ntype = \"json:Nope\"\nencoding = \"cbor\"\n"
+            )),
+            ["E023"]
+        );
+        assert_eq!(
+            codes(&format!(
+                "{HEAD}[resources.\"a\"]\nkind = \"stream\"\ntype = {{ raw = \"a/b\" }}\nattachment = \"json:Nope\"\nattachment_encoding = \"cbor\"\n"
+            )),
+            ["E023"]
+        );
+        assert_eq!(
+            codes(&format!(
+                "{HEAD}[resources.\"a\"]\nkind = \"stream\"\ntype = {{ raw = \"a/b\" }}\nattachment_encoding = \"cbor\"\n"
+            )),
+            ["W103"]
+        );
+        let raw = "{ raw = \"a/b\" }";
+        assert_eq!(op(&format!("request = {raw}\nresponse = {raw}")), ["W103"]);
+        assert_eq!(
+            op(&format!(
+                "request = {raw}\nresponse = {raw}\nerror = \"json:Nope\""
+            )),
+            ["E023"]
+        );
+    }
+
+    /// Under E036, E035 checks a requirement against the first declaration
+    /// in the order given; the later ones are the duplicates.
+    #[test]
+    fn a_set_checks_against_the_first_declaration() {
+        let load = |src: String| load_str(&src, Path::new("."), None).contract.unwrap();
+        let decl = |res: &str| {
+            load(format!(
+                "[interface]\nname = \"d\"\nmajor = 1\nminor = 0\n\
+                 [resources.{res}]\nkind = \"stream\"\ntype = {{ raw = \"a/b\" }}\n"
+            ))
+        };
+        let (first, second) = (decl("x"), decl("y"));
+        let user = load(format!(
+            "{HEAD}[requires.r]\ninterface = \"d.v1\"\nresources = [\"x\"]\n"
+        ));
+        assert_eq!(check_set(&[&first, &second, &user]).codes(), ["E036"]);
+        assert_eq!(
+            check_set(&[&second, &first, &user]).codes(),
+            ["E035", "E036"]
+        );
     }
 
     #[test]

@@ -1,0 +1,10 @@
+# A refused keyword's content is not a schema position, so the keywords
+# inside `allOf`, `not` and `definitions` are not reported: E037 three
+# times, once per refused keyword (§7.3).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/subset-nested.json"]

@@ -563,19 +563,39 @@ fn normalize(p: &Path) -> PathBuf {
     out
 }
 
-fn collect_refs(v: &Value, out: &mut Vec<String>) {
-    match v {
-        Value::Object(m) => {
-            for (k, x) in m {
-                match (k.as_str(), x) {
-                    ("$ref", Value::String(s)) => out.push(s.clone()),
-                    _ => collect_refs(x, out),
-                }
+/// Visits every schema object at a schema position (spec §7.3): the
+/// document root; each value of `properties` and `$defs`; each element of
+/// `prefixItems`, `oneOf` and `anyOf`; the value of `items` and
+/// `additionalProperties`. The value of a refused keyword is not a schema
+/// position, and neither is data (`enum`, `const`, `default`, `examples`):
+/// a `$ref` or a keyword written there is not one.
+pub(crate) fn visit_schemas<'a>(
+    schema: &'a Value,
+    f: &mut dyn FnMut(&'a serde_json::Map<String, Value>),
+) {
+    let Value::Object(m) = schema else { return };
+    f(m);
+    for (k, v) in m {
+        match (k.as_str(), v) {
+            ("properties" | "$defs", Value::Object(subs)) => {
+                subs.values().for_each(|s| visit_schemas(s, f));
             }
+            ("prefixItems" | "oneOf" | "anyOf", Value::Array(subs)) => {
+                subs.iter().for_each(|s| visit_schemas(s, f));
+            }
+            ("items" | "additionalProperties", sub) => visit_schemas(sub, f),
+            _ => {}
         }
-        Value::Array(a) => a.iter().for_each(|x| collect_refs(x, out)),
-        _ => {}
     }
+}
+
+/// Every `$ref` at a schema position, in document order.
+fn collect_refs(v: &Value, out: &mut Vec<String>) {
+    visit_schemas(v, &mut |m| {
+        if let Some(Value::String(r)) = m.get("$ref") {
+            out.push(r.clone());
+        }
+    });
 }
 
 /// RFC 8785 (JCS) bytes of a JSON value.
@@ -599,19 +619,13 @@ pub fn sha256_id(bytes: &[u8]) -> String {
     s
 }
 
-/// The first integer outside ±(2^53−1) in a JSON document, if any: JCS
-/// implementations disagree beyond it (Python's `rfc8785` raises).
-fn unsafe_integer(v: &Value) -> Option<String> {
-    const MAX: u64 = (1 << 53) - 1;
+/// The first number outside ±(2^53−1) in a JSON document, if any: an
+/// integer, or a float JCS writes as one
+/// ([`crate::canonical::outside_safe_range`]). JCS implementations disagree
+/// beyond it (Python's `rfc8785` raises).
+pub(crate) fn unsafe_integer(v: &Value) -> Option<String> {
     match v {
-        Value::Number(n) => {
-            let out = match (n.as_u64(), n.as_i64()) {
-                (Some(u), _) => u > MAX,
-                (None, Some(i)) => i.unsigned_abs() > MAX,
-                _ => false,
-            };
-            out.then(|| n.to_string())
-        }
+        Value::Number(n) => crate::canonical::outside_safe_range(n).then(|| n.to_string()),
         Value::Array(a) => a.iter().find_map(unsafe_integer),
         Value::Object(m) => m.values().find_map(unsafe_integer),
         _ => None,
@@ -656,30 +670,17 @@ const ANNOTATIONS: &[&str] = &[
     "writeOnly",
 ];
 
-/// Walks the schema positions of a JSON Schema document (never property
-/// names, which are data) and collects every keyword outside the subset.
+/// Every keyword outside the subset at a schema position of a JSON Schema
+/// document ([`visit_schemas`]: never property names, which are data, and
+/// never inside a refused keyword, whose content is not walked).
 fn refused_keywords(schema: &Value, out: &mut std::collections::BTreeSet<String>) {
-    let Value::Object(m) = schema else { return };
-    for (k, v) in m {
-        if !SUBSET.contains(&k.as_str()) && !ANNOTATIONS.contains(&k.as_str()) {
-            out.insert(k.clone());
-            continue;
-        }
-        match (k.as_str(), v) {
-            ("properties" | "$defs", Value::Object(subs)) => {
-                for sub in subs.values() {
-                    refused_keywords(sub, out);
-                }
+    visit_schemas(schema, &mut |m| {
+        for k in m.keys() {
+            if !SUBSET.contains(&k.as_str()) && !ANNOTATIONS.contains(&k.as_str()) {
+                out.insert(k.clone());
             }
-            ("prefixItems" | "oneOf" | "anyOf", Value::Array(subs)) => {
-                for sub in subs {
-                    refused_keywords(sub, out);
-                }
-            }
-            ("items" | "additionalProperties", sub) => refused_keywords(sub, out),
-            _ => {}
         }
-    }
+    });
 }
 
 #[cfg(test)]

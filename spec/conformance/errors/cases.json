@@ -1,5 +1,5 @@
 {
- "description": "An error envelope with its Zenoh encoding (text for JSON, hex bytes otherwise) \u2192 the decoded envelope, or the refusal tag. A protobuf detail is shown as {\"bytes_hex\": \u2026}. Cases written by an encoder independent of the reference implementation (spec core.md \u00a75.2).",
+ "description": "An error envelope with its Zenoh encoding (text for JSON, hex bytes otherwise) \u2192 the decoded envelope, or the refusal tag (core.md \u00a75.2). A protobuf detail is shown as {\"bytes_hex\": \u2026}; a CBOR byte string inside a detail as base64 text. Cases written by an encoder independent of the reference implementation.",
  "cases": [
   {
    "name": "json-invalid-request",
@@ -235,6 +235,111 @@
    "hex": "12076e6f20636f6465",
    "expect": {
     "refused": "code"
+   }
+  },
+  {
+   "name": "cbor-detail-bytes",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696ca164626c6f62420102",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": {
+     "blob": "AQI="
+    }
+   }
+  },
+  {
+   "name": "cbor-detail-tagged",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696cc11a00000001",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": 1
+   }
+  },
+  {
+   "name": "cbor-detail-undefined",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696cf7",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "cbor-indefinite-map",
+   "encoding": "application/cbor",
+   "hex": "bf64636f64656462757379676d65737361676560ff",
+   "expect": {
+    "code": "busy",
+    "message": "",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "refuse-cbor-trailing-bytes",
+   "encoding": "application/cbor",
+   "hex": "a264636f64656462757379676d6573736167656000",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-json-code-not-text",
+   "encoding": "application/json",
+   "text": "{\"code\": 3, \"message\": \"x\"}",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-encoding-parameter",
+   "encoding": "application/json;charset=utf-8",
+   "text": "{\"code\": \"busy\", \"message\": \"\"}",
+   "expect": {
+    "refused": "encoding"
+   }
+  },
+  {
+   "name": "refuse-encoding-no-schema",
+   "encoding": "application/protobuf",
+   "hex": "0a0462757379",
+   "expect": {
+    "refused": "encoding"
+   }
+  },
+  {
+   "name": "pb-no-message",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a0462757379",
+   "expect": {
+    "code": "busy",
+    "message": "",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "refuse-pb-wire-type",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0804",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-pb-empty-cause",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a0b756e617661696c61626c6512001a00",
+   "expect": {
+    "refused": "cause"
    }
   }
  ]

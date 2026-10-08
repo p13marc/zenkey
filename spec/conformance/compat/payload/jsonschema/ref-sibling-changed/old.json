@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "since_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "load": {
+          "$ref": "#/$defs/Load"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "note": {
+          "type": "string",
+          "description": "free text"
+        },
+        "detail": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "a"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "Load": {
+      "type": "number"
+    }
+  },
+  "$ref": "#/$defs/Status"
+}

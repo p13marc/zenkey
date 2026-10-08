@@ -1,5 +1,11 @@
 {
   "cases": {
+    "e000-integer-range": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
     "e000-not-toml": {
       "codes": [
         "E000"
@@ -128,6 +134,12 @@
       ],
       "fingerprint": null
     },
+    "e019-history-false": {
+      "codes": [
+        "E019"
+      ],
+      "fingerprint": null
+    },
     "e020-annotation": {
       "codes": [
         "E020",
@@ -141,9 +153,29 @@
       ],
       "fingerprint": null
     },
+    "e020-requirement": {
+      "codes": [
+        "E020"
+      ],
+      "fingerprint": null
+    },
+    "e020-twice": {
+      "codes": [
+        "E020",
+        "E020"
+      ],
+      "fingerprint": null
+    },
     "e021-shape": {
       "codes": [
         "E021"
+      ],
+      "fingerprint": null
+    },
+    "e021-shape-types": {
+      "codes": [
+        "E021",
+        "W101"
       ],
       "fingerprint": null
     },
@@ -159,6 +191,18 @@
       ],
       "fingerprint": null
     },
+    "e023-encoding": {
+      "codes": [
+        "E023"
+      ],
+      "fingerprint": null
+    },
+    "e023-enum": {
+      "codes": [
+        "E023"
+      ],
+      "fingerprint": null
+    },
     "e023-type": {
       "codes": [
         "E023",
@@ -169,6 +213,13 @@
     },
     "e024-ambiguous": {
       "codes": [
+        "E024"
+      ],
+      "fingerprint": null
+    },
+    "e024-stem": {
+      "codes": [
+        "E023",
         "E024"
       ],
       "fingerprint": null
@@ -192,7 +243,27 @@
       ],
       "fingerprint": null
     },
+    "e028-float": {
+      "codes": [
+        "E028",
+        "E028"
+      ],
+      "fingerprint": null
+    },
     "e028-integer": {
+      "codes": [
+        "E028"
+      ],
+      "fingerprint": null
+    },
+    "e028-non-finite": {
+      "codes": [
+        "E028",
+        "E028"
+      ],
+      "fingerprint": null
+    },
+    "e028-schema-float": {
       "codes": [
         "E028"
       ],
@@ -201,6 +272,18 @@
     "e028-schema-integer": {
       "codes": [
         "E028"
+      ],
+      "fingerprint": null
+    },
+    "e029-duplicate-member": {
+      "codes": [
+        "E029"
+      ],
+      "fingerprint": null
+    },
+    "e029-outside-include": {
+      "codes": [
+        "E029"
       ],
       "fingerprint": null
     },
@@ -223,6 +306,13 @@
       "codes": [
         "E031",
         "E031"
+      ],
+      "fingerprint": null
+    },
+    "e032-fragment": {
+      "codes": [
+        "E032",
+        "E032"
       ],
       "fingerprint": null
     },
@@ -256,6 +346,14 @@
       ],
       "fingerprint": null
     },
+    "e037-nested": {
+      "codes": [
+        "E037",
+        "E037",
+        "E037"
+      ],
+      "fingerprint": null
+    },
     "e037-subset": {
       "codes": [
         "E037",
@@ -275,6 +373,14 @@
       "codes": [],
       "fingerprint": "sha256:22ad11b3439f67716e76aeb199542544e61dc7f38391ff2010bcdabdf4d78c7e"
     },
+    "ok-float-integral": {
+      "codes": [],
+      "fingerprint": "sha256:969a86c807b1bb0cec2bceed1533fd8f36ba5d7f55ca61a07a24c1ed73176958"
+    },
+    "ok-gate-empty": {
+      "codes": [],
+      "fingerprint": "sha256:64d3487b766aaca8b3ca78c38a94bb272a9532aef3a90cc9fbf62e3c40cd6f89"
+    },
     "ok-json-qualified": {
       "codes": [],
       "fingerprint": "sha256:d7508020c2029d31d5cfa85e7ded560e4ce04e7e58d7b24ef072a7099d967d9c"
@@ -287,9 +393,25 @@
       "codes": [],
       "fingerprint": "sha256:8c7493396b63865ef028879e04c641c76fd18178f4d6a6cac8c166f7b94c8577"
     },
+    "ok-profile-without-vocabulary": {
+      "codes": [],
+      "fingerprint": "sha256:efc1be594bc9740f18e5c3df0ffb1d108a3cc8b3ff9b82be006a0d0eeddd9e81"
+    },
+    "ok-protobuf-nested": {
+      "codes": [],
+      "fingerprint": "sha256:4321b3ec90e9cdc41d897e19c191e30d7c30b2830236675bca1ffcb40899ddfb"
+    },
     "ok-protobuf-well-known": {
       "codes": [],
       "fingerprint": "sha256:c92e57c394dcb9795ecdf665ea4cf72ccd1c28e71ea76c3ba555cd765f8db72f"
+    },
+    "ok-resolved-operation": {
+      "codes": [],
+      "fingerprint": "sha256:5481094720ac92bb9651e70e703d33c3f76c92fde9a29924d01cc51ebd3cacae"
+    },
+    "ok-retention-leading-zero": {
+      "codes": [],
+      "fingerprint": "sha256:7e7bf5af892e882a0c75451c51150d1bc584256513e64386b341591ceb19d762"
     },
     "w101-overlap": {
       "codes": [
@@ -322,5 +444,5 @@
       "fingerprint": "sha256:f9e5bc2589dddc2496b5aa05bf270b246dbc2a12cba2bf5037e476d23d9ee522"
     }
   },
-  "description": "Contract lints, canonical forms and fingerprints. For each `<stem>.toml`: the sorted diagnostic codes (zenkey_model::diag::CODES) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."
+  "description": "Contract lints, canonical forms and fingerprints (core.md §9.1–§9.5). For each `<stem>.toml`: the sorted diagnostic codes (the code tables of §9.2 and §9.1) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."
 }

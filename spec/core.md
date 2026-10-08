@@ -1,7 +1,8 @@
 # zk2 core specification
 
-**Version 0.4** (0.1 accepted on 2026-10-08, #606; amended the same day:
-U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4).
+**Version 0.5** (0.1 accepted on 2026-10-08, #606; amended the same day:
+U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
+second implementation's findings in 0.5).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -85,6 +86,11 @@ MUST refuse to build one, and MUST report one it is asked to parse as not a
 zk2 key. Every key it accepts MUST build back to the same string.
 `[F: keys.json]`
 
+A key is parsed without a contract, so parsing applies the lexical rules
+alone. A resource chunk is any plain chunk (§1.2), `x-eth0` included,
+although no template could produce that one: which template a key belongs
+to, if any, is resolution's question (§2.2). `[F: keys.json]`
+
 ### 1.2 Lexical rules
 
 - **A plain chunk** is `[a-z0-9]([a-z0-9._-]*[a-z0-9])?`. Literal template
@@ -109,8 +115,10 @@ zk2 key. Every key it accepts MUST build back to the same string.
 - **A member value** is a plain chunk: the slugged value of the epoch
   parameter. `<epoch>` is an instance id. `[F: keys.json]`
 - **A ULID chunk** (events, §2.6) is 26 characters of Crockford's base32 in
-  lowercase: digits, and lowercase letters except `i`, `l`, `o`, `u`.
-  `[F: keys.json]`
+  lowercase: digits, and lowercase letters except `i`, `l`, `o`, `u`. The
+  check is lexical and the chunk is never decoded, so the first character
+  has no bound: `8zzzzzzzzzzzzzzzzzzzzzzzzz`, beyond 128 bits, is a ULID
+  chunk. `[F: keys.json]`
 
 ### 1.3 Kind tokens
 
@@ -258,22 +266,28 @@ A resource's **template** is its path below the kind chunk.
   Among the templates that match, the winner is the one that ranks higher
   at the first segment where they differ (literal > `{p}` > `{p...}`). With
   an equal prefix, the longer template wins. `[F: templates.json]`
+  - Parameter types play no part in matching: a `uint` parameter matches
+    `03` or `abc` as it matches any canonical slug. A consumer that needs
+    the typed value parses the bound value after resolution.
+  - Two templates that rank alike at every segment and have one length
+    have one shape, which a contract refuses (E021). Given such a list, a
+    resolver takes the first listed. `[F: templates.json]`
 - **Overlapping templates** with different types are a warning.
   `[F: contracts/w101-overlap]`
 
 **Cardinality.** A template with parameters MUST declare `cardinality`, a
 positive integer that bounds its population in one instance. A template
 without parameters MUST NOT declare it. An instance MAY declare a lower
-bound in its descriptor (§3.3). On an event, `cardinality` bounds the
-template's own parameters, and the key population is cardinality × rate ×
-retention. `[F: contracts/e013-cardinality, e014-field]`
+bound in its descriptor, from 1 to the contract's (§3.3). On an event,
+`cardinality` bounds the template's own parameters, and the key population
+is cardinality × rate × retention. `[F: contracts/e013-cardinality, e014-field]`
 
 ### 2.3 Resource attributes
 
 | Attribute | Rule | Fixture |
 |---|---|---|
 | `optional` | An owner MAY declare an optional resource unavailable (§3.3). An owner MUST expose every required one, or not start (§8.2). | `[Sc: presence.md §2]` |
-| `gate` | Only with `optional = true`. One or more of `build:<n>`, `config:<n>`, `capability:<n>`, where `<n>` is `[a-z0-9][a-z0-9_.-]*`. A list is an AND. | `[F: contracts/e016-gate-optional, e017-gate-syntax]` |
+| `gate` | Only with `optional = true`. One or more of `build:<n>`, `config:<n>`, `capability:<n>`, where `<n>` is `[a-z0-9][a-z0-9_.-]*`. A list is an AND. An empty list is no gate, so it needs no `optional`. | `[F: contracts/e016-gate-optional, e017-gate-syntax, ok-gate-empty]` |
 | `epoch` | Names one single-chunk parameter. The owner holds a member token per value of it, cycled on discontinuity (§8.1). | `[F: contracts/e022-epoch]` |
 | `deprecated` | `{since, replaced_by, reason}`. `replaced_by` names another template of the contract, and `since` is not later than `minor`. A deprecated resource stays in the contract until the next major, because removing a resource is breaking (§9.8). | `[F: contracts/e031-deprecated; compat/contract/resource-removed]` |
 | `attachment` | A type for the sample attachment, fingerprinted and encoded like a payload (§7). | `[F: contracts/ok-kinds]` |
@@ -330,6 +344,13 @@ subtree.
 - **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`.
   **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`. Both are
   required on an event. `[F: contracts/e015-event, e026-rate]`
+  - In a rate, `<n>` is decimal without a leading zero, from 1 to 2^32−1:
+    the canonical form keeps the rate's text, so `burst(012/h)` would be a
+    second spelling.
+  - In a retention, `<n>` is decimal digits, leading zeros allowed, and at
+    least 1: the canonical form keeps seconds, so `07d` is `7d`. The
+    seconds MUST fit 64 bits (E026) and, like every canonical integer,
+    ±(2^53−1) (E028). `[F: contracts/ok-retention-leading-zero]`
 - **Storage.** A deployment MAY run a union storage on `zk2/*/*/*/events/**`.
   An event key is never an owner's state (§4.4).
 - **Replay.** A consumer replays with a wildcard GET bounded by the
@@ -374,6 +395,15 @@ the required interface, and MUST NOT be empty.
 When several providers are bound, choosing between them is the consumer's
 (`arbitration.v1`).
 
+- **An unbound required role.** An owner whose configuration binds a
+  required role to nothing MUST NOT start, as one missing a required
+  resource does not (§8.2 step 2): no instance token appears. This refuses a
+  missing configuration, not a missing provider: a bound role still
+  resolves at once, without presence (R5, R7). `[Sc: presence.md §2]`
+- **An unbound optional role** is listed in the descriptor all the same,
+  with `"bindings": []` and `"params": {}` (R3): the graph keeps every edge
+  a contract declares, bound or not. `[Sc: bindings.md §3]`
+
 ### 3.3 The descriptor record
 
 Every instance serves a **descriptor**: a JSON document answered on GET at
@@ -382,6 +412,13 @@ its instance key, and put on every change. Its schema is
 exactly the `D…` codes that `conformance/descriptors/expect.json` lists for
 each document, checked against the fixture contract. `[F: descriptors/]`
 
+**The GET.** One `complete` queryable on the instance key answers with one
+reply: the current descriptor's bytes, with `Encoding` `application/json`,
+no attachment and no timestamp (S1–S2 bind state, and a descriptor is not
+state). The put on a change carries the owner's timestamp. A caller GETs
+with consolidation `None`, as §8.4 does, takes the first reply, and waits
+for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
+
 ```json
 {
   "format": "zk2-descriptor/0.1",
@@ -389,7 +426,7 @@ each document, checked against the fixture contract. `[F: descriptors/]`
   "instance": "3fa9c2d41b7e0012",
   "interfaces": [
     {"iface": "nav.v2", "contract": "sha256:…", "minor": 1, "token": true,
-     "unavailable": [{"resource": "state/covariance", "cause": "capability", "reason": "no IMU"}],
+     "unavailable": [{"resource": "state/covariance", "cause": "config", "reason": "calibrating"}],
      "cardinality": {"state/tracks/{track}": 50}}
   ],
   "capabilities": ["imu", "gnss"],
@@ -403,6 +440,10 @@ each document, checked against the fixture contract. `[F: descriptors/]`
   "meta": {"host": "…", "build": "…", "zid": "…"}
 }
 ```
+
+In the example, the instance holds `imu`, so `state/covariance` (gated on
+`capability:imu`) is exposed unless listed; it is listed, for a cause the
+gate does not name.
 
 - **Exposure is compact.**
   - The exposed resources of an interface are its contract's resources,
@@ -420,16 +461,60 @@ each document, checked against the fixture contract. `[F: descriptors/]`
 - **`token`** is `false` for an interface in the owner's tokenless set
   (§8.1), and `true` otherwise, which is the default.
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
-  `<kind token>/<template>`. It MUST NOT raise it. `[F: descriptors/d007-*]`
+  `<kind token>/<template>`, to a value from 1 to the contract's. It MUST
+  NOT raise it. `[F: descriptors/d007-*]`
 - **`requires`** lists each role with its bindings and parameter bindings
   (R2, R3). A role declared in a contract names that contract's interface in
   `declared_by`. A role declared by the component's manifest names `null`.
-  `[F: descriptors/d009-*]`
+  A role the configuration leaves unbound is listed with `"bindings": []`
+  (§3.2). `[F: descriptors/d009-*]`
+- **`profiles`** is the union of the `uses` of the contracts the instance
+  implements, sorted and deduplicated (§10 point 4).
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
   it changes, and MUST answer a GET there with the current one.
   `[Sc: presence.md §2]`
+
+**The checks.** A checker reads a descriptor with the contracts it is given,
+and reports these codes. `[F: descriptors/]`
+
+| Code | Condition | Severity | Reported |
+|---|---|---|---|
+| D000 | not strict JSON (a duplicate member included), or outside [`descriptor.schema.json`](descriptor.schema.json): an unknown or missing member, a value of the wrong type (an integer written with a fraction or an exponent included), a `cause` not `build`, `config` or `capability` | error | once; stops the check |
+| D001 | `format` is not `zk2-descriptor/0.1` | error | once |
+| D002 | `service` is not `<system>/<service>`, two plain chunks; `instance` is not 16 lowercase hex digits | error | per member |
+| D003 | an interface entry's `iface` is not an interface id; its `contract` is not a fingerprint (§1.2); or the interface is listed twice | error | per entry and condition |
+| D004 | the entry's interface is among the given contracts, but not at its fingerprint | error | per entry |
+| D005 | `unavailable` names a resource the contract does not declare, or a required one | error | per entry |
+| D006 | `unavailable` names a resource that a capability not held already implies | warning | per entry |
+| D007 | a `cardinality` key names no templated resource of the contract, or its bound is not from 1 to the contract's | error | per key |
+| D008 | a capability is not `[a-z0-9][a-z0-9_.-]*`; or one is listed twice | error | per capability; once for the repeat |
+| D009 | in a requirement entry: `role` is not `[a-z][a-z0-9_]*`; `interface` is not an interface id; `declared_by` is not one of the interfaces this descriptor lists; a `params` key is not `[a-z][a-z0-9_]*`, or its value is empty; a binding is not `<system>/<service>`, each chunk plain or `*` | error | per finding |
+| D010 | a profile is not `<name>.v<major>`; or one is listed twice | error | per profile; once for the repeat |
+
+**Cascades and scope.**
+1. D000 stops the check: no other code is reported.
+2. An interface entry whose `iface` is not an interface id (D003) is
+   checked no further, and is not one of the descriptor's interfaces: a role
+   `declared_by` it is D009. `[F: descriptors/d003-iface]`
+3. An entry whose `contract` is not a fingerprint (D003) is checked no
+   further: no D004. Its interface still counts for `declared_by`.
+   `[F: descriptors/d003-fingerprint]`
+4. An interface listed twice (D003) is otherwise checked like the first.
+5. An entry is checked against the given contract with its interface and
+   fingerprint (D005–D007). An interface none of the given contracts
+   declares is checked for syntax only; one given at other fingerprints
+   only is D004. `[F: descriptors/ok-unknown-interface, d004-revision]`
+6. Not checked, deliberately `[F: descriptors/ok-unchecked]`:
+   - that a `cause` agrees with the resource's gates: an owner may lack a
+     resource for a reason its gates do not name;
+   - R3's completeness, that every requirement a contract declares is
+     listed: a scenario checks it (`bindings.md §3`);
+   - that a role `declared_by` an interface is in that contract's
+     `[requires]`, and that `params` values fit the required interface;
+   - that `profiles` is the union of the contracts' `uses`;
+   - `minor`, an integer from 0 to 2^64−1 that nothing reads, and `token`.
 
 ---
 
@@ -606,6 +691,22 @@ the contract. It MUST refuse:
 A protobuf decoder ignores unknown fields, as protobuf does.
 `[F: errors/cases.json]`
 
+The decoding edges, each pinned by a case `[F: errors/cases.json]`:
+- **The encoding** is compared as an exact string. A parameter
+  (`application/json;charset=utf-8`), a bare `application/protobuf`, or
+  another schema suffix is an unknown encoding (`encoding`).
+- **JSON and CBOR:** a member of the wrong type (`"code": 3`) is `decode`,
+  like a missing one. A `cause` or `detail` that is `null` is absent.
+- **CBOR:** the bytes hold one data item and nothing after it (`decode`
+  otherwise). Indefinite lengths are accepted. A tag decodes as its content,
+  and `undefined` as `null`. A map key that is not text, an integer outside
+  64 bits, or a float that is not finite is `decode`. A byte string inside a
+  `detail` reads as base64 text (RFC 4648 §4, padded), the JSON form of bytes
+  (§7.2), so a CBOR detail decodes like the same detail sent as JSON.
+- **Protobuf:** a known field with the wrong wire type is `decode`. A missing
+  `message` decodes as `""` and is accepted, since protobuf cannot tell the
+  two apart. A `cause` present but empty is not a valid cause (`cause`).
+
 **Transport errors.** Zenoh reports some failures locally, such as a query
 timeout, as a reply error with encoding `zenoh/string`. A tool tells the two
 apart by encoding: only the three encodings above carry an envelope, and
@@ -708,11 +809,23 @@ listed files.
   `writeOnly`.
 - **Refused:** every other keyword in a schema position (`pattern`,
   `patternProperties`, `allOf`, `not`, `if`/`then`/`else`, `contains`,
-  `propertyNames`, `unevaluatedProperties`, …). Their validation differs
-  between implementations (regular-expression dialects), or they defeat
-  the compatibility rules. A contract whose schemas use one does not load
-  (E037). A property *named* like a keyword is data, not a keyword.
+  `propertyNames`, `unevaluatedProperties`, draft-07's `definitions`, …).
+  Their validation differs between implementations (regular-expression
+  dialects), or they defeat the compatibility rules. A contract whose
+  schemas use one does not load (E037, once per keyword and file). A
+  property *named* like a keyword is data, not a keyword.
   `[F: contracts/e037-subset]`
+- **Schema positions** are the document root; each value of `properties`
+  and `$defs`; each element of `prefixItems`, `oneOf` and `anyOf`; and the
+  value of `items` and `additionalProperties`. A keyword is a member of an
+  object at a schema position. Nothing else is a schema position:
+  - not the value of a refused keyword, so E037 reports the refused keyword
+    alone, never what it holds `[F: contracts/e037-nested]`;
+  - not data (`enum`, `const`, `default`, `examples`), so a `$ref` written
+    there is not a `$ref` `[F: contracts/e032-fragment]`.
+
+  E037, E032 (§9.4) and the classifier's comparisons (§9.8) read schema
+  positions only.
 
 **`oneOf`, `anyOf` and `prefixItems`** are in the subset because Rust-first
 contracts (schemars output) use them for enums, `Option<T>` and tuples.
@@ -765,6 +878,11 @@ Liveliness tokens carry no payload; everything is in the key.
   (`[F: contracts/e022-two-epochs]`). The owner MUST hold one member token
   per member, and cycle it whenever that member's continuity breaks.
   `[Sc: presence.md §3]`
+  - A member exists from the owner's first declaration of it, when the
+    entity its value names appears (a device enumerated, a first value to
+    publish), never because the contract declares the template.
+  - An owner with no member yet holds no member token: one that publishes
+    nothing under the template holds none.
 - **Re-minting is make-before-break.** An owner that starts a new instance
   id while running MUST declare the new tokens and descriptor first, then
   undeclare the old ones. There is an overlap, never a gap.
@@ -773,6 +891,20 @@ Liveliness tokens carry no payload; everything is in the key.
   liveliness subscriber MUST use a callback or an unbounded handler. With
   zenoh's default 256-slot handler, such a GET hung at every measured size
   from 996 tokens (zenoh#2678). `[Sc: presence.md §4]`
+  - **The subscribers bind too.** Every liveliness subscriber on that
+    session MUST be callback-driven, or drained as its samples arrive. A
+    bounded subscriber nobody drains starves even a callback GET: with
+    zenoh-python 1.10.1, one ended at its timeout with 257 of 2,002 tokens,
+    and silently. zenoh-python has no unbounded handler, so a callback is
+    the way there. `[Sc: presence.md §4]`
+  - A tool SHOULD treat a liveliness GET that ended at its timeout, rather
+    than at the routers' final reply, as possibly incomplete: silence is not
+    a verdict (O5).
+- **Timeouts are the caller's.** How long a liveliness GET, a descriptor
+  GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
+  for presence after an owner starts, are the caller's choices. The
+  scenarios, and so a conformance run, use 1 s unless they say otherwise.
+  S6's "the GET's timeout" is that choice.
 
 ### 8.2 Start-up order
 
@@ -805,15 +937,30 @@ Contract bundles (§9.6) live at the location-free key
 implements (§8.2), and any other participant MAY hold bundles too, because
 the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 
-1. GET with target `BestMatching`. That reaches the nearest holder on each
-   router the query visits.
+1. GET with target `BestMatching` and consolidation `None`. That reaches
+   the nearest holder on each router the query visits. A holder on the
+   caller's own session answers too, so a caller can get its own reply and
+   the nearest remote one: it assumes nothing about the count.
 2. Verify each reply **as it arrives** (§9.6), and accept the first valid
    one, without waiting for the GET to complete.
-3. If none was valid, retry once with target `All`.
+3. If none was valid, retry once with target `All`, consolidation `None`.
 4. If still none, report the contract **unavailable**. Never accept an
    unverified bundle.
 
 `[Sc: retrieval.md §1–§3]`
+
+- **Consolidation `None` is a MUST.** zenoh's default consolidation on a
+  concrete key holds every reply until the query finalizes (`Latest`,
+  §4.1), so step 2 cannot happen, and a slow corrupt reply can displace the
+  valid one: measured, the corrupt reply alone arrived at 2 s, the valid
+  one never, and a caller following the steps would report the contract
+  unavailable. A caller MUST set consolidation `None` on both attempts.
+  `[Sc: retrieval.md §2]`
+- **The reply.** A holder answers with one reply, the bundle's bytes, with
+  `Encoding` `application/json`. A caller MUST NOT depend on the encoding:
+  the hash is the check. `[Sc: retrieval.md §1]`
+- **An attempt ends** when its GET completes, or at the caller's timeout
+  (§8.1).
 
 ### 8.5 Constrained faces
 
@@ -874,19 +1021,30 @@ this text has a bug.
 
 A contract is a **TOML 1.0** file, one per interface major, named
 `<name>.v<major>.toml` (W107 otherwise; the fixtures do not check file
-names). A reader MAY accept later TOML, but a contract MUST NOT need it,
-so syntax that only TOML 1.1 has is **E000**:
+names). A contract MUST NOT need later TOML. A reader MAY be a parser of
+later TOML, provided it reports the constructs below as **E000**. They are
+the syntax TOML 1.1.0 adds to 1.0, and the list is closed: a construct of a
+later TOML version joins it by amendment.
 - a newline, a comment or a trailing comma inside an inline table;
 - the `\e` and `\xHH` escapes;
-- a time without seconds.
+- a time without seconds, alone or in a date-time.
 
 `[F: contracts/e000-toml11-inline-newline, e000-toml11-trailing-comma,
 e000-toml11-escape-e, e000-toml11-escape-x, e000-toml11-time]`
+
+**Integers.** A TOML 1.0 integer is 64-bit signed. An integer outside
+−2^63 to 2^63−1 is not TOML 1.0, so it is **E000**, even for a reader that
+can hold it. `[F: contracts/e000-integer-range]`
 
 Its shape is [`contract.schema.json`](contract.schema.json) (JSON Schema
 2020-12). An unknown table or field, a value of the wrong type, or text that
 is not TOML is **E000**, reported once, and it stops the load.
 `[F: contracts/e000-not-toml, e000-unknown-field]`
+- A float where an integer is due (`major = 1.0`) is a value of the wrong
+  type.
+- The schema's `format` is a bound here, not an annotation: `uint32` is 0
+  to 2^32−1, and `uint64` is 0 to 2^63−1, TOML's own bound. The `uint32`
+  fields also carry their bound as `maximum`.
 
 | Table | Fields |
 |---|---|
@@ -912,9 +1070,18 @@ is not TOML is **E000**, reported once, and it stops the load.
 
 `[F: contracts/e015-required]`
 
-**Values.** Annotation values are any TOML value except a datetime (E020).
-Floats are allowed. Every other value has the type
-`contract.schema.json` gives it.
+**Values.**
+- Annotation values are any TOML value except one holding a datetime: any
+  of TOML's four kinds (offset date-time, local date-time, local date,
+  local time), at any depth of the value (E020).
+  `[F: contracts/e020-datetime, e020-twice]`
+- Floats are allowed, within the canonical domain (§9.5). `nan` and `inf`
+  have no JSON form, and an integral float of magnitude beyond 2^53−1 and
+  below 10^21 serializes as an integer outside it: both are E028.
+  `[F: contracts/e028-float, e028-non-finite, ok-float-integral]`
+- Every other value has the type `contract.schema.json` gives it.
+- A field is judged as written: `history = false` on an event is E019, as
+  any `history` there is. `[F: contracts/e019-history-false]`
 
 ### 9.2 The lints
 
@@ -924,7 +1091,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 
 | Code | Condition | Reported |
 |---|---|---|
-| E000 | not TOML 1.0, or outside the format's shape | once; stops the load |
+| E000 | not TOML 1.0 (1.1-only syntax and integers beyond 64 bits included), or outside the format's shape (§9.1) | once; stops the load |
 | E001 | the interface name is not one or more `.`-joined segments `[a-z][a-z0-9_]*`, or it ends in, or is, a segment `v<digits>` | once |
 | E002 | a `uses` entry is not `<name>.v<major>` | per entry |
 | E010 | a template is empty, has an empty segment, a literal that is not a plain chunk or starts with `x-`, a parameter name not `[a-z][a-z0-9_]*`, a repeated parameter, or a rest parameter that is not last | per resource; stops that resource's other checks |
@@ -933,33 +1100,33 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E013 | a template with parameters has no `cardinality`, or 0 | per resource |
 | E014 | an illegal field (§9.1); `cardinality` without parameters | per field |
 | E015 | a required field is missing (§9.1) | per field |
-| E016 | `gate` without `optional = true` | per resource |
+| E016 | a non-empty `gate` without `optional = true` | per resource |
 | E017 | a gate is not `build:`, `config:` or `capability:` followed by `[a-z0-9][a-z0-9_.-]*` | per gate |
-| E018 | `serving = "replicated"` without `idempotent = true` | per resource |
+| E018 | the resolved `serving` (§9.3) is `replicated` and the resolved `idempotent` is not `true` | per resource |
 | E019 | `history` on an explicit resource, an event or an operation | per occurrence, defaults included |
-| E020 | an annotation key not `<profile>.<key>` (split at the **last** dot; the profile is a `uses` name without its major, the key `[a-z][a-z0-9_]*`), a profile not in `uses`, or a value holding a datetime | per key and table; once for `[defaults]`, whatever it reaches |
-| E021 | two templates under one kind token with the same shape (§2.2) | once per template after the first of its shape |
-| E022 | `epoch` does not name a single-chunk parameter of its template; or a second template of the interface declares `epoch` | per resource for the first condition; once per `epoch` template after the first, for the second |
+| E020 | an annotation key not `<profile>.<key>` (split at the **last** dot; the profile is a `uses` name without its major, the key `[a-z][a-z0-9_]*`), a profile not in `uses`, or a value holding a datetime (§9.1); in a resource, a requirement, `[defaults]` or `[defaults.<kind>]` | per key and table: once for the value, and once for the key or its profile, so one key can give two; `[defaults]` and each `[defaults.<kind>]` once, whatever they reach |
+| E021 | two templates under one kind token with the same shape (§2.2) | once per template after the first of its shape, in template order (below) |
+| E022 | `epoch` does not name a single-chunk parameter of its template; or a second template of the interface declares `epoch` | per resource for the first condition; once per `epoch` template after the first, in template order, for the second |
 | E023 | a type reference that does not resolve (§9.4), or a raw type that is not a media type | per reference |
-| E024 | a `json:` name defined by several listed files, or two listed JSON Schema files with one stem | per reference or file |
+| E024 | a `json:` name defined by several listed files, or two listed JSON Schema files with one stem | per reference; per listed file whose stem an earlier one took (that file is not loaded, §9.4) |
 | E025 | `media_param` does not name a single-chunk parameter of the template | per reference |
-| E026 | `rate` not `rare`, `low` or `burst(<n>/h)` (n ≥ 1, decimal, no leading zero); `retention` not `<n>` + `s`/`m`/`h`/`d`/`w` (n ≥ 1) | per field |
+| E026 | `rate` not `rare`, `low` or `burst(<n>/h)` (n from 1 to 2^32−1, decimal, no leading zero); `retention` not `<n>` + `s`/`m`/`h`/`d`/`w` (n ≥ 1, decimal digits, leading zeros allowed, the seconds within 64 bits) (§2.6) | per field |
 | E027 | a string in the canonical form (§9.5) outside printable ASCII (0x20–0x7E), keys included | per value |
-| E028 | an integer outside ±(2^53−1) in the canonical form, or in a JSON Schema artifact | per value; once per artifact |
-| E029 | a schema file missing, unreadable, not JSON, or not compiling (protobuf editions included) | per file |
+| E028 | a number outside the canonical domain (§9.5): an integer outside ±(2^53−1), a float that is not finite, or a float JCS writes as such an integer; in the canonical form, or in a JSON Schema artifact | per value; once per artifact |
+| E029 | a schema file missing, unreadable, not JSON (a duplicate member included), or not compiling (protobuf editions, and a file under no import root, included) (§9.4) | per file |
 | E030 | a role not `[a-z][a-z0-9_]*`, an `interface` not `<name>.v<major>`, a `resources` entry that is not a template, or `resources = []` | per finding |
 | E031 | `deprecated.replaced_by` names no other template of the interface, or `since` is greater than `minor` (checked only when `minor` is present) | per condition (both can fire on one resource) |
-| E032 | a `$ref` with a scheme (`:`), outside the listed files, or to a missing definition | per `$ref` |
-| E033 | `summary` without `replies = "many"` | per resource |
+| E032 | a `$ref` at a schema position (§7.3) whose file part has a scheme (`:`) or names no listed file, or whose fragment is not a JSON Pointer that resolves (§9.4) | per `$ref` |
+| E033 | `summary` written, and the resolved `replies` (§9.3) is not `many` | per resource |
 | E034 | `history.depth` is 0: on a resource where `history` is legal (where it is not, E019 alone); in `[defaults]`; in `[defaults.<kind>]`, where an illegal `history` gives both E019 and E034 | per occurrence |
-| E035 | a requirement names a resource its interface does not declare, when that interface is in the set | per resource name (set check) |
-| E036 | two contracts of a set declare one interface id | per duplicate (set check) |
+| E035 | a requirement names a resource its interface does not declare, when that interface is in the set; checked against the interface's first declaration (below) | per resource name (set check) |
+| E036 | two contracts of a set declare one interface id | per declaration after the first (set check) |
 | E037 | a JSON Schema keyword outside the subset (§7.3) | once per keyword and file |
 | W101 | two resolved resources under one token whose templates overlap, with different types (the payload type, or an operation's request and response) | per pair |
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
-| W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it | per field (a defaulted one is silent) |
+| W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
 | W104 | `minor` is absent | once |
-| W105 | an annotation key outside its profile's interim vocabulary (Appendix D) | per key |
+| W105 | an annotation key outside its profile's interim vocabulary (Appendix D); a profile without one has none to be outside of (§10) | per key |
 | W107 | the file is not named `<name>.v<major>.toml` | once |
 
 **Cascades.** A fixture's codes do not depend on the order lints run in,
@@ -970,13 +1137,31 @@ because of these rules:
 2. **E029** for one schema kind suppresses E023 for that kind.
 3. **E021** and the `replaced_by` half of **E031** are checked over every
    template, whatever else is wrong with its resource.
-4. **W101** is checked over resources without errors.
+4. **W101** is checked over the resources whose own checks found no error.
+   The table-wide checks of 1 and 3 (E021, the second-`epoch` E022, the
+   `replaced_by` half of E031) do not take a resource out, so one pair can
+   give E021 and W101. `[F: contracts/e021-shape-types]`
 5. **E027** and **E028** on the canonical form run only when no other
    error was found, because there is no canonical form otherwise. E028 on a
    JSON Schema artifact runs at load.
+6. **W103** is judged on resolved types only. A type that is missing (E015)
+   or does not resolve (E023, E024) says nothing about whether a JSON Schema
+   type takes the field: `encoding` waits for the payload type, or, on an
+   operation, for all four types; `attachment_encoding` for the attachment.
+   `[F: contracts/e023-encoding]`
 
-E035 and E036 are set checks: each file is loaded on its own first.
-`[F: sets/]`
+**Order.** Resources are taken in the bytewise order of their template
+text: a sorted table's order, not the file's, since TOML gives a table's
+keys no order. "The first" of E021 and E022 is the template that sorts
+first. The codes do not depend on it, only where they are reported.
+
+**Set checks.** E035 and E036 check a set of contract files, taken in
+file-name order. `[F: sets/]`
+- Each file is loaded on its own first. When one does not load, its own
+  codes stand, and the set checks do not run: they need every member.
+- E036 falls on each declaration of an interface after the first.
+- E035 checks a requirement against the interface's first declaration.
+  `[F: sets/e036-first-declaration]`
 
 ### 9.3 Defaults and resolution
 
@@ -990,7 +1175,9 @@ field:
 A default applies only where its field is legal (Appendix D), so
 `[defaults] history = true` skips `@stream`, events and operations.
 **Annotations** merge key by key, in the same precedence. **Requirements**
-take no defaults.
+take no defaults. A lint that reads a defaultable field judges its resolved
+value: `[defaults.operation] idempotent = true` satisfies E018 for every
+operation it reaches. `[F: contracts/ok-resolved-operation]`
 
 | Field | Built-in default |
 |---|---|
@@ -1017,18 +1204,33 @@ MUST have the same fingerprint.
 - **Import roots** are `proto_include`, relative to the contract.
   Otherwise the root is `proto/` when that directory exists, else the
   contract's own directory.
+- **A listed file's name.** A listed file is a path relative to the
+  contract. It is named by its path relative to the first import root that
+  contains it; a listed file under no import root has no name, and does
+  not compile (E029).
+  `[F: contracts/e029-outside-include, ok-protobuf-nested]`
 - **Each listed file** is compiled alone, with its imports and without
   source info, into a `FileDescriptorSet` holding the file and its imports
   in dependency order: `protoc --include_imports`, without
   `--include_source_info`.
-- **The artifact** is those bytes. Its `name` is the file's path relative to
-  its import root. A file using editions does not compile (E029).
-- **A message reference** resolves to the one listed file that defines the
-  message:
+- **The artifact** is those bytes, as protoc 3.21.12 writes them: every
+  field carries its `json_name`. Its `name` is the file's name above. A file
+  using editions does not compile (E029).
+- **A message reference** names a message, a nested one included
+  (`pkg.Outer.Inner`), and never an enum (E023). It resolves to the one
+  listed file that defines the message:
   - E023 when only an imported file defines it;
   - E023 when two listed files do.
+
+  Listed files are searched before the well-known types, so a listed file
+  that defines `google.protobuf.Empty` provides it.
+  `[F: contracts/ok-protobuf-nested, e023-enum]`
 - **The well-known types** are always available, each compiled on demand as
-  its own artifact named `google/protobuf/<file>.proto`:
+  its own artifact named `google/protobuf/<file>.proto`, from the sources
+  protoc 3.21.12 ships in its `include/` directory. Those sources fix the
+  artifacts' bytes, and so their ids. A listed file's
+  `import "google/protobuf/…"` resolves through the import roots first,
+  then to the same sources:
   - `any.proto`: `Any`;
   - `duration.proto`: `Duration`;
   - `empty.proto`: `Empty`;
@@ -1042,17 +1244,31 @@ MUST have the same fingerprint.
 `[F: contracts/ok-protobuf-well-known, e023-type, e029-schema]`
 
 **JSON Schema.**
-- **The artifact** is the document. Its id hashes the document's JCS bytes,
-  and its `name` is the file's stem, which MUST be unique among the listed
-  files (E024).
+- **The artifact** is the document, read as strict JSON: a duplicate member
+  makes the file not JSON (E029). Its id hashes the document's JCS bytes.
+  Its `name` is the file's stem, the last path segment without a final
+  `.json`, which MUST be unique among the listed files (E024). A later file
+  with a taken stem is not loaded. `[F: contracts/e029-duplicate-member]`
 - **`json:Name`** is `$defs/Name` in the one listed file that defines it
   (E023 when none does, E024 when several do).
-- **`json:stem#Name`** looks only in the file with that stem.
-- **A `$ref`'s file part** resolves as a path relative to the referencing
-  file, lexically normalized, and MUST name a listed file. A `$ref` with a
-  scheme (`:`) is refused. Its pointer MUST resolve. Each failure is E032.
+- **`json:stem#Name`** looks only in the file with that stem: the first
+  listed, since a later one is not loaded. `[F: contracts/e024-stem]`
+- **A `$ref`** is a member of a schema position (§7.3). Its value is split
+  at the first `#`. Each failure below is E032.
+  - **The file part**, before the `#`, names the same file when empty. One
+    with a `:` has a scheme, and is refused. Otherwise it resolves as a path
+    relative to the referencing file, lexically normalized, and MUST name a
+    listed file.
+  - **The fragment**, after the `#`, is a JSON Pointer (RFC 6901), applied
+    as written: `~0` and `~1` are unescaped, and nothing is percent-decoded.
+    An empty or absent fragment is the whole document. A fragment that does
+    not start with `/` (`#anchor`) is not a pointer. The pointer MUST
+    resolve.
+  - **In a bundle,** which keeps no paths, the file part names the artifact
+    whose `name` is the stem of its last path segment. Stems are unique per
+    contract, so this is the file the path named.
 
-`[F: contracts/e032-ref-dangling, e032-ref-outside, ok-json-qualified, e024-ambiguous]`
+`[F: contracts/e032-ref-dangling, e032-ref-outside, e032-fragment, ok-json-qualified, e024-ambiguous]`
 
 **Raw.** A media type is `<type>/<subtype>` or `<type>/*`. Each token is a
 lowercase letter or digit followed by lowercase letters, digits or
@@ -1120,9 +1336,17 @@ or `null` for "all".
 operation's `summary` *type* is included, and so is `deprecated.reason`.
 
 **Restrictions.** Every string, keys included, is printable ASCII
-(0x20–0x7E), and every integer is within ±(2^53−1). A contract that breaks
-either is invalid (E027, E028). On that domain every JCS implementation
-agrees. `[F: contracts/e027-ascii, e028-integer]`
+(0x20–0x7E), and every number is in the **canonical domain**:
+- an integer within ±(2^53−1);
+- a float that is finite and, when JCS writes it as an integer, within the
+  same range. JCS writes a float as an integer when it is integral and its
+  magnitude is below 10^21, so `1e16` is `10000000000000000`, outside, and
+  `1e21` is `1e+21`, a float.
+
+A contract that breaks either is invalid (E027, E028). On that domain every
+JCS implementation agrees. An integral float has the canonical bytes of the
+integer, so `1.0` and `1` fingerprint alike.
+`[F: contracts/e027-ascii, e028-integer, e028-float, e028-non-finite, ok-float-integral]`
 
 **Bytes and fingerprint.** The canonical bytes are the RFC 8785 (JCS)
 serialization. The fingerprint is `sha256:` followed by the lowercase hex
@@ -1163,16 +1387,25 @@ the extra documents it references:
  "extras": {"sha256:…": {"media_type": "application/json", "data": <JSON document>}}}
 ```
 
-**Extras** are exactly the documents that the contract's `views.document`
-annotations reference. That is the only extra-carrying annotation in this
-version. The reference builder does not carry extras yet, so a contract
-that uses `views.document` cannot be bundled by it until `views.v1` lands
-(#613).
+**Extras** are exactly the documents that the `views.document` annotations
+of the contract's resources reference. That is the only extra-carrying
+annotation in this version.
+- A `views.document` value references one document by its id, a
+  `sha256:…` string. Another value references nothing, and requirement
+  annotations carry no extras.
+- Where a builder finds the document for an id is `views.v1`'s to define
+  (#613), not the core's. Until it does, a core builder carries no extras,
+  and the bundle of a contract that uses `views.document` fails step 11
+  below, so it cannot be published. A verifier checks extras as below
+  meanwhile.
 
-A bundle file is the JCS serialization of that object, so one contract
-revision has one bundle. To verify bundle bytes, an implementation MUST
-check the following in order, and refuse with the given tag at the first
-failure. `[F: bundles/*, expect.json]`
+A bundle file is the JCS serialization of that object, with all three
+members, so one contract revision has one bundle: a builder writes
+`"schemas": {}` and `"extras": {}` when they are empty. A verifier accepts
+their absence (step 7), and the history check refuses it as not JCS
+(§9.7). To verify bundle bytes, an implementation MUST check the following
+in order, and refuse with the given tag at the first failure.
+`[F: bundles/*, expect.json]`
 
 | Step | Check | Tag |
 |---|---|---|
@@ -1184,20 +1417,42 @@ failure. `[F: bundles/*, expect.json]`
 | 6 | The contract keeps §9.5's restrictions | `restrictions` |
 | 7 | `schemas` and `extras` are objects when present (absent means empty), and `contract.schemas` is a list of `{id, kind}` | `shape` |
 | 8 | Every key of `schemas` is listed by the contract | `unlisted_schema` |
-| 9 | For each listed schema, in id order: it is present (`missing_schema`); its `kind` is the listed one (`schema_kind`); it has a `data` member, base64 text for protobuf, and its kind is `protobuf` or `jsonschema` (`shape`); it hashes to its id, from the decoded bytes for protobuf and the JCS bytes for jsonschema (`schema_hash`) | as given |
-| 10 | For each extra, in id order: it has `data` (`shape`), and the JCS bytes of `data` hash to its id (`extra_hash`) | as given |
+| 9 | For each listed schema, in id order: it is present (`missing_schema`); its `kind` is the listed one, an entry that is not an object or has no `kind` included (`schema_kind`); it has a `data` member and no member besides `kind` and `data`, `data` is base64 text for protobuf, and its kind is `protobuf` or `jsonschema` (`shape`); it hashes to its id, from the decoded bytes for protobuf and the JCS bytes for jsonschema (`schema_hash`) | as given |
+| 10 | For each extra, in id order: it has `data`, no member besides `media_type` and `data`, and a `media_type` that is a string when present (`shape`); the JCS bytes of `data` hash to its id (`extra_hash`) | as given |
 | 11 | The extras' ids are exactly the `views.document` values of the contract's resources | `extras` |
 | 12 | Where the caller expects a fingerprint (from a contract key or a descriptor), the contract's fingerprint equals it | `fingerprint` |
 
 Integrity is Merkle-style. The fingerprint covers the canonical contract,
 which lists every schema id and every extra's id (through its annotations).
-Each artifact is checked against its id, so the whole bundle is verified.
+Each artifact is checked against its id, and an entry carries nothing
+besides its artifact, so the whole bundle is verified. An extra's
+`media_type` is the one member no hash covers: it is informative.
+
+The steps' details `[F: bundles/*]`:
+- **Base64** is RFC 4648 §4: the standard alphabet, padded, decoded
+  strictly. Unpadded, URL-safe or whitespace-broken text is `shape`.
+- **A JSON document holding a number outside the canonical domain** (§9.5)
+  has no JCS bytes every implementation agrees on, so it matches no id:
+  `schema_hash`, or `extra_hash`.
+- **Verification checks hashes, not content.** A protobuf artifact that
+  hashes to its id verifies even if it does not decode; a conforming
+  builder never produces one (§9.8, `schema_unreadable`).
+- **One id listed twice** in `contract.schemas` is one artifact. Two listed
+  JSON Schema files with identical bytes have one id, so the canonical form
+  lists it once, under the `name` of the last of them in `[schemas]` order.
 
 ### 9.7 History and retention
 
-- **History.** A contract's CI keeps every published bundle at
-  `contracts/.history/<iface>/<hex>.bundle.json`, where `<hex>` is the
-  fingerprint without `sha256:`. The directory is append-only.
+- **History.** A contract's CI keeps every published bundle under a
+  **history root** it configures, at `<root>/<iface>/<hex>.bundle.json`,
+  where `<hex>` is the fingerprint without `sha256:`. The root is
+  append-only.
+  - A tool finds a contract's history by its interface id under the root,
+    never by the contract file's location, so one root holds the histories
+    of many interfaces.
+  - By convention the root is `.history` beside the contracts:
+    `contracts/.history`, or `examples/zk2/.history` for every example in
+    that tree.
 - **The history check** MUST verify:
   - every bundle (§9.6);
   - its fingerprint against its file name;
@@ -1206,26 +1461,54 @@ Each artifact is checked against its id, so the whole bundle is verified.
 
   It reports `directory` (an entry that is not an interface directory),
   `file_name`, `io`, `interface`, `jcs`, or a bundle tag. `[F: history/]`
-- **Retention.** A rebuild that the classifier judges identical to the
-  newest published revision keeps that revision's bundle, and mints no
-  fingerprint. For protobuf, identity compares the `FileDescriptorSet`s with
-  source info dropped and every default `json_name` dropped. Fingerprints
-  may over-detect a change, never under-detect one.
+- **The check's order.** It takes the root's entries, then each interface
+  directory's, in bytewise order of name.
+  - An entry of the root that is not a directory named by an interface id
+    is `directory`, and is not looked into.
+  - In an interface directory, an entry not named
+    `<64 lowercase hex>.bundle.json` is `file_name`, a subdirectory
+    included.
+  - For each file, in order: reading it (`io`); verifying it (§9.6),
+    expecting the fingerprint its name gives (a bundle tag, so a name that
+    is not the bundle's fingerprint is `fingerprint`); its interface against
+    its directory (`interface`); its bytes against the JCS of the bundle,
+    all three members written (`jcs`). The first three stop that file's
+    checks; `interface` and `jcs` are both reported.
+
+  `[F: history/wrong-directory-not-jcs, no-extras, stray-entries]`
+- **Retention.** A rebuild identical to the newest published revision keeps
+  that revision's bundle, and mints no fingerprint. Identity is not one of
+  the classifier's classes. Two revisions are identical when:
+  - their canonical forms are equal once each schema id is replaced by its
+    artifact's `kind` and `name`; and
+  - their artifacts, matched by `kind` and `name`, are equal: JSON Schema
+    documents by their JCS bytes, and protobuf `FileDescriptorSet`s as
+    messages, once source info and every default `json_name` are dropped.
+    The default `json_name` is protoc's: the field name with each `_`
+    removed and the letter after it upper-cased. Raw types have no
+    artifact.
+
+  Fingerprints may over-detect a change, never under-detect one.
   `[F: compat/expect.json, same_revision]`
 
 ### 9.8 Compatibility
 
 Revisions inside a major are checked **FULL_TRANSITIVE**: a candidate
-against every revision in the history, in both directions. Each rule is
-judged per direction:
+against every revision in the history, in both directions. A direction is a
+role, writer or reader, never a swap of old and new:
 - for streams, state, events and responses, the owner writes and the
   consumer reads;
 - for requests, the caller writes and the owner reads.
 
+The classifier compares each earlier revision to the candidate, never the
+reverse. Each rule below is a transition from the earlier revision to the
+candidate, and its class already accounts for an old reader of a new writer
+and a new reader of an old writer: that is what "both directions" means.
+
 A change is **compatible**, **review** or **breaking**. The candidate's
-class is the worst over both directions and every earlier revision. A
-revision that does not load at all is **invalid**, like the
-`add-pattern` case.
+class is the worst over every rule and every earlier revision. A candidate
+that does not load at all is **invalid**, like the `add-pattern` case.
+Earlier revisions come from verified bundles, so they load.
 - **Breaking:** a contract's CI MUST NOT publish the revision.
 - **Review:** a human MUST accept it before publication.
 
@@ -1235,7 +1518,8 @@ predecessor breaks against an earlier one. `[F: compat/]`
 
 Each rule has a name, which a classifier reports with its finding. The
 names below are the reference classifier's. `expect.json` pins the class of
-every case and the name of every warning.
+every case and the name of every warning. Warnings are reported by rule
+name, sorted and deduplicated over the whole history.
 
 **Interface:**
 
@@ -1245,7 +1529,12 @@ every case and the name of every warning.
 | `uses` changed | review | `uses_changed` |
 | Documentation and `minor` only | compatible | |
 
-**Resources,** matched by kind token and template:
+**Resources,** paired by kind (`stream`, `state`, `event`, `operation`) and
+template. A template is unique within a contract, since it is the table key,
+so a toggled `explicit`, which changes the kind token (§1.3), still pairs:
+that is what makes `explicit_cleared` review rather than a removal. A
+resource whose kind changed does not pair: the old one is removed, and
+another added. `[F: compat/contract/explicit-true-to-false, kind-changed]`
 
 | Change | Class | Rule |
 |---|---|---|
@@ -1254,7 +1543,7 @@ every case and the name of every warning.
 | A required resource added | breaking (old providers lack it) | `required_resource_added` |
 | optional → required | breaking (old providers may not expose it) | `optional_to_required` |
 | required → optional | breaking (consumers rely on it) | `required_to_optional` |
-| The kind changed | breaking | `kind_changed`, `token_changed` |
+| The kind changed | breaking: the resources do not pair, so the old one is removed | `resource_removed` |
 | `explicit` false → true | breaking for ambient consumers | `explicit_set` |
 | `explicit` true → false | review (link budgets) | `explicit_cleared` |
 | A template parameter's type changed | breaking | `params_changed` |
@@ -1307,22 +1596,42 @@ The request, response, error and summary types follow the type rules below.
 | The schema kind changed (raw, protobuf, jsonschema) | breaking | `type_kind_changed` |
 | A raw media type changed | breaking | `media_type_changed` |
 | A raw `media_param` changed | review | `media_param_changed` |
-| An artifact that does not decode, or lacks the named type | review (a verified bundle never has one) | `schema_unreadable` |
+| An artifact that does not decode, or lacks the named type | review (a conforming builder never produces one; verification checks hashes, not content) | `schema_unreadable` |
+
+Only the artifacts a type reaches are compared. A listed artifact that no
+type references can change, which changes the fingerprint, and that is
+compatible: nothing reads it. `[F: compat/contract/unreferenced-artifact-changed]`
 
 **Protobuf payloads:** WIRE semantics with renumber detection. A reader
 ignores unknown fields and defaults missing ones. Fields are matched by
 number. A field missing by number but present by name is renumbered.
-Messages are compared recursively, nested and referenced ones included,
-each pair once.
+- **What is compared.** Messages are compared recursively, from the named
+  type through its message-typed fields, each pair of (earlier, candidate)
+  message names once. They are compared by structure, not by name: a
+  message type renamed is compatible, and a nested type that no field
+  reaches is not compared. `[F: compat/payload/protobuf/message-renamed, nested-type-added]`
+- **Explicit presence** is protobuf's: a field has it when it is a proto3
+  `optional`, a member of a oneof, or a singular field of message type or
+  in a proto2 file.
+- **A oneof** is identified by its name, so a field moved between two
+  oneofs moves out of one and into another. A proto3 `optional`'s
+  synthetic oneof is not a oneof here. `[F: compat/payload/protobuf/move-between-oneofs]`
+- **An enum** is compared by value number, and is closed when the
+  candidate's file is proto2.
+- **Not compared:** proto2 defaults, field options other than `json_name`
+  (`packed`, `deprecated`), and reserved names. A change to them alone is
+  compatible. `[F: compat/payload/protobuf/proto2-default-changed, packed-option]`
 - **Breaking:**
   - a field's declared scalar type changes, including int32 → int64 and
     string → bytes (`type_changed`). The declared type is the contract: a
     narrower reader truncates, and a string reader is owed UTF-8;
   - its cardinality changes: singular, repeated or map
     (`cardinality_changed`);
-  - it moves into or out of a oneof (`oneof_changed`);
-  - it is renumbered: a deletion plus an addition of the same field, which
-    silently drops the data both ways (`renumbered`);
+  - it moves into or out of a oneof (`oneof_changed`), which alone is
+    reported, even where presence toggles too;
+  - it is renumbered (`renumbered`): matched by name, it silently drops the
+    data both ways. A renumbered field is not a deleted one, so it raises
+    no warning;
   - it reuses a number that an earlier revision reserved
     (`reserved_reused`);
   - a proto2 `required` field is added (`required_field_added`) or deleted
@@ -1334,10 +1643,12 @@ each pair once.
     (`json_name_changed`). Tools decode with the writer's bundle, so a name
     only relabels a display;
   - an enum value renamed or deleted (`enum_value_renamed`,
-    `enum_value_removed`);
-  - explicit presence toggled, such as proto3 `optional`
+    `enum_value_removed`); a value renumbered is a deletion and an addition
+    `[F: compat/payload/protobuf/enum-value-renumbered]`;
+  - explicit presence toggled, such as proto3 `optional`, or a file's
+    `syntax` changed between proto2 and proto3 under a singular scalar
     (`presence_changed`): a reader stops telling a default from an absent
-    value;
+    value `[F: compat/payload/protobuf/proto2-to-proto3]`;
   - a value added to a proto2 (closed) enum (`closed_enum_value_added`): an
     old reader keeps it as an unknown field and reads the default.
 - **Compatible:** a field added; a value added to a proto3 (open) enum.
@@ -1345,9 +1656,22 @@ each pair once.
   field deleted without reserving its number. Reuse is caught against the
   whole history.
 
-**JSON Schema payloads:** the subset of §7.3. Readers tolerate unknown
-properties, and writers send only what their schema declares. `$ref`s are
-followed, across the revision's artifacts. Annotations are ignored.
+**JSON Schema payloads:** the subset of §7.3, read at schema positions.
+Readers tolerate unknown properties, and writers send only what their schema
+declares. Annotations are ignored.
+- **`$ref`s are followed,** across the revision's artifacts, by stem as in a
+  bundle (§9.4). Keywords beside a `$ref` (`$defs` aside) are added to its
+  target, an outer one taking the place of the target's own, and the result
+  is compared like any schema.
+  `[F: compat/payload/jsonschema/ref-sibling-changed, compat/contract/cross-file-ref-retyped]`
+- **A boolean schema** (`true` accepts anything, `false` nothing) changed,
+  to or from anything, is review (`boolean_schema_changed`). As `items` or
+  `additionalProperties`, the rules below apply instead.
+  `[F: compat/payload/jsonschema/boolean-property]`
+- **Inside `oneOf`, `anyOf` and `prefixItems`,** the schemas are compared
+  as written, in order, with annotations dropped at schema positions: a
+  reordering is a change, and a `$ref` there is not followed.
+  `[F: compat/payload/jsonschema/oneof-reordered, oneof-annotation-only]`
 - **Compatible:**
   - an optional property added, even to a closed schema, or removed;
   - `additionalProperties` or `items` changed between absent, `true` and
@@ -1357,19 +1681,28 @@ followed, across the revision's artifacts. Annotations are ignored.
   - the `type` set changed, including integer ↔ number (`type_changed`);
   - a required property added (`required_added`) or removed
     (`required_removed`), or a property optional ↔ required
-    (`required_changed`);
+    (`required_changed`). A `required` name with no property on either side
+    still binds the member's presence, so adding or removing one is
+    breaking too `[F: compat/payload/jsonschema/required-without-property]`;
   - an `enum` value added or removed (`enum_changed`), or `const` changed
     (`const_changed`);
   - a bound changed, either way (`bound_changed`): `minimum`, `maximum`,
     `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`,
     `minItems` or `maxItems`. A tightened bound breaks old writers, and a
     loosened one breaks old readers;
-  - a `oneOf` branch added (`oneof_branch_added`).
+  - a `oneOf` branch added (`oneof_branch_added`): the candidate's `oneOf`
+    has more branches than the earlier one's, whatever they hold.
 - **Review:**
   - any other change inside `oneOf`, `anyOf` or `prefixItems`
     (`undecided_changed`). Their containment is not decided;
   - `additionalProperties` or `items` gaining or losing a schema
     (`members_changed`): a map closed, or array items constrained.
+
+The asymmetry inside `oneOf` and `anyOf` is deliberate. A `oneOf` branch
+added is the one undecided change measured (spike S7): a new writer sends
+the new variant, and an old reader refuses it. A branch added to an
+`anyOf`, or removed from either, is left to a human.
+`[F: compat/payload/jsonschema/oneof-add-branch, anyof-add-branch]`
 
 ---
 
@@ -1386,7 +1719,11 @@ contributes through exactly four points:
    that uses one MUST list the profile in `uses`, which is fingerprinted.
    `[F: contracts/e020-annotation]` Until a profile publishes its
    vocabulary, the interim tables of Appendix D apply, and a key outside
-   them is a warning. `[F: contracts/w105-vocabulary]`
+   them is a warning. `[F: contracts/w105-vocabulary]` A profile that
+   Appendix D does not list has no interim table, so none of its keys is
+   outside one: no W105. `[F: contracts/ok-profile-without-vocabulary]`
+   What a published vocabulary defines (`views.v1`'s documents among them,
+   §9.6) is the profile's, not the core's.
 3. **A registered verbatim kind**, such as `@blob`, at position 5. This
    point is reserved: this version refuses such keys (§1.2), and a later
    version defines their form.
@@ -1532,7 +1869,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4 |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.3, §8.1–§8.2 |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2 |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
@@ -1576,7 +1913,7 @@ publishes its own):
 | `desired` | `target_param`, `target` |
 | `alarms` | `severity_default` |
 | `media` | `tiers`, `tier_param`, `frame_clock`, `control`, `receiver_report` |
-| `views` | `document` |
+| `views` | `document` (an extra's id, `sha256:…`; §9.6) |
 | `redundancy` | `election` |
 
 ## Appendix E. Fixture formats
@@ -1597,7 +1934,11 @@ brief:
   template's text and its bindings, each a list of strings (one element for
   a single parameter), or `null`.
 - **`contracts/`, `descriptors/`, `sets/`:** expected codes, sorted. For
-  valid contracts, also the fingerprint and `<stem>.canonical.json`.
+  valid contracts, also the fingerprint and `<stem>.canonical.json`. The
+  codes' meanings are §9.2's table (contracts and sets) and §3.3's
+  (descriptors).
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
-  value.
-- **`compat/`:** the class, warnings and `same_revision`.
+  value. The tags' meanings are §9.6's, §9.7's and §5.2's.
+- **`compat/`:** the class, the warning rule names (sorted and
+  deduplicated) and `same_revision`. The case layout and the one-resource
+  wrapper are in [`compat/README.md`](conformance/compat/README.md).

@@ -1,0 +1,6 @@
+syntax = "proto3";
+package m.v1;
+message Pose {
+  double x = 1;
+  message Unused { int32 a = 1; }
+}

@@ -1,0 +1,12 @@
+# A profile without an interim vocabulary (Appendix D) has no table to be
+# outside of: no W105 (§10).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+uses = ["acme.v1"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "acme.anything" = { nested = [1, "two"] } }

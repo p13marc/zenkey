@@ -1,0 +1,12 @@
+{
+  "$defs": {
+    "Anchor": {"$ref": "#here"},
+    "Escaped": {"$ref": "#/$defs/a%20b"},
+    "Colon": {"$ref": "#/$defs/a:b"},
+    "Tilde": {"$ref": "#/$defs/c~1d"},
+    "Data": {"type": "object", "const": {"$ref": "nowhere.json"}, "examples": [{"$ref": "x:y"}]},
+    "a b": {"type": "string"},
+    "a:b": {"type": "string"},
+    "c/d": {"type": "string"}
+  }
+}

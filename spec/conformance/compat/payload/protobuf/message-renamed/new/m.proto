@@ -1,0 +1,7 @@
+syntax = "proto3";
+package m.v1;
+message Pose {
+  double x = 1;
+  Offset inner = 9;
+}
+message Offset { double z = 1; }

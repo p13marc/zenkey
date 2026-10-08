@@ -1,0 +1,10 @@
+# A listed .proto file under none of the import roots has no name, so it
+# does not compile (E029, §9.4).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+protobuf = ["schemas/nested.proto"]
+proto_include = ["schemas/dup"]

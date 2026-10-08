@@ -12,6 +12,10 @@
    "class": "review",
    "warnings": []
   },
+  "contract/cross-file-ref-retyped": {
+   "class": "breaking",
+   "warnings": []
+  },
   "contract/deprecated-added": {
    "class": "compatible",
    "warnings": []
@@ -45,6 +49,10 @@
    "warnings": []
   },
   "contract/idempotent-true-to-false": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/kind-changed": {
    "class": "breaking",
    "warnings": []
   },
@@ -112,6 +120,10 @@
    "class": "review",
    "warnings": []
   },
+  "contract/unreferenced-artifact-changed": {
+   "class": "compatible",
+   "warnings": []
+  },
   "payload/jsonschema/add-enum-value": {
    "class": "breaking",
    "type": "json:Status",
@@ -134,6 +146,16 @@
   },
   "payload/jsonschema/add-required-property": {
    "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/anyof-add-branch": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/boolean-property": {
+   "class": "review",
    "type": "json:Status",
    "warnings": []
   },
@@ -182,7 +204,27 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/jsonschema/oneof-annotation-only": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/oneof-property-named-title": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/oneof-reordered": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
   "payload/jsonschema/optional-to-required": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/ref-sibling-changed": {
    "class": "breaking",
    "type": "json:Status",
    "warnings": []
@@ -203,6 +245,11 @@
    "warnings": []
   },
   "payload/jsonschema/required-to-optional": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/required-without-property": {
    "class": "breaking",
    "type": "json:Status",
    "warnings": []
@@ -250,6 +297,12 @@
    "type": "m.v1.Pose",
    "warnings": []
   },
+  "payload/protobuf/enum-value-renumbered": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
   "payload/protobuf/int32-to-int64": {
    "class": "breaking",
    "same_revision": false,
@@ -262,14 +315,44 @@
    "type": "m.v1.Pose",
    "warnings": []
   },
+  "payload/protobuf/message-renamed": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/move-between-oneofs": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
   "payload/protobuf/move-into-oneof": {
    "class": "breaking",
    "same_revision": false,
    "type": "m.v1.Pose",
    "warnings": []
   },
+  "payload/protobuf/nested-type-added": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/packed-option": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
   "payload/protobuf/presence-toggled": {
    "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-default-changed": {
+   "class": "compatible",
    "same_revision": false,
    "type": "m.v1.Pose",
    "warnings": []
@@ -294,6 +377,12 @@
   },
   "payload/protobuf/proto2-required-removed": {
    "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-to-proto3": {
+   "class": "review",
    "same_revision": false,
    "type": "m.v1.Pose",
    "warnings": []
@@ -363,5 +452,5 @@
    "warnings": []
   }
  },
- "description": "Compatibility cases (spec core.md §9.8), FULL_TRANSITIVE: the class is the worst over both directions and every revision in the history. Classes: compatible, review, breaking; `invalid` when a revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection (decided 2026-10-08). Payload inputs come from spike S7 (`docs/zk2/spike-results/s7/`); the contract and transitive cases are written for #607. Evaluated by the classifier (#618); until it exists, the runner checks that every input loads. `same_revision` (protobuf) is the retention rule's identity check (core.md §9.7): true when the normalized descriptor sets are equal, so the old bundle is kept."
+ "description": "Compatibility cases (core.md \u00a79.8), FULL_TRANSITIVE: the class is the worst over both roles (writer and reader) and every revision in the history. Classes: compatible, review, breaking; `invalid` when the new revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection. `warnings` are the warning rule names, sorted and deduplicated. `same_revision` (protobuf) is the retention rule's identity (core.md \u00a79.7): true when the normalized descriptor sets are equal, so the old bundle is kept. Layout and wrapping: compat/README.md."
 }

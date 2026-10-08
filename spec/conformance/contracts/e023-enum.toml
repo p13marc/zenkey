@@ -1,0 +1,12 @@
+# A type reference names a message, never an enum (E023, §9.4).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+protobuf = ["schemas/nested.proto"]
+
+[resources.a]
+kind = "stream"
+type = "seed.v1.Mode"

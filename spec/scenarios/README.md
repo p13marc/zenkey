@@ -12,7 +12,7 @@ the runtime (#610 onward).
 | [`grammar.md`](grammar.md) | §1.3 the guard, §1.6 namespaces |
 | [`state.md`](state.md) | §4: S1–S7, archives, events |
 | [`operations.md`](operations.md) | §5: O1–O7; §6 split-brain |
-| [`presence.md`](presence.md) | §1.5 epochs, §3.3 the descriptor, §8.1–§8.2 |
+| [`presence.md`](presence.md) | §1.5 epochs, §3.2 an unbound required role, §3.3 the descriptor, §8.1–§8.2 |
 | [`bindings.md`](bindings.md) | §3.2: R1–R6 |
 | [`retrieval.md`](retrieval.md) | §8.4 |
 | [`types.md`](types.md) | §2.4 QoS, §7.1–§7.2 |

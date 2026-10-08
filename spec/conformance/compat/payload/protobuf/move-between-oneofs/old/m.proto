@@ -1,0 +1,7 @@
+syntax = "proto3";
+package m.v1;
+message Pose {
+  double x = 1;
+  oneof src { string gps = 7; string odom = 8; }
+  oneof aux { string tag = 9; }
+}

@@ -1,0 +1,10 @@
+# The first declaration of cmd.v1, in file-name order: E035 checks
+# drive.v1's requirement against this one (§9.2).
+[interface]
+name = "cmd"
+major = 1
+minor = 0
+
+[resources.twist]
+kind = "stream"
+type = { raw = "application/octet-stream" }
