@@ -1,0 +1,5 @@
+syntax = "proto3";
+package m.v1;
+message Pose {
+  double x = 1;
+}

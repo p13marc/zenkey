@@ -1,5 +1,5 @@
 {
-  "description": "Chunk slugging (ported from v1, RFC 03 §2): `slug` cases give a value and its canonical chunk (which must unslug back to the value); `unslug` cases give a chunk and its value, or null when the chunk is not a canonical slug.",
+  "description": "Chunk slugging (core.md §1.4): `slug` cases give a value and its canonical chunk (which must unslug back to the value); `unslug` cases give a chunk and its value, or null when the chunk is not a canonical slug.",
   "slug": [
     {
       "expect": "eth0",

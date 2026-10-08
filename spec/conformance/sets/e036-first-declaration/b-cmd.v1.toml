@@ -1,0 +1,9 @@
+# A later declaration of cmd.v1: the duplicate E036 names.
+[interface]
+name = "cmd"
+major = 1
+minor = 1
+
+[resources.wrench]
+kind = "stream"
+type = { raw = "application/octet-stream" }

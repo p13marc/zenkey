@@ -1,8 +1,9 @@
 {
- "description": "A directory of contracts → the sorted codes of the set checks (check_set). Each file is first loaded on its own, and must load; W107 (the file name) is not part of a set check.",
+ "description": "A directory of contracts → the sorted codes of the set checks (core.md §9.2, E035 and E036), its files taken in name order. Every file loads on its own first; W107 (the file name) is not part of a set check.",
  "sets": {
   "ok-set": {"codes": []},
   "e035-unknown-resource": {"codes": ["E035"]},
-  "e036-duplicate": {"codes": ["E036"]}
+  "e036-duplicate": {"codes": ["E036"]},
+  "e036-first-declaration": {"codes": ["E036"]}
  }
 }

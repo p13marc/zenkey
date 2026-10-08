@@ -1,5 +1,5 @@
 {
- "description": "A history root (contracts/.history) \u2192 its problems, as [at, tag], in directory then file order. Hand-written; checked, never blessed.",
+ "description": "A history root \u2192 its problems, as [at, tag] (core.md \u00a79.7): the root's entries, then each interface directory's, in bytewise name order, and each file's checks in \u00a79.7's order. Hand-written; checked, never blessed.",
  "cases": {
   "ok": [],
   "wrong-name": [
@@ -36,6 +36,32 @@
    [
     "seed.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
     "schema_hash"
+   ]
+  ],
+  "wrong-directory-not-jcs": [
+   [
+    "other.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "interface"
+   ],
+   [
+    "other.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "jcs"
+   ]
+  ],
+  "no-extras": [
+   [
+    "seed.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "jcs"
+   ]
+  ],
+  "stray-entries": [
+   [
+    "README.md",
+    "directory"
+   ],
+   [
+    "seed.v1/drafts",
+    "file_name"
    ]
   ]
  }

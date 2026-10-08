@@ -1,0 +1,11 @@
+[interface]
+name    = "m"
+major   = 1
+minor   = 0
+
+[schemas]
+jsonschema = ["new/status.json", "new/types.json"]
+
+[resources.status]
+kind = "state"
+type = "json:Status"

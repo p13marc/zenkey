@@ -444,5 +444,5 @@
       "fingerprint": "sha256:f9e5bc2589dddc2496b5aa05bf270b246dbc2a12cba2bf5037e476d23d9ee522"
     }
   },
-  "description": "Contract lints, canonical forms and fingerprints. For each `<stem>.toml`: the sorted diagnostic codes (zenkey_model::diag::CODES) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."
+  "description": "Contract lints, canonical forms and fingerprints (core.md §9.1–§9.5). For each `<stem>.toml`: the sorted diagnostic codes (the code tables of §9.2 and §9.1) and the fingerprint, null when the contract is invalid. A valid contract's canonical JCS bytes are `<stem>.canonical.json`. Files load from this directory, without the file-name convention check (W107)."
 }
