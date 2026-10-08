@@ -6,6 +6,52 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the inspection nouns speak zk2 (#612, FJ4)
+
+`main` is the zk2 line; nothing is released from it until FJ9, and fixes to
+the v1 tool ship from the `v1` branch (0.14.x). This chunk replaces v1's
+registry nouns with zk2's: presence (instance and interface tokens),
+descriptors and contract bundles, read through a session opened **in** the
+deployment's namespace (decided 2026-10-08) — `--namespace`, with `--base`
+as its alias and the context's `base` as its rung. Raw verbs and the admin
+space stay un-namespaced. No aliases and no shims, as with #307: the v1
+spellings below are gone, and each row names where its question went.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `topic list [--producer] [--class] [--type] [--deprecated] [--watch] [--budget]` | `iface list`, `iface show <iface>` | a zk2 interface's resources are its contract's (`iface show` lists them with kinds, types, QoS and fan-out); the cardinality judgement is `doctor`'s (FJ6) |
+| `topic info <key>` | `iface show <iface>`, `schema show <iface> [resource]` | a key's meaning is its contract's resource; resolved decoding of one sample is FJ5's `get` |
+| `node list [--verbose] [--watch]` | `service list [--system S]` | instances from their instance tokens, interfaces from tokens and descriptors side by side, the tokenless set (U22) from descriptors; a timed-out read says *possibly incomplete* |
+| `node info <origin>` | `service show <system>/<service>` | the descriptor as served; exit **2** when presence shows no instance |
+| `base list [--watch]` | `namespace list` | reads `**/zk2/*/*/@zk/instance/*` from a session in **no** namespace; the bus root is `(empty)`, selected with `--namespace ''` |
+| `service list [--producer]` | `service list`, `iface show` | a procedure is an operation resource of an interface |
+| `service info <producer> [procedure]` | `iface show <iface>`, `schema show <iface> <resource>` | an operation's request, response, error and summary types, `fanout`, `serving` and `idempotent` |
+| `service call …` | unchanged (v1 `@rpc`) | until FJ5's `call` |
+| `interface list` | `iface list` | |
+| `interface show <type> [--schema] [--full]` | `iface show <iface>[@fp]`, `schema show <iface> [resource] [--full]` | schemas come from the revision's bundle — `--contracts` or retrieved from its holders (spec §8.4) — never from a served `describe` |
+| `schema show <producer> [--type T] [--full]` | `schema show <iface>[@fp] [resource] [--full]` | protobuf artifacts shown as their messages and enums; a resource named implies its documents; exit **2** when the revision cannot be had |
+| `registry export\|diff\|lint\|lock\|migrate\|infer` | the contract CI binary (`zk2 contract lint\|fingerprint\|bundle\|compat\|check-history`) and `compat` | contracts are authoring files with a `.history`; the compatibility gate is `compat <old> <new>` here and `zk2 contract compat` in CI |
+| `registry consumers\|impact <subject>` | `iface show <iface>` (its consumers), `graph` | consumers are the roles descriptors declare (R3), never admin-space subscriber declarations |
+| — | `graph [--dot]` | the binding graph from descriptors and tokens (R3): an edge per binding that selects a provider present now, the edges the runtime computes; `--dot` is Graphviz, not a `--format` |
+| — | `compat <old> <new>` | each side a `*.toml`, a `*.bundle.json` or `<iface>[@fp]`; exit **0** compatible, **1** review or breaking, **2** no verdict |
+
+New bus flags on the zk2 verbs: `--namespace NS` (alias `--base`, env
+`ZENCTL_BASE`), and `--contracts PATH` (repeatable: an authoring file, a
+directory of them, or a `.history` root) on `iface show`, `schema show` and
+`compat` — a revision held there is never retrieved, and a question it
+answers alone opens no session. `namespace list` takes neither.
+
+Exit contract: a zk2 `show` asked about something nothing on the bus
+answers for — a service presence does not show, an interface nobody
+provides, requires or describes, a revision no holder serves — is the
+reserved **2** (`exit::Unanswered`, a sibling of `NoSession`). `check
+retired` moved with its ledger out of the retired `registry` module; its
+spelling and exits are unchanged.
+
+Completion offers the service addresses, interfaces and namespaces the last
+presence read and `namespace list` saw, per namespace, from
+`zk2-names.json` in the context's cache directory (`cache clear` removes it).
+
 ## 0.12.0 (2026-10-06) — config speaks RFC v1.50, and principals on a face
 
 ### config speaks RFC v1.50

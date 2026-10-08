@@ -13,7 +13,7 @@
 //! >
 //! > A degradation is **announced, once per invocation**, on stderr.
 //!
-//! `topic list` is determined by slices — with none, it has nothing to list,
+//! `blob list` is determined by slices — with none, it has nothing to list,
 //! and an empty table would be a lie about the deployment. `pub` is
 //! enriched by them: they supply the declared QoS profile and the schema
 //! encoding, and without them it publishes as-typed and says so. The first

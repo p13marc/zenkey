@@ -41,9 +41,9 @@ cardinality = 128
 since = "1.3"
 "#;
 
-/// A media-declaring producer shows its streams in `node_info` from the bus
+/// A media-declaring producer's streams are read from the bus
 /// alone — and a fleet slice read the same way carries the declarations for
-/// any other consumer (the zengui detail pane, `topic list`).
+/// any consumer (the zengui detail pane).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn declared_media_streams_are_discoverable_off_the_bus() {
     let (server, client) = peer_pair().await;
@@ -81,23 +81,22 @@ async fn declared_media_streams_are_discoverable_off_the_bus() {
         );
     }
 
-    let info = zenkey_fleet::node_info(
+    // The fleet's own introspect sweep, as any consumer reads it (`node
+    // info`, which joined it per origin, left with v1's `node` noun, #612).
+    let served = zenkey_fleet::fleet_registry(
         &zenkey_fleet::Fleet::new(&client, ""),
-        ORIGIN,
         Duration::from_secs(5),
-        false,
     )
     .await
-    .expect("node_info");
-    let producer = info
-        .producers
+    .expect("the introspect sweep");
+    let (_, producer) = served
         .iter()
-        .find(|p| p.name == "parallax")
+        .find(|(name, _)| name == "parallax")
         .expect("parallax introspected");
     assert_eq!(producer.media.len(), 2, "both declared streams surface");
     assert_eq!(producer.media[0].path, "{stream}/preview/jpeg");
-    assert_eq!(producer.media[0].encoding, "image/jpeg");
-    assert_eq!(producer.media[1].encoding, "video/*");
+    assert_eq!(producer.media[0].encoding.as_encoding_str(), "image/jpeg");
+    assert_eq!(producer.media[1].encoding.as_encoding_str(), "video/*");
 
     // And the raw slice parse carries the full declarations (v1.16's
     // MediaDecl), optional fields included.

@@ -40,7 +40,7 @@ use anyhow::Result;
 use zenkey::RegistrySlice;
 use zenkey_explorer_config::StoredContext;
 
-use crate::cli::{BusArgs, OutputArgs};
+use crate::cli::{BusArgs, NamespaceArgs, OutputArgs, SessionArgs};
 use crate::resolve;
 
 /// Everything a command needs from the bus flags, resolved.
@@ -297,6 +297,138 @@ impl Bus {
     }
 }
 
+/// A zk2 verb's connection, resolved (#612, FJ4): `SessionArgs` with every
+/// ladder climbed, and no deployment in it.
+///
+/// The same single impure edge as [`Bus`]: the context file is read once,
+/// when this is built. `namespace list` runs on one of these alone,
+/// because it looks across namespaces; a resolved verb runs on a
+/// [`Deployment`], which carries one.
+#[derive(Clone)]
+pub(crate) struct Link {
+    context: Option<String>,
+    transport: resolve::Transport,
+    timeout: Duration,
+    out: OutputArgs,
+}
+
+impl Link {
+    /// Resolve against the user's config file. The impure edge.
+    pub(crate) fn resolve(args: &SessionArgs) -> Result<Link> {
+        let stored = crate::context::active(args.context.as_deref())?;
+        Ok(Link::resolve_with(args, stored.as_ref()))
+    }
+
+    /// The same, against a caller-supplied context.
+    pub(crate) fn resolve_with(args: &SessionArgs, stored: Option<&StoredContext>) -> Link {
+        Link {
+            context: args.context.clone(),
+            transport: resolve::transport(
+                args.zenoh_config.as_deref(),
+                &args.connect,
+                &args.listen,
+                args.scouting,
+                stored,
+            ),
+            timeout: resolve::timeout(args.timeout, stored),
+            out: args.out,
+        }
+    }
+
+    pub(crate) fn format(&self) -> crate::render::Format {
+        self.out.format
+    }
+
+    pub(crate) fn color(&self) -> crate::render::ColorChoice {
+        self.out.color
+    }
+
+    pub(crate) fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// The `--context` name this invocation was given, if any — what the
+    /// completion cache is keyed by.
+    pub(crate) fn context_name(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    /// An un-namespaced session: the raw half of the FJ decision, for a
+    /// read that looks across namespaces.
+    pub(crate) async fn session(&self) -> Result<zenoh::Session> {
+        let t = &self.transport;
+        zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
+            .await
+            .map_err(open_error)
+    }
+}
+
+/// A zk2 resolved verb's bus (#612, FJ4): the deployment's namespace and the
+/// connection, resolved.
+///
+/// The namespace climbs the base's ladder — `--namespace` (alias `--base`,
+/// env `ZENCTL_BASE`) > the active context's `base` > empty — because they
+/// are one fact: the deployment base *is* the session namespace its
+/// services run in. Empty is the bus-root deployment and sets no
+/// namespace.
+#[derive(Clone)]
+pub(crate) struct Deployment {
+    namespace: String,
+    link: Link,
+}
+
+impl Deployment {
+    /// Resolve against the user's config file. The impure edge, once.
+    pub(crate) fn resolve(args: &NamespaceArgs) -> Result<Deployment> {
+        let stored = crate::context::active(args.session.context.as_deref())?;
+        Ok(Deployment::resolve_with(args, stored.as_ref()))
+    }
+
+    /// The same, against a caller-supplied context.
+    pub(crate) fn resolve_with(args: &NamespaceArgs, stored: Option<&StoredContext>) -> Deployment {
+        Deployment {
+            namespace: resolve::base(args.namespace.as_deref(), stored).to_string(),
+            link: Link::resolve_with(&args.session, stored),
+        }
+    }
+
+    /// The namespace; empty for the bus-root deployment.
+    pub(crate) fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    pub(crate) fn link(&self) -> &Link {
+        &self.link
+    }
+
+    pub(crate) fn format(&self) -> crate::render::Format {
+        self.link.format()
+    }
+
+    pub(crate) fn color(&self) -> crate::render::ColorChoice {
+        self.link.color()
+    }
+
+    pub(crate) fn timeout(&self) -> Duration {
+        self.link.timeout()
+    }
+
+    /// A session **in** the namespace (decided 2026-10-08): what this
+    /// verb reads, it reads as the deployment's own consumers do.
+    pub(crate) async fn session(&self) -> Result<zenoh::Session> {
+        let t = &self.link.transport;
+        zenkey_fleet::open_in_namespace(
+            &self.namespace,
+            t.file.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await
+        .map_err(open_error)
+    }
+}
+
 /// Why slices could not be loaded — and *whose* problem it is (#210).
 ///
 /// The distinction is the whole reason `slices_optional` returns a `Result`
@@ -429,6 +561,42 @@ pub(crate) mod tests {
         assert!(b.registry_dirs().is_empty());
         assert_eq!(b.context_name(), None);
         assert_eq!(bus_of(Some("zs")).base(), "zs");
+    }
+
+    /// FJ4: a resolved verb's namespace climbs the base's ladder — the flag
+    /// (which `--base` and `ZENCTL_BASE` both feed), then the context's
+    /// `base`, then the bus root — and an empty flag is the bus root, never
+    /// a fall-through to the context.
+    #[test]
+    fn a_namespace_climbs_the_base_s_ladder() {
+        let ns = |flag: Option<&str>, stored: Option<&StoredContext>| {
+            let args = NamespaceArgs {
+                namespace: flag.map(str::to_string),
+                session: SessionArgs {
+                    context: None,
+                    connect: vec![],
+                    listen: vec![],
+                    scouting: false,
+                    timeout: Some(2),
+                    zenoh_config: None,
+                    out: OutputArgs {
+                        format: crate::render::Format::Table,
+                        color: crate::render::ColorChoice::Never,
+                    },
+                },
+            };
+            let d = Deployment::resolve_with(&args, stored);
+            assert_eq!(d.timeout(), Duration::from_secs(2));
+            d.namespace().to_owned()
+        };
+        let ctx = StoredContext {
+            base: Some("prod".into()),
+            ..StoredContext::default()
+        };
+        assert_eq!(ns(None, None), "");
+        assert_eq!(ns(None, Some(&ctx)), "prod");
+        assert_eq!(ns(Some("site/a"), Some(&ctx)), "site/a");
+        assert_eq!(ns(Some(""), Some(&ctx)), "", "an empty flag is the root");
     }
 
     /// The `--context` **name** survives resolution, because the completion

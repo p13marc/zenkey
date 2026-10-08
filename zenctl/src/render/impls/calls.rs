@@ -119,7 +119,7 @@ impl Render for CallReport {
             // now it names the wait the report itself carries.
             0 => vec![Note::silence(format!(
                 "no replies to {} within {}s. The origin may be down, the procedure \
-                 unregistered, or the timeout too short — `zenctl node list` says \
+                 unregistered, or the timeout too short — `zenctl doctor` says \
                  who is up",
                 self.key, self.timeout_s
             ))],

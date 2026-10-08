@@ -1,0 +1,104 @@
+`compat <old> <new>` (#612, FJ4): two contract revisions, judged by the
+contract CI's own classifier (spec §9.8) — `zenkey_model::compat`, the one
+`zk2 contract compat` and the codegen's history gate run — so the tool cannot
+disagree with the build about what breaks.
+
+A side is an authoring file (`*.toml`), a bundle file (`*.bundle.json`,
+verified against its own content), or `<iface>[@<fingerprint>]`: a revision
+`--contracts` holds or the deployment's descriptors name. A verdict verb, on
+the one contract in `zenctl/src/exit.rs`: **0** compatible, **1** review or
+breaking (the finding), **2** no verdict.
+
+None of these opens a session: every side is a file or held by `--contracts`.
+
+The published revision of `tc.netif.v1` against its own authoring file: the
+same fingerprint, and compatible.
+
+```console
+$ zenctl compat ../examples/zk2/.history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json ../examples/zk2/tcgui/tc.netif.v1.toml --format table
+old  tc.netif.v1  sha256:4f531ebec4c4eee0…  bundle  ../examples/zk2/.history/tc.netif.v1/4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0.bundle.json
+new  tc.netif.v1  sha256:4f531ebec4c4eee0…  file    ../examples/zk2/tcgui/tc.netif.v1.toml
+
+compatible
+0 finding(s), 0 warning(s); exit 0.
+
+```
+
+A review change — the bandwidth stream's cardinality doubled — is a finding a
+human accepts, exit 1:
+
+```console
+$ zenctl compat ../examples/zk2/tcgui/tc.netif.v1.toml tests/cmd/fixtures/zk2/review/tc.netif.v1.toml --format table
+? 1
+old  tc.netif.v1  sha256:4f531ebec4c4eee0…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
+new  tc.netif.v1  sha256:94b92cc2ff1b030a…  file  tests/cmd/fixtures/zk2/review/tc.netif.v1.toml
+
+review  cardinality_changed  resources."bandwidth/{ns}/{iface}"
+  `cardinality` changed
+
+review
+1 finding(s), 0 warning(s); exit 1: a human accepts a review change.
+
+```
+
+A breaking one, with the old side named by interface and a fingerprint prefix
+out of `--contracts` — a `.history` root, the published bundles:
+
+```console
+$ zenctl compat tc.netif.v1@4f53 tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml --contracts ../examples/zk2/.history --format table
+? 1
+old  tc.netif.v1  sha256:4f531ebec4c4eee0…  history  tc.netif.v1@4f53
+new  tc.netif.v1  sha256:05e9f1168915c594…  file     tests/cmd/fixtures/zk2/breaking/tc.netif.v1.toml
+
+breaking  resource_removed  resources."namespaces"
+  removed; a deprecated resource stays until the next major
+
+breaking
+1 finding(s), 0 warning(s); exit 1: a breaking change needs a new major.
+
+```
+
+Two different interfaces are breaking by definition, and the report says so
+rather than listing every resource as removed:
+
+```console
+$ zenctl compat ../examples/zk2/tcgui/tc.netif.v1.toml ../examples/zk2/tcgui/tc.netem.v1.toml --format table
+? 1
+old  tc.netif.v1  sha256:4f531ebec4c4eee0…  file  ../examples/zk2/tcgui/tc.netif.v1.toml
+new  tc.netem.v1  sha256:30b491116ef6a534…  file  ../examples/zk2/tcgui/tc.netem.v1.toml
+
+breaking  interface_changed  interface
+  the interface id differs
+
+breaking
+1 finding(s), 0 warning(s); exit 1: a breaking change needs a new major.
+the two revisions are of different interfaces (tc.netif.v1 and tc.netem.v1): that alone is breaking
+
+```
+
+## No verdict
+
+An input that cannot be read is no verdict on compatibility — exit 2, never
+the 1 that would read as "breaking":
+
+```console
+$ zenctl compat tests/cmd/fixtures/zk2/missing.toml ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: tests/cmd/fixtures/zk2/missing.toml: no such file
+compat: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A revision `--contracts` does not hold has to be retrieved from the bus — and
+a bus that cannot be reached asked nothing:
+
+```console
+$ zenctl compat tc.netif.v1@ffff ../examples/zk2/tcgui/tc.netif.v1.toml --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+compat: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

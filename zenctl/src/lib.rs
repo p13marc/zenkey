@@ -17,6 +17,14 @@
 //! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
 //! command that reports it.
 //!
+//! **zk2's nouns** (#612, FJ4) — `service`, `iface`, `schema`, `namespace`,
+//! and the `graph` and `compat` verbs — read no slice at all: presence
+//! tokens, the descriptor each instance serves, and contract bundles,
+//! through a session opened in the deployment's namespace (`--namespace`,
+//! alias `--base`; decided 2026-10-08), with `--contracts` for revisions
+//! known offline. They replaced v1's `topic`, `node`, `base`, `interface`
+//! and `registry`; the rest of the tree is ported verb by verb until FJ9.
+//!
 //! Two seams carry the shape of the tool rather than the shape of a command:
 //! [`cli`] is the clap tree and the vocabulary it enforces (#307), and
 //! [`exit`] is the exit contract every verb cites. Read those two and the
@@ -45,8 +53,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AclCmd, AdminCmd, BaseCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, InterfaceCmd,
-    KeyCmd, NodeCmd, RegistryCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd, TopicCmd,
+    AclCmd, AdminCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, IfaceCmd, KeyCmd,
+    NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -100,48 +108,19 @@ pub async fn run() -> Result<()> {
     let (cli, gen_target_typed) = parse();
     match cli.command {
         // ── Nouns ────────────────────────────────────────────────────────
-        Command::Topic(TopicCmd::List(a)) => cmd::topic::list(a).await,
-        Command::Topic(TopicCmd::Info { key, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            let report = bus.slice_set().await?.topic_info(bus.base(), &key);
-            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
-        }
-        Command::Node(NodeCmd::Info { origin, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::node::info(&origin, &bus).await
-        }
-        Command::Node(NodeCmd::List(a)) => cmd::node::list(a).await,
-        Command::Base(BaseCmd::List(a)) => cmd::base::list(a).await,
-        Command::Service(ServiceCmd::List { producer, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            let report = bus.slice_set().await?.service_list(producer.as_deref());
-            crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())
-        }
-        Command::Service(ServiceCmd::Info(a)) => cmd::service::info(a).await,
+        Command::Service(ServiceCmd::List(a)) => cmd::service::list(a).await,
+        Command::Service(ServiceCmd::Show(a)) => cmd::service::show(a).await,
         Command::Service(ServiceCmd::Call(a)) => cmd::call::run(a).await,
+        Command::Iface(IfaceCmd::List(a)) => cmd::iface::list(a).await,
+        Command::Iface(IfaceCmd::Show(a)) => cmd::iface::show(a).await,
+        Command::Namespace(NamespaceCmd::List(a)) => cmd::namespace::list(a).await,
         Command::Config(ConfigCmd::Get(a)) => cmd::config::get(a).await,
         Command::Config(ConfigCmd::Set(a)) => cmd::config::set(a).await,
         Command::Config(ConfigCmd::Confirm(a)) => cmd::config::confirm(a).await,
         Command::Config(ConfigCmd::Cancel(a)) => cmd::config::cancel(a).await,
         Command::Config(ConfigCmd::Extend(a)) => cmd::config::extend(a).await,
         Command::Config(ConfigCmd::Persist(a)) => cmd::config::persist(a).await,
-        Command::Interface(InterfaceCmd::List { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::interface::list(&bus).await
-        }
-        Command::Interface(InterfaceCmd::Show(a)) => cmd::interface::show(a).await,
         Command::Schema(SchemaCmd::Show(a)) => cmd::schema::show(a).await,
-        Command::Registry(RegistryCmd::Export(a)) => cmd::registry::export(a).await,
-        Command::Registry(RegistryCmd::Diff { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::registry::diff(&bus).await
-        }
-        Command::Registry(RegistryCmd::Lint(a)) => cmd::registry::lint(a),
-        Command::Registry(RegistryCmd::Lock(a)) => cmd::registry::lock(a),
-        Command::Registry(RegistryCmd::Consumers(a)) => cmd::registry::consumers(a).await,
-        Command::Registry(RegistryCmd::Impact(a)) => cmd::registry::impact(a).await,
-        Command::Registry(RegistryCmd::Infer(a)) => cmd::registry::infer(a).await,
-        Command::Registry(RegistryCmd::Migrate(a)) => cmd::registry::migrate(a),
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
         Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,
@@ -175,6 +154,8 @@ pub async fn run() -> Result<()> {
             Some(SnapshotSub::Diff(d)) => cmd::snapshot::diff(d),
             None => cmd::snapshot::take(a).await,
         },
+        Command::Graph(a) => cmd::graph::run(a).await,
+        Command::Compat(a) => cmd::compat::run(a).await,
         Command::Export(a) => cmd::export::run(a).await,
         Command::Serve(a) => cmd::serve::run(a).await,
         Command::Gen(a) => cmd::generate::run(a, gen_target_typed).await,
@@ -185,8 +166,8 @@ pub async fn run() -> Result<()> {
         Command::Check(CheckCmd::Cutover(a)) => cmd::cutover::run(a).await,
         Command::Check(CheckCmd::Conform(a)) => cmd::conform::run(a).await,
         Command::Check(CheckCmd::Retired { for_secs, bus }) => {
-            let bus = cmd::registry::ASKING.ask(Bus::resolve(&bus));
-            cmd::registry::retired(for_secs, &bus).await
+            let bus = cmd::retired::ASKING.ask(Bus::resolve(&bus));
+            cmd::retired::run(for_secs, &bus).await
         }
         Command::Check(CheckCmd::Probe(a)) => cmd::probe::run(a).await,
         Command::Check(CheckCmd::Schema(a)) => cmd::schema::check(a).await,

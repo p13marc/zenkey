@@ -119,18 +119,23 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   replay locks are per-application and hold across every window.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
-  stays on crates.io un-yanked): app-neutral; registry knowledge comes from the live bus
-  (RFC 08 §6 introspection) or `--registry <dir>` TOMLs. `--base` resolves
-  flag > env `ZENCTL_BASE` > the active named context
-  (`zenctl context create …`, `~/.config/zenctl/config.toml`) > **empty**
-  (the base-less bus-root deployment, the RFC v1.6 default).
+  stays on crates.io un-yanked): app-neutral. Being ported to zk2 (#612,
+  FJ1–FJ9): the zk2 verbs read contracts from the bundles the bus serves
+  (spec §8.4) or `--contracts <path>`, and open their session in the
+  deployment namespace — `--namespace` (alias `--base`) resolves flag > env
+  `ZENCTL_BASE` > the active named context (`zenctl context create …`) >
+  **empty**; raw verbs and `namespace list` stay un-namespaced. The v1 verbs
+  not yet ported still read `--registry <dir>` TOMLs.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
-  declared, alive or persisted and gets verbs under it (`topic list|info`,
-  `node`, `base`, `service`, `config get|set|confirm|cancel|extend|persist`,
-  `interface`, `schema show`, `registry`, `storage`, `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
+  declared, alive or persisted and gets verbs under it (`service
+  list|show|call`, `iface list|show`, `schema show`, `namespace list`,
+  `config get|set|confirm|cancel|extend|persist`, `storage`, `acl`,
+  `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
   (`get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`, `replay`,
-  `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`); a **judgement**
+  `timeline`, `snapshot`, `graph`, `export`, `serve`, `gen`, `scout`);
+  `compat` compares two contract revisions offline, exit-coded like a
+  judgement; a **judgement**
   is exit-coded (`check
   expect|cutover|retired|probe|conform|schema`, `doctor`, `why`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),

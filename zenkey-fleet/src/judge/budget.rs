@@ -6,7 +6,7 @@
 //! makes an unbudgeted population-keyed subject a registry-review reject —
 //! and until this module nothing ever compared the declaration to reality.
 //! The join is deliberately engine-side: the doctor's
-//! `cardinality-over-declared` check, `zenctl topic list --budget` and
+//! `cardinality-over-declared` check and
 //! zengui's tree badge (#221, `zengui/src/budget.rs`) all read the same
 //! numbers (#400).
 //!
@@ -24,10 +24,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::SliceSet;
-use crate::judge::common::EXPANSION_CAP;
-use crate::model::examples::Examples;
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
-use crate::report::{BudgetCell, BudgetWindow, TopicList};
 
 /// Observed expansions of every `{var}` subject family, grouped
 /// per origin — RFC 04 §1's table bounds cardinality *per producer*, so one
@@ -95,57 +92,6 @@ impl BudgetObservation {
     ) -> Option<&BTreeMap<String, BTreeSet<String>>> {
         self.families.get(&(producer.to_string(), path.to_string()))
     }
-}
-
-/// Join an observation onto a `topic list` report: every `{var}` row gets a
-/// [`BudgetCell`], the list gets the [`BudgetWindow`] coverage statement.
-///
-/// Literal rows and ledger rows get no cell — their population is fixed by
-/// construction, and an empty cell claims nothing (which is not a pass).
-pub fn join_budget(list: &mut TopicList, obs: &BudgetObservation, window: BudgetWindow) {
-    for row in &mut list.subjects {
-        if row.deprecated || !row.path.contains('{') {
-            continue;
-        }
-        let empty = BTreeMap::new();
-        let origins = obs.family(&row.producer, &row.path).unwrap_or(&empty);
-        let observed: usize = origins.values().map(BTreeSet::len).sum();
-        let (worst_origin, worst_observed) = origins
-            .iter()
-            .max_by_key(|(_, keys)| keys.len())
-            .map(|(o, keys)| (Some(o.clone()), keys.len()))
-            .unwrap_or((None, 0));
-        let examples = worst_origin
-            .as_ref()
-            .and_then(|o| origins.get(o))
-            .map(|keys| {
-                let mut ex = Examples::new(EXPANSION_CAP);
-                for key in keys {
-                    ex.push_with(|| key.clone());
-                }
-                ex.into_vec()
-            })
-            .unwrap_or_default();
-        let exempt = row
-            .path
-            .contains("...")
-            .then(|| "rest-variable".to_string());
-        let over = exempt.is_none()
-            && row
-                .cardinality
-                .is_some_and(|declared| worst_observed as i64 > declared);
-        row.budget = Some(BudgetCell {
-            declared: row.cardinality,
-            observed,
-            origins: origins.len(),
-            worst_origin,
-            worst_observed,
-            exempt,
-            over,
-            examples,
-        });
-    }
-    list.budget = Some(window);
 }
 
 #[cfg(test)]

@@ -1,21 +1,24 @@
-`schema` is a noun now, with one verb under it (#307).
+`schema` is a noun with one verb under it (#307), and since FJ4 (#612) the
+schemas it shows are a zk2 contract's.
 
-It used to be a hybrid: `zenctl schema <producer>` dumped, `zenctl schema
-check` validated, and a bare `zenctl schema` exited **1** through an `anyhow`
-message where every other missing argument in this tool exits 2. `show` is the
-verb the dump always was, and the validator moved to `check schema`, where the
-rest of the exit-coded assertions live — one home each.
+v1's `schema show <producer>` read a producer's served `describe`. A zk2
+bundle carries every schema artifact its types live in (spec §9.5), verified
+against the revision's fingerprint, so `schema show` reads them from there:
+offline from `--contracts`, or retrieved from the revision's holders (§8.4).
+Validating a v1 payload against a served schema is still `check schema`, until
+FJ8 re-cuts it. `schema-show.trycmd` runs it against the repository's own
+contracts.
 
 ```console
 $ zenctl schema --help
-Payload schemas as producers serve them.
+Payload schemas, as a contract's bundle carries them.
 
-The `describe` procedure (RFC 08 §7). The shapes are served data, not registry data: the TOMLs carry type *names*. A producer that serves no `describe` degrades honestly — it is not an error. Validating a payload against one is `check schema`.
+The schema artifacts of one revision (spec §7.1, §9.5): JSON Schema documents and protobuf descriptor sets, and which resource member names which type. Offline from `--contracts`, or retrieved from the bus. Validating a v1 payload against a served schema is `check schema`.
 
 Usage: zenctl schema <COMMAND>
 
 Commands:
-  show  Dump a producer's served payload schemas (`@rpc/<producer>/describe`)
+  show  One revision's schema artifacts, and the type each member names
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -23,56 +26,57 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl schema show --help
-Dump a producer's served payload schemas (`@rpc/<producer>/describe`)
+One revision's schema artifacts, and the type each member names.
 
-Usage: zenctl schema show [OPTIONS] <PRODUCER>
+`<iface>` alone is the one revision `--contracts` holds or the deployment's descriptors name; `@<fingerprint>` (or a prefix of one) picks one among several. Without `--full` each artifact is listed by id, kind and name; with it, or with a resource named, its document follows — a JSON Schema as carried, a protobuf descriptor set read as its messages and enums. Answered from `--contracts` with no session when it holds the revision. Exit 2 when the revision cannot be had.
+
+Usage: zenctl schema show [OPTIONS] <IFACE[@FP]> [RESOURCE]
 
 Arguments:
-  <PRODUCER>
-          Producer name, e.g. `sysinfo`
+  <IFACE[@FP]>
+          `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one)
+
+  [RESOURCE]
+          Only this resource: `<kind token>/<template>` (`stream/bandwidth/{ns}/{iface}`), or its template alone when only one resource has it. Implies the full documents
 
 Options:
-      --type <TYPE>
-          Show only this type (implies the full document)
-
       --full
-          Print every schema document in full, not just kind + hash
+          Print every artifact's document, not just its id, kind and name
 
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl base list` discovers the bases in use.
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
           
           [env: ZENCTL_BASE=]
+          [alias: --base]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 
@@ -100,17 +104,16 @@ Options:
 
 ```
 
-A missing `<PRODUCER>` is now clap's refusal, at clap's exit code, with clap's
-usage line — not a sentence four frames later at a code that means "does not
-conform".
+A bare `zenctl schema show` is a usage error, exit 2, like every other missing
+argument:
 
 ```console
 $ zenctl schema show
 ? 2
 error: the following required arguments were not provided:
-  <PRODUCER>
+  <IFACE[@FP]>
 
-Usage: zenctl schema show --base <BASE> <PRODUCER>
+Usage: zenctl schema show --namespace <NS> <IFACE[@FP]> [RESOURCE]
 
 For more information, try '--help'.
 

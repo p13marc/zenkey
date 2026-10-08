@@ -5,7 +5,8 @@
 //! zenoh's default 256-slot handler hangs such a GET at every size measured
 //! from 996 tokens (zenoh#2678, spike S2), and the fleet's sessions do hold
 //! one: the [`zenkey_fleet::Monitor`] watches the roster with a history
-//! subscriber. `roster`, `node_info` and `discover_bases` each ran a
+//! subscriber. `roster`, `node_info` and `discover_bases` (the last two left
+//! with v1's `node` and `base` nouns at FJ4) each ran a
 //! liveliness GET on zenoh's default handler until this suite, and against
 //! that code this test hangs: the deadlock blocks the runtime's own threads,
 //! so not even a `tokio::time::timeout` around the read fires.
@@ -98,23 +99,17 @@ async fn reads_beside_a_subscriber() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
-    let info = zenkey_fleet::node_info(&fleet, ORIGIN, get, false)
+    // A read across every prefix, the shape `namespace list` asks
+    // (`**/zk2/…`), through the same chokepoint: every token, and complete.
+    let read = zenkey_fleet::liveliness_read(&reader, "**/v1/*/state/*/alive", get)
         .await
-        .expect("node_info");
-    assert_eq!(
-        info.producers.iter().filter(|p| p.alive).count(),
-        N,
-        "every producer alive"
-    );
-
-    let bases = zenkey_fleet::discover_bases(&reader, get)
+        .expect("a liveliness read");
+    assert_eq!(read.keys.len(), N);
+    assert!(read.complete, "a GET that returned before its timeout");
+    let none = zenkey_fleet::namespace_listing(&reader, get)
         .await
-        .expect("discover_bases");
-    let empty = bases
-        .iter()
-        .find(|b| b.base.is_empty())
-        .expect("the empty base");
-    assert_eq!(empty.producers.len(), N);
+        .expect("namespace list");
+    assert!(none.namespaces.is_empty() && none.complete);
 
     monitor.shutdown().await.expect("monitor shutdown");
     drop(tokens);

@@ -220,6 +220,190 @@ pub fn contexts() -> Vec<CompletionCandidate> {
     candidates(config.contexts.keys().cloned())
 }
 
+// ── zk2's names (#612, FJ4) ─────────────────────────────────────────────
+//
+// zk2 has no registry to cache: what a completion can offer is what a
+// presence read last saw — service addresses and interfaces, per namespace
+// — and which namespaces `namespace list` last saw. One small JSON file
+// beside the slices, under the same three rules: never the bus, never a
+// failure, never a claim. `cache clear` removes it with the slices.
+
+/// The file, inside the context's cache directory. `SliceSet::read_cache`
+/// reads only `*.toml`/`*.kdl` there, so it never mistakes this for a slice.
+const ZK2_NAMES: &str = "zk2-names.json";
+
+/// What presence reads last saw, per namespace.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Zk2Names {
+    #[serde(default)]
+    namespaces: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    seen: std::collections::BTreeMap<String, Zk2Seen>,
+}
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Zk2Seen {
+    #[serde(default)]
+    services: std::collections::BTreeSet<String>,
+    #[serde(default)]
+    ifaces: std::collections::BTreeSet<String>,
+}
+
+fn zk2_path(context: Option<&str>) -> std::path::PathBuf {
+    zenkey_explorer_config::cache_dir(zenkey_explorer_config::active_name(context).as_deref())
+        .join(ZK2_NAMES)
+}
+
+fn read_names(path: &std::path::Path) -> Zk2Names {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Best-effort, like the slice cache: a cache that cannot be written must
+/// not fail the command the user ran, so nothing here returns an error.
+fn write_names(path: &std::path::Path, names: &Zk2Names) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(names) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+/// Remember what one presence read in `namespace` saw. A read of the whole
+/// namespace (`whole`) replaces what was remembered there; a narrower one
+/// adds to it. Nothing seen writes nothing: one empty read must not blank a
+/// good cache.
+pub(crate) fn remember_presence(
+    context: Option<&str>,
+    namespace: &str,
+    whole: bool,
+    services: impl IntoIterator<Item = String>,
+    ifaces: impl IntoIterator<Item = String>,
+) {
+    remember_into(&zk2_path(context), namespace, whole, services, ifaces);
+}
+
+/// [`remember_presence`] against an explicit file: the pure half a test can
+/// drive without touching the user's cache directory.
+fn remember_into(
+    path: &std::path::Path,
+    namespace: &str,
+    whole: bool,
+    services: impl IntoIterator<Item = String>,
+    ifaces: impl IntoIterator<Item = String>,
+) {
+    let services: std::collections::BTreeSet<String> = services.into_iter().collect();
+    let ifaces: std::collections::BTreeSet<String> = ifaces.into_iter().collect();
+    if services.is_empty() && ifaces.is_empty() {
+        return;
+    }
+    let mut names = read_names(path);
+    let seen = names.seen.entry(namespace.to_owned()).or_default();
+    if whole {
+        *seen = Zk2Seen::default();
+    }
+    seen.services.extend(services);
+    seen.ifaces.extend(ifaces);
+    write_names(path, &names);
+}
+
+/// Remember the namespaces one `namespace list` saw (replacing the last).
+pub(crate) fn remember_namespaces(
+    context: Option<&str>,
+    namespaces: impl IntoIterator<Item = String>,
+) {
+    let namespaces: std::collections::BTreeSet<String> = namespaces.into_iter().collect();
+    if namespaces.is_empty() {
+        return;
+    }
+    let path = zk2_path(context);
+    let mut names = read_names(&path);
+    names.namespaces = namespaces;
+    write_names(&path, &names);
+}
+
+/// The value of `--namespace` (or `--base`) on the line being completed.
+fn namespace_in(args: impl IntoIterator<Item = String>) -> Option<String> {
+    let words: Vec<String> = args.into_iter().collect();
+    let start = words
+        .iter()
+        .rposition(|w| w == "--")
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let mut rest = words[start..].iter();
+    let mut found = None;
+    while let Some(word) = rest.next() {
+        let value =
+            ["--namespace", "--base"]
+                .iter()
+                .find_map(|flag| match word.strip_prefix(flag) {
+                    Some("") => Some(rest.clone().next().cloned()),
+                    Some(v) => v.strip_prefix('=').map(|v| Some(v.to_owned())),
+                    None => None,
+                });
+        if let Some(v) = value {
+            found = v;
+        }
+    }
+    found
+}
+
+/// Which namespace the line being completed reads: its `--namespace`,
+/// else `ZENCTL_BASE`, else the active context's base, else the bus root —
+/// the flag's own ladder, read without failing.
+fn namespace_on_line(context: Option<&str>) -> String {
+    let args: Vec<String> = std::env::args_os()
+        .filter_map(|a| a.into_string().ok())
+        .collect();
+    namespace_in(args)
+        .or_else(|| std::env::var("ZENCTL_BASE").ok())
+        .or_else(|| {
+            zenkey_explorer_config::active(context)
+                .ok()
+                .flatten()
+                .and_then(|c| c.base)
+        })
+        .unwrap_or_default()
+}
+
+/// Service addresses a presence read last saw in the line's namespace.
+pub fn services() -> Vec<CompletionCandidate> {
+    let context = context_on_line();
+    let names = read_names(&zk2_path(context.as_deref()));
+    let ns = namespace_on_line(context.as_deref());
+    candidates(
+        names
+            .seen
+            .get(&ns)
+            .map(|s| s.services.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
+    )
+}
+
+/// Interfaces a presence read last saw in the line's namespace.
+pub fn ifaces() -> Vec<CompletionCandidate> {
+    let context = context_on_line();
+    let names = read_names(&zk2_path(context.as_deref()));
+    let ns = namespace_on_line(context.as_deref());
+    candidates(
+        names
+            .seen
+            .get(&ns)
+            .map(|s| s.ifaces.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
+    )
+}
+
+/// Namespaces `namespace list` last saw, the bus root left out (it is
+/// spelled `''`, which a shell completes poorly and nobody needs offered).
+pub fn namespaces() -> Vec<CompletionCandidate> {
+    let names = read_names(&zk2_path(context_on_line().as_deref()));
+    candidates(names.namespaces.into_iter().filter(|n| !n.is_empty()))
+}
+
 /// Keys, completed from the *declared* keyspace: `v1/<origin>/<class>/…`.
 ///
 /// Subject patterns reach the user through here rather than on their own: a
@@ -374,5 +558,72 @@ mod tests {
             ]),
             None
         );
+    }
+
+    /// zk2's names (FJ4): the line's `--namespace` (or its alias `--base`)
+    /// picks which namespace's names are offered; a read of the whole
+    /// namespace replaces what it remembered, a narrower read adds to it,
+    /// and an empty read writes nothing, so one bad moment cannot blank a
+    /// good cache.
+    #[test]
+    fn zk2_names_are_remembered_per_namespace() {
+        let line = |w: &[&str]| {
+            let mut v = vec!["zenctl".to_string(), "--".to_string()];
+            v.extend(w.iter().map(|s| s.to_string()));
+            v
+        };
+        assert_eq!(
+            namespace_in(line(&[
+                "zenctl",
+                "service",
+                "show",
+                "--namespace",
+                "prod",
+                ""
+            ])),
+            Some("prod".into())
+        );
+        assert_eq!(
+            namespace_in(line(&["zenctl", "iface", "show", "--base=site/a", ""])),
+            Some("site/a".into())
+        );
+        assert_eq!(
+            namespace_in(line(&["zenctl", "--namespacex", "y", "service", ""])),
+            None
+        );
+        assert_eq!(namespace_in(line(&["zenctl", "service", "show", ""])), None);
+
+        let path = std::env::temp_dir().join(format!(
+            "zenctl-zk2-names-{}-{}.json",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        remember_into(
+            &path,
+            "prod",
+            true,
+            s(&["host-a/tc", "host-b/tc"]),
+            s(&["tc.netif.v1"]),
+        );
+        remember_into(&path, "prod", false, s(&["ws-01/gui"]), s(&[]));
+        remember_into(&path, "", true, s(&["root/svc"]), s(&[]));
+        remember_into(&path, "prod", true, s(&[]), s(&[]));
+        let names = read_names(&path);
+        let prod = &names.seen["prod"];
+        assert_eq!(
+            prod.services.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["host-a/tc", "host-b/tc", "ws-01/gui"],
+            "a narrower read adds; an empty one writes nothing"
+        );
+        assert_eq!(names.seen[""].services.len(), 1, "namespaces stay apart");
+        remember_into(&path, "prod", true, s(&["host-c/tc"]), s(&[]));
+        assert_eq!(
+            read_names(&path).seen["prod"].services.len(),
+            1,
+            "a whole read replaces"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -90,7 +90,7 @@ impl Render for BenchReport {
         if self.origins.is_empty() {
             notes.push(Note::silence(
                 "no origin answered — a non-verdict, not proof of absence; \
-                 `zenctl node list` says who is up",
+                 `zenctl doctor` says who is up",
             ));
         }
         if self.errors > 0 || self.silent > 0 {

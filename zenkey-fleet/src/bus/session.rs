@@ -51,7 +51,7 @@ pub const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// own introspection and sits outside any deployment namespace (RFC 09 §5),
 /// so [`crate::admin_get`], [`crate::routers`], [`crate::storages`],
 /// [`crate::declared_entities`] and [`crate::topology`] keep a bare
-/// `&Session`. [`crate::discover_bases`] likewise: it exists to *find* bases,
+/// `&Session`. `namespace list`'s read likewise: it exists to *find* namespaces,
 /// so requiring one would be circular. Handing those a `Fleet` would offer a
 /// base the function is obliged to ignore, which is the kind of parameter
 /// that eventually gets used.
@@ -201,9 +201,79 @@ pub async fn open_reporting_within(
     scouting: Option<bool>,
     deadline: Duration,
 ) -> Result<Session, OpenFailure> {
-    let config = config_off_runtime(file, connect, listen, scouting)
+    let config = config_off_runtime(file, connect, listen, scouting, Posture::Explorer)
         .await
         .map_err(OpenFailure::Config)?;
+    open_config(config, deadline).await
+}
+
+/// Open a session **in** a deployment's namespace (#612, FJ4), for zk2's
+/// resolved verbs.
+///
+/// The FJ decision of 2026-10-08 ends RFC 09 §5's "explorers are never
+/// namespaced" for zk2: a resolved verb — `service`, `iface`, `graph`,
+/// `schema show`, a live `compat` — reads base-relative `zk2/…` keys
+/// through a session whose `namespace` is the deployment's, exactly as the
+/// deployment's own services do, so presence, descriptors and bundles are
+/// read the way a consumer reads them. Raw verbs and the admin space keep
+/// the un-namespaced [`open_reporting`].
+///
+/// Everything else is [`open_reporting`]'s posture: a client unless it
+/// listens, multicast off unless asked or stated, bounded by
+/// [`OPEN_TIMEOUT`]. An **empty** namespace is the bus-root deployment and
+/// sets none. A namespace that is not a plain key expression — a wildcard,
+/// an empty chunk — is refused as the caller's input
+/// ([`OpenFailure::Config`]), and so is a config file that sets one of its
+/// own: the namespace has one source, the caller's.
+pub async fn open_in_namespace(
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    let mut config = config_off_runtime(file, connect, listen, scouting, Posture::Namespaced)
+        .await
+        .map_err(OpenFailure::Config)?;
+    if !namespace.is_empty() {
+        check_namespace(namespace).map_err(OpenFailure::Config)?;
+        let quoted = serde_json::to_string(namespace)
+            .map_err(|e| OpenFailure::Config(Error::Internal(e.to_string())))?;
+        config.insert_json5("namespace", &quoted).map_err(|e| {
+            OpenFailure::Config(Error::unaskable(
+                format!("namespace {namespace:?}"),
+                e.to_string(),
+            ))
+        })?;
+    }
+    open_config(config, OPEN_TIMEOUT).await
+}
+
+/// A namespace is a concrete key-expression prefix: no wildcard, no `$*`,
+/// no empty chunk (zenoh 1.10 sets it as the prefix of every key a session
+/// spells).
+fn check_namespace(namespace: &str) -> Result<()> {
+    let refuse = |detail: String| Error::unaskable(format!("namespace {namespace:?}"), detail);
+    let ke = zenoh::key_expr::KeyExpr::try_from(namespace).map_err(|e| refuse(e.to_string()))?;
+    if ke.as_str() != namespace {
+        return Err(refuse(format!(
+            "not in canonical form (zenoh reads it as {:?})",
+            ke.as_str()
+        )));
+    }
+    if namespace
+        .split('/')
+        .any(|c| c.contains('*') || c.contains('$'))
+    {
+        return Err(refuse(
+            "a namespace is a concrete prefix and cannot hold a wildcard".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Open a built config: the nothing-to-reach refusal, then the bounded open.
+async fn open_config(config: zenoh::Config, deadline: Duration) -> Result<Session, OpenFailure> {
     if reaches_nothing(&config) {
         // zenoh refuses this too, as "No peer specified and multicast
         // scouting deactivated!" — a peer's word, from a client. Said here in
@@ -294,18 +364,21 @@ async fn config_off_runtime(
     connect: &[String],
     listen: &[String],
     scouting: Option<bool>,
+    posture: Posture,
 ) -> Result<zenoh::Config> {
     let Some(path) = file else {
-        return build_config(None, connect, listen, scouting);
+        return build_config_as(None, connect, listen, scouting, posture);
     };
     let path = path.to_path_buf();
     let connect = connect.to_vec();
     let listen = listen.to_vec();
-    tokio::task::spawn_blocking(move || build_config(Some(&path), &connect, &listen, scouting))
-        .await
-        // A join failure here is this crate's own task management, not the
-        // user's file and not the fabric.
-        .map_err(|e| Error::Internal(format!("the config read task did not join: {e}")))?
+    tokio::task::spawn_blocking(move || {
+        build_config_as(Some(&path), &connect, &listen, scouting, posture)
+    })
+    .await
+    // A join failure here is this crate's own task management, not the
+    // user's file and not the fabric.
+    .map_err(|e| Error::Internal(format!("the config read task did not join: {e}")))?
 }
 
 /// The explorer config in one place: un-namespaced, explicit endpoints,
@@ -415,11 +488,33 @@ fn set(config: &mut zenoh::Config, key: &str, value: &str) -> Result<()> {
         .map_err(|e| Error::Internal(format!("setting {key} = {value}: {e}")))
 }
 
+/// Who a session is for, which decides the one thing a config file may not
+/// say: its namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Posture {
+    /// An un-namespaced explorer (RFC 09 §5): a namespace would strip keys
+    /// on ingress and lie about the wire.
+    Explorer,
+    /// A zk2 resolved verb (FJ4): it does run in a namespace, but the
+    /// caller sets it, so a file that sets one too is a second source.
+    Namespaced,
+}
+
 fn build_config(
     file: Option<&Path>,
     connect: &[String],
     listen: &[String],
     scouting: Option<bool>,
+) -> Result<zenoh::Config> {
+    build_config_as(file, connect, listen, scouting, Posture::Explorer)
+}
+
+fn build_config_as(
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+    posture: Posture,
 ) -> Result<zenoh::Config> {
     let (mut config, stated) = match file {
         Some(path) => {
@@ -428,18 +523,27 @@ fn build_config(
                 Error::unaskable(format!("zenoh config {}", path.display()), e.to_string())
             })?;
             // The one thing a passthrough refuses: an explorer with a
-            // namespace strips keys on ingress and would lie about the wire.
+            // namespace strips keys on ingress and would lie about the wire;
+            // a namespaced verb has its namespace from the caller already.
             if let Ok(ns) = config.get_json("namespace")
                 && ns != "null"
             {
-                return Err(Error::unaskable(
-                    format!("zenoh config {}", path.display()),
-                    format!(
+                let why = match posture {
+                    Posture::Explorer => format!(
                         "sets a session namespace ({ns}) — an explorer runs \
                          un-namespaced so it sees the wire as it really is \
                          (RFC 09 §5); remove the namespace from the file, or \
                          use --base to name the deployment"
                     ),
+                    Posture::Namespaced => format!(
+                        "sets a session namespace ({ns}) — the namespace has \
+                         one source, the caller's (--namespace, alias --base); \
+                         remove it from the file"
+                    ),
+                };
+                return Err(Error::unaskable(
+                    format!("zenoh config {}", path.display()),
+                    why,
                 ));
             }
             (config, Stated::read(path)?)
@@ -793,6 +897,32 @@ mod tests {
             .to_string();
         assert!(err.contains("RFC 09 §5"), "{err}");
         assert!(err.contains("--base"), "{err}");
+        std::fs::remove_file(path).ok();
+    }
+
+    /// FJ4: a namespaced open refuses a namespace that is not a concrete
+    /// prefix, and a file that sets one of its own — both as the caller's
+    /// input, before any transport is attempted.
+    #[tokio::test]
+    async fn a_namespaced_open_refuses_a_second_or_a_bad_namespace() {
+        let dead = ["tcp/127.0.0.1:1".to_owned()];
+        for bad in ["a/*", "a//b", "a/$*", "/a"] {
+            match open_in_namespace(bad, None, &dead, &[], None).await {
+                Err(OpenFailure::Config(e)) => assert!(e.is_unaskable(), "{bad}: {e}"),
+                Err(OpenFailure::Transport(e)) => panic!("{bad}: reached the transport: {e}"),
+                Ok(_) => panic!("{bad}: opened"),
+            }
+        }
+        let path = temp_config("namespaced-zk2", r#"{ namespace: "acme" }"#);
+        match open_in_namespace("acme", Some(&path), &dead, &[], None).await {
+            Err(OpenFailure::Config(e)) => {
+                let e = e.to_string();
+                assert!(e.contains("one source"), "{e}");
+                assert!(!e.contains("un-namespaced"), "{e}");
+            }
+            Err(OpenFailure::Transport(e)) => panic!("reached the transport: {e}"),
+            Ok(_) => panic!("opened"),
+        }
         std::fs::remove_file(path).ok();
     }
 }

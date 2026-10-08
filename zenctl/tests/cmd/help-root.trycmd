@@ -1,12 +1,15 @@
 The root: the tree itself, the version, and what a bare invocation does.
 
 Read the command list below as three groups, because that is how it was built
-(#307). **Nouns** — `topic`, `node`, `base`, `service`, `interface`, `schema`,
-`registry`, `storage`, `blob`, `admin`, `key`, `bench` — are things declared,
-alive or persisted, and get verbs under them. **Wire verbs** — `get`, `echo`,
-`pub`, `retire`, `rate`, `field`, `record`, `replay`, `serve`, `gen`, `scout` —
-are acts and observations on live traffic, and hang off the root, because an
-act is not a property of a noun. **Judgement** — `check`, `doctor`, `why`,
+(#307). **Nouns** — `service`, `config`, `iface`, `schema`, `namespace`,
+`storage`, `acl`, `blob`, `admin`, `key`, `bench` — are things declared, alive
+or persisted, and get verbs under them; FJ4 (#612) replaced v1's `topic`,
+`node`, `base`, `interface` and `registry` with zk2's `service`, `iface`,
+`schema` and `namespace`. **Wire verbs** — `get`, `echo`, `pub`, `retire`,
+`rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`,
+`export`, `serve`, `gen`, `scout` — are acts and observations on live traffic,
+and hang off the root, because an act is not a property of a noun.
+**Judgement** — `check`, `doctor`, `why`,
 `watchdog` — is exit-coded, under the one contract in `zenctl/src/exit.rs`.
 Then `context`, `cache` and `completions`, which are about the tool.
 
@@ -24,14 +27,11 @@ Explore, query and check a keyspace-v2 Zenoh bus
 Usage: zenctl <COMMAND>
 
 Commands:
-  topic        Subjects: what the registry declares, and what it means
-  node         Producers: who is alive on the bus
-  base         Deployment bases discovered from the wire (needs no --base)
-  service      Procedures producers offer: list them, describe them, call them
+  service      Running services: their instances, interfaces and descriptors
   config       Read and change a producer's live configuration
-  interface    Payload types declared by the registry slices
-  schema       Payload schemas as producers serve them
-  registry     The registry as a document: export it, diff it, lint it, lock it
+  iface        Interfaces: who provides each, who requires it, and its contract
+  schema       Payload schemas, as a contract's bundle carries them
+  namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
   acl          Router access control, generated from an enrollment file
   blob         Bulk content: who serves it, and fetching it
@@ -48,6 +48,8 @@ Commands:
   replay       Replay a .zrec capture onto the bus (this publishes)
   timeline     One merged ordering of a window's samples, a lane per origin
   snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
+  graph        The data-flow graph: each role bound to the providers it selects
+  compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics
   serve        Stand up a mock queryable that answers one keyexpr and logs every ask
   gen          Generate test traffic from the registry: a mock producer
@@ -93,14 +95,11 @@ Explore, query and check a keyspace-v2 Zenoh bus
 Usage: zenctl <COMMAND>
 
 Commands:
-  topic        Subjects: what the registry declares, and what it means
-  node         Producers: who is alive on the bus
-  base         Deployment bases discovered from the wire (needs no --base)
-  service      Procedures producers offer: list them, describe them, call them
+  service      Running services: their instances, interfaces and descriptors
   config       Read and change a producer's live configuration
-  interface    Payload types declared by the registry slices
-  schema       Payload schemas as producers serve them
-  registry     The registry as a document: export it, diff it, lint it, lock it
+  iface        Interfaces: who provides each, who requires it, and its contract
+  schema       Payload schemas, as a contract's bundle carries them
+  namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
   acl          Router access control, generated from an enrollment file
   blob         Bulk content: who serves it, and fetching it
@@ -117,6 +116,8 @@ Commands:
   replay       Replay a .zrec capture onto the bus (this publishes)
   timeline     One merged ordering of a window's samples, a lane per origin
   snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
+  graph        The data-flow graph: each role bound to the providers it selects
+  compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics
   serve        Stand up a mock queryable that answers one keyexpr and logs every ask
   gen          Generate test traffic from the registry: a mock producer

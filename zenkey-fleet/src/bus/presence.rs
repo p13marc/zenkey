@@ -31,7 +31,7 @@ use zenkey_model::grammar::{Addr, CONTROL, GRAMMAR, Name};
 use zenoh::Session;
 
 use crate::model::catalog::{Catalog, DescriptorRead, Observed};
-use crate::report::ServiceListing;
+use crate::report::{NamespaceListing, ServiceListing};
 use crate::{Error, Result};
 
 /// The one liveliness GET of this crate (spec §8.1): every token matching
@@ -145,6 +145,26 @@ pub async fn observe(session: &Session, scope: &Scope, timeout: Duration) -> Res
     let mut observed = read_tokens(session, scope, timeout).await?;
     describe(session, &mut observed, timeout).await;
     Ok(observed)
+}
+
+/// The selector `namespace list` reads, **un-namespaced**: every zk2
+/// instance token under any prefix. `**` matches the empty prefix too, so
+/// the bus-root deployment is in it; `@zk` is named because `*` and `**`
+/// never cross a verbatim chunk.
+pub const NAMESPACE_SELECTOR: &str = "**/zk2/*/*/@zk/instance/*";
+
+/// `namespace list` (#612, FJ4): which deployment namespaces hold zk2
+/// instance tokens, from one liveliness GET on a session that is **not** in
+/// a namespace — the raw half of the FJ decision, like the admin space.
+/// Through a namespaced session the prefix would be stripped and every
+/// namespace but its own invisible.
+pub async fn namespace_listing(session: &Session, timeout: Duration) -> Result<NamespaceListing> {
+    let read = liveliness_read(session, NAMESPACE_SELECTOR, timeout).await?;
+    Ok(crate::model::catalog::namespaces(
+        NAMESPACE_SELECTOR,
+        &read.keys,
+        read.complete,
+    ))
 }
 
 /// `service list` (§8.1): every service in `scope`, from its tokens and its
