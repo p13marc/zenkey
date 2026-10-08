@@ -3,6 +3,126 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.8 — 2026-10-08: a refused presence read, and what implementing 0.7 found (#664)
+
+Two sources, 10 items:
+- **The runtime catching up with 0.7 (#660, FH2)** found that a presence
+  read refused by access control looks complete and empty, plus six
+  smaller gaps.
+- **The Python implementation's round against 0.7 (#663)** found three:
+  F-71 to F-73.
+
+Each is resolved as in 0.5–0.7: **the reference's behaviour becomes the
+rule**, unless it is a bug. One was a bug, in `zenkey-model`, and is fixed
+here (the naming of an undecodable type, below).
+
+A fixture pins each static rule: 3 new compatibility cases. No existing
+expectation changed. The live rules land in scenarios:
+- `presence.md §6`, new;
+- `operations.md §1`, rewritten, and `§2` steps 4–5;
+- `state.md §1` step 3;
+- `types.md §2`;
+- `security.md §1`.
+
+The reference runtime gains a test for each live rule it had not yet
+shown.
+
+**Changed: rules stated, by section.**
+- **A refused read is complete, and empty (§8.1, §11.1, §11.3, O5,
+  Appendix B).** This is the important one.
+  - **The behaviour.** A router whose access control refuses a liveliness
+    GET answers it the way it answers a selector no token matches: a
+    final reply, no token, and no error reply. Measured on zenoh 1.10.1 with
+    a `liveliness_query` deny on the query's ingress at the router. The same
+    rule on `egress` alone refused nothing.
+  - **Why it matters.** O5 has a tool attribute silence through presence. A
+    tool that is refused both a call and the presence read reports the
+    service absent. That is a wrong verdict, and it is indistinguishable
+    from a right one.
+  - **The rule.** The Consume and Call grants now include liveliness reads
+    on the `@zk` subtree of every service they name. A tool reports absence
+    as what its reader could see, and says so where it cannot rule out a
+    refusal.
+- **A read that timed out shows it (§8.1, Appendix B).** In zenoh 1.10.1, a
+  liveliness GET that reaches its timeout ends with the error reply
+  `Timeout`, and one the routers finished ends with none. A read with any
+  error reply is possibly incomplete. The reference reads completeness
+  this way since #660, instead of guessing from elapsed time.
+- **`["null"]` is the null schema (F-71, §7.3).** A `type` is read as a set
+  of names everywhere in the subset, so `"null"` and `["null"]` are one
+  null schema, and a nullable form may spell its null branch either way.
+  This is the reference's behaviour. `nullable-null-as-list` pins it.
+- **"As written" is by text (F-72, §9.8).** Inside `oneOf`, `anyOf` and
+  `prefixItems`, a `$ref` back to a target already being followed is
+  compared by its `$ref` value and siblings, annotations dropped, not by the
+  target it resolves to.
+  - **The consequence.** Renaming a recursive definition reached from inside
+    one of those keywords is review, although the type is the same.
+  - **Pinned by** `anyof-recursive-renamed`. Its control,
+    `anyof-recursive-described`, shows that recursion ends and that an
+    annotation is no change.
+- **The tick is not observable from outside (F-73, `state.md §1`).** A tester
+  can neither arrange two puts within one clock reading nor tell from the
+  stamps that they fell in one.
+  - **The scenario** now asks only that v4's stamp exceed v3's.
+  - **The tick itself** is checked with a clock the implementation controls.
+    The reference does it in §7's catch-up: its clock reads behind the
+    record, and the stamp is the record plus one NTP64 unit.
+- **Observing target and consolidation (`operations.md §1`).** zenoh 1.10.1
+  does not give a queryable a query's target or consolidation, so a capture
+  at the server cannot show them. The scenario shows them by behaviour, and
+  that is the evidence it asks for:
+  - a call returns on its first reply while its server holds the query
+    open (`None`);
+  - a second instance on the same router runs none of the calls the first
+    runs (`BestMatching`).
+
+  A capture of the caller's outgoing queries MAY add to that evidence.
+- **One member per call, whatever `replies` is (§5.1).** The text said it
+  for `replies = "one"`. A template-wide server answers for one member per
+  call with `"many"` too: every value goes on that member's key, and naming
+  a second member is refused to the handler (`operations.md §2` step 5).
+- **A non-canonical chunk names no member (§5.1).** A server over a
+  template refuses `invalid_request`, before any handler runs, a call whose
+  concrete parameter chunk is not a canonical slug (§1.4). This holds for a
+  fan-out as for a concrete call (`operations.md §2` step 4, `§3` step 3).
+- **From a token to a fingerprint (§8.4).** An interface token's `fp16` is
+  not enough to retrieve by. A tool reads the full fingerprint from the
+  instance's descriptor, and retrieves by that. There is no retrieval by
+  prefix.
+
+**Changed: the reference was wrong, and is fixed in `zenkey-model`.**
+- **An undecodable type is named as a decoded one is (§7.2, `types.md §2`).**
+  `decode` named a JSON Schema type that failed to decode with its wire
+  (`json:Status (cbor)`), while a tool names a decoded one `json:Status`.
+  `decode::declared` is now the one spelling, the type reference as written
+  (§9.1). The wire moves into the reason (`as cbor: …`). The fleet's
+  renderer takes the function rather than keeping a copy.
+
+**Recorded: the fix belongs to other work.**
+- **The grant generator (#612, FJ7, `acl gen`)** MUST emit the new
+  liveliness reads of Consume and Call. `security.md §1`'s new step is
+  unmeasured until it does.
+- **The Python implementation** follows 0.8 in its next round. Its live
+  harness still marks the Rust owner example's two 0.7 deviations
+  (F-65, F-68) as known. Both now pass since #660, which was measured:
+  129 passed, 0 failed, 2 XPASS.
+
+**Deliberately not changed.**
+- **No probe that tells a refusal from absence.** None was measured. A
+  reader's own tokens show nothing about what it may read elsewhere, since
+  access control is per key expression and per hop. The fix is in the
+  grants.
+- **No retrieval by prefix.** The descriptor already carries the full
+  fingerprint. A GET on a wildcard over contract keys would reach every
+  holder of every revision. And a 64-bit prefix is a weaker check than the
+  hash §9.6 verifies.
+- **A recursive `$ref` is not compared by its target.** That needs a
+  comparison of two reference graphs, which the classifier does nowhere
+  else. A rename costs one review, never a wrong compatible.
+- **S7's tick stays.** Only the scenario's claim to observe it from outside
+  is withdrawn.
+
 ## 0.7 — 2026-10-08: the live findings, the operations runtime's decisions, and the codegen's gaps (#609, #621, #611)
 
 Three sources, 22 items:

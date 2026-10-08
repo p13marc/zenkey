@@ -1,0 +1,16 @@
+# core §5.1 (0.8): a many-reply operation over a template. Served over the
+# whole template, it answers for one member per call, whatever `replies`
+# is.
+[interface]
+name = "scan"
+major = 1
+minor = 0
+
+[resources."ports/{port}/scan"]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+params = { port = "string" }
+cardinality = 8
+replies = "many"
+fanout = "allowed"

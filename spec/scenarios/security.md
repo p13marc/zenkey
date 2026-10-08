@@ -14,6 +14,12 @@ contracts and bindings.
   token under its Own grant, and a consumer with history reads them.
 - A subscription the bindings do not name is blocked.
 - A frontend's fan-in GET over `zk2/*/tc/…` gets one reply per backend.
+- **Presence within the grants** (0.8). A principal with Call on a
+  backend's operation reads that backend's instance and interface tokens.
+  With its liveliness reads removed from its grant, the same read is
+  answered complete and empty (presence.md §6), which is why the grant
+  holds them (core §11.1). *Added in 0.8, after S14; not yet run against a
+  generator.*
 - A contract fetch works for any principal.
 
 *Spike S14: 13 of 13 checks.*

@@ -266,7 +266,8 @@ async fn s1_stamped_mutations() {
     assert_eq!(stamp.get_id().to_string(), r1.zid().to_string());
     assert_ne!(stamp.get_id().to_string(), third.zid().to_string());
 
-    // 3. v3 and v4 back to back, faster than the clock advances.
+    // 3. v3 and v4 back to back. Whether they fell within one clock
+    //    reading cannot be seen from here (F-73); the order can.
     let t3 = w.put("v3").await.unwrap();
     let t4 = w.put("v4").await.unwrap();
     assert!(
@@ -617,6 +618,13 @@ async fn s7_clocks() {
     };
     assert_eq!(t11.get_id(), t10.get_id());
     assert!(t11 > t10, "above rev 10's stamp");
+    // The clock reads behind the record, so the mint is the record plus
+    // one tick exactly (§4.3): the step state.md §1 cannot show (F-73).
+    assert_eq!(
+        t11.get_time().as_u64(),
+        record.get_time().as_u64() + 1,
+        "one NTP64 unit above the record"
+    );
     assert!(order.accept(key, &t11), "the consumer applies it");
 
     // 2. New epoch: no record, a fresh zid, 5 s behind.

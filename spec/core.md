@@ -1,10 +1,11 @@
 # zk2 core specification
 
-**Version 0.7** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.8** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
-archive's gaps in 0.6, and in 0.7 the findings of its live half, the
-operations runtime's decisions and the codegen's gaps).
+archive's gaps in 0.6, in 0.7 the findings of its live half, the
+operations runtime's decisions and the codegen's gaps, and in 0.8 what
+implementing 0.7 found, a refused presence read first).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -731,7 +732,7 @@ section is what the core requires of it.
 | O2 | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. **Caller:** a call to a fan-out operation MUST use target `All` and consolidation `None`. | `[Sc: operations.md §2]` |
 | O3 | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). Every call that reaches an owner's queryable MUST get one or the other, never silence (below). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
 | O4 | **Caller:** MUST NOT retry an operation that is not declared `idempotent`, and retries one that is only after silence (below). | `[Sc: operations.md §4]` |
-| O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence. | `[Sc: operations.md §5]` |
+| O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence, which a refusal can empty too (§8.1, 0.8). | `[Sc: operations.md §5]` |
 | O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`. `Latest` and `Auto` kept 1 reply of 10 in spike S6. A replier without exactly one summary is possibly partial (below). | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
 | O7 | **Caller:** a request MAY carry an attachment, the JSON object `{"actor", "request_id"}` (strings), which an owner MAY record for audit. It is claimed, never authentication, and never a reason to refuse a call (below). | `[Sc: operations.md §7]` |
 
@@ -820,12 +821,19 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
     reply answers for, and replies on that member's key, which the call's
     key expression MUST select. One that names no member has no key to
     reply on, and refuses the call: the reference refuses it `internal`.
+  - A concrete parameter chunk that is not a canonical slug (§1.4) names
+    no member. A server over the template refuses such a call
+    `invalid_request` before any handler runs, fan-out or not, as
+    operations.md §3 refuses a concrete call to such a key.
+    `[Sc: operations.md §2]`
   - A caller can rely on each value reply it keeps being on a concrete
     member key that its call selected, which names the service and the
     member's values (R6 discards the rest). It cannot rely on one reply per
     member: how many members a server answers for is the server's own. A
-    template-wide server with `replies = "one"` answers for one member per
-    call, and one with a queryable per member answers for each it holds.
+    template-wide server answers for one member per call, **whatever
+    `replies` is**: with `"many"`, every value it sends goes on that one
+    member's key, and naming a second member is refused to the handler.
+    One with a queryable per member answers for each it holds.
 
   `[Sc: operations.md §2]`
 - **Attribution (O3, O5).** A value reply is attributed by its key. A
@@ -1028,6 +1036,11 @@ listed files.
 - **Honest rendering.** A tool MUST render a kind it cannot decode as its
   declared type and size, or through a plugin. It MUST NOT show garbage, and
   MUST NOT drop the sample silently. `[Sc: types.md §2]`
+  - **A type is named one way** (0.8), decoded or not: as a type reference
+    is written (§9.1). That is the message name for protobuf,
+    `json:<name>` for a JSON Schema type, and the media type for a raw
+    one. Which wire a JSON Schema type was read from, JSON or CBOR, is
+    part of why it failed to decode, not of its name.
 
 ### 7.3 The JSON Schema subset
 
@@ -1077,6 +1090,9 @@ any change inside one conservatively, as *review*, a nullable form aside
   it that carries meaning, holding two branches in either order: the null
   schema, whose `type` is exactly `null` and which holds nothing else that
   carries meaning, and any schema S.
+  - **"Exactly `null`"** (0.8, F-71) reads the `type` as a set of names,
+    as everywhere in this subset: `"null"` and `["null"]` are both the
+    null schema. `[F: compat/payload/jsonschema/nullable-null-as-list]`
 - **Its reading** is S, its `$ref`s followed (§9.8), with `null` added to
   its `type` and, where it has one, to its `enum`. A form has a reading
   when that S is an object with a `type`, and without `const`, `oneOf` or
@@ -1160,7 +1176,25 @@ Liveliness tokens carry no payload; everything is in the key.
     the way there. `[Sc: presence.md §4]`
   - A tool SHOULD treat a liveliness GET that ended at its timeout, rather
     than at the routers' final reply, as possibly incomplete: silence is not
-    a verdict (O5).
+    a verdict (O5). In zenoh 1.10.1 the difference shows: a GET that
+    reached its timeout ends with an error reply, `Timeout`, and one the
+    routers finished ends with none (Appendix B). A read that received any
+    error reply is possibly incomplete. `[Sc: presence.md §6]`
+  - **A refused read is complete, and empty** (0.8). A router whose access
+    control refuses a liveliness GET answers it the way it answers a
+    selector no token matches: a final reply, no token, no error reply.
+    Measured on zenoh 1.10.1 with a `liveliness_query` deny on the query's
+    ingress at the router (on `egress` alone, the same rule refused
+    nothing). A reader cannot tell a refused read from absence, so O5's
+    attribution through presence is only as good as the reader's grants:
+    - The Consume and Call grants (§11.1) include liveliness reads on the
+      `@zk` subtree of every service they name, so a principal that may
+      consume from a service or call it may also see it alive.
+    - A tool reports absence as what its reader could see. Where it cannot
+      rule out a refusal, it SHOULD say so, as it says a read is possibly
+      incomplete.
+
+    `[Sc: presence.md §6]`
 - **Timeouts are the caller's.** How long a liveliness GET, a descriptor
   GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
   for presence after an owner starts, are the caller's choices. The
@@ -1267,6 +1301,13 @@ the hash is the check. A caller or tool MUST retrieve a bundle as follows:
   the hash is the check. `[Sc: retrieval.md §1]`
 - **An attempt ends** when its GET completes, or at the caller's timeout
   (§8.1).
+- **From a token to a fingerprint** (0.8). An interface token carries
+  `fp16`, the first 16 hex digits of the fingerprint (§1.2), which is not
+  enough to retrieve by. A tool reads the full fingerprint from the
+  instance's descriptor (§3.3, the interface's `contract`), and retrieves
+  by that. There is no retrieval by prefix: a holder declares its
+  queryable on full contract keys, and a GET on a wildcard over them is
+  not a step of the procedure above.
 
 ### 8.5 Constrained faces
 
@@ -1999,8 +2040,14 @@ declares. Annotations are ignored.
   inlining a definition is none. A `$ref` back to a target already being
   followed is compared as written, which ends a recursive type, and one
   that resolves to nothing is `schema_unreadable`.
+  - **"As written"** (0.8, F-72) means by its text: the `$ref` value and
+    its siblings, annotations dropped, not the target it resolves to. So
+    renaming a recursive definition reached from inside one of these
+    keywords is a change there (review), although the type is the same,
+    and an annotation added inside one is none.
   `[F: compat/payload/jsonschema/oneof-reordered, oneof-annotation-only,
-  oneof-ref-target-changed]`
+  oneof-ref-target-changed, anyof-recursive-renamed,
+  anyof-recursive-described]`
 - **A nullable form with a reading** (§7.3) is compared as its reading, so
   a change between the two spellings is none, and a change inside its S is
   classified by the rules below, through S's `$ref`s. The one exception: a
@@ -2084,8 +2131,8 @@ Ownership (§6) reduces access control to three grant shapes:
 | Grant | Rule |
 |---|---|
 | **Own** | A service principal puts, deletes, declares queryables and declares tokens under `zk2/<system>/<service>/**`. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history. |
-| **Call** | Query on specific `…/@op/<op>` keys. |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus liveliness reads (GETs and subscriptions) on the `…/@zk/**` subtree of each provider they name (§8.1, 0.8). |
+| **Call** | Query on specific `…/@op/<op>` keys, plus liveliness reads on the `…/@zk/**` subtree of each service whose operations it calls (§8.1, 0.8). |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
@@ -2123,6 +2170,9 @@ Ownership (§6) reduces access control to three grant shapes:
 - On a router-to-router link, a deny hides a denied declaration from the far
   side, but its key string still crosses. Access control is not a
   confidentiality boundary for key names there (§8.5).
+- A refused liveliness read is answered complete and empty (§8.1). A deny
+  on presence hides a service from a reader exactly as its absence would,
+  so a reader the grants refuse attributes silence to absence.
 
 ---
 
@@ -2199,7 +2249,11 @@ Appendix B. These are the ones the rules above cite:
 - A client connects to one endpoint at a time.
 - A link's batch is the minimum of the configured size, the MTU and the
   other end's.
-- A query timeout arrives as a reply error.
+- A query timeout arrives as a reply error. A liveliness GET's too: one
+  that reaches its timeout ends with the error reply `Timeout` (encoding
+  `zenoh/string`), and one the routers finished ends with none.
+- A liveliness GET that access control refuses is answered with the final
+  reply alone: no token and no error reply.
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 

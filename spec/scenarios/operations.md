@@ -7,18 +7,29 @@ exposing `@op/interfaces/{if}/set` (exclusive, fanout forbidden) and
 ## §1 At most once, while one instance serves (O1)
 
 **Steps.**
-1. 200 concrete calls with `BestMatching`, with one serving instance,
-   through a session whose outgoing queries the test captures.
-2. The same, with a second instance of the same service on another router
-   (a split-brain).
+1. 200 concrete calls to `set`, with one serving instance, whose handler
+   holds each query open for a while (500 ms, say) after replying.
+2. The same, with a second instance of the same service on the same router.
+3. The same, with that second instance on another router (a split-brain).
 
 **Expected.**
-1. 200 executions. Each query carries target `BestMatching` and
-   consolidation `None`, and the caller returns on the first reply, before
-   the query completes.
-2. 400 executions: one per side. With consolidation `None`, the caller sees
+1. 200 executions, and each call returns on its first reply, well before
+   its server lets the query go. That is consolidation `None`: under
+   `Latest`, the default on a concrete key, the call would wait for the
+   query to complete.
+2. 200 executions between the two instances, never 400. That is target
+   `BestMatching`: one `complete` queryable per router. Under `All`, each
+   call would run on both.
+3. 400 executions: one per side. With consolidation `None`, the caller sees
    both replies of each call; under `Latest`, one per key would vanish.
    This is the documented limit of O1, and §8 below detects it.
+
+**How a tester observes the query** (0.8). zenoh 1.10.1 does not give a
+queryable the target or the consolidation of a query, so a capture at the
+server cannot show them. Steps 1 and 2 show them by behaviour instead, and
+that is the evidence this scenario asks for. A tester that can capture the
+caller's outgoing queries (a proxy that decodes the protocol, say) MAY
+check the two fields as well.
 
 *Spike S6: A 200, B 0 on one router; 200 and 200 across routers.*
 
@@ -33,6 +44,13 @@ one queryable over the template that refuses every call with `busy`.
 1. Call `zk2/h1/tc/tc.v1/@op/interfaces/*/set`, then `zk2/*/tc/…`.
 2. Call `@op/diagnostics` on `zk2/*/tc/…` with `All` + `None`.
 3. Call `zk2/*/tc/tc.v1/@op/interfaces/*/reset` with `All` + `None`.
+4. Call `zk2/*/tc/tc.v1/@op/interfaces/ETH0/reset`, whose parameter chunk
+   is not a canonical slug, with `All` + `None`.
+5. **Many replies, over a template.** A service `h1/scan` exposes
+   `@op/ports/{port}/scan` (`replies = "many"`, fanout allowed, raw request
+   and response), served by one queryable over the template. Its handler
+   names `p1`, sends two values, then tries to name `p2`. Call
+   `zk2/h1/scan/scan.v1/@op/ports/*/scan` with `All` + `None`.
 
 **Expected.**
 1. One, then three `fanout_forbidden` refusals, and 0 executions.
@@ -43,6 +61,12 @@ one queryable over the template that refuses every call with `busy`.
    which the caller reports unattributed: a `reply_err` carries no key.
    Presence shows `h3` holding the token and sending no value, so `h3`
    refused or was silent, which the caller cannot tell apart.
+4. Two `invalid_request` envelopes, from `h2` and `h3`, and no handler
+   runs: the key names no member (core §5.1). `h1`'s queryables, on
+   `eth0` and `eth1`, are not selected.
+5. Two values, both on `…/ports/p1/scan`, and none on any other key:
+   naming `p2` is refused to the handler. A template-wide server answers
+   for one member per call, whatever `replies` is (core §5.1).
 
 ## §3 Replies and errors (O3, §5.2)
 

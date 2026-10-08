@@ -16,7 +16,7 @@ nothing (core §4.2, "Observing S1").
    subscribes before, and GETs with `All` + `Latest` after v2.
 2. **The control:** a third client of R1 puts on a key of its own without
    setting a timestamp, and the consumer subscribes to it.
-3. The owner puts v3 and v4 back to back, faster than its clock advances.
+3. The owner puts v3 and v4 back to back, with nothing between them.
 
 **Expected.**
 1. Every sample, the delete included, carries a timestamp whose id is the
@@ -24,7 +24,15 @@ nothing (core §4.2, "Observing S1").
    previous one. The GET after v2 returns v2 with v2's timestamp.
 2. The control's sample carries R1's zid: the router stamps what is
    unstamped, so the check in 1 can tell the two apart.
-3. v4's timestamp is greater than v3's, by at least one tick (core §4.3).
+3. v4's timestamp is greater than v3's.
+
+**What step 3 cannot show** (0.8, F-73). Two puts that fall within one
+reading of the owner's clock are where the minting rule (core §4.3) earns
+its keep, by one tick. A tester can neither arrange that from outside nor
+tell from the stamps whether it happened, so the scenario asks only for
+the order. An implementation checks the tick with a clock it controls: the
+reference does it in §7's catch-up, where its clock reads behind the
+record, and the next stamp is the record plus one NTP64 unit.
 
 *Measured (#609): the Rust owner example and zk2py's owner were each their
 own router, so their S1 check proved only that the stamp's id was the

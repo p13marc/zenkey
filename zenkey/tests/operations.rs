@@ -1404,3 +1404,57 @@ async fn unavailable_follows_exposure() {
         reset.refusals[0].message
     );
 }
+
+/// Core §5.1 (0.8): a server over a template answers for one member per
+/// call, whatever `replies` is. A `many` handler names `p1` and sends two
+/// values on its key; naming `p2` after that is refused, so a third value
+/// cannot go anywhere else. The caller gets two values, both on `p1`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_member_per_call_with_many_replies() {
+    const SCAN: &str = "@op/ports/{port}/scan";
+    let port = |p: &str| -> Bindings { [("port".to_owned(), vec![p.to_owned()])].into() };
+    let (_r1, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let scan: IfaceId = "scan.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("h1/scan"));
+    b.implement(imp("scan.v1")).unwrap();
+    let refused = Arc::new(Mutex::new(None));
+    let r = Arc::clone(&refused);
+    let _server = b
+        .serve(&scan, SCAN, None, move |call: Call| {
+            let r = Arc::clone(&r);
+            async move {
+                call.member(&port("p1"))
+                    .map_err(|e| OpError::internal(e.to_string()))?;
+                for v in ["open", "filtered"] {
+                    call.reply(v)
+                        .await
+                        .map_err(|e| OpError::internal(e.to_string()))?;
+                }
+                *r.lock().unwrap() = Some(call.member(&port("p2")).map_err(|e| e.to_string()));
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    let _svc = b.start().await.unwrap();
+    eventually("the scan instance is present", || async {
+        zenkey::presence::tokens(&tool, "zk2/h1/scan/@zk/alive/scan.v1/**", T)
+            .await
+            .unwrap()
+            .len()
+            == 1
+    })
+    .await;
+
+    let replies = fan(&tool, "zk2/h1/scan/scan.v1/@op/ports/*/scan", b"").await;
+    let keys: Vec<String> = replies
+        .iter()
+        .filter_map(|r| r.result().ok())
+        .map(|s| s.key_expr().to_string())
+        .collect();
+    assert_eq!(keys, ["zk2/h1/scan/scan.v1/@op/ports/p1/scan"; 2]);
+    let second = refused.lock().unwrap().clone().expect("the handler ran");
+    let err = second.expect_err("a second member is refused");
+    assert!(err.contains("one member per call"), "{err}");
+}

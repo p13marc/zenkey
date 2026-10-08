@@ -25,12 +25,27 @@ pub enum Rendered {
     /// A type this decoder does not decode: its declared media type and the
     /// payload's size.
     Opaque { media_type: String, size: usize },
-    /// Bytes that do not decode as their declared type.
+    /// Bytes that do not decode as their declared type, named as
+    /// [`declared`] names it (spec §7.2, 0.8).
     Undecodable {
         declared: String,
         size: usize,
         reason: String,
     },
+}
+
+/// A canonical type reference in the authoring spelling (spec §7.2, 0.8):
+/// the message name for protobuf, `json:<name>` for a JSON Schema type,
+/// the media type for a raw one. A tool names a type this way wherever it
+/// renders one, decoded or not.
+#[must_use]
+pub fn declared(ty: &Value) -> String {
+    let name = ty["name"].as_str().unwrap_or_default();
+    match ty["kind"].as_str() {
+        Some("jsonschema") => format!("json:{name}"),
+        Some("raw") => ty["media_type"].as_str().unwrap_or_default().to_owned(),
+        _ => name.to_owned(),
+    }
 }
 
 /// The canonical type reference of a resource's member (`type`,
@@ -93,9 +108,8 @@ pub fn decode(bundle: &Bundle, ty: &Value, encoding: Option<&str>, bytes: &[u8])
             Rendered::Opaque { media_type, size }
         }
         Some("protobuf") => {
-            let declared = name.to_owned();
             let fail = |reason: String| Rendered::Undecodable {
-                declared: declared.clone(),
+                declared: declared(ty),
                 size,
                 reason,
             };
@@ -134,9 +148,9 @@ pub fn decode(bundle: &Bundle, ty: &Value, encoding: Option<&str>, bytes: &[u8])
             match decoded {
                 Ok(v) => Rendered::Value(v),
                 Err(reason) => Rendered::Undecodable {
-                    declared: format!("json:{name} ({wire})"),
+                    declared: declared(ty),
                     size,
-                    reason,
+                    reason: format!("as {wire}: {reason}"),
                 },
             }
         }
@@ -238,7 +252,7 @@ mod tests {
         );
         assert!(matches!(
             decode(&b, ty, None, &[0xff, 0xff]),
-            Rendered::Undecodable { size: 2, .. }
+            Rendered::Undecodable { size: 2, declared, .. } if declared == "m.v1.Pose"
         ));
 
         // jsonschema, CBOR on the wire (the contract's encoding when the
@@ -255,6 +269,12 @@ mod tests {
             Rendered::Value(json!({"up": false})),
             "the sample's Encoding comes first"
         );
+        // Undecodable, named as a decoded value's type is (§7.2, 0.8).
+        assert!(matches!(
+            decode(&b, ty, None, b"{"),
+            Rendered::Undecodable { declared, reason, .. }
+                if declared == "json:Status" && reason.starts_with("as cbor: ")
+        ));
 
         // raw: the declared type and the size.
         let ty = super::type_of(&b, "stream", "frame", "type").unwrap();
