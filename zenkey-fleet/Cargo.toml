@@ -43,6 +43,11 @@ rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-def
 
 [dependencies]
 zenkey = { workspace = true, features = ["schema"] }
+# The zk2 runtime and model (#612, FJ3), beside the v1 library above until
+# FJ9 drops the v1 pin. The alias names the generation, not the crate: both
+# packages are called `zenkey`, and the runtime takes the name back at FJ9.
+zk2 = { package = "zenkey", path = "../zenkey" }
+zenkey-model = { path = "../zenkey-model" }
 zblob = { workspace = true, optional = true }
 prost-reflect = { workspace = true, optional = true }
 zenoh = { workspace = true }

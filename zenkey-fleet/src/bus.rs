@@ -23,6 +23,7 @@ pub mod admin;
 pub mod blob;
 pub mod discover;
 pub mod monitor;
+pub mod presence;
 pub mod producer;
 pub mod query;
 pub mod roster;

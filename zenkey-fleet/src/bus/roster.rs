@@ -28,18 +28,14 @@ pub async fn roster(
         )),
         fleet.wire(catalog_alive),
     ] {
-        let Ok(replies) = fleet
-            .session()
-            .liveliness()
-            .get(&expr)
-            .timeout(timeout)
-            .await
+        // The unbounded handler (spec §8.1): this session may hold the
+        // monitor's liveliness subscriber, beside which zenoh's default
+        // handler hangs from ~1,000 tokens (zenoh#2678).
+        let Ok(read) = crate::bus::presence::liveliness_read(fleet.session(), &expr, timeout).await
         else {
             continue;
         };
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else { continue };
-            let key = sample.key_expr().as_str();
+        for key in &read.keys {
             let Some((origin, producer)) = token_identity(fleet.base(), key) else {
                 continue;
             };
@@ -455,10 +451,11 @@ pub async fn node_info(
     // `@catalog`'s token has none — the service *is* the producer.
     let mut alive: Vec<String> = Vec::new();
     let alive_expr = with_base(base, node.alive_selector());
-    if let Ok(replies) = session.liveliness().get(&alive_expr).timeout(timeout).await {
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else { continue };
-            let Some(parsed) = zenkey::grammar::parse_full(base, sample.key_expr().as_str()) else {
+    // The unbounded handler (spec §8.1), as in `roster`: the GUI that asks
+    // for a node card is the one whose monitor watches the roster.
+    if let Ok(read) = crate::bus::presence::liveliness_read(session, &alive_expr, timeout).await {
+        for key in &read.keys {
+            let Some(parsed) = zenkey::grammar::parse_full(base, key) else {
                 continue;
             };
             alive.push(
