@@ -235,8 +235,8 @@ pub use bus::session::{
     open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, WriteAct, call,
-    call_traced, check_concrete, check_fanout, check_retire, declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WriteAct, call, check_concrete,
+    check_fanout, check_retire, declare_publication,
 };
 pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -357,8 +357,7 @@ pub use report::{
     RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
     SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport,
     SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport,
-    TotalityGap, TraceReport, ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader,
-    judgement_exit_code,
+    TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands

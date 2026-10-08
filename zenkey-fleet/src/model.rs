@@ -12,8 +12,7 @@
 //! ([`timeline`]), a fan-in's
 //! replies become snapshot rows ([`snapshot`]), two snapshots become one
 //! comparison ([`snapshot_diff`]), two deployments' hosts become one
-//! alignment ([`origin_map`]), a sample seen after a call becomes a
-//! *relation* to that call's procedure ([`trace`]), and a stream of
+//! alignment ([`origin_map`]), and a stream of
 //! described samples becomes a metrics surface whose blind spots are series
 //! of their own ([`export`], [`prom`]).
 //!
@@ -68,7 +67,6 @@ pub mod storage;
 pub mod structural;
 pub mod target;
 pub mod timeline;
-pub mod trace;
 pub mod tree;
 
 #[cfg(feature = "decode")]

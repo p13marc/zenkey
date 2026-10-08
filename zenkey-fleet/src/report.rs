@@ -97,7 +97,6 @@ mod storage;
 mod tape;
 mod timeline;
 mod topic;
-mod trace;
 mod watch;
 mod why;
 
@@ -139,6 +138,5 @@ pub use storage::*;
 pub use tape::*;
 pub use timeline::*;
 pub use topic::*;
-pub use trace::*;
 pub use watch::*;
 pub use why::*;
