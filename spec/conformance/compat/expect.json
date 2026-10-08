@@ -1,7 +1,19 @@
 {
  "cases": {
+  "contract/annotations-changed": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/congestion-block-to-drop": {
+   "class": "review",
+   "warnings": []
+  },
   "contract/congestion-drop-to-block": {
    "class": "review",
+   "warnings": []
+  },
+  "contract/deprecated-added": {
+   "class": "compatible",
    "warnings": []
   },
   "contract/documentation-only": {
@@ -24,8 +36,20 @@
    "class": "breaking",
    "warnings": []
   },
+  "contract/fanout-forbidden-to-allowed": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "contract/idempotent-false-to-true": {
+   "class": "review",
+   "warnings": []
+  },
   "contract/idempotent-true-to-false": {
    "class": "breaking",
+   "warnings": []
+  },
+  "contract/optional-resource-added": {
+   "class": "compatible",
    "warnings": []
   },
   "contract/optional-role-added": {
@@ -40,15 +64,31 @@
    "class": "review",
    "warnings": []
   },
+  "contract/reliability-raised": {
+   "class": "compatible",
+   "warnings": []
+  },
   "contract/reliable-to-best-effort": {
    "class": "review",
+   "warnings": []
+  },
+  "contract/replies-many-to-one": {
+   "class": "compatible",
    "warnings": []
   },
   "contract/replies-one-to-many": {
    "class": "breaking",
    "warnings": []
   },
+  "contract/required-resource-added": {
+   "class": "breaking",
+   "warnings": []
+  },
   "contract/required-role-added": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/required-to-optional": {
    "class": "breaking",
    "warnings": []
   },
@@ -62,6 +102,14 @@
   },
   "contract/role-interface-changed": {
    "class": "breaking",
+   "warnings": []
+  },
+  "contract/role-removed": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "contract/serving-changed": {
+   "class": "review",
    "warnings": []
   },
   "payload/jsonschema/add-enum-value": {
@@ -89,7 +137,22 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/jsonschema/closed-to-open": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/const-changed": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
   "payload/jsonschema/description-only": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/enum-reordered": {
    "class": "compatible",
    "type": "json:Status",
    "warnings": []
@@ -101,6 +164,11 @@
   },
   "payload/jsonschema/loosen-maxlength": {
    "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/map-closed": {
+   "class": "review",
    "type": "json:Status",
    "warnings": []
   },
@@ -126,6 +194,11 @@
   },
   "payload/jsonschema/remove-optional-property": {
    "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/remove-required-property": {
+   "class": "breaking",
    "type": "json:Status",
    "warnings": []
   },
@@ -195,6 +268,36 @@
    "type": "m.v1.Pose",
    "warnings": []
   },
+  "payload/protobuf/presence-toggled": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-enum-value-added": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-optional-to-required": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-required-added": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/proto2-required-removed": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
   "payload/protobuf/rename-enum-value": {
    "class": "review",
    "same_revision": false,
@@ -208,6 +311,12 @@
    "warnings": []
   },
   "payload/protobuf/renumber-field": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/reserved-reused": {
    "class": "breaking",
    "same_revision": false,
    "type": "m.v1.Pose",
@@ -254,5 +363,5 @@
    "warnings": []
   }
  },
- "description": "Compatibility cases (spec core.md \u00a79.8), FULL_TRANSITIVE: the class is the worst over both directions and every revision in the history. Classes: compatible, review, breaking; `invalid` when a revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection (decided 2026-10-08). Payload inputs come from spike S7 (`docs/zk2/spike-results/s7/`); the contract and transitive cases are written for #607. Evaluated by the classifier (#618); until it exists, the runner checks that every input loads. `same_revision` (protobuf) is the retention rule's identity check (core.md \u00a79.7): true when the normalized descriptor sets are equal, so the old bundle is kept."
+ "description": "Compatibility cases (spec core.md §9.8), FULL_TRANSITIVE: the class is the worst over both directions and every revision in the history. Classes: compatible, review, breaking; `invalid` when a revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection (decided 2026-10-08). Payload inputs come from spike S7 (`docs/zk2/spike-results/s7/`); the contract and transitive cases are written for #607. Evaluated by the classifier (#618); until it exists, the runner checks that every input loads. `same_revision` (protobuf) is the retention rule's identity check (core.md §9.7): true when the normalized descriptor sets are equal, so the old bundle is kept."
 }

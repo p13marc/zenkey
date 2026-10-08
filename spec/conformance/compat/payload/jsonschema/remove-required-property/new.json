@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "since_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "load": {
+          "type": "number",
+          "maximum": 100
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "note": {
+          "type": "string",
+          "description": "free text"
+        }
+      },
+      "required": []
+    }
+  },
+  "$ref": "#/$defs/Status"
+}

@@ -28,6 +28,9 @@
 //!   fingerprint.
 //! - [`bundle`]: the bundle container, built and verified Merkle-style.
 //! - [`history`]: the append-only `.history` of published revisions.
+//! - [`compat`]: the FULL_TRANSITIVE compatibility classifier (spec §9.8),
+//!   over revisions from contracts or bundles, and the retention rule's
+//!   identity check.
 //! - [`descriptor`]: the descriptor record an instance serves, checked
 //!   against its contracts; `spec/descriptor.schema.json` is generated
 //!   from it.
@@ -41,6 +44,7 @@ pub mod authoring;
 pub mod bundle;
 pub mod canonical;
 pub mod chunk;
+pub mod compat;
 pub mod contract;
 pub mod descriptor;
 pub mod diag;

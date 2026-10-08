@@ -16,7 +16,7 @@ runner is `zenkey-model/tests/conformance.rs`; the Python implementation
 | [`history/`](history/) | A `.history` root → its problems as `[at, tag]`. Hand-written. |
 | [`descriptors/`](descriptors/) | A descriptor document → its `D…` codes, checked against `contracts/nav.v2.toml` (`expect.json`). |
 | [`errors/`](errors/) | An error envelope and its Zenoh encoding → the decoded envelope, or a refusal tag. Written by an encoder independent of the reference implementation. |
-| [`compat/`](compat/) | Old/new payload schemas, contract pairs, and transitive histories → the FULL_TRANSITIVE class (`expect.json`). Evaluated by the classifier (#618); until then, the runner checks that every input loads. |
+| [`compat/`](compat/) | Old/new payload schemas, contract pairs, and transitive histories → the FULL_TRANSITIVE class (`expect.json`). Evaluated by the classifier (#618); layout and the departures from `buf` in [`compat/README.md`](compat/README.md). |
 
 ## What the contract fixtures pin
 

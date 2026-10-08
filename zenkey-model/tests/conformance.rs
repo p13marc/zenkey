@@ -562,12 +562,13 @@ fn history() {
     }
 }
 
-/// `spec/conformance/compat/`: the compatibility matrix (#607). The classes
-/// are evaluated by the classifier (#618); until then this checks that
-/// every input loads the way a contract would load it, that the one class
-/// `invalid` means "does not load (E037)", and that every class is known.
+/// `spec/conformance/compat/`: the compatibility matrix (#607), evaluated
+/// by the classifier (#618). Each case's class, warnings and, for
+/// protobuf, `same_revision` must be what `expect.json` says; `invalid`
+/// means the new revision does not load (E037).
 #[test]
-fn compat_inputs_load() {
+fn compat() {
+    use zenkey_model::compat::{Revision, check_history, compare, same_revision};
     let dir = spec().join("conformance/compat");
     let doc = read_json(&dir.join("expect.json"));
     // A one-resource contract over a schema file, loaded from `at`.
@@ -581,70 +582,88 @@ fn compat_inputs_load() {
             "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n[schemas]\n{kind} = [\"{schema}\"]\n\
              [resources.s]\nkind = \"state\"\ntype = \"{ty}\"\n"
         );
-        load_str(&text, at, None).report
+        load_str(&text, at, None)
     };
+    let rev = |l: zenkey_model::contract::Loaded, what: &str| {
+        Revision::of(
+            &l.contract
+                .unwrap_or_else(|| panic!("{what} does not load:\n{}", l.report)),
+        )
+    };
+    let mut seen = 0;
     for (name, case) in doc["cases"].as_object().expect("cases") {
-        let class = case["class"].as_str().unwrap();
-        assert!(
-            ["compatible", "review", "breaking", "invalid"].contains(&class),
-            "{name}: class {class}"
-        );
         let root = dir.join(name);
-        let reports: Vec<(String, zenkey_model::diag::Report)> = if name
-            .starts_with("payload/protobuf/")
-        {
-            ["old", "new"]
-                .iter()
-                .map(|s| {
-                    (
-                        s.to_string(),
-                        load(&root.join(s), "m.proto", case["type"].as_str().unwrap()),
-                    )
-                })
-                .collect()
-        } else if name.starts_with("payload/jsonschema/") {
-            ["old", "new"]
-                .iter()
-                .map(|s| {
-                    (
-                        s.to_string(),
-                        load(&root, &format!("{s}.json"), case["type"].as_str().unwrap()),
-                    )
-                })
-                .collect()
+        let want_class = case["class"].as_str().unwrap();
+        let (old, new) = if let Some(rest) = name.strip_prefix("payload/") {
+            let ty = case["type"].as_str().unwrap();
+            let (lo, ln) = if rest.starts_with("protobuf/") {
+                (
+                    load(&root.join("old"), "m.proto", ty),
+                    load(&root.join("new"), "m.proto", ty),
+                )
+            } else {
+                (load(&root, "old.json", ty), load(&root, "new.json", ty))
+            };
+            if want_class == "invalid" {
+                let errors: Vec<_> = ln.report.errors().map(|d| d.code).collect();
+                assert_eq!(errors, ["E037"], "{name}: the new revision must not load");
+                seen += 1;
+                continue;
+            }
+            (rev(lo, name), rev(ln, name))
         } else if name.starts_with("contract/") {
-            ["old", "new"]
-                .iter()
-                .map(|s| {
-                    (
-                        s.to_string(),
-                        zenkey_model::contract::load_path(&root.join(format!("{s}.toml"))).report,
-                    )
-                })
-                .collect()
+            let l = |f: &str| zenkey_model::contract::load_path(&root.join(f));
+            (rev(l("old.toml"), name), rev(l("new.toml"), name))
         } else if name.starts_with("transitive/") {
             let ty = case["type"].as_str().unwrap();
-            ["v1", "v2", "v3"]
-                .iter()
-                .map(|v| {
-                    let r = if root.join(v).is_dir() {
-                        load(&root.join(v), "m.proto", ty)
-                    } else {
-                        load(&root, &format!("{v}.json"), ty)
-                    };
-                    (v.to_string(), r)
-                })
-                .collect()
+            let v = |n: &str| {
+                if root.join(n).is_dir() {
+                    rev(load(&root.join(n), "m.proto", ty), name)
+                } else {
+                    rev(load(&root, &format!("{n}.json"), ty), name)
+                }
+            };
+            let (v1, v2, v3) = (v("v1"), v("v2"), v("v3"));
+            for (against, r) in [("v1", &v1), ("v2", &v2)] {
+                let got = compare(r, &v3).class().as_str();
+                assert_eq!(
+                    case["against"][against], got,
+                    "{name}: v3 against {against}"
+                );
+            }
+            let verdict = check_history(&[v1, v2], &v3);
+            assert_eq!(
+                want_class,
+                verdict.class().as_str(),
+                "{name}: {:#?}",
+                verdict.findings
+            );
+            seen += 1;
+            continue;
         } else {
             panic!("{name}: unknown case family");
         };
-        for (side, report) in reports {
-            let errors: Vec<_> = report.errors().map(|d| d.code).collect();
-            if class == "invalid" && side == "new" {
-                assert_eq!(errors, ["E037"], "{name} {side}:\n{report}");
-            } else {
-                assert!(errors.is_empty(), "{name} {side} does not load:\n{report}");
-            }
+        let verdict = compare(&old, &new);
+        assert_eq!(
+            want_class,
+            verdict.class().as_str(),
+            "{name}: {:#?}",
+            verdict.findings
+        );
+        let warnings: Vec<Value> = verdict
+            .warning_rules()
+            .into_iter()
+            .map(Value::from)
+            .collect();
+        assert_eq!(case["warnings"], Value::Array(warnings), "{name}: warnings");
+        if let Some(same) = case.get("same_revision") {
+            assert_eq!(
+                same,
+                &Value::Bool(same_revision(&old, &new)),
+                "{name}: same_revision"
+            );
         }
+        seen += 1;
     }
+    assert_eq!(seen, doc["cases"].as_object().unwrap().len());
 }

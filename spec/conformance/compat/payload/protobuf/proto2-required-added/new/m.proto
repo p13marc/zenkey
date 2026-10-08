@@ -1,0 +1,7 @@
+syntax = "proto2";
+package m.v1;
+message Pose {
+  optional double x = 1;
+  optional string frame = 3;
+  required int32 seq = 4;
+}
