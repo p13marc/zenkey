@@ -446,95 +446,6 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
     assert_eq!(envelope["timeout_s"], 5.0);
 }
 
-/// `service call --trace` (#215): the reply block first, exactly as `service
-/// call` draws it, then the three lanes — the declared chain with both
-/// clocks and the stamper, the same-origin lane, and the concurrent count
-/// as one line — with a drop rendered as a break before the row it
-/// preceded. The ndjson stream is the call's answers, then every effect
-/// tagged with its lane, then the concurrent lane as one row.
-#[test]
-fn a_traced_call_draws_the_reply_then_three_lanes_and_never_an_edge() {
-    assert_data_eq!(
-        table(&fx::trace_report()),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "id": "01HZY"
-}
-observed after the call · declared chain (long-running) · Δarrival · ΔHLC (stamper) · key
- +12.500ms    +8ms (foreign:33)  acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap    declared-chain
-                                 ⋯ 3 sample(s) dropped while behind
-+250.000ms  +246ms (foreign:33)  acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY  declared-chain
-
-observed after the call · same origin, not declared · Δarrival · ΔHLC (stamper) · key
-  +1.000ms                       acme/v1/h-3fa9c2d41b7e/telemetry/other/noise       same-origin, not declared
-
-concurrent, not attributed
-40 sample(s) on 2 key(s) from other origins during the window — e.g. acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu, acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem
-
-"#]]
-    );
-    assert_data_eq!(
-        ndjson(&fx::trace_report()),
-        str![[r#"
-{"answers":1,"attributed":2,"call_returned_ms":4.2,"chain_rule":"first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way","dropped":3,"excluded":"the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty","hlc_reference":"reply","idiom":"long-running","key":"acme/v1/h-3fa9c2d41b7e/@rpc/demo/artifact/request","keys_evicted":0,"notes":[{"cite":"RFC 05 §3","text":"chain rule: first-chunk naming heuristic (RFC 05 §3 idiom); a naming coincidence is tagged the same way"},{"cite":"RFC 09 §5.1 O7","text":"ΔHLC is measured against the reply's HLC (7680000000000000000/33) — the stamping node's clock, which is not necessarily the responder's and is never this caller's (it mints none); a different stamper on a row is a different clock"},{"cite":"RFC 03 §4 D2","text":"the verbatim planes (`@rpc`, `@blob`, `@media`, `@adv`, `@catalog`): `**` never crosses an `@`-chunk (RFC 03 §4 D2), so the artifact bytes on `@blob` are outside this window — excluded, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind on the origin's window — each is a break before the next row of every lane"}],"registry_loaded":true,"reply_hlc":"7680000000000000000/33","report":"trace","same_origin":1,"scopes":["acme/v1/h-3fa9c2d41b7e/**","acme/v1/*/**"],"subscribed_before_call":true,"t0_unix_s":1788000000.5,"timeout_s":5.0,"window_s":10.0}
-{"ok":true,"origin":"h-3fa9c2d41b7e","row":"answer","value":{"id":"01HZY"}}
-{"arrival_delta_ms":12.5,"hlc":"7680000000034359738/33","hlc_delta_ms":8,"key":"acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap","kind":"put","lane":"attributed","payload_bytes":40,"relation":"declared_chain","row":"effect","stamped_by":"foreign:33"}
-{"arrival_delta_ms":250.0,"break_before":3,"hlc":"7680000001056964608/33","hlc_delta_ms":246,"key":"acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY","kind":"put","lane":"attributed","payload_bytes":40,"relation":"declared_chain","row":"effect","stamped_by":"foreign:33"}
-{"arrival_delta_ms":1.0,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/other/noise","kind":"put","lane":"same_origin","payload_bytes":40,"relation":"same_origin_undeclared","row":"effect"}
-{"dropped":0,"examples":["acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu","acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem"],"keys":2,"row":"concurrent","samples":40}
-
-"#]]
-    );
-    let n = notes(&fx::trace_report());
-    assert!(
-        n.contains("chain rule: first-chunk naming heuristic"),
-        "{n}"
-    );
-    assert!(n.contains("never crosses an `@`-chunk"), "{n}");
-    assert!(n.contains("never caused"), "{n}");
-    assert!(n.contains("3 sample(s) dropped while behind"), "{n}");
-    assert!(!n.contains("registry not loaded"), "{n}");
-    assert!(
-        !n.contains("→") && !n.contains("caused by"),
-        "no edge, no arrow: {n}"
-    );
-
-    // No registry, no reply HLC: an empty attributed lane is a *coverage*
-    // sentence, never a silent header; the chain is unjudgeable and says so;
-    // ΔHLC is absent, so the stamped rows show `—` (not asked) rather than
-    // an empty cell that would read as unstamped.
-    let report = fx::trace_report_no_registry();
-    assert_data_eq!(
-        table(&report),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "id": "01HZY"
-}
-observed after the call · same origin — registry not loaded, chain unjudgeable · Δarrival · ΔHLC (stamper) · key
- +12.500ms  —  acme/v1/h-3fa9c2d41b7e/state/demo/artifact/pcap    same-origin, registry not loaded
-+250.000ms  —  acme/v1/h-3fa9c2d41b7e/events/demo/artifact/01HZY  same-origin, registry not loaded
-  +1.000ms     acme/v1/h-3fa9c2d41b7e/telemetry/other/noise       same-origin, registry not loaded
-
-concurrent, not attributed
-40 sample(s) on 2 key(s) from other origins during the window — e.g. acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/cpu, acme/v1/h-bbbbbbbbbbbb/telemetry/sysinfo/mem
-
-"#]]
-    );
-    let n = notes(&report);
-    assert!(n.contains("registry not loaded — chain unjudgeable"), "{n}");
-    assert!(
-        n.contains("nothing in the declared chain was observed"),
-        "{n}"
-    );
-    assert!(n.contains("the reply carried no HLC"), "{n}");
-    assert!(
-        !n.contains("dropped while behind"),
-        "zero costs emit nothing: {n}"
-    );
-}
-
 /// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
 /// line — a caller MUST NOT read a short page as the end — and `partial:
 /// true` with `next_cursor: null` is the contract violation the RFC says an
@@ -1801,6 +1712,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "key-canon",
         "key-relation",
         "namespace-list",
+        "operation",
         "probe",
         "rate",
         "record",
@@ -1813,12 +1725,12 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "service-show",
         "snapshot",
         "snapshot-diff",
+        "state",
         "storage-check",
         "storage-explain",
         "storage-list",
         "storage-plan",
         "timeline",
-        "trace",
         "why",
     ];
 
@@ -1926,11 +1838,6 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&fx::probe_report());
     assert_eq!(s.window_s, Some(5.0), "the probe's observation IS the call");
-    // The trace's scope is both watches over the window — the origin's
-    // subtree and the fleet's; the GET's own ask is inside `call`.
-    let s = scoped(&fx::trace_report());
-    assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/**", "acme/v1/*/**"]);
-    assert_eq!(s.window_s, Some(10.0));
     let s = scoped(&zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
         timeout_s: 5.0,
@@ -1955,6 +1862,16 @@ fn every_observing_family_states_its_scope() {
         report: &report,
         attachments: &attachments,
     });
+    // zk2's acts and reads (#612, FJ5): the keys a call or a state GET
+    // went out on, over its reply wait.
+    let s = scoped(&actfx::value());
+    assert_eq!(s.asked, ["zk2/host-a/tc/tc.netif.v1/@op/diagnostics"]);
+    assert_eq!(s.window_s, Some(5.0));
+    let s = scoped(&actfx::state(
+        zenkey_fleet::report::StateReading::Current,
+        vec![],
+    ));
+    assert_eq!(s.asked, ["zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*"]);
     // zk2's presence reads (#612, FJ4): one liveliness selector, no window —
     // namespaced for the resolved verbs, across namespaces for `namespace
     // list`.
@@ -2875,4 +2792,452 @@ fn an_incomplete_presence_read_says_so_in_every_format() {
     let mut graph = zk2fx::catalog().graph();
     graph.complete = false;
     assert!(zenctl::render::graph_dot(&graph).contains("possibly incomplete"));
+}
+
+// ── zk2's acts and reads (#612, FJ5) ─────────────────────────────────────────
+
+mod actfx {
+    use std::collections::BTreeMap;
+
+    use serde_json::json;
+    use zenkey_fleet::report::{
+        CallMode, EnvelopeView, OperationAnswer, OperationReport, PayloadRendering,
+        PresenceAttribution, Rendered, ReplierView, RepliesView, ResolvedResource,
+        SelectionPresence, SilenceView, Stamp, StateReading, StateReport, StateRow, StateValue,
+        Unresolved,
+    };
+
+    pub fn fp() -> String {
+        format!("sha256:{}", "4f53".repeat(16))
+    }
+
+    pub fn reply(
+        key: &str,
+        member: &str,
+        resource: &str,
+        value: serde_json::Value,
+    ) -> PayloadRendering {
+        PayloadRendering {
+            key: key.into(),
+            size: serde_json::to_vec(&value).expect("json").len(),
+            resource: Some(ResolvedResource {
+                iface: "tc.netif.v1".into(),
+                fingerprint: fp(),
+                resource: resource.into(),
+                member: member.into(),
+                values: BTreeMap::new(),
+            }),
+            rendered: Rendered::Value {
+                declared: "json:DiagnosticsResponse".into(),
+                value,
+            },
+        }
+    }
+
+    pub fn call(answer: OperationAnswer, mode: CallMode, address: &str) -> OperationReport {
+        OperationReport {
+            address: address.into(),
+            iface: "tc.netif.v1".into(),
+            fingerprint: fp(),
+            operation: "@op/diagnostics".into(),
+            values: BTreeMap::new(),
+            selectors: vec![format!("zk2/{address}/tc.netif.v1/@op/diagnostics")],
+            mode,
+            timeout_s: 5.0,
+            answer,
+        }
+    }
+
+    pub fn value() -> OperationReport {
+        let key = "zk2/host-a/tc/tc.netif.v1/@op/diagnostics";
+        call(
+            OperationAnswer::Value {
+                reply: reply(key, "response", "@op/diagnostics", json!({"ok": true})),
+            },
+            CallMode::Concrete,
+            "host-a/tc",
+        )
+    }
+
+    pub fn refused() -> OperationReport {
+        call(
+            OperationAnswer::Refused {
+                envelope: EnvelopeView {
+                    code: "app".into(),
+                    message: "the kernel refused".into(),
+                    cause: None,
+                    detail: Some(Rendered::Value {
+                        declared: "json:TcError".into(),
+                        value: json!({"kind": "kernel"}),
+                    }),
+                },
+            },
+            CallMode::Concrete,
+            "host-a/tc",
+        )
+    }
+
+    pub fn silent(presence: PresenceAttribution) -> OperationReport {
+        call(
+            OperationAnswer::Silent {
+                silence: SilenceView {
+                    attempts: 3,
+                    transport: Some("zenoh/string: Timeout".into()),
+                    presence,
+                },
+            },
+            CallMode::Concrete,
+            "host-a/tc",
+        )
+    }
+
+    pub fn fanout() -> OperationReport {
+        let (k1, k2) = (
+            "zk2/host-a/tc/tc.netif.v1/@op/diagnostics",
+            "zk2/host-b/tc/tc.netif.v1/@op/diagnostics",
+        );
+        let replier = |addr: &str, key: &str, summaries: usize| ReplierView {
+            address: addr.into(),
+            key: key.into(),
+            values: BTreeMap::new(),
+            replies: vec![reply(
+                key,
+                "response",
+                "@op/diagnostics",
+                json!({"ok": true}),
+            )],
+            summaries: (0..summaries)
+                .map(|_| reply(key, "summary", "@op/diagnostics", json!({"n": 1})))
+                .collect(),
+            possibly_partial: Some(summaries != 1),
+        };
+        call(
+            OperationAnswer::Replies {
+                replies: RepliesView {
+                    summary_declared: true,
+                    repliers: vec![replier("host-a/tc", k1, 1), replier("host-b/tc", k2, 2)],
+                    refusals: vec![EnvelopeView {
+                        code: "busy".into(),
+                        message: "a scan is running".into(),
+                        cause: None,
+                        detail: None,
+                    }],
+                    malformed: vec![],
+                    transport: vec![],
+                    discarded: 1,
+                    presence: SelectionPresence {
+                        selector: "zk2/*/tc/@zk/alive/tc.netif.v1/**".into(),
+                        complete: true,
+                        unheard: vec!["host-c/tc".into()],
+                        error: None,
+                    },
+                },
+            },
+            CallMode::Fanout,
+            "*/tc",
+        )
+    }
+
+    pub fn state(reading: StateReading, rows: Vec<StateRow>) -> StateReport {
+        StateReport {
+            reading,
+            address: "host-a/tc".into(),
+            iface: "tc.netif.v1".into(),
+            fingerprint: fp(),
+            resource: "state/interfaces/{ns}/{iface}".into(),
+            values: BTreeMap::new(),
+            selectors: vec!["zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*".into()],
+            archive: (reading == StateReading::LastKnown).then(|| "ground/archive".into()),
+            timeout_s: 5.0,
+            rows,
+        }
+    }
+
+    pub fn rows(last_known: bool) -> Vec<StateRow> {
+        let key = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+        let gone = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9";
+        vec![
+            StateRow {
+                key: key.into(),
+                value: StateValue::Value {
+                    payload: Box::new(PayloadRendering {
+                        rendered: Rendered::Value {
+                            declared: "json:NetworkInterface".into(),
+                            value: json!({"is_up": true}),
+                        },
+                        ..reply(
+                            key,
+                            "type",
+                            "state/interfaces/{ns}/{iface}",
+                            json!({"is_up": true}),
+                        )
+                    }),
+                },
+                timestamp: Some(Stamp {
+                    time: "2026-10-08T12:00:00.000000000Z".into(),
+                    clock: "a1b2c3".into(),
+                }),
+                confirmed: last_known.then_some(false),
+                identity: last_known.then(|| json!({"iface": "tc.netif.v1"})),
+            },
+            StateRow {
+                key: gone.into(),
+                value: StateValue::Deleted,
+                timestamp: None,
+                confirmed: last_known.then_some(true),
+                identity: None,
+            },
+        ]
+    }
+
+    pub fn structural() -> PayloadRendering {
+        PayloadRendering {
+            key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+            size: 3,
+            resource: None,
+            rendered: Rendered::Structural {
+                why: Unresolved::ContractNotHeld { fingerprint: fp() },
+                value: None,
+                text: "abc".into(),
+            },
+        }
+    }
+}
+
+/// O5's four cases are four first words in a table and four `answer` tags
+/// in a document: a value, an envelope, a malformed envelope and silence
+/// never read as one another (spec §5.1, the tooling guide's §2).
+#[test]
+fn a_call_keeps_a_value_an_envelope_and_silence_apart() {
+    use zenkey_fleet::report::PresenceAttribution;
+    assert_data_eq!(
+        table(&actfx::value()),
+        str![[r#"
+call host-a/tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (one address, 5s)
+key    zk2/host-a/tc/tc.netif.v1/@op/diagnostics
+value  json:DiagnosticsResponse {"ok":true}
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&actfx::refused()),
+        str![[r#"
+call host-a/tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (one address, 5s)
+refused  app — the kernel refused
+  detail: json:TcError {"kind":"kernel"}
+
+"#]]
+    );
+    let silent = actfx::silent(PresenceAttribution::NoTokenVisible);
+    assert_data_eq!(
+        table(&silent),
+        str![[r#"
+call host-a/tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (one address, 5s)
+no answer  after 3 attempt(s) — zenoh/string: Timeout
+presence   no token of the service is visible to this reader: it may be gone, or this reader may not see its presence (a refused read is empty too)
+
+"#]]
+    );
+    let tag = |r: &zenkey_fleet::report::OperationReport| -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(ndjson(r).lines().next().expect("a line"))
+            .expect("json")["answer"]
+            .clone()
+    };
+    assert_eq!(
+        [
+            tag(&actfx::value()),
+            tag(&actfx::refused()),
+            tag(&silent),
+            tag(&actfx::fanout())
+        ],
+        ["value", "refused", "silent", "replies"].map(serde_json::Value::from)
+    );
+    // Silence is a note in every format, and only silence is.
+    assert!(notes(&silent).contains("never \"no such operation\""));
+    assert!(notes(&actfx::value()).is_empty());
+    assert!(ndjson(&silent).contains(r#""presence":"no_token_visible""#));
+    assert_eq!(actfx::value().exit_code(), 0);
+    assert_eq!(actfx::refused().exit_code(), 1);
+    assert_eq!(silent.exit_code(), 2);
+}
+
+/// Silence is attributed through presence as what this reader could see
+/// (§8.1, 0.8): every attribution has its own sentence, and "no token
+/// visible" never claims the service is gone.
+#[test]
+fn a_silence_is_attributed_as_what_the_reader_could_see() {
+    use zenkey_fleet::report::PresenceAttribution as P;
+    let line = |p: P| {
+        table(&actfx::silent(p))
+            .lines()
+            .find(|l| l.starts_with("presence"))
+            .expect("a presence line")
+            .to_owned()
+    };
+    let lines: std::collections::BTreeSet<String> = [
+        P::Present,
+        P::InstanceOnly,
+        P::NoTokenVisible,
+        P::Unknown,
+        P::Unobservable,
+    ]
+    .into_iter()
+    .map(line)
+    .collect();
+    assert_eq!(lines.len(), 5, "{lines:#?}");
+    assert!(line(P::NoTokenVisible).contains("visible to this reader"));
+    assert!(line(P::Unknown).contains("may be incomplete"));
+}
+
+/// A fan-out's values are attributed by their key; its envelopes are not,
+/// because a `reply_err` carries none; a replier that did not end with one
+/// summary is possibly partial (§5.1, O6). The repliers are the rows, and
+/// everything else rides the envelope.
+#[test]
+fn a_fan_out_attributes_values_by_key_and_leaves_envelopes_unattributed() {
+    let r = actfx::fanout();
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+call */tc tc.netif.v1@sha256:4f534f534f534f53… @op/diagnostics  (fan-out, 5s)
+REPLIER    KEY                                        REPLY
+host-a/tc  zk2/host-a/tc/tc.netif.v1/@op/diagnostics  json:DiagnosticsResponse {"ok":true}
+  summary: json:DiagnosticsResponse {"n":1}
+host-b/tc  zk2/host-b/tc/tc.netif.v1/@op/diagnostics  json:DiagnosticsResponse {"ok":true}
+  summary: json:DiagnosticsResponse {"n":1}
+  summary: json:DiagnosticsResponse {"n":1}
+  possibly partial: 2 summaries, not exactly one
+refused (unattributed): busy — a scan is running
+no value from host-c/tc: each holds the interface's token, and refused or was silent — a caller cannot tell which
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&r)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+    assert_eq!(lines.len(), 3, "an envelope and a row per replier");
+    assert_eq!(lines[0]["report"], "operation");
+    assert_eq!(lines[0]["mode"], "fanout");
+    assert!(
+        lines[0]["replies"].get("repliers").is_none(),
+        "rows, not envelope"
+    );
+    assert_eq!(lines[0]["replies"]["refusals"][0]["code"], "busy");
+    assert_eq!(lines[0]["replies"]["presence"]["unheard"][0], "host-c/tc");
+    assert_eq!(lines[1]["row"], "replier");
+    assert_eq!(lines[1]["possibly_partial"], false);
+    assert_eq!(lines[2]["possibly_partial"], true);
+    let n = notes(&r);
+    assert!(n.contains("unattributed"), "{n}");
+    assert!(n.contains("possibly partial"), "{n}");
+    assert!(n.contains("(R6)"), "{n}");
+}
+
+/// Current and last-known state are different questions (S6), and no
+/// medium lets one pass for the other: the table's first line, the
+/// document's `reading`, and a note in every format.
+#[test]
+fn current_and_last_known_state_never_look_alike() {
+    use zenkey_fleet::report::StateReading;
+    let current = actfx::state(StateReading::Current, actfx::rows(false));
+    let last = actfx::state(StateReading::LastKnown, actfx::rows(true));
+    assert_data_eq!(
+        table(&current),
+        str![[r#"
+CURRENT state, the owner's answer: tc.netif.v1@sha256:4f534f534f534f53… state/interfaces/{ns}/{iface} at host-a/tc
+KEY                                                      STATE                                 STAMP
+zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  json:NetworkInterface {"is_up":true}  2026-10-08T12:00:00.000000000Z (clock a1b2c3)
+zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                               —
+
+"#]]
+    );
+    assert_data_eq!(
+        table(&last),
+        str![[r#"
+LAST-KNOWN state from archive ground/archive, never current: tc.netif.v1@sha256:4f534f534f534f53… state/interfaces/{ns}/{iface} at host-a/tc
+KEY                                                      STATE                                 STAMP
+zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  json:NetworkInterface {"is_up":true}  2026-10-08T12:00:00.000000000Z (clock a1b2c3)
+  NOT confirmed: alignment has not confirmed this key
+zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9  deleted                               —
+  confirmed by the archive's alignment
+
+"#]]
+    );
+    let envelope = |r: &zenkey_fleet::report::StateReport| -> serde_json::Value {
+        serde_json::from_str(ndjson(r).lines().next().expect("a line")).expect("json")
+    };
+    assert_eq!(envelope(&current)["reading"], "current");
+    assert_eq!(envelope(&last)["reading"], "last_known");
+    assert!(envelope(&current).get("archive").is_none());
+    assert_eq!(envelope(&last)["archive"], "ground/archive");
+    assert!(notes(&last).contains("last-known, never current"));
+    assert!(ndjson(&last).contains("last-known, never current"));
+    assert!(!ndjson(&current).contains("last-known, never current"));
+    // A current read keeps no confirmation: absent, not false (O4).
+    assert!(!ndjson(&current).contains("confirmed"));
+    // Silence is no rows and a note, never "no value".
+    let silent = actfx::state(StateReading::Current, vec![]);
+    assert!(notes(&silent).contains("silence, not \"no value\""));
+    assert_eq!(ndjson(&silent).lines().count(), 1, "the envelope alone");
+}
+
+/// A watched sample says how far its contract reached, and the summary
+/// keeps R6's discards apart from what the tool lagged — two counts, two
+/// lines, both non-zero here so a renderer that summed them would show.
+#[test]
+fn a_watch_keeps_r6_discards_apart_from_its_lag() {
+    use zenkey_fleet::report::{WatchEnd, WatchEvent, WatchSample, WatchSummary};
+    let sample = WatchSample {
+        provider: "host-a/tc".into(),
+        key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+        values: Default::default(),
+        timestamp: None,
+        event: WatchEvent::Put {
+            payload: Box::new(actfx::structural()),
+            attachment: None,
+        },
+    };
+    assert_eq!(
+        zenctl::render::sample_lines(&sample),
+        [
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  [host-a/tc]",
+            &format!(
+                "  abc  (structural: contract {} not held)",
+                "sha256:4f534f534f534f53…"
+            ),
+        ]
+    );
+    let delete = WatchSample {
+        event: WatchEvent::Delete,
+        ..sample
+    };
+    assert!(zenctl::render::sample_lines(&delete)[1].contains("not an empty value"));
+    let summary = WatchSummary {
+        address: "*/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: actfx::fp(),
+        resource: "stream/bandwidth/{ns}/{iface}".into(),
+        selectors: vec!["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*".into()],
+        received: 4,
+        discarded: 10,
+        lagged: 3,
+        elapsed_s: 2.0,
+        ended: WatchEnd::Window,
+    };
+    let lines = zenctl::render::summary_lines(&summary);
+    assert_eq!(lines.len(), 3, "{lines:#?}");
+    assert!(lines[1].starts_with("10 sample(s)") && lines[1].contains("(R6)"));
+    assert!(lines[2].starts_with("3 sample(s)") && lines[2].contains("lower bound"));
+    let silent = WatchSummary {
+        received: 0,
+        discarded: 0,
+        lagged: 0,
+        ..summary
+    };
+    assert!(
+        zenctl::render::summary_lines(&silent)
+            .last()
+            .is_some_and(|l| l.contains("never a verdict"))
+    );
 }

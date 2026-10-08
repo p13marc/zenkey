@@ -1,0 +1,50 @@
+`get` has two forms, and they cannot be confused (#612, FJ5). `get
+<SELECTOR>` is raw: a wire selector on a session in no namespace, any bus.
+`get state <ADDRESS> <IFACE> <STATE>` is resolved: one zk2 state resource of
+one owner, through its contract, in the deployment's namespace. The resolved
+form is a subcommand — `zenctl get --help` shows both usages — so the two
+never share a positional.
+
+The owner alone answers for its state (spec §4.2 S4), so the address is one
+service — a pattern is refused by the parser:
+
+```console
+$ zenctl get state '*/tc' tc.netif.v1 namespaces --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+error: invalid value '*/tc' for '<SYSTEM/SERVICE>': system "*" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+For more information, try '--help'.
+
+```
+
+Only a state resource is read:
+
+```console
+$ zenctl get state host-a/tc tc.netif.v1 'bandwidth/{ns}/{iface}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: bandwidth/{ns}/{iface}: tc.netif.v1 declares no state resource "bandwidth/{ns}/{iface}"; it declares: state/interfaces/{ns}/{iface}, state/namespaces
+
+```
+
+`--last-known <ARCHIVE>` reads an archive instead of the owner (S5), one
+key at a time (§4.4): every template parameter must be given.
+
+```console
+$ zenctl get state host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --param ns=default --last-known ground/archive --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: --last-known reads an archive one key at a time (spec §4.4): give --param iface=…
+
+```
+
+A read that passes every check goes on to its session (the dead-bus
+fixture, so the 2 is the session's):
+
+```console
+$ zenctl get state host-a/tc tc.netif.v1 namespaces --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

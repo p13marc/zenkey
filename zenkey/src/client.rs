@@ -471,26 +471,28 @@ impl Client {
     }
 
     /// What presence says of `addr` (O5): its interface token, else its
-    /// instance token, else nothing.
+    /// instance token, else nothing, from one read of its `@zk` subtree. A
+    /// read that may be incomplete (§8.1) and saw no interface token is
+    /// [`Attribution::Unknown`], never absence.
     pub async fn attribute(&self, addr: &Addr, timeout: Duration) -> Result<Attribution> {
         if self.presence == Presence::Unavailable {
             return Ok(Attribution::Unobservable);
         }
         let sel = format!("zk2/{}/{}/@zk/**", addr.system, addr.service);
-        let tokens = crate::presence::tokens(&self.session, &sel, timeout).await?;
+        let read = crate::presence::liveliness_read(&self.session, &sel, timeout).await?;
+        let tokens: Vec<ZkKey> = read
+            .keys
+            .iter()
+            .filter_map(|k| zenkey_model::grammar::parse(k).ok())
+            .collect();
         let iface = &self.contract.iface;
-        Ok(
-            if tokens
+        Ok(Attribution::of_read(
+            tokens
                 .iter()
-                .any(|t| matches!(t, ZkKey::Alive { iface: i, .. } if i == iface))
-            {
-                Attribution::Present
-            } else if tokens.iter().any(|t| matches!(t, ZkKey::Instance { .. })) {
-                Attribution::InstanceOnly
-            } else {
-                Attribution::Absent
-            },
-        )
+                .any(|t| matches!(t, ZkKey::Alive { iface: i, .. } if i == iface)),
+            tokens.iter().any(|t| matches!(t, ZkKey::Instance { .. })),
+            read.complete,
+        ))
     }
 
     /// The providers holding this interface's token now (§8.1).

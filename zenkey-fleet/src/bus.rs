@@ -28,12 +28,17 @@
 //! of 2026-10-08: [`presence`] (services from tokens and descriptors) and
 //! [`contracts`] (bundle retrieval, §8.4) take a bare `&Session` and spell
 //! base-relative keys, because zk2's resolved verbs read through a session
-//! in the deployment's namespace.
+//! in the deployment's namespace. So do FJ5's [`operation`] (a call
+//! through the runtime's `Client` or `Fleet`, §5.1) and [`consume`] (state
+//! and subscriptions through its `Consumer`, an archive's last-known state,
+//! §3.2, §4).
 
 pub mod admin;
 pub mod blob;
+pub mod consume;
 pub mod contracts;
 pub mod monitor;
+pub mod operation;
 pub mod presence;
 pub mod producer;
 pub mod query;

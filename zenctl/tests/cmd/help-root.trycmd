@@ -38,10 +38,11 @@ Commands:
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
   bench        Measure the fleet
-  get          Query any selector and print every reply, attributed to its key
+  get          Query a raw selector, or read a zk2 state resource (`get state`)
+  call         Call one operation of a zk2 service, through its contract
+  watch        Subscribe to a zk2 resource and print every sample, decoded
   echo         Subscribe and print decoded samples (on-bus)
-  pub          Publish a value to a key
-  retire       Retire a key with a tombstone, an authoritative delete
+  pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Per-field statistics over a window: stuck, vanished and new fields
   record       Capture a selector's traffic to a .zrec file
@@ -106,10 +107,11 @@ Commands:
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
   bench        Measure the fleet
-  get          Query any selector and print every reply, attributed to its key
+  get          Query a raw selector, or read a zk2 state resource (`get state`)
+  call         Call one operation of a zk2 service, through its contract
+  watch        Subscribe to a zk2 resource and print every sample, decoded
   echo         Subscribe and print decoded samples (on-bus)
-  pub          Publish a value to a key
-  retire       Retire a key with a tombstone, an authoritative delete
+  pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Per-field statistics over a window: stuck, vanished and new fields
   record       Capture a selector's traffic to a .zrec file

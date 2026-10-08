@@ -785,8 +785,10 @@ pub struct ReplaySpec<'a> {
     pub target: ReplayTarget<'a>,
     /// Pacing scale: 2.0 replays twice as fast as captured.
     pub speed: f64,
-    /// Replay recorded deletes that fall off the state class — the same
-    /// operator price as `zenctl retire` (RFC 04 §1.2, v1.12).
+    /// The operator's acknowledgement of a write that is not this replay's
+    /// to make: a recorded delete that falls off the state class (RFC 04
+    /// §1.2, v1.12), or a zk2 service's own key published where that
+    /// service runs (P3, spec §6; see [`replay`]).
     pub i_know: bool,
     /// The profile a row that recorded none is published under.
     pub default_qos: QosProfile,
@@ -795,6 +797,14 @@ pub struct ReplaySpec<'a> {
     /// state-at-capture-start republishes a snapshot over the live fleet
     /// with no pacing between the rows (RFC 13 §4.2).
     pub seed_state: bool,
+    /// Publish into this deployment namespace (`replay --namespace`, #612,
+    /// FJ5): each row's key has the capture's base stripped, and the
+    /// session — which the caller opened **in** this namespace — adds the
+    /// namespace on egress (spike S13; r4 §4.1). Events name the key as the
+    /// wire carries it. A row whose key does not sit under the capture's
+    /// base is refused and counted. `None` publishes every key as recorded,
+    /// on an un-namespaced session.
+    pub namespace: Option<&'a str>,
 }
 
 /// Replay events, surfaced as they happen so a frontend can render them —
@@ -811,7 +821,9 @@ pub enum ReplayEvent<'a> {
     WouldRetire { key: &'a str },
     /// A row that could not be parsed — counted, never skipped.
     Malformed { reason: String },
-    /// A delete row the retire gate refused (RFC 04 §1.2 v1.12).
+    /// A row a gate refused: a delete the retire gate refused (RFC 04 §1.2
+    /// v1.12), a wildcard, a key outside the capture's base under
+    /// `namespace`, or a zk2 service's own key where it runs (P3).
     Refused { key: String, reason: String },
     /// The capture itself missed this many samples here (O6): the replay
     /// is a partial view of a partial view, and both halves are counted.
@@ -890,6 +902,53 @@ impl Drop for Publications {
     }
 }
 
+/// Where one row goes: the key to publish on the replay's session, and the
+/// key the wire carries — or why it is refused (see [`replay`]).
+fn place(
+    base: &str,
+    key: &str,
+    namespace: Option<&str>,
+    i_know: bool,
+) -> std::result::Result<(String, String), String> {
+    let p3 = |owner: &zenkey_model::grammar::Addr, whose: String| {
+        format!(
+            "is a key {owner} owns, and would land in {whose}, where its owner runs: \
+             only the owner writes its keys (P3, spec §6). Replay into a namespace of \
+             your own with --namespace, or pass --i-know to write it anyway."
+        )
+    };
+    match namespace {
+        None => match crate::model::target::owned_key(key) {
+            Some(o) if !i_know => Err(p3(&o.owner, "the namespace it was recorded in".into())),
+            _ => Ok((key.to_owned(), key.to_owned())),
+        },
+        Some(ns) => {
+            let Some(rel) = zenkey::grammar::strip_base(base, key) else {
+                return Err(format!(
+                    "does not sit under the capture's base {base:?}, so it cannot be moved \
+                     into namespace {ns:?}"
+                ));
+            };
+            if ns == base
+                && !i_know
+                && let Some(o) =
+                    crate::model::target::owned_key(rel).filter(|o| o.prefix.is_empty())
+            {
+                return Err(p3(
+                    &o.owner,
+                    format!("namespace {ns:?}, the one it was recorded in"),
+                ));
+            }
+            let wire = if ns.is_empty() {
+                rel.to_owned()
+            } else {
+                format!("{ns}/{rel}")
+            };
+            Ok((rel.to_owned(), wire))
+        }
+    }
+}
+
 /// Replay a `.zrec` onto a bus — or list what doing so would publish.
 ///
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
@@ -898,7 +957,17 @@ impl Drop for Publications {
 /// [`crate::bus::write::check_retire`] under the **header's** base — the keys
 /// were captured under it, and classifying them under anything else would
 /// re-derive what O3 says must not be re-derived; `i_know` is the operator
-/// saying the off-state cleanup is meant. Publishers are declared once per
+/// saying the off-state cleanup is meant.
+///
+/// **A zk2 service's own keys** (P3, spec §6, the tooling guide's §5): a
+/// replayer stands in for the owners it recorded only in a namespace of its
+/// own, where they are not running. A row whose key is a service's own
+/// ([`crate::model::target::owned_key`]) is refused, counted, unless
+/// `i_know`, when it would land in the namespace the capture was recorded
+/// in: published as recorded (no `namespace`), or into a `namespace` equal
+/// to the header's base. Foreign rows replay as before.
+///
+/// Publishers are declared once per
 /// distinct key and undeclared on **every** way out — a failed row tears the
 /// set down before it reports, and a cancelled replay hands the remainder to
 /// a drop guard that undeclares them properly (#327).
@@ -913,6 +982,7 @@ pub async fn replay(
         i_know,
         default_qos,
         seed_state,
+        namespace,
     } = spec;
     if !(speed.is_finite() && speed > 0.0) {
         return Err(Error::unaskable(
@@ -925,6 +995,7 @@ pub async fn replay(
         header: reader.header().clone(),
         dry_run: matches!(target, ReplayTarget::DryRun),
         speed,
+        namespace: namespace.map(str::to_owned),
         published: 0,
         tombstones: 0,
         malformed: 0,
@@ -1000,15 +1071,21 @@ pub async fn replay(
         } else {
             crate::bus::write::check_concrete(&row.key, crate::bus::write::WriteAct::Put)
         };
-        if let Err(e) = gate {
-            let reason = e.to_string();
-            on_event(ReplayEvent::Refused {
-                key: row.key.clone(),
-                reason: reason.clone(),
-            });
-            record_err(&mut report, format!("{}: {reason}", row.key), true);
-            continue;
-        }
+        // Where the row goes: as recorded, or moved into `namespace`; and
+        // whether that is where a zk2 owner of the key runs (P3).
+        let placed = place(&base, &row.key, namespace, i_know);
+        let gate = gate.map_err(|e| e.to_string()).and(placed);
+        let (publish_key, wire_key) = match gate {
+            Ok(keys) => keys,
+            Err(reason) => {
+                on_event(ReplayEvent::Refused {
+                    key: row.key.clone(),
+                    reason: reason.clone(),
+                });
+                record_err(&mut report, format!("{}: {reason}", row.key), true);
+                continue;
+            }
+        };
         // A seeded preamble row is counted as what it is, never as an
         // observed row (O6 applied to rows); the dry-run listing still names
         // it as the put it would be.
@@ -1020,10 +1097,10 @@ pub async fn replay(
         match &target {
             ReplayTarget::DryRun => {
                 if row.delete {
-                    on_event(ReplayEvent::WouldRetire { key: &row.key });
+                    on_event(ReplayEvent::WouldRetire { key: &wire_key });
                 } else {
                     on_event(ReplayEvent::WouldPut {
-                        key: &row.key,
+                        key: &wire_key,
                         bytes: row.payload.len(),
                         encoding: row.encoding.as_deref(),
                     });
@@ -1042,7 +1119,7 @@ pub async fn replay(
                 if t_us.is_some() {
                     prev_t = t_us;
                 }
-                let publication = match publications.entry(row.key.clone()) {
+                let publication = match publications.entry(publish_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
                         // A row that recorded a profile name is judged
@@ -1066,7 +1143,7 @@ pub async fn replay(
                         };
                         let publication = match crate::bus::write::declare_publication(
                             session,
-                            &row.key,
+                            &publish_key,
                             qos,
                             row.encoding.as_deref(),
                         )
@@ -1294,6 +1371,56 @@ mod tests {
         assert!(reader.next().is_none());
     }
 
+    /// P3 (#612, FJ5): a zk2 service's own key is refused where it would
+    /// land in the namespace it was recorded in — as recorded, or into a
+    /// `namespace` equal to the capture's base — unless `i_know`; moved
+    /// into another namespace it is the replayer standing in for its
+    /// owner. Foreign keys replay as before; a key outside the base cannot
+    /// be moved.
+    #[test]
+    fn a_replay_writes_an_owners_key_only_where_the_owner_is_not() {
+        let zk = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+        let v1 = "v1/h-0123456789ab/state/p/health";
+        let p3 = |r: std::result::Result<(String, String), String>| {
+            r.expect_err("refused").contains("(P3, spec §6)")
+        };
+        // As recorded: into the namespace it came from.
+        assert!(p3(place("", zk, None, false)));
+        assert!(p3(place("", &format!("prod/{zk}"), None, false)));
+        assert_eq!(
+            place("", zk, None, true).unwrap(),
+            (zk.to_owned(), zk.to_owned())
+        );
+        assert_eq!(
+            place("", v1, None, false).unwrap(),
+            (v1.to_owned(), v1.to_owned())
+        );
+        // Moved into a namespace of its own: the stand-in replay.
+        assert_eq!(
+            place("prod", &format!("prod/{zk}"), Some("replay"), false).unwrap(),
+            (zk.to_owned(), format!("replay/{zk}"))
+        );
+        assert_eq!(
+            place("", zk, Some("replay"), false).unwrap(),
+            (zk.to_owned(), format!("replay/{zk}"))
+        );
+        // Into the namespace it was recorded in.
+        assert!(p3(place(
+            "prod",
+            &format!("prod/{zk}"),
+            Some("prod"),
+            false
+        )));
+        assert!(place("prod", &format!("prod/{zk}"), Some("prod"), true).is_ok());
+        assert_eq!(
+            place("prod", &format!("prod/{v1}"), Some("prod"), false).unwrap(),
+            (v1.to_owned(), format!("prod/{v1}"))
+        );
+        // Outside the capture's base: it cannot be moved.
+        let e = place("prod", &format!("staging/{zk}"), Some("replay"), false).unwrap_err();
+        assert!(e.contains("does not sit under the capture's base"), "{e}");
+    }
+
     /// A version-2 capture as the CLI replays it: without `--seed-state`
     /// the preamble row is skipped and *said* (RFC 13 §4.2's hazard), the
     /// trigger is a marker and never a put, and the observed row still
@@ -1314,6 +1441,7 @@ mod tests {
             i_know: false,
             default_qos: QosProfile::Refreshed,
             seed_state,
+            namespace: None,
         };
 
         let mut reader = source_of(&body).await;
@@ -1459,6 +1587,7 @@ mod tests {
                 i_know: false,
                 default_qos: QosProfile::Refreshed,
                 seed_state: false,
+                namespace: None,
             },
             |ev| {
                 would.push(format!("{ev:?}"));
@@ -1492,6 +1621,7 @@ mod tests {
                 i_know: false,
                 default_qos: QosProfile::Refreshed,
                 seed_state: false,
+                namespace: None,
             },
             |_| {},
         )
@@ -1520,6 +1650,7 @@ mod tests {
                     i_know: false,
                     default_qos: QosProfile::Refreshed,
                     seed_state: false,
+                    namespace: None,
                 },
                 |_| {},
             )
@@ -1570,6 +1701,7 @@ mod tests {
                 i_know: false,
                 default_qos: QosProfile::Transition,
                 seed_state: false,
+                namespace: None,
             },
             |_| {},
         )

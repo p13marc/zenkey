@@ -1,9 +1,10 @@
 //! Where zenctl reads a body from (#210).
 //!
-//! Seven arguments name bytes — `pub`'s payload and attachment, `get`'s
-//! body, `service call`'s body and attachment, `serve`'s reply, `check
+//! Seven arguments named bytes — `pub`'s payload and attachment, `get`'s
+//! body, v1 `service call`'s body and attachment, `serve`'s reply, `check
 //! schema`'s payload — and each one accepted the same three spellings: `-` for
-//! stdin, `@path` for a file, anything else for itself.
+//! stdin, `@path` for a file, anything else for itself. (`service call` gave
+//! way to zk2's `call` in FJ5, whose request is one more of them.)
 //!
 //! They were seven copies. Four were byte-identical; three had dropped the `-`
 //! arm because they take an `Option`, so `zenctl get --body -` read stdin while

@@ -7,6 +7,14 @@
 //! without `--force-base`; a recorded delete keeps the retire gate's price
 //! (`--i-know`); the capture's drop ledger is repeated, because a replay
 //! of a partial view is a partial view.
+//!
+//! **`--namespace`** (#612, FJ5; spike S13, r4 §4.1) publishes through a
+//! session opened in a deployment namespace, each key moved from the
+//! capture's base into it: a replayer standing in for the owners it
+//! recorded, in a namespace of its own. A zk2 service's own key replayed
+//! where that service runs — as recorded, or into the namespace the capture
+//! was recorded in — is refused, row by row, unless `--i-know` (P3; the
+//! tooling guide's §5).
 
 use std::io::BufReader;
 
@@ -27,6 +35,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         i_know,
         seed_state,
         qos,
+        namespace,
         bus: _,
     } = cli;
     let (file, qos) = (file.as_str(), qos.as_str());
@@ -53,11 +62,13 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         header.base,
         header.captured_at,
     );
-    let target_base = args.base();
+    // Under `--namespace` the target is the namespace typed: moving the keys
+    // there is the point, so the base contract below does not apply to it.
+    let target_base = namespace.as_deref().unwrap_or(args.base());
     // Both base refusals are refusals of the command line, so both are a 2
     // (`crate::exit`); the mismatch was a bare `bail!`, a 1, until #506 put
     // its sibling beside it. Neither opens a session.
-    if header.base != target_base && !force_base {
+    if namespace.is_none() && header.base != target_base && !force_base {
         return Err(unaskable!(
             "capture base {:?} != target base {:?} — recorded keys spell the \
              capture's deployment, and \"same keys, different deployment\" is \
@@ -82,7 +93,13 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         ));
     }
     if !dry_run {
-        eprintln!("replaying onto base {target_base:?} at speed {speed}");
+        match &namespace {
+            Some(ns) => eprintln!(
+                "replaying into namespace {ns:?} (keys moved from base {:?}) at speed {speed}",
+                header.base
+            ),
+            None => eprintln!("replaying onto base {target_base:?} at speed {speed}"),
+        }
     }
 
     // One resolution for the whole run, and it happens in `Mode::of` (#198).
@@ -179,12 +196,16 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
                 i_know,
                 default_qos,
                 seed_state,
+                namespace: namespace.as_deref(),
             },
             &mut on_event,
         )
         .await?
     } else {
-        let session = args.session().await?;
+        let session = match &namespace {
+            Some(ns) => args.session_in(ns).await?,
+            None => args.session().await?,
+        };
         let slices = args.slices_optional().await?;
         zenkey_fleet::replay(
             &mut reader,
@@ -197,6 +218,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
                 i_know,
                 default_qos,
                 seed_state,
+                namespace: namespace.as_deref(),
             },
             &mut on_event,
         )

@@ -2,41 +2,16 @@ An argument that lands in a chunk position of a key — a producer, a procedure
 path, a config resource or group — is a name the grammar has to be able to
 spell (RFC 03 §2). The typed builders in `zenkey::selector` *assert* on an
 illegal chunk, which is right for the registry constants they were written for
-and wrong for a shell: `zenctl service call h-0123456789ab MyApp foo` against a
-live bus panicked with **exit 101**, outside the 0/1/2 contract (#509).
+and wrong for a shell: v1's `zenctl service call h-0123456789ab MyApp foo`
+against a live bus panicked with **exit 101**, outside the 0/1/2 contract
+(#509). (`service call` is gone since FJ5: zk2's `call` takes an address and
+an interface, below.)
 
 Every such argument now goes through one clap `value_parser` built on
 `zenkey::grammar::is_valid_plain_chunk` — the predicate the builders and the
 registry linter share — so it is a usage error: exit 2, naming the argument and
 the rule, before any session is opened. That is why none of these needs a bus.
 The list is every verb that takes one; a new one belongs here.
-
-```console
-$ zenctl service call h-0123456789ab MyApp introspect
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk, nor `-` for a service origin — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl service call h-0123456789ab probe Ping
-? 2
-error: invalid value 'Ping' for '<PROCEDURE>': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl service call h-0123456789ab probe 'artifact//status'
-? 2
-error: invalid value 'artifact//status' for '<PROCEDURE>': "" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
 
 ```console
 $ zenctl bench rpc h-0123456789ab MyApp
@@ -192,16 +167,9 @@ For more information, try '--help'.
 ```
 
 `-` is the one non-chunk a call's producer position admits: a service origin's
-`@rpc` has no producer chunk (RFC 06 §5), so `service call @catalog - …` names
+`@rpc` has no producer chunk (RFC 06 §5), so `bench rpc @catalog - …` names
 none. Against a host or the fleet it is this tool's own refusal — still a 2,
 and still before a session.
-
-```console
-$ zenctl service call h-0123456789ab - introspect
-? 2
-Error: producer `-` stands for no producer chunk, which only a service origin (`@…`) has (RFC 06 §5) — a host or the fleet needs the producer's name
-
-```
 
 ```console
 $ zenctl bench rpc '*' -
@@ -260,3 +228,29 @@ Error: Host-A: system "Host-A" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-
 
 ```
 
+`call`, `get state` and `watch` (FJ5) take the same address. `get state`'s
+is one service, parsed at the edge; `call` and `watch` take a pattern too
+(`*/tc`), so theirs is checked as R1's binding syntax, before a session:
+
+```console
+$ zenctl get state MyHost/tc tc.netif.v1 namespaces
+? 2
+error: invalid value 'MyHost/tc' for '<SYSTEM/SERVICE>': system "MyHost" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl call MyHost/tc tc.netif.v1 diagnostics --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: MyHost/tc: binding "MyHost/tc" is not <system>/<service> (each a name or *)
+
+```
+
+```console
+$ zenctl watch 'host-a/*/x' tc.netif.v1 'bandwidth/{ns}/{iface}' --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: host-a/*/x: binding "host-a/*/x" is not <system>/<service> (each a name or *)
+
+```

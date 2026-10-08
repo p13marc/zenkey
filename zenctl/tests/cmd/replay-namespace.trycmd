@@ -1,0 +1,66 @@
+`replay --namespace` (#612, FJ5; spike S13, r4 §4.1).
+
+A replayer stands in for the owners it recorded: it republishes under their
+original addresses, in a namespace of its own where they are not running.
+`--namespace` opens the session in that namespace and moves every key there
+from the capture's base. The fixture was recorded under base `prod`: two
+samples of `host-a/tc`'s bandwidth stream, and one foreign key.
+
+```console
+$ zenctl replay --dry-run --format table --color never --namespace replay tests/cmd/fixtures/zk2.zrec
+tests/cmd/fixtures/zk2.zrec: captured prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** under base "prod" (2026-10-08T00:00:00Z)
+would put replay/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  (12 B, application/json)
+would put replay/legacy/temperature  (2 B, text/plain)
+would put replay/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  (12 B, application/json)
+would replay 3 put(s) and 0 tombstone(s) from prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** (captured 2026-10-08T00:00:00Z)
+into namespace "replay", each key moved from the capture's base "prod"
+
+```
+
+Replaying a zk2 service's own key into the namespace it was recorded in —
+where its owner runs — would write a key the owner owns (P3, spec §6), and
+each such row is refused and counted unless `--i-know`. Foreign rows replay
+as before. A refused row is the act failing, so it exits 1.
+
+```console
+$ zenctl replay --dry-run --format table --color never --namespace prod tests/cmd/fixtures/zk2.zrec
+? 1
+tests/cmd/fixtures/zk2.zrec: captured prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** under base "prod" (2026-10-08T00:00:00Z)
+refused prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in namespace "prod", the one it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+would put prod/legacy/temperature  (2 B, text/plain)
+refused prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in namespace "prod", the one it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+would replay 1 put(s) and 0 tombstone(s) from prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** (captured 2026-10-08T00:00:00Z)
+into namespace "prod", each key moved from the capture's base "prod"
+  prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in namespace "prod", the one it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+  prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in namespace "prod", the one it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+0 malformed row(s), 2 refused row(s) — counted, not silently skipped
+
+```
+
+```console
+$ zenctl replay --dry-run --format table --color never --namespace prod --i-know tests/cmd/fixtures/zk2.zrec
+tests/cmd/fixtures/zk2.zrec: captured prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** under base "prod" (2026-10-08T00:00:00Z)
+would put prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  (12 B, application/json)
+would put prod/legacy/temperature  (2 B, text/plain)
+would put prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  (12 B, application/json)
+would replay 3 put(s) and 0 tombstone(s) from prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** (captured 2026-10-08T00:00:00Z)
+into namespace "prod", each key moved from the capture's base "prod"
+
+```
+
+Without `--namespace`, every key is published as recorded, which is the
+namespace it came from:
+
+```console
+$ zenctl replay --dry-run --format table --color never --base prod tests/cmd/fixtures/zk2.zrec
+? 1
+tests/cmd/fixtures/zk2.zrec: captured prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** under base "prod" (2026-10-08T00:00:00Z)
+refused prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in the namespace it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+would put prod/legacy/temperature  (2 B, text/plain)
+refused prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in the namespace it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+would replay 1 put(s) and 0 tombstone(s) from prod/zk2/host-a/tc/tc.netif.v1/stream/** + prod/legacy/** (captured 2026-10-08T00:00:00Z)
+  prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in the namespace it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+  prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: is a key host-a/tc owns, and would land in the namespace it was recorded in, where its owner runs: only the owner writes its keys (P3, spec §6). Replay into a namespace of your own with --namespace, or pass --i-know to write it anyway.
+0 malformed row(s), 2 refused row(s) — counted, not silently skipped
+
+```

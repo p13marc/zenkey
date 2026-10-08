@@ -214,9 +214,9 @@ impl Responder {
     ///
     /// A deployment's `timestamping.enabled` stamps *publications* on the
     /// way past; a query reply is stamped only when the responder stamps
-    /// it. That stamp is what gives a traced call (#215) its HLC reference:
-    /// without it every effect's `hlc_delta_ms` is absent, because the
-    /// caller's own session mints no HLC to measure from.
+    /// it. That stamp is the HLC reference a caller can measure from, since
+    /// the caller's own session mints none (it gave v1's `service call
+    /// --trace`, #215, its `hlc_delta_ms`).
     pub async fn reply_stamped(
         &self,
         query: &Query,

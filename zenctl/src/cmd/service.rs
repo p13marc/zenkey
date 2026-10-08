@@ -3,8 +3,8 @@
 //!
 //! They replace v1's `node` (who is alive) and v1's `service list|info`
 //! (what a producer's `@rpc` plane declares): in zk2 both questions have one
-//! answer, the instance's descriptor. `service call` is still v1's, in
-//! `cmd/call.rs`, until FJ5's `call`.
+//! answer, the instance's descriptor. Calling one of its operations is
+//! `zenctl call` (`cmd/call.rs`, FJ5), which replaced v1's `service call`.
 
 use anyhow::Result;
 use zenkey_fleet::PresenceScope;

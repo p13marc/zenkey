@@ -6,7 +6,36 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — the inspection nouns speak zk2 (#612, FJ4)
+## Unreleased (`main`, zk2) — acting and reading through a contract (#612, FJ5)
+
+zk2's acts and reads, each aimed at an address, an interface revision and one
+resource of its contract, through the zk2 runtime's own client and consumer in
+the deployment's namespace. `service call` and `retire` are gone; `get` keeps
+its raw form and gains a resolved one beside it.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `service call <origin> <producer> <procedure> [--body] [--param k=v]` | `call <system>/<service> <iface>[@fp] <operation> [JSON\|@FILE\|-] [--param name=value]` | the request is encoded as the operation's type (JSON or CBOR, protobuf from JSON through the bundle's descriptor set, raw bytes); one address is called `BestMatching` + `None`, and only an idempotent operation is retried (`--retries`, after silence) |
+| `service call '*' …` (+ `--i-know` for an unknown procedure) | `call '*/tc' …`, or a `--param` left out | a fan-out (`All` + `None`) only to an operation declaring `fanout = "allowed"`; any other is refused before anything is sent (exit **2**), and no flag moves it |
+| `service call --trace [--for]` | — | dropped with `service call`: the trace window attributed by the v1 registry's declared chain |
+| `service call --attachment`, `--raw`, `--no-validate` | — | the contract decides the encoding; the request is not checked against its JSON Schema (the owner refuses what does not decode) |
+| a call's silence: `exit 2` and a paragraph | `answer: "silent"`, `silence.presence` | `present`, `instance_only`, `no_token_visible` (what *this reader* could see: a refused presence read is empty too, spec §8.1 0.8), `unknown` (a read that may be incomplete) |
+| — | a fan-out's `replies` | repliers by key (rows), envelopes unattributed (`refusals`), `presence.unheard` (token holders that sent no value), `possibly_partial` per replier with a declared summary |
+| `get <selector>` | `get <selector>`, unchanged | raw: a wire selector on a session in no namespace |
+| — | `get state <system>/<service> <iface>[@fp] <state> [--param]` | resolved: the owner's current state (target All, consolidation Latest, S4); silence is exit **2**, never "no value" |
+| — | `get state … --last-known <archive>` | an `archive.v1`'s answer (S5), one key at a time: `reading: "last_known"` in every format, with `confirmed` and the type identity |
+| — | `watch <address> <iface>[@fp] <resource> [--for] [--count]` | a stream, state or event resource, every sample decoded through the contract; R6's discards and the lag counted apart; exit **2** when nothing arrived |
+| `retire <key> [--qos] [--i-know]` | — | a tombstone has no zk2 meaning a tool may send (P3); `check retired` is a different verb and stays |
+| `pub <key> <body>` | `pub <key> <body>` | a key a zk2 service owns (`…/zk2/<system>/<service>/…`) is refused, exit **2**, not overridable; foreign keys are written as before. `--from ndjson` refuses such a row and counts it |
+| `replay <file>` | `replay <file> [--namespace NS]` | `--namespace` publishes through a session in `NS`, every key moved from the capture's base (spike S13); a zk2 service's own key replayed where it runs — as recorded, or into the capture's own namespace — is refused and counted unless `--i-know` (P3) |
+
+Report families: `operation` (a call; v1's `call` family stays with
+`config`'s read-back) and `state`; `watch` streams `sample`, `discarded`,
+`lagged` and `summary` rows with no envelope, and a typed `--format json` is
+refused, as on every stream. `--timeout` on the zk2 verbs also bounds a state
+GET and a call; a call given none waits its operation's `timeout_ms`.
+
+## FJ4 — the inspection nouns speak zk2 (#612)
 
 `main` is the zk2 line; nothing is released from it until FJ9, and fixes to
 the v1 tool ship from the `v1` branch (0.14.x). This chunk replaces v1's
@@ -26,7 +55,7 @@ spellings below are gone, and each row names where its question went.
 | `base list [--watch]` | `namespace list` | reads `**/zk2/*/*/@zk/instance/*` from a session in **no** namespace; the bus root is `(empty)`, selected with `--namespace ''` |
 | `service list [--producer]` | `service list`, `iface show` | a procedure is an operation resource of an interface |
 | `service info <producer> [procedure]` | `iface show <iface>`, `schema show <iface> <resource>` | an operation's request, response, error and summary types, `fanout`, `serving` and `idempotent` |
-| `service call …` | unchanged (v1 `@rpc`) | until FJ5's `call` |
+| `service call …` | `call` (FJ5, above) | |
 | `interface list` | `iface list` | |
 | `interface show <type> [--schema] [--full]` | `iface show <iface>[@fp]`, `schema show <iface> [resource] [--full]` | schemas come from the revision's bundle — `--contracts` or retrieved from its holders (spec §8.4) — never from a served `describe` |
 | `schema show <producer> [--type T] [--full]` | `schema show <iface>[@fp] [resource] [--full]` | protobuf artifacts shown as their messages and enums; a resource named implies its documents; exit **2** when the revision cannot be had |

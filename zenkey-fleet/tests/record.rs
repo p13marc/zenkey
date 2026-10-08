@@ -173,6 +173,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
             i_know: false,
             default_qos: zenkey::qos::QosProfile::Refreshed,
             seed_state: false,
+            namespace: None,
         },
         |_| {},
     )
@@ -290,6 +291,7 @@ async fn a_lossy_capture_says_so_at_both_ends() {
             i_know: false,
             default_qos: zenkey::qos::QosProfile::Refreshed,
             seed_state: false,
+            namespace: None,
         },
         |_| {},
     )

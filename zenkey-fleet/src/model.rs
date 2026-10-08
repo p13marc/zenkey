@@ -12,8 +12,7 @@
 //! ([`timeline`]), a fan-in's
 //! replies become snapshot rows ([`snapshot`]), two snapshots become one
 //! comparison ([`snapshot_diff`]), two deployments' hosts become one
-//! alignment ([`origin_map`]), a sample seen after a call becomes a
-//! *relation* to that call's procedure ([`trace`]), and a stream of
+//! alignment ([`origin_map`]), and a stream of
 //! described samples becomes a metrics surface whose blind spots are series
 //! of their own ([`export`], [`prom`]).
 //!
@@ -21,7 +20,11 @@
 //! of services, interfaces, revisions and bindings ([`catalog`], which also
 //! holds the contracts loaded offline), a zk2 sample plus the revision in
 //! hand becomes an honest rendering ([`render`]), and two revisions become
-//! the classifier's verdict on the change ([`compat`], FJ4). Bytes no
+//! the classifier's verdict on the change ([`compat`], FJ4). What a resolved
+//! verb aims at — an address or a pattern, a resource, the values given, a
+//! call's plan and its request's bytes, and whether a wire key is a
+//! service's own (P3) — is settled here before anything is sent
+//! ([`target`], FJ5). Bytes no
 //! schema reaches fall to the structural ladder ([`structural`]), which
 //! v1's decode seam and zk2's rendering share.
 //!
@@ -62,8 +65,8 @@ pub mod snapshot_diff;
 pub mod stats;
 pub mod storage;
 pub mod structural;
+pub mod target;
 pub mod timeline;
-pub mod trace;
 pub mod tree;
 
 #[cfg(feature = "decode")]

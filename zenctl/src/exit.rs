@@ -56,7 +56,7 @@
 //!
 //! ## Acts keep their 1
 //!
-//! `pub`, `retire`, `replay`, `gen` and `blob fetch` *do* something. "Could
+//! `pub`, `replay`, `gen` and `blob fetch` *do* something. "Could
 //! not be proven" has no meaning for an act — either it went out or it did
 //! not — so their failures are 1, and only an input **they** refuse is a 2.
 //!
