@@ -86,7 +86,8 @@ def _cbor_domain(v: Any) -> None:
         pass
     elif isinstance(v, int):
         # "Outside 64 bits": outside both i64 and u64, -2^63 to 2^64-1
-        # (SPEC-FINDINGS F-58). CBOR's major type 0 never exceeds 2^64-1.
+        # (§5.2, 0.6: "from −2^63 to 2^64−1"). CBOR's major type 0 never
+        # exceeds 2^64-1.
         if not -(2**63) <= v <= 2**64 - 1:
             raise EnvelopeError("decode", f"an integer outside 64 bits: {v}")
     elif isinstance(v, float):

@@ -82,6 +82,8 @@ class Verdict:
 BOUNDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
           "minLength", "maxLength", "minItems", "maxItems")
 _MISSING = object()
+#: Marks a schema whose $ref resolves to nothing (§9.8 schema_unreadable).
+UNRESOLVED = "$unresolved"
 
 
 @dataclass
@@ -114,8 +116,10 @@ class JsonWorld:
         hit = self._target(where, ref) if isinstance(ref, str) and (where, ref) not in seen else None
         siblings = {k: absolutize(v, where) for k, v in node.items() if k not in ("$ref", "$defs")}
         if hit is None:
-            # A $ref that does not resolve (or a cycle): keep it, as written.
-            return {"$ref": _absolute(ref, where), **siblings}
+            # 0.6: "a $ref whose file part named no artifact … or one whose
+            # pointer resolves to nothing, is now schema_unreadable (review)".
+            # A cycle lands here too.
+            return {UNRESOLVED: _absolute(ref, where), **siblings}
         target = self.resolve(hit[0], hit[1], seen | {(where, ref)})
         if not isinstance(target, dict):
             return target if not siblings else {"$ref": _absolute(ref, where), **siblings}
@@ -196,6 +200,9 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     if key in seen:
         return v
     seen.add(key)
+    if (isinstance(o, dict) and UNRESOLVED in o) or (isinstance(n, dict) and UNRESOLVED in n):
+        v.add(REVIEW, "schema_unreadable", f"{at}: a $ref resolves to nothing")
+        return v
     # "A boolean schema … changed, to or from anything, is review
     # (boolean_schema_changed)."
     if not isinstance(o, dict) or not isinstance(n, dict):
@@ -259,7 +266,10 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
         nb = [as_written(s) for s in n.get(kw, [])] if isinstance(n.get(kw, []), list) else n.get(kw)
         if _canon(ob) == _canon(nb) and (kw in o) == (kw in n):
             continue
-        if kw == "oneOf" and isinstance(ob, list) and isinstance(nb, list) and len(nb) > len(ob):
+        # 0.6: "oneof_branch_added needs a oneOf on both sides. Adding the
+        # keyword where there was none, or removing it, is undecided_changed".
+        if (kw == "oneOf" and kw in o and kw in n and isinstance(ob, list)
+                and isinstance(nb, list) and len(nb) > len(ob)):
             v.add(BREAKING, "oneof_branch_added", f"{at}: a oneOf branch added")
         else:
             v.add(REVIEW, "undecided_changed", f"{at}: a change inside {kw}")
@@ -269,10 +279,6 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     for k in sorted((set(o) | set(n)) - judged - ANNOTATIONS):
         if _canon(o.get(k)) != _canon(n.get(k)):
             v.add(REVIEW, "unlisted_changed", f"{at}: {k} changed")
-    # A $ref that did not resolve is kept as written; a change to it is
-    # judged like an unlisted keyword.
-    if _canon(o.get("$ref")) != _canon(n.get("$ref")):
-        v.add(REVIEW, "unlisted_changed", f"{at}: an unresolved $ref changed")
     return v
 
 

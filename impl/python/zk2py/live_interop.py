@@ -55,7 +55,8 @@ DEFAULT_RUNS = [
 #: §8.1 (0.5): "how long a tool waits for presence after an owner starts"
 #: is the caller's choice, and "the scenarios, and so a conformance run, use
 #: 1 s". zk2py counts it from its client session's connection to the
-#: owner's router (SPEC-FINDINGS F-59).
+#: owner's router: §8.1 (0.6) starts the wait at "the later of the tool's
+#: session connecting and the owner's launch", the connection here.
 PRESENCE_WAIT_S = 1.0
 #: Owners that MUST NOT start: a required role their configuration binds to
 #: nothing (§3.2, 0.5; presence.md §2 step 4). The owner example takes no

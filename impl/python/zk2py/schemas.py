@@ -183,6 +183,12 @@ class SchemaSet:
             self._err("E028", f"{listed}: an integer outside ±(2^53−1)")
         else:
             art_id = jcs.jcs_id(doc)
+            # §9.4 (0.6): "a later listed file with an earlier one's id is
+            # E024, once, and is not loaded, as a later file with a taken
+            # stem already was. Ids are compared, not file bytes."
+            if any(a.id == art_id for a in self.json_files):
+                self._err("E024", f"{listed}: its id {art_id} is an earlier file's; not loaded")
+                return
         # §7.3: a refused keyword is E037, once per keyword and file.
         for kw in refused_keywords(doc):
             self._err("E037", f"{listed}: keyword {kw!r} is outside the zk2 subset")
