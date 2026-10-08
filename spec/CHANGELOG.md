@@ -3,6 +3,249 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.7 — 2026-10-08: the live findings, the operations runtime's decisions, and the codegen's gaps (#609, #621, #611)
+
+Three sources, 22 items:
+- **The Python implementation's live half (#609):** a minimal owner, state
+  reads and calls, interop with the Rust owner both ways. It found 7 places
+  where the spec was silent or ambiguous: F-64 to F-70.
+- **The operations runtime (#621),** the first implementation of §5 and
+  §6, made 13 decisions where they were silent: O-1 to O-13.
+- **The codegen (#611)** found 2 gaps at the spec's level: C-1 and C-2.
+
+Each is resolved as 0.5's and 0.6's were:
+- **the reference's behaviour becomes the rule**, stated where a reader
+  looks for it; or,
+- **where that behaviour was a bug**, the corrected rule is stated. The
+  classifier is `zenkey-model`'s, and is fixed here. The runtime
+  (`zenkey/`) and the codegen (`zenkey-build/`) are not changed by this
+  amendment: their fixes are listed below, for the work that owns them.
+
+Resolving C-1 found one more bug, beyond the 22: the classifier never
+looked through a `$ref` inside `oneOf`, `anyOf` or `prefixItems`, so a
+breaking change could classify as compatible. It is fixed, and listed as
+X-1.
+
+A fixture pins every static rule a fixture can check: 8 compatibility
+cases and 4 error envelopes. No existing expectation changed. The live
+rules land in their scenarios: `state.md §1`, `presence.md §1–§2`, and
+`operations.md §1–§8`.
+
+**Changed: the reference was wrong, and is fixed in `zenkey-model`.**
+- **A nullable is one type (C-1, §7.3, §9.8).** schemars 1 writes
+  `Option<T>` as `{"type": [T, "null"]}` for a scalar, and as
+  `{"anyOf": [S, {"type": "null"}]}` for a referenced type; other
+  generators write the second for every optional value. The classifier read
+  them as two types: a move from one to the other was `type_changed`,
+  breaking, although nothing a reader or writer does changes.
+  - **The rule:** the second spelling, with nothing else beside the `anyOf`
+    that carries meaning, is the *nullable form*. Its *reading* is S, its
+    `$ref`s followed, with `null` added to its `type` and, where it has
+    one, to its `enum`. It exists when that S is an object with a `type`
+    and without `const`, `oneOf` or `anyOf`, the keywords that constrain a
+    null too. A form with a reading is compared as its reading.
+  - **The one exception:** a form against an `anyOf` that is not one is
+    compared as written, both sides, as any `anyOf` changed is. So
+    `anyof-add-branch`, whose new revision adds a `null` branch to a
+    one-branch `anyOf`, stays review.
+  - **Why this rule.** Of the three the decision weighed, it is the only
+    one that loses nothing:
+    - *Keeping two types, and calling a move between them review* still
+      asks a human to accept a generator upgrade, and leaves every change
+      inside S undecided.
+    - *Reading the `type` list as the `anyOf`* would make a change inside
+      `["integer", "null"]`, breaking today under the `type` rule, review.
+    - *The reading* moves the comparison into the decided rules: a change
+      inside S is classified as one outside a nullable is, through S's
+      `$ref`s. The conditions are those under which `null` added to the
+      `type` (and the `enum`) means exactly "S, or null".
+  - **What it changes.** On the new cases, 0.6's classifier said breaking
+    for `nullable-type-to-anyof`, `nullable-anyof-to-type` and
+    `nullable-enum-inlined` (now compatible), review for
+    `nullable-inner-retyped` (now breaking), and compatible for
+    `nullable-ref-target-changed` (now breaking).
+- **Undecided keywords compare through their `$ref`s (X-1, §9.8).** 0.5
+  wrote "a `$ref` there is not followed", while §7.3 says any change inside
+  `oneOf`, `anyOf` or `prefixItems` is review. A definition reached only
+  from inside one was compared nowhere, so a change to it, a field retyped
+  included, classified as compatible. Measured on 0.6's classifier: an
+  `Option<Struct>`'s struct with a field retyped, and a `oneOf` variant's
+  payload retyped (`oneof-ref-target-changed`), both compatible. Inside an
+  undecided keyword, a `$ref` is now compared by its target, siblings
+  added: a change there is review, and inlining a definition is no change.
+  A `$ref` back to a target already being followed is compared as written,
+  which ends a recursive type, and a dangling one is `schema_unreadable`,
+  as outside.
+
+**Recorded: the runtime and the codegen are wrong, and the fix is theirs.**
+Each item states the rule the fix must meet; none is made here.
+- **A raw `error` type's detail (F-65).** The `Raw` codec's detail is
+  bytes, which a JSON envelope refuses, so every `app` with a raw detail
+  goes out as `internal`. §5.2 now says the detail is base64 text.
+- **`app` without a detail (F-65).** `OpError` has no constructor for one,
+  and the owner example sends `{}`, or empty protobuf bytes, as the detail
+  of operations that declare no `error` type, which §5.2 now forbids.
+- **The first state value (F-68).** The owner example puts its state value
+  after `start()`, so after its tokens. §8.2 now asks for it before.
+- **Replicas and `unavailable` (O-10, O-12).** The runtime declares an
+  `unavailable` queryable over every optional operation an active instance
+  does not expose. An instance serving only replicated operations then
+  intercepts calls to an exclusive operation another instance serves. §5.1
+  now forbids it.
+- **The split-brain check (O-12).** `ownership::split_brain` compares
+  tokens only, so it reports replicas. §6 now exempts them, decided from
+  the contract and the holders' descriptors.
+- **A typed handler over a template (C-2, O-1).** A typed handler cannot
+  name the member a fan-out reply answers for: `Call::member` takes
+  `&mut self`, the member it names is not shared between a call's clones,
+  and `CallInfo` lends only `&Call`. So every fan-out over a templated
+  operation served by `serve_one` or `serve_many` is answered `internal`.
+- **The codegen's schema check (C-1).** `zenkey_build::check_schema`
+  compares the two spellings as written, so a type whose schemars output
+  spells an `Option` one way disagrees with a committed schema that spells
+  it the other. It should read a nullable form as its reading, as §7.3 now
+  says.
+
+**Changed: rules stated, by section.**
+- **The descriptor (F-67, §3.3, §8.1, §8.2).** The first descriptor is
+  put, when its queryable is declared in step 3, so before any token; a
+  re-mint puts the new instance's the same way.
+- **State (§4.2, §4.3).**
+  - *Observing S1 (F-69).* An owner that is its own router stamps with the
+    router's zid, so the check proves nothing. The tester runs the owner
+    as a client of a router with timestamping on, against a control: an
+    unstamped put through that router arrives with the router's zid.
+  - *The tick (F-66)* is the smallest step the timestamp type takes: one
+    NTP64 unit, 2^−32 s, in the reference. Any larger step keeps S7, such
+    as zenoh-python's 1 ns.
+- **Calling (§5.1).**
+  - *A concrete call (F-64, O-9)* MUST set `BestMatching` and `None`.
+    `Latest` would hold the reply until the query completes, and keep one
+    reply per key, so a split-brain's second execution would vanish.
+  - *Timeouts (O-8):* the caller's, else the operation's `timeout_ms`,
+    else 10 s, zenoh's default. `timeout_ms` had no stated meaning; it is
+    the contract's recommendation.
+  - *Retries (O-7)* are opt-in, and follow silence only. An envelope is an
+    answer, `busy` included: calling again after it is a new call.
+- **Answering (§5.1).**
+  - *Every call is answered (O-5):* a handler that ends without replying,
+    or without its declared summary, is answered `internal`.
+  - *A key that names no member (O-4)* is `invalid_request`: the key is
+    malformed. `not_found` is for a well-formed member the owner lacks.
+  - *The request (O-13).* One that does not decode as the request type is
+    `invalid_request`. The decode is the check the core requires: an owner
+    need not evaluate the JSON Schema, and a caller does not depend on it.
+  - *The active instance (O-10)* exposes at least one of the interface's
+    resources. Replicas: one that serves only replicated operations MUST
+    NOT answer `unavailable` on an exclusive operation, and replicas SHOULD
+    expose the same replicated operations.
+- **Fan-out (§5.1).**
+  - *Over a template (O-1, C-2).* A server over the whole template learns
+    only what the key expression binds, names the member each reply
+    answers for, and replies on its key, which the call must select. A
+    caller relies on a reply's key, and not on one reply per member.
+  - *Attribution (O-2).* A refusal cannot be attributed in zenoh 1.10.1: a
+    `reply_err` carries no key, and the replier's id is unstable. Who sent
+    no value is read from presence, refused and silent alike.
+  - *Possibly partial (O-3).* A replier, the replies on one key, is
+    complete only with exactly one summary. With none it was cut off; with
+    two, several instances answered on one key and cannot be told apart.
+- **Call metadata (O-6, §5.1).** A JSON object whose `actor` and
+  `request_id`, each optional, are strings where present; other members
+  ignored; anything else, a `null` member included, is no metadata. A call
+  is never refused for it.
+- **`app` (F-65, §5.2).** Any operation may refuse with `app`. With no
+  `error` type there is no detail; with one, the detail is optional, and a
+  raw type's is base64 text in its JSON envelope. A detail that does not
+  fit is never sent: the reference sends `internal`.
+- **Serving (§6).**
+  - *Replicated serving (O-12).* Each replica holds the interface's token,
+    so the token check exempts holders of which at most one exposes an
+    exclusive resource, decided from the contract and the descriptors.
+    Where a tool cannot read them, the holders are undecided.
+  - *The grace period (O-11)* is judged from two presence reads, `grace`
+    apart: two or more holders in both, not necessarily the same.
+- **Start-up (§8.2).**
+  - *Exposed (F-70)* is what the instance serves, as its descriptor says:
+    an operation by its queryable, a state by its state queryables and
+    publisher, a stream by its publisher, an event by its puts. A
+    template with no member yet is exposed by the template. Step 2 refuses
+    an optional resource neither exposed nor absent as the descriptor
+    says, since a descriptor's exposure is compact. The order of steps 1
+    and 2 is free.
+  - *State values (F-68).* An owner that holds a state value at start
+    SHOULD put it before the tokens, so a GET made on presence finds it.
+- **Appendix B** gains the reply error's shape, the default query timeout,
+  and NTP64's unit.
+
+**Where the Python implementation's guess and the stated rule differ** (it
+was right to guess; these are now decided):
+- *Exposed (F-70):* zk2py counts a state only once its value exists, and
+  refuses a contract with a required templated resource. The rule counts a
+  state without its value, and a template without members. zk2py may still
+  refuse to start what it does not serve.
+- *New static rules:* the nullable reading (C-1), and `$ref`s followed
+  inside undecided keywords (X-1), change the classifier zk2py follows.
+
+zk2py's guesses on F-64 (`None` for every call), F-65 (`app` without a
+detail), F-66 (1 ns), F-67 (one stamped put after step 3, before the
+tokens), F-68 (state values before the tokens) and F-69 (an owner behind a
+router) are the stated rules.
+
+**Deliberately not changed:**
+- **No existing expectation.** Every fixture of 0.6 keeps its expected
+  value; the classifier's fixes change behaviour only on inputs no fixture
+  had. `anyof-add-branch` keeps review through the exception above.
+- **The envelope gains no member to attribute a refusal (O-2).** A key or
+  an id inside it would change `error.proto`, `error.schema.json`, every
+  decoder and the fixtures, for an attribution a replier could claim
+  falsely. Refusals stay unattributed until zenoh has a stable way.
+- **No JSON Schema validation is required at run time (O-13).** Validators
+  differ (§7.3 refused `pattern` for that reason); the decode is the check.
+- **`oneOf: [S, {"type": "null"}]` has no reading.** It is not what the
+  generators write, and a `oneOf` branch added is the one undecided change
+  measured: it stays compared as written. A nullable inside an undecided
+  keyword is compared as written too, like everything there.
+- **No timeout value of the core's own (O-8).** 10 s is zenoh's default,
+  named as such; the scenarios' 1 s still binds conformance runs.
+- **No fan-out retries are specified (O-7).** The reference makes none,
+  and the core neither requires nor forbids one beyond O4.
+- **A split-brain "undecided" is not a new finding class.** It is what a
+  tool says when it cannot decide, as silence is never a verdict.
+- **The live rules have no fixture.** The first descriptor's put, the
+  state value's place, S1's observation, the fan-out rules and the
+  replicas' exemption are network behaviour: their evidence is the
+  scenarios.
+- **The owner example (#610)** is still its own router. `state.md §1`
+  needs it as a client of R1, like `presence.md §2` step 4 (0.6): the
+  runtime's change to make.
+
+| Id | Resolution |
+|---|---|
+| F-64 | Rule stated (§5.1 O1: a concrete call MUST set `BestMatching` and `None`); scenario `operations.md §1` |
+| F-65 | Rule stated (§5.2: `app` for any operation, no detail without an `error` type, a raw detail as base64 text); runtime fix recorded (the `Raw` codec's detail, a detail-less `app`, the owner example); fixtures `errors/json-app-no-detail`, `json-app-raw-detail`, `pb-app-no-detail`, `pb-app-empty-detail`; scenario `operations.md §3` |
+| F-66 | Rule stated (§4.3: a tick is one NTP64 unit, any larger step allowed; Appendix B); scenario `state.md §1` step 3 |
+| F-67 | Rule stated (§3.3, §8.1, §8.2 step 3: the first descriptor is put, before any token); scenario `presence.md §1` |
+| F-68 | SHOULD added (§8.2: a state value held at start is put before the tokens); owner example's fix recorded; scenario `presence.md §1` |
+| F-69 | Rule stated (§4.2 "Observing S1": an owner behind a router, with a control); scenario `state.md §1` rewritten |
+| F-70 | Rule stated (§8.2: "exposed" defined; step 2 refuses an optional resource neither exposed nor absent); scenarios `presence.md §1`, `§2` step 5 |
+| O-1 | Rule stated (§5.1 "Over a template": a template-wide server names the member, on a key the call selected) |
+| O-2 | Rule stated (§5.1 "Attribution": refusals unattributed, presence for the rest; Appendix B); scenario `operations.md §2` |
+| O-3 | Rule stated (§5.1 "Possibly partial": exactly one summary, two instances on one key indistinguishable); scenario `operations.md §6` |
+| O-4 | Rule stated (§5.1: a key that names no member is `invalid_request`); scenario `operations.md §3` step 3 |
+| O-5 | Rule stated (§5.1, O3: every call answered, `internal` for a handler that does not reply); scenario `operations.md §3` step 5 |
+| O-6 | Rule stated (§5.1 "Call metadata"); scenario `operations.md §7` |
+| O-7 | Rule stated (§5.1 "Retries": opt-in, after silence only, `busy` an answer); scenario `operations.md §4` |
+| O-8 | Rule stated (§5.1 "The timeout": the caller's, `timeout_ms`, 10 s; Appendix B) |
+| O-9 | As F-64 |
+| O-10 | Rule stated (§5.1 "The active instance"); MUST NOT added beside replicas; runtime fix recorded (`Ops::start`); scenario `operations.md §3` step 7 |
+| O-11 | Rule stated (§6: two presence reads `grace` apart); scenario `operations.md §8` |
+| O-12 | Rule stated (§6: holders of which at most one exposes an exclusive resource are no finding, decided from the contract and descriptors); runtime fix recorded (`ownership::split_brain`); scenario `operations.md §8` steps 4–5 |
+| O-13 | Rule stated (§5.1 "The request": the decode is the check); scenario `operations.md §3` step 2 |
+| C-1 | Rust fixed (the classifier's nullable reading); rule stated (§7.3, §9.8); codegen fix recorded (`check_schema`); fixtures `compat/payload/jsonschema/nullable-type-to-anyof`, `nullable-anyof-to-type`, `nullable-inner-retyped`, `nullable-null-dropped`, `nullable-ref-target-changed`, `nullable-enum-inlined`, `nullable-enum-null-refused` |
+| C-2 | Rule stated (§5.1 "Over a template": what a server and a caller rely on); runtime fix recorded (a typed handler names the member); scenario `operations.md §2` |
+| X-1 | Found resolving C-1. Rust fixed (`$ref`s followed inside undecided keywords); rule stated (§9.8); fixture `compat/payload/jsonschema/oneof-ref-target-changed` |
+
 ## 0.6 — 2026-10-08: the findings against 0.5, and the archive's gaps (#609, #620)
 
 The Python implementation (#609) was rewritten from 0.5, and found 8 more
