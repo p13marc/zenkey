@@ -1,0 +1,49 @@
+# zk2py's own interop contract (#609): one of every resource kind, an
+# explicit stream with an epoch, a capability-gated optional state, and a
+# requirement, so the live runner sees each of them in presence, the
+# descriptor and the bundle. It must load with no finding at all.
+[interface]
+name    = "zk2py_probe"
+major   = 1
+minor   = 2
+summary = "zk2py's interop probe"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/probe.json"]
+
+[resources.status]
+kind        = "state"
+type        = "json:Status"
+annotations = { "freshness.ttl_s" = 30 }
+
+[resources."lanes/{lane}"]
+kind        = "stream"
+explicit    = true
+type        = { raw = "application/octet-stream" }
+params      = { lane = "string" }
+cardinality = 4
+epoch       = "lane"
+
+[resources.calibration]
+kind     = "state"
+type     = "json:Status"
+optional = true
+gate     = "capability:probe_cal"
+
+[resources.changed]
+kind      = "event"
+type      = "json:Status"
+rate      = "low"
+retention = "1h"
+
+[resources.ping]
+kind       = "operation"
+request    = "json:Empty"
+response   = "json:Status"
+idempotent = true
+
+[requires.upstream]
+interface = "nav.v2"
+resources = ["position"]
+optional  = true
