@@ -85,6 +85,16 @@ pub fn contract(name: &str) -> Contract {
         .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
 }
 
+/// A contract from `examples/zk2/`, by its path without `.toml`.
+pub fn example(path: &str) -> Contract {
+    let full = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/zk2")
+        .join(format!("{path}.toml"));
+    let l = load_path(&full);
+    l.contract
+        .unwrap_or_else(|| panic!("{path} does not load:\n{}", l.report))
+}
+
 pub fn imp(name: &str) -> Implementation {
     Implementation::new(contract(name))
 }

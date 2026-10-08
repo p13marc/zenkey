@@ -113,3 +113,56 @@ impl Found {
         }
     }
 }
+
+/// An edge of the data-flow graph (R3): a consumer's role, bound to a
+/// provider.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Edge {
+    /// The consumer's `<system>/<service>`.
+    pub consumer: String,
+    pub role: String,
+    /// The provider's `<system>/<service>`.
+    pub provider: String,
+}
+
+/// The graph, read from descriptors and interface tokens only, never
+/// inferred from traffic (R3). A provider of an interface is a service with
+/// its interface token, or whose descriptor lists it (the tokenless set,
+/// §8.1). Each role's bindings, exact or wildcard, select among them.
+#[must_use]
+pub fn edges(descriptors: &[Descriptor], alive: &[ZkKey]) -> Vec<Edge> {
+    let mut providers: Vec<(String, Addr)> = alive
+        .iter()
+        .filter_map(|k| match k {
+            ZkKey::Alive { addr, iface, .. } => Some((iface.to_string(), addr.clone())),
+            _ => None,
+        })
+        .collect();
+    for d in descriptors {
+        if let Ok(addr) = d.service.parse::<Addr>() {
+            providers.extend(d.interfaces.iter().map(|e| (e.iface.clone(), addr.clone())));
+        }
+    }
+    let mut out = Vec::new();
+    for d in descriptors {
+        for r in &d.requires {
+            for b in &r.bindings {
+                let Ok(pattern) = crate::consumer::Provider::parse(b) else {
+                    continue;
+                };
+                for (iface, addr) in &providers {
+                    if *iface == r.interface && pattern.matches(addr) {
+                        out.push(Edge {
+                            consumer: d.service.clone(),
+                            role: r.role.clone(),
+                            provider: addr.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}

@@ -1,0 +1,37 @@
+# types.md §1–§3: a protobuf stream, a JSON Schema state on CBOR, raw
+# streams (one zenoh predefines, one it does not), and declared QoS.
+[interface]
+name = "sensor"
+major = 1
+minor = 0
+
+[schemas]
+protobuf = ["schemas/sensor.proto"]
+jsonschema = ["schemas/sensor.json"]
+
+[resources.pose]
+kind = "stream"
+type = "sensor.v1.Pose"
+
+[resources.status]
+kind = "state"
+type = "json:Status"
+encoding = "cbor"
+
+[resources.frames]
+kind = "stream"
+type = { raw = "image/jpeg" }
+
+[resources.blobs]
+kind = "stream"
+type = { raw = "application/x-flatbuffers" }
+
+[resources.fast]
+kind = "stream"
+type = { raw = "text/plain" }
+priority = "data_high"
+express = true
+
+[resources.slow]
+kind = "state"
+type = { raw = "text/plain" }

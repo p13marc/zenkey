@@ -1,0 +1,9 @@
+# bindings.md §1, §3, §4: what detectors publish and trackers bind.
+[interface]
+name = "detections"
+major = 1
+minor = 0
+
+[resources.objects]
+kind = "stream"
+type = { raw = "text/plain" }

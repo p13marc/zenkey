@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "up": { "type": "boolean" },
+        "load": { "type": "number" }
+      },
+      "required": ["up"]
+    }
+  }
+}
