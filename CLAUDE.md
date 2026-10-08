@@ -250,6 +250,16 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   minimal `archive.v1` (§4.4): records, refuses outdated puts, aligns on
   positive evidence only, and `last_known` reads it as last-known, never
   current.
+  Operations (#621, FH): `operation` serves a `complete` queryable that
+  refuses fan-out (O2) and answers `unavailable` with its cause before any
+  handler runs (O3), and a call left without its reply gets `internal`,
+  never silence; `client`'s `Client` calls one explicit address
+  (`BestMatching`, retrying only idempotent operations, O4), and its
+  `Outcome` keeps a value, an envelope and silence apart (O5); `Fleet` fans
+  out only to `fanout = "allowed"` (`All` + `None`), attributing each reply
+  by its key (O6); `ownership::split_brain` is §6's token check. At most
+  once holds only while one instance serves: exclusivity is
+  `redundancy.v1`'s (#613).
   Everything session-free stays in `zenkey-model`, including `decode`, the
   bundle-only decoder tools use (§7.2).
   `tests/` runs `spec/scenarios/` sections as in-process routers and

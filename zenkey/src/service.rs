@@ -76,6 +76,8 @@ pub struct ServiceBuilder {
     instance: InstanceId,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
+    /// Shared with its operation servers (O3, #621).
+    ops: Arc<crate::operation::Availability>,
     minter: Arc<Minter>,
     store: Arc<Store>,
     /// Interfaces whose state this service answers GETs for (S2).
@@ -115,6 +117,7 @@ impl ServiceBuilder {
             instance: mint(),
             impls: Vec::new(),
             roles: Vec::new(),
+            ops: Arc::default(),
             minter: Arc::new(Minter::new(session)),
             store: Arc::new(Store::new(window)),
             state_ifaces: BTreeSet::new(),
@@ -390,12 +393,15 @@ impl ServiceBuilder {
                 )));
             }
         }
+        // O3: `unavailable` answered for the optional operations not served.
+        let ops = crate::operation::Ops::start(&self).await?;
         let mut svc = Service {
             alive: BTreeMap::new(),
             instance_token: None,
             members: BTreeMap::new(),
             descriptor_q: None,
             contract_qs: Vec::new(),
+            ops,
             state_qs: BTreeMap::new(),
             clock: None,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
@@ -491,7 +497,7 @@ fn check_exposure(impls: &[ImplState], config: &ServiceConfig) -> Result<()> {
 
 /// Whether an interface exposes at least one resource now (§8.1): the
 /// condition for holding its interface token.
-fn exposes_any(s: &ImplState, held: &BTreeSet<String>) -> bool {
+pub(crate) fn exposes_any(s: &ImplState, held: &BTreeSet<String>) -> bool {
     s.imp
         .contract()
         .resources
@@ -525,6 +531,7 @@ pub struct Service {
     members: BTreeMap<(IfaceId, String), (InstanceId, LivelinessToken)>,
     descriptor_q: Option<Queryable<()>>,
     contract_qs: Vec<Queryable<()>>,
+    ops: crate::operation::Ops,
     state_qs: BTreeMap<IfaceId, Vec<Queryable<()>>>,
     clock: Option<ClockGuard>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
@@ -708,6 +715,9 @@ impl Service {
         next.capabilities = capabilities;
         check_exposure(&self.impls, &next)?;
         self.config = next;
+        self.ops
+            .availability
+            .refresh(&self.impls, &self.config.capabilities);
         self.publish_descriptor()?;
         let instance = self.instance.clone();
         let want: BTreeSet<IfaceId> = self.wanted_tokens();
@@ -751,6 +761,9 @@ impl Service {
                 s.unavailable.remove(resource);
             }
         }
+        self.ops
+            .availability
+            .refresh(&self.impls, &self.config.capabilities);
         self.publish_descriptor()
     }
 
@@ -941,5 +954,46 @@ impl Service {
             .timestamp(self.session.new_timestamp())
             .wait()
             .map_err(zenoh)
+    }
+}
+
+// What the operation layer (`operation.rs`, `client.rs`, #621) reads.
+impl ServiceBuilder {
+    pub(crate) fn session(&self) -> &zenoh::Session {
+        &self.session
+    }
+
+    pub(crate) fn config(&self) -> &ServiceConfig {
+        &self.config
+    }
+
+    pub(crate) fn impls(&self) -> &[ImplState] {
+        &self.impls
+    }
+
+    pub(crate) fn availability(&self) -> &Arc<crate::operation::Availability> {
+        &self.ops
+    }
+}
+
+impl Service {
+    pub(crate) fn session(&self) -> &zenoh::Session {
+        &self.session
+    }
+
+    pub(crate) fn config(&self) -> &ServiceConfig {
+        &self.config
+    }
+
+    pub(crate) fn impls(&self) -> &[ImplState] {
+        &self.impls
+    }
+
+    pub(crate) fn roles(&self) -> &[Role] {
+        &self.roles
+    }
+
+    pub(crate) fn ops(&self) -> &crate::operation::Ops {
+        &self.ops
     }
 }

@@ -7,11 +7,15 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use common::{T, client, config, eventually, example, router};
+use serde_json::{Value, json};
 use zenkey::consumer::Delivery;
-use zenkey::model::grammar::{IfaceId, ZkKey};
+use zenkey::model::authoring::Kind;
+use zenkey::model::envelope::Detail;
+use zenkey::model::grammar::{Addr, IfaceId, ZkKey};
 use zenkey::model::template::Bindings;
+use zenkey::operation::{Call, OpError, OperationServer};
 use zenkey::presence::{self, Edge};
-use zenkey::{Implementation, Service, ServiceBuilder};
+use zenkey::{Implementation, Outcome, Service, ServiceBuilder};
 
 fn iface(s: &str) -> IfaceId {
     s.parse().unwrap()
@@ -246,6 +250,255 @@ async fn tcgui_frontend_binding() {
     assert_eq!(
         *from.lock().unwrap(),
         BTreeSet::from(["host-a/tc".to_owned(), "host-b/tc".to_owned()])
+    );
+}
+
+/// A tcgui backend at `address`: `tc.netif.v1` and `tc.netem.v1`, serving
+/// their operations over the templates and exposing the rest. Each
+/// execution is recorded as `<host> <op> <values>`.
+async fn tc_backend(
+    s: &zenoh::Session,
+    address: &str,
+    ran: Arc<Mutex<Vec<String>>>,
+) -> (Service, Vec<OperationServer>) {
+    let (netif, netem) = (iface("tc.netif.v1"), iface("tc.netem.v1"));
+    let mut b = ServiceBuilder::new(s, config(address));
+    for (i, path) in [(&netif, "tcgui/tc.netif.v1"), (&netem, "tcgui/tc.netem.v1")] {
+        let c = example(path);
+        let names: Vec<String> = c
+            .resources
+            .iter()
+            .filter(|r| r.kind != Kind::Operation)
+            .map(zenkey::implementation::resource_name)
+            .collect();
+        b.implement(Implementation::new(c)).unwrap();
+        for n in names {
+            b.expose(i, &n).unwrap();
+        }
+    }
+    let record = |op: &'static str| {
+        let ran = Arc::clone(&ran);
+        let host = address.to_owned();
+        move |call: &Call| {
+            let v: Vec<String> = call
+                .values()
+                .map(|v| v.values().flatten().cloned().collect())
+                .unwrap_or_default();
+            ran.lock()
+                .unwrap()
+                .push(format!("{host} {op} {}", v.join("/")));
+        }
+    };
+
+    let mut servers = Vec::new();
+    let rec = record("interfaces-set");
+    servers.push(
+        b.serve_value(
+            &netif,
+            "@op/interfaces/{ns}/{iface}/set",
+            None,
+            move |call: Call, req: Value| {
+                rec(&call);
+                async move { Ok(json!({"new_state": req["operation"] == "Enable"})) }
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let rec = record("diagnostics");
+    let host = address.to_owned();
+    servers.push(
+        b.serve_value(
+            &netif,
+            "@op/diagnostics",
+            None,
+            move |call: Call, req: Value| {
+                rec(&call);
+                let host = host.clone();
+                async move { Ok(json!({"results": {"host": host, "interface": req["interface"]}})) }
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let rec = record("config-set");
+    servers.push(
+        b.serve_value(
+            &netem,
+            "@op/config/{ns}/{iface}/set",
+            None,
+            move |call: Call, _req: Value| {
+                rec(&call);
+                let lo = call.values().is_some_and(|v| v["iface"] == ["lo"]);
+                async move {
+                    if lo {
+                        return Err(OpError::app(
+                            "netem refused",
+                            &json!({"kind": "kernel", "message": "Operation not permitted"}),
+                        ));
+                    }
+                    Ok(json!({"message": "applied"}))
+                }
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let rec = record("plug-set");
+    servers.push(
+        b.serve_value(
+            &netem,
+            "@op/plug/{ns}/{iface}/set",
+            None,
+            move |call: Call, _req: Value| {
+                rec(&call);
+                async move { Ok(json!({"message": "plugged"})) }
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    (b.start().await.unwrap(), servers)
+}
+
+/// The tcgui pilot's operations (#621's done-when): the frontend calls the
+/// templated `set` operations at one host's explicit address through its
+/// roles, gets the backend's typed `app` error, and fans `diagnostics` out
+/// across hosts, each reply attributed to its host.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcgui_set_and_diagnostics() {
+    let (_r1, ep) = router(None).await;
+    let ran: Arc<Mutex<Vec<String>>> = Arc::default();
+    let mut backends = Vec::new();
+    for host in ["host-a", "host-b"] {
+        let s = client(&ep).await;
+        backends.push(tc_backend(&s, &format!("{host}/tc"), Arc::clone(&ran)).await);
+    }
+
+    let ws = client(&ep).await;
+    let mut b = ServiceBuilder::new(
+        &ws,
+        config("ws-01/tcgui-frontend")
+            .bind("netif", &["*/tc"])
+            .bind("netem", &["*/tc"]),
+    );
+    b.require("netif", iface("tc.netif.v1"), false);
+    b.require("netem", iface("tc.netem.v1"), false);
+    let frontend = b.start().await.unwrap();
+    let netif = frontend
+        .client("netif", Arc::new(example("tcgui/tc.netif.v1")))
+        .unwrap();
+    let netem = frontend
+        .client("netem", Arc::new(example("tcgui/tc.netem.v1")))
+        .unwrap();
+    // A tool acts on presence, never on an owner's start() returning.
+    eventually("both backends are present", || async {
+        netif.present(T).await.unwrap().len() == 2 && netem.present(T).await.unwrap().len() == 2
+    })
+    .await;
+    let (host_a, host_b): (Addr, Addr) =
+        ("host-a/tc".parse().unwrap(), "host-b/tc".parse().unwrap());
+    let member = |ns: &str, i: &str| -> Bindings {
+        [
+            ("ns".to_owned(), vec![ns.to_owned()]),
+            ("iface".to_owned(), vec![i.to_owned()]),
+        ]
+        .into()
+    };
+
+    // A templated set at one explicit address: the value is slugged into
+    // its chunk, and the server reads it back raw.
+    let out = netif
+        .call_value(
+            &host_a,
+            "@op/interfaces/{ns}/{iface}/set",
+            &member("default", "veth@1"),
+            &json!({"operation": "Enable"}),
+        )
+        .await
+        .unwrap();
+    let Outcome::Value(answer) = out else {
+        panic!("a value reply: {out:?}")
+    };
+    assert_eq!(
+        answer.key(),
+        "zk2/host-a/tc/tc.netif.v1/@op/interfaces/default/x-veth_x401/set"
+    );
+    assert_eq!(answer.value::<Value>().unwrap()["new_state"], true);
+
+    // A netem apply the kernel refuses: `app`, with the TcError inline.
+    let out = netem
+        .call_value(
+            &host_b,
+            "@op/config/{ns}/{iface}/set",
+            &member("default", "lo"),
+            &json!({"operation": {"Apply": {}}}),
+        )
+        .await
+        .unwrap();
+    let env = out.refusal().expect("refused");
+    assert_eq!(env.code, "app");
+    let Some(Detail::Value(detail)) = &env.detail else {
+        panic!("an inline detail: {env:?}")
+    };
+    assert_eq!(detail["kind"], "kernel");
+    let plug = netem
+        .call_value(
+            &host_b,
+            "@op/plug/{ns}/{iface}/set",
+            &member("default", "eth0"),
+            &json!({"operation": "Buffer"}),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(plug, Outcome::Value(_)), "{plug:?}");
+
+    // Cross-host diagnostics: one fan-out, one reply per host, attributed.
+    let replies = netif
+        .fleet()
+        .call_value(
+            "@op/diagnostics",
+            &Bindings::new(),
+            &json!({"namespace": "default", "interface": "eth0"}),
+        )
+        .await
+        .unwrap();
+    let mut by: Vec<(String, String)> = replies
+        .repliers
+        .iter()
+        .map(|r| {
+            let v = r.values[0].value::<Value>().unwrap();
+            let host = v["results"]["host"].as_str().unwrap().to_owned();
+            (r.addr.to_string(), host)
+        })
+        .collect();
+    by.sort();
+    let pair = |h: &str| (h.to_owned(), h.to_owned());
+    assert_eq!(by, [pair("host-a/tc"), pair("host-b/tc")]);
+    // A set is never fanned out (O2).
+    assert!(
+        netif
+            .fleet()
+            .call_value(
+                "@op/interfaces/{ns}/{iface}/set",
+                &Bindings::new(),
+                &json!({"operation": "Disable"}),
+            )
+            .await
+            .is_err()
+    );
+
+    let mut ran = ran.lock().unwrap().clone();
+    ran.sort();
+    assert_eq!(
+        ran,
+        [
+            "host-a/tc diagnostics ",
+            "host-a/tc interfaces-set veth@1/default",
+            "host-b/tc config-set lo/default",
+            "host-b/tc diagnostics ",
+            "host-b/tc plug-set eth0/default",
+        ]
     );
 }
 

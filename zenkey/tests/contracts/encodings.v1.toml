@@ -1,0 +1,44 @@
+# operations.md §3: the envelope's encoding follows the operation's error
+# type, else its response type (spec §5.2): JSON, CBOR, protobuf, raw.
+[interface]
+name = "encodings"
+major = 1
+minor = 0
+
+[schemas]
+protobuf = ["schemas/sensor.proto"]
+jsonschema = ["schemas/tc.json"]
+
+[resources.json]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+
+[resources.cbor]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+encoding = "cbor"
+
+[resources.proto]
+kind = "operation"
+request = "sensor.v1.Pose"
+response = "sensor.v1.Pose"
+
+[resources.raw]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+
+[resources.proto-error]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+error = "sensor.v1.Pose"
+
+[resources.cbor-error]
+kind = "operation"
+request = "sensor.v1.Pose"
+response = "sensor.v1.Pose"
+error = "json:TcError"
+encoding = "cbor"
