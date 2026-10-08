@@ -76,20 +76,23 @@ The result at the time of writing:
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
-contracts      91 passed     0 failed
+contracts      96 passed     0 failed
 sets            4 passed     0 failed
-bundles        23 passed     0 failed
+bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    30 passed     0 failed
-errors         35 passed     0 failed
-compat         87 passed     0 failed
+descriptors    36 passed     0 failed
+errors         38 passed     0 failed
+compat         89 passed     0 failed
 examples       97 passed     0 failed
-total         485 passed     0 failed
+total         502 passed     0 failed
 ```
 
-The figures are against `core.md` 0.5. Amendment 0.5 resolved all 55 of
-zk2py's earlier findings, and decided 13 of its guesses the other way. zk2py
-now follows the stated rules; `SPEC-FINDINGS.md` says, per finding, how.
+The figures are against `core.md` 0.6.
+- Amendment 0.5 resolved F-01 to F-55, and 0.6 resolved F-56 to F-63.
+- 0.5 decided 13 of zk2py's guesses the other way, and 0.6 three more.
+
+zk2py now follows the stated rules; `SPEC-FINDINGS.md` says, per finding,
+how.
 
 **The classifier since 0.3.** Against 0.2, zk2py classed every change §9.8
 did not list as review. 0.3 lists them, so zk2py now follows the tables,
@@ -159,7 +162,28 @@ state:
 
 Every wait is the 1 s that §8.1 gives a conformance run.
 
-Result: `live interop: 60 passed, 0 failed`. Exit codes are as for the
+**State, operations, and being an owner (0.6).**
+- `zk2py.live.get_state` makes a state GET per S4: target `All` and
+  consolidation `Latest`. It returns current replies with their stamps, or
+  silence.
+- `zk2py.live.call` makes a call: `BestMatching` (O1), or `All` for a
+  fan-out (O2), with consolidation `None`. It returns a value, a decoded
+  §5.2 envelope, a transport error, or silence (O5).
+- `zk2py.owner.Owner` is a minimal owner, a router or a client of one. It
+  brings itself up in §8.2's order: a stamped raw state value (S1, S2),
+  parameterless operations answered per O1–O3 (echo, a JSON operation,
+  `app` refusals), the descriptor and bundle holders, then its tokens. It
+  refuses to start with an unbound required role (§3.2).
+
+The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
+whose state zk2py GETs and whose operations it calls. It also adds two
+zk2py-owner runs:
+- one read by zk2py's own client and by the Rust `consume` example (three
+  times: echo, the protobuf `app` refusal, the JSON `invalid_request`);
+- the refusal of presence.md §2 step 4, watched through a router of the
+  runner's own with a control (`interop/zk2py_needs.v1.toml`).
+
+Result: `live interop: 113 passed, 0 failed`. Exit codes are as for the
 static runner.
 
 **§8.1's handler rule in zenoh-python.**
@@ -184,10 +208,18 @@ The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
 
 ## What it does not cover
 
-- **The rest of the live half:** state GETs and archives (§4), operations
-  (§5), being an owner (§6, §8.2), constrained faces (§8.5), and the
-  scenarios other than presence.md and retrieval.md. These are later
-  slices.
+- **The rest of the live half:**
+  - archives and alignment (§4.4);
+  - deletes and tombstones (S3);
+  - clocks beyond minting (S7's drift);
+  - fan-out and many-reply operations (O2's caller side beyond refusal, O6);
+  - serving roles (§6);
+  - constrained faces (§8.5);
+  - the scenarios other than presence.md, retrieval.md and parts of
+    state.md and operations.md.
+
+  zk2py's owner serves parameterless raw state and parameterless
+  operations only.
 - **Building bundles with extras.** The spec names no source for the
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
@@ -251,9 +283,10 @@ impl/python/
     cbor.py, envelope.py §5.2   the error envelope
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
-    live.py           §3.3 §8.1–§8.4 presence, descriptor GET, contract retrieval
-    live_interop.py             the live runner, against the Rust owner example
-  interop/            zk2py_probe.v1.toml: zk2py's own interop contract
+    live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls
+    owner.py          §3.3 §4 §5 §8 a minimal owner
+    live_interop.py             the live runner, with the Rust owner and consume examples
+  interop/            zk2py's own interop contracts: probe, echo, needs
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

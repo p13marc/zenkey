@@ -103,9 +103,9 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
 
 
 def _repeats(values: list[str]) -> int:
-    """§3.3's "once for the repeat": one per value listed more than once
-    (SPEC-FINDINGS F-57)."""
-    return sum(1 for v in set(values) if values.count(v) > 1)
+    """§3.3 (0.6): "A repeated capability or profile is one D008 or D010 for
+    the whole list, however many values repeat"."""
+    return 1 if len(set(values)) < len(values) else 0
 
 
 def _resources(contract: Contract) -> dict[str, dict[str, Any]]:

@@ -6,16 +6,19 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Four rounds.**
+**Five rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
-- **Amendment 0.5 resolves all of F-01 to F-55.** Each carries a "Status at
-  0.5" line saying how; earlier status lines are kept as history.
-- **F-56 to F-63 are new**, found against 0.5. Five follow up text that 0.5
-  added. One, F-62, is a contradiction between two 0.5 rules, shown by a
-  contract that lints clean and builds a bundle whose `$ref` resolves to
-  nothing.
+- Amendment 0.5 resolved all of F-01 to F-55.
+- F-56 to F-63 were found against 0.5.
+- **Amendment 0.6 resolves all of F-56 to F-63.** Each carries a "Status
+  at 0.6" line.
+- **F-64 to F-70 are new**, found against 0.6 while building the rest of
+  the live half:
+  - a state GET (S4);
+  - a call with its value or envelope decoded (O1–O5, §5.2);
+  - an owner (§8.2) that the Rust `consume` example reads.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -25,16 +28,16 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.5:** 63 entries.
-- F-01 to F-55: all **resolved by 0.5**; none left unresolved.
-  - In 13 of them, 0.5 decided against zk2py's earlier guess: F-08, F-09,
-    F-10, F-20, F-23, F-25, F-26, F-27, F-32, F-33, F-35, F-39 and F-43,
-    the changelog's list. zk2py now follows the stated rule.
-  - In 3 more, zk2py's mechanism changed though no class did:
-    - F-13: a later file with a taken stem is no longer loaded;
-    - F-38: a failing set member's codes stand;
-    - F-40: resources pair by kind and template.
-- F-56 to F-63: **new**, 6 ambiguity, 1 gap, 1 contradiction.
+**Counts at 0.6:** 70 entries.
+- F-01 to F-55: resolved by 0.5.
+- F-56 to F-63: resolved by 0.6; none left unresolved.
+  - 0.6 overturned three of zk2py's guesses: F-57, F-60 and F-62. zk2py
+    followed 0.5 there, and built the dangling `$ref`.
+  - It confirmed four: F-56, F-58, F-59 and F-63.
+  - F-61's rule is stated, and zk2py's own owner follows it. The Rust owner
+    example, still its own router, cannot be watched that way.
+- F-64 to F-70: **new**, 2 ambiguity, 5 gap (one observed on the reference
+  owner).
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
@@ -96,14 +99,21 @@ by the spec section that now states the rule.
 | F-53 | ambiguity | resolved by 0.5 | §3.3 | `profiles`. |
 | F-54 | gap | resolved by 0.5 | §8.1 | When a member exists. |
 | F-55 | ambiguity | resolved by 0.5 | §3.2 R3 | An unbound optional role. |
-| F-56 | ambiguity | **new** | §2.6, E026 (0.5) | "The seconds MUST fit 64 bits": signed or unsigned? |
-| F-57 | ambiguity | **new** | §3.3 D008, D010 (0.5) | "Once for the repeat": once per repeated value, or once per descriptor? |
-| F-58 | ambiguity | **new** | §5.2 CBOR (0.5) | "An integer outside 64 bits": i64, u64, or their union? |
-| F-59 | ambiguity | **new** | §8.1 timeouts (0.5) | "Waits for presence after an owner starts … 1 s": from which instant? |
-| F-60 | ambiguity | **new** | §9.8 `oneof_branch_added` (0.5) | "More branches than the earlier one's" when one side has no `oneOf`. |
-| F-61 | gap | **new** | §3.2, presence.md §2 step 4 (0.5) | "No instance token appears" cannot be observed when the refusing owner is its own router. |
-| F-62 | contradiction | **new** | §9.6 against §9.4 (0.5) | One id for identical files, under the *last* name, breaks a bundle `$ref` to the first file's stem. |
-| F-63 | ambiguity | **new** | descriptor.schema.json, §3.3, §9.1 (0.5) | `uint64` is bounded for contracts but not for descriptors' `cardinality`. |
+| F-56 | ambiguity | resolved by 0.6 | §2.6, E026 (0.5) | "The seconds MUST fit 64 bits": signed or unsigned? |
+| F-57 | ambiguity | resolved by 0.6 | §3.3 D008, D010 (0.5) | "Once for the repeat": once per repeated value, or once per descriptor? |
+| F-58 | ambiguity | resolved by 0.6 | §5.2 CBOR (0.5) | "An integer outside 64 bits": i64, u64, or their union? |
+| F-59 | ambiguity | resolved by 0.6 | §8.1 timeouts (0.5) | "Waits for presence after an owner starts … 1 s": from which instant? |
+| F-60 | ambiguity | resolved by 0.6 | §9.8 `oneof_branch_added` (0.5) | "More branches than the earlier one's" when one side has no `oneOf`. |
+| F-61 | gap | resolved by 0.6 | §3.2, presence.md §2 step 4 (0.5) | "No instance token appears" cannot be observed when the refusing owner is its own router. |
+| F-62 | contradiction | resolved by 0.6 | §9.6 against §9.4 (0.5) | One id for identical files, under the *last* name, breaks a bundle `$ref` to the first file's stem. |
+| F-63 | ambiguity | resolved by 0.6 | descriptor.schema.json, §3.3, §9.1 (0.5) | `uint64` is bounded for contracts but not for descriptors' `cardinality`. |
+| F-64 | ambiguity | **new** | §5.1 O1–O3 | A `replies = "one"` call names no consolidation. |
+| F-65 | gap (observed) | **new** | §5.2 | An `app` envelope for an operation with no `error` type, or a raw one, in JSON: what `detail` is. |
+| F-66 | ambiguity | **new** | §4.3 minting | "Plus one tick": which unit? |
+| F-67 | ambiguity | **new** | §3.3, §8.2 | Is the first descriptor a "change" to put, and where in the bring-up order? |
+| F-68 | gap | **new** | §8.2, §4.2 | When an owner puts its first state value, relative to its tokens. |
+| F-69 | gap | **new** | §4.2 S1, state.md §1 | "A router stamp would carry the router's": not observable when the owner is the router. |
+| F-70 | gap | **new** | §8.2 step 2 | What "exposed" means for a state resource, or a templated one, at start-up. |
 
 ---
 
@@ -1283,6 +1293,8 @@ No fixture pins any of these.
 
 ### F-56 · ambiguity · §2.6 and E026 (0.5): "the seconds MUST fit 64 bits"
 
+**Status at 0.6: resolved by 0.6.** §2.6/E026: the seconds are unsigned; above 2^64−1 is E026, and 2^63 s is E028 in the canonical form. zk2py's guess was the rule.
+
 > "In a retention, `<n>` is decimal digits, leading zeros allowed, and at
 > least 1 … The seconds MUST fit 64 bits (E026) and, like every canonical
 > integer, ±(2^53−1) (E028)."
@@ -1296,6 +1308,8 @@ signed (§9.1), and a descriptor's `minor` goes to 2^64−1 (§3.3).
 from the canonical form.
 
 ### F-57 · ambiguity · §3.3's D008 and D010 (0.5): "once for the repeat"
+
+**Status at 0.6: resolved by 0.6.** §3.3: a repeat is one D008 or D010 for the whole list, and a malformed value counts at each occurrence. zk2py's guess (one per repeated value) was overturned.
 
 > D008 "a capability is not `[a-z0-9][a-z0-9_.-]*`; or one is listed twice
 > | per capability; once for the repeat"; D010 likewise for profiles.
@@ -1312,6 +1326,8 @@ malformed occurrence (`descriptor._repeats`).
 
 ### F-58 · ambiguity · §5.2, CBOR (0.5): "an integer outside 64 bits"
 
+**Status at 0.6: resolved by 0.6.** §5.2: a CBOR integer decodes from −2^63 to 2^64−1. zk2py's guess was the rule.
+
 > "A map key that is not text, an integer outside 64 bits, or a float that
 > is not finite is `decode`."
 
@@ -1323,6 +1339,8 @@ has such an integer.
 holds, that is, below −2^63.
 
 ### F-59 · ambiguity · §8.1 (0.5): when "after an owner starts" begins
+
+**Status at 0.6: resolved by 0.6.** §8.1: the wait starts at the later of the tool's session connecting and the owner's launch, which is the connection when the owner is the tool's router. zk2py's guess was the rule.
 
 > "how long a tool waits for presence after an owner starts, are the
 > caller's choices. The scenarios, and so a conformance run, use 1 s unless
@@ -1343,6 +1361,8 @@ within it in every run (2 and 4 tokens, in about 1 ms).
 
 ### F-60 · ambiguity · §9.8 `oneof_branch_added` (0.5): a side with no `oneOf`
 
+**Status at 0.6: resolved by 0.6.** §9.8: `oneof_branch_added` needs a `oneOf` on both sides; adding or removing the keyword is `undecided_changed`. zk2py's guess (breaking) was overturned.
+
 > "a `oneOf` branch added (`oneof_branch_added`): the candidate's `oneOf`
 > has more branches than the earlier one's, whatever they hold."
 
@@ -1356,6 +1376,8 @@ Adding a `oneOf` keyword could be:
 adding one is breaking. Removing one is review.
 
 ### F-61 · gap · §3.2 and `presence.md` §2 step 4 (0.5): observing a refusal
+
+**Status at 0.6: resolved by 0.6.** §3.2 and presence.md §2 now watch a refusal through a router R1 that outlives the owner, against a control. The Rust owner example is still its own router, so its refusal check still rests on silence. zk2py's own owner, as a client of R1, now follows the scenario in full (`run_python_refusal`).
 
 > §3.2: "An owner whose configuration binds a required role to nothing MUST
 > NOT start, as one missing a required resource does not (§8.2 step 2): no
@@ -1376,6 +1398,8 @@ instance token while it ran, no `ready` line"), and reports how many
 presence GETs it completed: 0.
 
 ### F-62 · contradiction · §9.6 against §9.4 (0.5): one id for identical files
+
+**Status at 0.6: resolved by 0.6.** §9.4: a later listed file with an earlier one's id is E024 and is not loaded; the classifier reads a dangling `$ref` as `schema_unreadable`. zk2py follows both.
 
 > §9.6: "Two listed JSON Schema files with identical bytes have one id, so
 > the canonical form lists it once, under the `name` of the last of them in
@@ -1406,6 +1430,8 @@ example:
 
 ### F-63 · ambiguity · `descriptor.schema.json`, §3.3 and §9.1 (0.5): the `uint64` bound
 
+**Status at 0.6: resolved by 0.6.** §3.3: `format` is a bound in a descriptor too, `uint64` being 0 to 2^64−1. zk2py's guess was the rule.
+
 > §9.1: "The schema's `format` is a bound here, not an annotation: `uint32`
 > is 0 to 2^32−1, and `uint64` is 0 to 2^63−1, TOML's own bound."
 
@@ -1419,3 +1445,141 @@ is a bound for descriptors too.
 **Resolved:** a guess. zk2py's shape checker bounds `uint64` to 0..2^64−1
 in both schemas, so such a value is D000. For contracts this changes
 nothing, since TOML cannot write a larger integer.
+
+## New at 0.6: state, operations, and being an owner (#609)
+
+These come from the rest of #609's live scope:
+- `zk2py.live.get_state` and `zk2py.live.call`;
+- `zk2py.owner`, a minimal owner;
+- `zk2py.live_interop`, which reads the Rust owner example's state and
+  calls its operations, and lets the Rust `consume` example read zk2py's
+  owner.
+
+`just py-live` passes 113 of 113. Each entry below is a rule the
+implementation had to guess.
+
+### F-64 · ambiguity · §5.1 O1–O3: the consolidation of a single-reply call
+
+O2 gives a fan-out call target `All` and consolidation `None`, and O6
+gives a `replies = "many"` call consolidation `None`. O1 implies target
+`BestMatching` for a concrete call. Nothing names the consolidation of the
+common case, a concrete call to a `replies = "one"` operation.
+
+zenoh's default (`Auto`, `Latest` on a concrete key) holds the reply until
+the query completes (§4.1), the effect §8.4 measured and forbade for
+retrieval. It also ranks an unstamped reply, which every operation reply
+is, lowest.
+**Resolved:** a guess. zk2py's `call` uses `None` for every call, so a
+value or an envelope is seen as it arrives (`live.call`).
+
+### F-65 · gap (observed) · §5.2: `app`, and what `detail` is, in a JSON envelope
+
+> "`detail` | a value, bytes, or null | With `app` only: the operation's
+> declared `error` type, as a value inline (JSON, CBOR) or as its encoded
+> message (protobuf)"
+
+Three cases are not covered:
+- **An operation that declares no `error` type.** May it reply `app`,
+  and is `detail` then null?
+- **A raw `error` type.** The envelope is JSON ("A raw type: the envelope is
+  JSON"), and the detail is bytes. Is that base64 text, §7.2's JSON form of
+  bytes?
+- **A JSON Schema operation whose `error` type is raw or absent.** The same
+  question.
+
+Observed on the reference owner example, whose documented contract
+refuses "any other types … with an `app` error envelope":
+- every protobuf operation got `app` in `zk2.core.v1.Error`, with an empty
+  `detail`;
+- every JSON-enveloped operation got `{"code": "internal", "message": "the
+  app detail does not fit the envelope's encoding"}` instead. That held with
+  no `error` type, with `error = "json:Status"`, with `error = { raw =
+  "text/plain" }`, and with `encoding = "cbor"` (as CBOR).
+
+So the reference has no `app` envelope for those operations, and the spec
+does not say whether that is right.
+**Resolved:** zk2py's owner sends `app` without a detail, and `invalid_request`
+for a malformed JSON request. zk2py's runner accepts any envelope that
+decodes for the Rust owner's JSON operation, and records the code.
+
+### F-66 · ambiguity · §4.3 minting: "plus one tick"
+
+> "An owner therefore mints each state timestamp as the greater of
+> `Session::new_timestamp()` and the last timestamp it issued plus one
+> tick, with its session's zid as the id."
+
+The spec does not define a tick. NTP64's own unit is 2^−32 s (about 0.23
+ns), an HLC's is whatever it increments by, and zenoh-python builds an
+`NTP64` from seconds and nanoseconds only. So a Python owner's smallest step
+is 1 ns, about four of NTP64's units.
+**Resolved:** a guess. zk2py adds 1 ns (`Owner.mint`). Any positive step
+keeps S7's "never at or below the last", which is what the rule protects.
+
+### F-67 · ambiguity · §3.3 and §8.2: the descriptor's first put
+
+> §3.3: "The owner MUST put the descriptor on its instance key whenever it
+> changes, and MUST answer a GET there with the current one."
+
+Two points are open:
+- **The first descriptor.** Is an owner's first descriptor a "change" that
+  must be put?
+- **Its place in the order.** §8.2's order names the descriptor's
+  *queryable* (step 3), not a put. A subscriber to instance keys, as
+  presence.md §1's tool is, sees a put only if there is one, and
+  a late one could land after the tokens.
+
+**Resolved:** a guess. zk2py's owner puts the descriptor once at start,
+stamped, after step 3 and before the tokens.
+
+### F-68 · gap · §8.2 and §4.2: the first state value against the tokens
+
+§8.2's order makes "alive ⇒ callable" hold for operations: queryables come
+before tokens. A state resource's first *value* has no place in that order.
+An owner that declares its publisher and state queryable (step 1), then its
+tokens (step 4), and only then puts its first value, answers a GET made the
+moment its interface token appears with silence. S6 says silence is not a
+verdict, but a consumer acting on presence then reads nothing for a state
+the owner was about to set.
+
+**Resolved:** a guess. zk2py's owner puts every state value before its
+tokens. The Rust owner example's value was present whenever zk2py read it.
+That was after presence and the descriptor GET, though, so the runner does
+not test the moment the token appears.
+
+### F-69 · gap · §4.2 S1 and `state.md` §1: an owner stamp that cannot be told from a router's
+
+> state.md §1: "Every sample, the delete included, carries a timestamp
+> whose id is the owner session's zid. A router stamp would carry the
+> router's."
+
+Both the Rust owner example and zk2py's owner are their own routers in the
+runner. There, the owner session's zid is the router's, so the check
+cannot tell an owner stamp from a router stamp. The runner's S1 check
+passes in both cases, but it proves only that the stamp's id is the
+process's.
+
+This is F-61's situation again, for state: the scenario needs the owner as
+a client of a separate router, which state.md does not say.
+**Resolved:** zk2py's owner can run as a client of a router
+(`Owner(connect=…)`), which `run_python_refusal` uses. The S1 check against
+an owner behind a separate router is left for when the Rust owner can be
+one too.
+
+### F-70 · gap · §8.2 step 2: what "exposed" means at start-up
+
+> §8.2: "2. validate that every required resource is exposed"; §2.3: "An
+> owner MUST expose every required one, or not start (§8.2)."
+
+"Exposed" is defined for the descriptor ("The exposed resources of an
+interface are its contract's resources, minus …", §3.3), not for the
+runtime check. The spec does not say what being exposed takes:
+- for a state resource: a publisher, a queryable, a value;
+- for a templated resource with no member yet: a queryable over its
+  template.
+
+An owner that serves only some resources cannot know whether the others
+count as exposed.
+**Resolved:** a guess. zk2py's minimal owner counts a parameterless raw
+state, once its publisher, queryable and value exist, and a parameterless
+operation, once its queryable exists. It serves nothing templated, so it
+refuses to start for a contract with a required templated resource.

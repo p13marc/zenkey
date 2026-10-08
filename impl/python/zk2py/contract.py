@@ -388,7 +388,7 @@ class _Loader:
         # E026: rate and retention (§2.6).
         # §2.6 (0.5): a rate's <n> "from 1 to 2^32−1"; a retention's <n> at
         # least 1, leading zeros allowed, and "the seconds MUST fit 64 bits"
-        # (unsigned, SPEC-FINDINGS F-56); beyond ±(2^53−1) they are E028 in
+        # (unsigned, §2.6 in 0.6); beyond ±(2^53−1) they are E028 in
         # the canonical form.
         if "rate" in spec:
             m = _RATE.fullmatch(spec["rate"])

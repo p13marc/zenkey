@@ -1,0 +1,34 @@
+# zk2py's minimal interface for the state and operation interop (#609): a
+# raw state, a raw echo operation, and a JSON-typed operation. Each side of
+# the interop (the Rust owner example, zk2py's own owner) serves it, and the
+# other side reads its state and calls its operations. It must load with no
+# finding at all.
+[interface]
+name    = "zk2py_echo"
+major   = 1
+minor   = 0
+summary = "zk2py's minimal interop interface"
+
+[schemas]
+jsonschema = ["schemas/probe.json"]
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.echo]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+
+[resources.typed]
+kind     = "operation"
+request  = "json:Empty"
+response = "json:Status"
+
+# A protobuf-typed operation: an owner that decodes no schema refuses it
+# with an `app` envelope, `zk2.core.v1.Error` (§5.2).
+[resources.refuse]
+kind     = "operation"
+request  = "google.protobuf.Empty"
+response = "google.protobuf.Empty"

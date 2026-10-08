@@ -12,6 +12,7 @@ decoder ignores unknown fields, as protobuf does."
 from __future__ import annotations
 
 import base64
+import json
 from typing import Any
 
 from . import cbor, jcs
@@ -86,7 +87,8 @@ def _cbor_domain(v: Any) -> None:
         pass
     elif isinstance(v, int):
         # "Outside 64 bits": outside both i64 and u64, -2^63 to 2^64-1
-        # (SPEC-FINDINGS F-58). CBOR's major type 0 never exceeds 2^64-1.
+        # (§5.2, 0.6: "from −2^63 to 2^64−1"). CBOR's major type 0 never
+        # exceeds 2^64-1.
         if not -(2**63) <= v <= 2**64 - 1:
             raise EnvelopeError("decode", f"an integer outside 64 bits: {v}")
     elif isinstance(v, float):
@@ -213,3 +215,58 @@ def _validate(env: dict[str, Any]) -> None:
         raise EnvelopeError("cause", f"a cause on {env['code']}")
     if env["detail"] is not None and env["code"] != "app":
         raise EnvelopeError("detail", f"a detail on {env['code']}")
+
+
+# -- encoding (an owner's side, §5.2 "Encoding") ---------------------------------
+
+def envelope_encoding(op: dict[str, Any]) -> str:
+    """The reply ``Encoding`` of an operation's error envelope (§5.2): "The
+    envelope's kind follows the operation's error type when it declares
+    one, else its response type": JSON Schema → the operation's
+    ``encoding`` (JSON or CBOR); protobuf → ``zk2.core.v1.Error``; raw →
+    JSON. ``op`` is the operation's canonical resource (§9.5)."""
+    kind = (op.get("error") or op["response"])["kind"]
+    if kind == "protobuf":
+        return PROTOBUF_ENCODING
+    if kind == "jsonschema" and op.get("encoding") == "cbor":
+        return CBOR_ENCODING
+    return JSON_ENCODING
+
+
+def _pb_field(number: int, data: bytes) -> bytes:
+    out = bytearray()
+    for v in ((number << 3) | 2, len(data)):
+        while True:
+            b = v & 0x7F
+            v >>= 7
+            out.append(b | (0x80 if v else 0))
+            if not v:
+                break
+    return bytes(out) + data
+
+
+def encode(encoding: str, code: str, message: str, cause: str | None = None,
+           detail: Any = None) -> bytes:
+    """An envelope's bytes in one of §5.2's encodings (JSON or protobuf; zk2py
+    writes no CBOR envelope). The result is decoded again before it is
+    returned, so an owner never sends one a tool would refuse."""
+    _validate({"code": code, "message": message, "cause": cause, "detail": detail})
+    if encoding == JSON_ENCODING:
+        doc: dict[str, Any] = {"code": code, "message": message}
+        if cause is not None:
+            doc["cause"] = cause
+        if detail is not None:
+            doc["detail"] = detail
+        data = json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode()
+    elif encoding == PROTOBUF_ENCODING:
+        if detail is not None and not isinstance(detail, bytes):
+            raise ValueError("a protobuf envelope's detail is the encoded error message's bytes")
+        data = _pb_field(1, code.encode()) + _pb_field(2, message.encode())
+        if cause is not None:
+            data += _pb_field(3, cause.encode())
+        if detail is not None:
+            data += _pb_field(4, detail)
+    else:
+        raise ValueError(f"zk2py does not encode {encoding} envelopes")
+    decode(encoding, data)
+    return data
