@@ -210,7 +210,7 @@ class SchemaSet:
             by_path = {posixpath.normpath(a.listed): a for a in self.json_files}
         file_part, _, fragment = ref.partition("#")
         if ":" in file_part:
-            return None  # a scheme (§9.4); SPEC-FINDINGS F-10
+            return None  # a scheme (§9.4)
         if file_part:
             target_path = posixpath.normpath(
                 posixpath.join(posixpath.dirname(art.listed), file_part))
@@ -247,7 +247,8 @@ class SchemaSet:
                 name = norm[len(r) + 1:]
                 break
         if name is None:
-            # SPEC-FINDINGS F-15: the artifact name is
+            # §9.4 (0.5): a listed file under no import root has no name and
+            # does not compile (E029); the artifact name is
             # the path relative to its import root, which it does not have.
             self._err("E029", f"{listed}: not under an import root {roots}")
             self.broken.add(PROTOBUF)

@@ -243,7 +243,8 @@ def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
             contracts = [_wrapped(root, d, kind, f"{n}.json", want["type"]) for n in names]
     # compat/README.md: `invalid` "when the new revision must not load (its
     # only error is E037)". A history revision that does not load is
-    # reported the same way (SPEC-FINDINGS F-44).
+    # reported the same way; compat/README.md (0.5) says only a candidate
+    # can be, and every earlier revision loads.
     if not all(c.valid for c in contracts):
         return {"class": compat.INVALID, "warnings": []}
     revs = [_revision(c) for c in contracts]

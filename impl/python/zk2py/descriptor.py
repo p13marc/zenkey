@@ -4,35 +4,22 @@
 ``conformance/descriptors/expect.json`` lists for each document, checked
 against the fixture contract."
 
-The prose names D005, D006, D007 and D009 only. The meaning of every other
-code below is *derived from the fixture file names and expected values*,
-and SPEC-FINDINGS F-04 and F-05 record them as gaps:
+Since amendment 0.5, §3.3 "The checks" states every code with its severity
+and counting (D000–D010; D006 alone is a warning), and "Cascades and scope":
+1. D000 stops the check;
+2. an entry whose ``iface`` is not an interface id is checked no further,
+   and does not count for ``declared_by``;
+3. an entry whose ``contract`` is not a fingerprint is checked no further
+   (no D004), though its interface counts;
+4. an interface listed twice is otherwise checked like the first;
+5. an interface none of the given contracts declares is checked for syntax
+   only; one given at other fingerprints only is D004;
+6. deliberately not checked: ``cause`` against gates, R3's completeness,
+   ``declared_by`` against the contract's ``[requires]``, ``params``
+   values, ``profiles`` against the ``uses``, ``minor`` and ``token``.
 
-====  =====================================================================
-D000  not JSON (a duplicate member included), or outside
-      ``descriptor.schema.json``; reported once, stops the check
-D001  ``format`` is not ``zk2-descriptor/0.1``
-D002  ``service`` is not ``<system>/<service>`` (plain chunks), or
-      ``instance`` is not an instance id (§1.2)
-D003  an interface entry: ``iface`` not an interface id, ``contract`` not a
-      fingerprint, or an ``iface`` listed twice
-D004  an entry names the checked contract's interface with another
-      fingerprint: a revision the checker does not hold
-D005  ``unavailable`` lists a resource that is not an optional resource of
-      the contract (§3.3)
-D006  ``unavailable`` lists a resource a missing capability already implies
-      (§3.3, a warning)
-D007  ``cardinality`` names no templated resource, or raises its bound (§3.3)
-D008  a capability that is not a gate name (``[a-z0-9][a-z0-9_.-]*``,
-      §2.3), or one listed twice
-D009  a requirement: role, interface, a binding not ``<system>/<service>``
-      (either may be ``*``), a parameter name, or ``declared_by`` naming an
-      interface the instance does not list (§3.2 R3)
-D010  a profile that is not ``<name>.v<major>``, or one listed twice
-====  =====================================================================
-
-"A document whose interface names another contract is checked for syntax
-only" (``descriptors/expect.json``).
+This module follows that text. Before 0.5 these meanings were derived from
+the fixtures (SPEC-FINDINGS F-04, F-05).
 """
 
 from __future__ import annotations

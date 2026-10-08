@@ -199,7 +199,7 @@ class _Loader:
         if _beyond_i64(doc):
             # TOML 1.0: "If an integer cannot be represented losslessly [as a
             # 64-bit signed integer], an error must be thrown." Python's
-            # tomllib does not; this reader does (SPEC-FINDINGS F-16).
+            # tomllib does not; this reader does (§9.1 "Integers", 0.5).
             self.diag("E000", "not TOML 1.0: an integer beyond 64 bits")
             return None
         errors = Checker(load_schema("contract.schema.json", self.spec_dir)).errors(doc)
@@ -423,7 +423,7 @@ class _Loader:
         self.c.types[text] = resolved
 
         if kind == "operation":
-            # E018 / E033 on resolved values (SPEC-FINDINGS F-22).
+            # E018 / E033 on resolved values (§9.3, 0.5).
             serving = self.resolved(kind, spec, "serving", "exclusive")
             idempotent = self.resolved(kind, spec, "idempotent", False)
             if serving == "replicated" and idempotent is not True:
@@ -662,7 +662,8 @@ _TOML_1_1_PROBES = (
 def _require_toml_1_0_reader() -> None:
     """zk2py's E000 for TOML 1.1-only syntax is tomllib refusing it. A
     tomllib that reads TOML 1.1 would silently accept those contracts, so
-    refuse to run instead (SPEC-FINDINGS F-41)."""
+    refuse to run instead: §9.1 (0.5) lets a reader parse later TOML only
+    "provided it reports these as E000"."""
     global _READER_CHECKED
     if _READER_CHECKED:
         return

@@ -22,12 +22,13 @@ it now follows the table. The twelve changes, listed in the README, are:
 - a raw ``media_param`` changed: breaking → review;
 - ``items`` toggled between absent, true and false: breaking → compatible.
 
-How this module reads "both directions" (SPEC-FINDINGS F-29): each rule
-classifies a transition *from an earlier revision to the candidate*, and its
-class already accounts for both reader/writer roles.
+"Both directions" (§9.8, worded in 0.5): "A direction is a role, writer
+or reader, never a swap of old and new". Each rule classifies a transition
+*from an earlier revision to the candidate*.
 
-A change no table lists is classed **review** (SPEC-FINDINGS F-31, F-32,
-F-35 record what is still unlisted).
+Since 0.5 the tables and lists cover every canonical member and every
+subset keyword; a change none of them names (which zk2py has not met) is
+classed review.
 """
 
 from __future__ import annotations
@@ -341,7 +342,7 @@ def _presence(f: Any, syntax: str, oneof: str | None) -> bool:
 
 def json_name_default(name: str) -> str:
     """protoc's default ``json_name``: underscores dropped, the next letter
-    upper-cased (SPEC-FINDINGS F-28)."""
+    upper-cased (§9.7, 0.5)."""
     out, up = [], False
     for c in name:
         if c == "_":
@@ -411,7 +412,7 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
         if of.name in new_by_name:
             # "it is renumbered … (renumbered)". The deletion is the move's,
             # not also a warning (compat/payload/protobuf/renumber-field;
-            # SPEC-FINDINGS F-34).
+            # §9.8 0.5: "A renumbered field is not a deleted one").
             moved = new_by_name.pop(of.name)
             added.discard(moved)
             v.add(BREAKING, "renumbered", f"{path}.{of.name}: {num} → {moved}")
