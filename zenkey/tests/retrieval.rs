@@ -151,6 +151,52 @@ async fn s1_one_holder_many_holders() {
         replies += 1;
     }
     assert_eq!(replies, 1, "BestMatching reaches one of 200 equal holders");
+    drop(many);
+
+    // An owner holds the bundle and answers `application/json`; a session
+    // that holds the bundle itself gets two `BestMatching` replies, its own
+    // holder's and the nearest remote one's (core §8.4).
+    let owner_s = client(&ep).await;
+    let mut b = zenkey::ServiceBuilder::new(&owner_s, common::config("r1/cam"));
+    b.implement(camera()).unwrap();
+    let _owner = b.start().await.unwrap();
+    let imp = camera();
+    let key = contract_key(imp.iface(), imp.fingerprint().hex())
+        .unwrap()
+        .into_keyexpr();
+    let (k, bytes) = (key.clone(), imp.bundle_bytes().to_vec());
+    let _own = tool
+        .declare_queryable(key.clone())
+        .complete(true)
+        .callback(move |q| {
+            let _ = q.reply(k.clone(), bytes.clone()).wait();
+        })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + SETTLE;
+    loop {
+        let rx = tool
+            .get(key.clone())
+            .target(QueryTarget::BestMatching)
+            .consolidation(ConsolidationMode::None)
+            .timeout(T)
+            .with(flume::unbounded())
+            .await
+            .unwrap();
+        let mut encodings = Vec::new();
+        while let Ok(r) = rx.recv_async().await {
+            encodings.push(r.into_result().unwrap().encoding().to_string());
+        }
+        if encodings.len() == 2 {
+            assert!(
+                encodings.contains(&"application/json".to_owned()),
+                "{encodings:?}"
+            );
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{encodings:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// §2: a slow, a frozen and a corrupt nearest holder; three good holders
