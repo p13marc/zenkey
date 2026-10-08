@@ -21,6 +21,8 @@ observability shape.
 | [`r2.md`](r2.md) | **r2**: r1 revised by that review. Adds the `zk2/` grammar major, exclusive-by-default ownership, normative state timestamps, hash-verified contract retrieval, behavioural profiles. |
 | [`architecture.md`](architecture.md) | **The design of record: r4.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). r3.3 folds in the gaps found by mapping their contracts (D1–D26). r4 folds in the spike: the maintainer's decisions of 2026-10-08, and E1–E19 (§0.4). |
 | [`spike-report.md`](spike-report.md) | **The spike report** (complete, 2026-10-08): the environment, the decisions table that r4 settles, and one section per spike. Raw data is in [`spike-results/`](spike-results/), copied from branch `zk2-spike` (tag `zk2-spike-final`). |
+| [`codegen.md`](codegen.md) | The design note of `zenkey-build` 0.20 (#611): what a contract generates, and why. |
+| [`tooling-guide.md`](tooling-guide.md) | **The tooling guide** (non-normative for the core): what a tool owes the person reading it. It carries v1's observer conformance (RFC 13) over to zk2: the judgement shape, silence never being a verdict, the observer obligations, recording and replay (#612). |
 | [`upstream/`](upstream/) | Two draft reports on zenoh 1.10.1 behaviour (the storage manager, S5; ACL denies on router links, S3). **Not filed** (maintainer, 2026-10-08). They are kept as records. |
 
 ## Rules for this directory
