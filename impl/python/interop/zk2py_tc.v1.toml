@@ -1,0 +1,32 @@
+# zk2py's contract for the operation scenarios (operations.md §1, §2): the
+# common setup's `tc` with `@op/interfaces/{if}/set` (exclusive, fan-out
+# forbidden) and `@op/diagnostics` (fan-out allowed), and §2's
+# `@op/interfaces/{if}/reset` (fan-out allowed, one reply). Raw requests and
+# responses throughout. It must load with no finding at all.
+[interface]
+name    = "zk2py_tc"
+major   = 1
+minor   = 0
+summary = "zk2py's operation scenarios: one exclusive, two fan-out"
+
+[resources."interfaces/{if}/set"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { if = "string" }
+cardinality = 8
+fanout      = "forbidden"
+
+[resources.diagnostics]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+fanout   = "allowed"
+
+[resources."interfaces/{if}/reset"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { if = "string" }
+cardinality = 8
+fanout      = "allowed"

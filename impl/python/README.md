@@ -67,7 +67,7 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
-| compat | §9.7, §9.8 | `compat` | **all 87 cases** (spec 0.5), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
+| compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
 
 The result at the time of writing:
@@ -82,16 +82,18 @@ bundles        24 passed     0 failed
 history        10 passed     0 failed
 descriptors    36 passed     0 failed
 errors         42 passed     0 failed
-compat         97 passed     0 failed
+compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         514 passed     0 failed
+total         517 passed     0 failed
 ```
 
-The figures are against `core.md` 0.7.
-- Amendments 0.5, 0.6 and 0.7 resolved F-01 to F-70.
-- They decided 13, 3 and 1 of zk2py's guesses the other way.
+The figures are against `core.md` 0.8.
+- Amendments 0.5 to 0.8 resolved F-01 to F-73.
+- They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
+- 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
+  inside those keywords by its text, not its target.
 
 zk2py now follows the stated rules; `SPEC-FINDINGS.md` says, per finding,
 how.
@@ -201,12 +203,54 @@ the runner's own:
   and a template with no member;
 - presence.md §2 steps 4 and 5, each with its control.
 
-**Known deviations.** 0.7 records fixes the Rust owner example still owes.
-The runner reports them as XFAIL (or XPASS once met), not as failures:
-- an `app` envelope with a detail for an operation that declares no
-  `error` type (F-65);
-- the state value put after the tokens (F-68). The first-sight GET often
-  wins the race, so this shows as XPASS.
+**Since 0.8.**
+- **Presence completeness (§8.1).** A liveliness GET is complete when the
+  routers' final reply ends it with no error reply. zenoh 1.10.1 ends one
+  that reached its timeout with the error reply `Timeout`. `Presence.reading`
+  states a read as a tool should: possibly incomplete, or complete for
+  this reader. A complete, empty read is "absent, or refused by access
+  control", since a refused read looks exactly like absence.
+- **Retrieval (§8.4).** A token's `fp16` leads to the full fingerprint
+  through the instance's descriptor (`live.fingerprint_of`), and every
+  retrieval uses that fingerprint.
+- **Operations over a template (§5.1).** The owner takes an application
+  handler per operation (`handlers`, called with an `OpCall`), or serves
+  listed members with a queryable each (`members`).
+  - Before any handler runs, it refuses `fanout_forbidden` (O2), then
+    `invalid_request` for a concrete parameter chunk that is not a
+    canonical slug, fan-out or not.
+  - A handler names one member per call, whatever `replies` is. A second
+    member, or one the call does not select, is refused to it.
+  - A call left without its answer is `internal`.
+  - `live.call(first=True)` returns at the first value or envelope.
+  - `hold_s` keeps each query open after its reply.
+- **The tick (state.md §1).** The scenario now asks only that v4's stamp
+  exceed v3's. The runner checks the tick with `Owner.clock`, a clock zk2py
+  controls.
+
+Four more runs:
+- **The owner example behind R1**, with its new `--connect` (F-69's setup).
+  Its value held from the start is stamped with its own zid, not R1's.
+- **presence.md §6**, on a zenoh-python router with the scenario's access
+  control:
+  - a refused alive read is complete and empty, with no error reply;
+  - a read through a link the runner stalls (`_StallProxy`) ends with
+    `Timeout` and is reported possibly incomplete;
+  - the same deny on `egress` alone refuses nothing.
+- **operations.md §1**, by behaviour:
+  - a call returns on its first reply while the query stays open, and
+    under `Latest` it waits;
+  - two instances on one router run 200 calls between them;
+  - two instances across two routers run 200 each.
+- **operations.md §2** steps 1 to 5, and §3 step 3. Three `tc` hosts (one
+  queryable per member, one over the template, one refusing `busy`) and a
+  `many` scan, all zk2py owners.
+
+**Known deviations.** The owner example declares no queryable over an
+operation template. Its templated operations are silent although its
+descriptor claims them, so the runner reports those two checks as XFAIL
+(SPEC-FINDINGS, "New at 0.8"). The 0.7 deviations, F-65 and F-68, are met
+since FH2, and are now plain checks.
 
 The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
 whose state zk2py GETs and whose operations it calls. It also adds two
@@ -216,8 +260,10 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 129 passed, 0 failed, 2 known deviations of the Rust
-owner example`. Exit codes are as for the static runner.
+Result: `live interop: 163 passed, 0 failed, 2 known deviations of the Rust
+owner example`. Exit codes are as for the static runner. `--only <run>`
+(repeatable) runs some of the runs behind R1 alone, for instance
+`--only fanout --only o1`.
 
 **§8.1's handler rule in zenoh-python.**
 - Every liveliness GET passes a `zenoh.handlers.Callback`, whose callback
@@ -226,10 +272,11 @@ owner example`. Exit codes are as for the static runner.
   compliant handler.
 - The tool's session holds no bounded subscriber. Measured: a bounded,
   undrained subscriber starves even a callback GET (F-47).
-- A GET that ends at its timeout rather than at the final reply is
-  reported as possibly incomplete.
+- A GET with any error reply (`Timeout` when it reached its timeout) is
+  reported as possibly incomplete (0.8). Elapsed time is not used.
 
 **§8.4 in zenoh-python.**
+- The full fingerprint from the descriptor, never a prefix (0.8).
 - Target `BestMatching`, then `All`.
 - Consolidation `None`, so that each reply can be verified as it arrives.
   zenoh's default (`Auto`, which is `Latest` here) delivers one reply, at
@@ -245,14 +292,16 @@ The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
   - archives and alignment (§4.4);
   - deletes and tombstones (S3);
   - clocks beyond minting (S7's drift);
-  - fan-out and many-reply operations (O2's caller side beyond refusal, O6);
+  - O6's summaries, retries (O4) and call metadata (O7);
   - serving roles (§6);
   - constrained faces (§8.5);
   - the scenarios other than presence.md, retrieval.md and parts of
-    state.md and operations.md.
+    state.md and operations.md. types.md §2 needs a renderer, which zk2py
+    does not have, and security.md §1's new step needs a grant generator.
 
-  zk2py's owner holds values only for parameterless raw state, answers
-  only parameterless operations meaningfully, and has no template members.
+  zk2py's owner holds values only for parameterless state. It answers
+  templated operations through the handlers and members it is given, and
+  otherwise names no member.
 - **Building bundles with extras.** The spec names no source for the
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
@@ -319,7 +368,7 @@ impl/python/
     live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls
     owner.py          §3.3 §4 §5 §8 a minimal owner
     live_interop.py             the live runner, with the Rust owner and consume examples
-  interop/            zk2py's own interop contracts: probe, echo, needs
+  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

@@ -126,6 +126,57 @@ def match(template: Template, chunks: list[str]) -> dict[str, list[str]] | None:
     return bindings if i == len(chunks) else None
 
 
+def is_wild(chunk: str) -> bool:
+    """A key-expression chunk that is not concrete: ``*``, ``**``, or one
+    holding a sub-chunk wildcard (``$*``)."""
+    return "*" in chunk
+
+
+def bind(template: Template, chunks: list[str]) -> dict[str, list[str] | None] | None:
+    """A call's resource chunks against a template its server is declared
+    over (core.md §5.1 "Over a template", 0.8): the server "learns from such
+    a call only what its key expression binds: each parameter at a concrete
+    chunk, unslugged (§1.4), and none at a wildcard".
+
+    Returns each parameter's values, or None for one at a wildcard; or None
+    when the key names no member: "A concrete parameter chunk that is not a
+    canonical slug (§1.4) names no member". A ``**`` among the chunks
+    aligns with no position, so it binds nothing and checks nothing."""
+    if any(c == "**" for c in chunks):
+        return {name: None for name in template.param_names}
+    if not any(is_wild(c) for c in chunks):
+        found = match(template, chunks)
+        return None if found is None else dict(found)
+    out: dict[str, list[str] | None] = {}
+    i = 0
+    for seg in template.segments:
+        if seg.kind == REST:
+            rest = chunks[i:]
+            if not rest:
+                return None
+            values = [None if is_wild(c) else unslug(c) for c in rest]
+            if any(v is None and not is_wild(c) for v, c in zip(values, rest)):
+                return None
+            out[seg.text] = None if any(is_wild(c) for c in rest) else values  # type: ignore[assignment]
+            i = len(chunks)
+            continue
+        if i >= len(chunks):
+            return None
+        c = chunks[i]
+        if seg.kind == LITERAL:
+            if not is_wild(c) and c != seg.text:
+                return None
+        elif is_wild(c):
+            out[seg.text] = None
+        else:
+            value = unslug(c)
+            if value is None:
+                return None
+            out[seg.text] = [value]
+        i += 1
+    return out if i == len(chunks) else None
+
+
 def resolve(templates: list[Template], chunks: list[str]) -> tuple[Template, dict[str, list[str]]] | None:
     """Match, then rank (core.md §2.2): among matching templates the winner
     ranks higher at the first segment where they differ (literal > ``{p}`` >

@@ -191,7 +191,12 @@ def written(world: JsonWorld, where: str, node: Any, following: frozenset = froz
     inside one is a change inside it, and inlining a definition is none. A
     $ref back to a target already being followed is compared as written,
     which ends a recursive type, and one that resolves to nothing is
-    schema_unreadable" (marked UNRESOLVED here)."""
+    schema_unreadable" (marked UNRESOLVED here).
+
+    0.8 (F-72): ""As written" … means by its text: the $ref value and its
+    siblings, annotations dropped, not the target it resolves to." So the
+    back-reference is kept as the text it was found as, never made
+    absolute: renaming a recursive definition is a change here."""
     if not isinstance(node, dict):
         return node
     if "$ref" not in node:
@@ -203,9 +208,8 @@ def written(world: JsonWorld, where: str, node: Any, following: frozenset = froz
     tstem, frag, tnode = hit
     tid = (tstem, frag)
     if tid in following:
-        base: Any = {"$ref": f"{tstem}.json#{frag}"}
-    else:
-        base = written(world, tstem, tnode, following | {tid})
+        return as_written(node)
+    base: Any = written(world, tstem, tnode, following | {tid})
     rest = _written_keywords(world, where, {k: v for k, v in node.items() if k not in ("$ref", "$defs")},
                              following)
     if isinstance(base, dict):
@@ -239,8 +243,15 @@ def _has_unresolved(v: Any) -> bool:
 
 def _is_null_schema(node: Any) -> bool:
     """§7.3 (0.7): "the null schema, whose type is exactly null and which
-    holds nothing else that carries meaning"."""
-    return isinstance(node, dict) and set(node) - ANNOTATIONS == {"type"} and node["type"] == "null"
+    holds nothing else that carries meaning". 0.8 (F-71): "reads the type
+    as a set of names, as everywhere in this subset: "null" and ["null"]
+    are both the null schema"."""
+    if not isinstance(node, dict) or set(node) - ANNOTATIONS != {"type"}:
+        return False
+    t = node["type"]
+    if isinstance(t, list) and all(isinstance(x, str) for x in t):
+        return set(t) == {"null"}
+    return t == "null"
 
 
 def nullable_reading(world: JsonWorld, where: str, node: Any) -> tuple[bool, Any]:
