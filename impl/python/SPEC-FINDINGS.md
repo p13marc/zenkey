@@ -6,15 +6,16 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Six rounds.**
+**Seven rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
 - F-56 to F-63 were found against 0.5.
 - F-64 to F-70 were found against 0.6, with the rest of the live half.
-- Amendments 0.5, 0.6 and 0.7 resolved F-01 to F-70. Each entry carries a
-  status line naming its amendment.
-- **F-71 to F-73 are new**, found against 0.7.
+- F-71 to F-73 were found against 0.7.
+- Amendments 0.5 to 0.8 resolved F-01 to F-73. Each entry carries a status
+  line naming its amendment.
+- **F-74 to F-76 are new**, found against 0.8.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -24,23 +25,28 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.7:** 73 entries.
+**Counts at 0.8:** 76 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
-- F-64 to F-70: resolved by 0.7; none left unresolved.
+- F-64 to F-70: resolved by 0.7.
   - 0.7 confirmed six of zk2py's guesses: F-64, F-65, F-66, F-67, F-68 and
     F-69.
   - It overturned one, F-70 (exposed). F-67's place for the put was refined
     too.
-  - The Rust owner example has not caught up with 0.7 on F-65 and F-68, nor
-    on F-69's setup. The runner reports those as known deviations, not
-    failures.
-- F-71 to F-73: **new**, 2 ambiguity, 1 gap.
+  - The Rust owner example has met F-65 and F-68 since FH2 (#660), and the
+    runner now checks both strictly. With its new `--connect`, it also runs
+    in F-69's setup, behind a router.
+- F-71 to F-73: resolved by 0.8; none left unresolved.
+  - 0.8 overturned two of zk2py's guesses, F-71 (`["null"]`) and F-72 (by
+    text).
+  - It resolved F-73 by withdrawing the scenario's claim to observe the
+    tick from outside.
+- F-74 to F-76: **new**, 2 ambiguity, 1 gap.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.5 | Location | In one line |
+| Id | Severity | Status at 0.8 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -112,9 +118,12 @@ by the spec section that now states the rule.
 | F-68 | gap | resolved by 0.7 | §8.2, §4.2 | When an owner puts its first state value, relative to its tokens. |
 | F-69 | gap | resolved by 0.7 | §4.2 S1, state.md §1 | "A router stamp would carry the router's": not observable when the owner is the router. |
 | F-70 | gap | resolved by 0.7 | §8.2 step 2 | What "exposed" means for a state resource, or a templated one, at start-up. |
-| F-71 | ambiguity | **new** | §7.3 the nullable form (0.7) | "The null schema, whose type is exactly null": is `{"type": ["null"]}` one? |
-| F-72 | ambiguity | **new** | §9.8 inside undecided keywords (0.7) | "A $ref back to a target already being followed is compared as written": its text, or its target? |
-| F-73 | gap | **new** | state.md §1 step 3 (0.7) | "Faster than its clock advances" cannot be arranged by a tester; the tick path went unexercised. |
+| F-71 | ambiguity | resolved by 0.8 | §7.3 the nullable form (0.7) | "The null schema, whose type is exactly null": is `{"type": ["null"]}` one? |
+| F-72 | ambiguity | resolved by 0.8 | §9.8 inside undecided keywords (0.7) | "A $ref back to a target already being followed is compared as written": its text, or its target? |
+| F-73 | gap | resolved by 0.8 | state.md §1 step 3 (0.7) | "Faster than its clock advances" cannot be arranged by a tester; the tick path went unexercised. |
+| F-74 | ambiguity | **new** | §5.1 "Over a template" against O2 (0.8) | A wildcard call to a fan-out-forbidden template, with a non-canonical parameter chunk: `fanout_forbidden` or `invalid_request`? |
+| F-75 | gap | **new** | presence.md §6 step 3 (0.8) | `zk2/**` selects no control token, so its stalled read's "no token" cannot fail. |
+| F-76 | ambiguity | **new** | §5.1 "Over a template" and "Answering" (0.8) | A template-wide `replies = "many"` handler that names no member and sends nothing: `internal`, or zero values then completion? |
 
 ---
 
@@ -1477,7 +1486,7 @@ value or an envelope is seen as it arrives (`live.call`).
 
 ### F-65 · gap (observed) · §5.2: `app`, and what `detail` is, in a JSON envelope
 
-**Status at 0.7: resolved by 0.7.** §5.2: any operation may refuse with `app`; with no `error` type there is no detail, with one it is optional, and a raw type's is base64 text in a JSON envelope. zk2py's owner sends `app` without a detail, as the rule says. The Rust owner example still sends an empty detail on `@op/refuse`, a fix 0.7 records for the runtime: the runner reports it as a known deviation (XFAIL).
+**Status at 0.8: resolved by 0.7.** §5.2: any operation may refuse with `app`; with no `error` type there is no detail, with one it is optional, and a raw type's is base64 text in a JSON envelope. zk2py's owner sends `app` without a detail, as the rule says. The Rust owner example has sent no detail on `@op/refuse` since FH2 (#660), so the runner's known deviation is now a plain check, which passes.
 
 > "`detail` | a value, bytes, or null | With `app` only: the operation's
 > declared `error` type, as a value inline (JSON, CBOR) or as its encoded
@@ -1542,7 +1551,7 @@ stamped, after step 3 and before the tokens.
 
 ### F-68 · gap · §8.2 and §4.2: the first state value against the tokens
 
-**Status at 0.7: resolved by 0.7.** §8.2 "State values": a value held at start SHOULD be put before step 4. zk2py's guess was the rule. The Rust owner example still puts after starting (a fix 0.7 records); the runner's first-sight GET reports it as a known deviation, which a race can hide (XPASS).
+**Status at 0.8: resolved by 0.7.** §8.2 "State values": a value held at start SHOULD be put before step 4. zk2py's guess was the rule. The Rust owner example has put its value before starting since FH2 (#660), so the runner's first-sight GET is now a plain check, which passes.
 
 §8.2's order makes "alive ⇒ callable" hold for operations: queryables come
 before tokens. A state resource's first *value* has no place in that order.
@@ -1559,7 +1568,7 @@ not test the moment the token appears.
 
 ### F-69 · gap · §4.2 S1 and `state.md` §1: an owner stamp that cannot be told from a router's
 
-**Status at 0.7: resolved by 0.7.** §4.2 "Observing S1" and state.md §1: the owner and the consumer are clients of a router with timestamping on, against an unstamped control put. zk2py's owner now follows it in full (`run_python_s1`). The Rust owner example is still its own router, so its S1 check proves only the process's id.
+**Status at 0.8: resolved by 0.7.** §4.2 "Observing S1" and state.md §1: the owner and the consumer are clients of a router with timestamping on, against an unstamped control put. zk2py's owner follows it in full (`run_python_s1`). The Rust owner example now takes `--connect`, so `run_rust_behind_r1` runs it as a client of R1: the value it holds from the start carries its own session's zid (its descriptor's `meta.zid`), not R1's. It publishes no data, so the scenario's other steps stay with zk2py's owner.
 
 > state.md §1: "Every sample, the delete included, carries a timestamp
 > whose id is the owner session's zid. A router stamp would carry the
@@ -1607,6 +1616,8 @@ example.
 
 ### F-71 · ambiguity · §7.3 (0.7): what "the null schema" is
 
+**Status at 0.8: resolved by 0.8.** §7.3: "Exactly `null`" reads the `type` as a set of names, so `"null"` and `["null"]` are both the null schema (`compat/payload/jsonschema/nullable-null-as-list`). zk2py's guess (the string only) was overturned, and `compat._is_null_schema` now reads the set.
+
 > "holding two branches in either order: the null schema, whose `type` is
 > exactly `null` and which holds nothing else that carries meaning, and any
 > schema S"
@@ -1620,6 +1631,8 @@ the same `Option` a nullable form for one implementation and a plain
 (`compat._is_null_schema`).
 
 ### F-72 · ambiguity · §9.8 (0.7): a recursive `$ref` "compared as written"
+
+**Status at 0.8: resolved by 0.8.** §9.8: "as written" means by its text, the `$ref` value and its siblings with annotations dropped. So renaming a recursive definition reached from inside `oneOf`/`anyOf`/`prefixItems` is review (`anyof-recursive-renamed`), and an annotation added there is no change (`anyof-recursive-described`). zk2py's guess (by target) was overturned, and `compat.written` now keeps the back-reference as it was written. Under the guess, zk2py failed `anyof-recursive-described`, and passed `anyof-recursive-renamed` only by accident: the wrapped revisions' artifacts have different stems (`old`, `new`), so even the normalized target text differed.
 
 > "A `$ref` back to a target already being followed is compared as written,
 > which ends a recursive type"
@@ -1637,6 +1650,8 @@ as `<stem>.json#<pointer>`, so a respelling is no change
 
 ### F-73 · gap · `state.md` §1 step 3 (0.7): a precondition a tester cannot arrange
 
+**Status at 0.8: resolved by 0.8.** state.md §1 step 3 now asks only that v4's stamp exceed v3's. The tick is checked "with a clock the implementation controls". zk2py's runner checks the order. It then sets `Owner.clock` 5 s behind the last stamp, and checks that the next stamp is that stamp plus 1 ns, zk2py's tick.
+
 > "3. The owner puts v3 and v4 back to back, faster than its clock
 > advances. … v4's timestamp is greater than v3's, by at least one tick"
 
@@ -1650,3 +1665,88 @@ was taken, nor whether a run that did not take it counts.
 least a tick). It reports the gap in nanoseconds, which shows the branch
 was not exercised. zk2py's minting branch is exercised only by its own
 logic, not by a test here.
+
+## New at 0.8 (#609)
+
+Found while following 0.8. `just py-conformance` passes 517 of 517.
+`just py-live` passes 163 of 163, with 2 known deviations of the Rust owner
+example, both from one cause (below). zk2py now runs, against its own
+owners, the scenarios 0.8 rewrote or added:
+- presence.md §6, both halves, on a zenoh-python router with the access
+  control the scenario names. A refused read and a stalled one behave as
+  0.8 measured, and so does the `egress` control.
+- operations.md §1, by behaviour. A call returns on its first reply while
+  its server holds the query open 0.5 s, and the same call under `Latest`
+  waits the 0.5 s. Two instances on one router run 200 calls between them
+  (200 and 0), and run 2 under target `All`. Across two routers they run
+  200 each.
+- operations.md §2 steps 1 to 5, and §3 step 3.
+
+**Observed on the reference, not a finding.** The owner example declares
+no queryable over an operation template. With `zk2py_tc.v1`, it starts,
+holds the interface token, and lists nothing `unavailable`. Yet every call
+to `interfaces/{if}/set` or `…/reset` is silent, whether concrete,
+malformed (`ETH0`) or a fan-out, while `diagnostics` answers. O1 wants the
+queryable "on its concrete key (or its template)", and §8.2 "Exposed" says
+a template is exposed by its template. The runner reports both calls as
+known deviations (`run_rust_behind_r1`). This also leaves F-74 and F-76
+unobservable on the reference.
+
+### F-74 · ambiguity · §5.1 "Over a template" (0.8) against O2: two refusals for one call
+
+> O2: "a call whose key expression is not concrete MUST be refused with
+> `fanout_forbidden`, unless the operation declares `fanout = "allowed"`"
+
+> §5.1 (0.8): "A concrete parameter chunk that is not a canonical slug
+> (§1.4) names no member. A server over the template refuses such a call
+> `invalid_request` before any handler runs, fan-out or not"
+
+`zk2/*/tc/tc.v1/@op/interfaces/ETH0/set` is both:
+- not concrete, on an operation that forbids fan-out;
+- holding a concrete parameter chunk that is not canonical.
+
+Each rule refuses it before any handler, with a different code, and the
+call gets one envelope. No step of operations.md §2 combines the two:
+- step 1's `*` sits at the parameter, so no chunk is malformed;
+- step 4's `ETH0` targets `reset`, which allows fan-out.
+**Resolved:** a guess. zk2py checks O2 first, on the key expression as a
+whole, before it reads the template, so the call is `fanout_forbidden`
+(`owner._op_handler`).
+
+### F-75 · gap · presence.md §6 step 3 (0.8): a read that selects no token
+
+> "3. The second tool reads `zk2/**` with the link flowing, then again with
+> R1's replies held back past the read's timeout." Expected: "The second
+> ends with the error reply `Timeout` and no token"
+
+§1.3's guard: an ambient selector such as `zk2/**` "never reaches … a
+control key", because `**` never matches a verbatim chunk. So `zk2/**`
+returns no liveliness token even with the link flowing (measured: complete,
+no token, no error reply). The stalled read's "no token" therefore cannot
+fail, and the step does not show that the stall hid anything. The
+`Timeout` reply alone carries the evidence.
+**Resolved:** zk2py runs the step as written, and the same pair on
+`zk2/*/*/@zk/instance/*`. That read holds the owner's token while the link
+flows, has none and the `Timeout` reply while it is stalled, and has the
+token again once the link is released.
+
+### F-76 · ambiguity · §5.1 (0.8): a `replies = "many"` handler that names no member
+
+> "It names the member each reply answers for, and replies on that
+> member's key … One that names no member has no key to reply on, and
+> refuses the call: the reference refuses it `internal`."
+
+> "With `replies = "many"`, a declared `summary` is owed too … Without one,
+> zero values then completion is the operation's own answer"
+
+0.8 makes the template rule hold "whatever `replies` is". Take a
+template-wide `many` operation with no `summary`, called over a wildcard,
+whose handler finds nothing to report: it names no member and sends no
+value. By the first rule it refuses (`internal`). By the second, zero
+values then completion is its answer. A caller sees an envelope in one
+reading and silence in the other.
+**Resolved:** a guess. zk2py's owner reads it by the second rule: a `many`
+handler that sends nothing ends with completion alone, unless a summary
+is owed or the handler raised (`OpCall.finish`). `internal` is reserved for
+a call that needed an answer, and for zk2py's default handler, which names
+no member for a fan-out and says so.

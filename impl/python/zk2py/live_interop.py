@@ -14,16 +14,26 @@ client and checks, from the spec alone:
 - **the descriptor** (§3.3): GET at the instance key, valid for zk2py's
   checker against the contracts (no D code at all), naming exactly the
   expected interfaces with zk2py's fingerprints;
-- **retrieval** (§8.4): every bundle retrieved by the procedure, verified
-  against the fingerprint the descriptor names, and byte-identical to the
-  bundle zk2py builds. Also: an unknown revision is reported unavailable
-  after the retry, and a corrupt nearest holder is refused (scenarios
-  retrieval.md §2, §3);
+- **retrieval** (§8.4): every bundle retrieved by the procedure, by the
+  full fingerprint the descriptor names for the token's ``fp16`` (0.8),
+  verified, and byte-identical to the bundle zk2py builds. Also: an unknown
+  revision is reported unavailable after the retry, and a corrupt nearest
+  holder is refused (scenarios retrieval.md §2, §3);
 - **presence at scale** (presence.md §4): with a liveliness subscriber held,
   a callback GET lists every one of N extra tokens;
 - **shutdown:** closing the owner's stdin makes it exit, with status 0.
 
+Then the runs behind a router R1 of the runner's (a zenoh-python router):
+the owner example as R1's client (state.md §1's stamp, and its templated
+operations), zk2py's own owner read by the Rust ``consume`` example, the
+refusals of presence.md §2, state.md §1, presence.md §1, presence.md §6 (a
+read refused by access control, and one stalled past its timeout),
+operations.md §1 (target and consolidation shown by behaviour) and
+operations.md §2 (fan-out over templates). ``--only`` picks some of them.
+
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
+A rule the owner example is known not to meet is reported XFAIL (or XPASS),
+never as a failure.
 """
 
 from __future__ import annotations
@@ -89,9 +99,10 @@ class Report:
     known: list[tuple[str, str, bool, str]] = field(default_factory=list)
 
     def known_deviation(self, run: str, name: str, ok: bool, detail: str, why: str) -> None:
-        """A rule the Rust owner example is known not to meet yet, recorded
-        by the spec as the runtime's fix to make: printed as XFAIL (or XPASS
-        once it meets it), never counted as a failure of this runner."""
+        """A rule the Rust owner example is known not to meet yet, as the
+        spec records it or SPEC-FINDINGS observes it: printed as XFAIL (or
+        XPASS once it meets it), never counted as a failure of this
+        runner."""
         self.known.append((run, name, ok, f"{detail} [{why}]"))
         print(f"{'XPASS' if ok else 'XFAIL'} [{run}] {name}: {detail} [{why}]", flush=True)
 
@@ -99,11 +110,15 @@ class Report:
 class Owner:
     """The owner example as a child process, read line by line."""
 
-    def __init__(self, exe: Path, service: str, contracts: list[Path]):
+    def __init__(self, exe: Path, service: str, contracts: list[Path], connect: str | None = None):
+        """``connect``: run it as a client of that router (its documented
+        ``--connect <endpoint>``; it then prints ``connected …`` rather than
+        ``listening …``)."""
         if not exe.is_file():
             raise CannotRun(f"{exe} not found: build it with "
                             "`cargo build -q -p zenkey --example owner`")
-        self.proc = subprocess.Popen([str(exe), service, *map(str, contracts)],
+        self.proc = subprocess.Popen([str(exe), *(["--connect", connect] if connect else []), service,
+                                      *map(str, contracts)],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
         self.lines: queue.Queue[str] = queue.Queue()
@@ -234,12 +249,10 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
         # §8.2 (0.7) "State values": put before the tokens, so a GET made
         # when the interface token appears finds it.
         first = live.get_state(session, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
-        report.known_deviation(run, "a state GET on first sight of the interface token finds the value (§8.2)",
-                               [r.payload for r in first.replies] == [b"ok"],
-                               str([r.payload for r in first.replies]),
-                               "0.7 records the owner example's fix (F-68); the race may hide it")
-    report.check(run, "presence GET completed before its timeout (callback handler, §8.1)",
-                 pres.complete, f"{pres.elapsed_s:.3f} s, {pres.count} tokens")
+        report.check(run, "a state GET on first sight of the interface token finds the value (§8.2, F-68)",
+                     [r.payload for r in first.replies] == [b"ok"], str([r.payload for r in first.replies]))
+    report.check(run, "presence GET complete: the routers' final reply, no error reply (§8.1, 0.8)",
+                 pres.complete, f"{pres.elapsed_s:.3f} s, {pres.reading}")
     if not report.check(run, "exactly one instance token", len(pres.instances) == 1,
                         str([i["instance"] for i in pres.instances])):
         return
@@ -313,8 +326,15 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                  f"{doc.get('profiles')} vs {uses}")
 
     # -- retrieval (§8.4) -------------------------------------------------
+    # 0.8 "From a token to a fingerprint": the token's fp16 is not enough to
+    # retrieve by; the full fingerprint comes from the descriptor.
+    token_fp16 = {a["iface"]: a["fp16"] for a in pres.alive}
     for iface in sorted(by_iface):
-        fp = listed.get(iface, {}).get("contract") or by_iface[iface].fingerprint
+        fp = live.fingerprint_of(doc, iface, token_fp16.get(iface))
+        if not report.check(run, f"{iface}: the token's fp16 leads to the descriptor's full fingerprint (§8.4)",
+                            fp is not None, f"fp16 {token_fp16.get(iface)}, descriptor "
+                                            f"{listed.get(iface, {}).get('contract')}"):
+            continue
         r = live.retrieve_bundle(session, iface, fp)
         if report.check(run, f"{iface}: bundle retrieved and verified (§8.4, §9.6)", r.available, _describe(r)):
             report.check(run, f"{iface}: the retrieved bundle is byte-identical to zk2py's build",
@@ -369,7 +389,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
 
     # -- state and operations (§4, §5) ------------------------------------
     if "zk2py_echo.v1" in by_iface:
-        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None, rust=True)
+        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None)
 
     # -- presence at scale (presence.md §4) -------------------------------
     if scale > 0:
@@ -416,6 +436,74 @@ def _scale_check(report: Report, run: str, session, endpoint: str, system: str, 
             t.undeclare()
     finally:
         holder.close()
+
+
+def run_rust_behind_r1(report: Report, exe: Path) -> None:
+    """The Rust owner example as a client of a router R1 of the runner's
+    (``--connect``), the setup state.md §1 asks for (F-69): the value it
+    holds from the start is stamped with its own session's zid, not R1's.
+    It also serves ``zk2py_tc.v1``, whose operations are templated: O1 and
+    §8.2 "Exposed" want a queryable over each template, which the example
+    does not declare (a known deviation, below)."""
+    from . import live
+
+    service = "vehicle-02/tc"
+    system, svc = service.split("/")
+    paths = [REPO / ECHO, REPO / TC]
+    run = f"{service} ← {', '.join(p.name for p in paths)} (the owner example behind R1)"
+    r1, r1_endpoint, r1_zid = _r1()
+    try:
+        tool = live.open_client(r1_endpoint)
+        owner = Owner(exe, service, paths, connect=r1_endpoint)
+        try:
+            connected = owner.wait_for("connected ", 120)
+            if not report.check(run, "the owner example connects to R1", connected == r1_endpoint,
+                                f"connected {connected!r}; stderr {owner.stderr[-2:]}"):
+                return
+            selector = f"zk2/{system}/{svc}/@zk/**"
+            deadline = time.monotonic() + PRESENCE_WAIT_S
+            pres = live.list_presence(tool, selector)
+            while time.monotonic() < deadline and not (pres.instances and len(pres.alive) == 2):
+                time.sleep(0.05)
+                pres = live.list_presence(tool, selector)
+            if not report.check(run, "presence through R1: one instance token, two interface tokens",
+                                len(pres.instances) == 1 and len(pres.alive) == 2 and pres.complete,
+                                pres.reading):
+                return
+            instance_key = f"zk2/{system}/{svc}/@zk/instance/{pres.instances[0]['instance']}"
+            d = live.get_descriptor(tool, instance_key)
+            doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+            zid = doc.get("meta", {}).get("zid")
+            st = live.get_state(tool, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
+            report.check(run, "state.md §1 through R1: the value held from the start carries the owner "
+                              "session's zid (the descriptor's meta.zid), not R1's",
+                         [(r.payload, r.stamp_id) for r in st.replies] == [(b"ok", zid)] and zid != r1_zid,
+                         f"{[(r.payload, r.stamp_id) for r in st.replies]}, owner {zid}, R1 {r1_zid}")
+            base = f"zk2/{system}/{svc}/zk2py_tc.v1/@op"
+            diag = live.call(tool, f"{base}/diagnostics", b"x")
+            report.check(run, "a parameterless operation answers through R1 (O3)",
+                         [(r.kind, r.key) for r in diag.replies] == [("value", f"{base}/diagnostics")],
+                         str([(r.kind, r.key) for r in diag.replies]))
+            claimed = [e.get("unavailable") for e in doc.get("interfaces", []) if e.get("iface") == "zk2py_tc.v1"]
+            member = live.call(tool, f"{base}/interfaces/eth0/set", b"x")
+            report.known_deviation(
+                run, "a templated operation it claims exposed answers a concrete call, a value or an envelope "
+                     "(O1, O3, §8.2 \"Exposed\")",
+                not member.silent, f"{len(member.replies)} replies; descriptor lists unavailable {claimed}",
+                "the owner example declares no queryable over an operation template (0.8, observed)")
+            malformed = live.call(tool, f"{base}/interfaces/ETH0/set", b"x")
+            report.known_deviation(
+                run, "interfaces/ETH0/set is invalid_request (operations.md §3 step 3, §5.1)",
+                [(r.envelope or {}).get("code") for r in malformed.replies] == ["invalid_request"],
+                f"{[(r.kind, (r.envelope or {}).get('code')) for r in malformed.replies]}",
+                "the same: no queryable over the template")
+        finally:
+            code = owner.close()
+            tool.close()
+        report.check(run, "the owner exits when its stdin closes", code == 0,
+                     "killed after 15 s" if code is None else f"exit status {code}")
+    finally:
+        r1.close()
 
 
 def run_refusal(report: Report, exe: Path, service: str, paths: list[Path]) -> None:
@@ -465,11 +553,13 @@ def run_refusal(report: Report, exe: Path, service: str, paths: list[Path]) -> N
 ECHO = "impl/python/interop/zk2py_echo.v1.toml"
 NEEDS = "impl/python/interop/zk2py_needs.v1.toml"
 BRINGUP = "impl/python/interop/zk2py_bringup.v1.toml"
+TC = "impl/python/interop/zk2py_tc.v1.toml"
+SCAN = "impl/python/interop/zk2py_scan.v1.toml"
 DEFAULT_CONSUME = REPO / "target" / "debug" / "examples" / "consume"
 
 
 def _state_and_calls(report: Report, run: str, session, system: str, svc: str, owner_zid: str | None,
-                     expect_typed: str | None, rust: bool = False) -> None:
+                     expect_typed: str | None) -> None:
     """The consumer's and the caller's side, against an owner serving
     ``zk2py_echo.v1``: a state GET per S4, calls per O1–O5, envelopes per
     §5.2. ``expect_typed`` is the code the owner gives ``@op/typed``'s
@@ -511,12 +601,8 @@ def _state_and_calls(report: Report, run: str, session, system: str, svc: str, o
     # declares none.
     no_detail = len(refuse.replies) == 1 and refuse.replies[0].envelope is not None \
         and refuse.replies[0].envelope["detail"] is None
-    detail = str([(r.envelope or {}).get("detail") for r in refuse.replies])
-    if rust:
-        report.known_deviation(run, "@op/refuse's app envelope carries no detail (no error type, §5.2)",
-                               no_detail, detail, "0.7 records the owner example's fix (F-65)")
-    else:
-        report.check(run, "@op/refuse's app envelope carries no detail (no error type, §5.2)", no_detail, detail)
+    report.check(run, "@op/refuse's app envelope carries no detail (no error type, §5.2, F-65)", no_detail,
+                 str([(r.envelope or {}).get("detail") for r in refuse.replies]))
     typed = live.call(session, f"{base}/@op/typed", b"not json")
     good = len(typed.replies) == 1 and typed.replies[0].kind == "envelope" \
         and typed.replies[0].encoding == "application/json" \
@@ -567,12 +653,17 @@ def run_python_owner(report: Report, consume: Path) -> None:
                 and not answers[0].has_timestamp and not answers[0].has_attachment
             report.check(run, "its descriptor: one reply, application/json, no timestamp or attachment (§3.3)",
                          ok, str([(a.ok, a.encoding, a.has_timestamp) for a in answers]))
+            fp = None
             if ok:
                 codes = check_descriptor(answers[0].payload, [contract])
                 report.check(run, "its descriptor has no D code", codes == [], str(codes))
-            r = live.retrieve_bundle(session, "zk2py_echo.v1", contract.fingerprint)
-            report.check(run, "its bundle, retrieved per §8.4, verifies and is the build's bytes",
-                         r.available and r.data == bundle.build(contract), _describe(r))
+                fp = live.fingerprint_of(json.loads(answers[0].payload), "zk2py_echo.v1",
+                                         pres.alive[0]["fp16"] if pres.alive else None)
+            r = live.retrieve_bundle(session, "zk2py_echo.v1", fp) if fp else None
+            report.check(run, "its bundle, retrieved per §8.4 by the descriptor's fingerprint, verifies and is "
+                              "the build's bytes",
+                         r is not None and r.available and r.data == bundle.build(contract),
+                         _describe(r) if r else f"no fingerprint from the token's fp16 and the descriptor")
             _state_and_calls(report, run, session, system, svc, str(owner.session.zid()), "invalid_request")
         finally:
             session.close()
@@ -734,11 +825,25 @@ def run_python_s1(report: Report) -> None:
             cid = [None if x.timestamp is None else str(x.timestamp).split("/", 1)[1] for x in control]
             report.check(run, "the control: an unstamped put through R1 arrives with R1's zid",
                          cid == [r1_zid], f"{cid} vs {r1_zid}")
+            # Step 3 (0.8, F-73): only the order is observable from
+            # outside; the tick is not.
             v3 = owner.set_state(key, b"v3")
             v4 = owner.set_state(key, b"v4")
             d = v4.get_time_as_ntp64().as_nanos() - v3.get_time_as_ntp64().as_nanos()
-            report.check(run, "v3, v4 back to back: v4's timestamp is greater by at least one tick (§4.3)",
-                         d >= 1, f"{d} ns")
+            report.check(run, "v3, v4 back to back: v4's timestamp is greater than v3's (§4.3)",
+                         d > 0, f"{d} ns")
+            # The tick, "with a clock the implementation controls": a clock
+            # reading behind the last stamp, so the next is that plus 1 ns,
+            # zk2py's tick (§4.3).
+            behind = v4.get_time_as_ntp64().as_nanos() - 5_000_000_000
+            owner.clock = lambda: zenoh.Timestamp(
+                zenoh.NTP64(behind // 1_000_000_000, behind % 1_000_000_000), v4.get_id())
+            v5 = owner.set_state(key, b"v5")
+            owner.clock = None
+            tick = v5.get_time_as_ntp64().as_nanos() - v4.get_time_as_ntp64().as_nanos()
+            report.check(run, "a clock reading 5 s behind the record: the next stamp is the record plus one "
+                              "tick (§4.3, a clock zk2py controls)",
+                         tick == 1 and v5.get_id() == v4.get_id(), f"{tick} ns")
         finally:
             sub.undeclare()
             csub.undeclare()
@@ -789,7 +894,10 @@ def run_python_bringup(report: Report) -> None:
                          "started")
             seen = got_instance.wait(PRESENCE_WAIT_S)
             d = live.get_descriptor(tool, owner.instance_key) if seen else []
-            b = live.retrieve_bundle(tool, "zk2py_bringup.v1", contract.fingerprint) if seen else None
+            # §8.4 (0.8): retrieve by the descriptor's full fingerprint.
+            fp = live.fingerprint_of(json.loads(d[0].payload), "zk2py_bringup.v1") \
+                if len(d) == 1 and d[0].ok else None
+            b = live.retrieve_bundle(tool, "zk2py_bringup.v1", fp) if fp else None
             report.check(run, "the moment the instance token appears: the descriptor and the bundle answer",
                          seen and len(d) == 1 and d[0].ok and b is not None and b.available,
                          f"token {seen}, descriptor {len(d)} replies, bundle {b and b.available}")
@@ -829,6 +937,410 @@ def run_python_bringup(report: Report) -> None:
         r1.close()
 
 
+class _StallProxy:
+    """A TCP relay to a router whose router-to-client direction the runner
+    can hold back (presence.md §6 step 3): held bytes wait in the relay,
+    and flow again when released."""
+
+    def __init__(self, upstream: str):
+        import socket
+
+        host, port = upstream.removeprefix("tcp/").rsplit(":", 1)
+        self.upstream = (host, int(port))
+        self.flowing = threading.Event()
+        self.flowing.set()
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.endpoint = f"tcp/127.0.0.1:{self.sock.getsockname()[1]}"
+        self._conns: list[Any] = []
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        import socket
+
+        while True:
+            try:
+                c, _ = self.sock.accept()
+            except OSError:
+                return
+            u = socket.create_connection(self.upstream)
+            self._conns += [c, u]
+            threading.Thread(target=self._pump, args=(c, u, None), daemon=True).start()
+            threading.Thread(target=self._pump, args=(u, c, self.flowing), daemon=True).start()
+
+    @staticmethod
+    def _pump(src, dst, gate) -> None:
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                if gate is not None:
+                    gate.wait()
+                dst.sendall(data)
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        self.flowing.set()
+        for s in [self.sock, *self._conns]:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+
+def _acl_router(flow: str):
+    """presence.md §6's R1: access control under ``allow``, denying
+    ``liveliness_query`` on ``flow`` for ``zk2/*/*/@zk/alive/**``, for every
+    subject. Returns (session, endpoint)."""
+    import zenoh
+
+    from .owner import free_loopback_port
+
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("timestamping/enabled", "true")
+    conf.insert_json5("access_control", json.dumps({
+        "enabled": True,
+        "default_permission": "allow",
+        "rules": [{"id": "no-alive-reads", "messages": ["liveliness_query"], "flows": [flow],
+                   "permission": "deny", "key_exprs": ["zk2/*/*/@zk/alive/**"]}],
+        "subjects": [{"id": "everyone"}],
+        "policies": [{"id": "deny-alive", "rules": ["no-alive-reads"], "subjects": ["everyone"]}],
+    }))
+    return zenoh.open(conf), f"tcp/127.0.0.1:{port}"
+
+
+def run_python_presence_refused(report: Report) -> None:
+    """presence.md §6 (0.8): a read refused by access control is complete
+    and empty; a read that reached its timeout shows it. R1 is a zenoh-python
+    router with the deny; the owner is zk2py's, a client of R1; the second
+    tool reaches R1 through :class:`_StallProxy`. Then the control the
+    scenario records as measured: the same deny on ``egress`` alone refuses
+    nothing."""
+    from . import live
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    system, svc = "py-site", "guarded"
+    contract = load_contract(REPO / ECHO)
+    for flow in ("ingress", "egress"):
+        run = f"zk2py owner {system}/{svc} ← zk2py_echo.v1.toml (presence.md §6, deny on {flow})"
+        r1, r1_endpoint = _acl_router(flow)
+        try:
+            owner = PyOwner(system, svc, [contract], connect=r1_endpoint)
+            owner.start()
+            try:
+                # Step 1: R1's own session reads the interface token; "R1 has
+                # no face of its own, so no rule applies to it".
+                deadline = time.monotonic() + PRESENCE_WAIT_S
+                own = live.list_presence(r1, f"zk2/{system}/{svc}/@zk/alive/**")
+                while time.monotonic() < deadline and not own.alive:
+                    time.sleep(0.05)
+                    own = live.list_presence(r1, f"zk2/{system}/{svc}/@zk/alive/**")
+                report.check(run, "step 1: R1's own session reads the interface token", len(own.alive) == 1,
+                             own.reading)
+                tool = live.open_client(r1_endpoint)
+                try:
+                    inst = live.list_presence(tool, "zk2/*/*/@zk/instance/*")
+                    alive = live.list_presence(tool, "zk2/*/*/@zk/alive/**")
+                finally:
+                    tool.close()
+                report.check(run, "step 2: the instance read holds the owner's instance token, no error reply",
+                             [i["instance"] for i in inst.instances] == [owner.instance] and inst.complete
+                             and not inst.errors, inst.reading)
+                if flow == "ingress":
+                    report.check(run, "step 2: the alive read is refused as absence: a final reply, no token, "
+                                      "no error reply (§8.1, \"A refused read\")",
+                                 alive.complete and alive.count == 0 and not alive.errors, alive.reading)
+                else:
+                    report.check(run, "control: the same deny on egress alone refuses nothing; the alive read "
+                                      "holds the token (presence.md §6, measured)",
+                                 alive.complete and len(alive.alive) == 1, alive.reading)
+                    continue
+                # Step 3: the second tool, through a link the runner stalls.
+                proxy = _StallProxy(r1_endpoint)
+                try:
+                    tool2 = live.open_client(proxy.endpoint)
+                    try:
+                        flowing = live.list_presence(tool2, "zk2/**")
+                        flowing_inst = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                        proxy.flowing.clear()
+                        try:
+                            stalled = live.list_presence(tool2, "zk2/**")
+                            stalled_inst = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                        finally:
+                            proxy.flowing.set()
+                        time.sleep(0.3)
+                        after = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                    finally:
+                        tool2.close()
+                finally:
+                    proxy.close()
+                report.check(run, "step 3: zk2/** with the link flowing ends with no error reply",
+                             flowing.complete and not flowing.errors, flowing.reading)
+                report.check(run, "step 3: zk2/** with R1's replies held past the timeout ends with the error "
+                                  "reply Timeout and no token; reported possibly incomplete, never absence",
+                             not stalled.complete and stalled.errors == ["zenoh/string: Timeout"]
+                             and stalled.count == 0 and stalled.reading.startswith("possibly incomplete"),
+                             stalled.reading)
+                # zk2/** selects no control token (`**` never crosses @zk,
+                # §1.3): the same pair on the instance tokens, where "no
+                # token" is evidence (SPEC-FINDINGS F-75).
+                report.check(run, "step 3, on zk2/*/*/@zk/instance/*: the token when flowing; Timeout and no "
+                                  "token when stalled; the token again once released",
+                             len(flowing_inst.instances) == 1 and flowing_inst.complete
+                             and stalled_inst.errors == ["zenoh/string: Timeout"] and stalled_inst.count == 0
+                             and len(after.instances) == 1 and after.complete,
+                             f"{flowing_inst.reading} | {stalled_inst.reading} | {after.reading}")
+            finally:
+                owner.close()
+        finally:
+            r1.close()
+
+
+def _tc_owner(system: str, endpoint: str, *, hold_s: float = 0.0, members: bool = False,
+              busy: bool = False):
+    """One ``tc`` host of operations.md (zk2py_tc.v1), a client of the
+    router at ``endpoint``. Its ``set`` names the member its call binds and
+    echoes; ``reset`` is one queryable per member (``members``), or one over
+    the template whose handler names ``eth0`` unless the call binds another,
+    or refuses every call ``busy``."""
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    def named(call) -> None:
+        bound = call.bound.get("if")
+        call.name(**{"if": bound[0] if bound else "eth0"})
+        call.reply(call.payload)
+
+    def refuse_busy(call) -> None:
+        call.refuse("busy", "this host refuses every reset")
+
+    handlers: dict[str, Any] = {"@op/interfaces/{if}/set": named}
+    if busy:
+        handlers["@op/interfaces/{if}/reset"] = refuse_busy
+    elif not members:
+        handlers["@op/interfaces/{if}/reset"] = named
+    owner = PyOwner(system, "tc", [load_contract(REPO / TC)], connect=endpoint, handlers=handlers,
+                    members={"@op/interfaces/{if}/reset": [{"if": "eth0"}, {"if": "eth1"}]} if members else None,
+                    hold_s=hold_s)
+    owner.start()
+    return owner
+
+
+def _wait_alive(session, selector: str, n: int) -> None:
+    from . import live
+
+    deadline = time.monotonic() + PRESENCE_WAIT_S * 3
+    while time.monotonic() < deadline and len(live.list_presence(session, selector).alive) < n:
+        time.sleep(0.05)
+
+
+def run_python_o1(report: Report) -> None:
+    """operations.md §1 (0.8): target and consolidation shown by behaviour.
+    zk2py's owners and caller are clients of a router R1 of the runner's;
+    the split-brain's second instance is a client of a second router R2,
+    linked to R1."""
+    import zenoh
+
+    from . import live
+    from .owner import free_loopback_port
+
+    n, hold = 200, 0.5
+    run = "zk2py owners h1/tc ← zk2py_tc.v1.toml (operations.md §1)"
+    key = "zk2/h1/tc/zk2py_tc.v1/@op/interfaces/eth0/set"
+    r1, r1_endpoint, _ = _r1()
+    owners: list[Any] = []
+    r2 = None
+    try:
+        caller = live.open_client(r1_endpoint)
+        try:
+            a = _tc_owner("h1", r1_endpoint, hold_s=hold)
+            owners.append(a)
+            _wait_alive(caller, "zk2/h1/tc/@zk/alive/**", 1)
+            results = [live.call(caller, key, b"x", first=True) for _ in range(n)]
+            firsts = [r.first_s for r in results if r.first_s is not None]
+            values = sum(1 for r in results if [x.kind for x in r.replies] == ["value"])
+            report.check(run, f"step 1: {n} calls, {n} executions, each returning on its first reply well "
+                              f"before the server lets the query go ({hold} s)",
+                         len(a.handled) == n and values == n and len(firsts) == n and max(firsts) < hold / 2
+                         and all(r.done_s is None for r in results),
+                         f"{len(a.handled)} executions, {values} values, first reply max "
+                         f"{max(firsts or [0]):.3f} s")
+            # The control: under Latest, the reply waits for completion.
+            q: list[Any] = []
+            done = threading.Event()
+            t0 = time.monotonic()
+            got: list[float] = []
+            caller.get(key, zenoh.handlers.Callback(lambda rep: (q.append(rep), got.append(time.monotonic() - t0)),
+                                                    done.set),
+                       target=zenoh.QueryTarget.BEST_MATCHING, consolidation=zenoh.ConsolidationMode.LATEST,
+                       payload=b"x", timeout=5.0)
+            done.wait(10)
+            report.check(run, "control: under Latest the same call's reply waits for the query to complete",
+                         len(got) == 1 and got[0] >= hold * 0.9, f"reply after {got[0] if got else None} s")
+            time.sleep(hold + 0.2)
+
+            a.handled.clear()
+            b = _tc_owner("h1", r1_endpoint)
+            owners.append(b)
+            _wait_alive(caller, "zk2/h1/tc/@zk/alive/**", 2)
+            for _ in range(n):
+                live.call(caller, key, b"x", first=True)
+            time.sleep(hold + 0.2)
+            report.check(run, f"step 2: a second instance on the same router: {n} executions between the two, "
+                              f"never {2 * n} (BestMatching)",
+                         len(a.handled) + len(b.handled) == n,
+                         f"first {len(a.handled)}, second {len(b.handled)}")
+            a.handled.clear()
+            b.handled.clear()
+            every = live._answers(caller, key, zenoh.QueryTarget.ALL, 5.0)
+            got_all = list(every)
+            time.sleep(hold + 0.2)
+            report.check(run, "control: under target All, one call runs on both instances",
+                         len(a.handled) + len(b.handled) == 2 and len(got_all) == 2,
+                         f"first {len(a.handled)}, second {len(b.handled)}, {len(got_all)} replies")
+
+            for o in owners:
+                o.close()
+            owners.clear()
+            port = free_loopback_port()
+            conf = zenoh.Config()
+            conf.insert_json5("mode", json.dumps("router"))
+            conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+            conf.insert_json5("connect/endpoints", json.dumps([r1_endpoint]))
+            conf.insert_json5("scouting/multicast/enabled", "false")
+            conf.insert_json5("timestamping/enabled", "true")
+            r2 = zenoh.open(conf)
+            a = _tc_owner("h1", r1_endpoint)
+            b = _tc_owner("h1", f"tcp/127.0.0.1:{port}")
+            owners += [a, b]
+            _wait_alive(caller, "zk2/h1/tc/@zk/alive/**", 2)
+            both = [live.call(caller, key, b"x") for _ in range(n)]
+            two = sum(1 for r in both if [x.kind for x in r.replies] == ["value", "value"])
+            report.check(run, f"step 3: the second instance on another router: {2 * n} executions, one per side, "
+                              "and the caller sees both replies of each call (None)",
+                         len(a.handled) == n and len(b.handled) == n and two == n,
+                         f"R1 side {len(a.handled)}, R2 side {len(b.handled)}, {two}/{n} calls with two values")
+        finally:
+            caller.close()
+    finally:
+        for o in owners:
+            o.close()
+        if r2 is not None:
+            r2.close()
+        r1.close()
+
+
+def run_python_fanout(report: Report) -> None:
+    """operations.md §2 (0.8), with zk2py's owners as h1, h2 and h3, and
+    step 5's h1/scan, all clients of a router R1 of the runner's."""
+    from . import live
+    from .contract import load_contract
+    from .owner import MemberRefused, Owner as PyOwner
+
+    run = "zk2py owners h1..h3/tc, h1/scan ← zk2py_tc.v1, zk2py_scan.v1 (operations.md §2)"
+    r1, r1_endpoint, _ = _r1()
+    owners: list[Any] = []
+    try:
+        caller = live.open_client(r1_endpoint)
+        try:
+            h1 = _tc_owner("h1", r1_endpoint, members=True)
+            h2 = _tc_owner("h2", r1_endpoint)
+            h3 = _tc_owner("h3", r1_endpoint, busy=True)
+            owners += [h1, h2, h3]
+            refused_to_handler: list[str] = []
+
+            def scan(call) -> None:
+                call.name(port="p1")
+                call.reply(b"open 22")
+                call.reply(b"open 80")
+                try:
+                    call.name(port="p2")
+                except MemberRefused as e:
+                    refused_to_handler.append(str(e))
+                    return
+                call.reply(b"never")
+
+            sc = PyOwner("h1", "scan", [load_contract(REPO / SCAN)], connect=r1_endpoint,
+                         handlers={"@op/ports/{port}/scan": scan})
+            sc.start()
+            owners.append(sc)
+            _wait_alive(caller, "zk2/*/tc/@zk/alive/**", 3)
+            _wait_alive(caller, "zk2/h1/scan/@zk/alive/**", 1)
+
+            def codes(res) -> list[str]:
+                return sorted((r.envelope or {}).get("code", r.kind) for r in res.replies)
+
+            # Step 1.
+            one = live.call(caller, "zk2/h1/tc/zk2py_tc.v1/@op/interfaces/*/set", b"x", fanout=True)
+            three = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/*/set", b"x", fanout=True)
+            report.check(run, "step 1: one, then three fanout_forbidden refusals, and 0 executions",
+                         codes(one) == ["fanout_forbidden"] and codes(three) == ["fanout_forbidden"] * 3
+                         and not any(o.handled for o in owners), f"{codes(one)} {codes(three)}")
+            # Step 2.
+            diag = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/diagnostics", b"x", fanout=True)
+            report.check(run, "step 2: diagnostics with All + None: one reply per host, each on its own key",
+                         sorted(r.key or "" for r in diag.replies)
+                         == [f"zk2/h{i}/tc/zk2py_tc.v1/@op/diagnostics" for i in (1, 2, 3)],
+                         str([(r.kind, r.key) for r in diag.replies]))
+            # Step 3.
+            reset = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/*/reset", b"x", fanout=True)
+            vals = sorted(r.key for r in reset.replies if r.kind == "value")
+            envs = [r.envelope["code"] for r in reset.replies if r.kind == "envelope"]
+            report.check(run, "step 3: h1 two values (eth0, eth1), h2 one on the member it named, one busy "
+                              "envelope, unattributed",
+                         vals == ["zk2/h1/tc/zk2py_tc.v1/@op/interfaces/eth0/reset",
+                                  "zk2/h1/tc/zk2py_tc.v1/@op/interfaces/eth1/reset",
+                                  "zk2/h2/tc/zk2py_tc.v1/@op/interfaces/eth0/reset"]
+                         and envs == ["busy"] and all(r.key is None for r in reset.replies if r.kind != "value"),
+                         f"values {vals}, envelopes {envs}")
+            pres = live.list_presence(caller, "zk2/*/tc/@zk/alive/**")
+            silent = sorted({f"{a['system']}/{a['service']}" for a in pres.alive}
+                            - {k.split("/")[1] + "/tc" for k in vals})
+            report.check(run, "step 3: presence shows h3 holding the token and sending no value "
+                              "(refused or silent, which the caller cannot tell)",
+                         pres.complete and silent == ["h3/tc"], f"{pres.reading}; no value from {silent}")
+            # Step 4.
+            before = [(len(o.calls), len(o.handled)) for o in owners]
+            bad = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/ETH0/reset", b"x", fanout=True)
+            after = [(len(o.calls), len(o.handled)) for o in owners]
+            report.check(run, "step 4: ETH0, not a canonical slug: two invalid_request envelopes (h2, h3), no "
+                              "handler runs, h1's member queryables not selected (§5.1, 0.8)",
+                         codes(bad) == ["invalid_request", "invalid_request"]
+                         and [x[1] for x in after] == [x[1] for x in before]
+                         and after[0][0] == before[0][0]
+                         and [a[0] - b[0] for a, b in zip(after[1:3], before[1:3])] == [1, 1],
+                         f"{codes(bad)}; queryable hits {[a[0] - b[0] for a, b in zip(after, before)]}, "
+                         f"handler runs {[a[1] - b[1] for a, b in zip(after, before)]}")
+            # Step 5.
+            many = live.call(caller, "zk2/h1/scan/zk2py_scan.v1/@op/ports/*/scan", b"", fanout=True)
+            report.check(run, "step 5: replies = many over a template: two values, both on ports/p1/scan, none "
+                              "elsewhere; naming p2 is refused to the handler (§5.1, 0.8)",
+                         [(r.kind, r.key, r.payload) for r in many.replies]
+                         == [("value", "zk2/h1/scan/zk2py_scan.v1/@op/ports/p1/scan", b"open 22"),
+                             ("value", "zk2/h1/scan/zk2py_scan.v1/@op/ports/p1/scan", b"open 80")]
+                         and len(refused_to_handler) == 1,
+                         f"{[(r.kind, r.key, r.payload) for r in many.replies]}; refused to the handler: "
+                         f"{refused_to_handler}")
+            # operations.md §3 step 3, beside it: the concrete call.
+            concrete = live.call(caller, "zk2/h2/tc/zk2py_tc.v1/@op/interfaces/ETH0/set", b"x")
+            report.check(run, "and §3 step 3: a concrete call to interfaces/ETH0/set is invalid_request, not "
+                              "not_found", codes(concrete) == ["invalid_request"], str(codes(concrete)))
+        finally:
+            caller.close()
+    finally:
+        for o in owners:
+            o.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -840,6 +1352,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="the consume example binary")
     ap.add_argument("--scale", type=int, default=2000,
                     help="extra tokens for the presence-at-scale check, in the first run (0: skip)")
+    python_runs = {
+        "rust-behind-r1": lambda r: run_rust_behind_r1(r, args.owner),
+        "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
+        "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
+        "o1": run_python_o1, "fanout": run_python_fanout,
+    }
+    ap.add_argument("--only", action="append", choices=sorted(python_runs),
+                    help="run only these runs, the ones behind a router of the runner's (repeatable), "
+                         "and not the owner example's own-router runs")
     args = ap.parse_args(argv)
     runs = DEFAULT_RUNS
     if args.run:
@@ -854,16 +1375,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: zenoh-python is not installed: {e}", file=sys.stderr)
         return 2
     try:
-        for i, (service, files) in enumerate(runs):
-            run_one(report, args.owner, service, [REPO / f if not Path(f).is_absolute() else Path(f)
-                                                  for f in files], args.scale if i == 0 else 0)
-        if not args.run:
+        if args.only:
+            for name in args.only:
+                python_runs[name](report)
+        else:
+            for i, (service, files) in enumerate(runs):
+                run_one(report, args.owner, service, [REPO / f if not Path(f).is_absolute() else Path(f)
+                                                      for f in files], args.scale if i == 0 else 0)
+        if not args.run and not args.only:
             for service, files in REFUSAL_RUNS:
                 run_refusal(report, args.owner, service, [REPO / f for f in files])
-            run_python_owner(report, args.consume)
-            run_python_refusal(report)
-            run_python_s1(report)
-            run_python_bringup(report)
+            for run in python_runs.values():
+                run(report)
     except CannotRun as e:
         print(f"error: could not run: {e}", file=sys.stderr)
         return 2

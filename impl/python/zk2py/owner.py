@@ -13,19 +13,28 @@ withholds:
 - **streams**: a publisher when parameterless, none for a template (each
   member's would come as it appears); **events**: nothing to declare.
 - **operations**: a ``complete`` queryable on the concrete key, or over the
-  template (O1). A call on a key that is not concrete is ``fanout_forbidden``
-  unless the operation allows fan-out (O2). On a template, a key that names
-  no member is ``invalid_request`` and a well-formed one ``not_found``, since
-  this owner has no members (O-4). Otherwise:
-  - a ``raw`` request and response echo the request's bytes;
-  - a JSON Schema request that does not decode as a JSON object is
-    ``invalid_request`` (the decode is the check, O-13), else the answer is
-    a JSON value;
-  - any other request is refused with ``app``, without a detail since this
-    owner declares none (§5.2);
-  - every reply goes on the operation's own concrete key, and every failure
-    is a ``reply_err`` carrying the §5.2 envelope (O3). An optional
-    operation not exposed is answered ``unavailable`` with its cause (O3).
+  template, or, for the members the caller lists, one per member (O1,
+  §5.1). Before any handler runs, a call on a key that is not concrete is
+  ``fanout_forbidden`` unless the operation allows fan-out (O2), and, over a
+  template, a key whose concrete parameter chunk is not a canonical slug
+  names no member and is ``invalid_request``, fan-out or not (§5.1, 0.8).
+  Then the operation's handler runs with an :class:`OpCall`: the caller's,
+  or the default one, which
+  - over a template names no member, since this owner has none: a call
+    binding every parameter is ``not_found`` (O-4), and a fan-out
+    ``internal`` ("One that names no member … refuses the call");
+  - for a ``raw`` request and response echoes the request's bytes;
+  - for a JSON Schema request that does not decode as a JSON object answers
+    ``invalid_request`` (the decode is the check, O-13), else a JSON value;
+  - refuses any other request with ``app``, without a detail since this
+    owner declares none (§5.2).
+
+  A handler names at most one member per call, whatever ``replies`` is, and
+  one the call selects; anything else is refused to it (§5.1, 0.8). Every
+  value goes on the operation's own concrete key, or the named member's;
+  every failure is a ``reply_err`` carrying the §5.2 envelope, and a call
+  left without its answer is ``internal`` (O3). An optional operation not
+  exposed is answered ``unavailable`` with its cause (O3).
 
 **Bring-up (§8.2).** Step 2 runs first (the order of steps 1 and 2 is free),
 so a refusal declares nothing: a required resource not exposed, an optional
@@ -54,6 +63,7 @@ import zenoh
 
 from . import bundle, envelope, templates
 from .contract import Contract
+from .slug import slug
 
 #: core.md §2.4 / Appendix D names → zenoh's QoS enums.
 _CONGESTION = {"block": "BLOCK", "drop": "DROP"}
@@ -88,11 +98,130 @@ def _template_key(template: str) -> str:
                     for p in template.split("/"))
 
 
+def member_key(base: str, r: dict[str, Any], values: dict[str, Any]) -> str:
+    """A member's concrete key: each parameter's value slugged (§1.4), a
+    rest parameter's list one chunk per value."""
+    tpl = templates.parse_template(r["template"])
+    if set(values) != set(tpl.param_names):
+        raise MemberRefused(f"a member of {r['template']} names {tpl.param_names}, not {sorted(values)}")
+    chunks: list[str] = []
+    for seg in tpl.segments:
+        if seg.kind == templates.LITERAL:
+            chunks.append(seg.text)
+            continue
+        v = values[seg.text]
+        vs = [v] if isinstance(v, str) else list(v)
+        if seg.kind == templates.PARAM and len(vs) != 1 or not vs:
+            raise MemberRefused(f"{seg.text}: one value per parameter, at least one per rest parameter")
+        chunks.extend(slug(x) for x in vs)
+    return f"{base}/{r['token']}/{'/'.join(chunks)}"
+
+
+def _value_encoding(r: dict[str, Any]) -> str:
+    """A response value's Encoding (§7.2): a raw type's media type; a JSON
+    Schema type's JSON, or CBOR where the resource says so; protobuf's."""
+    t = r["response"]
+    if t["kind"] == "raw":
+        return t["media_type"]
+    if t["kind"] == "jsonschema":
+        return "application/cbor" if r.get("encoding") == "cbor" else "application/json"
+    return "application/protobuf"
+
+
+def _refuse(query: zenoh.Query, enc: str, code: str, message: str, **kw: Any) -> None:
+    query.reply_err(envelope.encode(enc, code, message, **kw), encoding=enc)
+
+
+class MemberRefused(RuntimeError):
+    """§5.1 (0.8): "naming a second member is refused to the handler", and
+    so is naming one the call's key expression does not select, or sending
+    a value before naming any."""
+
+
+class OpCall:
+    """One call, as an operation handler sees it (§5.1 "Answering").
+
+    ``bound`` is what the call's key expression binds (each parameter's
+    values, None at a wildcard). Over a template, the handler names the one
+    member it answers for, :meth:`name`, and every value goes on that
+    member's key; a concrete operation's key is named already."""
+
+    def __init__(self, query: zenoh.Query, base: str, r: dict[str, Any], enc: str,
+                 bound: dict[str, list[str] | None], key_expr: str):
+        self.query, self.base, self.resource, self.enc = query, base, r, enc
+        self.bound, self.key_expr = bound, key_expr
+        self.payload = b"" if query.payload is None else query.payload.to_bytes()
+        self.member_key: str | None = None if r["params"] else f"{base}/{r['token']}/{r['template']}"
+        self.values = self.summaries = self.envelopes = 0
+        self.refused_to_handler: list[str] = []
+        self.failed: str | None = None
+
+    def name(self, **values: Any) -> str:
+        """Name the member this call answers for; returns its key. A second
+        member, or one the call does not select, raises
+        :class:`MemberRefused` (§5.1, 0.8: "A template-wide server answers
+        for one member per call, whatever replies is")."""
+        try:
+            if not self.resource["params"]:
+                raise MemberRefused("a concrete operation has no member to name")
+            key = member_key(self.base, self.resource, values)
+            if self.member_key is not None and key != self.member_key:
+                raise MemberRefused(f"one member per call: {self.member_key} is named already")
+            if not zenoh.KeyExpr(self.key_expr).includes(zenoh.KeyExpr(key)):
+                raise MemberRefused(f"the call's key expression does not select {key}")
+        except MemberRefused as e:
+            self.refused_to_handler.append(str(e))
+            raise
+        self.member_key = key
+        return key
+
+    def reply(self, payload: bytes, encoding: str | None = None) -> None:
+        """A value reply on the named member's key (O3)."""
+        if self.member_key is None:
+            self.refused_to_handler.append("a value before naming a member")
+            raise MemberRefused("name the member this call answers for first")
+        if self.resource["replies"] == "one" and (self.values or self.envelopes):
+            raise RuntimeError("replies = \"one\": the call is answered already")
+        self.query.reply(self.member_key, payload, encoding=encoding or _value_encoding(self.resource))
+        self.values += 1
+
+    def summary(self, payload: bytes, encoding: str | None = None) -> None:
+        """O6: the one summary reply, its attachment the bytes ``summary``."""
+        if self.member_key is None:
+            raise MemberRefused("name the member this call answers for first")
+        self.query.reply(self.member_key, payload, encoding=encoding or "application/octet-stream",
+                         attachment=b"summary")
+        self.summaries += 1
+
+    def refuse(self, code: str, message: str, **kw: Any) -> None:
+        """A ``reply_err`` carrying the §5.2 envelope."""
+        _refuse(self.query, self.enc, code, message, **kw)
+        self.envelopes += 1
+
+    def finish(self) -> None:
+        """O3: "A handler that ends without replying is answered internal";
+        with replies = "many", a declared summary is owed too, "after any
+        values it sent". A handler that raised is internal unless it had
+        answered a one-reply call. A ``many`` handler that sent nothing,
+        named member or not, ends with completion alone, "the operation's
+        own answer" (SPEC-FINDINGS F-76)."""
+        r = self.resource
+        if self.envelopes:
+            return
+        if r["replies"] == "one":
+            owed = not self.values
+        else:
+            owed = (r.get("summary") is not None and not self.summaries) or self.failed is not None
+        if owed:
+            self.refuse("internal", self.failed or "the handler ended without its answer")
+
+
 class Owner:
     def __init__(self, system: str, service: str, contracts: list[Contract], *, port: int | None = None,
                  connect: str | None = None, bindings: dict[str, list[str]] | None = None,
                  capabilities: set[str] | None = None, unavailable: dict[str, str] | None = None,
-                 withhold: set[str] | None = None):
+                 withhold: set[str] | None = None, handlers: dict[str, Any] | None = None,
+                 members: dict[str, list[dict[str, Any]]] | None = None, hold_s: float = 0.0):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -101,7 +230,15 @@ class Owner:
         - ``unavailable``: ``<kind token>/<template>`` → cause, for optional
           resources not exposed and listed so.
         - ``withhold``: resources neither exposed nor listed, which step 2
-          refuses (presence.md §2 step 5)."""
+          refuses (presence.md §2 step 5).
+        - ``handlers``: ``<kind token>/<template>`` → a function of an
+          :class:`OpCall`, the operation's application handler (the default
+          is :meth:`_default_op`).
+        - ``members``: ``<kind token>/<template>`` → the members (values by
+          parameter, a list for a rest parameter) to serve with a queryable
+          each, instead of one over the template.
+        - ``hold_s``: how long each operation query stays open after its
+          handler returns (operations.md §1)."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -111,18 +248,28 @@ class Owner:
         self.capabilities = set(capabilities or ())
         self.unavailable = dict(unavailable or {})
         self.withhold = set(withhold or ())
+        self.handlers = dict(handlers or {})
+        self.members = dict(members or {})
+        self.hold_s = hold_s
         self.port = None if connect else (port or free_loopback_port())
         self.endpoint = connect or f"tcp/127.0.0.1:{self.port}"
         #: core.md §1.2: 64 random bits, 16 lowercase hex digits.
         self.instance = secrets.token_hex(8)
         self.session: zenoh.Session | None = None
+        #: the clock minting reads, ``Session::new_timestamp`` unless set: the
+        #: tick is checked "with a clock the implementation controls"
+        #: (state.md §1, 0.8)
+        self.clock: Any = None
         self._last: zenoh.Timestamp | None = None
         self._lock = threading.Lock()
         self._held: dict[str, _Held] = {}
         self._publishers: dict[str, Any] = {}
         self._encodings: dict[str, str] = {}
         self._entities: list[Any] = []
+        #: every call that reached an operation queryable, by key expression
         self.calls: list[str] = []
+        #: the calls a handler ran for (refusals before a handler excluded)
+        self.handled: list[str] = []
 
     # -- keys -------------------------------------------------------------
 
@@ -142,7 +289,7 @@ class Owner:
         zenoh-python's 1 ns", which is what this builds."""
         assert self.session is not None
         with self._lock:
-            ts = self.session.new_timestamp()
+            ts = self.clock() if self.clock is not None else self.session.new_timestamp()
             last = self._last
             if last is not None and ts.get_time_as_ntp64().as_nanos() <= last.get_time_as_ntp64().as_nanos():
                 n = last.get_time_as_ntp64().as_nanos() + 1
@@ -211,16 +358,23 @@ class Owner:
         for c in self.contracts:
             for r, status in plan[c.interface]:
                 key = f"{self.prefix(c)}/{r['token']}/{r['template']}"
-                if r["kind"] == "operation":
+                rid = f"{r['token']}/{r['template']}"
+                if r["kind"] == "operation" and status == "exposed" and rid in self.members:
+                    # §5.1 "Over a template": "One with a queryable per
+                    # member answers for each it holds."
+                    for values in self.members[rid]:
+                        mkey = member_key(self.prefix(c), r, values)
+                        self._entities.append(s.declare_queryable(
+                            mkey, zenoh.handlers.Callback(self._op_handler(self.prefix(c), r, values)),
+                            complete=True))
+                elif r["kind"] == "operation":
                     if status == "exposed":
-                        handler = self._op_handler(key, r)
+                        handler = self._op_handler(self.prefix(c), r)
                     else:
-                        cause = "capability" if status == "implied" else \
-                            self.unavailable[f"{r['token']}/{r['template']}"]
+                        cause = "capability" if status == "implied" else self.unavailable[rid]
                         handler = self._unavailable_handler(r, cause)
                     self._entities.append(s.declare_queryable(
-                        _template_key(f"{self.prefix(c)}/{r['token']}/{r['template']}"),
-                        zenoh.handlers.Callback(handler), complete=True))
+                        _template_key(key), zenoh.handlers.Callback(handler), complete=True))
                 elif status == "exposed" and r["kind"] in ("state", "stream") and not r["params"]:
                     enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                         "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
@@ -343,49 +497,94 @@ class Owner:
 
         return handle
 
-    def _op_handler(self, key: str, r: dict[str, Any]):
+    def _op_handler(self, base: str, r: dict[str, Any], member: dict[str, Any] | None = None):
+        """The queryable callback for one exposed operation of the interface
+        at ``base``: over its template, or, with ``member`` (its values by
+        parameter), on that member's concrete key (§5.1 "Over a template").
+
+        Before any handler runs: O2's ``fanout_forbidden``, then, over a
+        template, a key whose concrete parameter chunk is not a canonical
+        slug is ``invalid_request`` (§5.1, 0.8). Then the operation's
+        handler (the caller's, from ``handlers``, or the default below), and
+        after it O3: a call left without its answer is ``internal``."""
         enc = envelope.envelope_encoding(r)
         tpl = templates.parse_template(r["template"])
-        prefix_chunks = len(key.split("/")) - len(r["template"].split("/"))
-
-        def refuse(query: zenoh.Query, code: str, message: str) -> None:
-            query.reply_err(envelope.encode(enc, code, message), encoding=enc)
+        app = self.handlers.get(f"{r['token']}/{r['template']}")
 
         def handle(query: zenoh.Query) -> None:
             asked = str(query.key_expr)
             self.calls.append(asked)
-            # O2: a call on a key that is not concrete.
-            if "*" in asked and r["fanout"] != "allowed":
-                refuse(query, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
-                                                  "call one concrete key (O2)")
-                return
-            if r["params"]:
-                # O-4: a key that names no member is malformed; a well-formed
-                # member this owner lacks is not found. It has no members.
-                chunks = asked.split("/")[prefix_chunks:]
-                if templates.match(tpl, chunks) is None:
-                    refuse(query, "invalid_request", "the key names no member of the template")
-                else:
-                    refuse(query, "not_found", "no such member")
-                return
-            body = b"" if query.payload is None else query.payload.to_bytes()
-            req, resp = r["request"]["kind"], r["response"]["kind"]
-            if req == "raw" and resp == "raw":
-                query.reply(key, body, encoding=r["response"]["media_type"])
-            elif req == "jsonschema" and resp == "jsonschema":
-                try:
-                    if not isinstance(json.loads(body or b"null"), dict):
-                        raise ValueError("not an object")
-                except ValueError:
-                    refuse(query, "invalid_request", "the request does not decode as the request type")
+            try:
+                # O2: a call on a key that is not concrete. Checked first,
+                # on the key expression as a whole (SPEC-FINDINGS F-74).
+                if any(templates.is_wild(c) for c in asked.split("/")) and r["fanout"] != "allowed":
+                    _refuse(query, enc, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
+                                                            "call one concrete key (O2)")
                     return
-                query.reply(key, json.dumps({"state": "up"}).encode(), encoding="application/json")
-            else:
-                # §5.2 (0.7): any operation may refuse with app; with no
-                # error type there is no detail.
-                refuse(query, "app", "this owner decodes no protobuf schema")
+                if member is not None:
+                    bound: dict[str, list[str] | None] = {
+                        k: [v] if isinstance(v, str) else list(v) for k, v in member.items()}
+                elif r["params"]:
+                    chunks = asked.split("/")
+                    chunks = chunks[chunks.index(r["token"]) + 1:] if r["token"] in chunks else chunks
+                    got = templates.bind(tpl, chunks)
+                    if got is None:
+                        # §5.1 (0.8): "A concrete parameter chunk that is not
+                        # a canonical slug (§1.4) names no member … refuses
+                        # such a call invalid_request before any handler
+                        # runs, fan-out or not".
+                        _refuse(query, enc, "invalid_request", "the key names no member of the template")
+                        return
+                    bound = got
+                else:
+                    bound = {}
+                call = OpCall(query, base, r, enc, bound, asked)
+                if member is not None:
+                    call.name(**member)
+                self.handled.append(asked)
+                try:
+                    (app or self._default_op)(call)
+                except Exception as e:  # noqa: BLE001 - a handler's bug is internal, never silence
+                    call.failed = f"{type(e).__name__}: {e}"
+                call.finish()
+            finally:
+                if self.hold_s > 0:
+                    # operations.md §1 (0.8): hold the query open a while
+                    # after replying, so a caller that waits for completion
+                    # shows it.
+                    threading.Timer(self.hold_s, query.drop).start()
 
         return handle
+
+    def _default_op(self, call: OpCall) -> None:
+        """The default handler: a template-wide operation names no member,
+        since this owner has none, so a call naming one is ``not_found``
+        and a fan-out over the template is ``internal`` (§5.1: "One that
+        names no member has no key to reply on, and refuses the call").
+        Otherwise a raw operation echoes, a JSON one answers an object, and
+        any other is refused ``app`` with no detail (§5.2)."""
+        r = call.resource
+        if r["params"] and call.member_key is None:
+            if all(v is not None for v in call.bound.values()):
+                call.refuse("not_found", "no such member")
+            else:
+                call.refuse("internal", "this server names no member for the call")
+            return
+        req, resp = r["request"]["kind"], r["response"]["kind"]
+        if req == "raw" and resp == "raw":
+            call.reply(call.payload, encoding=r["response"]["media_type"])
+        elif req == "jsonschema" and resp == "jsonschema":
+            try:
+                if not isinstance(json.loads(call.payload or b"null"), dict):
+                    raise ValueError("not an object")
+            except ValueError:
+                call.refuse("invalid_request", "the request does not decode as the request type")
+                return
+            call.reply(json.dumps({"state": "up"}).encode(), encoding="application/json")
+        else:
+            # §5.2 (0.7): any operation may refuse with app; with no error
+            # type there is no detail.
+            call.refuse("app", "this owner decodes no protobuf schema")
 
     def close(self) -> None:
         for e in reversed(self._entities):
