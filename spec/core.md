@@ -1,9 +1,10 @@
 # zk2 core specification
 
-**Version 0.6** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.7** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
-archive's gaps in 0.6).
+archive's gaps in 0.6, and in 0.7 the findings of its live half, the
+operations runtime's decisions and the codegen's gaps).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -431,7 +432,7 @@ each document, checked against the fixture contract. `[F: descriptors/]`
 **The GET.** One `complete` queryable on the instance key answers with one
 reply: the current descriptor's bytes, with `Encoding` `application/json`,
 no attachment and no timestamp (S1–S2 bind state, and a descriptor is not
-state). The put on a change carries the owner's timestamp. A caller GETs
+state). Each put of it (below) carries the owner's timestamp. A caller GETs
 with consolidation `None`, as §8.4 does, takes the first reply, and waits
 for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
 
@@ -497,6 +498,12 @@ gate does not name.
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
   it changes, and MUST answer a GET there with the current one.
   `[Sc: presence.md §2]`
+  - **The first descriptor is put too.** The owner puts it when it
+    declares the descriptor's queryable, in §8.2 step 3, and so before any
+    token. A subscriber to instance keys that is already up, such as
+    `presence.md §1`'s tool, receives each descriptor an instance puts, its
+    first included. A re-mint puts the new instance's first descriptor the
+    same way, before the new tokens (§8.1). `[Sc: presence.md §1]`
 
 **The checks.** A checker reads a descriptor with the contracts it is given,
 and reports these codes. `[F: descriptors/]`
@@ -578,6 +585,15 @@ and reports these codes. `[F: descriptors/]`
 A **tool** checks S4 against the routers' storage admin space. A consumer
 cannot tell under `Latest` which replier answered.
 
+**Observing S1.** An owner's stamp is told from a router's by its id: the
+owner's session's zid, against the router's (§4.1). Where the owner's
+session is itself the router, the two zids are one, and the check proves
+nothing. A tester therefore runs the owner as a client of a router with
+timestamping enabled, which keeps the stamp a put carries unless it is
+future-dated (§4.1), and checks the check against a control: a put without
+a timestamp, through the same router, arrives with the router's zid.
+`[Sc: state.md §1]`
+
 ### 4.3 Clocks (S7)
 
 - **HLC.** A session that serves state MUST enable Zenoh's HLC. At the
@@ -587,6 +603,12 @@ cannot tell under `Latest` which replier answered.
   therefore mints each state timestamp as the greater of
   `Session::new_timestamp()` and the last timestamp it issued plus one
   tick, with its session's zid as the id. `[Sc: state.md §1]`
+  - **A tick** is the smallest step the owner's timestamp type can take
+    above the last. Timestamps are compared by their time, an NTP64 value
+    (Appendix B), whose unit is 2^−32 s: the reference adds one unit. A
+    larger step keeps the rule, which needs only that each stamp exceed the
+    last: zenoh-python builds an NTP64 from seconds and nanoseconds, so its
+    smallest step is 1 ns.
 - **Catch-up.** An owner MUST NOT stamp at or below the last timestamp it
   issued for its keys. Before its first write, it takes that timestamp from
   its own persistent record, else from an explicit read of an archive on its
@@ -705,16 +727,131 @@ section is what the core requires of it.
 
 | # | Rule | Evidence |
 |---|---|---|
-| O1 | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template), and MUST be `complete`. A concrete call with `BestMatching` then executes on at most one instance **while one instance serves the operation**. `BestMatching` reaches one `complete` queryable on each router, so a split-brain across routers runs a call on each side. Exclusivity beyond that is `redundancy.v1`'s. | `[Sc: operations.md §1]` |
+| O1 | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template), and MUST be `complete`. A concrete call with `BestMatching` then executes on at most one instance **while one instance serves the operation**. `BestMatching` reaches one `complete` queryable on each router, so a split-brain across routers runs a call on each side. Exclusivity beyond that is `redundancy.v1`'s. **Caller:** a concrete call MUST use target `BestMatching` and consolidation `None`, both set explicitly. | `[Sc: operations.md §1]` |
 | O2 | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. **Caller:** a call to a fan-out operation MUST use target `All` and consolidation `None`. | `[Sc: operations.md §2]` |
-| O3 | **Owner:** a reply MUST go on the operation's own concrete key. Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
-| O4 | **Caller:** MUST NOT retry an operation that is not declared `idempotent`. | `[Sc: operations.md §4]` |
+| O3 | **Owner:** a reply MUST go on the operation's own concrete key, a member's for a call over a template (below). Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). Every call that reaches an owner's queryable MUST get one or the other, never silence (below). The active instance of a service MUST answer a call to an optional operation it does not expose with `unavailable` and its cause. A standby declares no operation queryable (§6), so it cannot intercept calls. | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
+| O4 | **Caller:** MUST NOT retry an operation that is not declared `idempotent`, and retries one that is only after silence (below). | `[Sc: operations.md §4]` |
 | O5 | **Caller and tool:** MUST NOT treat an empty reply set as a verdict. Access-control refusals return empty since zenoh 1.3. A tool attributes silence through presence. | `[Sc: operations.md §5]` |
-| O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`. `Latest` and `Auto` kept 1 reply of 10 in spike S6. | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
-| O7 | **Caller:** a request MAY carry an attachment, the JSON object `{"actor", "request_id"}` (strings), which an owner MAY record for audit. It is claimed, never authentication. | `[Sc: operations.md §7]` |
+| O6 | **Owner:** an operation declared `replies = "many"` gives zero or more value replies, then completion. With a declared `summary`, each replier MUST end with exactly one summary reply, whose attachment is the ASCII bytes `summary`; value replies carry none. **Caller:** MUST use consolidation `None`. `Latest` and `Auto` kept 1 reply of 10 in spike S6. A replier without exactly one summary is possibly partial (below). | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
+| O7 | **Caller:** a request MAY carry an attachment, the JSON object `{"actor", "request_id"}` (strings), which an owner MAY record for audit. It is claimed, never authentication, and never a reason to refuse a call (below). | `[Sc: operations.md §7]` |
 
 Work that outlives a query timeout belongs to `jobs.v1`. A request type
 SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
+
+**Calling.**
+- **A concrete call (O1).** `BestMatching` reaches one `complete`
+  queryable on each router, and consolidation `None` delivers each reply as
+  it arrives, as on every operation call (O2, O6). zenoh's default on a
+  concrete key is `Latest` (§4.1): it holds the reply until the query
+  completes, and keeps one reply per key, so the second execution of a
+  split-brain would arrive unseen. A one-reply caller takes the first value
+  or envelope on the call's key, without waiting for the query to
+  complete. `[Sc: operations.md §1]`
+- **The timeout** is the caller's (§8.1). A caller that sets none waits
+  the operation's `timeout_ms`, the contract's recommendation, and with
+  neither, 10 s, zenoh's default query timeout (Appendix B). A call that
+  ends there with no value and no envelope is silent (O5).
+- **Retries (O4)** are opt-in: a caller makes one attempt unless it is
+  configured for more, and calls an operation that is not `idempotent` once,
+  whatever the configuration.
+  - A retry follows silence only: no value and no envelope before the
+    timeout, the transport's own error reply included (§5.2).
+  - An envelope is an answer, `busy` included, and so is a malformed one.
+    Calling again after `busy` is a new call, which the application
+    decides, never a retry.
+  - The reference retries no fan-out: every service that answered would
+    run it again.
+
+  `[Sc: operations.md §4]`
+
+**Answering.**
+- **Every call is answered (O3).** A call that reaches an owner's
+  queryable gets a value or an envelope. A handler that ends without
+  replying is answered `internal`, so a live server's own bug is never
+  silence (O5). With `replies = "many"`, a declared `summary` is owed too:
+  a handler that ends without it is answered `internal`, after any values
+  it sent (O6). Without one, zero values then completion is the
+  operation's own answer, which a caller cannot tell from silence.
+  `[Sc: operations.md §3, §6]`
+- **A key that names no member.** A concrete call whose resource chunks
+  resolve to no member of the operation's template, because a parameter
+  chunk is not a canonical slug (§1.4, §2.2), is refused with
+  `invalid_request`: the key is malformed. `not_found` is for a well-formed
+  member the owner does not have. `[Sc: operations.md §3]`
+- **The request.** A request that does not decode as the operation's
+  `request` type, by its `Encoding` and then the contract's (§7.2), is
+  refused with `invalid_request`.
+  - That decode is the check the core requires. An owner MAY decode into a
+    type generated from the schema, or checked against it, and need not
+    evaluate the JSON Schema itself; the reference does not.
+  - It MAY check further, and refuses what it rejects with
+    `invalid_request` too.
+  - A caller MUST NOT depend on a refusal of what the schema refuses: a
+    writer sends only what its schema declares (§9.8).
+
+  `[Sc: operations.md §3]`
+- **The active instance (O3).** An instance is active on an interface when
+  it exposes at least one of the interface's resources (§8.2). It then
+  holds the interface's token, unless the interface is in its tokenless
+  set (§8.1). The active instance declares a `complete` queryable over each
+  optional operation of the interface that it does not expose, and answers
+  there with `unavailable` and the cause its descriptor gives (§3.3). A
+  standby is active on nothing, so it declares none.
+  - **Beside replicas.** Several instances are active on one interface
+    only through replicated operations (§6). An instance whose exposed
+    resources of an interface are all replicated operations MUST NOT
+    declare an `unavailable` queryable on an exclusive operation of it: the
+    instance serving that operation may be another, and a concrete call
+    reaches whichever `complete` queryable is nearest (O1).
+  - Replicas SHOULD expose the same replicated operations, since one
+    answers `unavailable` where another would have served.
+
+  `[Sc: operations.md §3, §8]`
+
+**Fan-out.**
+- **Over a template (O2, O3).** A fan-out's key expression can hold a
+  wildcard where the template has a parameter, so it names no member,
+  while every reply goes on a concrete key.
+  - A server declared on one member's concrete key answers for that
+    member, on that key.
+  - A server declared over the whole template learns from such a call only
+    what its key expression binds: each parameter at a concrete chunk,
+    unslugged (§1.4), and none at a wildcard. It names the member each
+    reply answers for, and replies on that member's key, which the call's
+    key expression MUST select. One that names no member has no key to
+    reply on, and refuses the call: the reference refuses it `internal`.
+  - A caller can rely on each value reply it keeps being on a concrete
+    member key that its call selected, which names the service and the
+    member's values (R6 discards the rest). It cannot rely on one reply per
+    member: how many members a server answers for is the server's own. A
+    template-wide server with `replies = "one"` answers for one member per
+    call, and one with a queryable per member answers for each it holds.
+
+  `[Sc: operations.md §2]`
+- **Attribution (O3, O5).** A value reply is attributed by its key. A
+  refusal cannot be: in zenoh 1.10.1, a `reply_err` carries no key
+  expression, and the replier's id is unstable API (Appendix B), which the
+  core does not use (§0). A caller reports a fan-out's envelopes
+  unattributed. Which selected services sent no value it learns from
+  presence (§8.1): each of them refused or was silent, and the caller
+  cannot tell which. `[Sc: operations.md §2]`
+- **Possibly partial (O6).** A **replier** is the replies on one concrete
+  key. With a declared `summary`, a caller reads a replier as complete only
+  when it ended with exactly one summary.
+  - One with none was cut off by the timeout, or broke off.
+  - One with two or more is several instances on one key, a split-brain or
+    a replicated operation run once per router (§6), whose replies cannot
+    be told apart.
+
+  A caller reports both as possibly partial. Without a declared `summary`,
+  a replier's completion cannot be told. `[Sc: operations.md §6]`
+
+**Call metadata (O7).** An owner reads a request's attachment as call
+metadata only when it is a JSON object whose `actor` and `request_id`,
+each optional, are strings where present. Other members are ignored.
+Anything else is no metadata: bytes that are not JSON, a value that is not
+an object, or a member of another type, `null` included. A call is never
+refused for its attachment. `[Sc: operations.md §7]`
 
 ### 5.2 The error envelope
 
@@ -725,17 +862,33 @@ A failed call replies with `reply_err` and an envelope with these fields:
 | `code` | string | One of `invalid_request`, `not_found`, `unavailable`, `forbidden`, `fanout_forbidden`, `busy`, `internal`, `app` |
 | `message` | string | For a human, never parsed |
 | `cause` | string or null | With `unavailable` only, and then required: `build`, `config` or `capability` (§2.3) |
-| `detail` | a value, bytes, or null | With `app` only: the operation's declared `error` type, as a value inline (JSON, CBOR) or as its encoded message (protobuf) |
+| `detail` | a value, bytes, or null | With `app` only, and optional: a value of the operation's declared `error` type, inline (JSON, CBOR), as its encoded message (protobuf), or as base64 text of its bytes (raw, below) |
 
 **Encoding.** The envelope's kind follows the operation's `error` type when
 it declares one, else its `response` type:
 - **A JSON Schema type:** the envelope is encoded in the operation's
   `encoding`, JSON or CBOR.
 - **A protobuf type:** the envelope is the message `zk2.core.v1.Error`.
-- **A raw type:** the envelope is JSON.
+- **A raw type:** the envelope is JSON. A raw `error` type's detail is its
+  bytes as base64 text (RFC 4648 §4, padded), the JSON form of bytes
+  (§7.2). `[F: errors/cases.json]`
 - **The reply's `Encoding`** MUST say which:
   - `application/json` or `application/cbor`;
   - or `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
+
+**`app`** is the operation's own failure, and any operation MAY refuse
+with it.
+- **The detail** is optional. An operation that declares no `error` type
+  has none to send: its envelope follows the `response` type, and an owner
+  MUST NOT put a detail in it. With an `error` type, an owner MAY send a
+  detail, and then it is a value of that type, in the form above.
+- **A detail that does not fit** its envelope, such as bytes in a JSON or
+  CBOR envelope other than a raw type's base64 text, or a value in a
+  protobuf one, MUST NOT be sent. The reference sends `internal` instead.
+- **Reading one.** A tool decodes the envelope without the contract, so a
+  raw detail reads as a string, and a caller holding the contract decodes
+  it as base64. A protobuf detail is absent only when its field is not
+  written: an empty one is present. `[F: errors/cases.json]`
 
 The two definitions are [`core/error.proto`](core/error.proto) and
 [`core/error.schema.json`](core/error.schema.json).
@@ -791,12 +944,29 @@ any other reply error is the transport's.
   exposes it. An operation MAY declare `serving = "replicated"`, which lets
   any number of instances expose it, costs one execution per router per
   call, and requires `idempotent = true`. `[F: contracts/e018-replicated]`
+  Each instance that exposes a replicated operation is active on its
+  interface (§5.1), and so holds the interface's token, tokenless sets
+  aside (§8.1).
 - **No core roles.**
   - A standby instance exposes no exclusive resource, and declares no
     interface token for an interface it exposes nothing of.
   - Two instances of one service holding an interface token for the same
-    interface, for longer than a grace period, is a **finding**. A tool
-    diagnoses it, and the runtime does not fence.
+    interface, for longer than a grace period, is a **finding**, except
+    where replicated serving explains it (below). A tool diagnoses it, and
+    the runtime does not fence.
+    - **Replicated serving.** Holders are not a finding when at most one
+      of them exposes an exclusive resource of the interface: an interface
+      whose holders expose only replicated operations is held by any number
+      of instances. A tool decides this only for an interface whose
+      contract declares a replicated operation, from the contract and the
+      holders' descriptors (§3.3's exposure). One that cannot read a
+      holder's descriptor or the contract reports the holders as
+      undecided, neither a finding nor clear (O5).
+    - **Longer than the grace period** is judged from two presence reads,
+      `grace` apart: the service and interface held by two or more
+      instances in both reads, not necessarily the same ones. A re-mint's
+      overlap shows in one read at most, and a standby in neither. A read
+      that ended at its timeout can miss a holder, never invent one (§8.1).
     - The grace period is a tool setting. It SHOULD exceed the longest
       re-mint overlap the deployment allows (§8.1).
     - An owner SHOULD keep a re-mint's overlap below one second.
@@ -895,7 +1065,32 @@ listed files.
 **`oneOf`, `anyOf` and `prefixItems`** are in the subset because Rust-first
 contracts (schemars output) use them for enums, `Option<T>` and tuples.
 Their containment is not decided in general. The classifier (§9.8) treats
-any change inside one conservatively, as *review*.
+any change inside one conservatively, as *review*, a nullable form aside
+(below).
+
+**A nullable** has two spellings, which are one type.
+- `{"type": ["integer", "null"]}` is what schemars 1 writes for an
+  `Option` of a scalar.
+- `{"anyOf": [S, {"type": "null"}]}` is the **nullable form**, which
+  schemars 1 writes for an `Option` of a referenced type, and other
+  generators for every optional value. It is an `anyOf` with nothing beside
+  it that carries meaning, holding two branches in either order: the null
+  schema, whose `type` is exactly `null` and which holds nothing else that
+  carries meaning, and any schema S.
+- **Its reading** is S, its `$ref`s followed (§9.8), with `null` added to
+  its `type` and, where it has one, to its `enum`. A form has a reading
+  when that S is an object with a `type`, and without `const`, `oneOf` or
+  `anyOf`: those constrain a null too, so adding `null` to the `type`
+  would not admit one.
+- A form means what its reading means. Wherever an implementation compares
+  two schemas for meaning, the classifier (§9.8) or a generator's check
+  that a type agrees with its committed schema, it reads a form with a
+  reading as that reading. So `{"anyOf": [{"type": "integer"}, {"type":
+  "null"}]}` is `{"type": ["integer", "null"]}`, and `{"anyOf": [{"type":
+  "string", "enum": ["a", "b"]}, {"type": "null"}]}` is `{"type":
+  ["string", "null"], "enum": ["a", "b", null]}`.
+  `[F: compat/payload/jsonschema/nullable-type-to-anyof,
+  nullable-anyof-to-type, nullable-enum-inlined]`
 
 ### 7.4 Shared memory
 
@@ -949,8 +1144,9 @@ Liveliness tokens carry no payload; everything is in the key.
   - An owner with no member yet holds no member token: one that publishes
     nothing under the template holds none.
 - **Re-minting is make-before-break.** An owner that starts a new instance
-  id while running MUST declare the new tokens and descriptor first, then
-  undeclare the old ones. There is an overlap, never a gap.
+  id while running MUST declare the new descriptor and tokens first, in
+  §8.2's order (the descriptor's queryable and first put, then the
+  tokens), then undeclare the old ones. There is an overlap, never a gap.
   `[Sc: presence.md §3]`
 - **Reading presence.** A caller or tool's liveliness GET on a session that holds a
   liveliness subscriber MUST use a callback or an unbounded handler. With
@@ -983,12 +1179,49 @@ Liveliness tokens carry no payload; everything is in the key.
 
 An owner MUST bring itself up in this order, so that alive ⇒ callable:
 1. declare its resources (publishers and queryables);
-2. validate that every required resource is exposed;
-3. declare the descriptor's queryable, and a contract queryable (§8.4) for
-   each interface it implements, holding that interface's bundle;
+2. validate that every required resource is exposed, and every optional
+   one exposed or absent as its descriptor will say (below);
+3. declare the descriptor's queryable and put the first descriptor (§3.3),
+   then a contract queryable (§8.4) for each interface it implements,
+   holding that interface's bundle;
 4. declare the instance token, then the interface tokens.
 
 `[Sc: presence.md §1]`
+
+- **Exposed** is what an instance serves, as its descriptor says (§3.3).
+  At start-up, a resource is exposed once what serves it is declared, or,
+  for a template whose members appear later, once the owner serves the
+  template:
+  - an operation, by its `complete` queryable, on the concrete key or over
+    the template (O1);
+  - a state, by its interface's state queryables (S2) and its publisher,
+    or for a template, the publisher of each member as it appears. Its
+    value is not part of being exposed (below);
+  - a stream, by its publisher, or for a template, each member's as it
+    appears; an event, by the owner publishing its occurrences, which are
+    one-shot puts that need no declaration.
+
+  So a templated resource with no member yet is exposed by its template
+  (§8.1), and the descriptor claims it. The reference counts a resource
+  exposed when it is declared, or marked exposed, on the service before
+  start.
+- **Step 2** refuses to start an owner with a required resource not
+  exposed (§2.3), an optional one neither exposed nor absent as the
+  descriptor says (gated on a capability not held, or listed
+  `unavailable`), and one both exposed and listed. A descriptor's exposure
+  is compact (§3.3), so an optional resource left out of `unavailable` is
+  claimed. `[Sc: presence.md §2]`
+- **The order of steps 1 and 2** is free: what it protects is that
+  nothing of steps 3 and 4 happens unless step 2 passes. The reference
+  validates first, then declares its state queryables and `unavailable`
+  queryables (§5.1).
+- **State values.** Alive ⇒ callable holds for operations through the
+  steps. A state's value is not a declaration, so an owner that holds a
+  state member's value at start SHOULD put it before step 4: a GET made
+  when the interface token appears then finds it. A key the owner has not
+  written yet is absent from its answer, which a consumer cannot tell from
+  a reply that has not crossed: silence is not a verdict (S6).
+  `[Sc: presence.md §1]`
 
 ### 8.3 The presence budget
 
@@ -1760,8 +1993,24 @@ declares. Annotations are ignored.
   `[F: compat/payload/jsonschema/boolean-property]`
 - **Inside `oneOf`, `anyOf` and `prefixItems`,** the schemas are compared
   as written, in order, with annotations dropped at schema positions: a
-  reordering is a change, and a `$ref` there is not followed.
-  `[F: compat/payload/jsonschema/oneof-reordered, oneof-annotation-only]`
+  reordering is a change. A `$ref` there is compared by what it resolves
+  to, followed and its siblings added as above, so a change to a
+  definition reached only from inside one is a change inside it, and
+  inlining a definition is none. A `$ref` back to a target already being
+  followed is compared as written, which ends a recursive type, and one
+  that resolves to nothing is `schema_unreadable`.
+  `[F: compat/payload/jsonschema/oneof-reordered, oneof-annotation-only,
+  oneof-ref-target-changed]`
+- **A nullable form with a reading** (§7.3) is compared as its reading, so
+  a change between the two spellings is none, and a change inside its S is
+  classified by the rules below, through S's `$ref`s. The one exception: a
+  form against an `anyOf` that is not a form with a reading. Both are then
+  compared as written, like any `anyOf` changed, so a `null` branch added
+  to another `anyOf` stays review.
+  `[F: compat/payload/jsonschema/nullable-type-to-anyof,
+  nullable-anyof-to-type, nullable-inner-retyped, nullable-null-dropped,
+  nullable-ref-target-changed, nullable-enum-inlined,
+  nullable-enum-null-refused, anyof-add-branch]`
 - **Compatible:**
   - an optional property added, even to a closed schema, or removed;
   - `additionalProperties` or `items` changed between absent, `true` and
@@ -1941,7 +2190,12 @@ Appendix B. These are the ones the rules above cite:
 - `BestMatching` reaches the nearest `complete` queryable on each router.
 - Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
   beyond the HLC delta (500 ms).
-- A timestamp carries its HLC's id, the zid.
+- A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
+  whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
+- A reply error carries a payload and an encoding, and no key expression.
+  `Reply::replier_id` is behind the `unstable` feature.
+- A query that sets no timeout waits `queries_default_timeout`, 10 s by
+  default.
 - A client connects to one endpoint at a time.
 - A link's batch is the minimum of the configured size, the MTU and the
   other end's.

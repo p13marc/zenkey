@@ -6,14 +6,31 @@ A consumer `vehicle-01/executor`, bound with `{vehicle} = self.system`.
 
 ## §1 Stamped mutations (S1, S2, §4.3 minting)
 
-**Steps.** The owner puts v1, then v2, then deletes the key. The consumer
-subscribes before, and GETs with `All` + `Latest` after v2.
+**Setup.** The owner and the consumer are clients of R1, whose
+timestamping is enabled. The owner's session is never R1 itself: there,
+the owner's zid and the router's are one, and the id check below proves
+nothing (core §4.2, "Observing S1").
+
+**Steps.**
+1. The owner puts v1, then v2, then deletes the key. The consumer
+   subscribes before, and GETs with `All` + `Latest` after v2.
+2. **The control:** a third client of R1 puts on a key of its own without
+   setting a timestamp, and the consumer subscribes to it.
+3. The owner puts v3 and v4 back to back, faster than its clock advances.
 
 **Expected.**
-- Every sample, the delete included, carries a timestamp whose id is the
-  owner session's zid. A router stamp would carry the router's.
-- Each timestamp is greater than the previous one.
-- The GET after v2 returns v2 with v2's timestamp.
+1. Every sample, the delete included, carries a timestamp whose id is the
+   owner session's zid, not R1's. Each timestamp is greater than the
+   previous one. The GET after v2 returns v2 with v2's timestamp.
+2. The control's sample carries R1's zid: the router stamps what is
+   unstamped, so the check in 1 can tell the two apart.
+3. v4's timestamp is greater than v3's, by at least one tick (core §4.3).
+
+*Measured (#609): the Rust owner example and zk2py's owner were each their
+own router, so their S1 check proved only that the stamp's id was the
+process's (F-69). zk2py's owner also runs as a client of a router, and
+steps by 1 ns, its smallest; the reference steps by one NTP64 unit
+(2^−32 s).*
 
 ## §2 Deletes inside the window, and the collection (S2, S3)
 
