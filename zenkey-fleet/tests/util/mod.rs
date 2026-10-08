@@ -20,6 +20,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+/// The zk2 suites' routers, clients and example contracts (#612, FJ3).
+pub mod zk2;
+
 /// How long a bus test waits before calling a hang a hang (#371).
 ///
 /// **This is a net, not an assertion.** Every use of it is wrapped around a

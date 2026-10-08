@@ -374,7 +374,8 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
 ///
 /// Liveliness sweeps ([`crate::bus::roster::roster()`]) are a different API
 /// (`session.liveliness().get()`) with no querier equivalent and stay
-/// undeclared.
+/// undeclared; they have a chokepoint of their own,
+/// [`crate::bus::presence::liveliness_read`], for spec §8.1's handler rule.
 pub struct RepeatingQuery {
     querier: zenoh::query::Querier<'static>,
     base: String,

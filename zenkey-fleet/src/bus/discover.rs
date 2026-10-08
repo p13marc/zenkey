@@ -176,15 +176,12 @@ pub fn merge_signals(
 pub async fn discover_bases(session: &Session, timeout: Duration) -> Result<Vec<DiscoveredBase>> {
     let mut tokens = Vec::new();
     for sweep in [HOST_ALIVE_SWEEP, CATALOG_ALIVE_SWEEP] {
-        let Ok(replies) = session.liveliness().get(sweep).timeout(timeout).await else {
+        // The unbounded handler (spec §8.1): zenoh's default one hangs
+        // beside a liveliness subscriber from ~1,000 tokens (zenoh#2678).
+        let Ok(read) = crate::bus::presence::liveliness_read(session, sweep, timeout).await else {
             continue;
         };
-        while let Ok(reply) = replies.recv_async().await {
-            let Ok(sample) = reply.result() else { continue };
-            if let Some(token) = parse_alive_key(sample.key_expr().as_str()) {
-                tokens.push(token);
-            }
-        }
+        tokens.extend(read.keys.iter().filter_map(|key| parse_alive_key(key)));
     }
     let storages = crate::bus::admin::storages(session, timeout)
         .await

@@ -11,6 +11,18 @@
 //! explorer sees the wire as it really is, full keys included — that is what
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
 //!
+//! **zk2 beside v1** (#612, FJ3). The zk2 core sits beside the v1 engine
+//! until FJ9 deletes v1: [`bus::presence`] and [`bus::contracts`] read
+//! services, descriptors and contract bundles; [`model::catalog`],
+//! [`model::render`] and [`model::structural`] turn them into views and
+//! honest renderings; `report`'s `presence`, `iface`, `graph`, `contract`
+//! and `payload` domains are what zenctl prints. The zk2 functions take a
+//! bare `&Session` and spell base-relative keys, because zk2's resolved
+//! verbs read through a session **in** the deployment's namespace (decided
+//! 2026-10-08), which ends RFC 09 §5's rule above for zk2; raw verbs and the
+//! admin space stay un-namespaced. The runtime is the `zk2` dependency
+//! (`zenkey` 0.20 under an alias, so the v1 `zenkey` pin can coexist).
+//!
 //! # The map
 //!
 //! Five strata, and the arrow between them only ever points one way. A
@@ -27,12 +39,15 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, `blob`,
-//!   `roster`, `discover`, `producer`, `body`. The RFC 05 §2.1 fan-in
+//!   `roster`, `discover`, `producer`, `body`, and zk2's `presence` and
+//!   `contracts`. The RFC 05 §2.1 fan-in
 //!   discipline lives here exactly once, in [`bus::query::fleet_get`] (moved
 //!   verbatim from zenctl — target `All`, consolidation `None`, attribution
 //!   by the reply's own key), and everything in the layer that asks the
-//!   fleet a question goes through it. This layer returns observations and
-//!   never a verdict about one.
+//!   fleet a question goes through it. Every liveliness GET goes through
+//!   [`bus::presence::liveliness_read`] in the same way, on the unbounded
+//!   handler spec §8.1 requires beside a liveliness subscriber (zenoh#2678).
+//!   This layer returns observations and never a verdict about one.
 //!
 //!   Its event sources are **`Stream`s** (#343), not only `recv` loops:
 //!   [`EventStream::into_stream`], [`SeededSubscriber`] (a direct impl),
@@ -53,7 +68,9 @@
 //!
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
-//!   `diff`, `decode`, `retain`, plus the two mechanisms every long-running
+//!   `diff`, `decode`, `retain`, zk2's `catalog` and `render`, the
+//!   `structural` ladder both generations fall back to, plus the two
+//!   mechanisms every long-running
 //!   projection shares (`bounded`, `examples`). Nothing here takes a
 //!   session, and that is load-bearing: it is what lets a frontend replay a
 //!   `.zrec` through the same projections it runs live.
@@ -66,7 +83,8 @@
 //! * **[`report`]** — every serde-pinned wire shape in the crate, split by
 //!   domain. Its module doc carries the placement rule, which is the answer
 //!   to "where does this struct go?" whenever the struct has a `Serialize`
-//!   on it.
+//!   on it. zk2's shapes are domains of their own (`presence`, `iface`,
+//!   `graph`, `contract`, `payload`) beside v1's until FJ9.
 //!
 //! * **[`tape`]** — traffic as a thing rather than an event. `record`,
 //!   `ingest`, `generate`, `synth`, `bench`. It sits beside the others
@@ -236,10 +254,27 @@ pub use model::skeleton::{
     DeclRef, Evidence, NodeStats, SkeletonChunk, SkeletonCoverage, SkeletonNode, merge,
 };
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
-// The rest of what the frontends actually reach for.
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use model::decode::{OBSERVE_LIMIT, structural, structural_value};
+// The rest of what the frontends actually reach for. The structural ladder
+// needs no codec, so it is no longer gated on `decode` (#612, FJ3).
+pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
+// zk2 (#612, FJ3): presence and its §8.1 liveliness chokepoint, contract
+// retrieval, the catalog and its offline contracts, and honest rendering.
+// The generic verbs keep a zk2 name at the root — `observe` and `render`
+// alone would read as the crate's.
+pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
+pub use bus::presence::{
+    DESCRIBE_CONCURRENCY, Scope as PresenceScope, describe as describe_instances, liveliness_read,
+    observe as observe_presence, read_tokens, service_listing,
+};
+// `Observed` is `model::export`'s at the root already; zk2's is the
+// presence read, and says so.
+pub use model::catalog::{
+    Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,
+    Observed as ObservedPresence, Revision, type_view,
+};
+pub use model::render::{
+    Member, render as render_payload, render_with as render_payload_with, resolved_revision,
+};
 // Registry inference (#225, RFC 08 §6.1): the observation, the inference,
 // and the draft emitter a frontend writes files from.
 #[cfg(feature = "decode")]
@@ -309,11 +344,6 @@ pub use model::timeline::{
     PlacedBreak, SnLane, TimelineRow, Unstamped, Window, timeline,
 };
 pub use model::tree::KeyTreeSnapshot;
-/// The documents the verbs above **return**, at the root beside the verbs
-/// themselves — a caller that can spell `run_doctor` can spell what it hands
-/// back. The rest of `report` (rows, cells, verdict enums) stays behind
-/// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
-/// of it here would make this block a second copy of that module.
 pub use report::{
     AdminAnswer, AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
     ConformReport, ConsumerRow, ConsumersReport, Coverage, CoverageRow, CutoverReport,
@@ -326,6 +356,14 @@ pub use report::{
     SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, SubjectImpact,
     TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap, TraceReport,
     ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+};
+/// The documents the verbs above **return**, at the root beside the verbs
+/// themselves — a caller that can spell `run_doctor` can spell what it hands
+/// back. The rest of `report` (rows, cells, verdict enums) stays behind
+/// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
+/// of it here would make this block a second copy of that module.
+pub use report::{
+    BindingGraph, ContractAnswer, ContractView, IfaceView, PayloadRendering, ServiceListing,
 };
 // `CondState` and `Transition` are unconditional since v1.34: a version-2
 // `.zrec` carries the trigger record, and the reader is not decode-gated.
@@ -373,5 +411,27 @@ const _: () = {
         assert_send::<crate::SchemaStore>();
         assert_send::<crate::Monitor>();
         assert_send::<crate::Error>();
+        assert_send::<crate::BundleStore>();
+        assert_send::<crate::Catalog>();
+    }
+
+    /// The zk2 futures (#612, FJ3): a presence read holds a session and a
+    /// `JoinSet` across awaits, a retrieval a lock gate.
+    #[allow(dead_code)]
+    fn zk2_futures_are_send(
+        session: &zenoh::Session,
+        store: &crate::BundleStore,
+        iface: &zenkey_model::grammar::IfaceId,
+        fp: &zenkey_model::canonical::Fingerprint,
+    ) {
+        fn is_send<T: Send>(_: &T) {}
+        let scope = crate::PresenceScope::all();
+        is_send(&crate::service_listing(
+            session,
+            &scope,
+            std::time::Duration::ZERO,
+        ));
+        is_send(&store.fetch(session, iface, fp));
+        is_send(&store.fetch_all(session, &[]));
     }
 };
