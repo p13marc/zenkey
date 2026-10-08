@@ -645,7 +645,8 @@ pub(crate) enum Command {
     /// once, without presence), every sample rendered through the contract
     /// (§7.2). A sample put on a wildcard key is discarded by rule (R6) and
     /// counted apart from what this tool lagged behind. Ends at `--count`
-    /// samples, after `--for` seconds, or on ctrl-c, with a summary.
+    /// samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0
+    /// when a sample arrived, 2 when none did: silence is never a verdict.
     Watch(WatchArgs),
     /// Subscribe and print decoded samples (on-bus).
     ///

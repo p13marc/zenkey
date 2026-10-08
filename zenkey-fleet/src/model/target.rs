@@ -8,7 +8,7 @@
 //! resource the revision does not declare, a parameter its template does
 //! not have, a fan-out to an operation that forbids one (O2), a request
 //! that does not encode as the operation's type. Each is
-//! [`Error::Unaskable`](crate::Error::Unaskable): the caller's input to fix.
+//! [`Error::Unaskable`]: the caller's input to fix.
 //!
 //! Session-free, so `zenctl call --contracts …` refuses all of them with no
 //! bus at all.

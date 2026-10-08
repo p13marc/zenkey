@@ -281,7 +281,7 @@ Options:
 $ zenctl watch --help
 Subscribe to a zk2 resource and print every sample, decoded.
 
-A stream, state or event resource of one address or a pattern (`*/tc`), subscribed through the runtime's consumer (spec §3.2: at once, without presence), every sample rendered through the contract (§7.2). A sample put on a wildcard key is discarded by rule (R6) and counted apart from what this tool lagged behind. Ends at `--count` samples, after `--for` seconds, or on ctrl-c, with a summary.
+A stream, state or event resource of one address or a pattern (`*/tc`), subscribed through the runtime's consumer (spec §3.2: at once, without presence), every sample rendered through the contract (§7.2). A sample put on a wildcard key is discarded by rule (R6) and counted apart from what this tool lagged behind. Ends at `--count` samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0 when a sample arrived, 2 when none did: silence is never a verdict.
 
 Usage: zenctl watch [OPTIONS] <SYSTEM/SERVICE> <IFACE[@FP]> <RESOURCE>
 

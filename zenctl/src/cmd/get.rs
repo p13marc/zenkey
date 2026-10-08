@@ -2,9 +2,9 @@
 //! state`, a zk2 state resource read through its contract (#612, FJ5).
 //!
 //! The two forms never share a positional: `get <SELECTOR>` is RAW — a wire
-//! selector on a session in no namespace, any bus — and `get state
-//! <ADDRESS> <IFACE> <STATE>` is RESOLVED, in the deployment's namespace,
-//! through the runtime's consumer ([`state`]).
+//! selector on a session in no namespace, any bus — and
+//! `get state <ADDRESS> <IFACE> <STATE>` is RESOLVED, in the deployment's
+//! namespace, through the runtime's consumer ([`state`]).
 //!
 //! A plain fan-in GET: target `All`, consolidation `None`, every reply
 //! attributed by its own key (RFC 05 §2.1), error envelopes rendered as
