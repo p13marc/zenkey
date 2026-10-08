@@ -167,6 +167,26 @@ impl FromStr for IfaceId {
     }
 }
 
+/// `Addr` and `IfaceId` travel as their key spellings (`vehicle-01/nav`,
+/// `nav.v2`), parsed by the same `FromStr` that guards keys, so a
+/// configuration file cannot hold an address a key would refuse.
+macro_rules! serde_via_str {
+    ($($t:ty),*) => {$(
+        impl serde::Serialize for $t {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                s.collect_str(self)
+            }
+        }
+        impl<'de> serde::Deserialize<'de> for $t {
+            fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                let s = String::deserialize(d)?;
+                s.parse().map_err(serde::de::Error::custom)
+            }
+        }
+    )*};
+}
+serde_via_str!(Addr, IfaceId);
+
 impl fmt::Display for IfaceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.v{}", self.name, self.major)

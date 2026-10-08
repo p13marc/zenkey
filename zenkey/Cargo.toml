@@ -1,0 +1,31 @@
+[package]
+name = "zenkey"
+version = "0.20.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+authors.workspace = true
+description = "The zk2 runtime: services, presence, descriptors and contract retrieval over Zenoh"
+# Not on crates.io until the zk2 runtime chunks land (#610 onward). The v1
+# tools on `main` build against `zenkey =0.11.1` from crates.io meanwhile.
+# Both resolve side by side: `-p zenkey` selects this member, and only
+# whole-graph commands (`cargo pkgid`, `cargo tree -i`) need `zenkey@0.20.0`.
+publish = false
+
+[dependencies]
+zenkey-model = { path = "../zenkey-model" }
+zenoh = { workspace = true }
+# An unbounded liveliness and reply handler (spec §8.1: zenoh's default
+# 256-slot handler hangs a liveliness GET on a session that also holds a
+# liveliness subscriber, zenoh#2678). zenoh implements `IntoHandler` for a
+# flume pair, and its sender drops when the query finalizes: completion.
+flume = "0.11"
+rand = "0.9"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

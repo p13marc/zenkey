@@ -233,6 +233,16 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `examples/zk2/.history` and compatible with it. After an intended change,
   run `cargo run -p zenkey-model --bin zk2 -- contract bundle <file>
   --history examples/zk2/.history`; the history is append-only.
+- **`zenkey/`** 0.20.0 (MIT, unpublished) is zk2's session half (#610,
+  FE): `ServiceBuilder` → `start()` in spec §8.2's order (exposure checked,
+  descriptor D-checked and served, bundles on `complete` queryables, the
+  instance token, then the interface tokens), and the running `Service`
+  (capabilities, make-before-break `new_epoch`, member tokens). `presence`
+  reads liveliness on an unbounded flume handler (zenoh#2678), and
+  `retrieval` is §8.4. Everything session-free stays in `zenkey-model`.
+  `tests/` runs `spec/scenarios/` sections as in-process routers and
+  clients, one test per section, named after it. On `main` it shares the
+  name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.
 - **`spec/`** holds what every implementation must agree on:
   `contract.schema.json`, generated from `zenkey-model`'s authoring types,
   and `conformance/` fixtures. Both are checked by

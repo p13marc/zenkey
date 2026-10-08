@@ -8522,7 +8522,7 @@ dependencies = [
  "toml 1.1.4+spec-1.1.0",
  "tracing-subscriber",
  "trycmd",
- "zenkey",
+ "zenkey 0.11.1",
  "zenkey-build",
  "zenkey-explorer-config",
  "zenkey-fleet",
@@ -8548,7 +8548,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ttf-parser",
- "zenkey",
+ "zenkey 0.11.1",
  "zenkey-explorer-config",
  "zenkey-fleet",
  "zenoh",
@@ -8579,6 +8579,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zenkey"
+version = "0.20.0"
+dependencies = [
+ "flume",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "zenkey-model",
+ "zenoh",
+]
+
+[[package]]
 name = "zenkey-build"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8587,7 +8602,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "toml_edit",
- "zenkey",
+ "zenkey 0.11.1",
 ]
 
 [[package]]
@@ -8622,7 +8637,7 @@ dependencies = [
  "toml 1.1.4+spec-1.1.0",
  "tracing",
  "zblob",
- "zenkey",
+ "zenkey 0.11.1",
  "zenkey-build",
  "zenkey-report-fixtures",
  "zenoh",
@@ -8656,7 +8671,7 @@ version = "0.11.1"
 dependencies = [
  "base64 0.23.1",
  "serde_json",
- "zenkey",
+ "zenkey 0.11.1",
  "zenkey-fleet",
 ]
 
@@ -9220,7 +9235,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trycmd",
- "zenkey",
+ "zenkey 0.11.1",
  "zenkey-build",
  "zenkey-explorer-config",
  "zenkey-fleet",

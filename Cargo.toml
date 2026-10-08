@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "zenkey",
     "zenkey-model",
     "zenkey-fleet",
     "zenkey-explorer-config",

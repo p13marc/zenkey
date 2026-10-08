@@ -1,0 +1,34 @@
+# grammar.md §1–§2: one resource of every kind token.
+[interface]
+name = "probe"
+major = 1
+minor = 0
+
+[resources.s]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.xs]
+kind = "stream"
+explicit = true
+type = { raw = "text/plain" }
+
+[resources.st]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.xst]
+kind = "state"
+explicit = true
+type = { raw = "text/plain" }
+
+[resources.ev]
+kind = "event"
+type = { raw = "text/plain" }
+rate = "low"
+retention = "1d"
+
+[resources.op]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
