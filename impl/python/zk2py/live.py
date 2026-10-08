@@ -237,3 +237,133 @@ def retrieve_bundle(session: zenoh.Session, iface: str, fingerprint: str,
             r.data, r.verified = a.payload, v
             return r
     return r
+
+
+# -- §4 state, a consumer's GET --------------------------------------------------
+
+@dataclass
+class StateReply:
+    key: str
+    deleted: bool                # a reply_del (S2, S3)
+    payload: bytes
+    encoding: str
+    stamp: str | None            # Zenoh's "<ntp64>/<id hex>" text
+    stamp_id: str | None         # the id half: the HLC that issued it (§4.1)
+
+
+@dataclass
+class StateReading:
+    """The owner's answer to one state GET. ``silent`` is no reply at all:
+    "That silence is not a verdict about the key" (S6, O5)."""
+
+    replies: list[StateReply] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def silent(self) -> bool:
+        return not self.replies and not self.errors
+
+
+def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S) -> StateReading:
+    """S4: "a state GET MUST be addressed to the owner's keys, with target
+    All and consolidation Latest set explicitly." Current state is the
+    owner's answer (S6). §3.2 R6: a reply on a key that is not concrete is
+    discarded."""
+    q: queue.Queue = queue.Queue()
+    session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
+                target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.LATEST,
+                timeout=timeout)
+    out = StateReading()
+    while True:
+        try:
+            item = q.get(timeout=timeout + 5.0)
+        except queue.Empty:
+            break
+        if item is _DONE:
+            break
+        if item.ok is None:
+            out.errors.append(f"{item.err.encoding}: {item.err.payload.to_bytes()!r}")
+            continue
+        s = item.ok
+        key = str(s.key_expr)
+        if "*" in key:
+            continue
+        ts = s.timestamp
+        out.replies.append(StateReply(
+            key, s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(), str(s.encoding),
+            None if ts is None else str(ts),
+            None if ts is None else str(ts).split("/", 1)[1]))
+    return out
+
+
+# -- §5 operations, a caller's call ----------------------------------------------
+
+@dataclass
+class CallReply:
+    kind: str            # "value", "envelope", "refused_envelope", "transport"
+    key: str | None
+    encoding: str
+    payload: bytes
+    envelope: dict[str, Any] | None = None   # the decoded §5.2 envelope
+    refusal: str | None = None               # the tag a malformed envelope got
+
+
+@dataclass
+class CallResult:
+    replies: list[CallReply] = field(default_factory=list)
+
+    @property
+    def silent(self) -> bool:
+        """O5: "MUST NOT treat an empty reply set as a verdict"."""
+        return not self.replies
+
+
+def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,
+         encoding: str | None = None, timeout: float = GET_TIMEOUT_S) -> CallResult:
+    """Call an operation (§5.1).
+
+    - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
+      operation, target ``All`` and consolidation ``None`` (O2).
+    - Consolidation is ``None`` for a ``replies = "one"`` call too, which no
+      rule names (SPEC-FINDINGS F-64): every reply, an error included, is
+      seen as it arrives.
+    - A value reply is the result; a reply error is decoded by its encoding
+      (§5.2). Only ``application/json``, ``application/cbor`` and
+      ``application/protobuf;zk2.core.v1.Error`` carry an envelope; any
+      other is the transport's (§5.2 "Transport errors").
+    - No reply is silence, never a verdict (O5).
+    """
+    from . import envelope
+
+    q: queue.Queue = queue.Queue()
+    kwargs: dict[str, Any] = {
+        "target": zenoh.QueryTarget.ALL if fanout else zenoh.QueryTarget.BEST_MATCHING,
+        "consolidation": zenoh.ConsolidationMode.NONE,
+        "timeout": timeout,
+        "payload": payload,
+    }
+    if encoding is not None:
+        kwargs["encoding"] = encoding
+    session.get(key, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)), **kwargs)
+    out = CallResult()
+    while True:
+        try:
+            item = q.get(timeout=timeout + 5.0)
+        except queue.Empty:
+            break
+        if item is _DONE:
+            break
+        if item.ok is not None:
+            s = item.ok
+            out.replies.append(CallReply("value", str(s.key_expr), str(s.encoding), s.payload.to_bytes()))
+            continue
+        enc, data = str(item.err.encoding), item.err.payload.to_bytes()
+        if enc not in (envelope.JSON_ENCODING, envelope.CBOR_ENCODING, envelope.PROTOBUF_ENCODING):
+            out.replies.append(CallReply("transport", None, enc, data))
+            continue
+        try:
+            env = envelope.decode(enc, data)
+            out.replies.append(CallReply("envelope", None, enc, data, envelope=env))
+        except envelope.EnvelopeError as e:
+            out.replies.append(CallReply("refused_envelope", None, enc, data, refusal=e.tag))
+    return out

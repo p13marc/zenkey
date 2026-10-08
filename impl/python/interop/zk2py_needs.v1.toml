@@ -1,0 +1,17 @@
+# zk2py's contract for the refusal scenario (presence.md §2 step 4, core
+# §3.2): one raw state, and a required role. An owner whose configuration
+# binds the role to nothing must not start; with it bound, it starts (the
+# control). It must load with no finding at all.
+[interface]
+name    = "zk2py_needs"
+major   = 1
+minor   = 0
+summary = "zk2py's refusal-scenario interface"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.upstream]
+interface = "zk2py_echo.v1"
+resources = ["echo"]

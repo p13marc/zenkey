@@ -48,6 +48,7 @@ DEFAULT_RUNS = [
     ("vehicle-01/navigation", ["examples/zk2/walkthrough/nav.v2.toml"]),
     # Not thruster.v1 here: its required role has no binding, so the owner
     # must not start (§3.2); REFUSAL_RUNS checks exactly that.
+    ("vehicle-01/echo", ["impl/python/interop/zk2py_echo.v1.toml"]),
     ("site-1/interop", ["examples/zk2/walkthrough/camera.v1.toml",
                         "examples/zk2/zensight/zs.snmp.v1.toml",
                         "impl/python/interop/zk2py_probe.v1.toml"]),
@@ -66,7 +67,7 @@ REFUSAL_RUNS = [
 ]
 #: The harness's own 2,000 tokens (presence at scale) are not an owner's;
 #: their propagation gets a harness bound, not the conformance one.
-SCALE_PROPAGATION_S = 10.0
+SCALE_PROPAGATION_S = 30.0
 
 
 class CannotRun(Exception):
@@ -349,6 +350,10 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     finally:
         q.undeclare()
 
+    # -- state and operations (§4, §5) ------------------------------------
+    if "zk2py_echo.v1" in by_iface:
+        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None)
+
     # -- presence at scale (presence.md §4) -------------------------------
     if scale > 0:
         _scale_check(report, run, session, endpoint, system, scale)
@@ -368,17 +373,26 @@ def _scale_check(report: Report, run: str, session, endpoint: str, system: str, 
                   for i in range(n)]
         sub = session.liveliness().declare_subscriber("zk2/*/*/@zk/**", zenoh.handlers.Callback(lambda s: None))
         try:
+            def count(p) -> int:
+                return sum(1 for i in p.instances if i["service"].startswith("load"))
+
+            # The 2,000 tokens take about 3 s to reach the router from the
+            # holder's client (16–17 polls on this host), longer under load:
+            # each early GET is complete and sees what the router holds so
+            # far. Every attempt's (count, complete) is kept for the report.
             pres = live.list_presence(session, f"zk2/{system}/*/@zk/**")
+            attempts = [(count(pres), pres.complete)]
             deadline = time.monotonic() + SCALE_PROPAGATION_S
-            while time.monotonic() < deadline and sum(1 for i in pres.instances
-                                                      if i["service"].startswith("load")) < n:
+            while time.monotonic() < deadline and count(pres) < n:
                 time.sleep(0.2)
                 pres = live.list_presence(session, f"zk2/{system}/*/@zk/**")
-            loaded = sum(1 for i in pres.instances if i["service"].startswith("load"))
+                attempts.append((count(pres), pres.complete))
+            loaded = count(pres)
             report.check(run, f"presence at scale: a callback GET lists all {n} tokens while a "
                               "liveliness subscriber is held (presence.md §4)",
-                         loaded == n and pres.complete, f"{loaded}/{n} in {pres.elapsed_s:.3f} s, "
-                                                        f"complete={pres.complete}")
+                         loaded == n and pres.complete,
+                         f"{loaded}/{n} in {pres.elapsed_s:.3f} s, complete={pres.complete}, "
+                         f"{len(attempts)} attempts" + ("" if loaded == n else f": {attempts[:5]}…{attempts[-3:]}"))
         finally:
             sub.undeclare()
         for t in tokens:
@@ -429,6 +443,195 @@ def run_refusal(report: Report, exe: Path, service: str, paths: list[Path]) -> N
     report.info(run, f"owner exit status {code}")
 
 
+# -- state and operations (§4, §5): either owner ------------------------------------
+
+ECHO = "impl/python/interop/zk2py_echo.v1.toml"
+NEEDS = "impl/python/interop/zk2py_needs.v1.toml"
+DEFAULT_CONSUME = REPO / "target" / "debug" / "examples" / "consume"
+
+
+def _state_and_calls(report: Report, run: str, session, system: str, svc: str, owner_zid: str | None,
+                     expect_typed: str | None) -> None:
+    """The consumer's and the caller's side, against an owner serving
+    ``zk2py_echo.v1``: a state GET per S4, calls per O1–O5, envelopes per
+    §5.2. ``expect_typed`` is the code the owner gives ``@op/typed``'s
+    malformed request, or None to accept any valid envelope."""
+    from . import live
+
+    base = f"zk2/{system}/{svc}/zk2py_echo.v1"
+    key = f"{base}/state/health"
+    st = live.get_state(session, key)
+    ok = len(st.replies) == 1 and st.replies[0].key == key and not st.replies[0].deleted \
+        and st.replies[0].payload == b"ok"
+    report.check(run, "state GET (S4: All + Latest): the owner's one current value, 'ok'", ok,
+                 f"{[(r.key, r.payload, r.deleted) for r in st.replies]} {st.errors}")
+    if ok:
+        r = st.replies[0]
+        report.check(run, "the value is stamped by the owner (S1, S2): the stamp's id is its session's zid",
+                     r.stamp is not None and (owner_zid is None or r.stamp_id == owner_zid),
+                     f"stamp {r.stamp}, owner zid {owner_zid}")
+        report.check(run, "the value carries its media type as its Encoding (§7.2)", r.encoding == "text/plain",
+                     r.encoding)
+    sel = live.get_state(session, f"{base}/state/*")
+    report.check(run, "a state selector answers every matching live key (S2)",
+                 [r.key for r in sel.replies] == [key], str([r.key for r in sel.replies]))
+    none = live.get_state(session, f"{base}/state/nothing_here")
+    report.check(run, "a key nobody holds: silence, reported as such, not a verdict (S6, O5)", none.silent,
+                 f"{len(none.replies)} replies")
+
+    echo = live.call(session, f"{base}/@op/echo", b"ping")
+    report.check(run, "@op/echo: one value reply, the request's bytes, on the operation's key (O1, O3)",
+                 [(r.kind, r.key, r.payload) for r in echo.replies] == [("value", f"{base}/@op/echo", b"ping")],
+                 str([(r.kind, r.key, r.payload) for r in echo.replies]))
+    refuse = live.call(session, f"{base}/@op/refuse", b"")
+    report.check(run, "@op/refuse: one reply_err, an `app` envelope in zk2.core.v1.Error (O3, §5.2)",
+                 len(refuse.replies) == 1 and refuse.replies[0].kind == "envelope"
+                 and refuse.replies[0].envelope["code"] == "app"
+                 and refuse.replies[0].encoding == "application/protobuf;zk2.core.v1.Error",
+                 str([(r.kind, r.encoding, r.envelope or r.refusal) for r in refuse.replies]))
+    typed = live.call(session, f"{base}/@op/typed", b"not json")
+    good = len(typed.replies) == 1 and typed.replies[0].kind == "envelope" \
+        and typed.replies[0].encoding == "application/json" \
+        and (expect_typed is None or typed.replies[0].envelope["code"] == expect_typed)
+    report.check(run, "@op/typed, a malformed request: one reply_err whose JSON envelope decodes (§5.2)", good,
+                 str([(r.kind, r.encoding, r.envelope or r.refusal) for r in typed.replies]))
+    fan = live.call(session, f"{base}/@op/*", b"ping", fanout=True)
+    report.check(run, "a call on a wildcard key: fanout_forbidden from each operation, no value (O2)",
+                 len(fan.replies) == 3 and all(r.kind == "envelope" and r.envelope["code"] == "fanout_forbidden"
+                                               for r in fan.replies),
+                 str([(r.kind, (r.envelope or {}).get("code")) for r in fan.replies]))
+    silent = live.call(session, f"{base}/@op/nothing_here", b"ping")
+    report.check(run, "a call nobody serves: silence, never \"no such operation\" (O5)", silent.silent,
+                 f"{len(silent.replies)} replies")
+
+
+def run_python_owner(report: Report, consume: Path) -> None:
+    """zk2py as the owner (§8.2's order, §3.3, §4, §5), read by zk2py's own
+    client and by the Rust ``consume`` example."""
+    from . import bundle, live
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+    from .owner import Owner as PyOwner
+
+    if not consume.is_file():
+        raise CannotRun(f"{consume} not found: build it with `cargo build -q -p zenkey --example consume`")
+    system, svc = "py-site", "echo"
+    run = f"zk2py owner {system}/{svc} ← zk2py_echo.v1.toml"
+    path = REPO / ECHO
+    contract = load_contract(path)
+    owner = PyOwner(system, svc, [contract])
+    owner.start()
+    try:
+        session = live.open_client(owner.endpoint)
+        try:
+            deadline = time.monotonic() + PRESENCE_WAIT_S
+            pres = live.list_presence(session, f"zk2/{system}/{svc}/@zk/**")
+            while time.monotonic() < deadline and not (pres.instances and pres.alive):
+                time.sleep(0.1)
+                pres = live.list_presence(session, f"zk2/{system}/{svc}/@zk/**")
+            fp16 = contract.fingerprint.removeprefix("sha256:")[:16]
+            report.check(run, "presence: its instance token, then one interface token (§8.1, §8.2)",
+                         [i["instance"] for i in pres.instances] == [owner.instance]
+                         and [(a["iface"], a["fp16"]) for a in pres.alive] == [("zk2py_echo.v1", fp16)],
+                         f"{[i['instance'] for i in pres.instances]} {[(a['iface'], a['fp16']) for a in pres.alive]}")
+            answers = live.get_descriptor(session, owner.instance_key)
+            ok = len(answers) == 1 and answers[0].ok and answers[0].encoding == "application/json" \
+                and not answers[0].has_timestamp and not answers[0].has_attachment
+            report.check(run, "its descriptor: one reply, application/json, no timestamp or attachment (§3.3)",
+                         ok, str([(a.ok, a.encoding, a.has_timestamp) for a in answers]))
+            if ok:
+                codes = check_descriptor(answers[0].payload, [contract])
+                report.check(run, "its descriptor has no D code", codes == [], str(codes))
+            r = live.retrieve_bundle(session, "zk2py_echo.v1", contract.fingerprint)
+            report.check(run, "its bundle, retrieved per §8.4, verifies and is the build's bytes",
+                         r.available and r.data == bundle.build(contract), _describe(r))
+            _state_and_calls(report, run, session, system, svc, str(owner.session.zid()), "invalid_request")
+        finally:
+            session.close()
+
+        # The Rust consumer, as a client of zk2py's router.
+        stamp = str(owner._held[f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"].stamp)
+        key = f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"
+        for op, want in (("@op/echo", "call value ping"),
+                         ("@op/refuse", "call refused app "),
+                         ("@op/typed", "call refused invalid_request ")):
+            p = subprocess.run([str(consume), owner.endpoint, f"{system}/{svc}", str(path), "state/health", op],
+                               capture_output=True, text=True, timeout=60)
+            lines = p.stdout.splitlines()
+            ok = (p.returncode == 0 and len(lines) == 3 and lines[0] == f"present {system}/{svc}"
+                  and lines[1] == f"state {key} {stamp} ok" and lines[2].startswith(want))
+            report.check(run, f"the Rust consumer reads zk2py's owner: present, the stamped state, {op}",
+                         ok, f"exit {p.returncode}, {lines}, stderr {p.stderr.strip()[-200:]!r}")
+    finally:
+        owner.close()
+
+
+def run_python_refusal(report: Report) -> None:
+    """presence.md §2 step 4, as written since 0.6: zk2py's owner, a client
+    of a router R1 that outlives it, is watched by a liveliness subscriber
+    through R1 declared before launch. The control, with the required role
+    bound, shows its instance token within the wait; the refusal shows none,
+    and a liveliness GET through R1 afterwards returns none."""
+    import zenoh
+
+    from . import live
+    from .contract import load_contract
+    from .owner import Owner as PyOwner, OwnerRefused, free_loopback_port
+
+    system, svc = "py-site", "needs"
+    run = f"zk2py owner {system}/{svc} ← zk2py_needs.v1.toml (watched through R1)"
+    contract = load_contract(REPO / NEEDS)
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    r1 = zenoh.open(conf)
+    r1_endpoint = f"tcp/127.0.0.1:{port}"
+    try:
+        watcher = live.open_client(r1_endpoint)
+        seen: list[tuple[str, str]] = []
+        sub = watcher.liveliness().declare_subscriber(
+            f"zk2/{system}/{svc}/@zk/**",
+            zenoh.handlers.Callback(lambda s: seen.append((str(s.kind), str(s.key_expr)))), history=True)
+        try:
+            # The control: the role bound.
+            control = PyOwner(system, svc, [contract], connect=r1_endpoint,
+                              bindings={"upstream": ["py-site/echo"]})
+            control.start()
+            deadline = time.monotonic() + PRESENCE_WAIT_S
+            while time.monotonic() < deadline and not any(k == control.instance_key for _, k in seen):
+                time.sleep(0.05)
+            report.check(run, "the control (role bound) shows its instance token to the watcher within 1 s",
+                         any(k == control.instance_key for _, k in seen), str(seen))
+            control.close()
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**").count:
+                time.sleep(0.1)
+            # The refusal: the role unbound.
+            seen.clear()
+            refused = PyOwner(system, svc, [contract], connect=r1_endpoint)
+            try:
+                refused.start()
+                outcome = "started"
+            except OwnerRefused as e:
+                outcome = f"refused: {e}"
+            time.sleep(PRESENCE_WAIT_S)
+            after = live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**")
+            report.check(run, "an unbound required role: the owner refuses, the watcher sees no token, "
+                              "and a GET through R1 returns none (§3.2, presence.md §2 step 4)",
+                         outcome.startswith("refused") and not [k for kind, k in seen if "PUT" in kind]
+                         and after.count == 0 and after.complete,
+                         f"{outcome}; watcher saw {seen}; GET after: {after.count} tokens")
+            if outcome == "started":
+                refused.close()
+        finally:
+            sub.undeclare()
+            watcher.close()
+    finally:
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -436,6 +639,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run", action="append", metavar="SYSTEM/SERVICE=CONTRACT[,CONTRACT…]",
                     help="one owner run; repeatable (default: two runs over the examples and "
                          "impl/python/interop)")
+    ap.add_argument("--consume", type=Path, default=Path(os.environ.get("ZK2PY_CONSUME", DEFAULT_CONSUME)),
+                    help="the consume example binary")
     ap.add_argument("--scale", type=int, default=2000,
                     help="extra tokens for the presence-at-scale check, in the first run (0: skip)")
     args = ap.parse_args(argv)
@@ -458,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.run:
             for service, files in REFUSAL_RUNS:
                 run_refusal(report, args.owner, service, [REPO / f for f in files])
+            run_python_owner(report, args.consume)
+            run_python_refusal(report)
     except CannotRun as e:
         print(f"error: could not run: {e}", file=sys.stderr)
         return 2
