@@ -3,30 +3,43 @@
 //! input closes.
 //!
 //! ```text
-//! cargo run -p zenkey --example owner -- <system>/<service> <contract.toml>...
+//! cargo run -p zenkey --example owner -- [--connect <endpoint>] <system>/<service> <contract.toml>...
 //! ```
 //!
-//! The session is a router listening on an ephemeral loopback port, so a
-//! test connects to it as a client. Two lines on standard output say what
-//! to connect to and what came up:
+//! By default the session is a router listening on an ephemeral loopback
+//! port, so a test connects to it as a client. Two lines on standard output
+//! say what to connect to and what came up:
 //!
 //! ```text
 //! listening tcp/127.0.0.1:<port>
 //! ready zk2/<system>/<service>/@zk/instance/<instance>
 //! ```
 //!
+//! With `--connect <endpoint>`, the session is instead a client of the
+//! router at `<endpoint>`, with its HLC on (§4.3), and the first line is
+//! `connected <endpoint>`. That is the owner the black-box scenarios watch
+//! through a separate router (#660): `state.md §1` tells the owner's stamp
+//! from the router's only when the two sessions differ (§4.2, "Observing
+//! S1"), and `presence.md §2` sees a refusal only through a router that
+//! outlives the owner.
+//!
 //! Every resource of every contract is exposed (§8.1–§8.4), and for a
 //! counterpart to read:
 //! - a state resource with no template parameters and a `raw` type holds
-//!   the value `ok`, stamped (S1), answered on GET (S2);
+//!   the value `ok`, stamped (S1), answered on GET (S2), and put before the
+//!   tokens, so a GET made the moment they appear finds it (§8.2, "State
+//!   values", F-68);
 //! - an operation with no template parameters is served: a `raw` request
-//!   and response echo the request; any other types refuse with an `app`
-//!   error envelope (O3), since this owner decodes no schema.
+//!   and response echo the request; any other types refuse with `app` and no
+//!   detail (O3, §5.2), since this owner decodes no schema, and an
+//!   operation with no `error` type has no detail to send (F-65).
 //!
 //! Capabilities named by `capability:` gates are all held, so gated
 //! resources are exposed too.
 
+use std::future::Future;
 use std::io::Read;
+use std::path::PathBuf;
 
 use zenkey::model::authoring::Kind;
 use zenkey::model::contract::{Body, load_path};
@@ -34,20 +47,49 @@ use zenkey::model::schema::TypeId;
 use zenkey::model::template::Bindings;
 use zenkey::{Implementation, OpError, ServiceBuilder, ServiceConfig};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let [address, files @ ..] = args.as_slice() else {
-        eprintln!("usage: owner <system>/<service> <contract.toml>...");
-        std::process::exit(2);
-    };
-    let mut config = ServiceConfig::new(address.parse()?);
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// The command line.
+pub struct Options {
+    /// `--connect <endpoint>`: a client of that router, not a router.
+    pub connect: Option<String>,
+    pub address: String,
+    pub contracts: Vec<PathBuf>,
+}
+
+impl Options {
+    /// Reads `[--connect <endpoint>] <system>/<service> <contract.toml>...`.
+    pub fn parse(args: &[String]) -> Result<Self, String> {
+        let usage = || "usage: owner [--connect <endpoint>] <system>/<service> <contract.toml>...";
+        let (connect, rest) = match args {
+            [flag, endpoint, rest @ ..] if flag == "--connect" => (Some(endpoint.clone()), rest),
+            [flag, ..] if flag.starts_with("--") => return Err(usage().to_owned()),
+            rest => (None, rest),
+        };
+        let [address, files @ ..] = rest else {
+            return Err(usage().to_owned());
+        };
+        Ok(Self {
+            connect,
+            address: address.clone(),
+            contracts: files.iter().map(PathBuf::from).collect(),
+        })
+    }
+}
+
+/// Brings the owner up, says each output line through `say`, and runs until
+/// `until` resolves.
+pub async fn run(
+    opts: Options,
+    say: impl Fn(String),
+    until: impl Future<Output = ()>,
+) -> Result<(), BoxError> {
+    let mut config = ServiceConfig::new(opts.address.parse()?);
     let mut imps = Vec::new();
-    for f in files {
-        let l = load_path(std::path::Path::new(f));
+    for f in &opts.contracts {
+        let l = load_path(f);
         let Some(c) = l.contract else {
-            eprintln!("{f}:\n{}", l.report);
-            std::process::exit(2);
+            return Err(format!("{}:\n{}", f.display(), l.report).into());
         };
         for r in &c.resources {
             for cap in r.gate.iter().filter_map(|g| g.strip_prefix("capability:")) {
@@ -58,19 +100,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let mut z = zenoh::Config::default();
-    z.insert_json5("mode", "\"router\"")?;
-    z.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")?;
     z.insert_json5("scouting/multicast/enabled", "false")?;
-    let session = zenoh::open(z).await?;
-    let endpoint = session
-        .info()
-        .locators()
-        .await
-        .into_iter()
-        .map(|l| l.to_string())
-        .find(|l| l.starts_with("tcp/127.0.0.1:"))
-        .ok_or("no loopback listener")?;
-    println!("listening {endpoint}");
+    let session = match &opts.connect {
+        None => {
+            z.insert_json5("mode", "\"router\"")?;
+            z.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")?;
+            let session = zenoh::open(z).await?;
+            let endpoint = session
+                .info()
+                .locators()
+                .await
+                .into_iter()
+                .map(|l| l.to_string())
+                .find(|l| l.starts_with("tcp/127.0.0.1:"))
+                .ok_or("no loopback listener")?;
+            say(format!("listening {endpoint}"));
+            session
+        }
+        Some(endpoint) => {
+            z.insert_json5("mode", "\"client\"")?;
+            z.insert_json5("connect/endpoints", &serde_json::to_string(&[endpoint])?)?;
+            // §4.3: a session that serves state enables its HLC.
+            z.insert_json5("timestamping/enabled", "true")?;
+            let session = zenoh::open(z).await?;
+            say(format!("connected {endpoint}"));
+            session
+        }
+    };
 
     let mut b = ServiceBuilder::new(&session, config);
     let mut states = Vec::new();
@@ -91,31 +147,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 Body::Operation(o) if !r.template.has_params() => {
                     let echo = raw(&o.request) && raw(&o.response);
-                    // §5.2: the detail travels in the envelope's encoding:
-                    // bytes in a protobuf envelope, a value in JSON or CBOR.
-                    let protobuf = zenkey::operation::envelope_encoding(o)
-                        == zenkey::model::envelope::PROTOBUF;
                     servers.push(
                         b.serve(&iface, &name, Some(&none), move |call| async move {
-                            if echo {
-                                let body = call
-                                    .payload()
-                                    .map(|p| p.to_bytes().into_owned())
-                                    .unwrap_or_default();
-                                call.reply(body)
-                                    .await
-                                    .map_err(|e| OpError::internal(e.to_string()))
-                            } else if protobuf {
-                                Err(OpError::app_bytes(
+                            if !echo {
+                                // §5.2: `app` from any operation, and no detail
+                                // where there is no `error` type to carry one.
+                                return Err(OpError::app_without_detail(
                                     "this interop owner decodes no schema",
-                                    Vec::new(),
-                                ))
-                            } else {
-                                Err(OpError::app(
-                                    "this interop owner decodes no schema",
-                                    &serde_json::json!({}),
-                                ))
+                                ));
                             }
+                            let body = call
+                                .payload()
+                                .map(|p| p.to_bytes().into_owned())
+                                .unwrap_or_default();
+                            call.reply(body)
+                                .await
+                                .map_err(|e| OpError::internal(e.to_string()))
                         })
                         .await?,
                     );
@@ -126,18 +173,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
         }
     }
-    let svc = b.start().await?;
+    // §8.2 "State values" (F-68): the value is put before the tokens, so a
+    // GET made the moment they appear finds it.
     for w in &states {
         w.put("ok").await?;
     }
-    println!("ready {}", svc.instance_key()?);
+    let svc = b.start().await?;
+    say(format!("ready {}", svc.instance_key()?));
 
-    // Run until standard input closes.
-    tokio::task::spawn_blocking(|| {
-        let mut sink = Vec::new();
-        let _ = std::io::stdin().read_to_end(&mut sink);
-    })
-    .await?;
+    until.await;
     svc.close().await?;
+    drop(servers);
+    session.close().await?;
     Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let opts = match Options::parse(&args) {
+        Ok(o) => o,
+        Err(usage) => {
+            eprintln!("{usage}");
+            std::process::exit(2);
+        }
+    };
+    // Run until standard input closes.
+    let stdin_closed = async {
+        let _ = tokio::task::spawn_blocking(|| {
+            let mut sink = Vec::new();
+            let _ = std::io::stdin().read_to_end(&mut sink);
+        })
+        .await;
+    };
+    if let Err(e) = run(opts, |line| println!("{line}"), stdin_closed).await {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
 }
