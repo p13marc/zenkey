@@ -15,15 +15,24 @@
 //! ready zk2/<system>/<service>/@zk/instance/<instance>
 //! ```
 //!
-//! Every resource of every contract is exposed, and nothing is published:
-//! presence, the descriptor and the bundles are what this owner serves
-//! (spec §8.1–§8.4). Capabilities named by `capability:` gates are all
-//! held, so gated resources are exposed too.
+//! Every resource of every contract is exposed (§8.1–§8.4), and for a
+//! counterpart to read:
+//! - a state resource with no template parameters and a `raw` type holds
+//!   the value `ok`, stamped (S1), answered on GET (S2);
+//! - an operation with no template parameters is served: a `raw` request
+//!   and response echo the request; any other types refuse with an `app`
+//!   error envelope (O3), since this owner decodes no schema.
+//!
+//! Capabilities named by `capability:` gates are all held, so gated
+//! resources are exposed too.
 
 use std::io::Read;
 
-use zenkey::model::contract::load_path;
-use zenkey::{Implementation, ServiceBuilder, ServiceConfig};
+use zenkey::model::authoring::Kind;
+use zenkey::model::contract::{Body, load_path};
+use zenkey::model::schema::TypeId;
+use zenkey::model::template::Bindings;
+use zenkey::{Implementation, OpError, ServiceBuilder, ServiceConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -64,20 +73,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("listening {endpoint}");
 
     let mut b = ServiceBuilder::new(&session, config);
+    let mut states = Vec::new();
+    let mut servers = Vec::new();
+    let none = Bindings::new();
     for imp in imps {
         let iface = imp.iface().clone();
-        let names: Vec<String> = imp
-            .contract()
-            .resources
-            .iter()
-            .map(zenkey::implementation::resource_name)
-            .collect();
+        let resources = imp.contract().resources.clone();
         b.implement(imp)?;
-        for n in names {
-            b.expose(&iface, &n)?;
+        for r in resources {
+            let name = zenkey::implementation::resource_name(&r);
+            let raw = |t: &TypeId| matches!(t, TypeId::Raw { .. });
+            match &r.body {
+                Body::Data(d)
+                    if r.kind == Kind::State && !r.template.has_params() && raw(&d.type_) =>
+                {
+                    states.push(b.declare_state_writer(&iface, &name, &none).await?);
+                }
+                Body::Operation(o) if !r.template.has_params() => {
+                    let echo = raw(&o.request) && raw(&o.response);
+                    servers.push(
+                        b.serve(&iface, &name, Some(&none), move |call| async move {
+                            if echo {
+                                let body = call
+                                    .payload()
+                                    .map(|p| p.to_bytes().into_owned())
+                                    .unwrap_or_default();
+                                call.reply(body)
+                                    .await
+                                    .map_err(|e| OpError::internal(e.to_string()))
+                            } else {
+                                Err(OpError::app_bytes(
+                                    "this interop owner decodes no schema",
+                                    Vec::new(),
+                                ))
+                            }
+                        })
+                        .await?,
+                    );
+                }
+                _ => {
+                    b.expose(&iface, &name)?;
+                }
+            }
         }
     }
     let svc = b.start().await?;
+    for w in &states {
+        w.put("ok").await?;
+    }
     println!("ready {}", svc.instance_key()?);
 
     // Run until standard input closes.
