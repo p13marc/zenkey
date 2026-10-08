@@ -53,6 +53,7 @@ pub mod snapshot;
 pub mod snapshot_diff;
 pub mod stats;
 pub mod storage;
+pub mod structural;
 pub mod timeline;
 pub mod trace;
 pub mod tree;
