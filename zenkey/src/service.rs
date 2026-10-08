@@ -36,10 +36,12 @@ use zenoh::pubsub::Publisher;
 use zenoh::query::{Query, Queryable};
 
 use crate::config::ServiceConfig;
+use crate::consumer::Consumer;
 use crate::descriptor;
 use crate::error::{Error, Result, zenoh};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
+use crate::writer::{EventWriter, Writer};
 
 /// One implemented interface, and what this instance does with it.
 #[derive(Debug, Clone)]
@@ -291,6 +293,33 @@ impl ServiceBuilder {
             .map_err(zenoh)
     }
 
+    /// Declares a [`Writer`] on a stream or state member, with the
+    /// contract's QoS and `Encoding`, and exposes the resource.
+    pub async fn declare_writer(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<Writer> {
+        let key = self.key(iface, resource, values)?;
+        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        self.expose(iface, resource)?;
+        Writer::declare(&self.session, key.into_keyexpr(), &r, values).await
+    }
+
+    /// An [`EventWriter`] for an event's member, and exposes the resource.
+    pub fn event_writer(
+        &mut self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<EventWriter> {
+        let key = self.key(iface, resource, values)?;
+        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        self.expose(iface, resource)?;
+        EventWriter::new(&self.session, key.to_string(), &r, values)
+    }
+
     /// Brings the service up in the order of §8.2. On any refusal, nothing
     /// alive is declared.
     pub async fn start(self) -> Result<Service> {
@@ -467,6 +496,73 @@ impl Service {
     /// The concrete key of a resource member (see [`ServiceBuilder::key`]).
     pub fn key(&self, iface: &IfaceId, resource: &str, values: &Bindings) -> Result<Key> {
         resource_key(&self.config.address, &self.impls, iface, resource, values)
+    }
+
+    /// A [`Writer`] on a member of an exposed resource: for templates whose
+    /// members appear while the service runs. Exposure is fixed at start, so
+    /// an unexposed resource is refused.
+    pub async fn writer(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<Writer> {
+        let r = self.exposed(iface, resource)?;
+        let key = self.key(iface, resource, values)?;
+        Writer::declare(&self.session, key.into_keyexpr(), &r, values).await
+    }
+
+    /// An [`EventWriter`] on a member of an exposed event.
+    pub fn event_writer(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+        values: &Bindings,
+    ) -> Result<EventWriter> {
+        let r = self.exposed(iface, resource)?;
+        let key = self.key(iface, resource, values)?;
+        EventWriter::new(&self.session, key.to_string(), &r, values)
+    }
+
+    /// The consumer of `role`, compiled against `contract`, the required
+    /// interface's (R4: any revision of its major). Its providers and
+    /// parameter bindings are the configuration's (R1, R2).
+    pub fn consumer(
+        &self,
+        role: &str,
+        contract: std::sync::Arc<zenkey_model::contract::Contract>,
+    ) -> Result<Consumer> {
+        let r = self
+            .roles
+            .iter()
+            .find(|r| r.role == role)
+            .ok_or_else(|| Error::Contract(format!("this service has no role {role:?}")))?;
+        if r.interface != contract.iface {
+            return Err(Error::Contract(format!(
+                "role {role:?} requires {}, not {}",
+                r.interface, contract.iface
+            )));
+        }
+        let b = self.config.bindings.get(role).cloned().unwrap_or_default();
+        Consumer::new(
+            &self.session,
+            &self.config.address,
+            role,
+            contract,
+            &b.providers,
+            &b.params,
+        )
+    }
+
+    fn exposed(&self, iface: &IfaceId, resource: &str) -> Result<zenkey_model::contract::Resource> {
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?;
+        if !s.exposed.contains(&resource_name(r)) {
+            return Err(Error::Contract(format!(
+                "{iface} {resource:?} was not exposed before start (§8.2)"
+            )));
+        }
+        Ok(r.clone())
     }
 
     /// The interfaces for which this instance holds an interface token now.

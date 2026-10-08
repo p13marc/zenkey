@@ -1,0 +1,11 @@
+# bindings.md §2: a collection keyed by vehicle, bound to self.system.
+[interface]
+name = "mission_plan"
+major = 1
+minor = 0
+
+[resources."plans/{vehicle}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { vehicle = "string" }
+cardinality = 100

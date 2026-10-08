@@ -1,0 +1,11 @@
+# state.md §8: occurrences on ULID keys, replayed within the retention.
+[interface]
+name = "journal"
+major = 1
+minor = 0
+
+[resources.entries]
+kind = "event"
+type = { raw = "text/plain" }
+rate = "burst(2000/h)"
+retention = "1h"

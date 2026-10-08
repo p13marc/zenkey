@@ -1,7 +1,10 @@
 # zk2py: the second implementation of the zk2 spec
 
 zk2py is an independent Python implementation of the **static half** of the
-zk2 core specification (issue #609). It exists to test a claim the spec
+zk2 core specification, plus the **first slice of its live half** (issue
+#609).
+The live slice covers presence, descriptors and contract retrieval; see
+"The live half" below. It exists to test a claim the spec
 makes about itself (`spec/core.md`, preamble): an implementation in any
 language can be built from `spec/` alone, without reading the Rust
 reference.
@@ -109,11 +112,68 @@ and its reasons carry the reference rule names (`explicit_set`,
 Resources are still paired by template, not "by kind token and template",
 because the explicit rows need it (F-40).
 
+## The live half (first slice)
+
+```bash
+just py-live
+```
+
+The recipe reuses the bootstrap, builds the Rust owner example
+(`cargo build -q -p zenkey --example owner`, a no-op once built), then
+runs `python -m zk2py.live_interop`. The owner is used as a black box,
+through its documented contract only.
+
+The runner makes two owner runs:
+- `nav.v2`;
+- `camera.v1`, `zs.snmp.v1` and zk2py's own `interop/zk2py_probe.v1.toml`.
+
+In each run, zk2py connects as a client and acts on presence, not on the
+owner's `ready` line. It checks:
+- **Presence (§8.1, §8.2):** one instance token, and one interface token per
+  interface. Each token's `<fp16>` comes from the fingerprint zk2py computes
+  from the TOML.
+- **The descriptor (§3.3):** one reply on the instance key, no D code
+  against the contracts, the expected interfaces with zk2py's fingerprints,
+  minor, token and capabilities, and every contract-declared role (R3).
+- **Retrieval (§8.4):** every bundle, verified against the descriptor's
+  fingerprint and byte-identical to zk2py's own build.
+- **Retrieval failures:** an unheld revision is unavailable after
+  `BestMatching` then `All`. A corrupt nearest holder (a queryable zk2py
+  declares) is refused while the valid bundle is accepted, and only corrupt
+  holders leave the contract unavailable.
+- **Presence at scale (presence.md §4):** 2,000 extra tokens, listed in
+  full while a liveliness subscriber is held.
+- **Shutdown:** closing the owner's stdin makes it exit 0.
+
+Result: `live interop: 49 passed, 0 failed`. Exit codes are as for the
+static runner.
+
+**§8.1's handler rule in zenoh-python.**
+- Every liveliness GET passes a `zenoh.handlers.Callback`, whose callback
+  only appends to a list and whose drop function marks completion.
+  zenoh-python has no unbounded channel, so a callback is the only
+  compliant handler.
+- The tool's session holds no bounded subscriber. Measured: a bounded,
+  undrained subscriber starves even a callback GET (F-47).
+- A GET that ends at its timeout rather than at the final reply is
+  reported as possibly incomplete.
+
+**§8.4 in zenoh-python.**
+- Target `BestMatching`, then `All`.
+- Consolidation `None`, so that each reply can be verified as it arrives.
+  zenoh's default (`Auto`, which is `Latest` here) delivers one reply, at
+  completion, and can drop the valid one (F-50).
+- An unbounded queue fed by a callback; the first reply that verifies is
+  accepted.
+
+The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
-- **The live-bus half:** presence and tokens, state GET, operations, being
-  an owner, archives, contract retrieval, and everything in
-  `spec/scenarios/`. It needs a Zenoh session, and is a later phase.
+- **The rest of the live half:** state GETs and archives (§4), operations
+  (§5), being an owner (§6, §8.2), constrained faces (§8.5), and the
+  scenarios other than presence.md and retrieval.md. These are later
+  slices.
 - **Building bundles with extras.** The spec names no source for the
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
@@ -134,6 +194,7 @@ because the explicit rows need it (F-40).
 | `protobuf` | 6.33.5 | parsing `FileDescriptorSet`s, for the classifier and the §9.7 identity. It never produces artifact bytes. |
 | protoc | 3.21.12 | artifact bytes (§9.4). §9.5 "Portability" says the protobuf fixtures assume protoc 3.21.12 with `--include_imports` and without source info. |
 | pip | 25.2 | installed into the venv from its own wheel |
+| `eclipse-zenoh` | 1.10.1 | the live half. zk2 is specified against Zenoh 1.10.1 (§0). The abi3 manylinux x86_64 wheel is used. |
 
 **Why the system protoc rather than `grpcio-tools`.** The spec pins the
 compiler, not a Python package. `grpcio-tools` bundles whatever protoc its
@@ -176,6 +237,9 @@ impl/python/
     cbor.py, envelope.py §5.2   the error envelope
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
+    live.py           §3.3 §8.1–§8.4 presence, descriptor GET, contract retrieval
+    live_interop.py             the live runner, against the Rust owner example
+  interop/            zk2py_probe.v1.toml: zk2py's own interop contract
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

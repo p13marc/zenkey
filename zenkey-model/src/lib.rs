@@ -46,6 +46,7 @@ pub mod canonical;
 pub mod chunk;
 pub mod compat;
 pub mod contract;
+pub mod decode;
 pub mod descriptor;
 pub mod diag;
 pub mod envelope;

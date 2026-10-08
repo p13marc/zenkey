@@ -239,7 +239,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   instance token, then the interface tokens), and the running `Service`
   (capabilities, make-before-break `new_epoch`, member tokens). `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
-  `retrieval` is §8.4. Everything session-free stays in `zenkey-model`.
+  `retrieval` is §8.4. `writer` puts with the contract's QoS and `Encoding`
+  (advanced publication for `history`; events on fresh ULID keys), and
+  `consumer` reads through a role's bindings: R2 parameter binding, R6's
+  wildcard-key discard, R5's presence wait, R7's *unobservable*.
+  Everything session-free stays in `zenkey-model`, including `decode`, the
+  bundle-only decoder tools use (§7.2).
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. On `main` it shares the
   name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.

@@ -8582,7 +8582,10 @@ dependencies = [
 name = "zenkey"
 version = "0.20.0"
 dependencies = [
+ "ciborium",
+ "criterion",
  "flume",
+ "libc",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -8591,6 +8594,7 @@ dependencies = [
  "tracing",
  "zenkey-model",
  "zenoh",
+ "zenoh-ext",
 ]
 
 [[package]]
