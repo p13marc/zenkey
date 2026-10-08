@@ -1,0 +1,13 @@
+# operations.md §8 step 4: an interface whose only resource is a
+# replicated operation, which any number of instances may serve (core §6).
+[interface]
+name = "ping"
+major = 1
+minor = 0
+
+[resources.ping]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+idempotent = true
+serving = "replicated"

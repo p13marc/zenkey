@@ -1,0 +1,36 @@
+# operations.md §3 step 7, §6 step 3 and §8 step 5: a variant of `tc.v1`
+# whose `set` is optional and whose `diagnostics` and `listing` are
+# replicated. A replica exposes those two and lists `set` unavailable.
+[interface]
+name = "tc"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources."interfaces/{if}/set"]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+params = { if = "string" }
+cardinality = 64
+optional = true
+
+[resources.diagnostics]
+kind = "operation"
+request = "json:DiagnosticsRequest"
+response = "json:DiagnosticsResponse"
+idempotent = true
+fanout = "allowed"
+serving = "replicated"
+
+[resources.listing]
+kind = "operation"
+request = "json:ListingRequest"
+response = "json:Entry"
+summary = "json:ListingSummary"
+replies = "many"
+idempotent = true
+fanout = "allowed"
+serving = "replicated"
