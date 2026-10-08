@@ -8729,10 +8729,24 @@ dependencies = [
  "prost-types",
  "schemars 0.8.22",
  "schemars 1.2.2",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "toml 1.1.4+spec-1.1.0",
  "typify",
  "zenkey-model",
+]
+
+[[package]]
+name = "zenkey-codegen-test"
+version = "0.0.0"
+dependencies = [
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "zenkey 0.20.0",
+ "zenkey-build 0.20.0",
 ]
 
 [[package]]

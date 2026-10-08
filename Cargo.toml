@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "zenkey",
     "zenkey-model",
+    "zenkey-build",
+    "zenkey-build/fixtures/codegen-test",
     "zenkey-fleet",
     "zenkey-explorer-config",
     "report-fixtures",

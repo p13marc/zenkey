@@ -1,0 +1,21 @@
+[package]
+name = "zenkey-codegen-test"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "zenkey-build's test crate: the walkthrough's and the tcgui pilot's contracts, generated and exercised (#611)"
+publish = false
+
+[dependencies]
+zenkey = { path = "../../../zenkey" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+[build-dependencies]
+zenkey-build = { path = "../.." }
+
+[dev-dependencies]
+tokio = { workspace = true }
+zenkey-build = { path = "../.." }

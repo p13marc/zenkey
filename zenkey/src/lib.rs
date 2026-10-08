@@ -72,6 +72,10 @@ pub use prost;
 /// The well-known protobuf types, for generated code (`google.protobuf.*`).
 pub use prost_types;
 pub use zenkey_model as model;
+/// The zenoh this runtime is built on: zenoh stays reachable, and generated
+/// code names its session through it.
+#[cfg(feature = "zenoh")]
+pub use zenoh;
 
 pub use call::{CallInfo, CallMetadata, OpError, Sink};
 #[cfg(feature = "zenoh")]
