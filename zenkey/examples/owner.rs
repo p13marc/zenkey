@@ -91,6 +91,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 }
                 Body::Operation(o) if !r.template.has_params() => {
                     let echo = raw(&o.request) && raw(&o.response);
+                    // §5.2: the detail travels in the envelope's encoding:
+                    // bytes in a protobuf envelope, a value in JSON or CBOR.
+                    let protobuf = zenkey::operation::envelope_encoding(o)
+                        == zenkey::model::envelope::PROTOBUF;
                     servers.push(
                         b.serve(&iface, &name, Some(&none), move |call| async move {
                             if echo {
@@ -101,10 +105,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 call.reply(body)
                                     .await
                                     .map_err(|e| OpError::internal(e.to_string()))
-                            } else {
+                            } else if protobuf {
                                 Err(OpError::app_bytes(
                                     "this interop owner decodes no schema",
                                     Vec::new(),
+                                ))
+                            } else {
+                                Err(OpError::app(
+                                    "this interop owner decodes no schema",
+                                    &serde_json::json!({}),
                                 ))
                             }
                         })

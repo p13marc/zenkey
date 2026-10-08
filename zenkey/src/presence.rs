@@ -16,12 +16,33 @@ use zenoh::query::{ConsolidationMode, Reply};
 
 use crate::error::{Error, Result, zenoh};
 
+/// A presence read, and whether it is complete (§8.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresenceRead {
+    /// The token keys, sorted.
+    pub keys: Vec<String>,
+    /// `false` when the GET ended at its timeout: it may have missed tokens,
+    /// and a tool reports the result as possibly incomplete (§8.1).
+    pub complete: bool,
+}
+
 /// The keys of every liveliness token matching `selector`, sorted.
 pub async fn liveliness_keys(
     session: &zenoh::Session,
     selector: &str,
     timeout: Duration,
 ) -> Result<Vec<String>> {
+    Ok(liveliness_read(session, selector, timeout).await?.keys)
+}
+
+/// [`liveliness_keys`], saying whether the GET completed before `timeout`.
+/// A GET that runs to its timeout is read as possibly incomplete (§8.1).
+pub async fn liveliness_read(
+    session: &zenoh::Session,
+    selector: &str,
+    timeout: Duration,
+) -> Result<PresenceRead> {
+    let started = std::time::Instant::now();
     let rx = session
         .liveliness()
         .get(selector)
@@ -37,7 +58,10 @@ pub async fn liveliness_keys(
     }
     keys.sort();
     keys.dedup();
-    Ok(keys)
+    // The flume sender drops when the query finalizes, and the timeout
+    // finalizes it too: only the elapsed time tells the two apart.
+    let complete = started.elapsed() + Duration::from_millis(10) < timeout;
+    Ok(PresenceRead { keys, complete })
 }
 
 /// The zk2 tokens matching `selector`, parsed (§1.1). Keys that are not

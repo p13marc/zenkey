@@ -245,7 +245,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `retrieval` is §8.4. `writer` puts with the contract's QoS and `Encoding`
   (advanced publication for `history`; events on fresh ULID keys), and
   `consumer` reads through a role's bindings: R2 parameter binding, R6's
-  wildcard-key discard, R5's presence wait, R7's *unobservable*. `state`
+  wildcard-key discard, R5's presence wait, R7's *unobservable*; tools
+  consume with `Consumer::for_tool` and read presence with
+  `presence::liveliness_read`, which flags a GET that ran to its timeout as
+  possibly incomplete (§8.1). `state`
   stamps every put and delete (the `Minter`: §4.3's minting, catch-up, a
   clock guard that stops writes when ahead) and answers GETs with
   `reply_del` within the window; `Consumer::get` is S4's owner-only
