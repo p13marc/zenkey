@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "since_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "Mode": {
+      "type": "string",
+      "enum": [
+        "probe",
+        "model"
+      ]
+    }
+  },
+  "$ref": "#/$defs/Status"
+}
