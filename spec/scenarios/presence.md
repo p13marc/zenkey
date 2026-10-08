@@ -3,19 +3,35 @@
 ## §1 Bring-up order and tokens (§8.1, §8.2)
 
 **Setup.** An owner implementing `nav.v2` (one required state, one
-operation), and a pure consumer.
+operation, and a required templated state with no member yet), and a pure
+consumer. The owner holds its state's value at start.
 
 **Steps.** A tool subscribes to `zk2/*/*/@zk/**` with history, and calls the
-owner's operation the moment its interface token appears.
+owner's operation the moment its interface token appears. At that moment it
+also GETs the owner's state, with `All` + `Latest`.
 
 **Expected.**
 - The call succeeds: alive ⇒ callable.
 - A GET of the descriptor, and of the contract bundle by its key, made the
   moment the instance token appears, both answer.
+- A data subscriber to `zk2/*/*/@zk/instance/*`, up before the owner
+  starts, receives the owner's first descriptor, put on its instance key
+  (core §3.3, §8.2 step 3), without a GET.
+- The state GET returns the value the owner started with: it was put
+  before the tokens (core §8.2, "State values").
+- The owner starts although the templated state has no member: it is
+  exposed by its template, its descriptor does not list it, and no member
+  token appears (core §8.1, §8.2).
 - The owner holds an instance token and one `alive/nav.v2/…` token.
 - The pure consumer holds an instance token only.
 - An instance exposing nothing of an interface holds no interface token for
   it.
+
+*Measured (#609): zk2py's owner puts its descriptor once, stamped, after
+step 3 and before the tokens, as the reference does, and puts its state
+values before the tokens. The reference owner example put its state value
+after starting (F-68), and was read only after presence and the descriptor
+GET, so that runner did not test the moment the token appears.*
 
 ## §2 The descriptor (§3.3)
 
@@ -25,8 +41,10 @@ owner's operation the moment its interface token appears.
 3. An owner is started without one of its contract's required resources.
 4. An owner is started with a required role its configuration binds to
    nothing (core §3.2).
+5. An owner is started with an optional resource it neither exposes nor
+   lists `unavailable`, its gate's capability held (core §8.2 step 2).
 
-**Watching a refusal (steps 3 and 4).** A refusal shows only as a token
+**Watching a refusal (steps 3 to 5).** A refusal shows only as a token
 that never appears, and silence is not a verdict (core O5), so the watch
 needs a router that outlives the owner and a control:
 - the owner and the tool are clients of R1, which stays up whatever the
@@ -35,9 +53,9 @@ needs a router that outlives the owner and a control:
 - the tool subscribes to the liveliness selector
   `zk2/<system>/<service>/@zk/**` through R1 before the owner is launched,
   and watches until the owner exits or the wait of core §8.1 ends;
-- **the control:** the same owner, with the resource exposed or the role
-  bound, launched the same way, shows its instance token to that
-  subscriber within the wait.
+- **the control:** the same owner, with the resource exposed (or, in
+  step 5, listed `unavailable`) or the role bound, launched the same way,
+  shows its instance token to that subscriber within the wait.
 
 **Expected.**
 1. One reply, with `Encoding` `application/json`: a descriptor that
@@ -51,6 +69,8 @@ needs a router that outlives the owner and a control:
    the service while it watches, and a liveliness GET of the same selector
    through R1 afterwards returns none, where the control showed one.
 4. As 3.
+5. As 3: its descriptor would have claimed the resource, whose exposure is
+   compact (core §3.3).
 
 *Measured on the reference owner, from zenoh-python 1.10.1 (#609): one
 reply, `application/json`, no timestamp and no attachment; the

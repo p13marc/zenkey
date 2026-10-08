@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "since_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "link_up": {
+                  "$ref": "#/$defs/Link"
+                }
+              },
+              "required": [
+                "link_up"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "Link": {
+      "type": "object",
+      "properties": {
+        "mbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplex": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mbps"
+      ]
+    }
+  },
+  "$ref": "#/$defs/Status"
+}

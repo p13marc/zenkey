@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Status": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down"
+          ]
+        },
+        "since_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "probe",
+            "model"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    }
+  },
+  "$ref": "#/$defs/Status"
+}

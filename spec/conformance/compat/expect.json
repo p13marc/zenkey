@@ -194,6 +194,41 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/jsonschema/nullable-anyof-to-type": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-enum-inlined": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-enum-null-refused": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-inner-retyped": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-null-dropped": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-ref-target-changed": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/nullable-type-to-anyof": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
   "payload/jsonschema/number-to-integer": {
    "class": "breaking",
    "type": "json:Status",
@@ -220,6 +255,11 @@
    "warnings": []
   },
   "payload/jsonschema/oneof-property-named-title": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/oneof-ref-target-changed": {
    "class": "review",
    "type": "json:Status",
    "warnings": []

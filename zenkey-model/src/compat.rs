@@ -19,7 +19,9 @@
 //!   refuses a message that lacks it.
 //! - **JSON Schema payloads** use the zk2 subset with tolerant readers;
 //!   anything inside `oneOf`, `anyOf` or `prefixItems` that is not decided
-//!   is review.
+//!   is review, compared through its `$ref`s. A nullable's two spellings,
+//!   `{"type": [T, "null"]}` and `{"anyOf": [S, {"type": "null"}]}`, are one
+//!   type (spec §7.3, amendment 0.7).
 //! - **Retention** ([`same_revision`]): two revisions are the same when
 //!   their canonical forms agree once schema ids are replaced by artifact
 //!   names, and their artifacts agree once protobuf descriptor sets are
@@ -929,6 +931,15 @@ fn types(s: &Value) -> BTreeSet<String> {
     }
 }
 
+/// The null schema of a nullable form (spec §7.3): its `type` exactly
+/// `null`, and nothing else that carries meaning.
+fn is_null_schema(s: &Value) -> bool {
+    s.as_object().is_some_and(|m| {
+        m.keys()
+            .all(|k| k == "type" || ANNOTATIONS.contains(&k.as_str()))
+    }) && types(s) == BTreeSet::from(["null".to_owned()])
+}
+
 /// An `enum` as the set of its values: order carries no meaning.
 fn values(e: Option<&Value>) -> Option<BTreeSet<Vec<u8>>> {
     e.map(|e| e.as_array().into_iter().flatten().map(jcs).collect())
@@ -996,6 +1007,108 @@ impl<'a> JsonCx<'a> {
         Some((cur, doc))
     }
 
+    /// The reading of a nullable form (spec §7.3, 0.7): `{"anyOf": [S,
+    /// {"type": "null"}]}`, the branches in either order and nothing beside
+    /// the `anyOf` that carries meaning, read as S (its `$ref`s followed)
+    /// with `null` added to its `type` and, where it has one, its `enum`.
+    /// `None` when `s` is not the form, or its S, once followed, is not an
+    /// object with a `type` and without `const`, `oneOf` or `anyOf`: such an
+    /// `anyOf` is compared as written.
+    fn nullable(&self, s: &Value, doc: &'a Value, old: bool) -> Option<(Value, &'a Value)> {
+        let m = s.as_object()?;
+        if m.keys()
+            .any(|k| k != "anyOf" && !ANNOTATIONS.contains(&k.as_str()))
+        {
+            return None;
+        }
+        let [a, b] = m.get("anyOf")?.as_array()?.as_slice() else {
+            return None;
+        };
+        let branch = match (is_null_schema(a), is_null_schema(b)) {
+            (true, false) => b,
+            (false, true) => a,
+            _ => return None,
+        };
+        let (mut read, doc) = self.deref(branch, doc, old)?;
+        let r = read.as_object_mut()?;
+        let typed = match r.get("type") {
+            Some(Value::String(_)) => true,
+            Some(Value::Array(a)) => a.iter().all(Value::is_string),
+            _ => false,
+        };
+        if !typed
+            || ["const", "oneOf", "anyOf"]
+                .iter()
+                .any(|k| r.contains_key(*k))
+        {
+            return None;
+        }
+        let mut t = types(&Value::Object(r.clone()));
+        t.insert("null".to_owned());
+        r.insert(
+            "type".to_owned(),
+            Value::Array(t.into_iter().map(Value::from).collect()),
+        );
+        if let Some(Value::Array(e)) = r.get_mut("enum")
+            && !e.contains(&Value::Null)
+        {
+            e.push(Value::Null);
+        }
+        Some((read, doc))
+    }
+
+    /// A schema as an undecided keyword compares it (spec §9.8, 0.7):
+    /// annotations dropped at schema positions, as [`strip`] does, and every
+    /// `$ref` replaced by its target, siblings merged as [`JsonCx::deref`]
+    /// does. A `$ref` back to a target already being written stays as
+    /// written, so a recursive type ends. `None` when a `$ref` resolves to
+    /// nothing in its revision.
+    fn written(
+        &self,
+        v: &Value,
+        doc: &'a Value,
+        old: bool,
+        stack: &mut Vec<Vec<u8>>,
+    ) -> Option<Value> {
+        match v {
+            Value::Array(a) => a.iter().map(|x| self.written(x, doc, old, stack)).collect(),
+            Value::Object(m) if m.contains_key("$ref") => {
+                let (target, tdoc) = self.deref(v, doc, old)?;
+                let id = jcs(&target);
+                if stack.contains(&id) {
+                    return Some(strip(v));
+                }
+                stack.push(id);
+                let out = self.written(&target, tdoc, old, stack);
+                stack.pop();
+                out
+            }
+            Value::Object(m) => {
+                let mut out = Map::new();
+                for (k, x) in m {
+                    if ANNOTATIONS.contains(&k.as_str()) {
+                        continue;
+                    }
+                    let x = match (k.as_str(), x) {
+                        ("properties" | "$defs", Value::Object(subs)) => Value::Object(
+                            subs.iter()
+                                .map(|(n, s)| Some((n.clone(), self.written(s, doc, old, stack)?)))
+                                .collect::<Option<_>>()?,
+                        ),
+                        (
+                            "prefixItems" | "oneOf" | "anyOf" | "items" | "additionalProperties",
+                            sub,
+                        ) => self.written(sub, doc, old, stack)?,
+                        (_, x) => x.clone(),
+                    };
+                    out.insert(k.clone(), x);
+                }
+                Some(Value::Object(out))
+            }
+            x => Some(x.clone()),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn compare(
         &self,
@@ -1024,6 +1137,22 @@ impl<'a> JsonCx<'a> {
                 "a `$ref` resolves to nothing in its revision",
             );
             return;
+        };
+        // A nullable form is compared as its reading (spec §7.3, 0.7), unless
+        // the other side holds an `anyOf` that is not one: two `anyOf`s that
+        // are not both nullables stay undecided, compared as written.
+        let (ro, rn) = (
+            self.nullable(&o, doc_o, true),
+            self.nullable(&n, doc_n, false),
+        );
+        let other_anyof =
+            |s: &Value, read: &Option<(Value, &Value)>| read.is_none() && s.get("anyOf").is_some();
+        let as_written =
+            (ro.is_some() && other_anyof(&n, &rn)) || (rn.is_some() && other_anyof(&o, &ro));
+        let ((o, doc_o), (n, doc_n)) = if as_written {
+            ((o, doc_o), (n, doc_n))
+        } else {
+            (ro.unwrap_or((o, doc_o)), rn.unwrap_or((n, doc_n)))
         };
         let (o, n) = (&o, &n);
         // A boolean schema (`true` accepts anything, `false` nothing) is not
@@ -1070,9 +1199,25 @@ impl<'a> JsonCx<'a> {
             v.push(Class::Breaking, "const_changed", at, "`const` changed");
         }
         // Undecided keywords: review on any change, breaking on a oneOf
-        // branch added (spike S7).
+        // branch added (spike S7). Compared as written, through their
+        // `$ref`s (spec §9.8, 0.7): a change to a definition reached only
+        // from inside one is a change inside it.
         for k in ["oneOf", "anyOf", "prefixItems"] {
-            let (a, b) = (o.get(k).map(strip), n.get(k).map(strip));
+            let written = |s: &Value, doc: &'a Value, old: bool| {
+                s.get(k).map(|x| self.written(x, doc, old, &mut Vec::new()))
+            };
+            let (a, b) = match (written(o, doc_o, true), written(n, doc_n, false)) {
+                (Some(None), _) | (_, Some(None)) => {
+                    v.push(
+                        Class::Review,
+                        "schema_unreadable",
+                        at,
+                        format!("a `$ref` inside `{k}` resolves to nothing in its revision"),
+                    );
+                    continue;
+                }
+                (a, b) => (a.flatten(), b.flatten()),
+            };
             if a == b {
                 continue;
             }
@@ -1362,5 +1507,119 @@ mod tests {
         assert_eq!(class(&t("string"), &t("integer")), "review");
         let d = |text: &str| doc(&json!({"oneOf": [{"type": "string", "description": text}]}));
         assert_eq!(class(&d("a"), &d("b")), "compatible");
+    }
+
+    /// A one-property object whose property `p` is `schema`, beside the
+    /// definitions `I` (an object) and `E` (a string enum).
+    fn with_p(schema: &Value, i: &Value, e: &Value) -> Value {
+        json!({"$defs": {
+            "T": {"type": "object", "properties": {"p": schema}},
+            "I": i,
+            "E": e,
+        }})
+    }
+
+    /// Spec §7.3 and §9.8 (0.7, C-1): a nullable's two spellings are one
+    /// type, and a change inside its S is classified by the decided rules,
+    /// through its `$ref`.
+    #[test]
+    fn a_nullable_is_one_type_in_either_spelling() {
+        let i =
+            json!({"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]});
+        let e = json!({"type": "string", "enum": ["a", "b"]});
+        let t = |p: Value| with_p(&p, &i, &e);
+        let nul = json!({"type": "null"});
+        let ty = t(json!({"type": ["integer", "null"], "minimum": 0}));
+        let any = t(json!({"anyOf": [{"type": "integer", "minimum": 0}, nul]}));
+        let any_rev = t(json!({"anyOf": [nul, {"type": "integer", "minimum": 0}]}));
+        assert_eq!(class(&ty, &any), "compatible");
+        assert_eq!(class(&any, &ty), "compatible");
+        assert_eq!(class(&any, &any_rev), "compatible");
+        // S's changes are decided, not review.
+        let num = t(json!({"anyOf": [{"type": "number", "minimum": 0}, nul]}));
+        assert_eq!(class(&any, &num), "breaking");
+        let looser =
+            t(json!({"anyOf": [{"type": "integer", "minimum": 0, "description": "d"}, nul]}));
+        assert_eq!(class(&any, &looser), "compatible");
+        // Dropping the null is a type change.
+        assert_eq!(
+            class(&any, &t(json!({"type": "integer", "minimum": 0}))),
+            "breaking"
+        );
+        // Through a `$ref`: a change in the target is seen.
+        let r = |i: &Value| with_p(&json!({"anyOf": [{"$ref": "#/$defs/I"}, nul]}), i, &e);
+        let retyped =
+            json!({"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]});
+        assert_eq!(class(&r(&i), &r(&retyped)), "breaking");
+        let widened = json!({"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "string"}}, "required": ["x"]});
+        assert_eq!(class(&r(&i), &r(&widened)), "compatible");
+        // An enum's reading accepts null too; one that does not is another type.
+        let er = t(json!({"anyOf": [{"$ref": "#/$defs/E"}, nul]}));
+        let with_null = t(json!({"type": ["string", "null"], "enum": ["a", "b", null]}));
+        let without = t(json!({"type": ["string", "null"], "enum": ["a", "b"]}));
+        assert_eq!(class(&er, &with_null), "compatible");
+        assert_eq!(class(&er, &without), "breaking");
+    }
+
+    /// Spec §9.8 (0.7): against an `anyOf` that is not a nullable, both stay
+    /// undecided (the `anyof-add-branch` fixture's case), and an S without a
+    /// reading is compared as written.
+    #[test]
+    fn a_nullable_beside_another_anyof_stays_undecided() {
+        let (i, e) = (json!({"type": "object"}), json!({"type": "string"}));
+        let t = |p: Value| with_p(&p, &i, &e);
+        let one = t(json!({"anyOf": [{"type": "integer"}]}));
+        let two = t(json!({"anyOf": [{"type": "integer"}, {"type": "null"}]}));
+        assert_eq!(class(&one, &two), "review");
+        assert_eq!(class(&two, &one), "review");
+        let konst = t(json!({"anyOf": [{"type": "string", "const": "k"}, {"type": "null"}]}));
+        let konst2 = t(json!({"anyOf": [{"type": "string", "const": "j"}, {"type": "null"}]}));
+        assert_eq!(class(&konst, &konst2), "review");
+    }
+
+    /// Spec §9.8 (0.7): inside an undecided keyword, a `$ref` is compared
+    /// by its target, so a change there is a change inside the keyword; a
+    /// recursive type ends; a dangling one is unreadable.
+    #[test]
+    fn a_ref_inside_an_undecided_keyword_is_followed() {
+        let t = |body: Value| {
+            json!({"$defs": {
+                "T": {"oneOf": [{"type": "object", "properties": {"body": {"$ref": "#/$defs/B"}}}]},
+                "B": body,
+            }})
+        };
+        let b = json!({"type": "object", "properties": {"x": {"type": "integer"}}});
+        let b2 = json!({"type": "object", "properties": {"x": {"type": "string"}}});
+        assert_eq!(class(&t(b.clone()), &t(b.clone())), "compatible");
+        assert_eq!(class(&t(b.clone()), &t(b2)), "review");
+        let inline =
+            json!({"$defs": {"T": {"oneOf": [{"type": "object", "properties": {"body": b}}]}}});
+        assert_eq!(class(&t(b.clone()), &inline), "compatible");
+        let tree = |ty: &str| {
+            json!({"$defs": {"T": {"anyOf": [
+                {"type": ty},
+                {"type": "array", "items": {"$ref": "#/$defs/T"}},
+            ]}}})
+        };
+        assert_eq!(class(&tree("integer"), &tree("integer")), "compatible");
+        assert_eq!(class(&tree("integer"), &tree("string")), "review");
+
+        let dir = std::env::temp_dir().join(format!("zk2-compat-oneof-ref-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = rev(&dir, &t(json!({"type": "integer"})));
+        std::fs::remove_dir_all(&dir).unwrap();
+        let mut new = old.clone();
+        for s in new.schemas.values_mut() {
+            if let Schema::Json(v) = s {
+                v["$defs"]["T"]["oneOf"][0]["properties"]["body"]["$ref"] = json!("#/$defs/Gone");
+            }
+        }
+        let v = compare(&old, &new);
+        assert_eq!(v.class().as_str(), "review");
+        assert!(
+            v.findings.iter().all(|f| f.rule == "schema_unreadable"),
+            "{:?}",
+            v.findings
+        );
     }
 }
