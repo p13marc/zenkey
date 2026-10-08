@@ -1,0 +1,36 @@
+[interface]
+name    = "m"
+major   = 1
+minor   = 1
+summary = "the base"
+
+[resources.status]
+kind        = "state"
+type        = { raw = "application/octet-stream" }
+reliability = "best_effort"
+
+[resources.cmd]
+kind     = "stream"
+type     = { raw = "application/octet-stream" }
+priority = "data"
+express  = false
+congestion = "drop"
+explicit = false
+
+[resources.feed]
+kind     = "stream"
+type     = { raw = "application/octet-stream" }
+optional = true
+
+[resources.arm]
+kind       = "operation"
+request    = { raw = "application/octet-stream" }
+response   = { raw = "application/octet-stream" }
+idempotent = true
+fanout     = "allowed"
+replies    = "one"
+
+[requires.src]
+interface   = "cmd.v1"
+cardinality = "one"
+optional    = true

@@ -1,0 +1,233 @@
+{
+ "description": "An error envelope with its Zenoh encoding (text for JSON, hex bytes otherwise) \u2192 the decoded envelope, or the refusal tag. A protobuf detail is shown as {\"bytes_hex\": \u2026}. Cases written by an encoder independent of the reference implementation (spec core.md \u00a75.2).",
+ "cases": [
+  {
+   "name": "json-invalid-request",
+   "encoding": "application/json",
+   "text": "{\"code\": \"invalid_request\", \"message\": \"bad mode\"}",
+   "expect": {
+    "code": "invalid_request",
+    "message": "bad mode",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "json-unavailable",
+   "encoding": "application/json",
+   "text": "{\"code\": \"unavailable\", \"message\": \"no IMU\", \"cause\": \"capability\"}",
+   "expect": {
+    "code": "unavailable",
+    "message": "no IMU",
+    "cause": "capability",
+    "detail": null
+   }
+  },
+  {
+   "name": "json-app-detail",
+   "encoding": "application/json",
+   "text": "{\"code\": \"app\", \"message\": \"plan rejected\", \"detail\": {\"reason\": \"overlap\", \"with\": [3, 4]}}",
+   "expect": {
+    "code": "app",
+    "message": "plan rejected",
+    "cause": null,
+    "detail": {
+     "reason": "overlap",
+     "with": [
+      3,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "json-null-members",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\", \"message\": \"\", \"cause\": null, \"detail\": null}",
+   "expect": {
+    "code": "busy",
+    "message": "",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "cbor-fanout",
+   "encoding": "application/cbor",
+   "hex": "a264636f64657066616e6f75745f666f7262696464656e676d65737361676575636f6e6372657465206b6579207265717569726564",
+   "expect": {
+    "code": "fanout_forbidden",
+    "message": "concrete key required",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "cbor-unavailable",
+   "encoding": "application/cbor",
+   "hex": "a364636f64656b756e617661696c61626c65676d6573736167656065636175736566636f6e666967",
+   "expect": {
+    "code": "unavailable",
+    "message": "",
+    "cause": "config",
+    "detail": null
+   }
+  },
+  {
+   "name": "cbor-app-detail",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696ca2616e21626f6bf5",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": {
+     "n": -2,
+     "ok": true
+    }
+   }
+  },
+  {
+   "name": "pb-not-found",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a096e6f745f666f756e64120d6e6f207375636820747261636b",
+   "expect": {
+    "code": "not_found",
+    "message": "no such track",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "pb-unavailable",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a0b756e617661696c61626c6512126275696c7420776974686f757420676e73731a056275696c64",
+   "expect": {
+    "code": "unavailable",
+    "message": "built without gnss",
+    "cause": "build",
+    "detail": null
+   }
+  },
+  {
+   "name": "pb-app-detail",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a03617070120872656a656374656422020807",
+   "expect": {
+    "code": "app",
+    "message": "rejected",
+    "cause": null,
+    "detail": {
+     "bytes_hex": "0807"
+    }
+   }
+  },
+  {
+   "name": "pb-unknown-field-ignored",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a08696e7465726e616c1204626f6f6d4a06667574757265",
+   "expect": {
+    "code": "internal",
+    "message": "boom",
+    "cause": null,
+    "detail": null
+   }
+  },
+  {
+   "name": "refuse-encoding",
+   "encoding": "text/plain",
+   "hex": "6f6f7073",
+   "expect": {
+    "refused": "encoding"
+   }
+  },
+  {
+   "name": "refuse-json-syntax",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\", \"message\": ",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-json-duplicate",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\", \"code\": \"app\", \"message\": \"x\"}",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-json-unknown-member",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\", \"message\": \"x\", \"retry_after\": 3}",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-json-no-message",
+   "encoding": "application/json",
+   "text": "{\"code\": \"busy\"}",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-cbor-text-key-only",
+   "encoding": "application/cbor",
+   "hex": "a10102",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-pb-truncated",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a04627573791201",
+   "expect": {
+    "refused": "decode"
+   }
+  },
+  {
+   "name": "refuse-code",
+   "encoding": "application/json",
+   "text": "{\"code\": \"timeout\", \"message\": \"x\"}",
+   "expect": {
+    "refused": "code"
+   }
+  },
+  {
+   "name": "refuse-unavailable-no-cause",
+   "encoding": "application/json",
+   "text": "{\"code\": \"unavailable\", \"message\": \"x\"}",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
+   "name": "refuse-bad-cause",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "0a0b756e617661696c61626c651201781a076c6963656e6365",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
+   "name": "refuse-cause-not-unavailable",
+   "encoding": "application/cbor",
+   "hex": "a364636f646569666f7262696464656e676d657373616765617865636175736566636f6e666967",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
+   "name": "refuse-detail-not-app",
+   "encoding": "application/json",
+   "text": "{\"code\": \"internal\", \"message\": \"x\", \"detail\": {\"trace\": 1}}",
+   "expect": {
+    "refused": "detail"
+   }
+  }
+ ]
+}

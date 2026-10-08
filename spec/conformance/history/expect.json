@@ -1,0 +1,42 @@
+{
+ "description": "A history root (contracts/.history) \u2192 its problems, as [at, tag], in directory then file order. Hand-written; checked, never blessed.",
+ "cases": {
+  "ok": [],
+  "wrong-name": [
+   [
+    "seed.v1/0000000000000000000000000000000000000000000000000000000000000000.bundle.json",
+    "fingerprint"
+   ]
+  ],
+  "wrong-directory": [
+   [
+    "other.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "interface"
+   ]
+  ],
+  "not-jcs": [
+   [
+    "seed.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "jcs"
+   ]
+  ],
+  "bad-file-name": [
+   [
+    "seed.v1/notes.txt",
+    "file_name"
+   ]
+  ],
+  "bad-directory": [
+   [
+    "seed",
+    "directory"
+   ]
+  ],
+  "tampered": [
+   [
+    "seed.v1/87be07de0912f73eb795606626bc3f5e417d8fe6e73ff72a79b6681c384e0348.bundle.json",
+    "schema_hash"
+   ]
+  ]
+ }
+}

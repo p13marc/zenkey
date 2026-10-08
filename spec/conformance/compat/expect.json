@@ -1,0 +1,254 @@
+{
+ "cases": {
+  "contract/congestion-drop-to-block": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/documentation-only": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "contract/explicit-false-to-true": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/explicit-true-to-false": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/express-toggled": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/fanout-allowed-to-forbidden": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/idempotent-true-to-false": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/optional-role-added": {
+   "class": "compatible",
+   "warnings": []
+  },
+  "contract/optional-to-required": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/priority-changed": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/reliable-to-best-effort": {
+   "class": "review",
+   "warnings": []
+  },
+  "contract/replies-one-to-many": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/required-role-added": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/role-cardinality-changed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "contract/role-interface-changed": {
+   "class": "breaking",
+   "warnings": []
+  },
+  "payload/jsonschema/add-enum-value": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/add-optional-property": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/add-optional-property-closed": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/add-pattern": {
+   "class": "invalid",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/add-required-property": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/description-only": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/integer-to-number": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/loosen-maxlength": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/number-to-integer": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/oneof-add-branch": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/optional-to-required": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/remove-enum-value": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/remove-optional-property": {
+   "class": "compatible",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/required-to-optional": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/tighten-maximum": {
+   "class": "breaking",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/protobuf/add-enum-value": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/add-field": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/delete-enum-value": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/delete-field": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": [
+    "field_deleted_unreserved"
+   ]
+  },
+  "payload/protobuf/delete-field-reserved": {
+   "class": "compatible",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/doc-only": {
+   "class": "compatible",
+   "same_revision": true,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/int32-to-int64": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/json-name-option": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/move-into-oneof": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/rename-enum-value": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/rename-field": {
+   "class": "review",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/renumber-field": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/scalar-to-repeated": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "payload/protobuf/string-to-bytes": {
+   "class": "breaking",
+   "same_revision": false,
+   "type": "m.v1.Pose",
+   "warnings": []
+  },
+  "transitive/jsonschema-property-retyped": {
+   "against": {
+    "v1": "breaking",
+    "v2": "compatible"
+   },
+   "candidate": "v3",
+   "class": "breaking",
+   "history": [
+    "v1",
+    "v2"
+   ],
+   "type": "json:Status",
+   "warnings": []
+  },
+  "transitive/protobuf-field-reuse": {
+   "against": {
+    "v1": "breaking",
+    "v2": "compatible"
+   },
+   "candidate": "v3",
+   "class": "breaking",
+   "history": [
+    "v1",
+    "v2"
+   ],
+   "type": "m.v1.Pose",
+   "warnings": []
+  }
+ },
+ "description": "Compatibility cases (spec core.md \u00a79.6), FULL_TRANSITIVE: the class is the worst over both directions and every revision in the history. Classes: compatible, review, breaking; `invalid` when a revision does not load (outside the JSON Schema subset). Protobuf uses WIRE semantics with renumber detection (decided 2026-10-08). Payload inputs come from spike S7 (`docs/zk2/spike-results/s7/`); the contract and transitive cases are written for #607. Evaluated by the classifier (#618); until it exists, the runner checks that every input loads. `same_revision` (protobuf) is the retention rule's identity check (core.md \u00a79.5): true when the normalized descriptor sets are equal, so the old bundle is kept."
+}

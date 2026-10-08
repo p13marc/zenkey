@@ -37,8 +37,8 @@ RFC 2119 and RFC 8174, when written in capitals.
   runs;
 - `[Sc: file §n]` is a scenario under `scenarios/`: a network behaviour with
   a setup, steps and expected observations;
-- `[F: pending]` marks a fixture this draft still owes (#607). Version 0.1 is
-  accepted only once none is left.
+- `[F: pending]` would mark a fixture still owed. None is, in this version
+  (#607).
 
 **Zenoh.** zk2 is specified against Zenoh **1.10.1**. Facts about Zenoh that
 the rules depend on are listed in Appendix B. A participant uses only stable
@@ -169,9 +169,10 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
   uptime rewound, a container restarted. Consumers MUST treat an instance
   change as the only legitimate counter discontinuity. `[Sc: presence.md §3]`
 - **Moving a service to another host changes no key.**
-- **No implicit identity.** A builder MUST NOT supply a system or service
-  that its caller did not pass. Fleet-wide selection is spelled by name or
-  wildcard, never defaulted. `[F: pending]`
+- **No implicit identity.** Every key form names its system and service
+  (§1.1), so a key cannot be built without them. A fleet-wide selection is
+  spelled by name or wildcard, never defaulted from the local process.
+  `[F: keys.json]`
 
 ### 1.6 Namespaces and base-relative keys
 
@@ -330,7 +331,7 @@ the required interface, and MUST NOT be empty.
 | R1 | A role is bound at deployment, never in code. A binding is a list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1]` |
 | R2 | A template parameter MAY be bound too: `{vehicle} = self` binds the consumer to its own slice of a provider's collection. `self` resolves to the consumer's own system or service, whichever the binding names. | `[Sc: bindings.md §2]` |
 | R3 | The descriptor (§3.3) lists every requirement with its bindings as declared. The data-flow graph is read from descriptors, never inferred. | `[Sc: bindings.md §3]` |
-| R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.6). | `[F: pending]` (the compatibility matrix) |
+| R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.6). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | A consumer MUST discard a sample whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
 | R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses. Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. | `[Sc: constrained.md §3]` |
@@ -342,8 +343,9 @@ When several providers are bound, choosing between them is the consumer's
 
 Every instance serves a **descriptor**: a JSON document answered on GET at
 its instance key, and put on every change. Its schema is
-[`descriptor.schema.json`](descriptor.schema.json). `[F: pending]` (the
-schema and its valid and invalid documents)
+[`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report
+exactly the `D…` codes that `conformance/descriptors/expect.json` lists for
+each document, checked against the fixture contract. `[F: descriptors/]`
 
 ```json
 {
@@ -353,7 +355,7 @@ schema and its valid and invalid documents)
   "interfaces": [
     {"iface": "nav.v2", "contract": "sha256:…", "minor": 1,
      "unavailable": [{"resource": "state/covariance", "cause": "capability", "reason": "no IMU"}],
-     "cardinality": {"tracks/{track}": 50}}
+     "cardinality": {"state/tracks/{track}": 50}}
   ],
   "capabilities": ["imu", "gnss"],
   "requires": [
@@ -375,9 +377,11 @@ schema and its valid and invalid documents)
     the resource is absent here.
   - `capabilities` lists the capabilities held.
 
-  `[F: pending]`
-- **`cardinality`** MAY lower a template's bound for this instance. It MUST
-  NOT raise it. `[F: pending]`
+  A listed resource that is not an optional resource of the contract is an
+  error (D005). One that a missing capability already implies is a warning
+  (D006). `[F: descriptors/d005-*, d006-implied]`
+- **`cardinality`** MAY lower a template's bound for this instance, keyed
+  `<kind token>/<template>`. It MUST NOT raise it. `[F: descriptors/d007-*]`
 - **`requires`** lists each role with its bindings (R3). A role declared in a
   contract names that contract's interface in `declared_by`. A role declared
   by the component's manifest names `null`.
@@ -491,7 +495,7 @@ section is what the core requires of it.
 |---|---|---|
 | O1 | **Owner:** an operation's queryable is declared on its concrete key (or its template), and is `complete`. A concrete call with `BestMatching` then executes on at most one instance **while one instance serves the operation**. `BestMatching` reaches one `complete` queryable on each router, so a split-brain across routers runs a call on each side. Exclusivity beyond that is `redundancy.v1`'s. | `[Sc: operations.md §1]` |
 | O2 | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden`, unless the operation declares `fanout = "allowed"`, whatever the access control allows. **Caller:** a call to a fan-out operation uses target `All` and consolidation `None`. | `[Sc: operations.md §2]` |
-| O3 | **Owner:** a reply goes on the operation's own concrete key. Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). | `[Sc: operations.md §3]`; `[F: pending]` (the envelope) |
+| O3 | **Owner:** a reply goes on the operation's own concrete key. Success is a value reply; failure is a `reply_err` carrying the error envelope (§5.2). | `[Sc: operations.md §3]`; `[F: errors/cases.json]` |
 | O4 | **Caller:** only an operation declared `idempotent` MAY be retried. | `[Sc: operations.md §4]` |
 | O5 | **Caller and tool:** an empty reply set is not a verdict. Access-control refusals return empty since zenoh 1.3; a tool attributes silence through presence. | `[Sc: operations.md §5]` |
 | O6 | **Caller:** an operation declared `replies = "many"` gives zero or more value replies, then completion. The caller MUST use consolidation `None`: `Latest` and `Auto` kept 1 reply of 10 in spike S6. With a declared `summary`, each replier ends with exactly one summary reply. | `[Sc: operations.md §6]`; `[F: contracts/e033-summary]` |
@@ -522,7 +526,20 @@ A failed call replies with `reply_err` and an envelope with these fields:
   - or `application/protobuf` with the schema suffix `zk2.core.v1.Error`.
 
 The two definitions are [`core/error.proto`](core/error.proto) and
-[`core/error.schema.json`](core/error.schema.json). `[F: pending]`
+[`core/error.schema.json`](core/error.schema.json).
+
+**Decoding.** A tool decodes an envelope by its reply's `Encoding`, without
+the contract. It MUST refuse:
+- an unknown encoding (`encoding`);
+- malformed bytes, a duplicate or unknown member, or a missing `code` or
+  `message` (`decode`);
+- an unknown code (`code`);
+- `unavailable` without a valid cause, or a cause on any other code
+  (`cause`);
+- a detail on any code but `app` (`detail`).
+
+A protobuf decoder ignores unknown fields, as protobuf does.
+`[F: errors/cases.json]`
 
 ---
 
@@ -596,19 +613,28 @@ listed files.
 ### 7.3 The JSON Schema subset
 
 - **Keywords that carry meaning:**
-  - `type`, `properties`, `required`, `additionalProperties`, `items`;
+  - `type`, `properties`, `required`, `additionalProperties`, `items`,
+    `prefixItems`;
   - `enum`, `const`;
   - `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`;
   - `minLength`, `maxLength`, `minItems`, `maxItems`;
-  - local `$ref`, and `$ref` to another listed file by its stem;
-  - `oneOf` with a discriminator.
-- **Annotations, ignored:** `$schema`, `$defs`, `$comment`, `title`,
+  - `$ref`, local or to another listed file;
+  - `oneOf` and `anyOf`.
+- **Annotations, ignored:** `$schema`, `$id`, `$defs`, `$comment`, `title`,
   `description`, `default`, `examples`, `format`, `deprecated`, `readOnly`,
   `writeOnly`.
-- **Refused:** every other keyword (`pattern`, `allOf`, `anyOf`, `not`,
-  `if`/`then`/`else`, `patternProperties`, …). Containment is not decidable
-  for them. A contract whose schemas use one does not load.
-  `[F: pending]` (one fixture per refused keyword class)
+- **Refused:** every other keyword in a schema position (`pattern`,
+  `patternProperties`, `allOf`, `not`, `if`/`then`/`else`, `contains`,
+  `propertyNames`, `unevaluatedProperties`, …). Their validation differs
+  between implementations (regular-expression dialects), or they defeat
+  the compatibility rules. A contract whose schemas use one does not load
+  (E037). A property *named* like a keyword is data, not a keyword.
+  `[F: contracts/e037-subset]`
+
+**`oneOf`, `anyOf` and `prefixItems`** are in the subset because Rust-first
+contracts (schemars output) use them for enums, `Option<T>` and tuples.
+Their containment is not decided in general. The classifier (§9.6) treats
+any change inside one conservatively, as *review*.
 
 ### 7.4 Shared memory
 
@@ -751,6 +777,7 @@ a contract invalid; codes `W…` do not. `[F: contracts/*, expect.json]`
 | E031 | `deprecated` |
 | E033 | `summary` needs `replies = "many"` |
 | E036 | two contracts declare one interface id |
+| E037 | a JSON Schema keyword outside the subset (§7.3) |
 | W101–W105, W107 | overlapping types; a repeated parameter; an ignored encoding; no `minor`; an annotation outside the profile's vocabulary; the file name |
 
 A fixture's codes are independent of the order lints run in, because of four
@@ -763,7 +790,7 @@ cascade rules:
    that parses;
 4. overlaps (W101) are checked over resources without errors.
 
-E035 and E036 are set checks over several files. `[F: pending]` (set fixtures)
+E035 and E036 are set checks over several files. `[F: sets/]`
 
 ### 9.2 Defaults
 
@@ -855,13 +882,15 @@ carried and verified, never interpreted.
   `contracts/.history/<iface>/<hex>.bundle.json`, where `<hex>` is the
   fingerprint without `sha256:`. The directory is append-only. A history
   check MUST verify every bundle (§9.4), its fingerprint against its file
-  name, and its interface against its directory. `[F: pending]`
+  name, its interface against its directory, and that it is in JCS form.
+  A problem is reported as `directory`, `file_name`, `interface`, `jcs`, or
+  a bundle refusal tag (§9.4). `[F: history/]`
 - **Retention.** A rebuild that the classifier judges identical to the
   newest published revision keeps that revision's bundle, and mints no new
   fingerprint. For protobuf, the identity check compares `FileDescriptorSet`s
   normalized: source info dropped, and every `json_name` equal to its
   default dropped. Fingerprints may over-detect a change, never
-  under-detect one. `[F: pending]`
+  under-detect one. `[F: compat/expect.json, same_revision]`
 
 ### 9.6 Compatibility
 
@@ -870,7 +899,10 @@ every earlier revision in the history, in both directions. Each rule is
 judged per direction: for streams, state, events and responses the owner
 writes and the consumer reads; for requests the caller writes and the owner
 reads. A change is **compatible**, **review** (a human decides) or
-**breaking**. `[F: pending]` (the matrix, with transitive cases)
+**breaking**. The classifier MUST classify every case of `compat/` as
+`expect.json` says, including the transitive cases, where a revision
+compatible with its predecessor breaks against an earlier one.
+`[F: compat/]`
 
 **Contract metadata:**
 
@@ -1055,7 +1087,12 @@ Appendix B. These are the ones the rules above cite:
 |---|---|
 | `conformance/keys.json`, `slugs.json`, `templates.json` | §1, §2.2 |
 | `conformance/contracts/` | §2, §7, §9.1–§9.3, §10 |
+| `conformance/sets/` | §9.1 (E035, E036) |
 | `conformance/bundles/` | §9.4 |
+| `conformance/history/` | §9.5 |
+| `conformance/compat/` | §9.5 retention, §9.6, R4 |
+| `conformance/descriptors/` | §3.3 |
+| `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4 |
 | `scenarios/operations.md` | §5, §6 |
@@ -1066,11 +1103,5 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
 
-**Pending fixtures (#607):**
-- the descriptor schema and documents;
-- the error envelope;
-- the JSON Schema subset's refusals;
-- the set checks E035 and E036;
-- history and retention;
-- the compatibility matrix with transitive cases;
-- identity in builders (§1.5).
+The compatibility cases (`compat/`) are evaluated by the classifier (#618).
+Until it lands, the reference runner checks that every input loads.

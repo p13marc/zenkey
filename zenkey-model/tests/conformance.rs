@@ -371,3 +371,226 @@ fn contract_schema_is_current() {
         );
     }
 }
+
+/// `spec/conformance/descriptors/`: each document → the sorted `D…` codes
+/// `descriptor::check` reports against `contracts/nav.v2.toml`.
+#[test]
+fn descriptors() {
+    let dir = spec().join("conformance/descriptors");
+    let loaded = zenkey_model::contract::load_path(&dir.join("contracts/nav.v2.toml"));
+    let contract = loaded
+        .contract
+        .unwrap_or_else(|| panic!("the fixture contract does not load:\n{}", loaded.report));
+    let path = dir.join("expect.json");
+    let mut doc = read_json(&path);
+    let names: Vec<String> = doc["cases"]
+        .as_object()
+        .expect("cases")
+        .keys()
+        .cloned()
+        .collect();
+    for name in names {
+        let text = std::fs::read_to_string(dir.join(format!("{name}.json"))).unwrap();
+        let (_, report) = zenkey_model::descriptor::check(&text, &[&contract]);
+        let got = json!({ "codes": report.codes() });
+        if bless() {
+            doc["cases"][&name] = got;
+        } else {
+            assert_eq!(doc["cases"][&name], got, "descriptor {name}:\n{report}");
+        }
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `spec/descriptor.schema.json` is generated from the descriptor types.
+#[test]
+fn descriptor_schema_is_current() {
+    let path = spec().join("descriptor.schema.json");
+    let schema = schemars::schema_for!(zenkey_model::descriptor::Descriptor);
+    let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+    if bless() {
+        std::fs::write(&path, &text).unwrap();
+    } else {
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap_or_default(),
+            text,
+            "spec/descriptor.schema.json is stale: ZK2_BLESS=1 cargo test -p zenkey-model --test conformance"
+        );
+    }
+}
+
+/// `spec/conformance/errors/`: an envelope and its Zenoh encoding → the
+/// decoded envelope or a refusal tag. These expectations are written by an
+/// independent encoder, so they are checked, never blessed; each accepted
+/// envelope also round-trips through `envelope::encode`.
+#[test]
+fn error_envelopes() {
+    use zenkey_model::envelope::{Detail, decode, encode};
+    let doc = read_json(&spec().join("conformance/errors/cases.json"));
+    for case in doc["cases"].as_array().expect("cases") {
+        let name = case["name"].as_str().unwrap();
+        let enc = case["encoding"].as_str().unwrap();
+        let bytes: Vec<u8> = match (case.get("text"), case.get("hex")) {
+            (Some(t), _) => t.as_str().unwrap().as_bytes().to_vec(),
+            (None, Some(h)) => {
+                let h = h.as_str().unwrap();
+                (0..h.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+                    .collect()
+            }
+            _ => panic!("{name}: no input"),
+        };
+        let got = match decode(enc, &bytes) {
+            Ok(e) => {
+                let detail = match &e.detail {
+                    None => Value::Null,
+                    Some(Detail::Value(v)) => v.clone(),
+                    Some(Detail::Bytes(b)) => json!({
+                        "bytes_hex": b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+                    }),
+                };
+                let again = encode(&e, enc).map(|b| decode(enc, &b));
+                assert_eq!(again, Some(Ok(e.clone())), "{name}: round trip");
+                json!({"code": e.code, "message": e.message, "cause": e.cause, "detail": detail})
+            }
+            Err(err) => json!({"refused": err.tag()}),
+        };
+        assert_eq!(case["expect"], got, "error envelope {name}");
+    }
+}
+
+/// `spec/conformance/sets/`: a directory of contracts → the codes of the
+/// set checks over all of them (E035, E036). Written by hand, checked.
+#[test]
+fn sets() {
+    let dir = spec().join("conformance/sets");
+    let doc = read_json(&dir.join("expect.json"));
+    for (name, want) in doc["sets"].as_object().expect("sets") {
+        let mut files: Vec<_> = std::fs::read_dir(dir.join(name))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .collect();
+        files.sort();
+        let loaded: Vec<_> = files
+            .iter()
+            .map(|p| {
+                let l = zenkey_model::contract::load_path(p);
+                l.contract
+                    .unwrap_or_else(|| panic!("{}: does not load:\n{}", p.display(), l.report))
+            })
+            .collect();
+        let refs: Vec<_> = loaded.iter().collect();
+        let report = zenkey_model::contract::check_set(&refs);
+        assert_eq!(
+            want,
+            &json!({ "codes": report.codes() }),
+            "set {name}:\n{report}"
+        );
+    }
+}
+
+/// `spec/conformance/history/`: a history root → its problems as
+/// `[at, tag]`. Written by hand, checked.
+#[test]
+fn history() {
+    let dir = spec().join("conformance/history");
+    let doc = read_json(&dir.join("expect.json"));
+    for (name, want) in doc["cases"].as_object().expect("cases") {
+        let got: Vec<Value> = zenkey_model::history::check_tagged(&dir.join(name))
+            .into_iter()
+            .map(|p| json!([p.at, p.tag]))
+            .collect();
+        assert_eq!(want, &Value::Array(got), "history {name}");
+    }
+}
+
+/// `spec/conformance/compat/`: the compatibility matrix (#607). The classes
+/// are evaluated by the classifier (#618); until then this checks that
+/// every input loads the way a contract would load it, that the one class
+/// `invalid` means "does not load (E037)", and that every class is known.
+#[test]
+fn compat_inputs_load() {
+    let dir = spec().join("conformance/compat");
+    let doc = read_json(&dir.join("expect.json"));
+    // A one-resource contract over a schema file, loaded from `at`.
+    let load = |at: &Path, schema: &str, ty: &str| {
+        let kind = if schema.ends_with(".proto") {
+            "protobuf"
+        } else {
+            "jsonschema"
+        };
+        let text = format!(
+            "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n[schemas]\n{kind} = [\"{schema}\"]\n\
+             [resources.s]\nkind = \"state\"\ntype = \"{ty}\"\n"
+        );
+        load_str(&text, at, None).report
+    };
+    for (name, case) in doc["cases"].as_object().expect("cases") {
+        let class = case["class"].as_str().unwrap();
+        assert!(
+            ["compatible", "review", "breaking", "invalid"].contains(&class),
+            "{name}: class {class}"
+        );
+        let root = dir.join(name);
+        let reports: Vec<(String, zenkey_model::diag::Report)> = if name
+            .starts_with("payload/protobuf/")
+        {
+            ["old", "new"]
+                .iter()
+                .map(|s| {
+                    (
+                        s.to_string(),
+                        load(&root.join(s), "m.proto", case["type"].as_str().unwrap()),
+                    )
+                })
+                .collect()
+        } else if name.starts_with("payload/jsonschema/") {
+            ["old", "new"]
+                .iter()
+                .map(|s| {
+                    (
+                        s.to_string(),
+                        load(&root, &format!("{s}.json"), case["type"].as_str().unwrap()),
+                    )
+                })
+                .collect()
+        } else if name.starts_with("contract/") {
+            ["old", "new"]
+                .iter()
+                .map(|s| {
+                    (
+                        s.to_string(),
+                        zenkey_model::contract::load_path(&root.join(format!("{s}.toml"))).report,
+                    )
+                })
+                .collect()
+        } else if name.starts_with("transitive/") {
+            let ty = case["type"].as_str().unwrap();
+            ["v1", "v2", "v3"]
+                .iter()
+                .map(|v| {
+                    let r = if root.join(v).is_dir() {
+                        load(&root.join(v), "m.proto", ty)
+                    } else {
+                        load(&root, &format!("{v}.json"), ty)
+                    };
+                    (v.to_string(), r)
+                })
+                .collect()
+        } else {
+            panic!("{name}: unknown case family");
+        };
+        for (side, report) in reports {
+            let errors: Vec<_> = report.errors().map(|d| d.code).collect();
+            if class == "invalid" && side == "new" {
+                assert_eq!(errors, ["E037"], "{name} {side}:\n{report}");
+            } else {
+                assert!(errors.is_empty(), "{name} {side} does not load:\n{report}");
+            }
+        }
+    }
+}

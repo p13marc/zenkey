@@ -266,6 +266,15 @@ impl SchemaSet {
                     continue;
                 }
             };
+            let mut refused = std::collections::BTreeSet::new();
+            refused_keywords(&doc, &mut refused);
+            for k in refused {
+                report.push(Diagnostic::error(
+                    "E037",
+                    at.clone(),
+                    format!("keyword {k:?} is outside the zk2 JSON Schema subset"),
+                ));
+            }
             let stem = file_stem(f);
             if self.json.iter().any(|j| j.stem == stem) {
                 report.push(Diagnostic::error(
@@ -581,6 +590,70 @@ pub fn sha256_id(bytes: &[u8]) -> String {
         let _ = write!(s, "{b:02x}");
     }
     s
+}
+
+/// The zk2 JSON Schema subset (spec `core.md` §7.3): the keywords a schema
+/// may use. Annotations are carried and ignored.
+const SUBSET: &[&str] = &[
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "prefixItems",
+    "enum",
+    "const",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "$ref",
+    "oneOf",
+    "anyOf",
+];
+const ANNOTATIONS: &[&str] = &[
+    "$schema",
+    "$id",
+    "$defs",
+    "$comment",
+    "title",
+    "description",
+    "default",
+    "examples",
+    "format",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+];
+
+/// Walks the schema positions of a JSON Schema document (never property
+/// names, which are data) and collects every keyword outside the subset.
+fn refused_keywords(schema: &Value, out: &mut std::collections::BTreeSet<String>) {
+    let Value::Object(m) = schema else { return };
+    for (k, v) in m {
+        if !SUBSET.contains(&k.as_str()) && !ANNOTATIONS.contains(&k.as_str()) {
+            out.insert(k.clone());
+            continue;
+        }
+        match (k.as_str(), v) {
+            ("properties" | "$defs", Value::Object(subs)) => {
+                for sub in subs.values() {
+                    refused_keywords(sub, out);
+                }
+            }
+            ("prefixItems" | "oneOf" | "anyOf", Value::Array(subs)) => {
+                for sub in subs {
+                    refused_keywords(sub, out);
+                }
+            }
+            ("items" | "additionalProperties", sub) => refused_keywords(sub, out),
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

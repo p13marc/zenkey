@@ -1,0 +1,12 @@
+syntax = "proto3";
+package m.v1;
+message Pose {
+  double x = 1;
+  double y = 2;
+  int32 seq = 4;
+  Kind kind = 5;
+  repeated double cov = 6;
+  bytes frame = 3;
+  oneof src { string gps = 7; string odom = 8; }
+}
+enum Kind { KIND_UNSPECIFIED = 0; KIND_A = 1; KIND_B = 2; }

@@ -2,7 +2,8 @@
 //!
 //! This is the static half of zk2 (epic #585, issue #608): everything that
 //! can be decided from files, and never needs a bus. The design of record is
-//! `docs/zk2/architecture.md` (r3.3); the authoring format is draft 1
+//! `docs/zk2/architecture.md` (r4), stated normatively by `spec/core.md`;
+//! the authoring format is draft 1
 //! (`examples/zk2/README.md`).
 //!
 //! Layer map:
@@ -27,6 +28,11 @@
 //!   fingerprint.
 //! - [`bundle`]: the bundle container, built and verified Merkle-style.
 //! - [`history`]: the append-only `.history` of published revisions.
+//! - [`descriptor`]: the descriptor record an instance serves, checked
+//!   against its contracts; `spec/descriptor.schema.json` is generated
+//!   from it.
+//! - [`envelope`]: the error envelope of a failed call, decoded and
+//!   checked by its Zenoh encoding (`spec/core/error.proto`).
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -36,7 +42,9 @@ pub mod bundle;
 pub mod canonical;
 pub mod chunk;
 pub mod contract;
+pub mod descriptor;
 pub mod diag;
+pub mod envelope;
 pub mod grammar;
 pub mod history;
 pub mod schema;

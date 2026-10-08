@@ -1,0 +1,40 @@
+# The contract the descriptor fixtures are checked against.
+[interface]
+name    = "nav"
+major   = 2
+minor   = 1
+summary = "Navigation, for the descriptor fixtures"
+
+[schemas]
+jsonschema = ["nav.json"]
+
+[resources.position]
+kind = "state"
+type = "json:Position"
+
+[resources.covariance]
+kind     = "state"
+type     = "json:Position"
+optional = true
+gate     = "capability:imu"
+
+[resources.diagnostics]
+kind     = "state"
+type     = "json:Position"
+optional = true
+gate     = "config:diagnostics"
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = "json:Position"
+params      = { track = "string" }
+cardinality = 50
+
+[resources.arm]
+kind     = "operation"
+request  = "json:Position"
+response = "json:Position"
+
+[requires.cmd]
+interface   = "twist_cmd.v1"
+cardinality = "many"
