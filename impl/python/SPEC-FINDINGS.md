@@ -6,12 +6,15 @@ inputs. It never read the Rust implementation or `docs/zk2/`. Each entry
 below is a place where that was not enough, or where the spec said two
 things.
 
-**Two rounds.**
+**Three rounds.**
 - **F-01 to F-39** were found against `core.md` 0.2.
 - After amendments 0.3 (the classifier's rule set) and 0.4 (TOML 1.0
   enforced), each of those entries carries a status line where the
   amendment touches it.
 - **F-40 to F-45** are new, found against 0.4.
+- **F-46 to F-55** come from the live half's first slice (presence,
+  descriptors, contract retrieval, against the Rust owner example). They
+  are in their own section at the end, with their own table.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -23,7 +26,8 @@ things.
   text has a bug."
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.4:** 45 entries.
+**Counts of the static entries at 0.4:** 45 entries. The live section adds 10
+more (7 gap, 3 ambiguity), for 55 in all.
 - **By severity:** 18 gap, 23 ambiguity, 4 contradiction, 0 blocker.
 - **By status:**
   - 4 resolved: F-29, F-30, F-34, F-36;
@@ -916,3 +920,223 @@ for every example. All 24 are:
 - published there;
 - byte-identical to the bundle zk2py builds, protobuf ones included;
 - `compatible` against their history.
+
+## The live half, first slice (against 0.4; #609, #610)
+
+These come from `zk2py.live` and `zk2py.live_interop`, which run the Rust
+owner example as a black box over zenoh-python 1.10.1. The setup: loopback,
+the owner as the router, and zk2py as a client of it. The rules read are
+§3.3, §8.1–§8.4, `scenarios/presence.md` and `scenarios/retrieval.md`. Two
+entries rest on measurements, which are given.
+
+| Id | Severity | Location | In one line |
+|---|---|---|---|
+| F-46 | gap | §3.3 | The descriptor GET: no target, consolidation, timeout or reply encoding is stated. |
+| F-47 | gap (measured) | §8.1 "Reading presence", presence.md §4 | The handler rule binds only the GET. A bounded, undrained *subscriber* on the same session starves even a callback GET, which then returns 257 of 2,002 tokens at its timeout. |
+| F-48 | gap | §8.4, §9.6 | The bundle reply's encoding is not stated. |
+| F-49 | gap | §8.1, §3.3, §8.4 | No timeout anywhere: liveliness GET, descriptor GET, each §8.4 attempt, waiting for presence. |
+| F-50 | gap (measured) | §8.4 step 2 | "Verify each reply as it arrives" needs consolidation `None`. With zenoh's default, a slow corrupt holder's reply arrives alone, at completion, and the valid bundle is consolidated away. |
+| F-51 | ambiguity | §8.4 step 1, retrieval.md §1 | "The nearest holder on each router": from a client that holds a bundle itself, `BestMatching` returned two replies. |
+| F-52 | gap | §3.1, §3.2 R1, §8.2 | Nothing says an owner with an unbound *required role* must not start, yet the reference owner refuses to, citing R1. |
+| F-53 | ambiguity | §3.3, §10 point 4 | Is a descriptor's `profiles` the union of its contracts' `uses`? |
+| F-54 | gap | §8.1 member tokens | When does a member exist, and so need its token? |
+| F-55 | ambiguity | §3.2 R3 | Is an unconfigured optional role listed with `bindings: []`, or omitted? |
+
+### F-46 · gap · §3.3, the descriptor GET
+
+> "Every instance serves a **descriptor**: a JSON document answered on GET
+> at its instance key, and put on every change."
+
+The GET's target, consolidation and timeout are not given. Nor is the
+reply's `Encoding`: §7.2's encoding rule is about resource samples, and
+§5.2's about the error envelope. Nor is whether the reply carries a
+timestamp (S1–S2 bind state, not control keys), or how many replies to
+expect.
+
+The owner answered with one reply, encoded `application/json`, with no
+timestamp and no attachment.
+**Resolved:** a guess:
+- zk2py GETs with `BestMatching`, consolidation `None` (see F-50) and 5 s;
+- it discards a reply on a key that is not concrete (R6);
+- it treats `application/json` as an expectation the spec does not state.
+
+### F-47 · gap (measured) · §8.1 "Reading presence" and `presence.md` §4
+
+> "A caller or tool's liveliness GET on a session that holds a liveliness
+> subscriber MUST use a callback or an unbounded handler. With zenoh's
+> default 256-slot handler, such a GET hung at every measured size from
+> 996 tokens (zenoh#2678)."
+
+Measured with zenoh-python 1.10.1:
+- **Setup:** 2,000 extra instance tokens, declared by a second client. The
+  reading session holds a liveliness subscriber on `zk2/*/*/@zk/**`, and
+  issues `liveliness().get("zk2/*/*/@zk/**", timeout=10)`.
+- **Total:** 2,002 tokens, counting the owner's two.
+
+| GET handler | the session's liveliness subscriber | result |
+|---|---|---|
+| `Callback` | `Callback` | complete: 2,002 in 0.34 s |
+| default, drained as replies arrive | `Callback` | complete: 2,002 in 0.43 s |
+| default, drained after 3 s | `Callback` | complete: 2,002 in 3.0 s |
+| default | default, `history=True`, never drained | **hung**: 0 replies after 20 s |
+| `Callback` | default, `history=True`, never drained | **257 of 2,002**, ended at the 10 s timeout |
+
+Three things follow:
+1. **The scenario did not reproduce as written.** `presence.md` §4's "With
+   zenoh's default 256-slot handler, it hangs" did not happen for the GET's
+   handler alone in zenoh-python.
+2. **What starves the GET is the subscriber's handler,** when it is bounded
+   and nobody drains it. Then even a callback GET is cut short, silently,
+   at its timeout. A tool that trusts it under-reports presence, which is
+   exactly what O5 and R7 warn against.
+3. **zenoh-python has no unbounded handler.** Its default handler and
+   `FifoChannel` are bounded, and `RingChannel` drops. So "an unbounded
+   handler" is not an option there; only a callback is.
+
+The rule should also bind the subscriber's handler. A tool should treat a
+liveliness GET that ended at its timeout, rather than at the routers' final
+reply, as possibly incomplete.
+
+**Resolved:** how zk2py meets the rule:
+- every liveliness GET passes `zenoh.handlers.Callback(on_reply, on_done)`
+  (stable API, default `indirect` mode). The callback only appends to a
+  Python list, and `on_done` marks completion;
+- the session holds no bounded subscriber. The scale check's subscriber is
+  a `Callback` too;
+- `list_presence` reports `complete=False` when the GET ended at its
+  timeout.
+
+The runner checks the §4 scenario with callbacks: 2,000 of 2,000 tokens in
+about 0.15 s while a subscriber is held.
+
+### F-48 · gap · §8.4 and §9.6, the bundle reply's encoding
+
+§9.6 defines the bundle *bytes* (JCS). §8.4 defines how to retrieve and
+verify them. Neither says what `Encoding` a holder sets on its reply. The
+owner sets `application/json`.
+**Resolved:** zk2py does not depend on it. Verification is by hash, as §8.4
+intends ("the hash is the check"). zk2py records the encoding in its report.
+
+### F-49 · gap · timeouts: §8.1, §3.3 and §8.4
+
+The spec sets no timeout for any of these:
+- a liveliness GET;
+- the descriptor GET;
+- each of §8.4's two attempts. "If none was valid, retry once" depends on
+  when the first attempt counts as done;
+- how long a tool waits for presence after an owner starts.
+
+S6 speaks of "the GET's timeout" as if it were given.
+**Resolved:** a guess:
+- 5 s per GET;
+- 2 s for the attempts the runner expects to fail;
+- 30 s to wait for presence, polled every 0.2 s.
+
+### F-50 · gap (measured) · §8.4 step 2 and consolidation
+
+> "Verify each reply **as it arrives** (§9.6), and accept the first valid
+> one, without waiting for the GET to complete."
+
+§4.1 says `Latest` consolidation "delivers at query completion", and
+zenoh's default for a GET is `Auto`, which is `Latest` on a concrete key.
+§8.4 never says to set consolidation. O2 and O6 do say it, for calls.
+
+Measured: on the `nav.v2` contract key, zk2py's session held a holder that
+answers a corrupt 12-byte bundle after 2 s, and the owner's holder answers
+the valid 4,800-byte bundle at once:
+
+| Consolidation | Target | Replies delivered (arrival in s, size in bytes) |
+|---|---|---|
+| default (`Auto`) | `BestMatching` | (2.001, 12) |
+| default (`Auto`) | `All` | (2.000, 12) |
+| `None` | `BestMatching` | (0.001, 4800), (2.000, 12) |
+| `None` | `All` | (0.001, 4800), (2.000, 12) |
+
+With the default, the valid bundle never arrives: it is consolidated away,
+and only the corrupt one is delivered, at completion. A tool that follows
+§8.4 to the letter, with zenoh's defaults, waits 2 s, refuses the corrupt
+reply, retries with `All`, and reports the contract unavailable while a
+valid holder answers in 1 ms.
+
+**Resolved:** a guess. zk2py sets consolidation `None` for every §8.4 GET,
+and for the descriptor GET. §8.4 should say so.
+
+### F-51 · ambiguity · §8.4 step 1 and `retrieval.md` §1, "nearest holder"
+
+> "GET with target `BestMatching`. That reaches the nearest holder on each
+> router the query visits."
+
+> retrieval.md §1: "With 200 equal holders on one router and
+> `BestMatching`, one reply."
+
+Measured in the same setup as F-50: when zk2py's own client session held a
+complete queryable on the contract key, a `BestMatching` GET from that
+session returned **two** replies, its own and the owner's (see F-50's
+table).
+
+So the querying session's own holder counts as a holder of its own.
+"Nearest" is the routers' choice, not one a client can make or observe. The
+spec does not say how many replies a tool may get from `BestMatching`.
+**Resolved:** zk2py assumes nothing about the count. It verifies every reply
+that arrives, and accepts the first valid one. The runner's
+corrupt-nearest-holder check passes either way.
+
+### F-52 · gap · §3.1, §3.2 R1, §8.2: an unbound required role
+
+The owner example refused to start on `examples/zk2/walkthrough/thruster.v1.toml`.
+It exited with status 1 and declared no instance token, saying:
+`NotExposed("role \"cmd\" (twist_cmd.v1) is required and the configuration
+binds it to nothing (R1)")`.
+
+R1 says: "a role MUST be bound by configuration, never in code".
+- **Required resources:** §8.2 validates that every required *resource* is
+  exposed, and `presence.md` §2 step 3 says such an owner "does not start".
+- **Required roles:** nothing says an owner with an unbound required
+  *role* must not start.
+
+R5 ("A binding resolves at once") and R7 ("A binding MUST NOT require
+presence") suggest bindings never block start-up. The owner's documented
+contract ("it implements every contract given") does not hold for this
+contract either.
+
+**Resolved:** the runner uses only contracts the owner accepts. In place of
+`thruster.v1` it uses `camera.v1`, also protobuf. The spec should say what
+an unbound required role does.
+
+### F-53 · ambiguity · §3.3 and §10 point 4, the descriptor's `profiles`
+
+> descriptor.schema.json: "The profiles this instance follows, as
+> `<name>.v<major>`."
+
+The owner listed the union of its contracts' `uses`. For example,
+`["freshness.v1", "telemetry.v1"]` for `zk2py_probe.v1` with `zs.snmp.v1`.
+Nothing says whether `profiles` must equal, include, or be independent of
+those `uses`.
+**Resolved:** zk2py does not check `profiles` beyond D010's syntax.
+
+### F-54 · gap · §8.1 member tokens: when does a member exist?
+
+> "The owner MUST hold one member token per member, and cycle it whenever
+> that member's continuity breaks."
+
+The spec does not say when a member comes into being: when its first value
+is published, when it is configured, or when its device appears.
+`zs.snmp.v1` and `zk2py_probe.v1` both have an `epoch` template. The owner,
+which publishes no data, held no member token for either.
+**Resolved:** zk2py reports the member-token count. It asserts nothing.
+
+### F-55 · ambiguity · §3.2 R3, an unconfigured optional role
+
+> "**Owner:** the descriptor (§3.3) MUST list every requirement with its
+> bindings and parameter bindings as configured."
+
+The owner listed `zk2py_probe.v1`'s optional, unbound role as
+`{"role": "upstream", "interface": "nav.v2", "declared_by":
+"zk2py_probe.v1", "bindings": [], "params": {}}`.
+
+"As configured" could also be read as "only the roles the configuration
+binds". With that reading, an unbound optional role would be omitted, and
+the data-flow graph (R3's "read from descriptors") would lose an edge the
+contract declares.
+**Resolved:** a guess. zk2py's runner requires every contract-declared role
+to be listed. The owner passes.
