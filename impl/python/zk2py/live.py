@@ -17,7 +17,14 @@ zenoh-python has no unbounded channel: its default handler and
   Python list and whose drop function marks completion;
 - any liveliness subscriber zk2py declares is a ``Callback`` too;
 - "a liveliness GET that ended at its timeout, rather than at the routers'
-  final reply" is reported as possibly incomplete (``complete=False``);
+  final reply" is reported as possibly incomplete (``complete=False``).
+  0.8 says how to see it: "a GET that reached its timeout ends with an
+  error reply, Timeout, and one the routers finished ends with none … A
+  read that received any error reply is possibly incomplete". So
+  completeness is read from the error replies, not from elapsed time;
+- a complete read is what *this reader* could see: "A refused read is
+  complete, and empty" (§8.1, 0.8), so an empty one never rules out a
+  refusal by access control (:attr:`Presence.reading`);
 - presence is polled with GETs, never inferred from silence (§3.2 R7, O5).
 
 **Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
@@ -65,13 +72,29 @@ class Presence:
     members: list[dict[str, Any]] = field(default_factory=list)
     #: keys under the selector that are not zk2 control keys
     other: list[str] = field(default_factory=list)
-    #: the GET ended at the routers' final reply, not at its timeout
+    #: the GET ended at the routers' final reply with no error reply
     complete: bool = False
+    #: its error replies, "<encoding>: <payload>" (``zenoh/string: Timeout``)
+    errors: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
 
     @property
     def count(self) -> int:
         return len(self.instances) + len(self.alive) + len(self.members) + len(self.other)
+
+    @property
+    def reading(self) -> str:
+        """How a tool states this read (§8.1, 0.8): "A tool reports absence
+        as what its reader could see. Where it cannot rule out a refusal, it
+        SHOULD say so, as it says a read is possibly incomplete." A reader
+        can never rule one out from the read itself (the CHANGELOG's "No
+        probe that tells a refusal from absence")."""
+        if not self.complete:
+            why = "; ".join(self.errors) or "no final reply"
+            return f"possibly incomplete ({why}): {self.count} tokens, silence is not a verdict"
+        if self.count == 0:
+            return "complete and empty for this reader: absent, or refused by access control"
+        return f"complete for this reader: {self.count} tokens"
 
 
 def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
@@ -91,10 +114,9 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
                              timeout=timeout)
     finished = done.wait(timeout + 5.0)
     p = Presence(elapsed_s=time.monotonic() - t0)
-    # A GET whose drop fired only at the timeout may be partial (F-47).
-    p.complete = finished and p.elapsed_s < timeout * 0.95
     for r in replies:
         if r.ok is None:
+            p.errors.append(f"{r.err.encoding}: {r.err.payload.to_bytes().decode('utf-8', 'replace')}")
             continue
         key = str(r.ok.key_expr)
         parsed = keys.parse(key)
@@ -107,6 +129,9 @@ def list_presence(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
             p.members.append(parsed)
         else:
             p.other.append(key)
+    # §8.1 (0.8): ended by the routers' final reply, and no error reply. A
+    # GET whose drop never came is incomplete too.
+    p.complete = finished and not p.errors
     return p
 
 
@@ -194,6 +219,25 @@ class Retrieval:
     @property
     def available(self) -> bool:
         return self.data is not None
+
+
+def fingerprint_of(descriptor: dict[str, Any], iface: str, fp16: str | None = None) -> str | None:
+    """§8.4 (0.8) "From a token to a fingerprint": "An interface token
+    carries fp16 …, which is not enough to retrieve by. A tool reads the
+    full fingerprint from the instance's descriptor (§3.3, the interface's
+    contract), and retrieves by that. There is no retrieval by prefix."
+
+    The interface's ``contract`` in a descriptor, or None when it lists no
+    such interface, or, given the token's ``fp16``, when that is not the
+    start of it (§1.2)."""
+    for e in descriptor.get("interfaces", []):
+        if e.get("iface") != iface or not isinstance(e.get("contract"), str):
+            continue
+        fp = e["contract"]
+        if fp16 is not None and not fp.removeprefix("sha256:").startswith(fp16):
+            return None
+        return fp
+    return None
 
 
 def contract_key(iface: str, fingerprint: str) -> str:
@@ -311,6 +355,10 @@ class CallReply:
 @dataclass
 class CallResult:
     replies: list[CallReply] = field(default_factory=list)
+    #: seconds from the call to its first reply, and to the query's
+    #: completion (None when ``first`` returned before it)
+    first_s: float | None = None
+    done_s: float | None = None
 
     @property
     def silent(self) -> bool:
@@ -319,7 +367,7 @@ class CallResult:
 
 
 def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,
-         encoding: str | None = None, timeout: float = GET_TIMEOUT_S) -> CallResult:
+         encoding: str | None = None, timeout: float = GET_TIMEOUT_S, first: bool = False) -> CallResult:
     """Call an operation (§5.1).
 
     - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
@@ -327,6 +375,10 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
     - Consolidation is ``None`` for a concrete call too: §5.1 O1 (0.7) says
       "a concrete call MUST set BestMatching and None", since ``Latest``
       would hold the reply until the query completes.
+    - ``first``: a one-reply caller "takes the first value or envelope on
+      the call's key, without waiting for the query to complete" (§5.1
+      "A concrete call"); the call returns at the first value or envelope.
+      Otherwise every reply is collected until the query completes.
     - A value reply is the result; a reply error is decoded by its encoding
       (§5.2). Only ``application/json``, ``application/cbor`` and
       ``application/protobuf;zk2.core.v1.Error`` carry an envelope; any
@@ -344,6 +396,7 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
     }
     if encoding is not None:
         kwargs["encoding"] = encoding
+    t0 = time.monotonic()
     session.get(key, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)), **kwargs)
     out = CallResult()
     while True:
@@ -352,18 +405,24 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
         except queue.Empty:
             break
         if item is _DONE:
+            out.done_s = time.monotonic() - t0
             break
+        if out.first_s is None:
+            out.first_s = time.monotonic() - t0
         if item.ok is not None:
             s = item.ok
             out.replies.append(CallReply("value", str(s.key_expr), str(s.encoding), s.payload.to_bytes()))
-            continue
-        enc, data = str(item.err.encoding), item.err.payload.to_bytes()
-        if enc not in (envelope.JSON_ENCODING, envelope.CBOR_ENCODING, envelope.PROTOBUF_ENCODING):
-            out.replies.append(CallReply("transport", None, enc, data))
-            continue
-        try:
-            env = envelope.decode(enc, data)
-            out.replies.append(CallReply("envelope", None, enc, data, envelope=env))
-        except envelope.EnvelopeError as e:
-            out.replies.append(CallReply("refused_envelope", None, enc, data, refusal=e.tag))
+        else:
+            enc, data = str(item.err.encoding), item.err.payload.to_bytes()
+            if enc not in (envelope.JSON_ENCODING, envelope.CBOR_ENCODING, envelope.PROTOBUF_ENCODING):
+                out.replies.append(CallReply("transport", None, enc, data))
+                continue
+            try:
+                env = envelope.decode(enc, data)
+                out.replies.append(CallReply("envelope", None, enc, data, envelope=env))
+            except envelope.EnvelopeError as e:
+                out.replies.append(CallReply("refused_envelope", None, enc, data, refusal=e.tag))
+        if first and out.replies[-1].kind != "transport" and (out.replies[-1].kind != "value"
+                                                              or out.replies[-1].key == key):
+            break
     return out

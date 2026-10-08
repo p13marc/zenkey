@@ -1,0 +1,17 @@
+# zk2py's contract for operations.md §2 step 5 (0.8): many replies over a
+# template, served by one queryable over it. It must load with no finding at
+# all.
+[interface]
+name    = "zk2py_scan"
+major   = 1
+minor   = 0
+summary = "zk2py's many-replies-over-a-template scenario"
+
+[resources."ports/{port}/scan"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { port = "string" }
+cardinality = 8
+replies     = "many"
+fanout      = "allowed"
