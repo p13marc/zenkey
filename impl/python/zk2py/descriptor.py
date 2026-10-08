@@ -73,25 +73,32 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         codes.append("D002")
 
     caps = doc.get("capabilities", [])
-    for i, cap in enumerate(caps):
-        if GATE_NAME.fullmatch(cap) is None or cap in caps[:i]:
-            codes.append("D008")
+    # D008 (§3.3 table): "per capability; once for the repeat".
+    codes += ["D008"] * sum(1 for cap in caps if GATE_NAME.fullmatch(cap) is None)
+    codes += ["D008"] * _repeats(caps)
     held = set(caps)
 
     ifaces: list[str] = []
     for entry in doc["interfaces"]:
         iface = entry["iface"]
-        if not is_interface_id(iface) or iface in ifaces:
+        # Cascade 2: an iface that is not an interface id is checked no
+        # further, and is not one of the descriptor's interfaces.
+        if not is_interface_id(iface):
             codes.append("D003")
-        well_formed = FINGERPRINT.fullmatch(entry["contract"]) is not None
-        if not well_formed:
+            continue
+        # Cascade 4: listed twice is D003, otherwise checked like the first.
+        if iface in ifaces:
             codes.append("D003")
         ifaces.append(iface)
+        # Cascade 3: a malformed fingerprint is checked no further (no D004),
+        # but its interface still counts for declared_by.
+        if FINGERPRINT.fullmatch(entry["contract"]) is None:
+            codes.append("D003")
+            continue
+        # Cascade 5: an interface none of the given contracts declares is
+        # checked for syntax only.
         contract = held_contracts.get(iface)
-        if contract is None or not well_formed:
-            # Another contract: syntax only. A malformed fingerprint is D003
-            # alone, not also D004 (descriptors/d003-fingerprint;
-            # SPEC-FINDINGS F-05).
+        if contract is None:
             continue
         if entry["contract"] != contract.fingerprint:
             codes.append("D004")
@@ -102,10 +109,16 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         codes += _check_requirement(req, set(ifaces))
 
     profiles = doc.get("profiles", [])
-    for i, p in enumerate(profiles):
-        if not is_interface_id(p) or p in profiles[:i]:
-            codes.append("D010")
+    # D010: "per profile; once for the repeat".
+    codes += ["D010"] * sum(1 for p in profiles if not is_interface_id(p))
+    codes += ["D010"] * _repeats(profiles)
     return sorted(codes)
+
+
+def _repeats(values: list[str]) -> int:
+    """§3.3's "once for the repeat": one per value listed more than once
+    (SPEC-FINDINGS F-57)."""
+    return sum(1 for v in set(values) if values.count(v) > 1)
 
 
 def _resources(contract: Contract) -> dict[str, dict[str, Any]]:
@@ -132,9 +145,9 @@ def _check_exposure(entry: dict[str, Any], contract: Contract, held: set[str]) -
             codes.append("D006")
     for key, bound in entry.get("cardinality", {}).items():
         r = resources.get(key)
-        # §3.3: cardinality "MAY lower a template's bound for this instance,
-        # keyed <kind token>/<template>. It MUST NOT raise it."
-        if r is None or r["cardinality"] is None or bound > r["cardinality"]:
+        # §3.3: cardinality lowers a template's bound "to a value from 1 to
+        # the contract's. It MUST NOT raise it."
+        if r is None or r["cardinality"] is None or not 1 <= bound <= r["cardinality"]:
             codes.append("D007")
     return codes
 
@@ -149,8 +162,9 @@ def _check_requirement(req: dict[str, Any], ifaces: set[str]) -> list[str]:
         chunks = b.split("/")
         if len(chunks) != 2 or not all(c == "*" or is_plain_chunk(c) for c in chunks):
             codes.append("D009")
-    for p in req.get("params", {}):
-        if IDENT.fullmatch(p) is None:
+    for p, value in req.get("params", {}).items():
+        # D009: "a params key is not [a-z][a-z0-9_]*, or its value is empty".
+        if IDENT.fullmatch(p) is None or value == "":
             codes.append("D009")
     declared_by = req.get("declared_by")
     if declared_by is not None and declared_by not in ifaces:

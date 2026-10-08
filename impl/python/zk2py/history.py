@@ -19,19 +19,27 @@ _FILE = re.compile(r"([0-9a-f]{64})\.bundle\.json")
 
 
 def check_history(root: Path) -> list[tuple[str, str]]:
-    """Every problem of a history root, as ``(at, tag)``.
-
-    One problem per file at most: the first of verification (with the
-    fingerprint the file name implies, so a mismatch is the bundle tag
-    ``fingerprint``), the interface against the directory, then the JCS
-    form (SPEC-FINDINGS F-27).
+    """Every problem of a history root, as ``(at, tag)``, in §9.7's order
+    (0.5):
+    - the root's entries, then each interface directory's, in bytewise
+      order of name;
+    - a root entry that is not a directory named by an interface id is
+      ``directory``, and is not looked into;
+    - in an interface directory, an entry not named
+      ``<64 lowercase hex>.bundle.json`` is ``file_name``, a subdirectory
+      included;
+    - per file: reading it (``io``); verifying it, expecting the
+      fingerprint its name gives (a bundle tag); its interface against its
+      directory (``interface``); its bytes against the JCS of the bundle,
+      all three members written (``jcs``). The first two stop that file's
+      checks; ``interface`` and ``jcs`` are both reported.
     """
     problems: list[tuple[str, str]] = []
-    for d in sorted(root.iterdir(), key=lambda p: p.name):
+    for d in sorted(root.iterdir(), key=lambda p: p.name.encode()):
         if not d.is_dir() or not is_interface_id(d.name):
             problems.append((d.name, "directory"))
             continue
-        for f in sorted(d.iterdir(), key=lambda p: p.name):
+        for f in sorted(d.iterdir(), key=lambda p: p.name.encode()):
             at = f"{d.name}/{f.name}"
             m = _FILE.fullmatch(f.name)
             if not f.is_file() or m is None:
@@ -49,7 +57,7 @@ def check_history(root: Path) -> list[tuple[str, str]]:
                 continue
             if v.contract.get("interface") != d.name:
                 problems.append((at, "interface"))
-                continue
-            if jcs.dumps(jcs.loads(data)) != data:
+            full = {"contract": v.contract, "schemas": v.schemas, "extras": v.extras}
+            if jcs.dumps(full) != data:
                 problems.append((at, "jcs"))
     return problems

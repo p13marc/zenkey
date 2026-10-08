@@ -227,7 +227,6 @@ def _wrapped(root: Path, directory: Path, kind: str, artifact: str, type_ref: st
 def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     from . import compat
     from .contract import load_contract
-    from .schemas import PROTOBUF
 
     d = root / "compat" / case
     got: dict[str, Any] = {}
@@ -253,10 +252,8 @@ def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     if family == "transitive":
         got["against"] = {n: v.cls for n, v in zip(names[:-1], each)}
     if "same_revision" in want:
-        # §9.7's identity, over the protobuf artifacts of the two revisions.
-        def sets(c):
-            return [a.data for a in c.schemas.artifacts() if a.kind == PROTOBUF]
-        got["same_revision"] = compat.proto_same_revision(sets(contracts[0]), sets(contracts[1]))
+        # §9.7's retention identity (0.5), between the two revisions.
+        got["same_revision"] = compat.identical(revs[0], revs[1])
     return got
 
 

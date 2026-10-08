@@ -98,6 +98,9 @@ class Diagnostic:
     code: str
     message: str
     resource: str | None = None  # the template, when the finding is a resource's
+    #: a table-wide check (E021, the second-epoch E022, the replaced_by half
+    #: of E031): it does not take its resource out of W101 (§9.2 cascade 4)
+    table_wide: bool = False
 
     @property
     def is_error(self) -> bool:
@@ -176,8 +179,9 @@ class _Loader:
         self.spec_dir = spec_dir
         self.text = text
 
-    def diag(self, code: str, message: str, resource: str | None = None) -> None:
-        self.c.diagnostics.append(Diagnostic(code, message, resource))
+    def diag(self, code: str, message: str, resource: str | None = None,
+             table_wide: bool = False) -> None:
+        self.c.diagnostics.append(Diagnostic(code, message, resource, table_wide))
 
     # -- §9.1: TOML and shape -------------------------------------------
 
@@ -245,8 +249,10 @@ class _Loader:
         resources = doc.get("resources", {})
         self.parsed: dict[str, Template] = {}
         self.tokens: dict[str, str] = {}
-        for text, spec in resources.items():
-            self.check_resource(text, spec, resources)
+        # §9.2 "Order" (0.5): resources are taken in the bytewise order of
+        # their template text, "since TOML gives a table's keys no order".
+        for text in sorted(resources):
+            self.check_resource(text, resources[text], resources)
         self.check_shapes()
         self.check_second_epochs(resources)
         for role, req in doc.get("requires", {}).items():
@@ -261,23 +267,25 @@ class _Loader:
         return self.c
 
     def check_annotations(self, table: dict[str, Any], where: str, resource: str | None = None) -> None:
-        """E020 and W105, once per key of one table (§9.2). A key is
-        ``<profile>.<key>`` split at the last dot; the profile is a ``uses``
-        name without its major; the value holds no datetime (§9.1)."""
+        """E020 and W105 over one table (§9.2). A key is ``<profile>.<key>``
+        split at the last dot; the profile is a ``uses`` name without its
+        major; the value holds no datetime of any kind at any depth (§9.1).
+        0.5: "once for the value, and once for the key or its profile, so one
+        key can give two"."""
         for k, v in table.items():
             profile, dot, key = k.rpartition(".")
-            if not dot or not profile or IDENT.fullmatch(key) is None:
+            well_formed = bool(dot and profile) and IDENT.fullmatch(key) is not None
+            if not well_formed:
                 self.diag("E020", f"{where}: annotation key {k!r} is not <profile>.<key>", resource)
-                continue
-            if profile not in self.profile_names:
+            elif profile not in self.profile_names:
                 self.diag("E020", f"{where}: profile {profile!r} is not in uses", resource)
-                continue
             if _holds_datetime(v):
                 self.diag("E020", f"{where}: annotation {k!r} holds a datetime", resource)
-                continue
-            vocab = VOCABULARY.get(profile)
-            if vocab is not None and key not in vocab:
-                self.diag("W105", f"{where}: {k!r} is outside the interim vocabulary", resource)
+            if well_formed and profile in self.profile_names:
+                # W105; a profile without an interim table has none (§10).
+                vocab = VOCABULARY.get(profile)
+                if vocab is not None and key not in vocab:
+                    self.diag("W105", f"{where}: {k!r} is outside the interim vocabulary", resource)
 
     def check_history_depth(self, value: Any, where: str, resource: str | None = None) -> None:
         if isinstance(value, dict) and value.get("depth") == 0:
@@ -323,7 +331,8 @@ class _Loader:
         if dep is not None and dep.get("replaced_by") is not None:
             rb = dep["replaced_by"]
             if rb == text or rb not in resources:
-                self.diag("E031", f"{text}: replaced_by {rb!r} names no other template", text)
+                self.diag("E031", f"{text}: replaced_by {rb!r} names no other template", text,
+                          table_wide=True)
         # E010 stops the resource's other checks (§9.2 cascade 1).
         try:
             tpl = parse_template(text)
@@ -365,7 +374,9 @@ class _Loader:
             self.diag("E013", f"{text}: cardinality is required and positive", text)
         # E016 / E017: gates (§2.3).
         gates = _gates(spec.get("gate"))
-        if "gate" in spec and spec.get("optional") is not True:
+        # E016 (0.5): "a non-empty gate without optional = true"; an empty
+        # list is no gate.
+        if gates and spec.get("optional") is not True:
             self.diag("E016", f"{text}: gate without optional = true", text)
         for g in gates:
             m = _GATE.fullmatch(g)
@@ -375,11 +386,18 @@ class _Loader:
         if "epoch" in spec and spec["epoch"] not in tpl.single_chunk_params():
             self.diag("E022", f"{text}: epoch {spec['epoch']!r} is not a single-chunk parameter", text)
         # E026: rate and retention (§2.6).
-        if "rate" in spec and _RATE.fullmatch(spec["rate"]) is None:
-            self.diag("E026", f"{text}: rate {spec['rate']!r}", text)
+        # §2.6 (0.5): a rate's <n> "from 1 to 2^32−1"; a retention's <n> at
+        # least 1, leading zeros allowed, and "the seconds MUST fit 64 bits"
+        # (unsigned, SPEC-FINDINGS F-56); beyond ±(2^53−1) they are E028 in
+        # the canonical form.
+        if "rate" in spec:
+            m = _RATE.fullmatch(spec["rate"])
+            if m is None or (m.group(1) is not None and int(m.group(1)) > 2**32 - 1):
+                self.diag("E026", f"{text}: rate {spec['rate']!r}", text)
         if "retention" in spec:
             m = _RETENTION.fullmatch(spec["retention"])
-            if m is None or int(m.group(1)) < 1:
+            if (m is None or int(m.group(1)) < 1
+                    or int(m.group(1)) * _RETENTION_UNIT[m.group(2)] > 2**64 - 1):
                 self.diag("E026", f"{text}: retention {spec['retention']!r}", text)
         # E034: history.depth 0 where history is legal (E019 alone otherwise).
         if kind in ("stream", "state") and not explicit:
@@ -454,15 +472,16 @@ class _Loader:
         for text, tpl in self.parsed.items():
             key = (self.tokens[text], tpl.shape)
             if key in seen:
-                self.diag("E021", f"{text}: shape {tpl.shape!r} already taken under {key[0]}", text)
+                self.diag("E021", f"{text}: shape {tpl.shape!r} already taken under {key[0]}", text,
+                          table_wide=True)
             seen.add(key)
 
     def check_second_epochs(self, resources: dict[str, Any]) -> None:
         """E022, second condition, over the raw resources table: once per
         ``epoch`` template after the first (§8.1, §9.2)."""
-        with_epoch = [t for t, s in resources.items() if "epoch" in s]
+        with_epoch = sorted(t for t, s in resources.items() if "epoch" in s)
         for t in with_epoch[1:]:
-            self.diag("E022", f"{t}: a second template declares epoch", t)
+            self.diag("E022", f"{t}: a second template declares epoch", t, table_wide=True)
 
     def check_requirement(self, role: str, req: dict[str, Any]) -> None:
         """E030 (§3.1, §9.2), and the requirement's annotations (E020/W105)."""
@@ -485,7 +504,8 @@ class _Loader:
         """W101: two resolved resources under one token whose templates
         overlap, with different types; per pair, over resources without
         errors (§9.2 cascade 4)."""
-        bad = {d.resource for d in self.c.diagnostics if d.is_error and d.resource}
+        bad = {d.resource for d in self.c.diagnostics
+               if d.is_error and d.resource and not d.table_wide}
         ok = [t for t in self.parsed if t not in bad]
 
         def types_of(t: str) -> Any:
@@ -584,7 +604,13 @@ class _Loader:
                 "optional": req.get("optional", False),
                 "annotations": dict(req.get("annotations", {})),
             }
-        arts = sorted(self.schemas.artifacts(), key=lambda a: a.id or "")
+        # §9.6 (0.5): "Two listed JSON Schema files with identical bytes have
+        # one id, so the canonical form lists it once, under the name of the
+        # last of them in [schemas] order."
+        by_id = {}
+        for a in self.schemas.artifacts():
+            by_id[a.id] = a
+        arts = sorted(by_id.values(), key=lambda a: a.id or "")
         canonical = {
             "format": FORMAT,
             "interface": self.c.interface,

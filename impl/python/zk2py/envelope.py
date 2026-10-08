@@ -11,6 +11,7 @@ decoder ignores unknown fields, as protobuf does."
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from . import cbor, jcs
@@ -60,15 +61,44 @@ def _json(payload: bytes) -> Any:
 
 
 def _cbor(payload: bytes) -> Any:
+    """§5.2 (0.5), CBOR: one data item and nothing after it; indefinite
+    lengths accepted; a tag decodes as its content, ``undefined`` as null;
+    "A map key that is not text, an integer outside 64 bits, or a float that
+    is not finite is decode." Applied at any depth of the item."""
     try:
-        return cbor.loads(payload)
+        doc = cbor.loads(payload)
     except cbor.CborError as e:
         raise EnvelopeError("decode", str(e)) from e
+    _cbor_domain(doc)
+    return doc
+
+
+def _cbor_domain(v: Any) -> None:
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if not isinstance(k, str):
+                raise EnvelopeError("decode", f"a map key that is not text: {k!r}")
+            _cbor_domain(x)
+    elif isinstance(v, list):
+        for x in v:
+            _cbor_domain(x)
+    elif isinstance(v, bool) or v is None:
+        pass
+    elif isinstance(v, int):
+        # "Outside 64 bits": outside both i64 and u64, -2^63 to 2^64-1
+        # (SPEC-FINDINGS F-58). CBOR's major type 0 never exceeds 2^64-1.
+        if not -(2**63) <= v <= 2**64 - 1:
+            raise EnvelopeError("decode", f"an integer outside 64 bits: {v}")
+    elif isinstance(v, float):
+        if v != v or v in (float("inf"), float("-inf")):
+            raise EnvelopeError("decode", "a float that is not finite")
 
 
 def _bytes_view(v: Any) -> Any:
+    """§5.2 (0.5): "A byte string inside a detail reads as base64 text (RFC
+    4648 §4, padded), the JSON form of bytes (§7.2)"."""
     if isinstance(v, bytes):
-        return {"bytes_hex": v.hex()}
+        return base64.b64encode(v).decode("ascii")
     if isinstance(v, list):
         return [_bytes_view(x) for x in v]
     if isinstance(v, dict):

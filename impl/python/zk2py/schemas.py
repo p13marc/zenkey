@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import posixpath
 import re
-import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,13 +33,14 @@ ANNOTATIONS = {
     "$schema", "$id", "$defs", "$comment", "title", "description", "default",
     "examples", "format", "deprecated", "readOnly", "writeOnly",
 }
-# Where a 2020-12 keyword's value holds schemas: the positions walked for the
-# subset check and for $ref. Refused applicators are walked too, because
-# their values are schema positions in 2020-12 (SPEC-FINDINGS F-09).
-_SCHEMA_VALUED = {"additionalProperties", "items", "not", "if", "then", "else", "contains",
-                  "propertyNames", "unevaluatedProperties", "unevaluatedItems"}
-_SCHEMA_LISTS = {"prefixItems", "oneOf", "anyOf", "allOf"}
-_SCHEMA_MAPS = {"properties", "$defs", "patternProperties", "dependentSchemas"}
+# core.md §7.3 (0.5): "Schema positions are the document root; each value
+# of properties and $defs; each element of prefixItems, oneOf and anyOf; and
+# the value of items and additionalProperties. … Nothing else is a schema
+# position": not a refused keyword's content, not data (enum, const, …).
+# E037, E032 and the classifier read schema positions only.
+_SCHEMA_VALUED = {"additionalProperties", "items"}
+_SCHEMA_LISTS = {"prefixItems", "oneOf", "anyOf"}
+_SCHEMA_MAPS = {"properties", "$defs"}
 
 #: core.md §9.4 "Raw": each token is a lowercase letter or digit followed by
 #: lowercase letters, digits or ``!#$&-^_.+``; the subtype may be ``*``.
@@ -64,8 +64,8 @@ class Finding:
 
 
 def walk_schema(node: Any, visit, path: str = "") -> None:
-    """Call ``visit(schema_object, path)`` for every schema object reachable
-    through 2020-12 schema positions, the root included."""
+    """Call ``visit(schema_object, path)`` for every schema object at a
+    schema position (§7.3), the root included."""
     if not isinstance(node, dict):
         return
     visit(node, path)
@@ -115,9 +115,10 @@ def json_pointer(doc: Any, pointer: str) -> tuple[bool, Any]:
 
 
 def stem(listed: str) -> str:
-    """core.md §9.4: a JSON Schema artifact's name is the file's stem."""
+    """core.md §9.4 (0.5): "the file's stem, the last path segment without a
+    final .json"."""
     base = posixpath.basename(listed)
-    return base[:-5] if base.endswith(".json") else posixpath.splitext(base)[0]
+    return base[:-5] if base.endswith(".json") else base
 
 
 @dataclass
@@ -142,9 +143,16 @@ class SchemaSet:
     def load(cls, contract_dir: Path, jsonschema: list[str], protobuf: list[str],
              proto_include: list[str] | None) -> SchemaSet:
         s = cls(contract_dir)
+        taken: set[str] = set()
         for listed in jsonschema:
+            # §9.4 (0.5): a stem "MUST be unique among the listed files
+            # (E024). A later file with a taken stem is not loaded." E024
+            # falls once per such file (§9.2).
+            if stem(listed) in taken:
+                s._err("E024", f"{listed}: stem {stem(listed)!r} is already taken; not loaded")
+                continue
+            taken.add(stem(listed))
             s._load_json(listed)
-        s._check_stems()
         s._check_refs()
         roots = s._proto_roots(proto_include)
         for listed in protobuf:
@@ -180,16 +188,6 @@ class SchemaSet:
             self._err("E037", f"{listed}: keyword {kw!r} is outside the zk2 subset")
         self.json_files.append(Artifact(JSON, stem(listed), art_id, doc, listed))
 
-    def _check_stems(self) -> None:
-        # §9.4: the name "MUST be unique among the listed files (E024)";
-        # §9.2: "per … file". One E024 per file whose stem an earlier file
-        # already took (SPEC-FINDINGS F-13).
-        seen: set[str] = set()
-        for a in self.json_files:
-            if a.name in seen:
-                self._err("E024", f"{a.listed}: stem {a.name!r} is not unique")
-            seen.add(a.name)
-
     def _check_refs(self) -> None:
         """§9.4: a ``$ref``'s file part resolves relative to the referencing
         file, lexically normalized, and MUST name a listed file; a ``$ref``
@@ -221,7 +219,9 @@ class SchemaSet:
                 return None
         else:
             target = art
-        found, node = json_pointer(target.data, urllib.parse.unquote(fragment))
+        # §9.4 (0.5): the fragment "is a JSON Pointer (RFC 6901), applied as
+        # written: ~0 and ~1 are unescaped, and nothing is percent-decoded".
+        found, node = json_pointer(target.data, fragment)
         return (target, node) if found else None
 
     def _proto_roots(self, proto_include: list[str] | None) -> list[str]:

@@ -45,10 +45,11 @@ def revision(v: Verified):
 
 
 def extra_ids(contract: dict[str, Any]) -> set[str]:
-    """§9.6: extras are exactly the documents that the contract's
-    ``views.document`` annotations reference ("of the contract's resources",
-    step 11). A value is one ``sha256:…`` id; a list of ids is accepted too
-    (SPEC-FINDINGS F-26)."""
+    """§9.6: extras are exactly the documents that the ``views.document``
+    annotations of the contract's resources reference. 0.5: "A
+    views.document value references one document by its id, a sha256:…
+    string. Another value references nothing."
+    """
     out: set[str] = set()
     resources = contract.get("resources")
     if not isinstance(resources, list):
@@ -58,22 +59,20 @@ def extra_ids(contract: dict[str, Any]) -> set[str]:
         v = ann.get(EXTRA_ANNOTATION) if isinstance(ann, dict) else None
         if isinstance(v, str):
             out.add(v)
-        elif isinstance(v, list):
-            out |= {x for x in v if isinstance(x, str)}
     return out
 
 
 def build(contract: Contract) -> bytes:
-    """The bundle bytes of a valid contract (§9.6).
+    """The bundle bytes of a valid contract (§9.6), all three members
+    written.
 
-    The spec does not say where a builder finds an extra document from its
-    id, so a contract that uses ``views.document`` is refused here, as the
-    reference builder refuses it (§9.6; SPEC-FINDINGS F-26).
+    §9.6 (0.5): where a builder finds the document for an extra's id is
+    ``views.v1``'s to define; "until it does, a core builder carries no
+    extras, and the bundle of a contract that uses views.document fails step
+    11", so it cannot be published.
     """
     if not contract.valid or contract.canonical is None or contract.schemas is None:
         raise ValueError(f"{contract.path}: not a valid contract: {contract.codes}")
-    if extra_ids(contract.canonical):
-        raise NotImplementedError("views.document extras: the spec names no source for the documents")
     schemas: dict[str, Any] = {}
     for a in contract.schemas.artifacts():
         if a.kind == PROTOBUF:
@@ -133,12 +132,14 @@ def verify(data: bytes, expect_fingerprint: str | None = None) -> Verified:
         entry = schemas.get(sid)
         if entry is None:
             raise BundleError("missing_schema", sid)
-        if not isinstance(entry, dict):
-            raise BundleError("shape", f"{sid}: not an object")
-        if entry.get("kind") != listed_kind[sid]:
+        # 0.5: "its kind is the listed one, an entry that is not an object or
+        # has no kind included (schema_kind); it has a data member and no
+        # member besides kind and data, … and its kind is protobuf or
+        # jsonschema (shape)".
+        if not isinstance(entry, dict) or entry.get("kind") != listed_kind[sid]:
             raise BundleError("schema_kind", sid)
-        if "data" not in entry or entry["kind"] not in (PROTOBUF, JSON):
-            raise BundleError("shape", f"{sid}: no data, or kind {entry.get('kind')!r}")
+        if "data" not in entry or set(entry) - {"kind", "data"} or entry["kind"] not in (PROTOBUF, JSON):
+            raise BundleError("shape", f"{sid}: no data, another member, or kind {entry.get('kind')!r}")
         if entry["kind"] == PROTOBUF:
             if not isinstance(entry["data"], str):
                 raise BundleError("shape", f"{sid}: protobuf data is not base64 text")
@@ -148,21 +149,25 @@ def verify(data: bytes, expect_fingerprint: str | None = None) -> Verified:
                 raise BundleError("shape", f"{sid}: protobuf data is not base64") from e
             got = jcs.sha256_id(raw)
         else:
-            try:
-                got = jcs.jcs_id(entry["data"])
-            except Exception as e:  # noqa: BLE001 - no JCS bytes: cannot hash to the id
-                raise BundleError("schema_hash", f"{sid}: {e}") from e
+            # 0.5: a document holding a number outside the canonical domain
+            # "matches no id", by rule.
+            if jcs.restriction_violations(entry["data"])[1]:
+                raise BundleError("schema_hash", f"{sid}: a number outside the canonical domain")
+            got = jcs.jcs_id(entry["data"])
         if got != sid:
             raise BundleError("schema_hash", f"{sid}: hashes to {got}")
     # 10. Each extra, in id order.
     for eid in sorted(extras):
         entry = extras[eid]
-        if not isinstance(entry, dict) or "data" not in entry:
-            raise BundleError("shape", f"extra {eid}: no data")
-        try:
-            got = jcs.jcs_id(entry["data"])
-        except Exception as e:  # noqa: BLE001
-            raise BundleError("extra_hash", f"{eid}: {e}") from e
+        # 0.5: "it has data, no member besides media_type and data, and a
+        # media_type that is a string when present (shape)".
+        if (not isinstance(entry, dict) or "data" not in entry
+                or set(entry) - {"media_type", "data"}
+                or ("media_type" in entry and not isinstance(entry["media_type"], str))):
+            raise BundleError("shape", f"extra {eid}: not data plus an optional media_type")
+        if jcs.restriction_violations(entry["data"])[1]:
+            raise BundleError("extra_hash", f"{eid}: a number outside the canonical domain")
+        got = jcs.jcs_id(entry["data"])
         if got != eid:
             raise BundleError("extra_hash", f"{eid}: hashes to {got}")
     # 11. The extras are exactly the views.document values.
