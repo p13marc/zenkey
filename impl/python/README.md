@@ -67,27 +67,29 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
-| compat | §9.7, §9.8 | `compat` | **all 70 cases** (spec 0.3), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
+| compat | §9.7, §9.8 | `compat` | **all 87 cases** (spec 0.5), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
 
 The result at the time of writing:
 
 ```text
-keys           51 passed     0 failed
+keys           55 passed     0 failed
 slugs          42 passed     0 failed
-templates      10 passed     0 failed
-contracts      64 passed     0 failed
-sets            3 passed     0 failed
-bundles        17 passed     0 failed
-history         7 passed     0 failed
-descriptors    26 passed     0 failed
-errors         24 passed     0 failed
-compat         70 passed     0 failed
+templates      11 passed     0 failed
+contracts      91 passed     0 failed
+sets            4 passed     0 failed
+bundles        23 passed     0 failed
+history        10 passed     0 failed
+descriptors    30 passed     0 failed
+errors         35 passed     0 failed
+compat         87 passed     0 failed
 examples       97 passed     0 failed
-total         411 passed     0 failed
+total         485 passed     0 failed
 ```
 
-The figures are against `core.md` 0.4.
+The figures are against `core.md` 0.5. Amendment 0.5 resolved all 55 of
+zk2py's earlier findings, and decided 13 of its guesses the other way. zk2py
+now follows the stated rules; `SPEC-FINDINGS.md` says, per finding, how.
 
 **The classifier since 0.3.** Against 0.2, zk2py classed every change §9.8
 did not list as review. 0.3 lists them, so zk2py now follows the tables,
@@ -145,7 +147,19 @@ owner's `ready` line. It checks:
   full while a liveliness subscriber is held.
 - **Shutdown:** closing the owner's stdin makes it exit 0.
 
-Result: `live interop: 49 passed, 0 failed`. Exit codes are as for the
+Since 0.5, the runner also checks what §3.2, §3.3, §8.1 and §8.4 now
+state:
+- the descriptor reply carries no timestamp and no attachment;
+- `profiles` is the union of the contracts' `uses`;
+- unbound roles are listed with `bindings: []` and `params: {}`;
+- no member token while the owner publishes nothing;
+- each holder answers one `application/json` reply;
+- a third owner run, on `thruster.v1`, whose required role is unbound,
+  must not start.
+
+Every wait is the 1 s that §8.1 gives a conformance run.
+
+Result: `live interop: 60 passed, 0 failed`. Exit codes are as for the
 static runner.
 
 **§8.1's handler rule in zenoh-python.**

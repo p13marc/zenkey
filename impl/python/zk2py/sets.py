@@ -19,6 +19,9 @@ class SetLoadError(ValueError):
 class SetResult:
     contracts: list[Contract] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    #: False when a member did not load: its own codes stand, and the set
+    #: checks did not run (§9.2 "Set checks", 0.5)
+    ran: bool = True
 
     @property
     def codes(self) -> list[str]:
@@ -26,13 +29,19 @@ class SetResult:
 
 
 def check_set(paths: list[Path], spec_dir: Path | None = None) -> SetResult:
-    """Load each contract alone, then run E036 and E035 across them."""
+    """Load each contract alone, in file-name order, then run E036 and E035
+    across them (§9.2 "Set checks")."""
     result = SetResult()
-    for p in sorted(paths):
+    for p in sorted(paths, key=lambda q: q.name.encode()):
         c = load_contract(p, spec_dir=spec_dir)
-        if not c.valid:
-            raise SetLoadError(f"{p}: does not load: {c.codes}")
         result.contracts.append(c)
+    failed = [c for c in result.contracts if not c.valid]
+    if failed:
+        # "When one does not load, its own codes stand, and the set checks
+        # do not run: they need every member."
+        result.ran = False
+        result.diagnostics = [d for c in failed for d in c.diagnostics]
+        return result
     # E036: "two contracts of a set declare one interface id", per duplicate.
     by_iface: dict[str, Contract] = {}
     for c in result.contracts:

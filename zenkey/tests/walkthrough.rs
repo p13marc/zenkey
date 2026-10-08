@@ -501,3 +501,152 @@ async fn tcgui_set_and_diagnostics() {
         ]
     );
 }
+
+/// Walkthrough §4.3: a plan written while the vehicle was offline, after
+/// which the fleet manager stopped, still reaches the executor, through the
+/// ground's archive and the vehicle's (S5, S6). The executor applies a plan
+/// only when it is newer than the last applied (§4.3's consumer rule), so it
+/// converges with zero wrong answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn w4_3_commanding_an_intermittently_connected_vehicle() {
+    use common::{link_to, router_via};
+    use zenkey::archive::{self, Archive, ArchiveConfig, Recorded};
+    use zenkey::state::{StateGet, ValueOrder};
+
+    let (_r1, ep1) = router(None).await;
+    let link = link_to(&ep1).await;
+    let (_r2, ep2) = router_via(&link).await;
+    let ground = client(&ep1).await;
+    let vehicle = client(&ep2).await;
+    let plan = iface("mission_plan.v1");
+    let plan_imp = || Implementation::new(example("walkthrough/mission_plan.v1"));
+    let origin = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01";
+
+    let mut b = ServiceBuilder::new(&ground, config("ground/fleet-mgr"));
+    b.implement(plan_imp()).unwrap();
+    b.expose(&plan, "state/plans/{vehicle}").unwrap();
+    b.expose(&plan, "@op/list").unwrap();
+    b.serve_state(&plan).unwrap();
+    let mut mgr = b.start().await.unwrap();
+    let vals: Bindings = [("vehicle".to_owned(), vec!["vehicle-01".to_owned()])].into();
+    let w = mgr
+        .state_writer(&plan, "state/plans/{vehicle}", &vals)
+        .await
+        .unwrap();
+
+    let record = |selector: &str| Recorded {
+        owner: common::addr("ground/fleet-mgr"),
+        selector: selector.to_owned(),
+        implementation: plan_imp(),
+    };
+    let _ground_arch = Archive::start(
+        &ground,
+        ArchiveConfig {
+            service: config("ground/archive"),
+            records: vec![record("zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*")],
+            peers: vec![],
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .unwrap();
+    let veh_arch = Archive::start(
+        &vehicle,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![record(origin)],
+            peers: vec![common::addr("ground/archive")],
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut cfg = config("vehicle-01/executor").bind("plan", &["ground/fleet-mgr"]);
+    cfg.bindings
+        .get_mut("plan")
+        .unwrap()
+        .params
+        .insert("vehicle".to_owned(), "self.system".to_owned());
+    let mut b = ServiceBuilder::new(&vehicle, cfg);
+    b.require("plan", plan.clone(), false);
+    let exec = b.start().await.unwrap();
+    let consumer = exec
+        .consumer("plan", Arc::new(example("walkthrough/mission_plan.v1")))
+        .unwrap();
+
+    // The executor: the owner while it answers, else the vehicle's archive,
+    // known to be last-known; it applies only what is newer.
+    let mut order = ValueOrder::new();
+    let mut applied: Vec<(Vec<u8>, bool)> = Vec::new();
+    let read_and_apply = async |order: &mut ValueOrder, applied: &mut Vec<(Vec<u8>, bool)>| {
+        let (bytes, ts, last_known) = match consumer
+            .get("state/plans/{vehicle}", None, T)
+            .await
+            .unwrap()
+        {
+            StateGet::Answered(v) => match &v[0] {
+                zenkey::state::Current::Value { sample, .. } => (
+                    sample.payload().to_bytes().into_owned(),
+                    *sample.timestamp().unwrap(),
+                    false,
+                ),
+                zenkey::state::Current::Deleted { .. } => return,
+            },
+            StateGet::Silent => {
+                let Some(l) =
+                    archive::last_known(&vehicle, &common::addr("vehicle-01/archive"), origin, T)
+                        .await
+                        .unwrap()
+                else {
+                    return;
+                };
+                (l.value.unwrap_or_default(), l.timestamp.unwrap(), true)
+            }
+        };
+        if order.accept(origin, &ts) {
+            applied.push((bytes, last_known));
+        }
+    };
+
+    // Rev 1, with the link up: current.
+    eventually("the vehicle's archive records", || async {
+        w.put("rev1").await.unwrap();
+        veh_arch.confirmed(origin) == Some(true)
+    })
+    .await;
+    read_and_apply(&mut order, &mut applied).await;
+    assert_eq!(applied, [(b"rev1".to_vec(), false)]);
+
+    // The vehicle goes offline; rev 2 is written; the fleet manager stops.
+    link.cut();
+    eventually("the vehicle is cut off", || async {
+        zenkey::presence::liveliness_keys(&vehicle, "zk2/ground/*/@zk/**", T)
+            .await
+            .unwrap()
+            .is_empty()
+    })
+    .await;
+    w.put("rev2").await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    drop(w);
+    mgr.close().await.unwrap();
+
+    // The link heals: the vehicle's archive aligns from the ground's.
+    link.heal();
+    eventually("rev 2 reached the vehicle's archive", || async {
+        archive::last_known(&vehicle, &common::addr("vehicle-01/archive"), origin, T)
+            .await
+            .unwrap()
+            .is_some_and(|l| l.value.as_deref() == Some(&b"rev2"[..]))
+    })
+    .await;
+    read_and_apply(&mut order, &mut applied).await;
+    // Reading again changes nothing: no stale plan is ever applied.
+    read_and_apply(&mut order, &mut applied).await;
+    assert_eq!(
+        applied,
+        [(b"rev1".to_vec(), false), (b"rev2".to_vec(), true)],
+        "converged, last-known marked"
+    );
+}

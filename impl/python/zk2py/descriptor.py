@@ -4,35 +4,22 @@
 ``conformance/descriptors/expect.json`` lists for each document, checked
 against the fixture contract."
 
-The prose names D005, D006, D007 and D009 only. The meaning of every other
-code below is *derived from the fixture file names and expected values*,
-and SPEC-FINDINGS F-04 and F-05 record them as gaps:
+Since amendment 0.5, §3.3 "The checks" states every code with its severity
+and counting (D000–D010; D006 alone is a warning), and "Cascades and scope":
+1. D000 stops the check;
+2. an entry whose ``iface`` is not an interface id is checked no further,
+   and does not count for ``declared_by``;
+3. an entry whose ``contract`` is not a fingerprint is checked no further
+   (no D004), though its interface counts;
+4. an interface listed twice is otherwise checked like the first;
+5. an interface none of the given contracts declares is checked for syntax
+   only; one given at other fingerprints only is D004;
+6. deliberately not checked: ``cause`` against gates, R3's completeness,
+   ``declared_by`` against the contract's ``[requires]``, ``params``
+   values, ``profiles`` against the ``uses``, ``minor`` and ``token``.
 
-====  =====================================================================
-D000  not JSON (a duplicate member included), or outside
-      ``descriptor.schema.json``; reported once, stops the check
-D001  ``format`` is not ``zk2-descriptor/0.1``
-D002  ``service`` is not ``<system>/<service>`` (plain chunks), or
-      ``instance`` is not an instance id (§1.2)
-D003  an interface entry: ``iface`` not an interface id, ``contract`` not a
-      fingerprint, or an ``iface`` listed twice
-D004  an entry names the checked contract's interface with another
-      fingerprint: a revision the checker does not hold
-D005  ``unavailable`` lists a resource that is not an optional resource of
-      the contract (§3.3)
-D006  ``unavailable`` lists a resource a missing capability already implies
-      (§3.3, a warning)
-D007  ``cardinality`` names no templated resource, or raises its bound (§3.3)
-D008  a capability that is not a gate name (``[a-z0-9][a-z0-9_.-]*``,
-      §2.3), or one listed twice
-D009  a requirement: role, interface, a binding not ``<system>/<service>``
-      (either may be ``*``), a parameter name, or ``declared_by`` naming an
-      interface the instance does not list (§3.2 R3)
-D010  a profile that is not ``<name>.v<major>``, or one listed twice
-====  =====================================================================
-
-"A document whose interface names another contract is checked for syntax
-only" (``descriptors/expect.json``).
+This module follows that text. Before 0.5 these meanings were derived from
+the fixtures (SPEC-FINDINGS F-04, F-05).
 """
 
 from __future__ import annotations
@@ -73,25 +60,32 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         codes.append("D002")
 
     caps = doc.get("capabilities", [])
-    for i, cap in enumerate(caps):
-        if GATE_NAME.fullmatch(cap) is None or cap in caps[:i]:
-            codes.append("D008")
+    # D008 (§3.3 table): "per capability; once for the repeat".
+    codes += ["D008"] * sum(1 for cap in caps if GATE_NAME.fullmatch(cap) is None)
+    codes += ["D008"] * _repeats(caps)
     held = set(caps)
 
     ifaces: list[str] = []
     for entry in doc["interfaces"]:
         iface = entry["iface"]
-        if not is_interface_id(iface) or iface in ifaces:
+        # Cascade 2: an iface that is not an interface id is checked no
+        # further, and is not one of the descriptor's interfaces.
+        if not is_interface_id(iface):
             codes.append("D003")
-        well_formed = FINGERPRINT.fullmatch(entry["contract"]) is not None
-        if not well_formed:
+            continue
+        # Cascade 4: listed twice is D003, otherwise checked like the first.
+        if iface in ifaces:
             codes.append("D003")
         ifaces.append(iface)
+        # Cascade 3: a malformed fingerprint is checked no further (no D004),
+        # but its interface still counts for declared_by.
+        if FINGERPRINT.fullmatch(entry["contract"]) is None:
+            codes.append("D003")
+            continue
+        # Cascade 5: an interface none of the given contracts declares is
+        # checked for syntax only.
         contract = held_contracts.get(iface)
-        if contract is None or not well_formed:
-            # Another contract: syntax only. A malformed fingerprint is D003
-            # alone, not also D004 (descriptors/d003-fingerprint;
-            # SPEC-FINDINGS F-05).
+        if contract is None:
             continue
         if entry["contract"] != contract.fingerprint:
             codes.append("D004")
@@ -102,10 +96,16 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         codes += _check_requirement(req, set(ifaces))
 
     profiles = doc.get("profiles", [])
-    for i, p in enumerate(profiles):
-        if not is_interface_id(p) or p in profiles[:i]:
-            codes.append("D010")
+    # D010: "per profile; once for the repeat".
+    codes += ["D010"] * sum(1 for p in profiles if not is_interface_id(p))
+    codes += ["D010"] * _repeats(profiles)
     return sorted(codes)
+
+
+def _repeats(values: list[str]) -> int:
+    """§3.3's "once for the repeat": one per value listed more than once
+    (SPEC-FINDINGS F-57)."""
+    return sum(1 for v in set(values) if values.count(v) > 1)
 
 
 def _resources(contract: Contract) -> dict[str, dict[str, Any]]:
@@ -132,9 +132,9 @@ def _check_exposure(entry: dict[str, Any], contract: Contract, held: set[str]) -
             codes.append("D006")
     for key, bound in entry.get("cardinality", {}).items():
         r = resources.get(key)
-        # §3.3: cardinality "MAY lower a template's bound for this instance,
-        # keyed <kind token>/<template>. It MUST NOT raise it."
-        if r is None or r["cardinality"] is None or bound > r["cardinality"]:
+        # §3.3: cardinality lowers a template's bound "to a value from 1 to
+        # the contract's. It MUST NOT raise it."
+        if r is None or r["cardinality"] is None or not 1 <= bound <= r["cardinality"]:
             codes.append("D007")
     return codes
 
@@ -149,8 +149,9 @@ def _check_requirement(req: dict[str, Any], ifaces: set[str]) -> list[str]:
         chunks = b.split("/")
         if len(chunks) != 2 or not all(c == "*" or is_plain_chunk(c) for c in chunks):
             codes.append("D009")
-    for p in req.get("params", {}):
-        if IDENT.fullmatch(p) is None:
+    for p, value in req.get("params", {}).items():
+        # D009: "a params key is not [a-z][a-z0-9_]*, or its value is empty".
+        if IDENT.fullmatch(p) is None or value == "":
             codes.append("D009")
     declared_by = req.get("declared_by")
     if declared_by is not None and declared_by not in ifaces:

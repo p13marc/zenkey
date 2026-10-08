@@ -22,12 +22,13 @@ it now follows the table. The twelve changes, listed in the README, are:
 - a raw ``media_param`` changed: breaking → review;
 - ``items`` toggled between absent, true and false: breaking → compatible.
 
-How this module reads "both directions" (SPEC-FINDINGS F-29): each rule
-classifies a transition *from an earlier revision to the candidate*, and its
-class already accounts for both reader/writer roles.
+"Both directions" (§9.8, worded in 0.5): "A direction is a role, writer
+or reader, never a swap of old and new". Each rule classifies a transition
+*from an earlier revision to the candidate*.
 
-A change no table lists is classed **review** (SPEC-FINDINGS F-31, F-32,
-F-35 record what is still unlisted).
+Since 0.5 the tables and lists cover every canonical member and every
+subset keyword; a change none of them names (which zk2py has not met) is
+classed review.
 """
 
 from __future__ import annotations
@@ -74,60 +75,98 @@ class Verdict:
 
 
 # ===========================================================================
-# JSON Schema payloads (§9.8, over the §7.3 subset)
+# JSON Schema payloads (§9.8, over the §7.3 subset, at schema positions)
 # ===========================================================================
 
 #: §9.8 ``bound_changed``: "a bound changed, either way".
 BOUNDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
           "minLength", "maxLength", "minItems", "maxItems")
+_MISSING = object()
 
 
 @dataclass
 class JsonWorld:
     """The JSON Schema documents of one revision, by stem.
 
-    §9.8: "``$ref``s are followed, across the revision's artifacts." A
-    ``$ref``'s file part is resolved by the stem of its last path component:
-    in a source tree §9.4 resolves it as a path, but a bundle keeps only
-    stems, and §9.4's stem uniqueness (E024) makes the stem enough
-    (SPEC-FINDINGS F-11).
+    §9.8 (0.5): "``$ref``s are followed, across the revision's artifacts, by
+    stem as in a bundle (§9.4)": a file part names the artifact whose name
+    is the stem of its last path segment; an empty one, the same document.
     """
 
     docs: dict[str, Any]
 
-    def deref(self, where: str, node: Any, seen: frozenset = frozenset()) -> tuple[str, Any]:
-        """Follow a node that is only a ``$ref`` (plus annotations)."""
-        while isinstance(node, dict) and "$ref" in node and set(node) - ANNOTATIONS <= {"$ref"}:
-            ref = node["$ref"]
-            if (where, ref) in seen:
-                break
-            seen = seen | {(where, ref)}
-            file_part, _, frag = ref.partition("#")
-            target = stem(posixpath.basename(file_part)) if file_part else where
-            found, nxt = json_pointer(self.docs.get(target), frag)
-            if not found:
-                break
-            where, node = target, nxt
-        return where, node
+    def _target(self, where: str, ref: str) -> tuple[str, Any] | None:
+        file_part, _, frag = ref.partition("#")
+        target = stem(posixpath.basename(file_part)) if file_part else where
+        found, node = json_pointer(self.docs.get(target), frag)
+        return (target, node) if found else None
 
-    def normalize(self, where: str, node: Any, depth: int = 0) -> Any:
-        """A comparable form: refs inlined (bounded), annotations dropped."""
-        where, node = self.deref(where, node)
-        if depth > 32 or not isinstance(node, dict):
-            return node
-        out: dict[str, Any] = {}
-        for k, v in node.items():
-            if k in ANNOTATIONS:
-                continue
-            if k == "properties" and isinstance(v, dict):
-                out[k] = {p: self.normalize(where, s, depth + 1) for p, s in v.items()}
-            elif k in ("items", "additionalProperties") and isinstance(v, dict):
-                out[k] = self.normalize(where, v, depth + 1)
-            elif k in ("prefixItems", "oneOf", "anyOf") and isinstance(v, list):
-                out[k] = [self.normalize(where, s, depth + 1) for s in v]
-            else:
-                out[k] = v
-        return out
+    def resolve(self, where: str, node: Any, seen: frozenset = frozenset()) -> Any:
+        """A schema with its ``$ref`` followed: "Keywords beside a ``$ref``
+        (``$defs`` aside) are added to its target, an outer one taking the
+        place of the target's own, and the result is compared like any
+        schema." Every ``$ref`` left inside is made absolute
+        (``<stem>.json#…``), so the merged schema reads the same wherever it
+        came from."""
+        if not isinstance(node, dict) or "$ref" not in node:
+            return absolutize(node, where)
+        ref = node["$ref"]
+        hit = self._target(where, ref) if isinstance(ref, str) and (where, ref) not in seen else None
+        siblings = {k: absolutize(v, where) for k, v in node.items() if k not in ("$ref", "$defs")}
+        if hit is None:
+            # A $ref that does not resolve (or a cycle): keep it, as written.
+            return {"$ref": _absolute(ref, where), **siblings}
+        target = self.resolve(hit[0], hit[1], seen | {(where, ref)})
+        if not isinstance(target, dict):
+            return target if not siblings else {"$ref": _absolute(ref, where), **siblings}
+        return {**target, **siblings}
+
+
+def _absolute(ref: Any, where: str) -> Any:
+    if isinstance(ref, str) and ref.startswith("#"):
+        return f"{where}.json{ref}"
+    return ref
+
+
+def absolutize(node: Any, where: str) -> Any:
+    """Rewrite every same-document ``$ref`` at a schema position of ``node``
+    as ``<where>.json#…``."""
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for k, v in node.items():
+        if k == "$ref":
+            out[k] = _absolute(v, where)
+        elif k in ("properties", "$defs") and isinstance(v, dict):
+            out[k] = {p: absolutize(s, where) for p, s in v.items()}
+        elif k in ("items", "additionalProperties") and isinstance(v, dict):
+            out[k] = absolutize(v, where)
+        elif k in ("prefixItems", "oneOf", "anyOf") and isinstance(v, list):
+            out[k] = [absolutize(s, where) for s in v]
+        else:
+            out[k] = v
+    return out
+
+
+def as_written(node: Any) -> Any:
+    """A schema "as written … with annotations dropped at schema positions"
+    (§9.8, inside ``oneOf``, ``anyOf`` and ``prefixItems``): no ``$ref`` is
+    followed, and a property *named* like an annotation is kept."""
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for k, v in node.items():
+        if k in ANNOTATIONS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {p: as_written(s) for p, s in v.items()}
+        elif k in ("items", "additionalProperties") and isinstance(v, dict):
+            out[k] = as_written(v)
+        elif k in ("prefixItems", "oneOf", "anyOf") and isinstance(v, list):
+            out[k] = [as_written(s) for s in v]
+        else:
+            out[k] = v
+    return out
 
 
 def _canon(v: Any) -> str:
@@ -144,53 +183,42 @@ def _types(v: Any) -> frozenset[str] | None:
     return frozenset([v] if isinstance(v, str) else v)
 
 
-_MISSING = object()
-
-
 def json_compare(old: JsonWorld, old_where: str, old_node: Any,
                  new: JsonWorld, new_where: str, new_node: Any,
                  path: str = "", seen: set | None = None) -> Verdict:
     """Classify one JSON Schema node's change (§9.8 "JSON Schema payloads")."""
     v = Verdict()
     seen = set() if seen is None else seen
-    ow, o = old.deref(old_where, old_node)
-    nw, n = new.deref(new_where, new_node)
+    o = old.resolve(old_where, old_node)
+    n = new.resolve(new_where, new_node)
     at = path or "/"
-    key = (ow, id(o), nw, id(n))
+    key = (_canon(o), _canon(n))
     if key in seen:
         return v
     seen.add(key)
+    # "A boolean schema … changed, to or from anything, is review
+    # (boolean_schema_changed)."
     if not isinstance(o, dict) or not isinstance(n, dict):
-        # A boolean schema where a schema object is expected: no rule names
-        # this (SPEC-FINDINGS F-32).
-        if old.normalize(ow, o) != new.normalize(nw, n):
-            v.add(BREAKING, "boolean_schema_changed", f"{at}: a boolean schema changed")
+        if _canon(as_written(o)) != _canon(as_written(n)):
+            v.add(REVIEW, "boolean_schema_changed", f"{at}: a boolean schema changed")
         return v
-    if "$ref" in o or "$ref" in n:
-        # A $ref beside other keywords: no rule names it (SPEC-FINDINGS F-32).
-        if old.normalize(ow, o) != new.normalize(nw, n):
-            v.add(REVIEW, "ref_with_siblings_changed", f"{at}: a $ref beside other keywords changed")
-        return v
+    # The merged schemas' remaining $refs are absolute ("<stem>.json#…").
+    ow, nw = old_where, new_where
 
     # "the type set changed, including integer ↔ number (type_changed)".
     if _types(o.get("type")) != _types(n.get("type")):
         v.add(BREAKING, "type_changed", f"{at}: type {o.get('type')!r} → {n.get('type')!r}")
-    # "an enum value added or removed (enum_changed)"; "enum values
-    # reordered" is compatible, so enum compares as a multiset.
+    # "an enum value added or removed (enum_changed)"; reordering is
+    # compatible, so enum compares as a multiset.
     if ("enum" in o) != ("enum" in n) or _multiset(o.get("enum", [])) != _multiset(n.get("enum", [])):
         v.add(BREAKING, "enum_changed", f"{at}: enum changed")
-    # "const changed (const_changed)".
     if o.get("const", _MISSING) != n.get("const", _MISSING):
         v.add(BREAKING, "const_changed", f"{at}: const changed")
-    # "a bound changed, either way (bound_changed)".
     for b in BOUNDS:
         if (b in o) != (b in n) or o.get(b) != n.get(b):
             v.add(BREAKING, "bound_changed", f"{at}: {b} {o.get(b)!r} → {n.get(b)!r}")
 
-    # Properties: "an optional property added, even to a closed schema, or
-    # removed" is compatible; "a required property added (required_added)
-    # or removed (required_removed), or a property optional ↔ required
-    # (required_changed)" is breaking.
+    # Properties and required.
     op, np_ = o.get("properties", {}), n.get("properties", {})
     oreq, nreq = set(o.get("required", [])), set(n.get("required", []))
     for name in sorted(set(op) & set(np_)):
@@ -205,14 +233,15 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     for name in sorted(set(op) - set(np_)):
         if name in oreq:
             v.add(BREAKING, "required_removed", f"{path}/{name}: a required property removed")
+    # "A required name with no property on either side still binds the
+    # member's presence, so adding or removing one is breaking too."
     loose = (oreq ^ nreq) - set(op) - set(np_)
     if loose:
-        # A `required` name with no property on either side (SPEC-FINDINGS F-32).
         v.add(BREAKING, "required_changed", f"{at}: required names {sorted(loose)} changed")
 
-    # additionalProperties and items: "changed between absent, true and
-    # false" is compatible; "gaining or losing a schema (members_changed)"
-    # is review; two schemas are compared.
+    # additionalProperties and items: absent/true/false toggles compatible;
+    # "gaining or losing a schema (members_changed)" review; two schemas
+    # compared.
     for kw in ("additionalProperties", "items"):
         oa, na = o.get(kw, True), n.get(kw, True)
         if isinstance(oa, dict) and isinstance(na, dict):
@@ -220,35 +249,31 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
         elif isinstance(oa, dict) != isinstance(na, dict):
             v.add(REVIEW, "members_changed", f"{at}: {kw} gained or lost a schema")
 
-    # oneOf / anyOf / prefixItems: "a oneOf branch added
-    # (oneof_branch_added)" is breaking; "any other change inside oneOf,
-    # anyOf or prefixItems (undecided_changed)" is review.
+    # oneOf / anyOf / prefixItems: "compared as written, in order, with
+    # annotations dropped at schema positions: a reordering is a change, and
+    # a $ref there is not followed." "a oneOf branch added
+    # (oneof_branch_added): the candidate's oneOf has more branches than the
+    # earlier one's, whatever they hold"; any other change, review.
     for kw in ("oneOf", "anyOf", "prefixItems"):
-        ob = [old.normalize(ow, s) for s in o.get(kw, [])]
-        nb = [new.normalize(nw, s) for s in n.get(kw, [])]
-        same = (_canon(ob) == _canon(nb)) if kw == "prefixItems" else (_multiset(ob) == _multiset(nb))
-        if same and (kw in o) == (kw in n):
+        ob = [as_written(s) for s in o.get(kw, [])] if isinstance(o.get(kw, []), list) else o.get(kw)
+        nb = [as_written(s) for s in n.get(kw, [])] if isinstance(n.get(kw, []), list) else n.get(kw)
+        if _canon(ob) == _canon(nb) and (kw in o) == (kw in n):
             continue
-        if kw == "oneOf" and kw in o and kw in n and _is_superset(nb, ob):
+        if kw == "oneOf" and isinstance(ob, list) and isinstance(nb, list) and len(nb) > len(ob):
             v.add(BREAKING, "oneof_branch_added", f"{at}: a oneOf branch added")
         else:
             v.add(REVIEW, "undecided_changed", f"{at}: a change inside {kw}")
 
     judged = {"type", "enum", "const", *BOUNDS, "properties", "required",
-              "additionalProperties", "items", "oneOf", "anyOf", "prefixItems"}
+              "additionalProperties", "items", "oneOf", "anyOf", "prefixItems", "$ref"}
     for k in sorted((set(o) | set(n)) - judged - ANNOTATIONS):
         if _canon(o.get(k)) != _canon(n.get(k)):
             v.add(REVIEW, "unlisted_changed", f"{at}: {k} changed")
+    # A $ref that did not resolve is kept as written; a change to it is
+    # judged like an unlisted keyword.
+    if _canon(o.get("$ref")) != _canon(n.get("$ref")):
+        v.add(REVIEW, "unlisted_changed", f"{at}: an unresolved $ref changed")
     return v
-
-
-def _is_superset(new: list[Any], old: list[Any]) -> bool:
-    rest = _multiset(new)
-    for x in _multiset(old):
-        if x not in rest:
-            return False
-        rest.remove(x)
-    return len(rest) > 0
 
 
 # ===========================================================================
@@ -317,7 +342,7 @@ def _presence(f: Any, syntax: str, oneof: str | None) -> bool:
 
 def json_name_default(name: str) -> str:
     """protoc's default ``json_name``: underscores dropped, the next letter
-    upper-cased (SPEC-FINDINGS F-28)."""
+    upper-cased (§9.7, 0.5)."""
     out, up = [], False
     for c in name:
         if c == "_":
@@ -337,8 +362,10 @@ def _reserved(m: descriptor_pb2.DescriptorProto, number: int) -> bool:
 def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: str,
                           seen: set | None = None) -> Verdict:
     """§9.8: "Fields are matched by number. A field missing by number but
-    present by name is renumbered. Messages are compared recursively, nested
-    and referenced ones included, each pair once." """
+    present by name is renumbered." 0.5: "Messages are compared recursively,
+    from the named type through its message-typed fields, each pair of
+    (earlier, candidate) message names once. They are compared by
+    structure, not by name." """
     v = Verdict()
     seen = set() if seen is None else seen
     if (oname, nname) in seen:
@@ -362,16 +389,17 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
             v.add(BREAKING, "required_label_changed", f"{where}: a label toggled to or from required")
         o1, n1 = _real_oneof(om, of), _real_oneof(nm, nf)
         if o1 != n1:
+            # "it moves into or out of a oneof (oneof_changed), which alone is
+            # reported, even where presence toggles too" (0.5).
             v.add(BREAKING, "oneof_changed", f"{where}: moved into or out of a oneof")
-        if _presence(of, osyn, o1) != _presence(nf, nsyn, n1):
+        elif _presence(of, osyn, o1) != _presence(nf, nsyn, n1):
             v.add(REVIEW, "presence_changed", f"{where}: explicit presence toggled")
         if of.name != nf.name:
             v.add(REVIEW, "field_renamed", f"{where}: renamed to {nf.name}")
         elif of.json_name != nf.json_name:
             v.add(REVIEW, "json_name_changed", f"{where}: json_name {of.json_name!r} → {nf.json_name!r}")
-        if of.default_value != nf.default_value:
-            # A proto2 default changed: no rule names it (SPEC-FINDINGS F-35).
-            v.add(REVIEW, "default_changed", f"{where}: default changed")
+        # "Not compared: proto2 defaults, field options other than
+        # json_name, and reserved names" (0.5).
         if of.type == nf.type and of.type in (F.TYPE_MESSAGE, F.TYPE_GROUP):
             v.merge(proto_compare_message(old, of.type_name, new, nf.type_name, seen))
         elif of.type == nf.type == F.TYPE_ENUM:
@@ -384,7 +412,7 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
         if of.name in new_by_name:
             # "it is renumbered … (renumbered)". The deletion is the move's,
             # not also a warning (compat/payload/protobuf/renumber-field;
-            # SPEC-FINDINGS F-34).
+            # §9.8 0.5: "A renumbered field is not a deleted one").
             moved = new_by_name.pop(of.name)
             added.discard(moved)
             v.add(BREAKING, "renumbered", f"{path}.{of.name}: {num} → {moved}")
@@ -400,11 +428,7 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
         if nf.label == F.LABEL_REQUIRED:
             v.add(BREAKING, "required_field_added", f"{path}.{nf.name} = {num}: a required field added")
 
-    # Nested messages, by name, each pair once.
-    nested_new = {m.name for m in nm.nested_type}
-    for m in om.nested_type:
-        if m.name in nested_new and not m.options.map_entry:
-            v.merge(proto_compare_message(old, f"{oname}.{m.name}", new, f"{nname}.{m.name}", seen))
+    # 0.5: "a nested type that no field reaches is not compared".
     return v
 
 
@@ -425,9 +449,9 @@ def proto_compare_enum(old: ProtoWorld, oname: str, new: ProtoWorld, nname: str)
     for num in sorted(set(onames) - set(nnames)):
         v.add(REVIEW, "enum_value_removed", f"{path}: value {num} deleted")
     # "a value added to a proto2 (closed) enum (closed_enum_value_added)" is
-    # review; to a proto3 (open) enum, compatible. Closed when either
-    # revision's file is proto2 (SPEC-FINDINGS F-35).
-    closed = "proto2" in (osyn, nsyn)
+    # review; to a proto3 (open) enum, compatible. 0.5: "closed when the
+    # candidate's file is proto2".
+    closed = nsyn == "proto2"
     for num in sorted(set(nnames) - set(onames)):
         if closed:
             v.add(REVIEW, "closed_enum_value_added", f"{path}: value {num} added")
@@ -451,6 +475,38 @@ def proto_normalized(data: bytes) -> descriptor_pb2.FileDescriptorSet:
             if fld.json_name == json_name_default(fld.name):
                 fld.ClearField("json_name")
     return fds
+
+
+def identical(a: Revision, b: Revision) -> bool:
+    """§9.7 (0.5) retention identity, "not one of the classifier's classes".
+    Two revisions are identical when:
+    - their canonical forms are equal once each schema id is replaced by its
+      artifact's kind and name; and
+    - their artifacts, matched by kind and name, are equal: JSON Schema
+      documents by their JCS bytes, protobuf FileDescriptorSets as messages
+      once source info and every default json_name are dropped."""
+    from . import jcs
+
+    def named(rev: Revision) -> tuple[dict[str, Any], dict[tuple[str, str], Any]]:
+        names = {sch["id"]: (sch["kind"], sch["name"]) for sch in rev.canonical["schemas"]}
+        text = jcs.dumps(rev.canonical).decode()
+        for sid, (kind, name) in names.items():
+            text = text.replace(json.dumps(sid), json.dumps(f"{kind}:{name}"))
+        arts = {names[sid]: data for sid, data in rev.artifacts.items() if sid in names}
+        return json.loads(text), arts
+
+    ca, aa = named(a)
+    cb, ab = named(b)
+    if ca != cb or set(aa) != set(ab):
+        return False
+    for key, da in aa.items():
+        db = ab[key]
+        if key[0] == JSON:
+            if jcs.dumps(da) != jcs.dumps(db):
+                return False
+        elif proto_normalized(da) != proto_normalized(db):
+            return False
+    return True
 
 
 def proto_same_revision(old: list[bytes], new: list[bytes]) -> bool:
@@ -551,21 +607,21 @@ def contract_compare(old: Revision, new: Revision) -> Verdict:
         return v
     if oc["uses"] != nc["uses"]:
         v.add(REVIEW, "uses_changed", "uses changed")
-    # Resources. §9.8 says "matched by kind token and template", but its own
-    # explicit_set / explicit_cleared rows (and compat/contract/
-    # explicit-true-to-false) need a pairing that survives a token change:
-    # zk2py pairs by template, unique within a contract (SPEC-FINDINGS F-40).
-    ores = {r["template"]: r for r in oc["resources"]}
-    nres = {r["template"]: r for r in nc["resources"]}
-    for t in sorted(set(ores) - set(nres)):
-        v.add(BREAKING, "resource_removed", f"{t!r} removed")
-    for t in sorted(set(nres) - set(ores)):
-        if nres[t]["optional"]:
-            v.add(COMPATIBLE, "", f"{t!r} added, optional")
+    # Resources, 0.5: "paired by kind (stream, state, event, operation) and
+    # template … a toggled explicit, which changes the kind token, still
+    # pairs … A resource whose kind changed does not pair: the old one is
+    # removed, and another added."
+    ores = {(r["kind"], r["template"]): r for r in oc["resources"]}
+    nres = {(r["kind"], r["template"]): r for r in nc["resources"]}
+    for k in sorted(set(ores) - set(nres)):
+        v.add(BREAKING, "resource_removed", f"{k[0]} {k[1]!r} removed")
+    for k in sorted(set(nres) - set(ores)):
+        if nres[k]["optional"]:
+            v.add(COMPATIBLE, "", f"{k[0]} {k[1]!r} added, optional")
         else:
-            v.add(BREAKING, "required_resource_added", f"{t!r} added, required")
-    for t in sorted(set(ores) & set(nres)):
-        v.merge(_resource_compare(old, ores[t], new, nres[t]), f"{t}: ")
+            v.add(BREAKING, "required_resource_added", f"{k[0]} {k[1]!r} added, required")
+    for k in sorted(set(ores) & set(nres)):
+        v.merge(_resource_compare(old, ores[k], new, nres[k]), f"{k[1]}: ")
     # Roles.
     oreq, nreq = oc["requires"], nc["requires"]
     for role in sorted(set(nreq) - set(oreq)):
@@ -586,9 +642,7 @@ def contract_compare(old: Revision, new: Revision) -> Verdict:
 
 def _resource_compare(old: Revision, a: dict[str, Any], new: Revision, b: dict[str, Any]) -> Verdict:
     v = Verdict()
-    if a["kind"] != b["kind"]:
-        v.add(BREAKING, "kind_changed", f"kind {a['kind']} → {b['kind']}")
-        return v
+    # Paired resources share their kind (contract_compare pairs by kind).
     if a["token"] != b["token"]:
         if (a["token"], b["token"]) in _EXPLICIT:
             v.add(BREAKING, "explicit_set", "explicit false → true")
@@ -661,4 +715,7 @@ def full_transitive(history: list[Any], candidate: Any,
         pv = compare(h, candidate)
         each.append(pv)
         total.merge(pv)
+    # 0.5: "Warnings are reported by rule name, sorted and deduplicated over
+    # the whole history."
+    total.warnings = sorted(set(total.warnings))
     return total, each

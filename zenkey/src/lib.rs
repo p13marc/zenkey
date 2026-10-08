@@ -15,6 +15,8 @@
 //! | [`consumer`]: data through a role's bindings | §3.2 R1–R7 |
 //! | [`operation`]: serving calls; [`client`]: calling them, one address or a fleet; [`ownership`]: the split-brain diagnosis | §5.1 O1–O7, §5.2, §6 |
 //! | [`shm`]: the memlock limit SHM falls back under | §7.4 |
+//! | [`state`]: stamped mutations, tombstones, clocks, the owner-only GET | §4.1–§4.3, S1–S4, S6–S7 |
+//! | [`archive`]: last-known state, recorded and aligned; the explicit read | §4.4, S5–S6 |
 //!
 //! **Zenoh stays reachable.** The runtime never owns the session: a
 //! service holds a clone, every key is available as a key expression, and
@@ -22,6 +24,7 @@
 //! contract's QoS. The typed layers (streams #619, state #620, operations
 //! #621) are built on these.
 
+pub mod archive;
 pub mod client;
 pub mod config;
 pub mod consumer;
@@ -35,6 +38,7 @@ mod qos;
 pub mod retrieval;
 pub mod service;
 pub mod shm;
+pub mod state;
 pub mod writer;
 
 pub use zenkey_model as model;

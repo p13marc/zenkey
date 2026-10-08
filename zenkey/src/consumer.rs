@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Contract, Resource};
-use zenkey_model::grammar::{Addr, IfaceId, ZkKey, parse};
+use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::key_expr::OwnedKeyExpr;
@@ -29,6 +29,7 @@ use zenoh::pubsub::Subscriber;
 use zenoh::sample::Sample;
 
 use crate::error::{Error, Result, zenoh};
+use crate::state::{Current, StateGet};
 
 /// One bound provider address: a position is `None` for `*`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -371,6 +372,87 @@ impl Consumer {
             }
         }
         Ok(out)
+    }
+
+    /// GETs current state from its owners (S4): every bound provider's keys
+    /// for `resource`, one member when `values` binds its parameters (R2's
+    /// bindings apply either way), with target `All` and consolidation
+    /// `Latest` set explicitly. Silence is [`StateGet::Silent`], never a
+    /// verdict (S6, O5).
+    pub async fn get(
+        &self,
+        resource: &str,
+        values: Option<&Bindings>,
+        timeout: Duration,
+    ) -> Result<StateGet> {
+        let r = self.resource(resource)?.clone();
+        if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
+            return Err(Error::Contract(format!("{resource:?} is not state")));
+        }
+        let selectors = match values {
+            None => self.selectors(resource)?,
+            Some(v) => {
+                let mut merged: Bindings = self
+                    .params
+                    .iter()
+                    .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                    .collect();
+                merged.extend(v.clone());
+                let chunks = r
+                    .template
+                    .build(&merged)
+                    .map_err(|e| Error::Contract(format!("{resource:?}: {e}")))?;
+                self.providers
+                    .iter()
+                    .map(|p| {
+                        let (sys, svc) = p.chunks();
+                        let ke = format!(
+                            "zk2/{sys}/{svc}/{}/{}/{}",
+                            self.contract.iface,
+                            r.token,
+                            chunks.join("/")
+                        );
+                        OwnedKeyExpr::try_from(ke).map_err(zenoh)
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            }
+        };
+        let mut out = Vec::new();
+        for ke in selectors {
+            let rx = self
+                .session
+                .get(ke)
+                .target(zenoh::query::QueryTarget::All)
+                .consolidation(zenoh::query::ConsolidationMode::Latest)
+                .timeout(timeout)
+                .with(flume::unbounded::<zenoh::query::Reply>())
+                .await
+                .map_err(zenoh)?;
+            while let Ok(reply) = rx.recv_async().await {
+                let Ok(sample) = reply.into_result() else {
+                    continue;
+                };
+                let key = sample.key_expr().as_str().to_owned();
+                if key.contains('*') {
+                    continue;
+                }
+                out.push(match sample.kind() {
+                    zenoh::sample::SampleKind::Delete => Current::Deleted {
+                        key,
+                        timestamp: sample.timestamp().copied(),
+                    },
+                    zenoh::sample::SampleKind::Put => Current::Value {
+                        key,
+                        sample: Box::new(sample),
+                    },
+                });
+            }
+        }
+        Ok(if out.is_empty() {
+            StateGet::Silent
+        } else {
+            StateGet::Answered(out)
+        })
     }
 
     /// The bound providers holding this interface's token now (§8.1).

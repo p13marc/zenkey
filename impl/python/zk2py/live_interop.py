@@ -46,13 +46,26 @@ DEFAULT_OWNER = REPO / "target" / "debug" / "examples" / "owner"
 #: (service, contracts): one owner process each.
 DEFAULT_RUNS = [
     ("vehicle-01/navigation", ["examples/zk2/walkthrough/nav.v2.toml"]),
-    # Not thruster.v1 or detections.v1: their required roles have no binding,
-    # and the owner refuses to start then (SPEC-FINDINGS F-52).
+    # Not thruster.v1 here: its required role has no binding, so the owner
+    # must not start (§3.2); REFUSAL_RUNS checks exactly that.
     ("site-1/interop", ["examples/zk2/walkthrough/camera.v1.toml",
                         "examples/zk2/zensight/zs.snmp.v1.toml",
                         "impl/python/interop/zk2py_probe.v1.toml"]),
 ]
-PRESENCE_WAIT_S = 30.0
+#: §8.1 (0.5): "how long a tool waits for presence after an owner starts"
+#: is the caller's choice, and "the scenarios, and so a conformance run, use
+#: 1 s". zk2py counts it from its client session's connection to the
+#: owner's router (SPEC-FINDINGS F-59).
+PRESENCE_WAIT_S = 1.0
+#: Owners that MUST NOT start: a required role their configuration binds to
+#: nothing (§3.2, 0.5; presence.md §2 step 4). The owner example takes no
+#: binding configuration, so every required role is unbound.
+REFUSAL_RUNS = [
+    ("vehicle-01/thrusters", ["examples/zk2/walkthrough/thruster.v1.toml"]),
+]
+#: The harness's own 2,000 tokens (presence at scale) are not an owner's;
+#: their propagation gets a harness bound, not the conformance one.
+SCALE_PROPAGATION_S = 10.0
 
 
 class CannotRun(Exception):
@@ -186,6 +199,8 @@ def run_one(report: Report, exe: Path, service: str, paths: list[Path], scale: i
 
 def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, system: str, svc: str,
             by_iface: dict[str, Any], built: dict[str, bytes], scale: int) -> None:
+    import zenoh
+
     from . import live
     from .descriptor import check_descriptor
 
@@ -221,7 +236,10 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                  f"seen {sorted(got_alive)}, expected {sorted(expected_alive)}")
     report.check(run, "every token under the service is a zk2 control key", not pres.other,
                  str(pres.other))
-    report.info(run, f"member tokens: {len(pres.members)} (the owner publishes no data)")
+    # §8.1 (0.5): "An owner with no member yet holds no member token: one
+    # that publishes nothing under the template holds none."
+    report.check(run, "no member token: the owner publishes nothing (§8.1)", not pres.members,
+                 f"{len(pres.members)} member tokens")
 
     # -- the descriptor (§3.3) --------------------------------------------
     answers = live.get_descriptor(session, instance_key)
@@ -232,8 +250,11 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
         return
     d = oks[0]
     report.info(run, f"descriptor encoding {d.encoding!r}, {len(d.payload)} bytes")
-    report.check(run, "the descriptor reply's encoding is application/json",
-                 d.encoding == "application/json", d.encoding)
+    # §3.3 "The GET" (0.5): "one reply … Encoding application/json, no
+    # attachment and no timestamp".
+    report.check(run, "the descriptor reply: application/json, no timestamp, no attachment (§3.3)",
+                 d.encoding == "application/json" and not d.has_timestamp and not d.has_attachment,
+                 f"{d.encoding}, timestamp {d.has_timestamp}, attachment {d.has_attachment}")
     codes = check_descriptor(d.payload, list(by_iface.values()))
     report.check(run, "the descriptor has no D code against the contracts", codes == [], str(codes))
     doc = json.loads(d.payload)
@@ -259,6 +280,18 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     listed_roles = {(r.get("declared_by"), r["role"], r["interface"]) for r in doc.get("requires", [])}
     report.check(run, "R3: every contract-declared role is listed in requires",
                  declared <= listed_roles, f"declared {sorted(declared)}, listed {sorted(listed_roles)}")
+    # §3.2 (0.5): "An unbound optional role is listed in the descriptor all
+    # the same, with "bindings": [] and "params": {}". The owner example has
+    # no binding configuration, so every role here is unbound.
+    unbound_ok = all(r.get("bindings") == [] and r.get("params", {}) == {}
+                     for r in doc.get("requires", []))
+    report.check(run, "unbound roles are listed with bindings [] and params {} (§3.2)", unbound_ok,
+                 str([(r["role"], r.get("bindings"), r.get("params")) for r in doc.get("requires", [])]))
+    # §3.3 (0.5): "profiles is the union of the uses of the contracts the
+    # instance implements, sorted and deduplicated".
+    uses = sorted({u for c in by_iface.values() for u in c.canonical["uses"]})
+    report.check(run, "profiles is the union of the contracts' uses (§3.3)", doc.get("profiles") == uses,
+                 f"{doc.get('profiles')} vs {uses}")
 
     # -- retrieval (§8.4) -------------------------------------------------
     for iface in sorted(by_iface):
@@ -269,10 +302,19 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                          r.data == built[iface], f"{len(r.data)} vs {len(built[iface])} bytes")
             report.info(run, f"{iface}: accepted on {r.attempts[-1].target}, "
                              f"encoding {r.attempts[-1].replies[-1][2]!r}")
+        # §8.4 (0.5): "A holder answers with one reply, the bundle's bytes,
+        # with Encoding application/json" (a caller does not depend on it;
+        # this checks the holder).
+        all_replies = list(live._answers(session, live.contract_key(iface, fp),
+                                         zenoh.QueryTarget.ALL, live.GET_TIMEOUT_S))
+        report.check(run, f"{iface}: the holder answers one reply, application/json (§8.4)",
+                     len(all_replies) == 1 and all_replies[0].ok
+                     and all_replies[0].encoding == "application/json",
+                     f"{[(a.ok, a.encoding) for a in all_replies]}")
 
     first = sorted(by_iface)[0]
     unknown = "sha256:" + "0" * 64
-    r = live.retrieve_bundle(session, first, unknown, timeout=2.0)
+    r = live.retrieve_bundle(session, first, unknown)
     report.check(run, "an unheld revision is reported unavailable after BestMatching then All",
                  not r.available and [a.target for a in r.attempts] == ["BestMatching", "All"], _describe(r))
 
@@ -297,7 +339,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
         qbad = session.declare_queryable(live.contract_key(first, unknown),
                                          zenoh.handlers.Callback(answer), complete=True)
         try:
-            r = live.retrieve_bundle(session, first, unknown, timeout=2.0)
+            r = live.retrieve_bundle(session, first, unknown)
             report.check(run, "only corrupt holders: unavailable, nothing accepted (retrieval.md §3)",
                          not r.available and any(not ok for a in r.attempts for ok, _, _ in a.replies),
                          _describe(r))
@@ -326,7 +368,7 @@ def _scale_check(report: Report, run: str, session, endpoint: str, system: str, 
         sub = session.liveliness().declare_subscriber("zk2/*/*/@zk/**", zenoh.handlers.Callback(lambda s: None))
         try:
             pres = live.list_presence(session, f"zk2/{system}/*/@zk/**")
-            deadline = time.monotonic() + PRESENCE_WAIT_S
+            deadline = time.monotonic() + SCALE_PROPAGATION_S
             while time.monotonic() < deadline and sum(1 for i in pres.instances
                                                       if i["service"].startswith("load")) < n:
                 time.sleep(0.2)
@@ -342,6 +384,48 @@ def _scale_check(report: Report, run: str, session, endpoint: str, system: str, 
             t.undeclare()
     finally:
         holder.close()
+
+
+def run_refusal(report: Report, exe: Path, service: str, paths: list[Path]) -> None:
+    """§3.2 (0.5): "An owner whose configuration binds a required role to
+    nothing MUST NOT start …: no instance token appears." Watched from a
+    client for the conformance second, or until the owner exits."""
+    from . import live
+
+    run = f"{service} ← {', '.join(p.name for p in paths)}"
+    system, svc = service.split("/")
+    owner = Owner(exe, service, paths)
+    seen: set[str] = set()
+    watched = 0  # presence GETs that completed while the owner ran
+    try:
+        endpoint = owner.wait_for("listening ", 120)
+        if endpoint is not None and owner.proc.poll() is None:
+            try:
+                session = live.open_client(endpoint)
+            except Exception:  # noqa: BLE001 - the router may already be gone
+                session = None
+            if session is not None:
+                try:
+                    deadline = time.monotonic() + PRESENCE_WAIT_S
+                    while time.monotonic() < deadline and owner.proc.poll() is None:
+                        pres = live.list_presence(session, f"zk2/{system}/{svc}/@zk/**")
+                        seen |= {i["instance"] for i in pres.instances}
+                        watched += pres.complete
+                        time.sleep(0.1)
+                finally:
+                    session.close()
+        ready = owner.wait_for("ready ", 0.5)
+    finally:
+        code = owner.close()
+    # The owner is its own router: when it refuses, it exits, and a client
+    # may never connect. So the check rests on what can be observed: no
+    # instance token while it ran, no `ready` line (SPEC-FINDINGS F-61).
+    report.check(run, "an unbound required role: the owner does not start (no instance token "
+                      "while it ran, no `ready` line) (§3.2)",
+                 not seen and ready is None,
+                 f"instance tokens {sorted(seen)} over {watched} presence GETs before the owner "
+                 f"exited, ready {ready!r}; stderr: {' | '.join(owner.stderr[-1:])}")
+    report.info(run, f"owner exit status {code}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -370,6 +454,9 @@ def main(argv: list[str] | None = None) -> int:
         for i, (service, files) in enumerate(runs):
             run_one(report, args.owner, service, [REPO / f if not Path(f).is_absolute() else Path(f)
                                                   for f in files], args.scale if i == 0 else 0)
+        if not args.run:
+            for service, files in REFUSAL_RUNS:
+                run_refusal(report, args.owner, service, [REPO / f for f in files])
     except CannotRun as e:
         print(f"error: could not run: {e}", file=sys.stderr)
         return 2
