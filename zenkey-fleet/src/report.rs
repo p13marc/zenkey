@@ -45,6 +45,15 @@
 //! split is free to be re-cut — a domain that grows can be halved, two that
 //! never differed can be merged — without a single call site moving. The
 //! files are organisation; the module is the interface.
+//!
+//! **zk2's domains** (#612, FJ3) sit beside v1's until FJ9 deletes those:
+//! `presence` (services, instances and their tokens and descriptors —
+//! v1's `service` is the `@rpc` plane, a different thing), `iface` (one
+//! interface across a deployment — v1's `interface` is a type across
+//! producers), `graph` (the binding graph, R3), `contract` (a revision's
+//! view, and what asking for it found) and `payload` (a sample rendered
+//! through its contract, or honestly without one). Their type names do not
+//! collide with v1's, so the flat namespace holds both generations.
 
 mod acl;
 mod admin;
@@ -57,6 +66,7 @@ mod catalog;
 mod condition;
 mod conform;
 mod consumers;
+mod contract;
 mod cutover;
 mod diff;
 mod discover;
@@ -65,11 +75,15 @@ mod expect;
 mod export;
 mod field;
 mod generate;
+mod graph;
+mod iface;
 mod impact;
 mod infer;
 mod interface;
 mod judgement;
 mod node;
+mod payload;
+mod presence;
 mod rate;
 mod registry;
 mod retired;
@@ -96,6 +110,7 @@ pub use catalog::*;
 pub use condition::*;
 pub use conform::*;
 pub use consumers::*;
+pub use contract::*;
 pub use cutover::*;
 pub use diff::*;
 pub use discover::*;
@@ -104,11 +119,15 @@ pub use expect::*;
 pub use export::*;
 pub use field::*;
 pub use generate::*;
+pub use graph::*;
+pub use iface::*;
 pub use impact::*;
 pub use infer::*;
 pub use interface::*;
 pub use judgement::*;
 pub use node::*;
+pub use payload::*;
+pub use presence::*;
 pub use rate::*;
 pub use registry::*;
 pub use retired::*;

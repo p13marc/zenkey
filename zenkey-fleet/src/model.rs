@@ -18,6 +18,13 @@
 //! described samples becomes a metrics surface whose blind spots are series
 //! of their own ([`export`], [`prom`]).
 //!
+//! For zk2 (#612, FJ3), a presence read and its descriptors become a catalog
+//! of services, interfaces, revisions and bindings ([`catalog`], which also
+//! holds the contracts loaded offline), and a zk2 sample plus the revision
+//! in hand becomes an honest rendering ([`render`]). Bytes no schema reaches
+//! fall to the structural ladder ([`structural`]), which v1's decode seam
+//! and zk2's rendering share.
+//!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
 //! runs live, and what lets these modules be unit-tested without a bus. A
@@ -36,6 +43,7 @@
 pub mod acl;
 pub mod alert;
 pub mod bounded;
+pub mod catalog;
 pub mod consumers;
 pub mod diff;
 pub mod examples;
@@ -47,6 +55,7 @@ pub mod origin_map;
 pub mod project;
 pub mod prom;
 pub mod registry;
+pub mod render;
 pub mod retain;
 pub mod skeleton;
 pub mod snapshot;

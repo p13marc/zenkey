@@ -15,12 +15,24 @@
 //! what makes "silence is never a verdict" a property of the crate instead of
 //! a habit of its authors.
 //!
+//! Every **liveliness** GET goes through [`presence::liveliness_read`] the
+//! same way: it runs on the unbounded handler spec §8.1 requires on a
+//! session that holds a liveliness subscriber (zenoh#2678), which this
+//! crate's sessions do whenever a monitor watches the roster.
+//!
 //! Sessions opened here are deliberately **un-namespaced** (RFC 09 §5): an
 //! explorer sees the wire as it really is, full keys included — that is what
 //! lets it spot a leak. Do not "fix" this by setting a namespace.
+//!
+//! zk2's modules (#612, FJ3) are the exception, by the maintainer's decision
+//! of 2026-10-08: [`presence`] (services from tokens and descriptors) and
+//! [`contracts`] (bundle retrieval, §8.4) take a bare `&Session` and spell
+//! base-relative keys, because zk2's resolved verbs read through a session
+//! in the deployment's namespace.
 
 pub mod admin;
 pub mod blob;
+pub mod contracts;
 pub mod discover;
 pub mod monitor;
 pub mod presence;
