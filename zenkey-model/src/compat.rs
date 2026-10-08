@@ -940,6 +940,66 @@ fn is_null_schema(s: &Value) -> bool {
     }) && types(s) == BTreeSet::from(["null".to_owned()])
 }
 
+/// The reading of a nullable form (spec §7.3, 0.7, C-1): `{"anyOf": [S,
+/// {"type": "null"}]}`, the branches in either order and nothing beside the
+/// `anyOf` that carries meaning, read as S (its `$ref`s followed) with
+/// `null` added to its `type` and, where it has one, its `enum`. `None` when
+/// `s` is not the form, or its S, once followed, is not an object with a
+/// `type` and without `const`, `oneOf` or `anyOf`: such an `anyOf` is
+/// compared as written.
+///
+/// `follow` resolves S's `$ref`s, as the caller's documents hold them, and
+/// returns what it read beside the schema (the classifier, the document
+/// the target lives in); `None` when a `$ref` resolves to nothing. The
+/// classifier reads a form through it, and so does a generator's check that
+/// a type agrees with its committed schema (`zenkey_build::check_schema`):
+/// one reading, wherever two schemas are compared for meaning (§7.3).
+pub fn nullable_reading<T>(
+    s: &Value,
+    follow: impl FnOnce(&Value) -> Option<(Value, T)>,
+) -> Option<(Value, T)> {
+    let m = s.as_object()?;
+    if m.keys()
+        .any(|k| k != "anyOf" && !ANNOTATIONS.contains(&k.as_str()))
+    {
+        return None;
+    }
+    let [a, b] = m.get("anyOf")?.as_array()?.as_slice() else {
+        return None;
+    };
+    let branch = match (is_null_schema(a), is_null_schema(b)) {
+        (true, false) => b,
+        (false, true) => a,
+        _ => return None,
+    };
+    let (mut read, beside) = follow(branch)?;
+    let r = read.as_object_mut()?;
+    let typed = match r.get("type") {
+        Some(Value::String(_)) => true,
+        Some(Value::Array(a)) => a.iter().all(Value::is_string),
+        _ => false,
+    };
+    if !typed
+        || ["const", "oneOf", "anyOf"]
+            .iter()
+            .any(|k| r.contains_key(*k))
+    {
+        return None;
+    }
+    let mut t = types(&Value::Object(r.clone()));
+    t.insert("null".to_owned());
+    r.insert(
+        "type".to_owned(),
+        Value::Array(t.into_iter().map(Value::from).collect()),
+    );
+    if let Some(Value::Array(e)) = r.get_mut("enum")
+        && !e.contains(&Value::Null)
+    {
+        e.push(Value::Null);
+    }
+    Some((read, beside))
+}
+
 /// An `enum` as the set of its values: order carries no meaning.
 fn values(e: Option<&Value>) -> Option<BTreeSet<Vec<u8>>> {
     e.map(|e| e.as_array().into_iter().flatten().map(jcs).collect())
@@ -1007,54 +1067,10 @@ impl<'a> JsonCx<'a> {
         Some((cur, doc))
     }
 
-    /// The reading of a nullable form (spec §7.3, 0.7): `{"anyOf": [S,
-    /// {"type": "null"}]}`, the branches in either order and nothing beside
-    /// the `anyOf` that carries meaning, read as S (its `$ref`s followed)
-    /// with `null` added to its `type` and, where it has one, its `enum`.
-    /// `None` when `s` is not the form, or its S, once followed, is not an
-    /// object with a `type` and without `const`, `oneOf` or `anyOf`: such an
-    /// `anyOf` is compared as written.
+    /// The reading of a nullable form ([`nullable_reading`]), its S
+    /// followed through this side's documents.
     fn nullable(&self, s: &Value, doc: &'a Value, old: bool) -> Option<(Value, &'a Value)> {
-        let m = s.as_object()?;
-        if m.keys()
-            .any(|k| k != "anyOf" && !ANNOTATIONS.contains(&k.as_str()))
-        {
-            return None;
-        }
-        let [a, b] = m.get("anyOf")?.as_array()?.as_slice() else {
-            return None;
-        };
-        let branch = match (is_null_schema(a), is_null_schema(b)) {
-            (true, false) => b,
-            (false, true) => a,
-            _ => return None,
-        };
-        let (mut read, doc) = self.deref(branch, doc, old)?;
-        let r = read.as_object_mut()?;
-        let typed = match r.get("type") {
-            Some(Value::String(_)) => true,
-            Some(Value::Array(a)) => a.iter().all(Value::is_string),
-            _ => false,
-        };
-        if !typed
-            || ["const", "oneOf", "anyOf"]
-                .iter()
-                .any(|k| r.contains_key(*k))
-        {
-            return None;
-        }
-        let mut t = types(&Value::Object(r.clone()));
-        t.insert("null".to_owned());
-        r.insert(
-            "type".to_owned(),
-            Value::Array(t.into_iter().map(Value::from).collect()),
-        );
-        if let Some(Value::Array(e)) = r.get_mut("enum")
-            && !e.contains(&Value::Null)
-        {
-            e.push(Value::Null);
-        }
-        Some((read, doc))
+        nullable_reading(s, |branch| self.deref(branch, doc, old))
     }
 
     /// A schema as an undecided keyword compares it (spec §9.8, 0.7):
