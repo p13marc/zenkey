@@ -1,0 +1,25 @@
+# owner_example.rs: what the interop owner example (`examples/owner.rs`)
+# serves — a raw state holding `ok`, an echo, and an operation of JSON
+# Schema types with no `error` type, which it refuses `app` without a
+# detail.
+[interface]
+name = "interop"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources.status]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.echo]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+
+[resources.typed]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"

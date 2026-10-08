@@ -186,14 +186,19 @@ async fn answered(c: &Consumer, values: Option<&Bindings>) -> Vec<Current> {
     }
 }
 
-/// §1: every mutation, the delete included, carries the owner's stamp,
-/// increasing; a GET after v2 returns v2 with v2's stamp.
+/// §1: the owner and the consumer are clients of R1, which stamps. Every
+/// mutation, the delete included, carries the owner's stamp, increasing; a
+/// GET after v2 returns v2 with v2's stamp. The control: an unstamped put
+/// through R1 carries R1's zid, so the check tells the two apart (core
+/// §4.2, "Observing S1", F-69). Two puts back to back step by at least one
+/// tick (§4.3, F-66).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_stamped_mutations() {
-    let (_r1, ep) = router(None).await;
+    let (r1, ep) = router(None).await;
     let owner = client(&ep).await;
     let (_mgr, w) = fleet_mgr(&owner, None, &["vehicle-01"]).await;
-    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let consumer = client(&ep).await;
+    let (_ex, c) = executor(&consumer, true).await;
     let got: Arc<Mutex<Vec<Sample>>> = Arc::default();
     let g = Arc::clone(&got);
     let _sub = c
@@ -220,19 +225,55 @@ async fn s1_stamped_mutations() {
         got.lock().unwrap().len() == 3
     })
     .await;
-    let got = got.lock().unwrap();
-    let stamps: Vec<_> = got
-        .iter()
-        .map(|s| *s.timestamp().expect("stamped"))
-        .collect();
-    assert_eq!(stamps, [t1, t2, t3]);
-    assert!(stamps.windows(2).all(|p| p[0] < p[1]));
-    let zid = owner.zid().to_string();
+    {
+        let got = got.lock().unwrap();
+        let stamps: Vec<_> = got
+            .iter()
+            .map(|s| *s.timestamp().expect("stamped"))
+            .collect();
+        assert_eq!(stamps, [t1, t2, t3]);
+        assert!(stamps.windows(2).all(|p| p[0] < p[1]));
+        let zid = owner.zid().to_string();
+        assert_ne!(zid, r1.zid().to_string(), "the owner is not R1");
+        assert!(
+            stamps.iter().all(|t| t.get_id().to_string() == zid),
+            "the owner's zid, not a router's"
+        );
+        assert_eq!(got[2].kind(), zenoh::sample::SampleKind::Delete);
+    }
+
+    // 2. The control: a third client puts without a timestamp; R1 stamps it.
+    let third = client(&ep).await;
+    let control = consumer
+        .declare_subscriber("control/s1")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    let sample = loop {
+        third.put("control/s1", "x").await.unwrap();
+        if let Ok(Ok(s)) =
+            tokio::time::timeout(Duration::from_millis(100), control.recv_async()).await
+        {
+            break s;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never: the control's put"
+        );
+    };
+    let stamp = sample.timestamp().expect("R1 stamps an unstamped put");
+    assert_eq!(stamp.get_id().to_string(), r1.zid().to_string());
+    assert_ne!(stamp.get_id().to_string(), third.zid().to_string());
+
+    // 3. v3 and v4 back to back, faster than the clock advances.
+    let t3 = w.put("v3").await.unwrap();
+    let t4 = w.put("v4").await.unwrap();
     assert!(
-        stamps.iter().all(|t| t.get_id().to_string() == zid),
-        "the owner's zid, not a router's"
+        t4.get_time().as_u64() > t3.get_time().as_u64(),
+        "at least one tick (one NTP64 unit) apart"
     );
-    assert_eq!(got[2].kind(), zenoh::sample::SampleKind::Delete);
+    assert_eq!(t4.get_id(), t3.get_id());
 }
 
 /// §2: within the window, a deleted key answers `reply_del` with the

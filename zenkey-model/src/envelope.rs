@@ -41,11 +41,40 @@ pub struct Envelope {
 }
 
 /// An `app` error's detail: the declared `error` type's value inline (JSON,
-/// CBOR), or its encoded message (protobuf).
+/// CBOR), its encoded message (protobuf), or a raw type's bytes as base64
+/// text in a JSON envelope ([`Detail::raw`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Detail {
     Value(Value),
     Bytes(Vec<u8>),
+}
+
+impl Detail {
+    /// A raw `error` type's detail (spec §5.2, 0.7, F-65): its bytes as
+    /// base64 text (RFC 4648 §4, padded), the JSON form of bytes (§7.2), in
+    /// the JSON envelope a raw type takes.
+    #[must_use]
+    pub fn raw(bytes: &[u8]) -> Self {
+        use base64::Engine as _;
+        Self::Value(Value::String(
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        ))
+    }
+
+    /// A raw `error` type's bytes, read back from their base64 text: what a
+    /// caller holding the contract does with a detail a tool reads as a
+    /// string (§5.2, "Reading one"). `None` for anything but padded base64
+    /// text.
+    #[must_use]
+    pub fn raw_bytes(&self) -> Option<Vec<u8>> {
+        use base64::Engine as _;
+        match self {
+            Self::Value(Value::String(s)) => {
+                base64::engine::general_purpose::STANDARD.decode(s).ok()
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Why an envelope was refused.
@@ -346,6 +375,28 @@ mod tests {
         assert!(decode(CBOR, &bytes).is_ok());
         bytes.push(0);
         assert_eq!(decode(CBOR, &bytes).map_err(|e| e.tag()), Err("decode"));
+    }
+
+    /// Spec §5.2 (0.7, F-65): a raw detail is base64 text, padded, and
+    /// reads as the fixture `json-app-raw-detail` does.
+    #[test]
+    fn a_raw_detail_is_base64_text() {
+        let d = Detail::raw(&[0xff, 0xd8, 0xff, 0xe0]);
+        assert_eq!(d, Detail::Value(Value::String("/9j/4A==".into())));
+        assert_eq!(d.raw_bytes(), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
+        let env = Envelope {
+            code: "app".into(),
+            message: "camera fault".into(),
+            cause: None,
+            detail: Some(d),
+        };
+        let bytes = encode(&env, JSON).unwrap();
+        assert_eq!(decode(JSON, &bytes), Ok(env));
+        assert_eq!(
+            Detail::Value(Value::String("/9j/4A".into())).raw_bytes(),
+            None
+        );
+        assert_eq!(Detail::Bytes(vec![1]).raw_bytes(), None);
     }
 
     #[test]

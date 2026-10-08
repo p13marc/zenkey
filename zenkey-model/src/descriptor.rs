@@ -370,6 +370,41 @@ fn check_exposure(
     }
 }
 
+impl Descriptor {
+    /// The resources of `contract` this instance exposes (§3.3): the
+    /// contract's, minus the optional ones gated on a capability it does not
+    /// hold, minus those its entry lists `unavailable`. `None` when it lists
+    /// no entry for the contract's interface.
+    ///
+    /// What a tool decides a split-brain from, beside replicated serving
+    /// (§6, 0.7, #660). The entry's revision is the caller's to match: this
+    /// reads `contract` as given.
+    #[must_use]
+    pub fn exposed<'c>(
+        &self,
+        contract: &'c Contract,
+    ) -> Option<Vec<&'c crate::contract::Resource>> {
+        let iface = contract.iface.to_string();
+        let entry = self.interfaces.iter().find(|e| e.iface == iface)?;
+        let held = |cap: &str| self.capabilities.iter().any(|h| h == cap);
+        Some(
+            contract
+                .resources
+                .iter()
+                .filter(|r| {
+                    let name = format!("{}/{}", r.token, r.template);
+                    let gated_off = r
+                        .gate
+                        .iter()
+                        .any(|g| g.strip_prefix("capability:").is_some_and(|cap| !held(cap)));
+                    let listed = entry.unavailable.iter().any(|u| u.resource == name);
+                    !(r.optional && (gated_off || listed))
+                })
+                .collect(),
+        )
+    }
+}
+
 fn yes() -> bool {
     true
 }
@@ -387,4 +422,56 @@ fn is_name(s: &str) -> bool {
     cs.next()
         .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         && cs.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "_.-".contains(c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Descriptor;
+
+    /// §3.3's compact exposure: a missing capability implies an optional
+    /// resource absent, as a listed one is; a required resource is always
+    /// exposed.
+    #[test]
+    fn exposure_is_the_contract_minus_the_gated_off_and_the_listed() {
+        let op = |name: &str, extra: &str| {
+            format!(
+                "[resources.{name}]\nkind = \"operation\"\n{extra}\
+                 request = {{ raw = \"text/plain\" }}\nresponse = {{ raw = \"text/plain\" }}\n"
+            )
+        };
+        let toml = format!(
+            "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n{}{}{}",
+            op("a", ""),
+            op("b", "optional = true\n"),
+            op("c", "optional = true\ngate = [\"capability:x\"]\n"),
+        );
+        let l = crate::contract::load_str(&toml, std::path::Path::new("."), None);
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let d = |caps: &str, unavailable: &str| -> Descriptor {
+            serde_json::from_str(&format!(
+                r#"{{"format": "zk2-descriptor/0.1", "service": "s/t", "instance": "000000000000000a",
+                    "interfaces": [{{"iface": "t.v1", "contract": "sha256:{}", "minor": 0,
+                                     "unavailable": [{unavailable}]}}],
+                    "capabilities": [{caps}]}}"#,
+                "0".repeat(64)
+            ))
+            .unwrap()
+        };
+        let names = |d: &Descriptor| -> Vec<String> {
+            d.exposed(&c)
+                .unwrap()
+                .iter()
+                .map(|r| r.template.as_str().to_owned())
+                .collect()
+        };
+        assert_eq!(names(&d("", "")), ["a", "b"]);
+        assert_eq!(names(&d("\"x\"", "")), ["a", "b", "c"]);
+        assert_eq!(
+            names(&d("\"x\"", r#"{"resource": "@op/b", "cause": "config"}"#)),
+            ["a", "c"]
+        );
+        let mut other = d("", "");
+        other.interfaces[0].iface = "u.v1".into();
+        assert!(other.exposed(&c).is_none());
+    }
 }

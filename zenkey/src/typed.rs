@@ -617,6 +617,12 @@ fn served_op<Req: Codec, Resp: Codec, Sum: Codec>(
 /// ([`ServiceBuilder::serve`]): the request decoded as `Req` (a failure is
 /// `invalid_request`), the handler's value encoded as `Resp` and replied, its
 /// error refused with its envelope (O3).
+///
+/// A fan-out whose key leaves a parameter unbound names no member: the
+/// handler names the one it answers for with [`CallInfo::member`], from what
+/// the key bound ([`CallInfo::bound`]), and the value goes on that member's
+/// key (§5.1 "Over a template", 0.7). One that names none is answered
+/// `internal`.
 pub async fn serve_one<Req, Resp, H, Fut>(
     b: &mut ServiceBuilder,
     iface: &IfaceId,
@@ -661,7 +667,8 @@ impl ReplyOut for CallOut {
 /// Serves a `replies = "many"` operation over its whole template: the
 /// handler sends values, then the summary when one is declared, through a
 /// [`Sink`] (O6). A handler that returns without the declared summary is
-/// answered `internal` by the runtime.
+/// answered `internal` by the runtime. Over a template, the handler names
+/// the member before it sends, as with [`serve_one`].
 pub async fn serve_many<Req, Resp, Sum, H, Fut>(
     b: &mut ServiceBuilder,
     iface: &IfaceId,

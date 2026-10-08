@@ -42,3 +42,17 @@ request = "sensor.v1.Pose"
 response = "sensor.v1.Pose"
 error = "json:TcError"
 encoding = "cbor"
+
+# §3 step 6 (core 0.7, F-65): a raw `error` type, whose detail is base64
+# text in a JSON envelope.
+[resources.raw-error]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+error = { raw = "image/jpeg" }
+
+[resources.json-error]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+error = "json:TcError"

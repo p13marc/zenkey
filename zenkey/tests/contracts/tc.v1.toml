@@ -1,6 +1,7 @@
 # operations.md: the common setup's service `tc` on every host — an
 # exclusive templated operation, a fan-out one, a many-reply listing with a
-# per-replier summary, and an optional operation gated on a capability.
+# per-replier summary, an optional operation gated on a capability, and
+# §2's templated fan-out `reset`.
 [interface]
 name = "tc"
 major = 1
@@ -39,3 +40,13 @@ request = "json:SetRequest"
 response = "json:SetResponse"
 optional = true
 gate = ["capability:xdp"]
+
+# §2: a fan-out over a template, served per member, over the template, or
+# refused `busy`, host by host.
+[resources."interfaces/{if}/reset"]
+kind = "operation"
+request = "json:DiagnosticsRequest"
+response = "json:DiagnosticsResponse"
+params = { if = "string" }
+cardinality = 64
+fanout = "allowed"
