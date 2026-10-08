@@ -224,9 +224,15 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 - **`zenkey-model/`** (MIT, unpublished until #606) is zk2's session-free
   half (#608): keys, templates, the authoring format (draft 1) and its
   lints with stable codes (`diag::CODES`), the canonical form, fingerprints,
-  bundles and `.history`. It depends on `zenoh-keyexpr` and no other zenoh
-  crate (`scripts/check-model-zenoh-free.sh`). `tests/examples.rs` requires
-  every contract in `examples/zk2/` to load with **no finding at all**.
+  bundles and `.history`, and the compatibility classifier (`compat`,
+  #618). It depends on `zenoh-keyexpr` and no other zenoh crate
+  (`scripts/check-model-zenoh-free.sh`). Its `zk2` binary is the contract CI
+  (`zk2 contract lint|fingerprint|bundle|compat|check-history`; exit 0/1/2
+  as zenctl's). `tests/examples.rs` requires every contract in
+  `examples/zk2/` to load with **no finding at all**, and to be published in
+  `examples/zk2/.history` and compatible with it. After an intended change,
+  run `cargo run -p zenkey-model --bin zk2 -- contract bundle <file>
+  --history examples/zk2/.history`; the history is append-only.
 - **`spec/`** holds what every implementation must agree on:
   `contract.schema.json`, generated from `zenkey-model`'s authoring types,
   and `conformance/` fixtures. Both are checked by
@@ -249,7 +255,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.2 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.3 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

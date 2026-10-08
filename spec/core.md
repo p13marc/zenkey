@@ -1,7 +1,7 @@
 # zk2 core specification
 
-**Version 0.2** (0.1 accepted on 2026-10-08, #606; amended the same day:
-U23). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
+**Version 0.3** (0.1 accepted on 2026-10-08, #606; amended the same day:
+U23 in 0.2, the classifier's rule set in 0.3). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
 amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -43,10 +43,6 @@ An archive (§4.4) is an owner of its own keys.
   a setup, steps and expected observations;
 - `[F: pending]` would mark a fixture still owed. None is, in this version
   (#607).
-- `[F: compat/]` is the one family whose expected values no implementation
-  checks yet. They are written by hand, and the classifier (#618) evaluates
-  them. Until then, the reference runner only checks that every input
-  loads.
 
 **Zenoh.** zk2 is specified against Zenoh **1.10.1**. Facts about Zenoh that
 the rules depend on are listed in Appendix B. A participant uses only stable
@@ -1232,56 +1228,143 @@ The classifier MUST classify every case of `compat/` as `expect.json` says,
 including the transitive cases, where a revision compatible with its
 predecessor breaks against an earlier one. `[F: compat/]`
 
-**Contract metadata:**
+Each rule has a name, which a classifier reports with its finding. The
+names below are the reference classifier's. `expect.json` pins the class of
+every case and the name of every warning.
 
-| Change | Class |
-|---|---|
-| A resource removed | breaking (deprecated resources are kept until the next major) |
-| `idempotent` true → false | breaking |
-| `fanout` allowed → forbidden | breaking |
-| `reliability` reliable → best_effort | review |
-| optional → required | breaking |
-| `priority` changed, `express` toggled | review |
-| `congestion` drop → block | review (it can stall the producer) |
-| `explicit` false → true | breaking for ambient consumers |
-| `explicit` true → false | review (link budgets) |
-| `replies` one → many | breaking (callers' consolidation) |
-| A required role added | breaking |
-| An optional role added | compatible |
-| A role's interface or cardinality changed | breaking |
-| Documentation and `minor` only | compatible |
+**Interface:**
+
+| Change | Class | Rule |
+|---|---|---|
+| The interface id differs | breaking | `interface_changed` |
+| `uses` changed | review | `uses_changed` |
+| Documentation and `minor` only | compatible | |
+
+**Resources,** matched by kind token and template:
+
+| Change | Class | Rule |
+|---|---|---|
+| A resource removed | breaking (a deprecated resource stays until the next major) | `resource_removed` |
+| An optional resource added | compatible | |
+| A required resource added | breaking (old providers lack it) | `required_resource_added` |
+| optional → required | breaking (old providers may not expose it) | `optional_to_required` |
+| required → optional | breaking (consumers rely on it) | `required_to_optional` |
+| The kind changed | breaking | `kind_changed`, `token_changed` |
+| `explicit` false → true | breaking for ambient consumers | `explicit_set` |
+| `explicit` true → false | review (link budgets) | `explicit_cleared` |
+| A template parameter's type changed | breaking | `params_changed` |
+| The payload or attachment encoding changed | breaking | `encoding_changed` |
+| An attachment added or removed | review | `attachment_changed` |
+| `deprecated` added | compatible | |
+| `deprecated` removed or changed | review | `deprecated_changed` |
+| `cardinality`, `epoch`, `gate` or `annotations` changed | review | `cardinality_changed`, `epoch_changed`, `gate_changed`, `annotations_changed` |
+
+**Delivery** (streams, state, events):
+
+| Change | Class | Rule |
+|---|---|---|
+| `reliability` reliable → best_effort | review | `reliability_lowered` |
+| `reliability` best_effort → reliable | compatible | |
+| `congestion` changed, either way | review (`block` can stall the producer; `drop` can lose samples) | `congestion_changed` |
+| `priority`, `express`, `history`, `rate` or `retention_s` changed | review | `priority_changed`, `express_toggled`, `history_changed`, `rate_changed`, `retention_changed` |
+
+**Operations:**
+
+| Change | Class | Rule |
+|---|---|---|
+| `idempotent` true → false | breaking (callers may retry it) | `idempotent_cleared` |
+| `idempotent` false → true | review (new callers may retry old servers) | `idempotent_set` |
+| `fanout` allowed → forbidden | breaking | `fanout_forbidden` |
+| `fanout` forbidden → allowed | compatible | |
+| `replies` one → many | breaking (callers' consolidation) | `replies_many` |
+| `replies` many → one | compatible | |
+| An `error` or `summary` type added or removed | review | `error_type_changed`, `summary_type_changed` |
+| `serving`, `timeout_ms` or `priority` changed | review | `serving_changed`, `timeout_changed`, `priority_changed` |
+
+The request, response, error and summary types follow the type rules below.
+
+**Roles** (`requires`):
+
+| Change | Class | Rule |
+|---|---|---|
+| An optional role added | compatible | |
+| A required role added | breaking (deployments must bind it) | `required_role_added` |
+| A role removed | compatible (deployments stop binding it) | |
+| A role's interface or cardinality changed | breaking | `role_changed` |
+| A role optional → required | breaking | `role_required` |
+| A role required → optional | compatible | |
+| The resources or annotations a role consumes changed | review | `role_resources_changed` |
+
+**Types:**
+
+| Change | Class | Rule |
+|---|---|---|
+| The schema kind changed (raw, protobuf, jsonschema) | breaking | `type_kind_changed` |
+| A raw media type changed | breaking | `media_type_changed` |
+| A raw `media_param` changed | review | `media_param_changed` |
+| An artifact that does not decode, or lacks the named type | review (a verified bundle never has one) | `schema_unreadable` |
 
 **Protobuf payloads:** WIRE semantics with renumber detection. A reader
-ignores unknown fields and defaults missing ones.
+ignores unknown fields and defaults missing ones. Fields are matched by
+number. A field missing by number but present by name is renumbered.
+Messages are compared recursively, nested and referenced ones included,
+each pair once.
 - **Breaking:**
   - a field's declared scalar type changes, including int32 → int64 and
-    string → bytes;
-  - its cardinality changes;
-  - it moves into or out of a oneof;
+    string → bytes (`type_changed`). The declared type is the contract: a
+    narrower reader truncates, and a string reader is owed UTF-8;
+  - its cardinality changes: singular, repeated or map
+    (`cardinality_changed`);
+  - it moves into or out of a oneof (`oneof_changed`);
   - it is renumbered: a deletion plus an addition of the same field, which
-    silently drops the data both ways.
-- **Review:** a field renamed, an enum value renamed or deleted, a
-  `json_name` option.
-- **Compatible:** a field added; a value added to a proto3 (open) enum. A
-  value added to a proto2 (closed) enum is review.
+    silently drops the data both ways (`renumbered`);
+  - it reuses a number that an earlier revision reserved
+    (`reserved_reused`);
+  - a proto2 `required` field is added (`required_field_added`) or deleted
+    (`required_field_removed`), or a label toggles to or from `required`
+    (`required_label_changed`). A reader refuses a message that lacks a
+    required field.
+- **Review:**
+  - a field renamed (`field_renamed`), or its `json_name` changed
+    (`json_name_changed`). Tools decode with the writer's bundle, so a name
+    only relabels a display;
+  - an enum value renamed or deleted (`enum_value_renamed`,
+    `enum_value_removed`);
+  - explicit presence toggled, such as proto3 `optional`
+    (`presence_changed`): a reader stops telling a default from an absent
+    value;
+  - a value added to a proto2 (closed) enum (`closed_enum_value_added`): an
+    old reader keeps it as an unknown field and reads the default.
+- **Compatible:** a field added; a value added to a proto3 (open) enum.
 - **Warning** `field_deleted_unreserved` (reported alongside the class): a
-  field deleted without
-  reserving its number. Reuse is caught against the whole history.
+  field deleted without reserving its number. Reuse is caught against the
+  whole history.
 
 **JSON Schema payloads:** the subset of §7.3. Readers tolerate unknown
-properties, and writers send only what their schema declares.
-- **Compatible:** an optional property added, even to a closed schema, or
-  removed.
+properties, and writers send only what their schema declares. `$ref`s are
+followed, across the revision's artifacts. Annotations are ignored.
+- **Compatible:**
+  - an optional property added, even to a closed schema, or removed;
+  - `additionalProperties` or `items` changed between absent, `true` and
+    `false`;
+  - `enum` values reordered.
 - **Breaking:**
-  - a required property added;
-  - optional → required, or required → optional;
-  - integer ↔ number;
-  - an enum value added or removed;
-  - a bound changed: a tightened `maximum` breaks old writers, and a
-    loosened `maxLength` breaks old readers;
-  - a `oneOf` branch added.
-- **Review:** any other change inside `oneOf`, `anyOf` or `prefixItems`.
-  Their containment is not decided.
+  - the `type` set changed, including integer ↔ number (`type_changed`);
+  - a required property added (`required_added`) or removed
+    (`required_removed`), or a property optional ↔ required
+    (`required_changed`);
+  - an `enum` value added or removed (`enum_changed`), or `const` changed
+    (`const_changed`);
+  - a bound changed, either way (`bound_changed`): `minimum`, `maximum`,
+    `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`,
+    `minItems` or `maxItems`. A tightened bound breaks old writers, and a
+    loosened one breaks old readers;
+  - a `oneOf` branch added (`oneof_branch_added`).
+- **Review:**
+  - any other change inside `oneOf`, `anyOf` or `prefixItems`
+    (`undecided_changed`). Their containment is not decided;
+  - `additionalProperties` or `items` gaining or losing a schema
+    (`members_changed`): a map closed, or array items constrained.
 
 ---
 
@@ -1451,8 +1534,10 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
 
-The compatibility cases (`compat/`) are evaluated by the classifier (#618).
-Until it lands, the reference runner checks that every input loads.
+The compatibility cases (`compat/`) are evaluated by the reference
+classifier (#618). [`compat/README.md`](conformance/compat/README.md)
+records where its protobuf verdicts depart from `buf breaking` with WIRE,
+and why.
 
 ## Appendix D. Authoring fields by kind
 

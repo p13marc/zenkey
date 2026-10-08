@@ -64,3 +64,34 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
         contracts.len()
     );
 }
+
+/// `examples/zk2/.history` (#618): every bundle verifies, every example's
+/// current revision is published there, and it is compatible with every
+/// earlier revision of its interface. After an intended change, publish the
+/// new revision with `zk2 contract bundle <file> --history examples/zk2/.history`.
+#[test]
+fn every_example_is_published_and_compatible_with_its_history() {
+    use zenkey_model::compat::{Class, Revision, check_history, same_revision};
+    let root = examples().join(".history");
+    let problems = zenkey_model::history::check_tagged(&root);
+    assert!(problems.is_empty(), "{problems:#?}");
+    for p in contract_files(&examples()) {
+        let rel = p.strip_prefix(examples()).unwrap().display().to_string();
+        let c = load_path(&p).contract.expect("validated above");
+        let dir = root.join(c.iface.to_string());
+        let mut revs = Vec::new();
+        for e in std::fs::read_dir(&dir)
+            .unwrap_or_else(|_| panic!("{rel}: no history at {}", dir.display()))
+        {
+            let bytes = std::fs::read(e.unwrap().path()).unwrap();
+            revs.push(Revision::of_bundle(&Bundle::verify(&bytes).unwrap()));
+        }
+        let new = Revision::of(&c);
+        assert!(
+            revs.iter().any(|r| same_revision(r, &new)),
+            "{rel}: the current revision is not published; run zk2 contract bundle {rel} --history examples/zk2/.history"
+        );
+        let v = check_history(&revs, &new);
+        assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
+    }
+}
