@@ -276,13 +276,14 @@ async fn big_gets(o: &Observer, ep: &str, n: usize) -> Result<(String, String)> 
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn run(results: &Path, quick: bool) -> Result<()> {
+pub async fn run(results: &Path, quick: bool, only: Option<&str>) -> Result<()> {
+    let want = |g: &str| only.is_none_or(|o| o == g);
     std::fs::create_dir_all(results)?;
     let mut rows = Vec::new();
     let interfaces = 5;
     let counts: &[usize] = if quick { &[100, 1000] } else { &[100, 1_000, 10_000, 50_000] };
     // A. Scale × layout.
-    for &n in counts {
+    for &n in counts.iter().filter(|_| want("scale")) {
         for layout in [Layout::A, Layout::B, Layout::C] {
             let t = topology().await?;
             let o = observer(&t.e1).await?;
@@ -328,12 +329,12 @@ pub async fn run(results: &Path, quick: bool) -> Result<()> {
     }
 
     // B. The ZenSight shape and U18: device-as-service vs member tokens.
-    for (label, layout, services, members) in [
+    for (label, layout, services, members) in want("shapes").then_some([
         ("ZenSight: 1,000 hosts x 6 sensors x (1 instance + 5 interfaces)", Layout::A, 6_000, 0),
         ("U18 device-as-service: 5,000 SNMP devices x (1 instance + 2 interfaces)", Layout::A, 5_000, 0),
         ("U18 member tokens: one poller with 5,000 device members (D9b)", Layout::Members, 1, 5_000),
         ("member tokens at 512 containers x 20 hosts (D9b)", Layout::Members, 20, 512),
-    ] {
+    ]).into_iter().flatten() {
         let ifs = if label.starts_with("U18 device") { 2 } else { interfaces };
         let t = topology().await?;
         let o = observer(&t.e1).await?;
@@ -363,7 +364,7 @@ pub async fn run(results: &Path, quick: bool) -> Result<()> {
     }
 
     // C. Disruptions at 10k tokens, layout a.
-    {
+    if want("disruption") {
         let services = 10_000 / (1 + interfaces);
         let total = services * (1 + interfaces);
         // A router restart: R2 dies and comes back on the same endpoint.
@@ -397,7 +398,7 @@ pub async fn run(results: &Path, quick: bool) -> Result<()> {
         record(results, rows.last().unwrap())?;
         drop((h, r2, r1, o));
     }
-    {
+    if want("disruption") {
         // A client moving to another router: its link to R2 is blackholed
         // (only the lease can tell); it also knows R1.
         let t = topology().await?;
@@ -438,7 +439,7 @@ pub async fn run(results: &Path, quick: bool) -> Result<()> {
     }
     // D. Churn: one service re-minted per second, with and without a
     // descriptor put, over 10k tokens; and the re-mint overlap (D9a).
-    for descriptor in [false, true] {
+    for descriptor in [false, true].into_iter().filter(|_| want("churn")) {
         let t = topology().await?;
         let o = observer(&t.e1).await?;
         let services = 10_000 / (1 + interfaces);

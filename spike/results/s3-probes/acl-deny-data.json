@@ -1,0 +1,49 @@
+{
+ "access_control": {
+  "enabled": true,
+  "default_permission": "allow",
+  "rules": [
+   {
+    "id": "zk-off-the-link",
+    "messages": [
+     "put",
+     "delete",
+     "declare_subscriber",
+     "query",
+     "reply",
+     "declare_queryable",
+     "liveliness_token",
+     "liveliness_query",
+     "declare_liveliness_subscriber"
+    ],
+    "flows": [
+     "egress",
+     "ingress"
+    ],
+    "permission": "deny",
+    "key_exprs": [
+     "zk2/v/*/camera.v1/**"
+    ]
+   }
+  ],
+  "subjects": [
+   {
+    "id": "link",
+    "link_protocols": [
+     "tcp"
+    ]
+   }
+  ],
+  "policies": [
+   {
+    "id": "r7",
+    "rules": [
+     "zk-off-the-link"
+    ],
+    "subjects": [
+     "link"
+    ]
+   }
+  ]
+ }
+}

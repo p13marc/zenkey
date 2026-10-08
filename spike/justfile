@@ -88,6 +88,11 @@ spike-s7: build
 spike-s3: build
     {{spike}} s3 --results results/s3 --examples ../examples/zk2
 
+# S3's link probes: RF presence against zenoh's batch size and lease, and
+# what an ACL deny or a client link keeps off a router-to-router link.
+spike-s3-probes: build
+    s3/probes.sh results/s3-probes
+
 # Reclaim the build tree (it is large, and the disk is shared).
 clean:
     cargo clean

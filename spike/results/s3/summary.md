@@ -1,0 +1,70 @@
+# S3 — constrained links (#599)
+
+Written from `s3.csv` (`spike s3`, `unix_s` 1791422661, 1791423963), zenoh 1.10.1. A shaping proxy between the vehicle and ground routers behaves as a serial line (delay line, bandwidth cap per direction, ~50 ms slices, ~0.5 s buffer; no loss emulation), and shapes **each TCP connection separately**. Bytes are TCP payload over the link; windowed measures run until the link is quiet (≤ 64 B in 3 s). In the ground-as-client profile each ground session has a connection, so a line, of its own. Router config overrides per profile: `link-<profile>.json`. One harness-written note was corrected after the run: the named-`@stream` rows said "(best effort: zenoh drops what the link cannot carry)", which the byte counts contradict (nothing was dropped).
+
+| Profile | Measure | s | B vehicle→ground | B ground→vehicle | Note |
+|---|---|---|---|---|---|
+| 600 ms RTT, 1 Mbit/s | first view of 50 services' presence (100 tokens; spawn 0.2 s, 0 B up during spawn) | 1.18 | 11257 | 159 | 100/100 seen |
+| 600 ms RTT, 1 Mbit/s | presence replay after a reconnect (cut, then heal) | 2.70 | 11129 | 193 | 100/100 seen again; router reconnect included |
+| 600 ms RTT, 1 Mbit/s | one descriptor GET | 0.61 | 405 | 77 | 312 B of JSON |
+| 600 ms RTT, 1 Mbit/s | contract bundle fetch: camera.v1 (1761 B) | 0.62 | 1894 | 18 | attempt 1 |
+| 600 ms RTT, 1 Mbit/s | contract bundle fetch: zs.snmp.v1 (82391 B) | 1.33 | 82541 | 19 | attempt 1 |
+| 600 ms RTT, 1 Mbit/s | state GET answered by a storage on the vehicle | 0.61 | 305 | 46 | 1 replies |
+| 600 ms RTT, 1 Mbit/s | 4 s of 10 KB @stream frames + 100 B stream samples at 5 Hz, ground subscribed to zk2/vehicle-01/**, until the link is quiet | 7.14 | 3383 | 9 | the @stream frames do not cross |
+| 600 ms RTT, 1 Mbit/s | the same, with the ground also naming the @stream key | 7.19 | 204163 | 9 | frames cross only when asked for |
+| 600 ms RTT, 1 Mbit/s | a tool's first useful view: presence, 50 descriptors, one contract, one state | 2.01 | 21943 | 135 | presence 0.0 s / 0 B (50 tokens); descriptors 0.8 s / 19744 B (50 replies); contract 0.6 s / 1894 B (attempt 1); state 0.6 s / 305 B (1 replies) |
+| 600 ms RTT, 1 Mbit/s | 100 subscriber declarations, zk2-shaped keys (64 B each) | 3.63 | 3 | 8442 | 84 B per declaration toward the vehicle |
+| 600 ms RTT, 1 Mbit/s | 100 subscriber declarations, v1-shaped keys (52 B each) | 3.63 | 6 | 7593 | 76 B per declaration toward the vehicle |
+| 600 ms RTT, 1 Mbit/s | 3 coverage gaps (2 s each) with presence crossing the link | 14.28 | 33780 | 579 | 300 deletes and 300 puts seen by the ground: every token flaps each gap |
+| 600 ms RTT, 64 kbit/s | first view of 50 services' presence (100 tokens; spawn 0.1 s, 0 B up during spawn) | 2.42 | 11086 | 159 | 100/100 seen |
+| 600 ms RTT, 64 kbit/s | presence replay after a reconnect (cut, then heal) | 4.03 | 11102 | 252 | 100/100 seen again; router reconnect included |
+| 600 ms RTT, 64 kbit/s | one descriptor GET | 0.66 | 405 | 18 | 312 B of JSON |
+| 600 ms RTT, 64 kbit/s | contract bundle fetch: camera.v1 (1761 B) | 0.85 | 1894 | 18 | attempt 1 |
+| 600 ms RTT, 64 kbit/s | contract bundle fetch: zs.snmp.v1 (82391 B) | 11.17 | 82553 | 31 | attempt 1 |
+| 600 ms RTT, 64 kbit/s | state GET answered by a storage on the vehicle | 0.65 | 305 | 46 | 1 replies |
+| 600 ms RTT, 64 kbit/s | 4 s of 10 KB @stream frames + 100 B stream samples at 5 Hz, ground subscribed to zk2/vehicle-01/**, until the link is quiet | 7.14 | 3383 | 9 | the @stream frames do not cross |
+| 600 ms RTT, 64 kbit/s | the same, with the ground also naming the @stream key | 29.41 | 204190 | 36 | frames cross only when asked for |
+| 600 ms RTT, 64 kbit/s | a tool's first useful view: presence, 50 descriptors, one contract, one state | 4.63 | 21898 | 138 | presence 0.0 s / 0 B (50 tokens); descriptors 3.1 s / 19699 B (50 replies); contract 0.8 s / 1894 B (attempt 1); state 0.7 s / 305 B (1 replies) |
+| 600 ms RTT, 64 kbit/s | 100 subscriber declarations, zk2-shaped keys (64 B each) | 4.39 | 3 | 8415 | 84 B per declaration toward the vehicle |
+| 600 ms RTT, 64 kbit/s | 100 subscriber declarations, v1-shaped keys (52 B each) | 4.35 | 3 | 7161 | 72 B per declaration toward the vehicle |
+| 600 ms RTT, 64 kbit/s | 3 coverage gaps (2 s each) with presence crossing the link | 18.31 | 34050 | 891 | 300 deletes and 300 puts seen by the ground: every token flaps each gap |
+| RF class: 200 ms RTT, 2,400 bit/s, zenoh defaults | first view of 50 services' presence (100 tokens; spawn 0.2 s, 0 B up during spawn) | 300.01 | 85543 | 4248 | 0/100 seen |
+| RF class: 200 ms RTT, 2,400 bit/s, zenoh defaults | presence replay after a reconnect (cut, then heal) | 300.00 | 85413 | 4338 | 0/100 seen again; router reconnect included |
+| RF class: 200 ms RTT, 2,400 bit/s, zenoh defaults | one descriptor GET | NaN | 0 | 0 | skipped: no instance token visible on the ground |
+| RF class: 200 ms RTT, 2,400 bit/s, zenoh defaults | profile aborted | NaN | 0 | 0 | contract camera.v1 sha256:0f66b421dc6decf2b28bf4b8f0c6006cbdbb7fe0a4d9a997e637f9105dc0ea98 is unavailable |
+| RF class, 1 KB batches | first view of 50 services' presence (100 tokens; spawn 0.1 s, 0 B up during spawn) | 38.43 | 11300 | 201 | 100/100 seen |
+| RF class, 1 KB batches | presence replay after a reconnect (cut, then heal) | 39.88 | 11284 | 293 | 100/100 seen again; router reconnect included |
+| RF class, 1 KB batches | one descriptor GET | 1.62 | 437 | 18 | 311 B of JSON |
+| RF class, 1 KB batches | contract bundle fetch: camera.v1 (1761 B) | 6.70 | 1912 | 24 | attempt 1 |
+| RF class, 1 KB batches | contract bundle fetch: zs.snmp.v1 (82391 B) | 280.17 | 83104 | 352 | attempt 1 |
+| RF class, 1 KB batches | state GET answered by a storage on the vehicle | 0.00 | 0 | 0 | 0 replies |
+| RF class, 1 KB batches | 4 s of 10 KB @stream frames + 100 B stream samples at 5 Hz, ground subscribed to zk2/vehicle-01/**, until the link is quiet | 14.30 | 3392 | 15 | the @stream frames do not cross |
+| RF class, 1 KB batches | the same, with the ground also naming the @stream key | 604.07 | 179296 | 723 | frames cross only when asked for |
+| RF class, 1 KB batches | a tool's first useful view: presence, 50 descriptors, one contract, one state | 165.70 | 49149 | 327 | presence 0.0 s / 0 B (50 tokens); descriptors 120.0 s / 35644 B (22 replies); contract 44.3 s / 13160 B (attempt 1); state 1.4 s / 345 B (1 replies) |
+| RF class, 1 KB batches | 100 subscriber declarations, zk2-shaped keys (64 B each) | 32.30 | 39 | 8736 | 87 B per declaration toward the vehicle |
+| RF class, 1 KB batches | 100 subscriber declarations, v1-shaped keys (52 B each) | 30.76 | 39 | 8303 | 83 B per declaration toward the vehicle |
+| RF class, 1 KB batches | 3 coverage gaps (2 s each) with presence crossing the link | 127.82 | 34458 | 1020 | 300 deletes and 300 puts seen by the ground: every token flaps each gap |
+| RF class, 1 KB batches, @zk denied (R7) | bring-up across the link: 50 services' data declarations (spawn 0.1 s, 0 B up during spawn) | 37.72 | 11121 | 345 | until the link is quiet (≤ 64 B in 3 s) |
+| RF class, 1 KB batches, @zk denied (R7) | presence across the link | NaN | 0 | 0 | 0 tokens visible from the ground (the ACL denies `@zk`), 0 seen by the history subscriber |
+| RF class, 1 KB batches, @zk denied (R7) | a descriptor GET across the link | NaN | 0 | 0 | 0 replies: the ground binds from configuration and its own copy of the contract |
+| RF class, 1 KB batches, @zk denied (R7) | descriptors and contract bundles | NaN | 0 | 0 | not fetched: under R7 the ground holds the bundles it binds |
+| RF class, 1 KB batches, @zk denied (R7) | state GET answered by a storage on the vehicle | 1.39 | 305 | 46 | 1 replies |
+| RF class, 1 KB batches, @zk denied (R7) | state GET answered by the owner, bound statically (svc-0 camera.v1/state/info) | 0.68 | 115 | 26 | 1 replies |
+| RF class, 1 KB batches, @zk denied (R7) | 4 s of 10 KB @stream frames + 100 B stream samples at 5 Hz, ground subscribed to zk2/vehicle-01/**, until the link is quiet | 14.41 | 3392 | 18 | the @stream frames do not cross |
+| RF class, 1 KB batches, @zk denied (R7) | the same, with the ground also naming the @stream key | 604.04 | 179328 | 723 | frames cross only when asked for |
+| RF class, 1 KB batches, @zk denied (R7) | a tool's first useful view, bound statically: one state | 91.49 | 27168 | 186 | 1 replies; presence, descriptors and contracts are local under R7 |
+| RF class, 1 KB batches, @zk denied (R7) | 100 subscriber declarations, zk2-shaped keys (64 B each) | 34.56 | 42 | 9387 | 94 B per declaration toward the vehicle |
+| RF class, 1 KB batches, @zk denied (R7) | 100 subscriber declarations, v1-shaped keys (52 B each) | 31.68 | 39 | 8593 | 86 B per declaration toward the vehicle |
+| RF class, 1 KB batches, @zk denied (R7) | 3 coverage gaps (2 s each), `@zk` denied | 134.83 | 34062 | 1458 | 11840 B per gap, until the link is quiet again; 0 tokens seen by the ground |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | bring-up across the link: 50 services' data declarations (spawn 0.2 s, 0 B up during spawn) | 0.22 | 17 | 49 | until the link is quiet (≤ 64 B in 3 s) |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | presence across the link | NaN | 0 | 0 | 0 tokens visible from the ground (the ACL denies `@zk`), 0 seen by the history subscriber |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | a descriptor GET across the link | NaN | 0 | 0 | 0 replies: the ground binds from configuration and its own copy of the contract |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | descriptors and contract bundles | NaN | 0 | 0 | not fetched: under R7 the ground holds the bundles it binds |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | state GET answered by a storage on the vehicle | 1.38 | 305 | 45 | 1 replies |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | state GET answered by the owner, bound statically (svc-0 camera.v1/state/info) | 0.75 | 115 | 48 | 1 replies |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | 4 s of 10 KB @stream frames + 100 B stream samples at 5 Hz, ground subscribed to zk2/vehicle-01/**, until the link is quiet | 14.30 | 3372 | 18 | the @stream frames do not cross |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | the same, with the ground also naming the @stream key | 604.05 | 179296 | 723 | frames cross only when asked for |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | a tool's first useful view, bound statically: one state | 1.43 | 721 | 62 | 1 replies; presence, descriptors and contracts are local under R7 |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | 100 subscriber declarations, zk2-shaped keys (64 B each) | 89.26 | 25865 | 8746 | 87 B per declaration toward the vehicle |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | 100 subscriber declarations, v1-shaped keys (52 B each) | 27.43 | 99 | 7388 | 74 B per declaration toward the vehicle |
+| RF class, 1 KB batches, @zk denied, ground as a client (R7) | 3 coverage gaps (2 s each), `@zk` denied | 22.16 | 780 | 828 | 536 B per gap, until the link is quiet again; 0 tokens seen by the ground |

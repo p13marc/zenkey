@@ -60,10 +60,24 @@ pub async fn spawn(args: &[String], wait: Duration) -> Result<Proc> {
 /// A router on a free loopback port, connected to `connect`.
 pub async fn router(connect: &[String]) -> Result<(Proc, String)> {
     let ep = format!("tcp/127.0.0.1:{}", zk2rt::config::free_port()?);
-    let mut args = vec!["router".to_owned(), "--listen".into(), ep.clone()];
+    Ok((router_with(std::slice::from_ref(&ep), connect, None).await?, ep))
+}
+
+/// A router listening on `listen`, connected to `connect`, with an optional
+/// `--extra-config` file (an ACL).
+pub async fn router_with(listen: &[String], connect: &[String], extra: Option<&std::path::Path>) -> Result<Proc> {
+    let mut args = vec!["router".to_owned()];
+    for l in listen {
+        args.push("--listen".into());
+        args.push(l.clone());
+    }
     for c in connect {
         args.push("--connect".into());
         args.push(c.clone());
     }
-    Ok((spawn(&args, Duration::from_secs(30)).await?, ep))
+    if let Some(p) = extra {
+        args.push("--extra-config".into());
+        args.push(p.display().to_string());
+    }
+    spawn(&args, Duration::from_secs(30)).await
 }

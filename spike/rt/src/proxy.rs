@@ -20,18 +20,31 @@ pub struct Shape {
     pub bytes_per_s: Option<u64>,
 }
 
-/// Copies `r` to `w` through the shape: each chunk leaves at its arrival
-/// time plus the delay, no faster than the cap.
-async fn pump<R, W>(mut r: R, mut w: W, shape: Shape, hole: Arc<AtomicBool>, count: Arc<AtomicU64>)
+/// Copies `r` to `w` through the shape. With a cap, the link behaves like
+/// a serial line: bytes leave in slices of about 50 ms of link time, each at
+/// its arrival time plus the delay and no faster than the cap, and the line
+/// buffers about 0.5 s of data (at least 512 B). A full buffer pushes back
+/// through TCP, so zenoh's own queues and congestion control apply. (An
+/// earlier version released whole 16 KB reads after their link time, which
+/// held small messages behind large ones and buffered up to 256 KB.)
+async fn pump<R, W>(mut r: R, mut w: W, shape: Shape, hole: Arc<AtomicBool>, count: Arc<AtomicU64>, tap: Option<Tap>)
 where
     R: AsyncReadExt + Unpin,
     W: AsyncWriteExt + Unpin,
 {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(tokio::time::Instant, Vec<u8>)>();
+    let (slice, depth) = match shape.bytes_per_s {
+        Some(bps) => {
+            let slice = usize::try_from(bps / 20).unwrap_or(usize::MAX).clamp(32, 16 * 1024);
+            let buffer = usize::try_from(bps / 2).unwrap_or(usize::MAX).max(512);
+            (slice, (buffer / slice).max(2))
+        }
+        None => (16 * 1024, 16),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(tokio::time::Instant, Vec<u8>)>(depth);
     // Both halves are futures of this one task, so aborting the task (a
     // cut) drops the sockets.
     let reader = async move {
-        let mut b = vec![0u8; 16 * 1024];
+        let mut b = vec![0u8; slice];
         loop {
             let n = match r.read(&mut b).await {
                 Ok(0) | Err(_) => break,
@@ -40,7 +53,7 @@ where
             if hole.load(Ordering::SeqCst) {
                 continue;
             }
-            if tx.send((tokio::time::Instant::now() + shape.delay, b[..n].to_vec())).is_err() {
+            if tx.send((tokio::time::Instant::now() + shape.delay, b[..n].to_vec())).await.is_err() {
                 break;
             }
         }
@@ -50,18 +63,32 @@ where
         while let Some((due, chunk)) = rx.recv().await {
             tokio::time::sleep_until(due.max(next_free)).await;
             if let Some(bps) = shape.bytes_per_s {
-                // The chunk occupies the link for len / bps seconds.
+                // The slice occupies the link for len / bps seconds.
                 let busy = Duration::from_secs_f64(chunk.len() as f64 / bps as f64);
                 next_free = tokio::time::Instant::now().max(next_free) + busy;
                 tokio::time::sleep_until(next_free).await;
             }
             count.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+            if let Some(t) = &tap {
+                t.lock().unwrap().extend_from_slice(&chunk);
+            }
             if w.write_all(&chunk).await.is_err() {
                 break;
             }
         }
     };
     tokio::join!(reader, writer);
+}
+
+/// Forwarded bytes kept for inspection (shaped proxies only).
+pub type Tap = Arc<std::sync::Mutex<Vec<u8>>>;
+
+/// A loopback socket with a small receive buffer, so the kernel does not
+/// hide a backlog in front of a capped link.
+fn small_rcvbuf() -> std::io::Result<tokio::net::TcpSocket> {
+    let s = tokio::net::TcpSocket::new_v4()?;
+    s.set_recv_buffer_size(4096)?;
+    Ok(s)
 }
 
 /// A running proxy from `listen` to `upstream` (`127.0.0.1:port`).
@@ -75,6 +102,12 @@ pub struct Proxy {
     pub up: Arc<AtomicU64>,
     pub down: Arc<AtomicU64>,
     conns: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    /// Connections accepted (a reconnect counts again).
+    accepted: Arc<AtomicU64>,
+    /// Every byte forwarded client → upstream, when shaped.
+    pub tap: Tap,
+    /// Every byte forwarded upstream → client, when shaped.
+    pub tap_down: Tap,
     _accept: JoinHandle<()>,
 }
 
@@ -86,7 +119,14 @@ impl Proxy {
 
     /// A proxy whose two directions are both shaped as `shape`.
     pub async fn shaped(upstream: String, shape: Shape) -> Result<Self> {
-        let l = TcpListener::bind("127.0.0.1:0").await?;
+        let capped = shape.bytes_per_s.is_some();
+        let l = if capped {
+            let s = small_rcvbuf()?;
+            s.bind("127.0.0.1:0".parse()?)?;
+            s.listen(64)?
+        } else {
+            TcpListener::bind("127.0.0.1:0").await?
+        };
         let port = l.local_addr()?.port();
         let cut = Arc::new(AtomicBool::new(false));
         let blackhole = Arc::new(AtomicBool::new(false));
@@ -94,22 +134,35 @@ impl Proxy {
         let conns: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
         let (c2, k2) = (cut.clone(), conns.clone());
         let (bh, u2, d2) = (blackhole.clone(), up.clone(), down.clone());
+        let accepted = Arc::new(AtomicU64::new(0));
+        let a2 = accepted.clone();
+        let (tap, tap_down): (Tap, Tap) = (Arc::default(), Arc::default());
+        let (t2, td2) = (tap.clone(), tap_down.clone());
         let accept = tokio::spawn(async move {
             while let Ok((inb, _)) = l.accept().await {
                 if c2.load(Ordering::SeqCst) {
                     drop(inb);
                     continue;
                 }
-                let Ok(out) = TcpStream::connect(&upstream).await else { continue };
+                a2.fetch_add(1, Ordering::Relaxed);
+                let out = if capped {
+                    let Ok(addr) = upstream.parse() else { continue };
+                    let Ok(sock) = small_rcvbuf() else { continue };
+                    let Ok(out) = sock.connect(addr).await else { continue };
+                    out
+                } else {
+                    let Ok(out) = TcpStream::connect(&upstream).await else { continue };
+                    out
+                };
                 let _ = inb.set_nodelay(true);
                 let _ = out.set_nodelay(true);
                 let (mut ir, mut iw) = inb.into_split();
                 let (mut or, mut ow) = out.into_split();
-                let (bh1, bh2, u3, d3) = (bh.clone(), bh.clone(), u2.clone(), d2.clone());
+                let (bh1, bh2, u3, d3, t3, td3) = (bh.clone(), bh.clone(), u2.clone(), d2.clone(), t2.clone(), td2.clone());
                 if shape.bytes_per_s.is_some() || !shape.delay.is_zero() {
                     let h = tokio::spawn(async move {
-                        let a = pump(ir, ow, shape, bh1, u3);
-                        let b = pump(or, iw, shape, bh2, d3);
+                        let a = pump(ir, ow, shape, bh1, u3, Some(t3));
+                        let b = pump(or, iw, shape, bh2, d3, Some(td3));
                         tokio::join!(a, b);
                     });
                     k2.lock().await.push(h);
@@ -160,7 +213,7 @@ impl Proxy {
                 k2.lock().await.push(h);
             }
         });
-        Ok(Self { port, cut, blackhole, up, down, conns, _accept: accept })
+        Ok(Self { port, cut, blackhole, up, down, conns, accepted, tap, tap_down, _accept: accept })
     }
 
     /// `tcp/127.0.0.1:<port>`, for a zenoh connect endpoint.
@@ -192,5 +245,11 @@ impl Proxy {
     #[must_use]
     pub fn bytes(&self) -> (u64, u64) {
         (self.up.load(Ordering::Relaxed), self.down.load(Ordering::Relaxed))
+    }
+
+    /// Connections accepted so far.
+    #[must_use]
+    pub fn accepted(&self) -> u64 {
+        self.accepted.load(Ordering::Relaxed)
     }
 }

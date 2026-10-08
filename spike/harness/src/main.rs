@@ -187,6 +187,9 @@ enum Cmd {
         results: PathBuf,
         #[arg(long)]
         quick: bool,
+        /// Only one group: scale, shapes, disruption or churn.
+        #[arg(long)]
+        only: Option<String>,
     },
     /// S2's default-handler liveliness GET child.
     #[command(hide = true)]
@@ -225,6 +228,50 @@ enum Cmd {
         results: PathBuf,
         #[arg(long, default_value = "../examples/zk2")]
         examples: PathBuf,
+        /// Only the profiles whose name contains this.
+        #[arg(long)]
+        only: Option<String>,
+    },
+    /// S3's ACL probe: two routers with an ACL file on both, one owner, one
+    /// reader; prints what crosses.
+    #[command(hide = true)]
+    S3AclProbe {
+        #[arg(long)]
+        acl: Option<PathBuf>,
+        #[arg(long)]
+        dir: PathBuf,
+        /// Through the shaping proxy at this many bytes per second (100 ms
+        /// one-way delay).
+        #[arg(long)]
+        bps: Option<u64>,
+        /// The reader also holds a liveliness subscriber (with history) on
+        /// `@zk`, as S3's ground does.
+        #[arg(long)]
+        live_sub: bool,
+        /// No ground router: the reader is a client of the vehicle router
+        /// across the link.
+        #[arg(long)]
+        client_link: bool,
+        /// Which routers get the ACL: both, rv (the vehicle) or rg.
+        #[arg(long, default_value = "both")]
+        side: String,
+        /// Extra `@zk` tokens the owner declares, for the byte count.
+        #[arg(long, default_value_t = 0)]
+        zk: usize,
+        /// Extra data queryables the owner declares, for the byte count.
+        #[arg(long, default_value_t = 0)]
+        data: usize,
+    },
+    /// S3's RF probe: N tokens across a 2,400 bit/s link, with optional
+    /// router config overrides on both routers; first view, then a replay.
+    #[command(hide = true)]
+    S3RfProbe {
+        #[arg(long, default_value_t = 100)]
+        tokens: usize,
+        #[arg(long, default_value_t = 300)]
+        bps: u64,
+        #[arg(long)]
+        extra: Option<PathBuf>,
     },
     /// S4, contract retrieval by hash against bad holders (#600).
     S4 {
@@ -403,10 +450,12 @@ async fn main() -> Result<()> {
         }
         Cmd::S13Detector { connect, namespace, bindings, secs } => s13::detector(connect, namespace, bindings, secs).await,
         Cmd::S13Clock { connect, speed } => s13::clock(connect, speed).await,
-        Cmd::S2 { results, quick } => s2::run(&results, quick).await,
+        Cmd::S2 { results, quick, only } => s2::run(&results, quick, only.as_deref()).await,
         Cmd::S14 { results } => s14::run(&results).await.map(|_| ()),
-        Cmd::S3 { results, examples } => s3::run(&results, &examples).await,
+        Cmd::S3 { results, examples, only } => s3::run(&results, &examples, only.as_deref()).await,
         Cmd::S15 { results, pico } => s15::run(&results, &pico).await,
+        Cmd::S3RfProbe { tokens, bps, extra } => s3::rf_probe(tokens, bps, extra.as_deref()).await,
+        Cmd::S3AclProbe { acl, dir, bps, live_sub, client_link, side, zk, data } => s3::acl_probe(acl.as_deref(), &dir, bps, live_sub, client_link, &side, zk, data).await,
         Cmd::S2Get { connect, subscribe_first } => s2::get_child(connect, subscribe_first).await,
         Cmd::S2Tokens { connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor } => {
             s2::tokens(connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor).await
