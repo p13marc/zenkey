@@ -23,7 +23,8 @@
 //! - [`schema`]: schema artifacts (protobuf through `protox`, JSON Schema)
 //!   and type resolution.
 //! - [`contract`]: the contract model: defaults expanded, types resolved,
-//!   every lint run.
+//!   every lint run; or read back from a bundle
+//!   ([`contract::Contract::from_bundle`], #611).
 //! - [`canonical`]: the canonical JSON form, its restrictions, and the
 //!   fingerprint.
 //! - [`bundle`]: the bundle container, built and verified Merkle-style.
@@ -57,3 +58,4 @@ pub mod slug;
 mod strict;
 pub mod template;
 mod toml10;
+mod unbundle;
