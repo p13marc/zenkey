@@ -277,6 +277,50 @@ def family_compat(root: Path) -> list[Result]:
     return out
 
 
+# -- examples/zk2 (not a fixture family: extra inputs) -----------------------
+
+def family_examples(root: Path) -> list[Result]:
+    """``examples/zk2/``: every contract (``<name>.v<major>.toml``) loads
+    with no finding at all, W107 included, and its built bundle verifies
+    with its fingerprint; every bundle under a ``.history`` directory there
+    passes the §9.7 history check."""
+    import re
+
+    from . import bundle
+    from .contract import load_contract
+    from .history import check_history
+
+    ex = root.parent.parent / "examples" / "zk2"
+    if not ex.is_dir():
+        print(f"note: {ex} not found; examples skipped", file=sys.stderr)
+        return []
+    out = []
+    for path in sorted(ex.rglob("*.toml")):
+        if ".history" in path.parts or not re.fullmatch(r".+\.v[0-9]+\.toml", path.name):
+            continue
+        rel = path.relative_to(ex).as_posix()
+        c = load_contract(path, check_file_name=True, spec_dir=root.parent)
+        ok = not c.diagnostics
+        out.append((rel, ok, "" if ok else "; ".join(f"{d.code} {d.message}" for d in c.diagnostics)))
+        if not c.valid:
+            continue
+        try:
+            data = bundle.build(c)
+        except NotImplementedError as e:
+            out.append((f"{rel} (bundle)", False, str(e)))
+            continue
+        try:
+            v = bundle.verify(data, c.fingerprint)
+            out.append((f"{rel} (bundle round trip)", v.fingerprint == c.fingerprint, ""))
+        except bundle.BundleError as e:
+            out.append((f"{rel} (bundle round trip)", False, e.tag))
+    histories = sorted(p for p in ex.rglob(".history") if p.is_dir())
+    for h in histories:
+        problems = check_history(h)
+        out.append((h.relative_to(ex).as_posix(), not problems, "" if not problems else str(problems)))
+    return out
+
+
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "keys": family_keys,
     "slugs": family_slugs,
@@ -288,6 +332,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "descriptors": family_descriptors,
     "errors": family_errors,
     "compat": family_compat,
+    "examples": family_examples,
 }
 
 

@@ -143,6 +143,16 @@ def _holds_datetime(v: Any) -> bool:
     return False
 
 
+def _beyond_i64(v: Any) -> bool:
+    if isinstance(v, int) and not isinstance(v, bool):
+        return not -(2**63) <= v < 2**63
+    if isinstance(v, dict):
+        return any(_beyond_i64(x) for x in v.values())
+    if isinstance(v, list):
+        return any(_beyond_i64(x) for x in v)
+    return False
+
+
 def _gates(value: Any) -> list[str]:
     if value is None:
         return []
@@ -175,6 +185,12 @@ class _Loader:
             doc = tomllib.loads(text)
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
             self.diag("E000", f"not TOML: {e}")
+            return None
+        if _beyond_i64(doc):
+            # TOML 1.0: "If an integer cannot be represented losslessly [as a
+            # 64-bit signed integer], an error must be thrown." Python's
+            # tomllib does not; this reader does (SPEC-FINDINGS F-15).
+            self.diag("E000", "not TOML 1.0: an integer beyond 64 bits")
             return None
         errors = Checker(load_schema("contract.schema.json", self.spec_dir)).errors(doc)
         if errors:
