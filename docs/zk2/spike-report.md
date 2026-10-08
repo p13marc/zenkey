@@ -51,7 +51,7 @@ sections below.
 | U11 | Descriptor dynamics | Put + GET | S2 | **holds**: a re-mint per second over 10k tokens costs 0.7 KiB/s; make-before-break left no gap |
 | U12 | Redundancy | Diagnose only | S6 | **diagnose** (the token check) **and delegate** to `redundancy.v1` |
 | U13 | A constrained conformance level | Define it | S15, S3 | **define it**: wall-clock timestamps with catch-up, a literal prefix, gateway bundles for receive limits (S15); a link profile of about 1 KB zenoh batches at radio rates, `@stream` denied across the face, the far side attached as a client (S3) |
-| R7, D15 | Bindings across a constrained face | Deny `@zk` on the face; bind statically | S3 | **restate the mechanism**: a far-side session or gateway attaches as a client (17 B per bring-up); a site with its own router is r4's U23. On a router-to-router link a deny hides presence, but the denied declarations still cross (11.1 KB). [Draft upstream report](upstream/acl-denied-declarations-cross.md) |
+| R7, D15 | Bindings across a constrained face | Deny `@zk` on the face; bind statically | S3 | **restate the mechanism**: a far-side session or gateway attaches as a client (17 B per bring-up); a far site with its own router is placed in a `gateway.south` region of the near router (506 B for 200 denied tokens; U23, measured after r4). On a router-to-router link a deny hides presence, but the denied declarations still cross (11.1 KB). [Draft upstream report](upstream/acl-denied-declarations-cross.md) |
 | U14 | `default_permission: deny` as a MUST | SHOULD | S14 | **SHOULD** confirmed: deny gives P3 outright; under allow, D13 + R6 |
 | U15 | The storage-manager position | With U1 | S5 | no storage on owners' state; an archive backend must not resurrect a deleted key (r4). The draft upstream report is not filed |
 | U16, U19 | The `events` kind token | Yes (D3) | S5 | union replay works; the `retention` bound needs a time-series backend |
@@ -640,6 +640,27 @@ router-to-router link, bytes vehicle→ground):
 The ACL controls what the far side *sees*, not what the link *carries*. On a
 client link, declarations travel only toward interests, which is what makes
 the deny effective.
+
+**U23 addendum** (2026-10-08, after the spec's acceptance; `s3/u23.sh`, raw
+data `spike-results/s3-probes/u23.log`). A far side with its own router:
+the ground router names its region (`region_name = "ground"`), and the
+vehicle router places it in a south region (zenoh 1.10.1 `gateway.south`).
+The vehicle router keeps `auto`'s rule for its own clients and peers.
+
+| Setup (200 tokens, bytes vehicle→ground) | Bytes | Denied keys in the bytes | Data crosses |
+|---|---|---|---|
+| Router to router, no deny | 11,791 | 201 (none denied) | yes |
+| Router to router, `@zk` deny | 11,330 | **201** | yes |
+| Far router south, no deny | 10,425 | 201 (none denied) | yes |
+| **Far router south, `@zk` deny** | **506** | **0** | yes |
+| Far router south, the deny on the vehicle router only | 515 | 0 | yes |
+| Far router south, the deny, and a ground subscriber on `@zk` | 506 | 0 | yes |
+| Far router south, 200 data queryables, a deny on their keys | 544 | 0 | yes |
+
+**What it shows.** In a south region, the near router sends the far router
+declarations on interest, as it does to a client, and the deny then keeps
+the denied families off the link. The far site keeps a router of its own,
+with its own clients, and U23 is settled: spec amendment 0.2 (§8.5).
 
 **For r4:**
 - **U-D:** confirmed on a link. `@stream` stays off ambient selectors.

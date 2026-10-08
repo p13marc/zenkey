@@ -1,0 +1,56 @@
+== --zk 200
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 11791 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== --zk 200 --acl results/s3-probes/acl-deny-zk.json
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 11330 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== --zk 200 --south
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 10425 vehicle→ground, 401 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== --zk 200 --south --acl results/s3-probes/acl-deny-zk.json
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 506 vehicle→ground, 401 ground→vehicle
+in the vehicle→ground bytes: 0 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"
+== --zk 200 --south --acl results/s3-probes/acl-deny-zk.json --side rv
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 515 vehicle→ground, 401 ground→vehicle
+in the vehicle→ground bytes: 0 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"
+== --zk 200 --south --acl results/s3-probes/acl-deny-zk.json --live-sub
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 506 vehicle→ground, 410 ground→vehicle
+in the vehicle→ground bytes: 0 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"
+== --data 200 --south
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 8660 vehicle→ground, 401 ground→vehicle
+in the vehicle→ground bytes: 1 × "@zk/instance", 200 × "camera.v1/state/info", 111 × "svc-1"
+== --data 200 --south --acl results/s3-probes/acl-deny-data.json
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 544 vehicle→ground, 410 ground→vehicle
+in the vehicle→ground bytes: 1 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"

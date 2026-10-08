@@ -7,7 +7,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 
 | Path | What it is | Source |
 |---|---|---|
-| [`core.md`](core.md) | **The normative core**, version 0.1, accepted on 2026-10-08 (#606). Every MUST cites a fixture or a scenario. | written from r4 |
+| [`core.md`](core.md) | **The normative core**, version 0.2 (0.1 accepted on 2026-10-08, #606; amended for U23). Every MUST cites a fixture or a scenario. | written from r4 |
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 1. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |

@@ -53,6 +53,11 @@ that face. Today it is sent anyway, which has two consequences:
 - **Disclosure:** the key names under a denied expression reach the other
   side of the face.
 
+**What works** (measured 2026-10-08, after this draft): placing the far
+router in a `gateway.south` region of the near router. Declarations then
+cross on interest, and the same deny keeps every denied key off the link
+(506 B for 200 tokens, 0 keys). zk2 adopts that shape (spec 0.2, §8.5).
+
 **Not identified:** the mechanism. The key strings may travel as key
 expression declarations (wire mappings) ahead of the filtered declaration, or
 the filter may apply only at the receiving router. A client link carries only
