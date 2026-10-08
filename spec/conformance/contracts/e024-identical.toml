@@ -1,0 +1,18 @@
+# Two listed files with one id (§9.4): `same-b.json` is `same-a.json` with
+# its members reordered and its whitespace removed, so their JCS bytes, and
+# so their ids, are equal. E024 once, on the later file, which is not
+# loaded, as a later file with a taken stem is not. Without the rule, the
+# canonical form would list the one id under one name, and the bundle
+# `$ref` `same-a.json#/$defs/Point` could name a stem no artifact has
+# (§9.6). `refs-same.json` loads, and its `$ref` resolves.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/same-a.json", "schemas/same-b.json", "schemas/refs-same.json"]
+
+[resources.track]
+kind = "stream"
+type = "json:refs-same#Track"

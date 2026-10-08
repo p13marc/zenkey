@@ -5,6 +5,11 @@
         "D000"
       ]
     },
+    "d000-cardinality-range": {
+      "codes": [
+        "D000"
+      ]
+    },
     "d000-minor-float": {
       "codes": [
         "D000"
@@ -66,6 +71,11 @@
         "D006"
       ]
     },
+    "d007-cardinality-max": {
+      "codes": [
+        "D007"
+      ]
+    },
     "d007-not-templated": {
       "codes": [
         "D007"
@@ -86,7 +96,19 @@
         "D008"
       ]
     },
+    "d008-malformed-twice": {
+      "codes": [
+        "D008",
+        "D008",
+        "D008"
+      ]
+    },
     "d008-twice": {
+      "codes": [
+        "D008"
+      ]
+    },
+    "d008-two-repeated-values": {
       "codes": [
         "D008"
       ]
@@ -106,12 +128,24 @@
         "D009"
       ]
     },
+    "d010-malformed-twice": {
+      "codes": [
+        "D010",
+        "D010",
+        "D010"
+      ]
+    },
     "d010-profile": {
       "codes": [
         "D010"
       ]
     },
     "d010-twice": {
+      "codes": [
+        "D010"
+      ]
+    },
+    "d010-two-repeated-values": {
       "codes": [
         "D010"
       ]

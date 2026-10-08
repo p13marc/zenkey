@@ -49,6 +49,10 @@
       "error": "shape",
       "ok": false
     },
+    "ref-names-no-artifact.bundle.json": {
+      "fingerprint": "sha256:7765aa53db06c50e99223f132d01c55d7883222a2efd8c19ca507daa9c2a8a03",
+      "ok": true
+    },
     "restrictions.bundle.json": {
       "error": "restrictions",
       "ok": false
