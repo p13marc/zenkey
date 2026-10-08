@@ -13,10 +13,14 @@ each rule with a name. This module implements those tables and reports the
 reference names in its reasons ("Rule names stay informative", CHANGELOG
 0.3). Before 0.3, zk2py classed every unlisted change as review; the
 amended tables now decide them, and where zk2py's earlier guess differed
-(required → optional, a required resource added, best_effort → reliable,
-``fanout`` forbidden → allowed, ``replies`` many → one, a role removed, a
-role required → optional, ``deprecated`` added, a ``media_param`` change,
-``items`` toggles) it now follows the table.
+it now follows the table. The twelve changes, listed in the README, are:
+- required → optional, a required resource added, a parameter type changed,
+  an encoding changed: review → breaking;
+- best_effort → reliable, ``fanout`` forbidden → allowed, ``replies`` many
+  → one, a role removed, a role required → optional, ``deprecated`` added:
+  review → compatible;
+- a raw ``media_param`` changed: breaking → review;
+- ``items`` toggled between absent, true and false: breaking → compatible.
 
 How this module reads "both directions" (SPEC-FINDINGS F-29): each rule
 classifies a transition *from an earlier revision to the candidate*, and its

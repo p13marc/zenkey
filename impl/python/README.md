@@ -58,14 +58,14 @@ case name. It exits with:
 | keys | §1.1, §1.2 | `keys`, `lexical` | parse every key in `keys.json`, refuse the others, and build each accepted key back to the same string |
 | slugs | §1.4 | `slug` | slug and unslug, round trips, and refusal of non-canonical chunks |
 | templates | §2.2 | `templates` | match, then rank, with unslugged bindings |
-| contracts | §9.1–§9.5, App. D | `contract`, `schemas`, `shape`, `protoc`, `jcs` | the exact sorted codes, the canonical JCS bytes and the fingerprint of every fixture. The protobuf well-known types are included. |
+| contracts | §9.1–§9.5, App. D | `contract`, `schemas`, `shape`, `protoc`, `jcs` | the exact sorted codes, the canonical JCS bytes and the fingerprint of every fixture. The protobuf well-known types and the five `e000-toml11-*` cases (0.4) are included. |
 | sets | §9.2 | `sets` | E035, E036 |
 | bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte. |
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
-| compat | §9.7, §9.8 | `compat` | **all 47 cases**, evaluated: the contract table, JSON Schema payloads, protobuf payloads (with `same_revision`), and the FULL_TRANSITIVE cases (with each pairwise `against`). |
-| examples | — | | every `examples/zk2/**/<name>.v<major>.toml` loads with **no finding at all**, W107 included, and its built bundle verifies. Every `.history` directory under `examples/zk2/` would pass the §9.7 check; none exists at this revision. |
+| compat | §9.7, §9.8 | `compat` | **all 70 cases** (spec 0.3), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
+| examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
 
 The result at the time of writing:
 
@@ -73,20 +73,41 @@ The result at the time of writing:
 keys           51 passed     0 failed
 slugs          42 passed     0 failed
 templates      10 passed     0 failed
-contracts      59 passed     0 failed
+contracts      64 passed     0 failed
 sets            3 passed     0 failed
 bundles        17 passed     0 failed
 history         7 passed     0 failed
 descriptors    26 passed     0 failed
 errors         24 passed     0 failed
-compat         47 passed     0 failed
-examples       48 passed     0 failed
-total         334 passed     0 failed
+compat         70 passed     0 failed
+examples       97 passed     0 failed
+total         411 passed     0 failed
 ```
 
-`core.md` §0 says that no implementation checks the `compat/` expected
-values yet. zk2py checks every one and agrees with all of them, using its
-own reading of §9.8 (SPEC-FINDINGS F-29 to F-36).
+The figures are against `core.md` 0.4.
+
+**The classifier since 0.3.** Against 0.2, zk2py classed every change §9.8
+did not list as review. 0.3 lists them, so zk2py now follows the tables,
+and its reasons carry the reference rule names (`explicit_set`,
+`reserved_reused`, …). Twelve earlier guesses changed:
+
+| Change | 0.2 guess | 0.3 rule |
+|---|---|---|
+| required → optional | review | breaking |
+| a required resource added | review | breaking |
+| a template parameter's type changed | review | breaking |
+| the payload or attachment encoding changed | review | breaking |
+| best_effort → reliable | review | compatible |
+| `fanout` forbidden → allowed | review | compatible |
+| `replies` many → one | review | compatible |
+| a role removed | review | compatible |
+| a role required → optional | review | compatible |
+| `deprecated` added | review | compatible |
+| a raw `media_param` changed | breaking | review |
+| `items` toggled between absent, `true` and `false` | breaking | compatible |
+
+Resources are still paired by template, not "by kind token and template",
+because the explicit rows need it (F-40).
 
 ## What it does not cover
 
@@ -97,8 +118,10 @@ own reading of §9.8 (SPEC-FINDINGS F-29 to F-36).
   documents `views.document` references (F-26). The builder refuses such a
   contract, as the reference builder does. Verification of extras is
   implemented.
-- **The TOML 1.1 lint** that §9.1 says is owed. `tomllib` is a strict TOML
-  1.0 reader, so a 1.1-only contract is E000 here (F-16).
+- **A TOML 1.1 parser.** §9.1 (0.4) makes 1.1-only syntax E000, and
+  `tomllib` is a strict TOML 1.0 reader that refuses all five constructs.
+  zk2py probes the reader at load and refuses to run on a `tomllib` that
+  reads 1.1 (F-41).
 - **W107** runs only on request (`load_contract(..., check_file_name=True)`),
   as the fixtures load without it. The examples family turns it on.
 
