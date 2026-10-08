@@ -1,11 +1,12 @@
 # zk2 spike report
 
-**Status: every spike has run (2026-10-08).** The spike measures r3's claims
-before the core is specified (epic #585: "measure the network half before
-specifying it"). Each section below is filled by its issue. The decisions
-table is settled in #605, which produces r4.
+**Status: complete (2026-10-08).** The spike measured r3's claims before the
+core is specified (epic #585: "measure the network half before specifying
+it"). Each section below was filled by its issue. The decisions table was
+settled in #605, and r4 (`architecture.md` §0.4) folds it in.
 
-Two draft upstream reports are waiting for the maintainer's go-ahead:
+Two draft upstream reports are kept as records. The maintainer decided on
+2026-10-08 not to file them:
 - [the storage manager](upstream/storage-manager-outdated-guard.md) (S5);
 - [ACL denies on router links](upstream/acl-denied-declarations-cross.md) (S3).
 
@@ -39,10 +40,10 @@ sections below.
 | U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | **defaults hold**; `real_time` + express lost 0.6–4 % at 1–5 kHz with no gain, so express stays opt-in (S9) |
 | U-F | Decodability: two blessed kinds + others | As in §3.9 | S9 | **holds**: protobuf 126 ns, JSON 0.9 µs per message; raw over SHM for frames |
 | U-G | Many-reply operations in the core | Yes (O6) | S6 | **holds**; consolidation `None` is necessary (`Latest` keeps 1 of 10) |
-| U1 | State: producer + storage merged by timestamp | Merge | S5, S12 | **not met**: 10 of 42 wrong (4 from a storage-manager bug). Recommend an owner-authoritative GET, storage as `archive.v1`, and the upstream fix |
+| U1 | State: producer + storage merged by timestamp | Merge | S5, S12 | **not met**: 10 of 42 wrong (4 from a storage-manager bug). **Decided 2026-10-08:** an owner-authoritative GET, with last-known state in `archive.v1` (r4 §3.6) |
 | U2 | Clock discipline | HLC MUST + hold writes past the last stored timestamp | S5, S12 | **catch-up confirmed**; add a bound on clocks *ahead* (S12) |
 | U3 | Tombstone window | Core default, annotation override | S5 | 60 s default, with replication required for storages on state; ~100 B per tombstone |
-| U4 | `complete` operation queryables | Keep | S6 | keep `complete`, but **O1 is not at-most-once across routers**: reword it |
+| U4 | `complete` operation queryables | Keep | S6 | keep `complete`, but **O1 is not at-most-once across routers**. **Decided 2026-10-08:** O1 reworded (r4 §3.7) |
 | U5 | Token layout | Instance + interface tokens | S2 | **holds** (A = B per token); add a **presence budget**: discovery 1.2–1.9 s at 10k tokens, 46–49 s or never at 50k |
 | U6 | Mandatory one-chunk `system` | Keep | S8 | on paper: holds ([`examples/zk2/shapes.md`](../../examples/zk2/shapes.md), #604) |
 | U7 | Bundle stability | Build once, embed, retention rule | S7 | **holds**: protox = protoc byte for byte; normalized identity for `buf` |
@@ -50,9 +51,9 @@ sections below.
 | U11 | Descriptor dynamics | Put + GET | S2 | **holds**: a re-mint per second over 10k tokens costs 0.7 KiB/s; make-before-break left no gap |
 | U12 | Redundancy | Diagnose only | S6 | **diagnose** (the token check) **and delegate** to `redundancy.v1` |
 | U13 | A constrained conformance level | Define it | S15, S3 | **define it**: wall-clock timestamps with catch-up, a literal prefix, gateway bundles for receive limits (S15); a link profile of about 1 KB zenoh batches at radio rates, `@stream` denied across the face, the far side attached as a client (S3) |
-| R7, D15 | Bindings across a constrained face | Deny `@zk` on the face; bind statically | S3 | **restate the mechanism**: the far side attaches as a client (17 B per bring-up). On a router-to-router link a deny hides presence, but the denied declarations still cross (11.1 KB). [Draft upstream report](upstream/acl-denied-declarations-cross.md) |
+| R7, D15 | Bindings across a constrained face | Deny `@zk` on the face; bind statically | S3 | **restate the mechanism**: a far-side session or gateway attaches as a client (17 B per bring-up); a site with its own router is r4's U23. On a router-to-router link a deny hides presence, but the denied declarations still cross (11.1 KB). [Draft upstream report](upstream/acl-denied-declarations-cross.md) |
 | U14 | `default_permission: deny` as a MUST | SHOULD | S14 | **SHOULD** confirmed: deny gives P3 outright; under allow, D13 + R6 |
-| U15 | The storage-manager position | With U1 | S5 | **require a fixed version** (draft upstream report) |
+| U15 | The storage-manager position | With U1 | S5 | no storage on owners' state; an archive backend must not resurrect a deleted key (r4). The draft upstream report is not filed |
 | U16, U19 | The `events` kind token | Yes (D3) | S5 | union replay works; the `retention` bound needs a time-series backend |
 | U18 | Device-as-service at SNMP scale | Device-as-service | S2 | **holds at 5,000 devices** (15k tokens, 3.3 s); members (D9b) above that |
 | U20 | `@state` for large populations | Yes (D3) | S2, S5 | **confirmed**: per-entity tokens break down between 15k and 50k (S2); 100k `@state` keys read in 248–390 ms (S5) |
@@ -887,7 +888,8 @@ fingerprint. JSON-name changes then never break a running system; they only
 relabel a tool's display. The recommendation is **WIRE** semantics with
 renumber detection for compatibility, and JSON-name and enum-name changes as
 **review**. That also makes adding an enum value compatible, as it is for
-binary readers.
+binary readers. **Decided 2026-10-08:** WIRE with renumber detection (r4
+§3.11).
 
 **The zk2 JSON Schema subset** (r3 §3.9, D11). Its keywords are `type`,
 `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`,

@@ -1,7 +1,8 @@
 # Draft upstream report: an ACL deny does not keep declarations off a router-to-router link
 
-**Status: a draft, not filed.** Filing it in eclipse-zenoh/zenoh waits for the
-maintainer's go-ahead (#599, #605). The measurements are
+**Status: not filed.** The maintainer decided on 2026-10-08 not to file it
+(#599, #605). It is kept as a record of zenoh 1.10.1's behaviour, which r4
+designs around. The measurements are
 [`../spike-report.md`](../spike-report.md) § S3. The raw data is
 [`../spike-results/s3-probes/`](../spike-results/s3-probes/), and the probe is
 `spike s3-acl-probe` on branch `zk2-spike`.

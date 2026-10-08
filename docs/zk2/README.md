@@ -19,16 +19,17 @@ observability shape.
 | [`r1-analysis.md`](r1-analysis.md) | Part 1: the review request sent to the brief's author. Part 2: **r1**, an independent analysis of the brief against the v1 repository and prior art. |
 | [`r1-review.md`](r1-review.md) | The brief author's review of r1. Every ruling is kept; the wording is condensed. |
 | [`r2.md`](r2.md) | **r2**: r1 revised by that review. Adds the `zk2/` grammar major, exclusive-by-default ownership, normative state timestamps, hash-verified contract retrieval, behavioural profiles. |
-| [`architecture.md`](architecture.md) | **The design of record: r3.3.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). r3.3 folds in the gaps found by mapping their contracts (D1–D25). |
-| [`spike-report.md`](spike-report.md) | **The spike report** (in progress): the environment, the decisions table that #605 settles, and one section per spike, filled by its issue. Raw data is in [`spike-results/`](spike-results/), copied from branch `zk2-spike`. |
+| [`architecture.md`](architecture.md) | **The design of record: r4.** r3 redesigned the data plane from twelve use cases. r3.1 is the issue review (decisions, sourced corrections). r3.2 is the check against the three adopters (ZenSight, zenoh-modem, tcgui). r3.3 folds in the gaps found by mapping their contracts (D1–D26). r4 folds in the spike: the maintainer's decisions of 2026-10-08, and E1–E19 (§0.4). |
+| [`spike-report.md`](spike-report.md) | **The spike report** (complete, 2026-10-08): the environment, the decisions table that r4 settles, and one section per spike. Raw data is in [`spike-results/`](spike-results/), copied from branch `zk2-spike` (tag `zk2-spike-final`). |
+| [`upstream/`](upstream/) | Two draft reports on zenoh 1.10.1 behaviour (the storage manager, S5; ACL denies on router links, S3). **Not filed** (maintainer, 2026-10-08). They are kept as records. |
 
 ## Rules for this directory
 
 - **The r-number moves only through a reviewed revision.** Every revision
   carries a "what changed since rN" table, as r2 and r3 did.
-- **Point releases keep section numbers.** r3.x keeps r3's section numbers,
-  so issue citations of the form `r3 §x` stay valid until r4. r4 comes from
-  the spike report (#605).
+- **Section numbers are stable.** r3.x and r4 keep r3's section numbers,
+  so issue citations of the form `r3 §x` stay valid. r4 added §0.4 and
+  nothing else at the top level.
 - **The spike's code is throwaway.** It lives on branch `zk2-spike` and is
   never merged. Its results and `spike-report.md` land here by docs PRs.
 
