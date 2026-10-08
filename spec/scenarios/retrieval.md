@@ -24,8 +24,9 @@ completion cost 1,001 ms.*
 
 **Steps.**
 1. Every holder is corrupt.
-2. The nearest holder can send only 4 KB, and the bundle is 83 KB. A gateway
-   holder sits behind the second router.
+2. The nearest participant is a constrained device that cannot receive or
+   hold the 83 KB bundle, so it holds none. A gateway holder sits behind
+   the second router.
 
 **Expected.**
 1. After the retry with `All`, the contract is reported unavailable. No

@@ -24,6 +24,12 @@
       ],
       "fingerprint": null
     },
+    "e010-literal-x": {
+      "codes": [
+        "E010"
+      ],
+      "fingerprint": null
+    },
     "e010-template": {
       "codes": [
         "E010"
@@ -92,6 +98,12 @@
       ],
       "fingerprint": null
     },
+    "e020-datetime": {
+      "codes": [
+        "E020"
+      ],
+      "fingerprint": null
+    },
     "e021-shape": {
       "codes": [
         "E021"
@@ -99,6 +111,12 @@
       "fingerprint": null
     },
     "e022-epoch": {
+      "codes": [
+        "E022"
+      ],
+      "fingerprint": null
+    },
+    "e022-two-epochs": {
       "codes": [
         "E022"
       ],
@@ -143,6 +161,12 @@
       ],
       "fingerprint": null
     },
+    "e028-schema-integer": {
+      "codes": [
+        "E028"
+      ],
+      "fingerprint": null
+    },
     "e029-schema": {
       "codes": [
         "E029",
@@ -180,6 +204,12 @@
     "e033-summary": {
       "codes": [
         "E033"
+      ],
+      "fingerprint": null
+    },
+    "e034-defaults-depth": {
+      "codes": [
+        "E034"
       ],
       "fingerprint": null
     },

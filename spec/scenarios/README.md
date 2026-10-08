@@ -15,7 +15,7 @@ the runtime (#610 onward).
 | [`presence.md`](presence.md) | §1.5 epochs, §3.3 the descriptor, §8.1–§8.2 |
 | [`bindings.md`](bindings.md) | §3.2: R1–R6 |
 | [`retrieval.md`](retrieval.md) | §8.4 |
-| [`types.md`](types.md) | §7.2 |
+| [`types.md`](types.md) | §2.4 QoS, §7.1–§7.2 |
 | [`security.md`](security.md) | §11 |
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
 

@@ -108,6 +108,10 @@ pub struct RequireEntry {
     pub declared_by: Option<String>,
     /// Service addresses, `<system>/<service>`; either chunk may be `*`.
     pub bindings: Vec<String>,
+    /// Template parameters bound by the binding (R2): parameter name →
+    /// `self.system`, `self.service`, or a value.
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
 }
 
 /// Parses and checks a descriptor. `contracts` are the contracts it is
@@ -255,6 +259,13 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             bad.push(format!(
                 "declared_by {by:?} is not one of this instance's interfaces"
             ));
+        }
+        for (k, v) in &r.params {
+            if !is_ident(k) || v.is_empty() {
+                bad.push(format!(
+                    "parameter binding {k:?} = {v:?} is not <name> = a non-empty value"
+                ));
+            }
         }
         for b in &r.bindings {
             let ok = b.split_once('/').is_some_and(|(sys, svc)| {

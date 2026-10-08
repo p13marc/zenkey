@@ -41,7 +41,9 @@ impl Segment {
 pub enum TemplateError {
     #[error("template {0:?} is empty or has an empty segment")]
     Empty(String),
-    #[error("template {0:?}: literal segment {1:?} is not a plain chunk")]
+    #[error(
+        "template {0:?}: literal segment {1:?} is not a plain chunk, or starts with the slug prefix x-"
+    )]
     Literal(String, String),
     #[error("template {0:?}: parameter name {1:?} is not [a-z][a-z0-9_]*")]
     ParamName(String, String),
@@ -83,7 +85,7 @@ impl Template {
                 } else {
                     Segment::Param(inner.to_owned())
                 }
-            } else if is_plain_chunk(p) {
+            } else if is_plain_chunk(p) && !p.starts_with("x-") {
                 Segment::Literal((*p).to_owned())
             } else {
                 return Err(TemplateError::Literal(raw.to_owned(), (*p).to_owned()));

@@ -138,6 +138,14 @@
           "description": "The required interface, `<name>.v<major>`.",
           "type": "string"
         },
+        "params": {
+          "description": "Template parameters bound by the binding (R2): parameter name →\n`self.system`, `self.service`, or a value.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
         "role": {
           "description": "The role's name, `[a-z][a-z0-9_]*`.",
           "type": "string"

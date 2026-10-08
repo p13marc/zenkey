@@ -148,7 +148,10 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     ("E001", "interface name or major invalid"),
     ("E002", "a `uses` entry is not a profile id <name>.v<major>"),
-    ("E010", "template syntax"),
+    (
+        "E010",
+        "template syntax (a literal is a plain chunk not starting with x-)",
+    ),
     (
         "E011",
         "template parameters and the `params` table disagree",
@@ -181,12 +184,12 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     (
         "E020",
-        "annotation key is not <profile>.<key>, or its profile is not in `uses`",
+        "annotation key is not <profile>.<key>, its profile is not in `uses`, or its value holds a TOML datetime",
     ),
     ("E021", "two templates under one kind token share a shape"),
     (
         "E022",
-        "`epoch` does not name one single-chunk parameter of the template",
+        "`epoch` does not name one single-chunk parameter of the template, or a second template of the interface declares `epoch`",
     ),
     ("E023", "a type reference does not resolve"),
     (
@@ -199,7 +202,10 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     ("E026", "`rate` or `retention` syntax"),
     ("E027", "a canonical string is not printable ASCII"),
-    ("E028", "a canonical integer is outside ±(2^53−1)"),
+    (
+        "E028",
+        "an integer in the canonical contract or a JSON Schema artifact is outside ±(2^53−1)",
+    ),
     (
         "E029",
         "a schema file is missing, unreadable, or does not compile",

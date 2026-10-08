@@ -1,7 +1,8 @@
 # Operation scenarios (core §5, §6)
 
-Common setup: an owner `h1/tc` exposing operation `@op/interfaces/{if}/set`
-(exclusive, fanout forbidden) and `@op/diagnostics` (fanout allowed).
+Common setup: three hosts `h1`, `h2`, `h3`, each with a service `tc`
+exposing `@op/interfaces/{if}/set` (exclusive, fanout forbidden) and
+`@op/diagnostics` (fanout allowed).
 
 ## §1 At most once, while one instance serves (O1)
 

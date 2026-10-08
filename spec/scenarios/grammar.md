@@ -11,12 +11,16 @@ and its instance token.
    resource.
 2. The consumer GETs `zk2/g/**`.
 3. The consumer runs a liveliness GET on `zk2/g/**`, then on `zk2/g/*/@zk/**`.
+4. The consumer subscribes to and GETs `zk2/*/*/*/state/**`.
 
 **Expected.**
 1. The consumer receives the `stream`, `state` and `events` samples only.
-2. The GET reaches the state queryable and never the `@op` queryable.
+2. The GET reaches the plain state queryable. It never reaches the `@state`
+   queryable, the `@op` queryable, or the descriptor's queryable at the
+   instance key.
 3. The first liveliness GET returns no token; the second returns the
    instance token.
+4. Plain state only: no `stream`, `events` or `@state` sample or reply.
 
 *Spike S1: passed, also under a namespace.*
 

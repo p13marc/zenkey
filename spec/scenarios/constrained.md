@@ -49,3 +49,12 @@ crosses. With 1 KB batches, presence arrives at link speed: about 7 KB in
 
 *Spike S3: default 85 s with 4 reconnects in the probe, never in the full
 profile; 1 KB 24 s.*
+
+## §5 A one-fragment descriptor (§3.3, §12)
+
+**Setup.** A zenoh-pico owner with the default `Z_FRAG_MAX_SIZE` of 4 KB.
+
+**Expected.** Its descriptor is under 4 KB, and a GET of its instance key
+returns it whole.
+
+*Spike S15: the pico's descriptor was answered.*

@@ -266,6 +266,13 @@ impl SchemaSet {
                     continue;
                 }
             };
+            if let Some(n) = unsafe_integer(&doc) {
+                report.push(Diagnostic::error(
+                    "E028",
+                    at.clone(),
+                    format!("{n} is outside ±(2^53−1), so the artifact has no portable id"),
+                ));
+            }
             let mut refused = std::collections::BTreeSet::new();
             refused_keywords(&doc, &mut refused);
             for k in refused {
@@ -590,6 +597,25 @@ pub fn sha256_id(bytes: &[u8]) -> String {
         let _ = write!(s, "{b:02x}");
     }
     s
+}
+
+/// The first integer outside ±(2^53−1) in a JSON document, if any: JCS
+/// implementations disagree beyond it (Python's `rfc8785` raises).
+fn unsafe_integer(v: &Value) -> Option<String> {
+    const MAX: u64 = (1 << 53) - 1;
+    match v {
+        Value::Number(n) => {
+            let out = match (n.as_u64(), n.as_i64()) {
+                (Some(u), _) => u > MAX,
+                (None, Some(i)) => i.unsigned_abs() > MAX,
+                _ => false,
+            };
+            out.then(|| n.to_string())
+        }
+        Value::Array(a) => a.iter().find_map(unsafe_integer),
+        Value::Object(m) => m.values().find_map(unsafe_integer),
+        _ => None,
+    }
 }
 
 /// The zk2 JSON Schema subset (spec `core.md` §7.3): the keywords a schema

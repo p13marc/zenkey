@@ -226,10 +226,17 @@ fn bundles() {
     let mut seen = 0;
     for (name, w) in cases {
         let bytes = std::fs::read(dir.join(name)).unwrap();
-        let got = match Bundle::verify(&bytes) {
+        let verified = match w.get("expect_fingerprint").and_then(Value::as_str) {
+            Some(fp) => Bundle::verify_expecting(&bytes, &Fingerprint::parse(fp).unwrap()),
+            None => Bundle::verify(&bytes),
+        };
+        let mut got = match verified {
             Ok(b) => json!({"ok": true, "fingerprint": b.fingerprint().to_string()}),
             Err(e) => json!({"ok": false, "error": e.tag()}),
         };
+        if let Some(fp) = w.get("expect_fingerprint") {
+            got["expect_fingerprint"] = fp.clone();
+        }
         assert_eq!(&got, w, "{name}");
         seen += 1;
     }
@@ -343,6 +350,53 @@ fn bless_bundles(dir: &Path) {
         "extra-hash.bundle.json",
         jcs(&v),
         json!({"ok": false, "error": "extra_hash"}),
+    ));
+
+    let mut v = valid.clone();
+    let doc = json!({"views": []});
+    let doc_id = zenkey_model::schema::sha256_id(&jcs(&doc));
+    v["extras"][&doc_id] = json!({"media_type": "application/json", "data": doc});
+    out.push((
+        "extras-unreferenced.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "extras"}),
+    ));
+
+    out.push((
+        "not-utf8.bundle.json",
+        vec![0xff, 0xfe],
+        json!({"ok": false, "error": "shape"}),
+    ));
+
+    let mut v = valid.clone();
+    v["signature"] = json!({});
+    out.push((
+        "unknown-member.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+
+    let mut v = valid.clone();
+    v.as_object_mut().unwrap().remove("contract");
+    out.push((
+        "no-contract.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+
+    let mut v = valid.clone();
+    v["contract"]["schemas"] = json!({});
+    out.push((
+        "contract-schemas-not-a-list.bundle.json",
+        jcs(&v),
+        json!({"ok": false, "error": "shape"}),
+    ));
+
+    let other = format!("sha256:{}", "0".repeat(64));
+    out.push((
+        "fingerprint.bundle.json",
+        b.to_bytes(),
+        json!({"ok": false, "error": "fingerprint", "expect_fingerprint": other}),
     ));
 
     let mut cases = serde_json::Map::new();

@@ -8,7 +8,10 @@ contracts and bindings.
 
 **Expected:**
 - A commander's put on its own command key reaches the actuator.
-- A put on another principal's key is blocked.
+- A put on another principal's key is blocked, and so is a queryable or
+  token declared there.
+- A service using advanced publication declares its `@adv` queryable and
+  token under its Own grant, and a consumer with history reads them.
 - A subscription the bindings do not name is blocked.
 - A frontend's fan-in GET over `zk2/*/tc/…` gets one reply per backend.
 - A contract fetch works for any principal.

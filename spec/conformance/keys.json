@@ -226,6 +226,47 @@
     {
       "expect": null,
       "key": "zk2/@zk/alive/nav.v2/0123456789abcdef/0123456789abcdef"
+    },
+    {
+      "expect": null,
+      "key": "zk2/s/svc/blob.v1/@blob/a"
+    },
+    {
+      "expect": {
+        "form": "data",
+        "iface": "log.v1",
+        "resource": [
+          "applied",
+          "01hzx3k5n2m4p6q8r0s2t4v6w8"
+        ],
+        "service": "svc",
+        "system": "s",
+        "token": "events"
+      },
+      "key": "zk2/s/svc/log.v1/events/applied/01hzx3k5n2m4p6q8r0s2t4v6w8"
+    },
+    {
+      "expect": null,
+      "key": "zk2/s/svc/log.v1/events/applied/01HZX3K5N2M4P6Q8R0S2T4V6W8"
+    },
+    {
+      "expect": null,
+      "key": "zk2/s/svc/v2.v3/stream/a"
+    },
+    {
+      "expect": null,
+      "key": "zk2/s/svc/nav.v2/stream/@x"
+    },
+    {
+      "expect": {
+        "epoch": "3fa9c2d41b7e0012",
+        "form": "member",
+        "iface": "media.v1",
+        "member": "front",
+        "service": "svc",
+        "system": "s"
+      },
+      "key": "zk2/s/svc/@zk/member/media.v1/front/3fa9c2d41b7e0012"
     }
   ],
   "description": "zk2 keys (r3.3 §3.1). `expect` is the parse, or null when the key is refused. Every accepted key must build back to exactly the same string."

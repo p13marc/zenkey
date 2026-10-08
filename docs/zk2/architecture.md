@@ -223,9 +223,9 @@ findings (3 blockers), all integrated before r4 became the design of record
 
 | # | Change | Spike | Where |
 |---|---|---|---|
-| E1 | **State: owner-authoritative GET, and `archive.v1`** (U1, U15). A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys; tools check the storage admin space. An archive records owners' mutations under its own address, with timestamps, type identity and tombstones, and answers explicit GETs only. Its backend MUST NOT accept a put older than a delete it holds; zenoh 1.10.1's storage manager does (`upstream/storage-manager-outdated-guard.md`, not filed). It **re-aligns** with an owner that becomes reachable again (or with the owner's side archive while the owner is down), and drops keys only after a complete reply set. Archives are placed on the consumer's side against link loss, and on the owner's side against owner loss. | S5, S12 | §3.6, §3.12 |
+| E1 | **State: owner-authoritative GET, and `archive.v1`** (U1, U15). A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys; tools check the storage admin space. An archive records owners' mutations under its own address, with timestamps, type identity and tombstones, and answers explicit GETs only. Its backend MUST NOT accept a put older than a delete it holds; zenoh 1.10.1's storage manager does (`upstream/storage-manager-outdated-guard.md`, not filed). It **re-aligns** with an owner that becomes reachable again (or with the owner's side archive while the owner is down), and drops a key only on a `reply_del` (erratum). Archives are placed on the consumer's side against link loss, and on the owner's side against owner loss. | S5, S12 | §3.6, §3.12 |
 | E2 | **Clocks bounded both ways** (U2). HLC MUST. **Catch-up:** an owner never stamps at or below the last timestamp it issued. It reads that from its own persistent record, else from an archive on its own side. With neither, it starts a new epoch: a new instance with a fresh zid. Every zenoh timestamp carries its HLC's id, so consumers order within an id and restart their ordering at a new one. **Ahead:** an owner never stamps beyond its router's HLC delta (500 ms by default). It SHOULD detect drift against a router-stamped reference it subscribes to, and stops writing state when beyond it. Routers re-stamp future-dated puts but not replies. The constrained level keeps the catch-up and the ahead bound on a wall clock. | S5, S12, S15 | §3.6 |
-| E3 | **Tombstone windows** (U3): 60 s by default, overridable by annotation. State an archive records across a constrained face carries a window of at least the face's maximum outage. The deployment raises it through `link.v1`'s face policy. This takes the place of S5's "replication required for storages on state". About 100 B per tombstone. | S5 | §3.6, §3.12 |
+| E3 | **Tombstone windows** (U3): 60 s by default, a deployment setting of the owner (erratum: not an annotation). State an archive records across a constrained face carries a window of at least the face's maximum outage. The deployment raises it through `link.v1`'s face policy. This takes the place of S5's "replication required for storages on state". About 100 B per tombstone. | S5 | §3.6, §3.12 |
 | E4 | **O1 reworded; split-brain diagnosed, exclusivity delegated** (U4, U12). `complete` stays: it routes concrete calls, captures templated ones, and makes fan-in work. The token check has a grace period longer than D9a's make-before-break overlap. Tools diagnose; the runtime does not fence. | S6, S2 | §3.7, §3.8 |
 | E5 | **O6, measured:** `Latest` and `Auto` kept 1 reply of 10, so consolidation `None` stays a MUST (U-G). | S6 | §3.7 |
 | E6 | **Contract retrieval accepts the first valid reply as it arrives.** In S4, the slow and the unreachable holders were the nearest, the valid reply came from behind a second router, and waiting for completion cost the whole timeout. | S4 | §3.10 |
@@ -243,6 +243,21 @@ findings (3 blockers), all integrated before r4 became the design of record
 | E18 | **Events: `retention` needs a time-series backend**, or a consumer-side filter. The memory backend ignores `_time` (U16, U19). | S5 | §3.2 |
 | E19 | **Runtime rules.** A liveliness GET on a session that holds a liveliness subscriber MUST use a callback or an unbounded handler: zenoh#2678 hung such a session at every measured size from 996 tokens. A silent loss is noticed only at the lease, 10 s by default. | S2, S10 | §3.10, §3.4 |
 | E20 | **`desired.v1` cancels with a terminal document**, not a delete, so an archive that missed it cannot resurrect a plan. | S5 | §3.12, §4.3 |
+
+**Errata found while writing the spec (#606).** Each is marked where it
+applies:
+- §3.2: events are the fourth pattern (D3), and the "no event kind" line is
+  gone.
+- §3.6 rule S3: the tombstone window is a deployment setting of the owner.
+  No annotation key exists for it.
+- §3.6 rule S5: archive alignment drops a key only on positive evidence (a
+  `reply_del`). An empty reply set never does.
+- §3.3: state QoS is a SHOULD, not a MUST. zenoh-modem's refreshed state is
+  legitimate.
+- §3.1: profile-registered verbatim kinds are reserved.
+- **Minting** *(spec §4.3)*: zenoh 1.10.1 keeps `Session::hlc()` internal,
+  so an owner mints state timestamps as the greater of `new_timestamp()`
+  and the last one plus a tick.
 
 **Not measured.** The spike did not cover these, and the rules above do not
 claim them:
@@ -360,7 +375,7 @@ zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract b
 | 2 | `<system>` | One plain chunk (§3.5). Under `zk2/@zk/…`, position 2 is the control token instead. |
 | 3 | `<service>` | One plain chunk. |
 | 4 | `<iface>.v<major>` \| `@zk` | Interface identity, or the control token. |
-| 5 | Kind | `stream` \| `@stream` \| `state` \| `@state` \| `events` \| `@op` *(r3.3; r4: the block above updated to match)*, or a verbatim kind registered by a profile (`@blob`). |
+| 5 | Kind | `stream` \| `@stream` \| `state` \| `@state` \| `events` \| `@op` *(r3.3; r4: the block above updated to match)*. A verbatim kind registered by a profile (`@blob`) is reserved: the spec (#606) refuses it until a later version defines its form. |
 | 6+ | Resource path | Literal and `{param}` chunks from the contract template. Values are slugged injectively (v1's `x-` rule, with a decoder and fixtures). |
 
 **Kind tokens and the infrastructure that selects on them:**
@@ -387,12 +402,13 @@ zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract b
 
 ### 3.2 Resources
 
-An interface **provides** resources of three patterns:
+An interface **provides** resources of four patterns *(r4 erratum: r3.3's D3 made events a kind, and this table had not followed)*:
 
 | Pattern | Meaning | Zenoh mapping |
 |---|---|---|
 | **stream** | A sequence of values pushed by the owner. Each sample stands alone. | A declared publisher. `explicit = true` selects the `@stream` token. |
-| **state** | The latest value is the truth; it may be deleted | A declared publisher + a non-`complete` queryable over the interface's `state/**` (§3.6) |
+| **state** | The latest value is the truth; it may be deleted | A declared publisher + a non-`complete` queryable over the interface's `state/**` and `@state/**` (§3.6) |
+| **event** | One key per occurrence, kept by union storages (D3) | A one-shot put on `…/events/<template>/<ulid>` |
 | **operation** | Request → one reply, or many | A `complete` queryable on the concrete `@op` key (§3.7) |
 
 - **Templates** with typed parameters (`devices/{device}/sample`,
@@ -404,8 +420,6 @@ An interface **provides** resources of three patterns:
 - **Cardinality (r3.2).** A templated resource declares `cardinality`, its expected population bound. Tools and conformance check it. This is the bus's low-cardinality discipline, kept from v1.
 - **Advanced pub/sub (r3.2; corrected in r4).** zenoh-ext history and recovery are opt-in, on `stream` and `state` resources only. Under a verbatim chunk, history from publishers already present works, but late-publisher detection and heartbeat recovery do not: zenoh-ext parses `@adv` keys with a `**` that cannot cross `@stream` (spike S1). zk2 therefore allows history on plain `stream` and `state` only (lint E019 in `zenkey-model`'s `diag::CODES`).
 - **No input kind** (by §2).
-- **No event kind.** An event is a reliable stream, or a state per
-  occurrence (`alarms.v1`).
 - **No presence kind.** Presence belongs to instances (§3.10).
 
 ### 3.3 QoS is part of the resource
@@ -529,9 +543,9 @@ deadline (`twist_mux`), freshest wins, or an explicit lease.
 |---|---|
 | S1 | Every state mutation (put **and** delete) carries a producer-set timestamp. |
 | S2 | The owner's GET reply carries the timestamp of the mutation it represents. |
-| S3 | The owner answers GETs for keys it deleted within the tombstone window with `reply_del` and the deletion timestamp. *(r4)* The window is 60 s by default, overridable by annotation (U3). State recorded by an archive across a constrained face MUST carry a window of at least that face's maximum outage. A delete the archive misses is otherwise resurrected: spike S5's "after the producer's window" case. The contract's annotation sets the window. The deployment raises it for the keys that cross a face, through `link.v1`'s face policy, a deployment setting that is not fingerprinted. |
+| S3 | The owner answers GETs for keys it deleted within the tombstone window with `reply_del` and the deletion timestamp. *(r4; erratum, #606)* The window is 60 s, unless the deployment configures the owner with another (U3). No annotation key exists for it. State recorded by an archive across a constrained face MUST carry a window of at least that face's maximum outage, which the deployment's face configuration gives. A delete the archive misses is otherwise resurrected: spike S5's "after the producer's window" case. |
 | S4 *(r4)* | **The owner is authoritative.** A consumer's state GET is addressed to the owner's keys and answered by the owner, with target `All` and consolidation `Latest` set explicitly. A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. Under `Latest` a consumer cannot tell which replier answered, so tools check this against the routers' storage admin space (#612). |
-| S5 *(r4)* | **Last-known state lives in an archive**: a service implementing `archive.v1`, read explicitly. It records owners' mutations under its own address with each mutation's timestamp and type identity, and keeps tombstones for at least the window (S3). Its backend MUST NOT accept a put older than a delete it holds. zenoh 1.10.1's storage manager does accept one (spike S5). **Alignment:** when an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it again. While the owner stays absent, it re-reads that collection from an archive on the owner's side instead. It drops the keys the source neither reports nor tombstones, and only after the source's GET completed without a timeout (zenoh delivers one as a reply error). A partial reply set is not a verdict (O5). |
+| S5 *(r4)* | **Last-known state lives in an archive**: a service implementing `archive.v1`, read explicitly. It records owners' mutations under its own address with each mutation's timestamp and type identity, and keeps tombstones for at least the window (S3). Its backend MUST NOT accept a put older than a delete it holds. zenoh 1.10.1's storage manager does accept one (spike S5). **Alignment** *(erratum, #606)*: when an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it as confirmed. While the owner stays absent, it re-reads that collection from an archive on the owner's side instead. It drops a key **only on positive evidence**, a `reply_del` from the source. A key the source neither reports nor tombstones is kept and served unconfirmed, because an empty reply set is not a verdict (O5): an access-control refusal, or a route that has not crossed yet, returns empty too. The raised window of S3 is what makes every missed delete answerable. |
 | S6 *(r4)* | Consumers distinguish *current* state (the owner's GET) from *last-known* state (an archive). A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or when presence shows the owner absent. That silence is not a verdict about the key (O5): it only selects the archive, whose answer is last-known, never current. |
 | S7 *(r4)* | Serving sessions MUST enable HLC (U2). **Catch-up:** an owner MUST NOT stamp at or below the last timestamp it issued for its keys. Before its first write, it takes that timestamp from its own persistent record of it, else from an explicit read of an archive **on its own side**. A consumer-side archive can be stale by a whole partition. With neither source, it MUST start a new epoch: a new instance (§3.5) whose session has a fresh, unpinned zid. Every zenoh timestamp carries its HLC's id, the zid, so each value already carries its epoch, with no per-sample attribution (§8). A consumer orders values by time **within** one timestamp id, and accepts the first value under a new id, restarting its ordering there. That is U2's "epoch in the value". A value from the old epoch still in transit when the new one starts is the residual risk, left to the spec (#606). **Ahead:** an owner MUST NOT stamp beyond its router's HLC delta (500 ms by default). It SHOULD detect drift against a reference it holds for the purpose: a subscription to a router-stamped key, such as a deployment heartbeat, because its own puts are never echoed back. When a detection shows it beyond the delta, it stops writing state and reports through `health.v1`. Without a reference, routers re-stamp its future-dated puts (or drop them, with `drop_future_timestamp`), and its GET replies keep its own stamps. The constrained level replaces HLC with a wall clock plus the catch-up, and the ahead bound still applies (U13). |
 
@@ -1161,7 +1175,7 @@ table).
 | **U-G** | Operations with many replies in the core | **r4: yes (O6)**; consolidation `None` is necessary (S6) | S6 | `jobs.v1` only |
 | U1 | State: producer + storage merged by timestamp, or owner-only + an explicit archive interface | **Decided 2026-10-08: the owner is authoritative, with `archive.v1`** (§3.6). The merged GET gave 10 wrong answers in 42 cases (S5) | S5, S12 | Merge, with a storage manager that cannot resurrect a deleted key |
 | U2 | Clock discipline: HLC MUST? Restart regression strategy | **r4: HLC MUST, the catch-up (from a persistent record or an archive, else a new instance id), and a bound on clocks ahead** (S5, S12); a wall clock + the catch-up at the constrained level (S15) | S5, S12, S15 | Epoch in the value, which the new-instance fallback already carries |
-| U3 | Tombstone window | **r4: 60 s by default**, annotation override. Archives keep tombstones at least that long. State archived across a constrained face carries at least the face's maximum outage (S5) | S5 | n/a |
+| U3 | Tombstone window | **r4: 60 s by default**, a deployment setting of the owner (erratum, #606). Archives keep tombstones at least that long. State archived across a constrained face carries at least the face's maximum outage (S5) | S5 | n/a |
 | U4 | `complete` operation queryables (O1) | **r4: keep `complete`; O1 reworded** (decided 2026-10-08; S6) | S6 | Non-complete; lose at-most-once |
 | U5 | Token layout | **r4: kept** (A = B per token), with a **presence budget** of about 10–15k tokens per domain (S2); the multiplier is U22 | S2 | Instance tokens only + descriptors |
 | U6 | Mandatory one-chunk `system` | **Holds** on paper (S8) | S8 | Revisit only on fake names |
