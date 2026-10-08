@@ -5,6 +5,7 @@ members = [
     "zenkey-model",
     "zenkey-build",
     "zenkey-build/fixtures/codegen-test",
+    "zenkey-build/fixtures/contract-crate",
     "zenkey-fleet",
     "zenkey-explorer-config",
     "report-fixtures",
