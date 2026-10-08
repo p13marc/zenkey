@@ -318,7 +318,10 @@ mod tests {
         let detail = |item: &str| decode(CBOR, &app_with(item)).map(|e| e.detail);
         let value = |v: Value| Ok(Some(Detail::Value(v)));
         assert_eq!(detail("1bffffffffffffffff"), value(Value::from(u64::MAX)));
-        assert_eq!(detail("1b8000000000000000"), value(Value::from(1_u64 << 63)));
+        assert_eq!(
+            detail("1b8000000000000000"),
+            value(Value::from(1_u64 << 63))
+        );
         assert_eq!(detail("3b7fffffffffffffff"), value(Value::from(i64::MIN)));
         for below in ["3b8000000000000000", "3bffffffffffffffff"] {
             assert_eq!(

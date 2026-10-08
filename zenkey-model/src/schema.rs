@@ -752,8 +752,16 @@ mod tests {
     fn a_listed_file_with_a_taken_id_is_e024() {
         let dir = std::env::temp_dir().join(format!("zk2-schema-ids-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("a.json"), r#"{"$defs": {"X": {"type": "string"}}}"#).unwrap();
-        std::fs::write(dir.join("b.json"), "{\"$defs\":{\"X\":{\"type\":\"string\"}}}\n").unwrap();
+        std::fs::write(
+            dir.join("a.json"),
+            r#"{"$defs": {"X": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("b.json"),
+            "{\"$defs\":{\"X\":{\"type\":\"string\"}}}\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.join("c.json"),
             r#"{"$defs": {"Y": {"$ref": "a.json#/$defs/X"}}}"#,

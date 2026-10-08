@@ -627,7 +627,10 @@ mod tests {
         let verbatim = archive_key(&peer, "zk2/g/s/i.v1/@state/plans/a");
         let pat = OwnedKeyExpr::try_from(pattern).unwrap();
         for k in [&plain, &verbatim] {
-            assert!(pat.intersects(&OwnedKeyExpr::try_from(k.clone()).unwrap()), "{k}");
+            assert!(
+                pat.intersects(&OwnedKeyExpr::try_from(k.clone()).unwrap()),
+                "{k}"
+            );
         }
         assert_eq!(
             peer_origin(&sel, &plain).as_deref(),
