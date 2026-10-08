@@ -20,22 +20,35 @@ owner's operation the moment its interface token appears.
 ## §2 The descriptor (§3.3)
 
 **Steps.**
-1. GET the owner's instance key.
+1. GET the owner's instance key, with consolidation `None`.
 2. The owner loses a capability that gates an optional resource.
 3. An owner is started without one of its contract's required resources.
+4. An owner is started with a required role its configuration binds to
+   nothing (core §3.2).
 
 **Expected.**
-1. A descriptor that validates against `descriptor.schema.json`.
+1. One reply, with `Encoding` `application/json`: a descriptor that
+   validates against `descriptor.schema.json`. Its `profiles` is the union
+   of its contracts' `uses`, and every role is listed, an unbound optional
+   one with `"bindings": []`.
 2. A new descriptor is put on the instance key. The gated resource's
    absence is implied by the missing capability, so it is not listed in
    `unavailable`. A GET returns the new descriptor.
 3. The owner does not start: no instance token appears.
+4. The owner does not start: no instance token appears.
+
+*Measured on the reference owner, from zenoh-python 1.10.1 (#609): one
+reply, `application/json`, no timestamp and no attachment; the
+`walkthrough/thruster.v1` owner, whose required role `cmd` was unbound,
+refused to start and declared no token.*
 
 ## §3 Epochs and re-minting (§1.5, §8.1)
 
 **Steps.**
 1. The owner's counters reset without a restart.
 2. A member of a template with `epoch` loses continuity.
+3. An owner whose contract has an `epoch` template starts, and declares no
+   member.
 
 **Expected.**
 1. The owner declares a new instance token, interface tokens and descriptor,
@@ -43,6 +56,8 @@ owner's operation the moment its interface token appears.
    throughout, never 0. Consumers treat the instance change as the counter
    discontinuity.
 2. That member's token cycles. The others are untouched.
+3. No member token: a member exists from the owner's first declaration of
+   it (core §8.1).
 
 *Spike S2: one re-mint per second over 10k tokens cost 0.7 KiB/s; the
 re-minted service always had 1 or 2 live instance tokens.*
@@ -52,13 +67,30 @@ re-minted service always had 1 or 2 live instance tokens.*
 **Setup.** 10,000 tokens.
 
 **Steps.** A session that holds a liveliness subscriber issues a liveliness
-GET.
+GET, under each pairing of the GET's handler and the subscriber's.
 
-**Expected.** With a callback handler, the GET completes with every token.
-With zenoh's default 256-slot handler, it hangs (zenoh#2678), which is why
-the rule forbids it.
+**Expected.**
+- With callbacks for both, the GET completes with every token. So it does
+  with a GET handler drained as replies arrive, beside a callback
+  subscriber.
+- With a bounded subscriber handler that nobody drains, a callback GET ends
+  at its timeout with a fraction of the tokens, silently, and a GET on a
+  bounded handler hangs. This is why the rule binds the subscribers too
+  (core §8.1).
+- A tool that sees a GET end at its timeout reports the result as possibly
+  incomplete.
 
-*Spike S2: hung at every measured size from 996 tokens.*
+*Spike S2 (Rust): hung at every measured size from 996 tokens
+(zenoh#2678).*
+
+*Measured with zenoh-python 1.10.1 (#609), 2,002 tokens, a 10 s timeout:
+GET and subscriber both callbacks, complete in 0.34 s; a default GET
+handler drained as replies arrive, or after 3 s, beside a callback
+subscriber, complete; a default GET beside a default subscriber never
+drained, 0 replies after 20 s; a callback GET beside that subscriber, 257
+of 2,002, ended at the timeout. The default handler alone did not hang: the
+undrained subscriber is what starves the GET. zenoh-python has no unbounded
+handler.*
 
 ## §5 A tokenless set (§8.1, U22)
 

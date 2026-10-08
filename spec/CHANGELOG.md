@@ -6,18 +6,52 @@ deliberately did not, and why.
 ## 0.5 — 2026-10-08: the second implementation's findings (#609, #607)
 
 The Python implementation (#609) was written from `spec/` alone, and passes
-every fixture. It recorded 45 places, F-01 to F-45, where the spec was
-silent, ambiguous or said two things. Each is resolved here, in one of two
-ways:
+every fixture. It recorded 55 places where the spec was silent, ambiguous
+or said two things: F-01 to F-45 from its static half, and F-46 to F-55
+from its live half, which runs the reference runtime (#610) as a black box.
+Each is resolved here, in one of two ways:
 - **the reference's behaviour becomes the rule**, stated where a reader
   looks for it; or,
 - **where that behaviour was a bug**, `zenkey-model` is fixed, and the
   corrected rule is stated.
 
-A fixture pins every rule a fixture can check: 21 contract cases, 4
+A fixture pins every static rule a fixture can check: 21 contract cases, 4
 descriptors, 1 set, 3 histories, 6 bundles, 11 error envelopes, 17
 compatibility cases, 2 keys and 1 template case. No existing expectation
-changed.
+changed. The live rules land in their scenarios, with what was measured.
+
+**Changed: the live half (F-46 to F-55, §3.2, §3.3, §8.1, §8.4).** The
+runtime already behaved this way, except where noted; the spec now says so.
+- **Retrieval needs consolidation `None` (F-50), a MUST.** Measured: with
+  zenoh's default, a holder's corrupt reply after 2 s was delivered alone,
+  and the valid reply, sent at once, never arrived. A caller following
+  §8.4's steps would have reported the contract unavailable. The runtime
+  already set `None`; §8.4 now requires it on both attempts.
+- **The presence rule binds the subscribers (F-47).** Measured: a bounded
+  liveliness subscriber nobody drains starves even a callback GET on the
+  same session, which ended at its timeout with 257 of 2,002 tokens,
+  silently. Every liveliness subscriber on such a session MUST be
+  callback-driven or drained, and a GET that ends at its timeout SHOULD be
+  read as possibly incomplete. `presence.md §4` said the default GET handler
+  alone hangs; zenoh-python showed it does not, so the scenario now states
+  what was measured, beside spike S2's Rust result.
+- **The replies (F-46, F-48).** A descriptor and a bundle are each answered
+  with one reply, `application/json`; the descriptor's has no timestamp and
+  no attachment. A bundle reader MUST NOT depend on the encoding: the hash
+  is the check. A descriptor GET uses consolidation `None` too.
+- **Timeouts (F-49)** are the caller's choices, named in §8.1; the
+  scenarios' 1 s is the conformance default.
+- **A holder on the caller's own session (F-51)** answers `BestMatching`
+  too, so a caller can get two replies; it assumes nothing about the count.
+- **An unbound required role (F-52):** the owner MUST NOT start (R1, §8.2
+  step 2), as the runtime already refused. It refuses a missing
+  configuration, not a missing provider, so R5 and R7 stand.
+- **`profiles` (F-53)** is the union of the implemented contracts' `uses`.
+  The descriptor checker does not check it.
+- **Members (F-54)** exist from the owner's first declaration of one: no
+  member, no member token.
+- **An unbound optional role (F-55)** is listed with `"bindings": []`, so
+  the graph keeps every edge a contract declares.
 
 **Changed: the reference was wrong, and is fixed.**
 - **Floats (F-19).** `nan` and `inf` in an annotation became `null` without a
@@ -177,6 +211,17 @@ template order, not document order (F-39); a oneof move reports one rule
 - **Protobuf portability.** Canonical bytes stay portable only across
   encoders that match protoc 3.21.12. Naming that release's well-known
   sources pins their ids, and adds no new mechanism.
+- **The live rules have no fixture.** They are network behaviour: their
+  evidence is the scenarios, with zenoh-python's measurements beside the
+  spike's Rust ones. Spike S2's hang stays recorded as measured.
+- **No timeout values in the core.** Naming one would bind every deployment
+  to a loopback figure; the 1 s of the scenarios binds conformance runs
+  only.
+- **The descriptor GET's target** is left to the caller: one instance's
+  queryable answers it, under `BestMatching` or `All` alike.
+- **The runtime (#610)** needed no change: it already set consolidation
+  `None`, answered with `application/json`, refused an unbound required
+  role, listed unbound roles, and holds no liveliness subscriber.
 
 | Id | Resolution |
 |---|---|
@@ -225,6 +270,16 @@ template order, not document order (F-39); a oneof move reports one rule
 | F-43 | Rule stated (§9.8 presence); fixture `proto2-to-proto3` |
 | F-44 | Rule stated (`compat/README.md`: wrapper location, `invalid`) |
 | F-45 | Rule stated (§9.7 history root); `examples/zk2/README.md` states the examples' requirement |
+| F-46 | Rule stated (§3.3 "The GET": one reply, `application/json`, no timestamp, consolidation `None`); scenario `presence.md §2` |
+| F-47 | MUST extended to the session's liveliness subscribers, SHOULD on a timed-out GET (§8.1); scenario `presence.md §4` corrected to the measurement |
+| F-48 | Rule stated (§8.4: one reply, `application/json`; a caller MUST NOT depend on it); scenario `retrieval.md §1` |
+| F-49 | Rule stated (§8.1: timeouts are the caller's; 1 s in the scenarios) |
+| F-50 | MUST added (§8.4: consolidation `None`, both attempts); scenario `retrieval.md §2` with the measurement |
+| F-51 | Rule stated (§8.4 step 1: a caller's own holder answers too); scenario `retrieval.md §1` |
+| F-52 | MUST stated (§3.2: an unbound required role, no start); scenario `presence.md §2` step 4 |
+| F-53 | Rule stated (§3.3 `profiles`); not checked by the descriptor checker; scenario `presence.md §2` |
+| F-54 | Rule stated (§8.1 members); scenario `presence.md §3` step 3 |
+| F-55 | Rule stated (§3.2, §3.3 `requires`); scenario `bindings.md §3` |
 
 ## 0.4 — 2026-10-08: TOML 1.0, enforced (#607)
 

@@ -395,6 +395,15 @@ the required interface, and MUST NOT be empty.
 When several providers are bound, choosing between them is the consumer's
 (`arbitration.v1`).
 
+- **An unbound required role.** An owner whose configuration binds a
+  required role to nothing MUST NOT start, as one missing a required
+  resource does not (§8.2 step 2): no instance token appears. This refuses a
+  missing configuration, not a missing provider: a bound role still
+  resolves at once, without presence (R5, R7). `[Sc: presence.md §2]`
+- **An unbound optional role** is listed in the descriptor all the same,
+  with `"bindings": []` and `"params": {}` (R3): the graph keeps every edge
+  a contract declares, bound or not. `[Sc: bindings.md §3]`
+
 ### 3.3 The descriptor record
 
 Every instance serves a **descriptor**: a JSON document answered on GET at
@@ -402,6 +411,13 @@ its instance key, and put on every change. Its schema is
 [`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report
 exactly the `D…` codes that `conformance/descriptors/expect.json` lists for
 each document, checked against the fixture contract. `[F: descriptors/]`
+
+**The GET.** One `complete` queryable on the instance key answers with one
+reply: the current descriptor's bytes, with `Encoding` `application/json`,
+no attachment and no timestamp (S1–S2 bind state, and a descriptor is not
+state). The put on a change carries the owner's timestamp. A caller GETs
+with consolidation `None`, as §8.4 does, takes the first reply, and waits
+for it as long as it chooses (§8.1). `[Sc: presence.md §2]`
 
 ```json
 {
@@ -450,7 +466,10 @@ gate does not name.
 - **`requires`** lists each role with its bindings and parameter bindings
   (R2, R3). A role declared in a contract names that contract's interface in
   `declared_by`. A role declared by the component's manifest names `null`.
-  `[F: descriptors/d009-*]`
+  A role the configuration leaves unbound is listed with `"bindings": []`
+  (§3.2). `[F: descriptors/d009-*]`
+- **`profiles`** is the union of the `uses` of the contracts the instance
+  implements, sorted and deduplicated (§10 point 4).
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
@@ -494,6 +513,7 @@ and reports these codes. `[F: descriptors/]`
      listed: a scenario checks it (`bindings.md §3`);
    - that a role `declared_by` an interface is in that contract's
      `[requires]`, and that `params` values fit the required interface;
+   - that `profiles` is the union of the contracts' `uses`;
    - `minor`, an integer from 0 to 2^64−1 that nothing reads, and `token`.
 
 ---
@@ -858,6 +878,11 @@ Liveliness tokens carry no payload; everything is in the key.
   (`[F: contracts/e022-two-epochs]`). The owner MUST hold one member token
   per member, and cycle it whenever that member's continuity breaks.
   `[Sc: presence.md §3]`
+  - A member exists from the owner's first declaration of it, when the
+    entity its value names appears (a device enumerated, a first value to
+    publish), never because the contract declares the template.
+  - An owner with no member yet holds no member token: one that publishes
+    nothing under the template holds none.
 - **Re-minting is make-before-break.** An owner that starts a new instance
   id while running MUST declare the new tokens and descriptor first, then
   undeclare the old ones. There is an overlap, never a gap.
@@ -866,6 +891,20 @@ Liveliness tokens carry no payload; everything is in the key.
   liveliness subscriber MUST use a callback or an unbounded handler. With
   zenoh's default 256-slot handler, such a GET hung at every measured size
   from 996 tokens (zenoh#2678). `[Sc: presence.md §4]`
+  - **The subscribers bind too.** Every liveliness subscriber on that
+    session MUST be callback-driven, or drained as its samples arrive. A
+    bounded subscriber nobody drains starves even a callback GET: with
+    zenoh-python 1.10.1, one ended at its timeout with 257 of 2,002 tokens,
+    and silently. zenoh-python has no unbounded handler, so a callback is
+    the way there. `[Sc: presence.md §4]`
+  - A tool SHOULD treat a liveliness GET that ended at its timeout, rather
+    than at the routers' final reply, as possibly incomplete: silence is not
+    a verdict (O5).
+- **Timeouts are the caller's.** How long a liveliness GET, a descriptor
+  GET (§3.3) or a retrieval attempt (§8.4) waits, and how long a tool waits
+  for presence after an owner starts, are the caller's choices. The
+  scenarios, and so a conformance run, use 1 s unless they say otherwise.
+  S6's "the GET's timeout" is that choice.
 
 ### 8.2 Start-up order
 
@@ -898,15 +937,30 @@ Contract bundles (§9.6) live at the location-free key
 implements (§8.2), and any other participant MAY hold bundles too, because
 the hash is the check. A caller or tool MUST retrieve a bundle as follows:
 
-1. GET with target `BestMatching`. That reaches the nearest holder on each
-   router the query visits.
+1. GET with target `BestMatching` and consolidation `None`. That reaches
+   the nearest holder on each router the query visits. A holder on the
+   caller's own session answers too, so a caller can get its own reply and
+   the nearest remote one: it assumes nothing about the count.
 2. Verify each reply **as it arrives** (§9.6), and accept the first valid
    one, without waiting for the GET to complete.
-3. If none was valid, retry once with target `All`.
+3. If none was valid, retry once with target `All`, consolidation `None`.
 4. If still none, report the contract **unavailable**. Never accept an
    unverified bundle.
 
 `[Sc: retrieval.md §1–§3]`
+
+- **Consolidation `None` is a MUST.** zenoh's default consolidation on a
+  concrete key holds every reply until the query finalizes (`Latest`,
+  §4.1), so step 2 cannot happen, and a slow corrupt reply can displace the
+  valid one: measured, the corrupt reply alone arrived at 2 s, the valid
+  one never, and a caller following the steps would report the contract
+  unavailable. A caller MUST set consolidation `None` on both attempts.
+  `[Sc: retrieval.md §2]`
+- **The reply.** A holder answers with one reply, the bundle's bytes, with
+  `Encoding` `application/json`. A caller MUST NOT depend on the encoding:
+  the hash is the check. `[Sc: retrieval.md §1]`
+- **An attempt ends** when its GET completes, or at the caller's timeout
+  (§8.1).
 
 ### 8.5 Constrained faces
 
@@ -1150,9 +1204,10 @@ MUST have the same fingerprint.
 - **Import roots** are `proto_include`, relative to the contract.
   Otherwise the root is `proto/` when that directory exists, else the
   contract's own directory.
-- **Each listed file** is a path relative to the contract. It is named by
-  its path relative to the first import root that contains it; a listed
-  file under no import root has no name, and does not compile (E029).
+- **A listed file's name.** A listed file is a path relative to the
+  contract. It is named by its path relative to the first import root that
+  contains it; a listed file under no import root has no name, and does
+  not compile (E029).
   `[F: contracts/e029-outside-include, ok-protobuf-nested]`
 - **Each listed file** is compiled alone, with its imports and without
   source info, into a `FileDescriptorSet` holding the file and its imports
@@ -1814,7 +1869,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4 |
 | `scenarios/operations.md` | §5, §6 |
-| `scenarios/presence.md` | §1.5, §3.3, §8.1–§8.2 |
+| `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2 |
 | `scenarios/bindings.md` | §3.2 |
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
