@@ -177,6 +177,18 @@ async fn a_restart_with_the_same_state_file_does_not_re_page() {
     assert_eq!(saved["version"], 1);
     assert_eq!(saved["entries"].as_array().unwrap().len(), 1, "{saved}");
     assert_eq!(saved["entries"][0]["state"], "firing");
+    // The first life's subscription must be gone from `a`'s view first:
+    // otherwise the matching wait below is met by it, the re-put reaches
+    // nobody, and the empty capture proves nothing (seen under `just ci`
+    // load as `deduped` 0).
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while publication.matching_status().await.unwrap() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the first life's subscription never went away"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     // The second life: the re-put is a duplicate of what was announced
     // before the restart.
