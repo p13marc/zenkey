@@ -26,7 +26,8 @@
 //!   failure is a `reply_err` carrying the envelope, encoded as §5.2 says;
 //!   a refusal that does not fit its envelope goes out as `internal`.
 //!   The active instance answers `unavailable`, with its cause, for every
-//!   optional operation it does not expose; a standby declares nothing.
+//!   optional operation it does not expose; a standby declares nothing, and
+//!   a replica nothing on an exclusive operation (§5.1, "Beside replicas").
 //! - **Over a template** (§5.1, 0.7): a fan-out to a server declared over
 //!   the whole template replies on the key of the member it answers for,
 //!   named by the key when it binds every parameter, else by the handler
@@ -44,7 +45,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
+use zenkey_model::authoring::{Encoding as WireEncoding, Kind, Serving};
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies, Resource};
 use zenkey_model::descriptor::Cause;
 use zenkey_model::envelope::{self, Detail, Envelope};
@@ -404,21 +405,51 @@ pub(crate) struct Ops {
     fallbacks: Vec<Queryable<()>>,
 }
 
+/// Whether an operation resource is `serving = "replicated"` (§6).
+pub(crate) fn is_replicated(r: &Resource) -> bool {
+    matches!(&r.body, Body::Operation(op) if op.serving == Serving::Replicated)
+}
+
+/// Whether every resource `s` exposes now is a replicated operation: a
+/// replica, beside which another instance may serve the exclusive ones
+/// (§5.1, "Beside replicas").
+fn replica_only(s: &ImplState, held: &BTreeSet<String>) -> bool {
+    s.imp
+        .contract()
+        .resources
+        .iter()
+        .filter(|r| s.exposed.contains(&resource_name(r)) && missing_capability(r, held).is_none())
+        .all(is_replicated)
+}
+
 impl Ops {
     /// At start, after §8.2 step 2: for every interface this instance is
     /// active on (it exposes at least one resource of it), a `complete`
     /// queryable over each optional operation it does not expose, answering
     /// `unavailable` with the cause. A standby is active on nothing, so it
     /// declares none and intercepts no call (O3, §6).
+    ///
+    /// **Beside replicas** (§5.1, 0.7, O-10): an instance whose exposed
+    /// resources of an interface are all replicated operations declares none
+    /// on the interface's exclusive operations. The instance serving one may
+    /// be another, and a concrete call reaches whichever `complete`
+    /// queryable is nearest (O1), so an `unavailable` there would intercept
+    /// it. It still answers `unavailable` on a replicated operation it does
+    /// not expose, which replicas should all expose.
     pub(crate) async fn start(b: &ServiceBuilder) -> Result<Self> {
         let availability = Arc::clone(b.availability());
         let held = &b.config().capabilities;
         availability.refresh(b.impls(), held);
         let mut fallbacks = Vec::new();
         for s in b.impls().iter().filter(|s| exposes_any(s, held)) {
+            let replica = replica_only(s, held);
             for r in &s.imp.contract().resources {
                 let name = resource_name(r);
-                if r.kind != Kind::Operation || !r.optional || s.exposed.contains(&name) {
+                if r.kind != Kind::Operation
+                    || !r.optional
+                    || s.exposed.contains(&name)
+                    || (replica && !is_replicated(r))
+                {
                     continue;
                 }
                 let spec = Arc::new(OpSpec::new(&b.config().address, s.imp.iface(), r)?);
@@ -1022,7 +1053,8 @@ impl Service {
 
     /// The `unavailable` queryables this instance declared at start (O3):
     /// one per optional operation of an active interface that it does not
-    /// serve.
+    /// serve, an exclusive one excepted where it is a replica (§5.1,
+    /// "Beside replicas").
     #[must_use]
     pub fn unavailable_queryables(&self) -> &[Queryable<()>] {
         self.ops().fallbacks()
