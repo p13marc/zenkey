@@ -16,6 +16,42 @@ use zenkey_model::descriptor::Unavailable;
 
 use crate::report::{Asked, ContractAnswer};
 
+/// `iface list`: every interface a presence read names — provided by a
+/// token or a descriptor, or required by a role (R3).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct IfaceListing {
+    /// The liveliness selector read, base-relative.
+    pub selector: String,
+    /// Whether the presence read completed before its timeout (§8.1).
+    pub complete: bool,
+    /// By interface, sorted.
+    pub interfaces: Vec<IfaceSummary>,
+    /// Instances whose descriptor did not read: a tokenless interface they
+    /// provide, and every role they declare, is missing here (§8.1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub undescribed: Vec<InstanceRef>,
+}
+
+/// One interface across the deployment, summarised.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IfaceSummary {
+    /// `<name>.v<major>`.
+    pub iface: String,
+    /// Service addresses providing it, by token or descriptor, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+    /// Service addresses with a role bound to it, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumers: Vec<String>,
+    /// The fingerprints providers' descriptors name, sorted. More than one
+    /// is a rolling upgrade or a split brain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revisions: Vec<String>,
+    /// Some provider serves it in the tokenless set (U22).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tokenless: bool,
+}
+
 /// `iface show <iface>`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IfaceView {
@@ -114,6 +150,49 @@ mod tests {
     use super::*;
     use serde_json::json;
     use zenkey_model::descriptor::Cause;
+
+    /// The document `iface list --format json` prints: an interface only
+    /// required has consumers and nothing else.
+    #[test]
+    fn iface_listing_json_shape_is_pinned() {
+        let listing = IfaceListing {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            interfaces: vec![
+                IfaceSummary {
+                    iface: "health.v1".into(),
+                    providers: vec!["vehicle-01/cam-front".into()],
+                    consumers: vec![],
+                    revisions: vec![format!("sha256:{}", "cd".repeat(32))],
+                    tokenless: true,
+                },
+                IfaceSummary {
+                    iface: "tc.scenario.v1".into(),
+                    providers: vec![],
+                    consumers: vec!["ws-01/tcgui-frontend".into()],
+                    revisions: vec![],
+                    tokenless: false,
+                },
+            ],
+            undescribed: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&listing).expect("serialize"),
+            json!({
+                "selector": "zk2/*/*/@zk/**",
+                "complete": true,
+                "interfaces": [
+                    {
+                        "iface": "health.v1",
+                        "providers": ["vehicle-01/cam-front"],
+                        "revisions": [format!("sha256:{}", "cd".repeat(32))],
+                        "tokenless": true,
+                    },
+                    {"iface": "tc.scenario.v1", "consumers": ["ws-01/tcgui-frontend"]},
+                ],
+            })
+        );
+    }
 
     /// The document `iface show --format json` prints. A provider known by
     /// its token alone carries only the token; one known by its descriptor

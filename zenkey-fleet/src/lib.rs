@@ -234,7 +234,8 @@ pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
-    Fleet, OPEN_TIMEOUT, OpenFailure, open, open_reporting, open_reporting_within, open_with_config,
+    Fleet, OPEN_TIMEOUT, OpenFailure, open, open_in_namespace, open_reporting,
+    open_reporting_within, open_with_config,
 };
 pub use bus::write::{
     CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, TraceSpec, WriteAct, call,
@@ -263,15 +264,17 @@ pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
 // alone would read as the crate's.
 pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
 pub use bus::presence::{
-    DESCRIBE_CONCURRENCY, Scope as PresenceScope, describe as describe_instances, liveliness_read,
+    DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR, Scope as PresenceScope,
+    describe as describe_instances, liveliness_read, namespace_listing,
     observe as observe_presence, read_tokens, service_listing,
 };
 // `Observed` is `model::export`'s at the root already; zk2's is the
 // presence read, and says so.
 pub use model::catalog::{
     Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,
-    Observed as ObservedPresence, Revision, type_view,
+    Observed as ObservedPresence, Revision, namespaces, type_view,
 };
+pub use model::compat::compat;
 pub use model::render::{
     Member, render as render_payload, render_with as render_payload_with, resolved_revision,
 };
@@ -363,7 +366,8 @@ pub use report::{
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.
 pub use report::{
-    BindingGraph, ContractAnswer, ContractView, IfaceView, PayloadRendering, ServiceListing,
+    BindingGraph, CompatReport, ContractAnswer, ContractView, IfaceListing, IfaceView,
+    NamespaceListing, PayloadRendering, SchemaView, ServiceListing, ServiceView,
 };
 // `CondState` and `Transition` are unconditional since v1.34: a version-2
 // `.zrec` carries the trigger record, and the reader is not decode-gated.

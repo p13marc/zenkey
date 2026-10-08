@@ -204,6 +204,76 @@ pub async fn open_reporting_within(
     let config = config_off_runtime(file, connect, listen, scouting)
         .await
         .map_err(OpenFailure::Config)?;
+    open_config(config, deadline).await
+}
+
+/// Open a session **in** a deployment's namespace (#612, FJ4), for zk2's
+/// resolved verbs.
+///
+/// The FJ decision of 2026-10-08 ends RFC 09 §5's "explorers are never
+/// namespaced" for zk2: a resolved verb — `service`, `iface`, `graph`,
+/// `schema show`, a live `compat` — reads base-relative `zk2/…` keys
+/// through a session whose `namespace` is the deployment's, exactly as the
+/// deployment's own services do, so presence, descriptors and bundles are
+/// read the way a consumer reads them. Raw verbs and the admin space keep
+/// the un-namespaced [`open_reporting`].
+///
+/// Everything else is [`open_reporting`]'s posture: a client unless it
+/// listens, multicast off unless asked or stated, bounded by
+/// [`OPEN_TIMEOUT`]. An **empty** namespace is the bus-root deployment and
+/// sets none. A namespace that is not a plain key expression — a wildcard,
+/// an empty chunk — is refused as the caller's input
+/// ([`OpenFailure::Config`]), and so is a config file that sets one of its
+/// own: the namespace has one source, the caller's.
+pub async fn open_in_namespace(
+    namespace: &str,
+    file: Option<&Path>,
+    connect: &[String],
+    listen: &[String],
+    scouting: Option<bool>,
+) -> Result<Session, OpenFailure> {
+    let mut config = config_off_runtime(file, connect, listen, scouting)
+        .await
+        .map_err(OpenFailure::Config)?;
+    if !namespace.is_empty() {
+        check_namespace(namespace).map_err(OpenFailure::Config)?;
+        let quoted = serde_json::to_string(namespace)
+            .map_err(|e| OpenFailure::Config(Error::Internal(e.to_string())))?;
+        config.insert_json5("namespace", &quoted).map_err(|e| {
+            OpenFailure::Config(Error::unaskable(
+                format!("namespace {namespace:?}"),
+                e.to_string(),
+            ))
+        })?;
+    }
+    open_config(config, OPEN_TIMEOUT).await
+}
+
+/// A namespace is a concrete key-expression prefix: no wildcard, no `$*`,
+/// no empty chunk (zenoh 1.10 sets it as the prefix of every key a session
+/// spells).
+fn check_namespace(namespace: &str) -> Result<()> {
+    let refuse = |detail: String| Error::unaskable(format!("namespace {namespace:?}"), detail);
+    let ke = zenoh::key_expr::KeyExpr::try_from(namespace).map_err(|e| refuse(e.to_string()))?;
+    if ke.as_str() != namespace {
+        return Err(refuse(format!(
+            "not in canonical form (zenoh reads it as {:?})",
+            ke.as_str()
+        )));
+    }
+    if namespace
+        .split('/')
+        .any(|c| c.contains('*') || c.contains('$'))
+    {
+        return Err(refuse(
+            "a namespace is a concrete prefix and cannot hold a wildcard".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Open a built config: the nothing-to-reach refusal, then the bounded open.
+async fn open_config(config: zenoh::Config, deadline: Duration) -> Result<Session, OpenFailure> {
     if reaches_nothing(&config) {
         // zenoh refuses this too, as "No peer specified and multicast
         // scouting deactivated!" — a peer's word, from a client. Said here in

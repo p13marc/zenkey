@@ -36,6 +36,65 @@ pub struct ServiceListing {
     pub unparsed: Vec<String>,
 }
 
+/// One service (`service show`): its instances, each with its tokens and
+/// the descriptor it serves, read from a presence scope of that address
+/// alone.
+///
+/// No instance is an answer, not a verdict: with `complete` false the
+/// service may still be up (O5), and even a complete read only says that
+/// no token was held when it ran.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ServiceView {
+    /// `<system>/<service>`.
+    pub address: String,
+    /// The liveliness selector read, base-relative
+    /// (`zk2/<system>/<service>/@zk/**`).
+    pub selector: String,
+    /// Whether the read completed before its timeout (§8.1).
+    pub complete: bool,
+    /// By instance id, as [`ServiceSighting::instances`].
+    pub instances: Vec<InstanceSighting>,
+    /// Member tokens, as [`ServiceSighting::members`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<MemberSighting>,
+    /// Keys under the scope that are not zk2 tokens, verbatim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unparsed: Vec<String>,
+}
+
+/// Every deployment namespace in which a zk2 service holds an instance
+/// token (`namespace list`), read un-namespaced.
+///
+/// The read is the one place a zk2 tool looks across namespaces: the
+/// resolved verbs run **in** one (decided 2026-10-08), so finding which
+/// ones exist is asked of the raw bus, like the admin space.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NamespaceListing {
+    /// The liveliness selector read, un-namespaced
+    /// (`**/zk2/*/*/@zk/instance/*`).
+    pub selector: String,
+    /// Whether the read completed before its timeout (§8.1).
+    pub complete: bool,
+    /// By namespace, sorted; the bus root (no namespace) sorts first.
+    pub namespaces: Vec<NamespaceSighting>,
+    /// Keys the selector matched that are not instance tokens, verbatim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unparsed: Vec<String>,
+}
+
+/// One namespace and the services holding instance tokens in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NamespaceSighting {
+    /// The key prefix before `zk2/`, as a session's `namespace` names it;
+    /// empty for the bus-root deployment.
+    pub namespace: String,
+    /// `<system>/<service>` of every instance token, sorted, once each.
+    pub services: Vec<String>,
+    /// Instance tokens: more than the services when an address has
+    /// several (a re-mint's overlap, a redundant pair, a split brain).
+    pub instances: usize,
+}
+
 /// One service address and its instances.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ServiceSighting {
@@ -209,6 +268,59 @@ mod tests {
                     "members": [{"iface": "tc.netif.v1", "member": "eth0", "epoch": "0000000000000001"}],
                 }],
                 "unparsed": ["zk2/host-a/tc/@zk/bogus"],
+            })
+        );
+    }
+
+    /// The documents `service show` and `namespace list` print: a service
+    /// nobody holds a token for is an empty instance list beside the
+    /// completeness flag, and the bus root's namespace is the empty string.
+    #[test]
+    fn service_view_and_namespace_listing_json_shapes_are_pinned() {
+        let view = ServiceView {
+            address: "host-a/tc".into(),
+            selector: "zk2/host-a/tc/@zk/**".into(),
+            complete: false,
+            instances: vec![],
+            members: vec![],
+            unparsed: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&view).expect("serialize"),
+            json!({
+                "address": "host-a/tc",
+                "selector": "zk2/host-a/tc/@zk/**",
+                "complete": false,
+                "instances": [],
+            })
+        );
+        let listing = NamespaceListing {
+            selector: "**/zk2/*/*/@zk/instance/*".into(),
+            complete: true,
+            namespaces: vec![
+                NamespaceSighting {
+                    namespace: String::new(),
+                    services: vec!["host-a/tc".into()],
+                    instances: 1,
+                },
+                NamespaceSighting {
+                    namespace: "site/prod".into(),
+                    services: vec!["host-a/tc".into(), "host-b/tc".into()],
+                    instances: 3,
+                },
+            ],
+            unparsed: vec!["x/zk2/a/b/@zk/instance/nope".into()],
+        };
+        assert_eq!(
+            serde_json::to_value(&listing).expect("serialize"),
+            json!({
+                "selector": "**/zk2/*/*/@zk/instance/*",
+                "complete": true,
+                "namespaces": [
+                    {"namespace": "", "services": ["host-a/tc"], "instances": 1},
+                    {"namespace": "site/prod", "services": ["host-a/tc", "host-b/tc"], "instances": 3},
+                ],
+                "unparsed": ["x/zk2/a/b/@zk/instance/nope"],
             })
         );
     }
