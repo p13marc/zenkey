@@ -453,7 +453,7 @@ pub async fn run(results: &Path, examples: &Path, only: Option<&str>) -> Result<
 /// Two routers joined by TCP, each serving a local client by unix socket,
 /// with `acl` on both: what crosses.
 #[allow(clippy::too_many_arguments)]
-pub async fn acl_probe(acl: Option<&Path>, dir: &Path, bps: Option<u64>, live_sub: bool, client_link: bool, side: &str, zk: usize, data: usize) -> Result<()> {
+pub async fn acl_probe(acl: Option<&Path>, dir: &Path, bps: Option<u64>, live_sub: bool, client_link: bool, south: bool, side: &str, zk: usize, data: usize) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     let dir = std::fs::canonicalize(dir)?;
     let tcp = format!("tcp/127.0.0.1:{}", zk2rt::config::free_port()?);
@@ -470,9 +470,36 @@ pub async fn acl_probe(acl: Option<&Path>, dir: &Path, bps: Option<u64>, live_su
         let ep = proxy.endpoint();
         (r, proxy, None, ep)
     } else {
-        let r1 = procs::router_with(&[tcp.clone(), rg.clone()], &[], acl.filter(|_| side != "rv")).await?;
+        // U23: the ground router names its region; the vehicle router keeps
+        // `auto`'s rule (clients and peers south) and adds the ground router
+        // as a second south region.
+        let with = |base: Option<&Path>, extra: serde_json::Value, name: &str| -> Result<Option<PathBuf>> {
+            if !south {
+                return Ok(base.map(Path::to_path_buf));
+            }
+            let mut v: serde_json::Value = match base {
+                Some(p) => serde_json::from_str(&std::fs::read_to_string(p)?)?,
+                None => serde_json::json!({}),
+            };
+            for (k, x) in extra.as_object().expect("object") {
+                v[k] = x.clone();
+            }
+            let f = dir.join(format!("{name}-{}.json", std::process::id()));
+            std::fs::write(&f, serde_json::to_string_pretty(&v)?)?;
+            Ok(Some(f))
+        };
+        let rg_cfg = with(acl.filter(|_| side != "rv"), serde_json::json!({"region_name": "ground"}), "rg")?;
+        let rv_cfg = with(
+            acl.filter(|_| side != "rg"),
+            serde_json::json!({"gateway": {"south": [
+                {"filters": [{"modes": ["peer", "client"]}]},
+                {"filters": [{"region_names": ["ground"]}]}
+            ]}}),
+            "rv",
+        )?;
+        let r1 = procs::router_with(&[tcp.clone(), rg.clone()], &[], rg_cfg.as_deref()).await?;
         let proxy = Proxy::shaped(tcp.strip_prefix("tcp/").unwrap_or(&tcp).to_owned(), shape).await?;
-        let r2 = procs::router_with(std::slice::from_ref(&rv), &[proxy.endpoint()], acl.filter(|_| side != "rg")).await?;
+        let r2 = procs::router_with(std::slice::from_ref(&rv), &[proxy.endpoint()], rv_cfg.as_deref()).await?;
         (r1, proxy, Some(r2), rg)
     };
     let owner = Topo::client(std::slice::from_ref(&rv)).open().await?;

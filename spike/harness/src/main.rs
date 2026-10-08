@@ -252,6 +252,10 @@ enum Cmd {
         /// across the link.
         #[arg(long)]
         client_link: bool,
+        /// U23: the ground router is a south region of the vehicle router
+        /// (zenoh 1.10.1 `gateway.south`, matched by `region_name`).
+        #[arg(long)]
+        south: bool,
         /// Which routers get the ACL: both, rv (the vehicle) or rg.
         #[arg(long, default_value = "both")]
         side: String,
@@ -455,7 +459,7 @@ async fn main() -> Result<()> {
         Cmd::S3 { results, examples, only } => s3::run(&results, &examples, only.as_deref()).await,
         Cmd::S15 { results, pico } => s15::run(&results, &pico).await,
         Cmd::S3RfProbe { tokens, bps, extra } => s3::rf_probe(tokens, bps, extra.as_deref()).await,
-        Cmd::S3AclProbe { acl, dir, bps, live_sub, client_link, side, zk, data } => s3::acl_probe(acl.as_deref(), &dir, bps, live_sub, client_link, &side, zk, data).await,
+        Cmd::S3AclProbe { acl, dir, bps, live_sub, client_link, south, side, zk, data } => s3::acl_probe(acl.as_deref(), &dir, bps, live_sub, client_link, south, &side, zk, data).await,
         Cmd::S2Get { connect, subscribe_first } => s2::get_child(connect, subscribe_first).await,
         Cmd::S2Tokens { connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor } => {
             s2::tokens(connect, layout, services, first, interfaces, members, sessions, churn_hz, descriptor).await
