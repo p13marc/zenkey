@@ -1,9 +1,13 @@
 # zk2 spike report
 
-**Status: in progress.** The spike measures r3's claims before the core is
-specified (epic #585: "measure the network half before specifying it"). Each
-section below is filled by its issue. The decisions table is settled in #605,
-which produces r4.
+**Status: every spike has run (2026-10-08).** The spike measures r3's claims
+before the core is specified (epic #585: "measure the network half before
+specifying it"). Each section below is filled by its issue. The decisions
+table is settled in #605, which produces r4.
+
+Two draft upstream reports are waiting for the maintainer's go-ahead:
+- [the storage manager](upstream/storage-manager-outdated-guard.md) (S5);
+- [ACL denies on router links](upstream/acl-denied-declarations-cross.md) (S3).
 
 Rules:
 - **Numbers, never adjectives.** Every claim here cites a row of raw data.
@@ -31,7 +35,7 @@ sections below.
 |---|---|---|---|---|
 | Grammar | `zk2/` keys, kind tokens, namespaces, zenoh-ext | r3.3 §3.1 | S1 | **holds** (#597); one r3.2 §3.2 sentence corrected |
 | U-A | P3 or P2 for control and commanding | **Decided: P3** | S10, S11, S12 | **confirmed** by S10, S11 and S12 |
-| U-D | `@stream` as a kind token | Token | S3, S9 | S9: **no measurable cost**; S3 pending |
+| U-D | `@stream` as a kind token | Token | S3, S9 | **holds**: no measurable cost (S9); across a link, ambient selectors carried the samples and none of the frames (S3) |
 | U-E | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | **defaults hold**; `real_time` + express lost 0.6–4 % at 1–5 kHz with no gain, so express stays opt-in (S9) |
 | U-F | Decodability: two blessed kinds + others | As in §3.9 | S9 | **holds**: protobuf 126 ns, JSON 0.9 µs per message; raw over SHM for frames |
 | U-G | Many-reply operations in the core | Yes (O6) | S6 | **holds**; consolidation `None` is necessary (`Latest` keeps 1 of 10) |
@@ -39,19 +43,20 @@ sections below.
 | U2 | Clock discipline | HLC MUST + hold writes past the last stored timestamp | S5, S12 | **catch-up confirmed**; add a bound on clocks *ahead* (S12) |
 | U3 | Tombstone window | Core default, annotation override | S5 | 60 s default, with replication required for storages on state; ~100 B per tombstone |
 | U4 | `complete` operation queryables | Keep | S6 | keep `complete`, but **O1 is not at-most-once across routers**: reword it |
-| U5 | Token layout | Instance + interface tokens | S2 | pending |
+| U5 | Token layout | Instance + interface tokens | S2 | **holds** (A = B per token); add a **presence budget**: discovery 1.2–1.9 s at 10k tokens, 46–49 s or never at 50k |
 | U6 | Mandatory one-chunk `system` | Keep | S8 | on paper: holds ([`examples/zk2/shapes.md`](../../examples/zk2/shapes.md), #604) |
-| U7 | Bundle stability | Build once, embed, retention rule | S7 | pending |
+| U7 | Bundle stability | Build once, embed, retention rule | S7 | **holds**: protox = protoc byte for byte; normalized identity for `buf` |
 | U10 | Large collections | No paging in the core | S5 | **holds** to 100k keys (248–390 ms) |
-| U11 | Descriptor dynamics | Put + GET | S2 | pending |
+| U11 | Descriptor dynamics | Put + GET | S2 | **holds**: a re-mint per second over 10k tokens costs 0.7 KiB/s; make-before-break left no gap |
 | U12 | Redundancy | Diagnose only | S6 | **diagnose** (the token check) **and delegate** to `redundancy.v1` |
-| U13 | A constrained conformance level | Define it | S15 | pending |
-| U14 | `default_permission: deny` as a MUST | SHOULD | S14 | pending |
+| U13 | A constrained conformance level | Define it | S15, S3 | **define it**: wall-clock timestamps with catch-up, a literal prefix, gateway bundles for receive limits (S15); a link profile of about 1 KB zenoh batches at radio rates, `@stream` denied across the face, the far side attached as a client (S3) |
+| R7, D15 | Bindings across a constrained face | Deny `@zk` on the face; bind statically | S3 | **restate the mechanism**: the far side attaches as a client (17 B per bring-up). On a router-to-router link a deny hides presence, but the denied declarations still cross (11.1 KB). [Draft upstream report](upstream/acl-denied-declarations-cross.md) |
+| U14 | `default_permission: deny` as a MUST | SHOULD | S14 | **SHOULD** confirmed: deny gives P3 outright; under allow, D13 + R6 |
 | U15 | The storage-manager position | With U1 | S5 | **require a fixed version** (draft upstream report) |
 | U16, U19 | The `events` kind token | Yes (D3) | S5 | union replay works; the `retention` bound needs a time-series backend |
-| U18 | Device-as-service at SNMP scale | Device-as-service | S2 | pending |
-| U20 | `@state` for large populations | Yes (D3) | S2, S5 | S5: **confirmed** at 50k and 100k; S2 pending |
-| U21 | Allow rules under `default_permission: allow` | Not evaluated; compile to denies | S14 | pending |
+| U18 | Device-as-service at SNMP scale | Device-as-service | S2 | **holds at 5,000 devices** (15k tokens, 3.3 s); members (D9b) above that |
+| U20 | `@state` for large populations | Yes (D3) | S2, S5 | **confirmed**: per-entity tokens break down between 15k and 50k (S2); 100k `@state` keys read in 248–390 ms (S5) |
+| U21 | Allow rules under `default_permission: allow` | Not evaluated; compile to denies | S14 | **confirmed** on a live router |
 
 ## Harness (#591)
 
@@ -402,13 +407,255 @@ key, which is why (a) works.
   change.
 
 ### S2 — liveliness scaling (#598)
-*Pending.* 100 / 1k / 10k / 50k tokens; layouts; 2+ routers; the ZenSight
-shape. Measures: RSS, CPU, bytes, discovery latency, convergence, churn.
-Decides U5, U11, U18, U20.
+
+**Verdict:**
+- **The layout holds (U5): presence costs per token, not per layout.**
+  Layouts A (r3's instance + interface tokens) and B (interface tokens under
+  the instance token) measured the same at every scale.
+- **Discovery is fast to 10k tokens and falls off a cliff between 15k and
+  50k:**
+
+  | Tokens | Discovery |
+  |---|---|
+  | 10k | 1.2–1.9 s |
+  | 15k | 3.3 s |
+  | 36k | 23.8 s |
+  | 50k | 46–49 s, or never |
+
+  At 50k, a liveliness GET returned almost nothing within 10 s.
+- **r4 needs a presence budget.** The token count is what to spend:
+  - r3's layout multiplies it by 1 + the number of interfaces;
+  - ZenSight's shape spends 36k tokens;
+  - device-as-service at 5,000 SNMP devices spends 15k (U18);
+  - large populations belong in `@state` (U20, and S5's 100k keys).
+- **zenoh#2678 bites at 996 tokens.** On a session that already watches
+  presence, a liveliness GET with zenoh's default handler never completed.
+  Tools use a callback.
+- **Churn is cheap, and make-before-break leaves no gap (U11, D9a).** One
+  re-mint per second over 10k tokens cost 0.7 KiB/s on the router link and
+  0.7 % of a core. The re-minted service always had 1 or 2 live instance
+  tokens, never 0. A descriptor put on each change added nothing, because
+  nobody subscribed to it.
+
+`spike s2`: token holders (child processes, up to 200 client sessions) on
+router R2, an observer client on router R1, and R2 reaching R1 through the
+byte-counting proxy (no shaping). Layouts:
+
+| Layout | Tokens |
+|---|---|
+| A (r3 §3.10) | an instance token, plus one `@zk/alive/<iface>/…` token per interface (5 here) |
+| B | the interface tokens under the instance token |
+| C | instance tokens only |
+| Members (D9b) | one parent service with member tokens |
+
+Discovery is the time from the holders' `ready` to the observer's history
+subscriber holding every token (limit 120 s). Raw data:
+[`spike-results/s2/`](spike-results/s2/).
+
+**Scale × layout:**
+
+| Tokens | Layout | Discovery | R1 growth | R2→R1 bytes | Liveliness GET, fresh session | Liveliness GET, session already watching |
+|---|---|---|---|---|---|---|
+| 96 | A | < 50 ms | 440 KiB | 6 KiB | 6 ms | 24 ms |
+| 96 | B | < 50 ms | 504 KiB | 6 KiB | 6 ms | 24 ms |
+| 100 | C | < 50 ms | 320 KiB | 5 KiB | 4 ms | 24 ms |
+| 996 | A | < 50 ms | 2,464 KiB | 72 KiB | 16 ms | **hung** (20 s) |
+| 996 | B | < 50 ms | 2,176 KiB | 74 KiB | 16 ms | **hung** |
+| 1,000 | C | < 50 ms | 2,676 KiB | 58 KiB | 22 ms | **hung** |
+| 9,996 | A | 1.2 s | 22,956 KiB | 779 KiB | 679 ms | **hung** |
+| 9,996 | B | 1.2 s | 21,024 KiB | 803 KiB | 682 ms | **hung** |
+| 10,000 | C | 1.9 s | 23,600 KiB | 627 KiB | 1,550 ms | **hung** |
+| 49,998 | A | **46.2 s** | 114,276 KiB | 4,065 KiB | 1 token in 10 s | 1 in 40 s |
+| 49,998 | B | **48.6 s** | 103,716 KiB | 4,183 KiB | 0 in 10 s | 0 in 40 s |
+| 50,000 | C | **never** (120 s) | 114,076 KiB | 3,716 KiB | 0 in 10 s | 1 in 40 s |
+
+At 50k, a callback GET gathered 102 to 4,241 tokens in 15 s.
+
+**Per token:**
+- a router holds 2.1–2.4 KiB;
+- the inter-router link carries 63–85 B per declaration;
+- both are flat from 10k to 50k. Only the time grows faster.
+
+**Shapes (the adopters):**
+
+| Shape | Tokens | Discovery | R1 growth | R2→R1 |
+|---|---|---|---|---|
+| ZenSight: 1,000 hosts × 6 sensors × (1 instance + 5 interfaces) | 36,000 | **23.8 s** | 82,700 KiB | 2,901 KiB |
+| U18 device-as-service: 5,000 SNMP devices × (1 instance + 2 interfaces) | 15,000 | 3.3 s | 36,176 KiB | 1,128 KiB |
+| U18 member tokens: one poller with 5,000 device members (D9b) | 5,001 | 0.3 s | 10,476 KiB | 354 KiB |
+| Member tokens: 512 containers × 20 hosts (D9b) | 10,260 | 1.2 s | 20,156 KiB | 686 KiB |
+
+**Disruption:**
+
+| Case | Observed |
+|---|---|
+| Router R2 killed under 9,996 tokens, then restarted | all 9,996 deleted at the observer 0.5 s after the kill; all back 2.5 s after the restart |
+| 1,200 tokens' client loses R2 silently (blackhole) and reconnects to R1 | live count 1,200 → 0 at 10.0 s (the lease); back to 1,200 at 20.0 s; 1,200 deletes and 1,200 puts |
+
+**Churn** (one service re-minted per second for 10 s over 9,996 tokens: new
+tokens declared first, the old ones dropped after, as D9a says):
+
+| Case | Router link | Routers' CPU | The service's live instance tokens |
+|---|---|---|---|
+| Re-mint only | 0.7 KiB/s | 0.7 % of a core | always 1 or 2 |
+| Re-mint + a 300 B descriptor put on each change | 0.7 KiB/s | 0.7 % | always 1 or 2 |
+
+**For r4:**
+- **U5:** keep layout A. Add a **presence budget** to §3.10: about 10–15k
+  tokens per presence domain keeps discovery within 2–4 s on this host. A
+  deployment above it cuts the multiplier, and #605 picks how:
+  - interface tokens only for the interfaces consumers discover by;
+  - or instance tokens only, with the interfaces read from descriptors.
+
+  Layout C at equal token counts is no faster: the count is the cost.
+- **U18:** device-as-service holds at 5,000 devices (15k tokens, 3.3 s). It
+  triples the token count against member tokens. Above about 5,000 devices
+  per domain, members (D9b) are the shape.
+- **U11:** put + GET holds. A descriptor put crosses only toward
+  subscribers, and a re-mint costs about a dozen declarations.
+- **U20:** confirmed from the presence side. Per-entity tokens break down
+  between 15k and 50k, while S5 read 100k `@state` keys in 248–390 ms.
+- **Liveliness is lease-bound.** A silent loss is noticed only after the
+  10 s lease, and the client's move to another router took another 10 s. A
+  router restart is noticed in 0.5 s.
+- **Runtime rule (#2678):** a liveliness GET on a session that holds a
+  liveliness subscriber uses a callback or an unbounded handler, never the
+  default 256-slot FIFO.
 
 ### S3 — constrained links (#599)
-*Pending.* netem through tcgui, plus zenoh-modem's link classes. Measures:
-presence replay, descriptor and bundle fetch, time to first view.
+
+**Verdict:**
+- **`@stream` isolation holds across a link (U-D).** With the ground
+  subscribed to `zk2/vehicle-01/**`, 4 s of 10 KB frames put 3.4 KB on the
+  link: the 100 B stream samples, no frames. Frames crossed only when the
+  ground named the `@stream` key.
+- **At 64 kbit/s and above, discovery is cheap.** Presence for 50 services
+  costs 11 KB. A descriptor takes about one RTT, and a tool's first view
+  4.6 s.
+- **At 2,400 bit/s, zenoh's defaults do not work at all.** A 64 KB batch
+  outlasts the 10 s lease, so the link re-handshakes and resends in a loop:
+  presence 0 of 100 tokens in 300 s.
+  - **1 KB batches fix it:** link-speed presence in 38 s.
+  - The batch size is part of a constrained face's configuration (U13).
+- **R7 needs a different mechanism from the one r3.3 assumed.**
+  - An ACL deny on `@zk` hides presence, but the denied declarations still
+    cross a router-to-router link, key strings included. Bring-up cost
+    11.1 KB, the same as with presence.
+  - **A ground that is a zenoh *client* of the vehicle router** receives only
+    what it shows interest in: a bring-up put 17 B on the link (11.1 KB router-to-router), a coverage gap 536 B (11.8 KB), and a statically bound state GET answered in 0.75 s.
+- **A named `@stream` key starves a slow link.** Nothing is dropped: 4 s of
+  frames took 29 s to drain at 64 kbit/s, and more than 600 s at 2,400 bit/s.
+  Every request queued behind them.
+- **Every coverage gap flaps every token**, and costs as many bytes as a
+  bring-up.
+
+**Setup.** `spike s3` builds a vehicle router with 50 mock `camera.v1`
+services, a storage, and a holder of the 82 KB `zs.snmp.v1` bundle. It reaches
+a ground router (the tools) through the harness's shaping proxy:
+- the proxy behaves as a serial line: a one-way delay, a bandwidth cap per
+  direction, bytes released in slices of about 50 ms, and a buffer of about
+  0.5 s;
+- windowed measures run until the link is quiet (64 B or less in 3 s).
+
+**Not modelled:** loss, because `tc`/netem is not available here (over TCP,
+loss would show as retransmission delay), and zenoh-modem's 220 B MTU.
+
+The `@zk`-denied profiles carry an ACL on both routers' TCP face (the link
+only; local clients use unix sockets) that denies every message on
+`zk2/**/@zk/**` both ways. Each profile's router config is the
+`link-<profile>.json` beside the data. The probes are `s3/probes.sh`.
+
+Raw data: [`spike-results/s3/`](spike-results/s3/) (the profiles) and
+[`spike-results/s3-probes/`](spike-results/s3-probes/) (the probes).
+
+**A correction in this run.** The first version of the proxy released each
+16 KB read whole after its link time, and buffered up to 256 KB. That made
+two false findings:
+- "at 2,400 bit/s presence never converges", for a mix of reasons;
+- "a router queues `@stream` frames ahead of a tool's requests" at 64 kbit/s.
+
+The proxy now emulates a line, and every profile was rerun.
+
+**The profiles** (seconds / bytes vehicle→ground):
+
+| Measure | 1 Mbit/s, 600 ms RTT | 64 kbit/s, 600 ms RTT | 2,400 bit/s, 200 ms RTT, zenoh defaults | 2,400 bit/s, 1 KB batches | the same, `@zk` denied (R7) | the same, ground as a client (R7) |
+|---|---|---|---|---|---|---|
+| Presence, first view (100 tokens) | 1.2 s / 11.3 KB | 2.4 s / 11.1 KB | **0 of 100 in 300 s** (85.5 KB) | 38.4 s / 11.3 KB | hidden: 0 tokens; bring-up still 37.7 s / 11.1 KB | hidden; bring-up **0.2 s / 17 B** |
+| Presence replay after a reconnect | 2.7 s / 11.1 KB | 4.0 s / 11.1 KB | **0 of 100 in 300 s** | 39.9 s / 11.3 KB | — | — |
+| One descriptor GET (312 B) | 0.61 s | 0.66 s | (the profile stopped) | 1.6 s | denied: 0 replies | denied: 0 replies |
+| Bundle fetch, `camera.v1` (1,761 B) | 0.62 s | 0.85 s | | 6.7 s | local | local |
+| Bundle fetch, `zs.snmp.v1` (82,391 B) | 1.3 s | 11.2 s | | 280 s (link speed) | local | local |
+| State GET, answered by a storage on the vehicle | 0.61 s | 0.65 s | | **0 replies**, at once (note 1) | 1.4 s | 1.4 s |
+| State GET, answered by the owner (static binding) | — | — | | — | 0.68 s | 0.75 s |
+| 4 s of 10 KB frames + 100 B samples at 5 Hz, ground on `zk2/vehicle-01/**` | 3.4 KB | 3.4 KB | | 3.4 KB | 3.4 KB | 3.4 KB |
+| The same, with the ground naming the `@stream` key | 204 KB in 7.2 s | 204 KB in **29.4 s** | | 179 KB, still draining at 604 s | the same | 179 KB, still draining at 604 s |
+| A tool's first view: presence, 50 descriptors, 1 bundle, 1 state | 2.0 s / 22 KB | 4.6 s / 22 KB | | 165.7 s (note 2) | one state, statically bound: 91.5 s (note 2) | one state: 1.4 s (note 3) |
+| 100 subscriber declarations toward the vehicle, zk2 / v1-shaped keys | 84 / 76 B each | 84 / 72 B | | 87 / 83 B | 94 / 86 B | 87 / 74 B |
+| 3 coverage gaps of 2 s | 33.8 KB; 300 deletes + 300 puts | 34.1 KB; the same | | 34.5 KB in 128 s; the same | 11.8 KB per gap, 0 tokens seen | **536 B per gap**, 0 tokens seen |
+
+**Notes:**
+1. The storage started 0.8 s before the GET, and its queryable's declaration
+   had not crossed yet. A GET with no route returns empty at once: silence,
+   not absence, which is R5's point.
+2. These views queued behind the previous step's frame backlog. Only 22 of
+   the 50 descriptors arrived within the 120 s limit.
+3. The proxy shapes each TCP connection separately. In the client profile
+   every ground session has its own connection, so the tool did not queue
+   behind the frame backlog. On one radio, all sessions share the line.
+
+**Why the defaults fail at 2,400 bit/s** (probes, 100 tokens):
+
+| Router config | First view (time; bytes; reconnects) | Replay after a cut |
+|---|---|---|
+| zenoh defaults (batch 65,535 B, lease 10 s) | 85.3 s; 24.3 KB; **4 reconnects** | 59.9 s; 16.8 KB; 2 beyond the healing reconnect |
+| `batch_size` 1,024 | 24.1 s; 7.0 KB; none | 25.6 s; 7.0 KB |
+| `lease` 60 s | 23.8 s; 6.9 KB; none | 25.3 s; 7.0 KB |
+| both | 24.1 s; 7.0 KB; none | 25.5 s; 7.0 KB |
+
+The defaults are also erratic. An earlier run of the same probe took 57 s and
+175 s (2, and 8 beyond the healing one). The full profile above, with 50 services'
+declarations (11 KB), never converged in 300 s. 7 KB at 300 B/s is 23 s:
+tuned, the link runs at its own speed.
+
+A batch must cross well within the lease, or the receiver drops the link
+mid-batch. 1 KB batches keep the 10 s failure detection, which makes them the
+right knob rather than a longer lease.
+
+**What an ACL keeps off the link** (probes; 200 `@zk` tokens across a
+router-to-router link, bytes vehicle→ground):
+
+| Setup | Bytes | Denied key strings in the bytes | The ground sees the tokens |
+|---|---|---|---|
+| Router-to-router, no ACL | 11,811 | 201 of 201 | yes |
+| Router-to-router, the deny on both routers | 10,530 | **201** | no |
+| The deny on the vehicle router only | 11,097 | 201 | no |
+| The deny on the vehicle router, egress only | 10,719 | 201 | no |
+| The deny on the ground router only | 11,820 | 201 | no |
+| 200 data queryables, no ACL / with a deny on their keys | 10,038 / 8,737 | 200 / **200** | — |
+| **The ground as a client** of the vehicle router, no interest in `@zk` | **322** | 1 (its own GET's reply) | — |
+| The ground as a client, holding a liveliness subscriber on `@zk` | 12,316 | 201 | yes |
+| **The ground as a client, the deny on the vehicle router** | **285** | **0** | no |
+
+The ACL controls what the far side *sees*, not what the link *carries*. On a
+client link, declarations travel only toward interests, which is what makes
+the deny effective.
+
+**For r4:**
+- **U-D:** confirmed on a link. `@stream` stays off ambient selectors.
+- **R7 / D15, restated mechanism:**
+  - Across a constrained face, the far side **attaches as a client** of the
+    near router (interest-scoped declarations), with the `@zk` deny making it
+    enforceable.
+  - A router-to-router link carries every declaration, and in zenoh 1.10.1 a
+    deny does not stop the key strings: [draft upstream
+    report](upstream/acl-denied-declarations-cross.md), not filed.
+- **U13, the constrained level, gains a link profile:**
+  - batches of about 1 KB at radio rates;
+  - `@stream` keys denied across the face unless `link.v1` downsamples them,
+    because one named key starves the link for minutes;
+  - presence never crosses: one gap costs a full re-declaration.
+- **Declarations:** zk2 keys cost 4–12 B more per declaration than
+  v1-shaped ones (84–94 B against 72–86 B), the difference in key length.
 
 ### S4 — contract serving (#600)
 
@@ -586,22 +833,214 @@ reproduce, and the committed timeline shows the lease pattern.
   already requires.
 
 ### S7 — bundle stability and classifier feasibility (#603)
-*Pending.* protox/protoc/buf determinism; the retention rule; WIRE_JSON on
-prost-reflect against `buf`; the JSON Schema subset; Python `rfc8785`
-against Rust canonical bytes. Decides U7. A starting point: `zenkey-model`'s
-conformance fixtures already pin JCS canonical bytes for JSON Schema and
-raw contracts, and state that protobuf artifacts are protox's encoding
-(`spec/conformance/README.md`).
+
+**Verdict:**
+- **U7 holds.** Bundles are built once, with bytes, plus the retention rule:
+  - protox compiles byte-identically, and matches protoc 3.21.12 byte for byte;
+  - a normalized comparison recognises `buf build`'s different bytes as the same schema.
+- **The protobuf classifier is feasible on prost-reflect.** buf's WIRE_JSON
+  rules re-implemented on it agree with `buf breaking` on 14 of 14 cases in
+  both argument orders.
+- **But `buf` in both orders cannot define FULL_TRANSITIVE:** it calls adding
+  a field breaking. zk2 needs its own directional reader/writer semantics.
+- **The zk2 JSON Schema subset is written down.** Its classifier agrees with
+  `jsoncompat` on 13 of 15 cases. The other two are a deliberate choice:
+  tolerant readers.
+- **Python `rfc8785` verified every Rust bundle byte for byte.**
+
+`spike s7` and `s7/verify_bundles.py`. Raw data and every input:
+[`spike-results/s7/`](spike-results/s7/).
+
+**Determinism** (the 8 walkthrough `.proto` sets):
+
+| Comparison | Result |
+|---|---|
+| protox 0.9.1, twice | identical bytes, 8/8 |
+| protoc 3.21.12 (`--include_imports`) | **identical bytes**, 8/8 |
+| `buf build --as-file-descriptor-set` (1.73.0) | different bytes (it keeps source info: 784 B against 265 B); **identical after normalization** (source info dropped, default `json_name` dropped), 8/8 |
+
+The retention rule's identity check is that normalized comparison. A
+rebuild whose bytes differ but which normalizes the same keeps the old
+bundle.
+
+**Protobuf** (14 old→new cases):
+- **buf's WIRE_JSON rules re-implemented on prost-reflect** (`FIELD_NO_DELETE_UNLESS_*`, `FIELD_SAME_NAME`, `FIELD_SAME_JSON_NAME`, `FIELD_WIRE_JSON_COMPATIBLE_TYPE`/`_CARDINALITY`, `FIELD_SAME_ONEOF`, `RESERVED_*_NO_DELETE`, `ENUM_VALUE_*`) **agree with `buf breaking` on all 14 cases, in both orders.**
+- **`buf` in both orders is not "both directions".** Adding a field or an enum value is breaking in the swapped order, because the swap reads it as a deletion. Deleting a field is breaking in the forward order only.
+- **The zk2 classifier proposed for #618 is directional.** A reader reads a writer's data; unknown fields are ignored and missing fields defaulted. A change breaks when the same field's wire or JSON encoding diverges: its type, JSON name, cardinality, oneof membership, or an enum value's name. It also **detects renumbering**, which is a deletion plus an addition and silently drops the data in both directions. A field deleted without reserving its number is a **warning**: reuse is caught against the full history.
+
+| Case | `buf` new vs old / old vs new | zk2, WIRE_JSON | zk2, WIRE only |
+|---|---|---|---|
+| add a field | ok / breaking | compatible | compatible |
+| delete a field (unreserved) | breaking / ok | compatible + warning | compatible |
+| renumber a field | breaking / breaking | **breaking** (data dropped) | **breaking** |
+| rename a field | breaking / breaking | breaking (JSON name) | compatible |
+| int32 → int64; string → bytes | breaking / breaking | breaking | breaking |
+| scalar → repeated; move into a oneof | breaking / breaking | breaking | breaking |
+| add an enum value | ok / breaking | breaking (old JSON readers lack the name) | compatible |
+| rename / delete an enum value | breaking / breaking; breaking / ok | breaking | compatible |
+| `json_name` option added | breaking / breaking | breaking | compatible |
+| documentation only | ok / ok | compatible | compatible |
+
+**For r4:** WIRE_JSON or WIRE only? zk2 protobuf payloads are binary
+on the wire (D5), and tools decode with the *writer's* bundle, fetched by
+fingerprint. JSON-name changes then never break a running system; they only
+relabel a tool's display. The recommendation is **WIRE** semantics with
+renumber detection for compatibility, and JSON-name and enum-name changes as
+**review**. That also makes adding an enum value compatible, as it is for
+binary readers.
+
+**The zk2 JSON Schema subset** (r3 §3.9, D11). Its keywords are `type`,
+`properties`, `required`, `additionalProperties`, `items`, `enum`, `const`,
+`minimum`/`maximum`/`exclusive*`, `minLength`/`maxLength`,
+`minItems`/`maxItems`, local `$ref`, and `oneOf` (with a discriminator).
+Annotations are ignored: `$schema`, `$defs`, `$comment`, `title`,
+`description`, `default`, `examples`, `format`, `deprecated`, `readOnly`,
+`writeOnly`. Everything else (`pattern`, `if`/`then`, `allOf`,
+`patternProperties`, …) is refused, because containment is not decidable for it.
+Rule: a reader accepts every instance its writer produces, with **readers
+tolerating unknown properties and writers sending only what their schema
+declares**, as in protobuf. Full compatibility needs both directions.
+
+| Case | zk2 | `jsoncompat` 0.4.2 (serializer / deserializer) |
+|---|---|---|
+| add an optional property | compatible | ok / ok |
+| add an optional property to a closed schema | compatible (tolerant readers) | **breaking** / ok |
+| remove an optional property | compatible (writers send only what they declare) | **breaking** / ok |
+| add a required property; optional → required | breaking | ok / breaking |
+| required → optional | breaking | breaking / ok |
+| integer → number; number → integer | breaking | breaking / ok; ok / breaking |
+| add / remove an enum value | breaking | breaking / ok; ok / breaking |
+| tighten `maximum`; loosen `maxLength` | breaking | ok / breaking; breaking / ok |
+| add a `oneOf` branch | breaking | breaking / ok |
+| add a `pattern` | refused (outside the subset) | ok / breaking |
+| documentation only | compatible | ok / ok |
+
+The oracle caught one real gap in a first version of the rules: a removed
+property definition lifts its type constraint in an open schema. Resolving it
+led to the tolerant-reader rule above. The two remaining disagreements are
+that rule, and they are deliberate.
+
+**Cross-language canonical bytes.** Python 3.13's `rfc8785` 0.1.4 and
+`hashlib` verified **24 of 24** example bundles. Each file is the JCS of its
+own value, its fingerprint matches its name, and every schema matches its
+id. The same held for **11 of 11** seeded canonical fixtures.
+
+**The compatibility matrix** is handed to #607 as
+[`compat-matrix.draft.json`](spike-results/s7/compat-matrix.draft.json): 53
+draft cases (14 protobuf, 15 JSON Schema, 24 contract-metadata rows from
+r3 §3.11 that await #618).
 
 ### S8 — deployment shapes (#604)
 Done on paper: [`examples/zk2/shapes.md`](../../examples/zk2/shapes.md).
 Natural `system`/`service` names exist for every shape examined.
 
 ### S14 — ACL on a live router (#616)
-*Pending.* The pilot and walkthrough rule sets under
-`default_permission: deny`; wildcard-put injection; fan-out refusal; allow
-rules under `allow`. Decides U14, U21.
+
+**Verdict:**
+- **`default_permission: deny` with P3's three grant shapes works:** 13 of 13
+  checks.
+- **U21 is confirmed:** under `allow`, allow rules are not evaluated, and
+  every unauthorized action got through.
+- **D13 works:** compiling each grant into denies of its complement blocks
+  them all, except wildcard puts, which R6 stops at the consumer.
+- **Two generator rules were found the hard way** (below).
+
+`spike s14`: one router with usrpwd authentication, 9 principals (the
+control walkthrough, the tcgui pilot, offline commanding), and the generated
+router configs. Raw data, including each posture's config:
+[`spike-results/s14/`](spike-results/s14/).
+
+| Check | deny + allows | allow + the same allows (U21) | allow + complement denies (D13) |
+|---|---|---|---|
+| teleop puts on its own cmd; the thruster receives it | yes | yes | yes |
+| teleop puts on autopilot's cmd key (impersonation) | **blocked** | gets through | blocked |
+| teleop puts on `zk2/vehicle-01/*/twist_cmd.v1/stream/cmd` | blocked | gets through | **gets through** (a wildcard is in no deny; R6 drops it) |
+| teleop subscribes to the thruster's status (not granted) | blocked | gets through | blocked |
+| the frontend sees the vehicle's presence (not granted) | 0 tokens | 4 tokens | 0 tokens |
+| the frontend's fan-in GET `zk2/*/tc/tc.netif.v1/state/**` | 2 replies | 2 | 2 |
+| the frontend's wildcard call to a fan-out-forbidden operation | 2 `fanout_forbidden` refusals, 0 executions | same | same |
+| backend h1 puts on h2's state | blocked | gets through | blocked |
+| vehicle-01's executor reads vehicle-02's plan | blocked | gets through | blocked |
+| contract fetch; a client without credentials | works; refused | same | same |
+
+**Generator rules for `zenctl acl gen` (#612):**
+1. **own** `sys/svc` spells out every verbatim chunk, because `**` never
+   crosses one: `zk2/sys/svc/**`, `…/*/@stream/**`, `…/*/@state/**`,
+   `…/*/@op/**`, `zk2/sys/svc/@zk/**`.
+   - **Ingress:** put, delete, declare_queryable, reply, liveliness_token.
+   - **Egress:** query and declare_subscriber (a publisher must learn of interest).
+2. **consume** keys.
+   - **Ingress:** declare_subscriber, query, declare_liveliness_subscriber, liveliness_query.
+   - **Egress:** put, delete, reply, liveliness_token.
+3. **call** operation keys: ingress query; egress reply.
+4. **Found here:** egress to a provider is checked against the query's or
+   subscription's *own* key expression, by inclusion. A consumer's wildcard
+   selector (`zk2/*/tc/...`) is not included in `zk2/h1/tc/**`, so the fan-in
+   GET got **0 replies** until **every consumer selector that intersects a
+   provider was added to that provider's egress grant**.
+5. **Found here:** a reply to a wildcard query is checked against the query's
+   key, and that includes a `fanout_forbidden` refusal. The same selectors
+   must be granted for the provider's ingress *reply*.
+6. **Contract bundles:** anyone may hold or fetch them on `zk2/@zk/contract/**`;
+   the hash is the check.
+
+A liveliness GET returns the querying session's own token twice, its local
+copy and the router's. Tools count distinct keys.
+
+**For r4:**
+- **U14:** a SHOULD, as r3.2 leaned. Default deny gives P3's guarantees
+  outright.
+- **Under `allow`:** grants must be compiled into denies of their complement
+  (D13), and regenerated on every contract revision. Wildcard injection then
+  rests on R6 and O2.
+- mTLS certificate-CN subjects were not run; they differ from usrpwd only in
+  how a subject is named.
+- **Router-to-router faces (from S3):**
+  - these checks ran on one router with client principals;
+  - between routers, a deny hides the denied declarations, but their key
+    strings still cross the link;
+  - an ACL is therefore not a confidentiality boundary for key names.
 
 ### S15 — constrained devices (#617)
-*Pending.* A zenoh-pico participant as an owner against a router. Decides
-U13.
+
+**Verdict: a zenoh-pico 1.10.1 participant can be a full zk2 owner.**
+- Tokens, descriptor, stream, state with S1–S3 timestamps and `reply_del`,
+  and `complete` operations all work.
+- A literal prefix replaces the session namespace.
+- The constrained level relaxes the clock rule and the namespace, and it
+  needs no gateway for bundles of this size.
+
+`spike s15`, with the participant `s15/zk2_pico.c` (C, client mode, linked
+against `libzenohpico.a` 1.10.1 built with its defaults). Raw data and the
+source: [`spike-results/s15/`](spike-results/s15/).
+
+| Case | Observed |
+|---|---|
+| Bring-up (queryables, then the instance token, then the interface token) | ready in 1 ms |
+| Its tokens, parsed by `zenkey-model` | instance and `alive health.v1`: both parse |
+| Its descriptor, by GET on the instance key | answered |
+| Its heartbeat stream, 2 s | 19 samples, all stamped by the router (pico stamps nothing by itself) |
+| A state GET (`All` + `Latest`) | the value, with the pico's own timestamp (`z_timestamp_new`: wall clock + a per-session bump, the pico's id) |
+| After a delete | a `reply_del` with a timestamp |
+| A `complete` operation | 1 reply |
+| Replies of 1 KB, 4 KB, 8 KB, 64 KB, 100 KB | **all delivered** (100,000 B in 1 ms) |
+| Pico + a storage, unconsolidated | both replies carry the pico's timestamp (the storage keeps it) |
+| A pico using the literal prefix `dep1/zk2`, read by a Rust session in namespace `dep1` | 1 reply, seen as `zk2/…` |
+
+**Corrections to the r3 facts:**
+- **`Z_FRAG_MAX_SIZE` = 4096 bounds what a pico *receives*, not what it
+  sends.** A Linux pico served 100 KB replies, so a gateway holder (S4) is
+  needed for pico *consumers* of large data, and for microcontroller builds
+  with smaller batches.
+- **The pico's timestamps are not HLC**, but they are monotonic within a
+  session and merge cleanly with a storage.
+
+**The proposed constrained conformance level, for #606:**
+- **Clock (U2):** wall clock with a per-session bump, instead of HLC MUST. The
+  catch-up rule still applies: read the last stored timestamp of one's keys
+  before the first write.
+- **Namespace:** a deployment prefix is literal in keys.
+- **Descriptor:** small enough for one fragment.
+- **Bundles:** served by a gateway when the device cannot (receive limits).
+- **Constrained faces** (zenoh-modem's radios) are the other half of the
+  level. Liveness there is link freshness (D15), and S3 measures the costs.

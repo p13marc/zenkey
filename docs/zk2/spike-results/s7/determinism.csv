@@ -1,0 +1,9 @@
+unix_s,contract,file,protox_twice_equal,protoc_bytes,buf_bytes,normalized
+1791415931,camera.v1,camera/v1/camera.proto,true,equal,differ (784 vs 265 B),"protoc identical, buf identical"
+1791415931,detections.v1,detections/v1/detections.proto,true,equal,differ (977 vs 330 B),"protoc identical, buf identical"
+1791415931,geo.v1,geo/v1/geo.proto,true,equal,differ (763 vs 275 B),"protoc identical, buf identical"
+1791415931,health.v1,health/v1/health.proto,true,equal,differ (1295 vs 454 B),"protoc identical, buf identical"
+1791415931,mission_plan.v1,mission_plan/v1/mission_plan.proto,true,equal,differ (1202 vs 471 B),"protoc identical, buf identical"
+1791415931,nav.v2,nav/v2/nav.proto,true,equal,differ (2062 vs 757 B),"protoc identical, buf identical"
+1791415931,thruster.v1,thruster/v1/thruster.proto,true,equal,differ (733 vs 262 B),"protoc identical, buf identical"
+1791415931,twist_cmd.v1,twist_cmd/v1/twist_cmd.proto,true,equal,differ (482 vs 207 B),"protoc identical, buf identical"
