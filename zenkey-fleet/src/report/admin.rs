@@ -167,11 +167,13 @@ pub struct TopologyNode {
     pub whatami: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// Locators as the node's own root doc declares them. Since zenoh
-    /// 1.10.0 the root doc filters loopback endpoints out of this list
-    /// (upstream eclipse-zenoh/zenoh#2671, the loopback scouting fix:
-    /// `get_locators()` → `get_locators_noloopback()`) — deliberate, so a
-    /// loopback-only node honestly declares `[]` here.
+    /// Locators as the node's own root doc declares them. zenoh 1.10.0's
+    /// root doc filters every loopback endpoint out of this list (upstream
+    /// eclipse-zenoh/zenoh#2671, the loopback scouting fix:
+    /// `get_locators()` → `get_locators_noloopback()`), so a loopback-only
+    /// node declares `[]`; from 1.10.1 the filter covers only the loopback
+    /// addresses an unspecified listener resolves to, and an explicit
+    /// `127.0.0.1` listener is declared again.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub locators: Vec<String>,
     /// Endpoints corroborated from session links when the root doc

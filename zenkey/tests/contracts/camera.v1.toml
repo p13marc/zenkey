@@ -1,0 +1,13 @@
+# retrieval.md: the bundle the holders hold. Also an interface whose only
+# resource is gated (presence.md §1: an instance exposing nothing of it).
+[interface]
+name = "camera"
+major = 1
+minor = 0
+
+[resources.frames]
+kind = "stream"
+explicit = true
+type = { raw = "image/jpeg" }
+optional = true
+gate = ["capability:camera"]

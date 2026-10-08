@@ -1,0 +1,29 @@
+# presence.md §1–§3: a required state, an operation, an optional resource
+# gated on a capability, and a member template (`epoch`).
+[interface]
+name = "nav"
+major = 2
+minor = 1
+
+[resources.pose]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.goto]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+
+[resources.covariance]
+kind = "state"
+type = { raw = "text/plain" }
+optional = true
+gate = ["capability:imu"]
+
+[resources."tracks/{track}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { track = "string" }
+cardinality = 50
+epoch = "track"
+optional = true
