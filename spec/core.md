@@ -795,13 +795,13 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
   holds the interface's token, unless the interface is in its tokenless
   set (§8.1). The active instance declares a `complete` queryable over each
   optional operation of the interface that it does not expose, and answers
-  there with `unavailable` and the cause its descriptor gives (§3.3). A
-  standby is active on nothing, so it declares none.
-  - **Beside replicas.** Several instances are active on one interface
-    only through replicated operations (§6). An instance whose exposed
-    resources of an interface are all replicated operations MUST NOT
-    declare an `unavailable` queryable on an exclusive operation of it: the
-    instance serving that operation may be another, and a concrete call
+  there with `unavailable` and the cause its descriptor gives or implies
+  (§3.3). A standby is active on nothing, so it declares none.
+  - **Beside replicas.** Several instances are legitimately active on one
+    interface only through replicated operations (§6). An instance whose
+    exposed resources of an interface are all replicated operations MUST
+    NOT declare an `unavailable` queryable on an exclusive operation of it:
+    the instance serving that operation may be another, and a concrete call
     reaches whichever `complete` queryable is nearest (O1).
   - Replicas SHOULD expose the same replicated operations, since one
     answers `unavailable` where another would have served.
