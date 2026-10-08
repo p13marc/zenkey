@@ -186,7 +186,7 @@ Counts are v1's: telemetry / state / events · procedures · errors · `when`.
 | `[[blob]]` (30) | `blob.v1`'s `@blob` kind |
 | `[[error]]` (25) | `serialize` (16) → core `internal`; `no-route-socket`, `no-system-bus` → `unavailable` cause capability; catalog `not-firing`/`publish`, desired `not-durable`, the historian's four → `app` error types (`CatalogError`, `DesiredError`, `HistorianError`) |
 | `[[deprecated]]` (20) | not migrated: a new major starts clean (G19 is about the next retirements) |
-| `seed`, the advanced tier | S4 state GET + storage; `history = true` where v1 ran an AdvancedPublisher on state or evidence |
+| `seed`, the advanced tier | S4 state GET to the owner, and an `archive.v1` read for last-known (r4); `history = true` where v1 ran an AdvancedPublisher on state or evidence |
 | `?actor=` selector parameter | O7 call metadata `{actor, request_id}`, recorded as `by` |
 
 ## Consumer side
@@ -216,7 +216,7 @@ interfaces from presence and contracts, then subscribes per interface.
 | `v1/*/@rpc/logs/events/page`, netring/netlink listings, the generic `v1/*/@rpc/<p>/<proc>` fallback (`call.rs:455-470`, `view/specialized/netring_detail.rs:86-91`, `bandwidth.rs:157`) | `zk2/*/*/<iface>/@op/<op>`, legal only where `fanout = "allowed"` is declared (O2). v1 reads defaulted to fan-out allowed; draft 0 defaults to forbidden, so every fleet-called read declares it. |
 | `v1/*/@rpc/<p>/artifact/request` and `…/cancel` fleet writes (`view/artifact_fetch.rs:516`, `app.rs:4048`) | `zk2/*/*/zs.artifacts.v1/@op/request`, `…/cancel` (fan-out allowed, as v1 declared) |
 | `v1/@desired/state/**` seed (desired `publish.rs:62`, hand-built) | `zk2/fleet/desired/zs.desired.v1/state/**`. The sensor side reads its exact key, binding `{host}`/`{service}` to itself. |
-| `v1/@catalog/state/pdns/**` storage (`router-pdns-influxdb-storage.json5:76`) | `zk2/fleet/catalog/zs.catalog.v1/state/pdns/**` |
+| `v1/@catalog/state/pdns/**` storage (`router-pdns-influxdb-storage.json5:76`) | `zk2/fleet/catalog/zs.catalog.v1/state/pdns/**`; under r4 the history capture is an archive, recording, never answering on the catalog's keys |
 | web `v1/*/state/parallax/alive` (`web/src/origins.ts:28`, `keys.ts:68-74`) | `zk2/*/*/@zk/alive/zs.parallax.v1/**` |
 | web `v1/<origin>/state/parallax/stream/*` (`catalogue.ts:45`) | `zk2/<host>/*/zs.parallax.v1/state/streams/*` |
 | zenwatch's own state (`zenwatch/src/publish.rs:557-565`: health, `firing/{rule}`, describe) | `health.v1` + a zenwatch interface of its own; describe is deleted |
@@ -290,7 +290,7 @@ Tests spell many more keys; bmc's e2e alone spells 61.
   - on events and alerts: historian `timeline.rs:54, 125`;
   - on evidence, assertions, alerts, acks and silences: correlator `subscriber.rs:47-114`. The catalog documents there are published by plain publishers, so their history reads nothing.
   - on **desired**, sensor side only (`zensight-sensor-core/src/desired.rs:274-279`).
-- The contracts declare `history = true` on evidence and on that state, and nowhere on telemetry (RFC 11 §1's target posture) or desired (storage + S4). Depth and heartbeat cannot be declared (G24).
+- The contracts declare `history = true` on evidence and on that state, and nowhere on telemetry (RFC 11 §1's target posture) or desired (S4 + an archive, r4). Depth and heartbeat cannot be declared (G24).
 
 **Other:**
 

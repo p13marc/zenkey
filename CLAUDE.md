@@ -211,10 +211,10 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
 
 ## zk2 — the redesign in progress (epic #585)
 
-- **The design of record** is `docs/zk2/architecture.md` (proposal r3.3; contracts in `examples/zk2/`, authoring format draft 1).
+- **The design of record** is `docs/zk2/architecture.md` (proposal r4, after the spike; contracts in `examples/zk2/`, authoring format draft 1).
   Its history (brief → r1 → review → r2) sits beside it, indexed by
-  `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x keeps r3's section
-  numbers. The r-number moves only through a reviewed revision carrying a
+  `docs/zk2/README.md`. Issues cite it as `r3 §x`; r3.x and r4 keep r3's
+  section numbers. The r-number moves only through a reviewed revision carrying a
   "what changed since rN" table.
 - **The v1 line.** v1 (`rfcs/`, frozen at v1.50) is maintained on the `v1`
   branch (0.14.x patches, #587).
@@ -234,14 +234,21 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `ZK2_BLESS=1 cargo test -p zenkey-model --test conformance` and read the
   diff: a bless claims every changed expectation is right.
 - **Spike code** lives on branch `zk2-spike`, with its own `[workspace]`,
-  and is never merged. Only results and `docs/zk2/spike-report.md` land on
-  `main`.
+  and is never merged (tag `zk2-spike-final`). Only results and
+  `docs/zk2/spike-report.md` land on `main`.
 - **Decided 2026-10-07:**
   - paradigm P3: a key is written only by the service that owns it, and
     consumers bind roles to providers;
   - tcgui is the pilot;
   - adopter shapes are first-class: system = host (`hostid.v1`), and
     device-as-service.
+- **Decided 2026-10-08 (r4):**
+  - the owner is authoritative for state, and last-known state lives in
+    `archive.v1`;
+  - O1 holds only while one instance serves; `redundancy.v1` owns
+    exclusivity;
+  - the protobuf classifier uses WIRE semantics with renumber detection;
+  - the draft upstream reports in `docs/zk2/upstream/` are not filed.
 
 ## Commands
 

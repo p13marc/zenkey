@@ -1,8 +1,8 @@
-# Zenkey v2: architecture proposal r3.3, a redesign driven by use cases
+# Zenkey v2: architecture proposal r4, a redesign driven by use cases
 
-*Proposal r3, 2026-10-07; **r3.1** after the issue review of the same day (§0.1), **r3.2** after checking it against the three adopters (§0.2), and **r3.3** after the adopters' contract mappings (§0.3). r3.x keeps r3's section numbers, so citations of the form `r3 §x` stay valid. It supersedes r2 and §8 of the r1 analysis, and
+*Proposal r3, 2026-10-07; **r3.1** after the issue review of the same day (§0.1), **r3.2** after checking it against the three adopters (§0.2), **r3.3** after the adopters' contract mappings (§0.3), and **r4** after the spike (§0.4, 2026-10-08). r3.x and r4 keep r3's section numbers, so citations of the form `r3 §x` stay valid. It supersedes r2 and §8 of the r1 analysis, and
 it is self-contained. It is not code. Zenoh facts were read in the zenoh
-1.10.1 source (Appendix B).*
+1.10.1 source, and r4's were measured by the spike (Appendix B).*
 
 **Objective.** The smallest durable, language-independent interface-contract
 and reflection layer that makes Zenoh the foundation of an *application
@@ -69,7 +69,7 @@ The review was sourced against zenoh 1.10.1 (still the latest release), zenoh-pi
 | Canonical form | Restricted to ASCII identifiers and integers within ±(2^53−1), with duplicate keys rejected. These are the only conditions under which every JCS implementation agrees: Rust crates round larger integers, Python's `rfc8785` raises on them. | §3.11 |
 | Protobuf | **proto2/proto3 only** for now. protox, prost and prost-reflect do not support editions (prost#1031 is open). | §3.9 |
 | jsonschema | Restricted to **a zk2 subset of JSON Schema 2020-12**, so that compatibility is decidable. The existing checkers are young: `json-schema-diff` is best-effort draft-07, `jsoncompat` is alpha. | §3.9 |
-| The classifier | No Rust equivalent of `buf breaking` exists. The protobuf rules become a WIRE_JSON subset on `prost-reflect`, evaluated per direction, with `buf` as an optional cross-check. Bytes + the retention rule stand, because no protobuf compiler guarantees byte-stable descriptors. | §3.11 |
+| The classifier | No Rust equivalent of `buf breaking` exists. The protobuf rules become a WIRE_JSON subset on `prost-reflect`, evaluated per direction, with `buf` as an optional cross-check. Bytes + the retention rule stand, because no protobuf compiler guarantees byte-stable descriptors. *(r4: superseded by WIRE with renumber detection, §3.11.)* | §3.11 |
 | Wildcard puts | Verified live: under `default_permission: allow`, a put on `t/*` reaches a `t/a` subscriber even though a deny rule on `t/a` exists. P3's ACL guarantees therefore need `default_permission: deny`, and consumers discard samples whose key is not concrete. | §3.4, §3.13 |
 | Storage manager | It keeps timestamps, but never replies with tombstones. It has a suspected garbage-collection bug that drops *recent* tombstones, and a known wildcard-delete resurrection issue (zenoh#2649). Spike S5 tests both; they weigh on U1. | §3.6, §5 |
 | Constrained devices | zenoh-pico supports liveliness, `complete`, `reply_del`, timestamps and the querier. It has **no namespace, no real HLC** (wall clock with a per-session bump), and 4 KB default fragments. The location-free bundle key lets a gateway serve bundles for it. A constrained conformance level is a new open question (U13), and the clock rule (U2) must allow for it. | §3.10, §5 |
@@ -171,7 +171,7 @@ They consolidate into the decisions below (D1–D26). **The authoring format mov
 | D23 | **`alarms.v1`** fixes the host-scoped label exclusion normatively. References across services are structured fields (system, service, key), never dot-packed. Dotted service names are derived as `<parent>.<slug(device)>`, with a dot-free parent, split at the first dot. | G3, G4 | §3.5, §3.12 |
 | D24 | **Strays.** A parent service keeps families for data about devices it does not serve as services (`traps/{sender}`). Device services exist only by configuration. | G15 | §3.5 |
 | D26 | **One host-id salt for zk2.** v1 salts the machine-id hash per application, so one machine gets three different origins under tcgui, ZenSight and zenoh-modem. `hostid.v1` uses a single zk2-wide salt (`zk2-hostid-v1`), keeping the derivation and test-vector discipline, so a machine is **one system across every application**. Each adopter's v1 origin maps to its zk2 system name at port time (a migration table; ZenSight's catalog can publish it as aliases). | Z22 | §3.5, §3.12 |
-| D25 | **Large populations.** S5 seeds 50k and 100k by wildcard GET. U10's lean changes: large populations are `@state`, with paged or many-reply operations, or storage-backed GETs, sized by measurement. | G22 | §5 |
+| D25 | **Large populations.** S5 seeds 50k and 100k by wildcard GET. U10's lean changes: large populations are `@state`, with paged or many-reply operations, or storage-backed GETs, sized by measurement. *(r4: storage-backed GETs on an owner's keys are superseded by §3.6 rule S4; archives serve last-known state.)* | G22 | §5 |
 
 **Deferred, minor:**
 - codegen name hints (G23) → #611;
@@ -188,6 +188,92 @@ They consolidate into the decisions below (D1–D26). **The authoring format mov
 - interface-keyed selectors remove a ZenSight GUI bug: instance-suffixed producers (`netring-2`) were silently missed;
 - device-as-service and capability gates express all 88 of zenoh-modem's gated entries;
 - no `@zk` traffic needs to cross the radio.
+
+## 0.4 What r4 changed (the spike, 2026-10-08)
+
+**The input.** Every spike has run: S1–S15, with S8 on paper. The numbers
+are in [`spike-report.md`](spike-report.md), and the code is tagged
+`zk2-spike-final`. Each row below cites the spike behind it. r4 keeps r3's
+section numbers. *In §0.4, "Sn" names a spike. §3.6's state rules are
+written "rule Sn".*
+
+**Reviewed.** An independent review checked r4 against the spike report,
+its raw data, the spike code and the zenoh 1.10.1 sources. It made 40
+findings (3 blockers), all integrated before r4 became the design of record
+(#605).
+
+**Decided by the maintainer on 2026-10-08:**
+- **U1: the owner is authoritative.** A state GET is answered by the owner.
+  Last-known state lives in an **archive**, a service implementing
+  `archive.v1` that consumers read explicitly. This is r3's own fallback for
+  U1, adopted because the merged GET gave 10 wrong answers in 42 cases (S5).
+- **O1 is reworded.** A concrete call executes at most once **only while one
+  instance serves it**. `BestMatching` reaches one `complete` queryable per
+  router, so under a split-brain across routers every call ran on both sides
+  (S6). Tools detect that from tokens, and `redundancy.v1` owns exclusivity.
+- **The protobuf classifier uses WIRE semantics with renumber detection.**
+  JSON-name and enum-name changes are *review*, and adding a value to an
+  open enum is compatible. zk2 protobuf is binary on the wire, and tools
+  decode with the writer's bundle (S7).
+- **The two draft upstream reports** (the storage manager, S5; ACL denies on
+  router links, S3) **are not filed.** They stay in `docs/zk2/upstream/` as
+  records of zenoh 1.10.1's behaviour.
+
+**What changed:**
+
+| # | Change | Spike | Where |
+|---|---|---|---|
+| E1 | **State: owner-authoritative GET, and `archive.v1`** (U1, U15). A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys; tools check the storage admin space. An archive records owners' mutations under its own address, with timestamps, type identity and tombstones, and answers explicit GETs only. Its backend MUST NOT accept a put older than a delete it holds; zenoh 1.10.1's storage manager does (`upstream/storage-manager-outdated-guard.md`, not filed). It **re-aligns** with an owner that becomes reachable again (or with the owner's side archive while the owner is down), and drops keys only after a complete reply set. Archives are placed on the consumer's side against link loss, and on the owner's side against owner loss. | S5, S12 | §3.6, §3.12 |
+| E2 | **Clocks bounded both ways** (U2). HLC MUST. **Catch-up:** an owner never stamps at or below the last timestamp it issued. It reads that from its own persistent record, else from an archive on its own side. With neither, it starts a new epoch: a new instance with a fresh zid. Every zenoh timestamp carries its HLC's id, so consumers order within an id and restart their ordering at a new one. **Ahead:** an owner never stamps beyond its router's HLC delta (500 ms by default). It SHOULD detect drift against a router-stamped reference it subscribes to, and stops writing state when beyond it. Routers re-stamp future-dated puts but not replies. The constrained level keeps the catch-up and the ahead bound on a wall clock. | S5, S12, S15 | §3.6 |
+| E3 | **Tombstone windows** (U3): 60 s by default, overridable by annotation. State an archive records across a constrained face carries a window of at least the face's maximum outage. The deployment raises it through `link.v1`'s face policy. This takes the place of S5's "replication required for storages on state". About 100 B per tombstone. | S5 | §3.6, §3.12 |
+| E4 | **O1 reworded; split-brain diagnosed, exclusivity delegated** (U4, U12). `complete` stays: it routes concrete calls, captures templated ones, and makes fan-in work. The token check has a grace period longer than D9a's make-before-break overlap. Tools diagnose; the runtime does not fence. | S6, S2 | §3.7, §3.8 |
+| E5 | **O6, measured:** `Latest` and `Auto` kept 1 reply of 10, so consolidation `None` stays a MUST (U-G). | S6 | §3.7 |
+| E6 | **Contract retrieval accepts the first valid reply as it arrives.** In S4, the slow and the unreachable holders were the nearest, the valid reply came from behind a second router, and waiting for completion cost the whole timeout. | S4 | §3.10 |
+| E7 | **A presence budget** (U5). Presence costs per token, not per layout. Discovery took 1.2–1.9 s at 10k tokens, 23.8 s at 36k, and 46–49 s or never at 50k. A presence domain, the routers that exchange declarations, SHOULD stay within about 10–15k tokens, which kept discovery within 2–4 s. S2 measured tokens only, so the budget may be optimistic. Cutting r3's per-service multiplier is U22. | S2 | §3.10, §5 |
+| E8 | **Device-as-service holds to about 5,000 devices per domain** (15k tokens, 3.3 s), which is the whole budget. Above that, member tokens (D9b) are the shape, at a third of the tokens (U18). | S2 | §3.5 |
+| E9 | **What crosses a constrained face depends on the attachment** (R7, D15). A router-to-router link carries every declaration. A `@zk` deny there hides presence, but the denied declarations still cross, key strings included (`upstream/acl-denied-declarations-cross.md`, not filed). A far-side session attached as a **client** carries only what it asks for: 17 B per bring-up of 50 services with the deny, and 322 B for 200 unrequested tokens without it, against 11.1 KB router to router. The rule covers one far-side session, or a gateway session that re-keys what it relays under its own address. A site with its own router, or a service commanding many vehicles, is **U23** (zenoh 1.10.1 clients connect to one endpoint). | S3 | §3.4, §3.10, §3.13, §4.10 |
+| E10 | **The constrained level** (U13), in two halves. **Devices:** a wall clock with the catch-up, a literal deployment prefix, a one-fragment descriptor, gateway bundles where receive limits bite. **Links:** the far side attached as a client; batches that cross well within the lease (about 1 KB at 2,400 bit/s, where the 64 KB default made the link reconnect in a loop; a link's batch is node-wide on TCP, so the face needs its own router); `@stream` and `@zk` denied across the face; no presence across it, because on a router link every coverage gap re-declares everything (11.8 KB against 536 B over a client link). | S15, S3 | §3.10, §3.12 |
+| E11 | **Advanced pub/sub under a verbatim chunk, corrected.** History from publishers already present works, but late-publisher detection and heartbeat recovery do not, because zenoh-ext parses `@adv` keys with a `**` that cannot cross `@stream`. History stays on plain `stream` and `state` only (lint E019 in `zenkey-model`'s `diag::CODES`). | S1 | §3.2 |
+| E12 | **QoS defaults confirmed; `express` stays opt-in** (U-E). `real_time` + express lost 0.6–4 % of samples at 1–5 kHz on loopback, with no latency gain; the contract author opts in only on measurement. `@stream` costs nothing measurable as a token, and ambient selectors carried none of its frames across a link (U-D). | S9, S3 | §3.3 |
+| E13 | **The typed-layer budget is a per-message cost:** at most 1 µs of CPU on the typed path for a control-size message (measured: 126 ns). The ≤ 5 % p99 target is deferred to a quiet host. **SHM conditions:** zenoh-shm locks the pool plus 1,280 KiB of metadata, so `RLIMIT_MEMLOCK` SHOULD be at least the pool plus about 2 MiB. The implicit 16 MiB pool needs 17.25 MiB; at 8 MiB it fell back to TCP silently. An unlockable metadata segment panics, and tools check the limit at start. Zero-copy flatbuffers need in-place building (#611). | S9 | §3.9 |
+| E14 | **`arbitration.v1` and `timing.v1` gain their rules.** The binding order is the priority. The deadline runs on the **receiver's** monotonic clock, evaluated on receive and on a timer of at most deadline/50. A liveliness delete drops a provider at once. No fresh provider means the dead-man value. Identity comes from the key. A sender-stamped `lifespan` MUST NOT be used unless skew is bounded well below it, and uhlc's default 500 ms delta is not. Without that bound `lifespan` is not enforced, and control loops rely on the deadline. | S11 | §3.12, Appendix A |
+| E15 | **`clock.v1` states its tick.** Replay into a deployment namespace needs a replayer in that namespace (zk2 `zenctl replay --namespace`, #612). | S13 | §3.12, §4.1 |
+| E16 | **ACL generation rules** for #612. Egress is checked by inclusion against the query's or subscription's own key, so every consumer selector that intersects a provider joins that provider's egress grant. Replies to such selectors are granted on the provider's ingress. Own spells out `@state`; contract bundles are open to all. U21 is confirmed live, D13's complement denies work, and U14 stays a SHOULD. | S14 | §3.13 |
+| E17 | **Bundles and compatibility:** protox matches protoc byte for byte. The retention rule's identity check is a normalized comparison (source info and default `json_name` dropped), which also recognizes `buf build`'s bytes (U7). The protobuf rules are WIRE with renumber detection, and adding to a proto2 closed enum is review. The jsonschema subset uses tolerant readers. S7's draft matrix is regenerated under the decision (#607). | S7 | §3.11 |
+| E18 | **Events: `retention` needs a time-series backend**, or a consumer-side filter. The memory backend ignores `_time` (U16, U19). | S5 | §3.2 |
+| E19 | **Runtime rules.** A liveliness GET on a session that holds a liveliness subscriber MUST use a callback or an unbounded handler: zenoh#2678 hung such a session at every measured size from 996 tokens. A silent loss is noticed only at the lease, 10 s by default. | S2, S10 | §3.10, §3.4 |
+| E20 | **`desired.v1` cancels with a terminal document**, not a delete, so an archive that missed it cannot resurrect a plan. | S5 | §3.12, §4.3 |
+
+**Not measured.** The spike did not cover these, and the rules above do not
+claim them:
+- **S3:**
+  - loss (no netem on the host);
+  - the 220 B MTU, the LoRa duty cycle, and SBD's one-hour lease;
+  - several client sessions sharing one line;
+  - `express` under link contention (S9 deferred it to S3, and S3 did not
+    run it).
+- **S2:** declarations other than tokens.
+- **S9:** cross-host latency, and the ≤ 5 % p99 target on a quiet host.
+- **S12:** outages longer than about 1.5 s.
+- **S14:** certificate-CN subjects.
+- **S5:** an owner answering a 100k collection alone, without a storage.
+
+**Confirmed, not changed:**
+- the grammar: 2,226 keys round-trip, and the guard holds under namespaces
+  (S1);
+- P3 (S10, S11, S12);
+- R1, because sources switched by configuration alone (S13);
+- R3, because descriptors alone drew the data-flow graph (S10);
+- R5 (S10);
+- R6, at about 10 ns per sample (S1);
+- O2 and O7 (S6);
+- U6 (S8);
+- U10, with no paging up to 100k keys (S5);
+- U11, because make-before-break never left a gap (S2);
+- U17 (S6);
+- U20 (S2, S5);
+- U-F;
+- zenoh-pico as a full owner (S15).
 
 ## 1. Use cases a foundation must carry
 
@@ -259,7 +345,10 @@ commanding, the fallback is to add *one* sink kind (U-A).
 zk2/<system>/<service>/<iface>.v<major>/stream/<resource…>            output stream, ambient
 zk2/<system>/<service>/<iface>.v<major>/@stream/<resource…>           output stream, explicit-only (high-rate, large)
 zk2/<system>/<service>/<iface>.v<major>/state/<resource…>             output state
+zk2/<system>/<service>/<iface>.v<major>/@state/<resource…>            output state, explicit-only (large populations; r3.3)
+zk2/<system>/<service>/<iface>.v<major>/events/<resource…>/<ulid>     one key per occurrence (r3.3)
 zk2/<system>/<service>/<iface>.v<major>/@op/<operation…>              operation
+zk2/<system>/<service>/@zk/member/<iface>.v<major>/<value>/<epoch>    member tokens (liveliness; r3.3, D9b)
 zk2/<system>/<service>/@zk/instance/<instance>                        instance token (liveliness) and descriptor (queryable)
 zk2/<system>/<service>/@zk/alive/<iface>.v<major>/<instance>/<fp16>   interface tokens (liveliness)
 zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract bundles, location-free
@@ -271,7 +360,7 @@ zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract b
 | 2 | `<system>` | One plain chunk (§3.5). Under `zk2/@zk/…`, position 2 is the control token instead. |
 | 3 | `<service>` | One plain chunk. |
 | 4 | `<iface>.v<major>` \| `@zk` | Interface identity, or the control token. |
-| 5 | Kind | `stream` \| `@stream` \| `state` \| `@op`, or a verbatim kind registered by a profile (`@blob`). |
+| 5 | Kind | `stream` \| `@stream` \| `state` \| `@state` \| `events` \| `@op` *(r3.3; r4: the block above updated to match)*, or a verbatim kind registered by a profile (`@blob`). |
 | 6+ | Resource path | Literal and `{param}` chunks from the contract template. Values are slugged injectively (v1's `x-` rule, with a decoder and fixtures). |
 
 **Kind tokens and the infrastructure that selects on them:**
@@ -280,8 +369,8 @@ zk2/@zk/contract/<iface>.v<major>/<sha256>                            contract b
 |---|---|---|
 | `stream` | Plain: rides `zk2/<system>/**` | Recorders, link budgets, QoS overwrite |
 | `@stream` | Verbatim: must be named | Explicit consumers only. A system subscription or a link filter never pulls 100 MB/s by accident. |
-| `state` | Plain | Storage (`zk2/*/*/*/state/**`) for last-known values and store-and-forward |
-| `@state` *(r3.3)* | Verbatim: must be named | Large populations (catalog edges, pdns, desired documents); storages and consumers name them explicitly |
+| `state` | Plain | Archives (`zk2/*/*/*/state/**`, subscribing; *r4*: never answering on the owner's keys; across a constrained face, only what `link.v1` exposes) for last-known values and store-and-forward |
+| `@state` *(r3.3)* | Verbatim: must be named | Large populations (catalog edges, pdns, desired documents); archives *(r4)* and consumers name them explicitly |
 | `events` *(r3.3)* | Plain | One key per occurrence (`…/events/<template>/<ulid>`); union storages (`zk2/*/*/*/events/**`) and bounded replay GETs |
 | `@op` | Verbatim | Calls only. No snapshot GET or `**` selector can invoke an operation. |
 
@@ -310,10 +399,10 @@ An interface **provides** resources of three patterns:
   `tracks/{track}`) apply to all three. A wildcard GET over a state
   template lists the collection.
 - **Rest parameters (r3.2).** The last segment of a template may be `{name...}`. It matches one or more chunks, each slugged, for device-defined trees such as `devices/{device}/metrics/{metric...}`. The whole family has one type, which is why it is the last segment only.
-- **Occurrence-keyed streams (r3.2; r3.3: now the `events` kind, D3).** A stream template may end in `{occurrence}` (a lowercase ULID). Each sample is published once, with a one-shot put, on a fresh key. A storage then keeps the union, and a consumer replays with a wildcard GET bounded by a `retention` annotation. This is v1's sanctioned events exception, for logs that must survive. Everything else stays on stable keys (U16).
+- **Occurrence-keyed streams (r3.2; r3.3: now the `events` kind, D3).** A stream template may end in `{occurrence}` (a lowercase ULID). Each sample is published once, with a one-shot put, on a fresh key. A storage then keeps the union, and a consumer replays with a wildcard GET bounded by a `retention` annotation. This is v1's sanctioned events exception, for logs that must survive. Everything else stays on stable keys (U16). *(r4)* Enforcing `retention` needs a time-series backend, or a consumer-side filter, because the storage manager's memory backend ignores `_time` (spike S5). A union storage on `events/**` is not an owner's state, and S4 of §3.6 does not forbid it.
 - **Typed attachments (r3.2).** A resource may declare `attachment = "<type>"`, for example video frame metadata. The attachment is fingerprinted with the contract and encoded like the payload.
 - **Cardinality (r3.2).** A templated resource declares `cardinality`, its expected population bound. Tools and conformance check it. This is the bus's low-cardinality discipline, kept from v1.
-- **Advanced pub/sub (r3.2).** zenoh-ext history and recovery are opt-in, on `stream` and `state` resources only. On a key under a verbatim chunk (`@stream`), zenoh-ext's `@adv` token parser cannot work.
+- **Advanced pub/sub (r3.2; corrected in r4).** zenoh-ext history and recovery are opt-in, on `stream` and `state` resources only. Under a verbatim chunk, history from publishers already present works, but late-publisher detection and heartbeat recovery do not: zenoh-ext parses `@adv` keys with a `**` that cannot cross `@stream` (spike S1). zk2 therefore allows history on plain `stream` and `state` only (lint E019 in `zenkey-model`'s `diag::CODES`).
 - **No input kind** (by §2).
 - **No event kind.** An event is a reliable stream, or a state per
   occurrence (`alarms.v1`).
@@ -334,6 +423,15 @@ and mapped 1:1 onto stable Zenoh QoS:
 
 Operations carry a *recommended* `priority`. Zenoh replies inherit the
 caller's QoS, so the caller applies it.
+
+*(r4)* The defaults delivered every sample at 100 Hz–5 kHz (spike S9).
+`express` stays opt-in: `real_time` + express lost 0.6–4 % of samples at
+1–5 kHz on loopback, with no latency gain. It is a fingerprinted contract
+field, so the contract author opts in, and SHOULD do so only on
+measurement. The walkthrough's `twist_cmd.v1` keeps it as the example of
+opting in. State writes MUST keep the state defaults (`reliable` +
+`block`): with a dropping put, 10,917 of 100,000 values never reached a
+storage (spike S5).
 
 Timing (period, deadline, lifespan) is `timing.v1` (§3.12). It stays a
 profile only because it needs synchronized clocks and runtime support that
@@ -358,9 +456,9 @@ optional    = false
 | R2 | Template parameters may be bound too: `{vehicle} = self` binds the consumer to *its own* slice of a provider's collection (§4.3). |
 | R3 | The instance descriptor lists every requirement with its bindings as declared. **The data-flow graph is read from descriptors and never inferred**, which serves debugging, safety review and supervision impact analysis alike. |
 | R4 | A consumer compiled against interface `X.vN` binds to providers of *any* revision of `X.vN`, because FULL_TRANSITIVE compatibility guarantees it (§3.11). |
-| R5 | Presence lets a consumer wait for its bound providers (start-up ordering) and notice when they leave. |
+| R5 | Presence lets a consumer wait for its bound providers (start-up ordering) and notice when they leave. *(r4)* A binding resolves at once, without presence, and a consumer waiting on presence starts within one token propagation (spike S10: 11 ms). A silent loss is noticed only at the lease, 10 s by default. |
 | R6 *(r3.1)* | A consumer discards any sample whose key expression is not concrete. Zenoh accepts puts on wildcard keys and delivers them with the publisher's key, so this filter costs one check per sample and stops injection by an over-granted principal. |
-| R7 *(r3.2, r3.3)* | **Bindings never require presence.** A binding resolves statically from configuration; presence is an optimization (R5). Across a constrained face, where a deployment denies `@zk` traffic, a consumer binds statically and judges liveness from the freshness of whatever `link.v1` exposes. Where nothing crosses (SBD), liveness is *unobservable*, and tools say so (D15). |
+| R7 *(r3.2, r3.3, r4)* | **Bindings never require presence.** A binding resolves statically from configuration; presence is an optimization (R5). Across a constrained face, a consumer binds statically and judges liveness from the freshness of whatever `link.v1` exposes. Where nothing crosses (SBD), liveness is *unobservable*, and tools say so (D15). *(r4)* What crosses a constrained face is set by how the far side attaches (§3.10). A router-to-router link carries every declaration, and a `@zk` deny there hides presence without keeping it off the link (spike S3). A far-side session attached as a **client** of the near router carries only the declarations its interests ask for. That covers one far-side session or a gateway session; a far side with several sessions or its own router is U23. |
 
 When several providers are bound, choosing between them belongs to the
 consumer. `arbitration.v1` standardizes policies such as priority with
@@ -389,7 +487,11 @@ deadline (`twist_mux`), freshest wins, or an explicit lease.
 - **Device-as-service (r3.2).** A process serving several devices hosts
   one service per device: `zk2/node-1/rf0/modem.v3/…`,
   `zk2/h-…/snmp.router01/snmp.v1/…`. Each device then has its own
-  presence, exposure, capabilities and ACL prefix.
+  presence, exposure, capabilities and ACL prefix. *(r4)* It holds to about
+  5,000 devices per presence domain (15k tokens, discovered in 3.3 s; spike
+  S2). That is the whole presence budget (§3.10), shared with everything
+  else in the domain. Above it, member tokens (D9b) are the shape, at a
+  third of the tokens (U18).
 - **The instance id is a continuity epoch (r3.2).** An instance MUST mint
   a new id whenever its counters reset, even without a process restart:
   a device re-enumerated, a polled device's uptime rewound, a container
@@ -401,7 +503,9 @@ deadline (`twist_mux`), freshest wins, or an explicit lease.
 - **No implicit identity.** Every client targets an address or a binding;
   fleet-wide selection is spelled by name.
 
-### 3.6 State semantics (unchanged from r2)
+### 3.6 State semantics (r4: the owner is authoritative)
+
+*In this section, S1–S7 are the state rules. Spikes are written "spike Sn".*
 
 **Facts** (Appendix B):
 
@@ -412,31 +516,82 @@ deadline (`twist_mux`), freshest wins, or an explicit lease.
   query completion.
 - `reply_del` is stable.
 - `new_timestamp()` uses the HLC if enabled, otherwise wall clock + zid.
-- Routers re-stamp future-dated puts by default.
+- Routers re-stamp future-dated puts by default, but not GET replies *(r4)*.
+  A revision written by a clock that runs ahead therefore carries two
+  timestamps (spike S12). uhlc's default maximum delta is 500 ms
+  (`UHLC_MAX_DELTA_MS`). A router can drop future-dated puts instead
+  (`timestamping.drop_future_timestamp`).
 
 | # | Rule |
 |---|---|
 | S1 | Every state mutation (put **and** delete) carries a producer-set timestamp. |
 | S2 | The owner's GET reply carries the timestamp of the mutation it represents. |
-| S3 | The owner answers GETs for keys it deleted within the tombstone window with `reply_del` and the deletion timestamp. |
-| S4 | A state GET sets target `All` and consolidation `Latest` explicitly. |
-| S5 | **Deployment:** storages covering state preserve timestamps and keep tombstones at least as long as the window. |
-| S6 | Consumers distinguish *current* state (owner present) from *last-known* state (owner absent), through presence. |
-| S7 | Serving sessions SHOULD enable HLC (open: MUST? U2). |
+| S3 | The owner answers GETs for keys it deleted within the tombstone window with `reply_del` and the deletion timestamp. *(r4)* The window is 60 s by default, overridable by annotation (U3). State recorded by an archive across a constrained face MUST carry a window of at least that face's maximum outage. A delete the archive misses is otherwise resurrected: spike S5's "after the producer's window" case. The contract's annotation sets the window. The deployment raises it for the keys that cross a face, through `link.v1`'s face policy, a deployment setting that is not fingerprinted. |
+| S4 *(r4)* | **The owner is authoritative.** A consumer's state GET is addressed to the owner's keys and answered by the owner, with target `All` and consolidation `Latest` set explicitly. A deployment MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. Under `Latest` a consumer cannot tell which replier answered, so tools check this against the routers' storage admin space (#612). |
+| S5 *(r4)* | **Last-known state lives in an archive**: a service implementing `archive.v1`, read explicitly. It records owners' mutations under its own address with each mutation's timestamp and type identity, and keeps tombstones for at least the window (S3). Its backend MUST NOT accept a put older than a delete it holds. zenoh 1.10.1's storage manager does accept one (spike S5). **Alignment:** when an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it again. While the owner stays absent, it re-reads that collection from an archive on the owner's side instead. It drops the keys the source neither reports nor tombstones, and only after the source's GET completed without a timeout (zenoh delivers one as a reply error). A partial reply set is not a verdict (O5). |
+| S6 *(r4)* | Consumers distinguish *current* state (the owner's GET) from *last-known* state (an archive). A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or when presence shows the owner absent. That silence is not a verdict about the key (O5): it only selects the archive, whose answer is last-known, never current. |
+| S7 *(r4)* | Serving sessions MUST enable HLC (U2). **Catch-up:** an owner MUST NOT stamp at or below the last timestamp it issued for its keys. Before its first write, it takes that timestamp from its own persistent record of it, else from an explicit read of an archive **on its own side**. A consumer-side archive can be stale by a whole partition. With neither source, it MUST start a new epoch: a new instance (§3.5) whose session has a fresh, unpinned zid. Every zenoh timestamp carries its HLC's id, the zid, so each value already carries its epoch, with no per-sample attribution (§8). A consumer orders values by time **within** one timestamp id, and accepts the first value under a new id, restarting its ordering there. That is U2's "epoch in the value". A value from the old epoch still in transit when the new one starts is the residual risk, left to the spec (#606). **Ahead:** an owner MUST NOT stamp beyond its router's HLC delta (500 ms by default). It SHOULD detect drift against a reference it holds for the purpose: a subscription to a router-stamped key, such as a deployment heartbeat, because its own puts are never echoed back. When a detection shows it beyond the delta, it stops writing state and reports through `health.v1`. Without a reference, routers re-stamp its future-dated puts (or drop them, with `drop_future_timestamp`), and its GET replies keep its own stamps. The constrained level replaces HLC with a wall clock plus the catch-up, and the ahead bound still applies (U13). |
 
-Under P3, S1–S6 cover shared state (D), digital twins, store-and-forward
-commands (H, through `desired.v1`) and supervision (J) with one mechanism.
+**Why r4 left the merged GET.** r3 merged owner and storage replies by
+timestamp. Spike S5 measured 10 wrong answers in 42 cases with the stock
+storage manager:
+- A local patch to the storage manager removed 4 of them net. It fixed five
+  rows caused by the defect (an older put after a delete resurrects the key)
+  and turned one replicated case that had been right only by accident into
+  a wrong one.
+- Six remain, and they are design-level:
+  - a stale storage answering alone;
+  - a producer restarting with its clock behind;
+  - a tombstone window shorter than the storage's staleness;
+  - an unstamped producer;
+  - the memory backend ignoring `_time` on events.
+- A clock running *ahead* was spike S12's case, not spike S5's.
+
+The owner-authoritative form keeps a stale storage, a short window and an
+unstamped producer away from a consumer that asks for *current* state. It
+does not fix a clock behind, which still breaks a consumer that remembers
+what it applied (spike S12). The catch-up in S7 fixes that. An archive makes
+the remaining risk explicit in the read.
+
+**The archive** *(r4; a sketch, settled by the spec #606 and `archive.v1`,
+#613)*:
+- **It is a new zk2 service.** The zenoh storage manager answers only on
+  the keys it subscribes to, so it cannot serve under another prefix. It can
+  serve as the archive's store only once it stops accepting outdated puts.
+- **Its keys:** the archived key's address under the archive's own `@state`
+  token: `zk2/<system>/<archive>/archive.v1/@state/{origin...}`. Each origin
+  chunk is slugged like any rest parameter, so a verbatim `@state` chunk of
+  the origin becomes `x-_x40state`. For example,
+  `zk2/vehicle-01/archive/archive.v1/@state/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01`.
+- **What it answers:** GETs only. It never puts, because it is not a second
+  publisher of the data. Each reply carries the archived value's type
+  identity (interface, contract fingerprint, type) in an attachment. The
+  owner's descriptor is unreachable exactly when the archive is read.
+- **Its `cardinality`:** the sum of the populations it records.
+- **Ownership holds:** the archive writes only its own prefix. Ambient
+  selectors never see archived copies.
+- **Placement, by what each covers:**
+  - an archive on the consumer's side covers losing the link;
+  - an archive on the owner's side covers losing the owner's process, for
+    example a plan written while the vehicle was offline, after which the
+    fleet manager stopped.
+
+  Store-and-forward deployments place one on each side.
+
+Under P3, S1–S7 cover shared state (D), digital twins, store-and-forward
+commands (H, through `desired.v1` and archives) and supervision (J) with one
+mechanism.
 
 ### 3.7 Operation calling rules
 
 | # | Rule |
 |---|---|
-| O1 | Operation queryables are concrete-keyed and `complete`. A concrete call with `BestMatching` executes on **at most one** instance, even under split-brain. |
+| O1 *(r4)* | Operation queryables are concrete-keyed and `complete`. A concrete call with `BestMatching` executes on **at most one instance while one instance serves the operation**. `BestMatching` reaches one `complete` queryable per router, so under a split-brain across routers a call executes on each side: spike S6 measured 200 of 200 calls run twice. Tools diagnose that from tokens (§3.8), and exclusivity belongs to `redundancy.v1`. |
 | O2 | A wildcard call is legal only to `fanout = "allowed"` operations, with target `All` and consolidation `None`. The server refuses any non-concrete query to other operations (`fanout_forbidden`), whatever the ACL says. |
 | O3 | *(r3.2: `unavailable` carries `cause = build \| config \| capability` plus a reason, which restores v1's actionable split between `unsupported` (rebuild) and `gated` (reconfigure).)* The reply goes on the operation's own concrete key. Success is a value reply; failure is `reply_err` with the core envelope (`invalid_request`, `not_found`, `unavailable`, `forbidden`, `fanout_forbidden`, `busy`, `internal`, `app`). |
 | O4 | Only idempotent operations may be retried. |
 | O5 | An empty reply set is not a verdict. ACL refusals return empty since zenoh 1.3. Attribute silence through presence. |
-| **O6** *(r3.3: + `summary`, D10)* | An operation may declare `replies = "many"`: zero or more value replies, then completion. These are native Zenoh semantics. Callers MUST use consolidation `None`. This covers listings, partial results and streamed answers. Work that outlives a query timeout belongs to `jobs.v1`. |
+| **O6** *(r3.3: + `summary`, D10)* | An operation may declare `replies = "many"`: zero or more value replies, then completion. These are native Zenoh semantics. Callers MUST use consolidation `None`. *(r4)* `Latest` and `Auto` kept 1 reply of 10 in spike S6. `Monotonic` kept all 10 there only because the replies were unstamped. This covers listings, partial results and streamed answers. Work that outlives a query timeout belongs to `jobs.v1`. |
 | O7 *(r3.2)* | **Call metadata:** a request MAY carry a small attachment `{actor, request_id}`, which servers MAY record for audit. It is **claimed, never authentication**. Both adopters already pass these as selector parameters (U17). |
 
 ### 3.8 Ownership and serving
@@ -451,7 +606,14 @@ The core has **no role concept**:
 - a standby instance exposes no exclusive resources, and declares **no interface token** for an interface it exposes nothing of (r3.2). It is visible through its instance token only, so alive ⇒ callable holds;
 - two instances exposing the same exclusive resource is a finding,
   diagnosed from descriptors (Zenoh's `SourceInfo` is unstable and
-  unvalidated);
+  unvalidated). *(r4)* The token form of the check is two alive instances of
+  one service holding an interface token for the same interface, for longer
+  than a grace period. The grace period MUST exceed D9a's make-before-break
+  overlap, which is that same shape for a moment. The check found every
+  split-brain in spike S6 and flagged no standby. Tools diagnose (`doctor`,
+  #612); the runtime does not fence;
+- *(r4)* `serving = "replicated"` costs one execution per router per call
+  (spike S6), which is why it requires idempotent operations;
 - election and fencing belong to `redundancy.v1`;
 - actuators keep an exclusivity lock outside the bus.
 
@@ -478,6 +640,24 @@ spellings:
   capped at 255 bytes).
 - **Shared memory stays possible.** Zenoh SHM is transparent to keys, and
   generated publishers for `@stream` resources accept SHM buffers.
+  *(r4)* Raw frames over SHM were zero-copy end to end: 0.02 MB allocated
+  per 4 MB frame (spike S9). Two conditions apply:
+  - **Memory locking.** zenoh-shm `mlock`s every segment it creates or maps:
+    the pool, plus 1,280 KiB of metadata on first use.
+    - A deployment SHOULD set `RLIMIT_MEMLOCK` to at least the pool plus
+      2 MiB; zenoh's implicit 16 MiB pool needs about 17.25 MiB. At the spike
+      host's 8 MiB limit, the pool could not be created and SHM fell back to
+      TCP silently.
+    - A metadata segment that cannot be locked panics.
+    - On 1.10.1 the fallback is visible only on the receiving side, through
+      the unstable `ZBytes::as_shm()`. Tools SHOULD therefore check the
+      limit at start.
+  - **Copies.** Protobuf `bytes` costs a copy on each side. Flatbuffers are
+    zero-copy only when built in place in the SHM buffer (#611).
+- **The typed layer's budget** *(r4)* is a per-message cost: at most 1 µs of
+  CPU on the typed path for a control-size message (spike S9: 126 ns). The
+  ≤ 5 % p99 target from #592 is deferred to a quiet, CPU-isolated host: on a
+  shared host, end-to-end p99 varied by up to 4× between repetitions.
 
 ### 3.10 Presence, descriptors, contract retrieval
 
@@ -506,18 +686,62 @@ tokens carry no payload.
 - the profiles;
 - metadata (host, build, zid).
 
-**Constrained faces (r3.2).** No `@zk` traffic is ever *required* across a
+**Constrained faces (r3.2; r4: the mechanism).** No `@zk` traffic is ever *required* across a
 face a deployment marks constrained (`link.v1`). Presence, descriptors and
 bundles all stay local:
 - bundles come from holders on the same side, or are pre-provisioned;
 - across the face, only the resources `link.v1` exposes travel, downsampled as declared;
-- the descriptor targets ≤ 1 KB, because v1's 50 KB `introspect` reply would cost about 185 SBD messages (two days of budget).
+- the descriptor targets ≤ 1 KB, because v1's 50 KB `introspect` reply would cost about 185 SBD messages (two days of budget);
+- *(r4)* **How the far side attaches decides what crosses** (spike S3, at 2,400 bit/s):
+  - **Router to router,** every declaration crosses. A bring-up of 50 services cost 11.1 KB, and each coverage gap re-declared everything (11.8 KB).
+  - **A client** of the near router receives only the declarations its interests ask for. With the `@zk` deny on, a bring-up cost 17 B and a gap 536 B. Without the deny, 200 tokens nobody asked for cost 322 B.
+  - **A deployment SHOULD attach a single far-side session, or a gateway session, as a client,** with the `@zk` deny on the face. A **gateway** is the only session on its side that talks across the face. It is a principal of its own, and it never answers or republishes on the near side's keys: what it relays to its side, it re-keys under its own address, like §4.8's bridge. Anything beyond that is U23.
+  - **The scope of that rule:**
+    - zenoh 1.10.1 clients connect to one endpoint at a time, so a site with its own router, or a ground service commanding many vehicles, does not fit it. That is U23, whose router-level candidate is zenoh 1.10.1's `gateway.south` regions.
+    - The spike shaped each TCP connection separately, so it did not measure several client sessions sharing one line.
+- *(r4)* **On a router-to-router link, a `@zk` deny hides presence but does not keep it off the link.** The denied declarations still cross, key strings included (zenoh 1.10.1; `upstream/acl-denied-declarations-cross.md`, not filed).
+- *(r4)* **A batch MUST cross the link well within the lease.** At 2,400 bit/s, the 64 KB default outlasted the 10 s lease and the link reconnected in a loop. With 1 KB batches it ran at link speed (spike S3). A link's batch is the minimum of the configured size, the link's MTU and both ends' settings, so a TCP router configured for 1 KB caps its local links as well. The constrained face then needs a router of its own, or a link type whose MTU bounds the batch. The cost of 1 KB batches on high-rate local traffic was not measured.
+- *(r4)* **`@stream` keys SHOULD be denied across the face** unless `link.v1` downsamples them. Nothing is dropped: one named key queued 4 s of frames for 29 s at 64 kbit/s and for more than 600 s at 2,400 bit/s, and every request waited behind them.
+
+**The constrained level** *(r4, U13)* relaxes the full level in two halves:
+- **Devices** (spike S15, a zenoh-pico participant as owner):
+  - timestamps from a wall clock with a per-session bump, plus the catch-up (§3.6 S7);
+  - a literal deployment prefix in keys instead of a session namespace;
+  - a descriptor small enough for one fragment;
+  - bundles from a gateway holder where the device's receive limit (`Z_FRAG_MAX_SIZE`, 4 KB by default) bites. A pico *sent* 100 KB replies.
+- **Links** (spike S3): the far side attached as a client, batches within the lease, `@stream` and `@zk` denied across the face. No presence crosses: on a router link, every coverage gap re-declares all of it.
+
+**The presence budget** *(r4, U5)*. Presence costs per token, whatever the
+layout: a router holds 2.1–2.4 KiB per token, and a router link carries
+63–85 B per declaration. Discovery stays fast up to about 10k tokens and
+then degrades (spike S2):
+
+| Tokens | Discovery |
+|---|---|
+| 10k | 1.2–1.9 s |
+| 15k | 3.3 s |
+| 36k (ZenSight's shape, as spike S2 modelled it) | 23.8 s |
+| 50k | 46–49 s, or never |
+
+At 50k, a liveliness GET returned almost nothing within 10 s.
+
+**A presence domain** is the set of routers whose router-to-router links
+carry each other's declarations: the whole routed network, unless client
+attachment or disjoint networks split it. A deployment SHOULD keep a domain
+within about **10–15k tokens**, which kept discovery within 2–4 s on the
+spike's host. The budget is shared:
+- r3's layout spends 1 + the number of interfaces per service;
+- device-as-service at 5,000 devices spends all of it (§3.5);
+- queryables and subscribers are routed the same way, but spike S2 measured
+  tokens only, so the budget may be optimistic.
+
+How a deployment above the budget cuts the multiplier is U22.
 
 **Contract retrieval** uses the key `zk2/@zk/contract/<iface>.v<major>/<sha256>`.
 Every holder declares a `complete` queryable on it. The client:
 
-1. GETs with `BestMatching`, which routes to the nearest holder;
-2. verifies the sha256 of each reply and accepts the first valid one;
+1. GETs with `BestMatching`. *(r4)* That reaches the nearest holder on each router the query visits, so replies may come from several routers (spikes S4, S6);
+2. verifies the sha256 of each reply **as it arrives**, and accepts the first valid one without waiting for the GET to complete *(r4)*. In spike S4 the slow holder and the unreachable holder were the nearest, and the valid reply came from behind a second router: waiting for completion cost the whole 1 s timeout;
 3. on no valid reply, retries once with target `All`;
 4. if still nothing, reports the contract as *unavailable*.
 
@@ -533,7 +757,12 @@ use-case-L feature as much as a tooling one.
 4. Declare the instance token, then the interface tokens.
 
 So alive ⇒ callable. Tools query liveliness with explicit large handlers
-(zenoh#2678).
+(zenoh#2678). *(r4)* A liveliness GET on a session that already holds a
+liveliness subscriber MUST use a callback or an unbounded handler: with the
+default handler, such a session hung at every measured size from 996 tokens
+(spike S2; a fresh session read 9,996 tokens in 679 ms). Make-before-break
+re-minting (D9a) never left a service without a live instance token, and
+one re-mint per second over 10k tokens cost 0.7 KiB/s (spike S2).
 
 ### 3.11 Contracts and compatibility
 
@@ -558,10 +787,47 @@ So alive ⇒ callable. Tools query liveliness with explicit large handlers
   that domain.
 - **Retention rule:** a rebuild that the classifier judges identical keeps
   the old bundle. Fingerprints may over-detect, never under-detect.
+  *(r4)* The identity check is a normalized comparison of descriptor sets
+  (source info and default `json_name` dropped). protox matches protoc 3.21
+  byte for byte, and the normalization also recognizes `buf build`'s bytes
+  (spike S7).
 
 **Compatibility.** Every revision inside a major is FULL_TRANSITIVE
 compatible: both directions, against every earlier revision. Payload types
-are delegated to the schema kind's rules (protobuf: buf WIRE_JSON).
+are delegated to the schema kind's rules *(r4: for protobuf, no longer buf's
+WIRE_JSON; see below)*.
+
+*(r4)* **Protobuf uses WIRE semantics with renumber detection**, judged per
+direction: a reader reads a writer's data, ignoring unknown fields and
+defaulting missing ones.
+- **Breaking:**
+  - a field's declared scalar type changes, including int32 → int64 and
+    string → bytes, which share a wire type (spike S7's matrix);
+  - its cardinality changes;
+  - it moves into or out of a oneof;
+  - it is **renumbered**, which silently drops the data both ways.
+- **Review:** a field renamed (its JSON name), an enum value renamed or
+  deleted, a `json_name` option. zk2 protobuf is binary on the wire, and
+  tools decode with the writer's bundle, fetched by fingerprint, so a name
+  change relabels a display and breaks nothing running.
+- **Compatible:** adding an enum value to a proto3 (open) enum. For a proto2
+  (closed) enum it is review, because an old reader reads the unknown value
+  as an unknown field and falls back to the default. Spike S7 tested proto3
+  only.
+- **Warning:** a field deleted without reserving its number. Reuse is caught
+  against the whole history.
+
+`buf breaking` run in both orders cannot express this: it calls adding a
+field breaking in the swapped order. Spike S7 re-implemented buf's WIRE_JSON
+rules on prost-reflect, and they agreed with `buf breaking` on 14 of 14 cases
+in both orders. The decided WIRE rules depart from buf by design, on renames
+and enum names. Spike S7's draft compatibility matrix carries the superseded
+WIRE_JSON verdicts, and #607 regenerates it under this decision. **jsonschema** uses the zk2 subset of
+2020-12, with protobuf's discipline: readers tolerate unknown properties,
+and writers send only what their schema declares. Adding an optional
+property, even to a closed schema, and removing one are therefore
+compatible. Keywords whose containment is undecidable (`pattern`, `allOf`,
+`if`/`then`, …) are refused (spike S7).
 
 **Metadata changes are directional.** The r2 table is kept:
 
@@ -569,7 +835,9 @@ are delegated to the schema kind's rules (protobuf: buf WIRE_JSON).
 - `fanout` allowed → forbidden: breaking;
 - `delivery`/`reliability` reliable → best_effort: review;
 - optional → required: breaking for implementers;
-- enum value added: review.
+- enum value added: review. *(r4)* This row is about contract-level
+  enumerations, such as a template parameter's allowed values. Payload enums
+  follow the schema kind's rules above.
 
 New rows in r3:
 
@@ -599,17 +867,18 @@ Re-cut by use case:
 
 | Profile | Use cases | Contributes |
 |---|---|---|
-| `timing.v1` | A, B, G | `period_ms`, `deadline_ms`, `lifespan_ms` annotations. Runtime: staleness flags, deadline-missed events, dead-man stops. |
-| `arbitration.v1` | B | Consumer policies over many bound providers (priority + deadline, freshest, lease); optional `acquire`/`release` operations for explicit control authority. |
-| `clock.v1` | G | A standard `clock.v1` interface (simulated, paused or real time); runtime rule that components read time through the bound clock. |
-| `desired.v1` | H, D | Desired documents as **state of the authoring service, keyed by target**. Targets bind with `{target} = self`, converge, and report `observed_revision` in their own state (Kubernetes spec/status, device shadows). Store-and-forward rides S1–S6 plus a storage. |
+| `timing.v1` | A, B, G | `period_ms`, `deadline_ms`, `lifespan_ms` annotations. Runtime: staleness flags, deadline-missed events, dead-man stops. *(r4, spike S11)* The deadline runs on the **receiver's** monotonic clock. A `lifespan` check against the sender's stamp MUST NOT be used unless clock skew is bounded well below the lifespan. At ±250 ms of skew it rejected every sample of a healthy commander. uhlc's default maximum delta (500 ms) is larger than both that skew and `twist_cmd.v1`'s 100 ms lifespan. Without such a bound, `lifespan` is **not enforced**: a receive-clock check cannot see that a sample was already stale on arrival. Control loops rely on the deadline, and on a sequence check where staleness in transit matters. |
+| `arbitration.v1` | B | Consumer policies over many bound providers (priority + deadline, freshest, lease); optional `acquire`/`release` operations for explicit control authority. *(r4, spike S11)* The binding's order is the priority. A role's deadline comes from `timing.v1`, and a binding may tighten it. Arbitration is evaluated on every receive and on a timer of at most deadline/50. A liveliness delete drops a provider at once. No fresh provider means the dead-man value. A source's identity comes from its key, never its payload. Measured: takeover in one sample, silence caught at 100–102 ms, a crash in 4–5 ms, no false stops, and 7.0 % of a core for two actuators on a 2 ms tick. |
+| `clock.v1` | G | A standard `clock.v1` interface (simulated, paused or real time); runtime rule that components read time through the bound clock. *(r4, spike S13)* The profile states its tick, and consumers extrapolate between ticks or accept tick granularity. |
+| `archive.v1` *(r4)* | D, H, J | Last-known state (§3.6, rules S3, S5 and S6). It records owners' mutations under the archive's own address, with timestamps, type identity and tombstones. It answers explicit GETs only, and re-aligns with an owner that becomes reachable again. Its backend MUST NOT accept a put older than a delete it holds. Placement: on the consumer's side against link loss, on the owner's side against owner loss (§3.6). |
+| `desired.v1` | H, D | Desired documents as **state of the authoring service, keyed by target**. Targets bind with `{target} = self`, converge, and report `observed_revision` in their own state (Kubernetes spec/status, device shadows). Store-and-forward rides rules S1–S7 plus archives (§3.6). *(r4)* Cancellation SHOULD be a put of a terminal document, not a delete, so that an archive that missed it cannot resurrect the plan (spike S5's resurrection case, under long outages). |
 | `config.v1` | D | Commit-confirm configuration (set → apply → confirm window → confirm or roll back; hot versus reach groups), as a standard interface. |
 | `jobs.v1` | C | Start → id, state `jobs/{job}` lifecycle with terminal states and retention, cancel; annotations mark an interface's own job resources. |
-| `redundancy.v1` | C, B | Election, fencing epochs, role naming (§3.8). |
+| `redundancy.v1` | C, B | Election, fencing epochs, role naming (§3.8). *(r4)* It owns exclusivity: O1's at-most-once holds only while one instance serves (spike S6). ZenSight's claim protocol, where a standby holds its instance token only, raised no finding and took no calls. |
 | `blob.v1` | C, H | `@blob` kind: content-addressed bulk transfer with integrity rules. Delivery references carry (holder address, hash), never key prefixes. |
 | `hostid.v1` *(r3.2)* | J, all adopters | System names minted from the machine id: v1's `h-<12hex>` derivation, with test vectors |
 | `media.v1` *(r3.2)* | A | Codec tiers, the frame-age clock, receiver-driven adaptation, frame-metadata attachment (ZenSight parallax) |
-| `link.v1` *(r3.2)* | H | Per-resource exposure on constrained faces and downsampling, read by the face/ACL generator (zenoh-modem) |
+| `link.v1` *(r3.2; r4)* | H | Per-resource exposure on constrained faces and downsampling, read by the face/ACL generator (zenoh-modem). *(r4, spike S3)* It also records the face's attachment (the far side as a client, within U23's scope), the batch size for the link's rate (about 1 KB at 2,400 bit/s, crossing well within the lease), the face's maximum outage (the floor for state windows, §3.6 rule S3), and the `@zk` and `@stream` denies. Across the face, an archive records only what `link.v1` exposes. |
 | `views.v1` *(r3.2, r3.3)* | I | Presentation documents for generic UIs (ZenSight's `views`): content-addressed artifacts referenced by annotation and carried in the bundle's `extras` (D18) |
 | `freshness.v1` *(r3.3)* | D, J | `ttl_s` is the staleness horizon; `0` means never stale (D16) |
 | `health.v1`, `telemetry.v1`, `alarms.v1` | J, E | Health interface; metric annotations (unit, counter/gauge, histogram); active alarms as state plus transitions. |
@@ -621,7 +890,7 @@ The ownership invariant reduces ACL to three grant shapes:
 
 | Grant | Rule |
 |---|---|
-| **Own** | A service principal publishes, deletes, declares queryables and declares tokens under `zk2/<system>/<service>/**`, plus its verbatim subtrees (`…/@stream/**`, `…/@op/**`, `…/@zk/**`), plus `zk2/@zk/contract/<iface>/*` for the interfaces it implements. |
+| **Own** | A service principal publishes, deletes, declares queryables and declares tokens under `zk2/<system>/<service>/**`, plus its verbatim subtrees, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**` *(r4: `@state` added, spike S14)*. Contract bundles are open to all: any principal may hold or fetch `zk2/@zk/contract/<iface>.v<major>/*`, because the hash is the check (spike S14). An archive principal (§3.6) has Own on its own prefix, plus Consume on the keys it records. |
 | **Consume** | Subscribe or GET on the prefixes a principal's bindings name. |
 | **Call** | Query on specific `…/@op/<op>` keys. Privileged operations are listed one by one. |
 
@@ -630,19 +899,20 @@ component except as a call or through its own bindings.
 
 Plain facts the spec states:
 
-- **grants compile per posture (r3.3, D13).** Under `default_permission: deny`, a grant is an allow. Under `allow`, it is compiled into denies of its complement, and regenerated on every contract revision;
-
+- **grants compile per posture (r3.3, D13).** Under `default_permission: deny`, a grant is an allow. Under `allow`, it is compiled into denies of its complement, and regenerated on every contract revision. *(r4, spike S14)* Measured on a live router: deny + allows passed 13 of 13 checks; under `allow`, allow rules are not evaluated (U21); the complement denies blocked every unauthorized action except wildcard puts, which R6 stops;
+- *(r4, spike S14)* **egress is checked by inclusion** against the query's or subscription's own key expression. Every consumer selector that intersects a provider's keys therefore joins that provider's egress grant, and the same selectors are granted for the provider's ingress `reply` (a refusal included). These are rules for the generator (#612);
+- *(r4, spike S3)* **an ACL controls what the far side sees, not what a router link carries.** On a router-to-router link, a denied declaration still crosses, key strings included, so an ACL is not a confidentiality boundary for key names there. Over a client link, declarations travel only toward interests;
 - **under `default_permission: allow`, a put on a wildcard key bypasses a
   deny rule on a concrete key it covers** (verified live, r3.1). P3's
   guarantees therefore rest on O2 (server refusal) and R6 (consumer
   filter). `default_permission: deny` is recommended where practical. It
   is node-global, and zenoh-modem's constrained faces run `allow` with
   face-scoped denies (U14, r3.2);
-
 - deny works by inclusion, so deny with the widest pattern (`**/@op/**`);
 - multicast transports bypass ACL;
 - `zids` subjects are unauthenticated, so bind principals by certificate
-  CN;
+  CN. *(r4)* Spike S14 used usrpwd subjects; certificate-CN subjects were
+  not run;
 - ACL is enforced per hop, and the running ACL is not observable.
 
 The certificate scope (one per system or one per service) is a deployment
@@ -696,9 +966,12 @@ while let Some((source, cmd)) = cmds.next().await {
     and requires `camera.v1` as `input`, bound to `vehicle-01/cam-front`.
   - `vehicle-01/tracker` requires `detections.v1` as `sources`, bound to
     `vehicle-01/*`, which means every detector.
-- **Replay:** the recorder republishes as `replay/cam-front` in a
-  `replay` namespace, or the detector's `input` is rebound to
-  `vehicle-01/replay-cam`. No code changes.
+- **Replay:** the recorder republishes under the original address in a
+  `replay` namespace, with the detector's binding unchanged. Alternatively,
+  the detector's `input` is rebound to `vehicle-01/replay-cam`. No code
+  changes either way. *(r4)* Spike S13 ran both. The first needs a replayer
+  whose session carries the namespace: zk2 `zenctl replay --namespace`,
+  #612.
 - **Simulation:** `sim-1/cam-front` implements the same `camera.v1`.
 - **The graph:** detector ← cam-front, tracker ← {detectors}, read from
   descriptors.
@@ -725,11 +998,34 @@ while let Some((source, cmd)) = cmds.next().await {
   `mission_plan.v1` with `state plans/{vehicle}` (`desired.v1`).
 - **The vehicle side:** `vehicle-01/executor` requires `mission_plan.v1`
   as `plan`, bound to `ground/fleet-mgr` with `{vehicle} = self`.
-- **Store and forward:** a storage keeps `plans/*`. On reconnect, the
-  executor GETs (S4, so the newest stamped value wins), converges, and
-  reports `state/plan_status` with `observed_revision`.
-- **Immediate actions:** `vehicle-01/executor` `@op abort` *fails fast
-  when offline*. That is honest, and the operator sees it.
+- **Store and forward** *(r4: through archives, §3.6)*:
+  - **Two archives.** An archive on the vehicle (`vehicle-01/archive`)
+    records `plans/vehicle-01`, against link loss. One on the ground
+    records `plans/*`, against the fleet manager stopping.
+  - **Reading.** The executor reads the owner while it answers, and the
+    vehicle's archive when the owner gives no reply within the timeout,
+    knowing that read is last-known (rule S6). While the link is up and the
+    fleet manager is down, the vehicle's archive aligns from the ground's
+    archive (rule S5). A plan written while the vehicle was offline, after
+    which the fleet manager stopped, therefore still reaches the executor.
+  - **Applying.** It applies a plan only if its timestamp is newer than the
+    last one applied, which rejects stale commands. It converges and
+    reports `state/plan_status` with `observed_revision`.
+  - **Cancellation** is a terminal document, not a delete (`desired.v1`).
+    The plans carry a tombstone window of at least the link's maximum
+    outage (rule S3).
+- **Measured:** spike S12 converged in 1.4–1.6 s after the link healed, with
+  zero stale plans, using a storage and outages of about 1.5 s. The spec
+  (#606) re-runs spike S12's cases against the archive form, with outages
+  longer than the window.
+- **The link** *(r4)*. How the ground side attaches across the vehicle's
+  constrained face is U23 when the fleet manager serves many vehicles: a
+  zenoh 1.10.1 client connects to one router.
+- **Immediate actions:** `vehicle-01/executor` `@op abort` fails once the
+  route is gone. *(r4)* Until the lease expires, a call waits out its own
+  timeout: spike S6 saw 9 timeouts within the 10 s lease, then immediate
+  failures. Over a link with a long lease (SBD's is an hour), that is the
+  whole lease. The operator sees each timeout.
 
 **4.4 Hardware driver with N devices (F).**
 
@@ -760,9 +1056,36 @@ cancel). Listings use an operation with `replies = "many"` (O6).
   services bound to it are `planner` and `executor`". v1 needed a catalog
   service and evidence fusion to get this.
 
+**4.8 ROS 2 bridge (K).** The mapping:
+
+| ROS 2 | Zenkey |
+|---|---|
+| node | service |
+| publisher | stream (or state, for latched topics) |
+| subscriber | requirement |
+| service | operation |
+| parameters | `config.v1` |
+| actions | `jobs.v1` |
+| message types | the `ros2msg` kind, with RIHS01 as the hash |
+
+The bridge publishes under its own service addresses (the ownership
+invariant holds).
+
 **4.9 ZenSight (r3.2).**
 
 **Identity:** `system` = host id (`hostid.v1`).
+
+**Presence** *(r4)*:
+- **As spike S2 modelled it:** 36k tokens (1,000 hosts × 6 sensors × (1
+  instance + 5 interfaces)), discovered in 23.8 s. That is well over the
+  presence budget (§3.10).
+- **The mapping's own count is higher:** 5 framework interfaces plus each
+  sensor's own interface, so about 7 tokens per service and about 42k in
+  all.
+- **Under U22's lean** (no interface token for the framework set), it is 2
+  per service, about 12k, within the budget.
+
+ZenSight is U22's case.
 
 **Services:**
 - the host sensors (`sysinfo`, `netlink`, `netring`, `logs`, `systemd`, `hostspec`);
@@ -803,7 +1126,7 @@ cancel). Listings use an operation with `replies = "many"` (O6).
 - each of set / confirm / cancel / extend / persist is its own `@op` key, so each is separately grantable;
 - the device is the service, so it is in the path.
 
-**Links:** `link.v1` marks the four `link` resources that may cross an RF face (downsampled to 1/min) and none for SBD. No `@zk` traffic crosses.
+**Links:** `link.v1` marks the four `link` resources that may cross an RF face (downsampled to 1/min) and none for SBD. No `@zk` traffic crosses. *(r4)* The ground's gateway session (§3.10) attaches to the node's router as a client across the RF face, with the `@zk` deny on the face. Batches on the face stay within the lease. zenoh-modem's own radio link type bounds them by its MTU; on TCP, the face needs a router of its own, with batches of about 1 KB. At 2,400 bit/s, zenoh's default batches made the link reconnect in a loop (spike S3). A ground site with several sessions, or its own router, behind one radio is U23.
 
 **Contract crate:** `modem-contract` becomes a zk2 contract crate, with its bundle and generated traits, and zenoh glue behind a feature. Out-of-tree backends depend on it as they do today.
 
@@ -815,56 +1138,46 @@ cancel). Listings use an operation with `replies = "many"` (O6).
 - **Operations:** templated, exclusive, fan-out forbidden; `diagnostics` is fan-out allowed.
 - **Full mapping:** `examples/zk2/tcgui/`.
 
-**4.8 ROS 2 bridge (K).** The mapping:
-
-| ROS 2 | Zenkey |
-|---|---|
-| node | service |
-| publisher | stream (or state, for latched topics) |
-| subscriber | requirement |
-| service | operation |
-| parameters | `config.v1` |
-| actions | `jobs.v1` |
-| message types | the `ros2msg` kind, with RIHS01 as the hash |
-
-The bridge publishes under its own service addresses (the ownership
-invariant holds).
-
 ---
 
 ## 5. Unresolved design decisions
 
-The ones that decide the paradigm come first.
+The ones that decide the paradigm come first. *(r4)* The spike settled most
+of them. In this table, "Sn" names a spike. The Lean column now gives each item's status: **r4** marks a
+verdict, with the spike that measured it (`spike-report.md`'s decisions
+table).
 
-| # | Question | Lean | Decided by | Fallback |
+| # | Question | Lean, or *r4* status | Decided by | Fallback |
 |---|---|---|---|---|
-| **U-A** | P3 (consumer bindings) or P2 (sink-addressed inputs) for control and commanding | **Decided 2026-10-07: P3** | Walkthroughs 4.2/4.3 under review; spikes S11, S12 | Add one sink kind `@in` (verbatim; the owner discards samples whose key is not concrete, which works because subscribers see the publication key) |
+| **U-A** | P3 (consumer bindings) or P2 (sink-addressed inputs) for control and commanding | **Decided 2026-10-07: P3**; confirmed by S10, S11, S12 | Walkthroughs 4.2/4.3; spikes S11, S12 | Add one sink kind `@in` (verbatim; the owner discards samples whose key is not concrete, which works because subscribers see the publication key) |
 | **U-B** | Is the binding configuration format normative? | Descriptor field normative, configuration shape recommended | Multi-language pilot (L) | A normative minimal TOML/JSON shape |
 | **U-C** | Requirements in contracts, or only in the component manifest? | Both allowed; interface-level ones are fingerprinted | Walkthroughs | Manifest only (simpler compatibility, weaker contracts) |
-| **U-D** | `@stream` as a kind token, or a contract attribute only | Token (infrastructure must see it) | S3, S9 | Attribute + a recommended separate interface |
-| **U-E** | QoS defaults per pattern; `priority` in the core | As in §3.3 | S9, S11 | Fewer fields; the rest to `timing.v1` |
-| **U-F** | Decodability: two blessed kinds + allowed others | As in §3.9 | Pilot, S9 | Narrow to protobuf, jsonschema and raw |
-| **U-G** | Operations with many replies in the core | Yes (O6) | S6 | `jobs.v1` only |
-| U1 | State: producer + storage merged by timestamp, or owner-only + an explicit archive interface | Merge | S5 | Owner-only + `archive.v1` |
-| U2 | Clock discipline: HLC MUST? Restart regression strategy | HLC MUST + hold writes until the clock passes the last stored timestamp | S5 | Epoch in the value |
-| U3 | Tombstone window | Core default, annotation override | S5 | n/a |
-| U4 | `complete` operation queryables (O1) | Keep | S6 | Non-complete; lose at-most-once |
-| U5 | Token layout | Instance token + API-first interface tokens | S2 | Instance tokens only + descriptors |
-| U6 | Mandatory one-chunk `system` | Keep | S8 | Revisit only on fake names |
-| U7 | Bundle stability | Build once, embed, retention rule | S7 | Normalized description per kind |
+| **U-D** | `@stream` as a kind token, or a contract attribute only | **r4: token.** No measurable cost (S9); ambient selectors carried none of its frames across a link (S3) | S3, S9 | Attribute + a recommended separate interface |
+| **U-E** | QoS defaults per pattern; `priority` in the core | **r4: as in §3.3**; `express` stays opt-in (S9) | S9, S11 | Fewer fields; the rest to `timing.v1` |
+| **U-F** | Decodability: two blessed kinds + allowed others | **r4: as in §3.9** (protobuf 126 ns per message; JSON affordable for documents; S9) | Pilot, S9 | Narrow to protobuf, jsonschema and raw |
+| **U-G** | Operations with many replies in the core | **r4: yes (O6)**; consolidation `None` is necessary (S6) | S6 | `jobs.v1` only |
+| U1 | State: producer + storage merged by timestamp, or owner-only + an explicit archive interface | **Decided 2026-10-08: the owner is authoritative, with `archive.v1`** (§3.6). The merged GET gave 10 wrong answers in 42 cases (S5) | S5, S12 | Merge, with a storage manager that cannot resurrect a deleted key |
+| U2 | Clock discipline: HLC MUST? Restart regression strategy | **r4: HLC MUST, the catch-up (from a persistent record or an archive, else a new instance id), and a bound on clocks ahead** (S5, S12); a wall clock + the catch-up at the constrained level (S15) | S5, S12, S15 | Epoch in the value, which the new-instance fallback already carries |
+| U3 | Tombstone window | **r4: 60 s by default**, annotation override. Archives keep tombstones at least that long. State archived across a constrained face carries at least the face's maximum outage (S5) | S5 | n/a |
+| U4 | `complete` operation queryables (O1) | **r4: keep `complete`; O1 reworded** (decided 2026-10-08; S6) | S6 | Non-complete; lose at-most-once |
+| U5 | Token layout | **r4: kept** (A = B per token), with a **presence budget** of about 10–15k tokens per domain (S2); the multiplier is U22 | S2 | Instance tokens only + descriptors |
+| U6 | Mandatory one-chunk `system` | **Holds** on paper (S8) | S8 | Revisit only on fake names |
+| U7 | Bundle stability | **r4: holds**; the identity check is a normalized comparison (S7) | S7 | Normalized description per kind |
 | U8 | Error envelope encoding | Core `Error` in protobuf and jsonschema, `detail` in the interface's encoding | Spec draft | Always JSON |
-| U10 | Large collections | No paging in the core; large collections become streams or operations with many replies | S5 | Paging on GET parameters |
-| U11 | Descriptor dynamics | Put + GET | S2 | GET only |
-| U12 | Redundancy: diagnose or delegate | Diagnose only | S6 | n/a |
-| U13 *(r3.1)* | A constrained conformance level for zenoh-pico participants (no namespace, no HLC, 4 KB fragments) | Define it; bundles served by a gateway | S15 | zk2 requires the full Rust-core feature set |
-| U14 *(r3.1, r3.2)* | Is `default_permission: deny` a deployment MUST for P3's guarantees? | **SHOULD**: guarantees rest on O2 + R6, because the setting is node-global (zenoh-modem) | S14 | n/a |
-| U15 *(r3.1)* | The storage-manager position: depend on it, require a fixed version, or no storage on `state/**` | Decided with U1 | S5 | `archive.v1` |
-| U16 *(r3.2)* | Occurrence-keyed streams in the core, or an `events.v1` profile | Core attribute (it changes key semantics and storage behaviour) | S5 (union storage, bounded replay GET) | Profile |
-| U17 *(r3.2)* | Call metadata (`actor`, `request_id`) as a core convention | Optional core attachment, claimed only | Spec draft | Left to `config.v1` and applications |
-| U19 *(r3.3)* | The `events` kind token, with cardinality = rate × retention | Yes (D3) | S5 (union storage, replay GET sizes) | Occurrence streams under `stream` plus an `events.v1` profile |
-| U20 *(r3.3)* | `@state` for large populations | Yes (D3) | S2, S5 (50k / 100k) | A verbatim system token for singleton services |
-| U21 *(r3.3)* | Does zenoh evaluate allow rules under `default_permission: allow`? (From source: it does not.) | It does not; compile grants into denies (D13) | S14 | n/a |
-| U18 *(r3.2; r3.3: member tokens, D9)* | Device-as-service at ZenSight's SNMP scale (thousands of devices per poller): token and descriptor cost | Device-as-service, with interface tokens only where exposed | S2 (ZenSight shape) | Per-device presence as a template-scoped liveliness token under the parent service |
+| U10 | Large collections | **r4: no paging**. 100k keys came back in ≤ 366 ms with owner + storage and `Latest` (S5). The owner alone is measured in #606 | S5 | Paging on GET parameters |
+| U11 | Descriptor dynamics | **r4: put + GET** (S2) | S2 | GET only |
+| U12 | Redundancy: diagnose or delegate | **r4: diagnose** (the token check found every split-brain) **and delegate** to `redundancy.v1` (S6) | S6 | n/a |
+| U13 *(r3.1)* | A constrained conformance level for zenoh-pico participants (no namespace, no HLC, 4 KB fragments) | **r4: defined in two halves**, devices (S15) and links (S3): §3.10 | S15, S3 | zk2 requires the full Rust-core feature set |
+| U14 *(r3.1, r3.2)* | Is `default_permission: deny` a deployment MUST for P3's guarantees? | **r4: SHOULD**, confirmed live (S14) | S14 | n/a |
+| U15 *(r3.1)* | The storage-manager position: depend on it, require a fixed version, or no storage on `state/**` | **r4: no storage on owners' state**; archives only, whose backend must not resurrect a deleted key. zenoh 1.10.1's storage manager does (the draft upstream report is not filed) | S5 | n/a |
+| U16 *(r3.2)* | Occurrence-keyed streams in the core, or an `events.v1` profile | **r4: core** (D3). Union replay is right; `retention` needs a time-series backend (S5) | S5 | Profile |
+| U17 *(r3.2)* | Call metadata (`actor`, `request_id`) as a core convention | Optional core attachment, claimed only. The attachment works (S6) | Spec draft | Left to `config.v1` and applications |
+| U19 *(r3.3)* | The `events` kind token, with cardinality = rate × retention | **r4: yes** (S5) | S5 | Occurrence streams under `stream` plus an `events.v1` profile |
+| U20 *(r3.3)* | `@state` for large populations | **r4: yes.** Per-entity tokens break down between 15k and 50k (S2); 100k `@state` keys read in ≤ 366 ms with owner + storage (S5) | S2, S5 | A verbatim system token for singleton services |
+| U21 *(r3.3)* | Does zenoh evaluate allow rules under `default_permission: allow`? | **r4: it does not**, confirmed live; D13's complement denies work (S14) | S14 | n/a |
+| U18 *(r3.2; r3.3: member tokens, D9)* | Device-as-service at ZenSight's SNMP scale (thousands of devices per poller): token and descriptor cost | **r4: device-as-service to about 5,000 devices per domain** (15k tokens, 3.3 s); member tokens above (S2) | S2 | Per-device presence as a template-scoped liveliness token under the parent service |
+| **U22** *(r4)* | A deployment above the presence budget: how does it cut the per-service multiplier (1 instance + one token per interface)? | An interface every service implements (`health.v1`, the framework set) declares no interface token. Its providers are found through instance tokens and descriptors. Costs, as §3.10 exceptions: "who implements X" for those interfaces needs descriptors, not a token selector; the split-brain token check (§3.8) narrows to the other interfaces; and alive ⇒ callable holds per instance, not per interface, for them. ZenSight's shape would fall from about 42k tokens to about 12k (§4.9) | Spec review (#606), with ZenSight's shape re-measured | Instance tokens only, with interfaces read from descriptors |
+| **U23** *(r4)* | The far side of a constrained face when it is more than one session: a ground site with its own router, or a service commanding many vehicles (§4.3) | Measure zenoh 1.10.1's `gateway.south` regions: a far router placed south by zid, interface or region name, so that declarations reach it only on interest | A spike follow-up before `link.v1` (#613) | One gateway session per link (§3.10), re-keying what it relays under its own address |
 
 (r2's U9, profile binding, is now settled: `uses` in the contract plus
 `profiles` in the descriptor.)
@@ -878,11 +1191,15 @@ The ones that decide the paradigm come first.
 | **0** | **Paradigm** (new) | **Decided 2026-10-07: P3**, service-owned keys + consumer bindings. |
 | 1 | ZenSight | Freeze v1 at 1.50 / 0.14.x. Port tcgui first. Decide ZenSight after the tooling phase. |
 | 2 | Mandatory `system` | Yes, provisionally (S8) |
-| 3 | Kind in the key | Yes: `stream`, `@stream`, `state`, `@op` |
+| 3 | Kind in the key | Yes: `stream`, `@stream`, `state`, `@op`; r3.3 added `@state` and `events` |
 | 4 | Schema kinds | Protobuf by default; jsonschema first-class; flatbuffer, ros2msg and raw allowed and rendered honestly |
 | 5 | Ownership | Exclusive per resource by default; replicated operations explicit; no core role |
 | 6 | Repository and naming | Same repository. A `v1` branch for the frozen line; main takes the new architecture; 0.x until the core spec is frozen. Move production zenctl builds to `v1` first, and decide the open 0.15.0 milestone. |
 | 7 | Pilot | **Decided 2026-10-07: tcgui.** The criteria it meets: a real, non-safety-critical company component with **a data-flow or control path** (at least one bound requirement), a state, an operation and a parametric resource, restart and reconnect behaviour, and preferably two machines. A pure supervision pilot would not validate r3. |
+| 8 *(r4)* | State answers (U1) | **Decided 2026-10-08:** the owner is authoritative, and last-known state lives in `archive.v1` (§3.6). |
+| 9 *(r4)* | Operation exclusivity (O1) | **Decided 2026-10-08:** at most once only while one instance serves; split-brain diagnosed from tokens; exclusivity in `redundancy.v1` (§3.7). |
+| 10 *(r4)* | Protobuf compatibility | **Decided 2026-10-08:** WIRE semantics with renumber detection; JSON-name and enum-name changes are review (§3.11). |
+| 11 *(r4)* | Upstream reports | **Decided 2026-10-08:** the two drafts in `docs/zk2/upstream/` are not filed. |
 
 ---
 
@@ -890,6 +1207,10 @@ The ones that decide the paradigm come first.
 
 The spike is throwaway code that produces measured numbers. **The paradigm
 tests (S9–S13) run first.**
+
+*(r4)* Every spike has run. The results are in
+[`spike-report.md`](spike-report.md), and the code is on branch `zk2-spike`,
+tagged `zk2-spike-final`. The table is kept as the plan of record.
 
 | # | Group | Matrix | Measure | Decides |
 |---|---|---|---|---|
@@ -949,6 +1270,7 @@ congestion  = "drop"
 priority    = "real_time"
 express     = true
 annotations = { "timing.period_ms" = 20, "timing.deadline_ms" = 100, "timing.lifespan_ms" = 100 }
+# r4: lifespan is not enforced unless clock skew is bounded well below 100 ms; the deadline is (§3.12)
 ```
 
 ```toml
@@ -1020,7 +1342,7 @@ response = "mission_plan.v1.PlanSummary"
 replies  = "many"
 ```
 
-## Appendix B: Zenoh facts relied on (1.10.1 source)
+## Appendix B: Zenoh facts relied on (1.10.1 source; r4: measured)
 
 | Fact | Source |
 |---|---|
@@ -1029,7 +1351,7 @@ replies  = "many"
 | Routers hold every token; clients and peers receive tokens on interest | `src/net/routing/hat/{router,client,peer,broker}/token.rs` |
 | Verbatim = a chunk starting with `@`; `*`/`**` never match it | `commons/zenoh-keyexpr/src/key_expr/borrowed.rs` |
 | **A put on a wildcard key is legal, and subscribers receive the publication's key, not their own** | `src/api/session.rs` (put resolution has no wildcard check; `subscriber_callbacks` passes the incoming key, ~l.498–520) |
-| `BestMatching` = the nearest `complete` queryable whose key includes the query's key, else `All` | `src/net/routing/dispatcher/queries.rs` |
+| `BestMatching` = the nearest `complete` queryable whose key includes the query's key, else `All`. *(r4, measured)* "Nearest" is per router: a query reaches one such queryable on each router it visits | `src/net/routing/dispatcher/queries.rs`; S4, S6 |
 | `Latest`: per key, greatest timestamp (`None` lowest), delivered at completion; `None` consolidation delivers every reply | `src/api/session.rs` (~l.3540–3605) |
 | Routers stamp puts only, where timestamping is enabled; future-dated puts are re-stamped | `src/net/routing/dispatcher/pubsub.rs` (`treat_timestamp!`); `DEFAULT_CONFIG.json5` |
 | `Query::reply_del` is stable; `Session::new_timestamp()` = HLC, else wall clock + zid | `src/api/queryable.rs:437`; `src/api/session.rs:1038` |
@@ -1037,4 +1359,33 @@ replies  = "many"
 | Encoding schema suffix ≤ 255 bytes, sent per put | `commons/zenoh-codec/src/core/encoding.rs` |
 | ACL by inclusion; multicast bypasses ACL; `zids` unauthenticated | `src/net/routing/interceptor/{authorization,access_control}.rs`; `DEFAULT_CONFIG.json5` |
 | `SourceInfo` unstable and unvalidated; matching status is a boolean | `src/api/{sample,matching}.rs` |
-| `liveliness_query` deadlock past ~256 tokens on the default handler (open) | eclipse-zenoh/zenoh#2678 |
+| `liveliness_query` deadlock past ~256 tokens on the default handler (open). *(r4)* A session already holding a liveliness subscriber hung at every measured size from 996 tokens (the first point measured above 96). A fresh session read 9,996 tokens in 679 ms | eclipse-zenoh/zenoh#2678; S2 |
+
+**Measured by the spike (r4).** Each row cites its section of
+[`spike-report.md`](spike-report.md).
+
+| Fact | Spike |
+|---|---|
+| `BestMatching` reaches one `complete` queryable per router. Under a split-brain across routers, a concrete call executes on each side | S4, S6 |
+| Routers re-stamp future-dated puts, but not GET replies | S12 |
+| zenoh-ext parses advanced-publisher keys with `${remaining:**}/@adv/…` (`advanced_cache.rs:40`). It cannot cross a verbatim chunk, so late-publisher detection and heartbeat recovery fail under `@stream`, while the initial history query works | S1 |
+| zenoh-shm `mlock`s every segment it creates or maps (`shm/unix.rs:291`). Under the memlock limit, SHM silently falls back to TCP, and a metadata segment that cannot be locked panics (`metadata/storage.rs:31`) | S9 |
+| Discovery: 1.2–1.9 s at 10k tokens; 46–49 s or never at 50k. Routers hold 2.1–2.4 KiB per token, and router links carry 63–85 B per declaration | S2 |
+| A router-to-router link carries every declaration. A client link carries only those its interests ask for | S3 |
+| An ACL deny does not stop a denied declaration, key string included, from crossing a router-to-router link. It hides it from the far side | S3; `upstream/acl-denied-declarations-cross.md`, not filed |
+| At 2,400 bit/s, the default 65,535 B batch outlasts the 10 s lease, and the link reconnects in a loop. `transport/link/tx/batch_size` = 1024, or a 60 s lease, restores link speed | S3 |
+| The storage manager 1.10.1 accepts a put older than a delete it holds (`guard_cache_if_latest`), and its GC keeps the wrong side of the limit | S5; `upstream/storage-manager-outdated-guard.md`, not filed |
+| The storage manager's memory backend ignores `_time` | S5 |
+| zenoh-pico 1.10.1 stamps with a wall clock plus a per-session bump. `Z_FRAG_MAX_SIZE` = 4096 bounds what it receives, not what it sends | S15 |
+
+**Read in the 1.10.1 sources for r4:**
+
+| Fact | Source |
+|---|---|
+| uhlc's default maximum clock delta is 500 ms, overridable by `UHLC_MAX_DELTA_MS` | `uhlc-0.8.2/src/lib.rs:89` |
+| A router can drop future-dated puts instead of re-stamping them (`timestamping.drop_future_timestamp`, default false) | `DEFAULT_CONFIG.json5:219` |
+| A link's batch size is the minimum of the configured size, the link's MTU and the unicast bound, negotiated down to the smaller end's | `zenoh-transport` `unicast/establishment/open.rs:318`, `:652` |
+| A client connects to a single endpoint at a time | `DEFAULT_CONFIG.json5:50` |
+| `gateway.south` regions assign remotes to south-bound subregions by zid, interface or region name (`"auto"` by default) | `DEFAULT_CONFIG.json5:250–273`; `dispatcher/region.rs` |
+| `ZBytes::as_shm()` exists only with the `unstable` and `shared-memory` features | `src/api/bytes.rs:256–260` |
+| A query timeout is delivered as a reply error `"Timeout"` | `src/api/session.rs:2760` |

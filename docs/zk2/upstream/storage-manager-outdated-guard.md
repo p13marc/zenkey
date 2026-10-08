@@ -1,7 +1,8 @@
 # Draft upstream report: the storage manager accepts outdated samples after a delete
 
-**Status: a draft, not filed.** Filing it in eclipse-zenoh/zenoh waits for the
-maintainer's go-ahead (#601, #605). The measurements are
+**Status: not filed.** The maintainer decided on 2026-10-08 not to file it
+(#601, #605). It is kept as a record of zenoh 1.10.1's behaviour, which r4
+designs around. The measurements are
 [`../spike-report.md`](../spike-report.md) § S5, and the raw data is
 [`../spike-results/s5/`](../spike-results/s5/) (stock) and
 [`../spike-results/s5-patched/`](../spike-results/s5-patched/) (with the patch
