@@ -5,7 +5,7 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use common::{T, client, config, contract, eventually, imp, router};
+use common::{T, client, config, contract, eventually, example, imp, router};
 use zenkey::model::descriptor::check;
 use zenkey::model::grammar::{IfaceId, ZkKey, parse};
 use zenkey::model::template::Bindings;
@@ -196,7 +196,16 @@ async fn s2_the_descriptor() {
     let tool = client(&ep).await;
     let owner = client(&ep).await;
 
-    let (b, _held) = nav_builder(&owner, "p2/nav", &["imu"]).await;
+    let (mut b, _held) = nav_builder(&owner, "p2/nav", &["imu"]).await;
+    // An interface that uses a profile, and an optional role left unbound.
+    let plan: IfaceId = "mission_plan.v1".parse().unwrap();
+    b.implement(zenkey::Implementation::new(example(
+        "walkthrough/mission_plan.v1",
+    )))
+    .unwrap();
+    b.expose(&plan, "state/plans/{vehicle}").unwrap();
+    b.expose(&plan, "@op/list").unwrap();
+    b.require("telemetry", "detections.v1".parse().unwrap(), true);
     let mut svc = b.start().await.unwrap();
     seen(&tool, &svc).await;
 
@@ -208,9 +217,39 @@ async fn s2_the_descriptor() {
     else {
         panic!("no descriptor")
     };
-    let (d, report) = check(std::str::from_utf8(&bytes).unwrap(), &[&nav_c]);
+    let plan_c = example("walkthrough/mission_plan.v1");
+    let (d, report) = check(std::str::from_utf8(&bytes).unwrap(), &[&nav_c, &plan_c]);
     assert!(report.0.is_empty(), "{report}");
-    assert_eq!(d.unwrap().capabilities, ["imu"]);
+    let d = d.unwrap();
+    assert_eq!(d.capabilities, ["imu"]);
+    assert_eq!(
+        d.profiles,
+        ["desired.v1"],
+        "the union of the contracts' uses"
+    );
+    let tele = d
+        .requires
+        .iter()
+        .find(|r| r.role == "telemetry")
+        .expect("listed");
+    assert!(
+        tele.bindings.is_empty() && tele.declared_by.is_none(),
+        "unbound optional: bindings []"
+    );
+    // One reply, application/json, with consolidation None.
+    let rx = tool
+        .get(svc.instance_key().unwrap().into_keyexpr())
+        .consolidation(zenoh::query::ConsolidationMode::None)
+        .timeout(T)
+        .with(flume::unbounded::<zenoh::query::Reply>())
+        .await
+        .unwrap();
+    let mut replies = Vec::new();
+    while let Ok(r) = rx.recv_async().await {
+        replies.push(r.into_result().expect("an ok reply"));
+    }
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].encoding().to_string(), "application/json");
 
     // 2. The capability is lost.
     let puts = tool
@@ -235,7 +274,7 @@ async fn s2_the_descriptor() {
         .expect("a new descriptor is put")
         .unwrap();
     let text = String::from_utf8(put.payload().to_bytes().into_owned()).unwrap();
-    let (d, report) = check(&text, &[&nav_c]);
+    let (d, report) = check(&text, &[&nav_c, &plan_c]);
     assert!(
         report.0.is_empty(),
         "the implied absence is not listed (no D006): {report}"
@@ -262,6 +301,20 @@ async fn s2_the_descriptor() {
     );
     assert!(
         keys(&tool, "zk2/p2/broken/@zk/**").await.is_empty(),
+        "no token appears"
+    );
+
+    // 4. A required role the configuration binds to nothing: no start
+    //    (core §3.2), observed from a session that stays up.
+    let mut b = ServiceBuilder::new(&owner, config("p2/unbound"));
+    b.require("cmd", "twist_cmd.v1".parse().unwrap(), false);
+    let err = b.start().await.err().expect("refused");
+    assert!(
+        matches!(err, Error::NotExposed(ref m) if m.contains("cmd")),
+        "{err}"
+    );
+    assert!(
+        keys(&tool, "zk2/p2/unbound/@zk/**").await.is_empty(),
         "no token appears"
     );
 }
@@ -338,6 +391,10 @@ async fn s3_epochs_and_re_minting() {
         .into_descriptor()
         .unwrap();
     assert_eq!(d.instance, svc.instance().as_str());
+
+    // 3. An `epoch` template, and no member declared yet: no member token
+    //    (core §8.1, a member exists from its first declaration).
+    assert!(keys(&tool, "zk2/p3/nav/@zk/member/**").await.is_empty());
 
     // 2. Members: `a` loses continuity, `b` is untouched.
     let events: Arc<Mutex<Vec<(SampleKind, String)>>> = Arc::default();

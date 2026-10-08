@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "operations.md: the request and reply types of the common setup's tc service.",
+  "$defs": {
+    "SetRequest": {
+      "type": "object",
+      "properties": { "up": { "type": "boolean" } },
+      "required": ["up"],
+      "additionalProperties": false
+    },
+    "SetResponse": {
+      "type": "object",
+      "properties": { "up": { "type": "boolean" } },
+      "required": ["up"]
+    },
+    "TcError": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["kernel", "busy"] },
+        "message": { "type": "string" }
+      },
+      "required": ["kind"]
+    },
+    "DiagnosticsRequest": {
+      "type": "object",
+      "properties": { "verbose": { "type": "boolean" } }
+    },
+    "DiagnosticsResponse": {
+      "type": "object",
+      "properties": { "ok": { "type": "boolean" } },
+      "required": ["ok"]
+    },
+    "ListingRequest": {
+      "type": "object",
+      "properties": { "limit": { "type": "integer", "minimum": 0 } }
+    },
+    "Entry": {
+      "type": "object",
+      "properties": { "name": { "type": "string" } },
+      "required": ["name"]
+    },
+    "ListingSummary": {
+      "type": "object",
+      "properties": {
+        "partial": { "type": "boolean" },
+        "scanned": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["partial", "scanned"]
+    }
+  }
+}
