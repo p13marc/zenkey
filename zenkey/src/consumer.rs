@@ -200,7 +200,19 @@ impl Consumer {
         &self.providers
     }
 
-    fn resource(&self, name: &str) -> Result<&Resource> {
+    /// The session it reads through: zenoh stays reachable.
+    #[must_use]
+    pub fn session(&self) -> &zenoh::Session {
+        &self.session
+    }
+
+    /// The role's parameter bindings (R2), resolved.
+    #[must_use]
+    pub fn params(&self) -> &BTreeMap<String, String> {
+        &self.params
+    }
+
+    pub(crate) fn resource(&self, name: &str) -> Result<&Resource> {
         name.split_once('/')
             .and_then(|(t, tpl)| self.contract.resource(t.parse().ok()?, tpl))
             .ok_or_else(|| Error::NoResource {

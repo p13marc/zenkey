@@ -135,7 +135,7 @@ pub enum Rate {
 }
 
 impl Rate {
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "rare" => Some(Self::Rare),
             "low" => Some(Self::Low),

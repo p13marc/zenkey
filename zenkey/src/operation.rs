@@ -32,16 +32,15 @@
 //! Calling is [`crate::client`]'s.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::future::Future;
 use std::sync::{Arc, Mutex, RwLock};
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies, Resource};
 use zenkey_model::descriptor::Cause;
-use zenkey_model::envelope::{self, Detail, Envelope};
+use zenkey_model::envelope;
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::schema::TypeId;
 use zenkey_model::template::{Bindings, Segment};
@@ -50,6 +49,7 @@ use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
 use zenoh::query::{Query, Queryable};
 
+pub use crate::call::{CallMetadata, OpError, cause_name};
 use crate::client::Client;
 use crate::error::{Error, Result, zenoh};
 use crate::implementation::{missing_capability, resource_name};
@@ -61,168 +61,6 @@ pub const SUMMARY: &[u8] = b"summary";
 
 /// The schema suffix of a protobuf envelope (§5.2).
 const PROTOBUF_ERROR: &str = "zk2.core.v1.Error";
-
-/// The optional call metadata (O7): who claims to call, and the caller's
-/// id for the request. It travels as the request's attachment, the JSON
-/// object `{"actor", "request_id"}`. Claimed, never authentication: any
-/// session can write any value here.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CallMetadata {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_id: Option<String>,
-}
-
-impl CallMetadata {
-    #[must_use]
-    pub fn new(actor: &str, request_id: &str) -> Self {
-        Self {
-            actor: Some(actor.to_owned()),
-            request_id: Some(request_id.to_owned()),
-        }
-    }
-
-    /// The attachment's bytes.
-    #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("two optional strings serialize")
-    }
-
-    /// Reads an attachment as call metadata: a JSON object whose `actor`
-    /// and `request_id`, when present, are strings. Other members are
-    /// ignored. Anything else is not call metadata, and `None`.
-    #[must_use]
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let serde_json::Value::Object(m) = serde_json::from_slice(bytes).ok()? else {
-            return None;
-        };
-        let text = |k: &str| match m.get(k) {
-            None => Some(None),
-            Some(serde_json::Value::String(s)) => Some(Some(s.clone())),
-            Some(_) => None,
-        };
-        Some(Self {
-            actor: text("actor")?,
-            request_id: text("request_id")?,
-        })
-    }
-}
-
-/// A failed call, as its owner refuses it (O3): the error envelope of §5.2.
-/// The runtime encodes it as the operation's types say.
-#[derive(Debug, Clone, PartialEq)]
-pub struct OpError(Envelope);
-
-/// The name §5.2 gives a cause.
-#[must_use]
-pub fn cause_name(c: Cause) -> &'static str {
-    match c {
-        Cause::Build => "build",
-        Cause::Config => "config",
-        Cause::Capability => "capability",
-    }
-}
-
-impl OpError {
-    fn new(code: &str, message: impl Into<String>, cause: Option<Cause>) -> Self {
-        Self(Envelope {
-            code: code.to_owned(),
-            message: message.into(),
-            cause: cause.map(|c| cause_name(c).to_owned()),
-            detail: None,
-        })
-    }
-
-    /// The request does not decode, or breaks the operation's rules.
-    pub fn invalid_request(message: impl Into<String>) -> Self {
-        Self::new("invalid_request", message, None)
-    }
-
-    pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new("not_found", message, None)
-    }
-
-    /// The operation is not available here, and why (§2.3, §3.3).
-    pub fn unavailable(cause: Cause, message: impl Into<String>) -> Self {
-        Self::new("unavailable", message, Some(cause))
-    }
-
-    pub fn forbidden(message: impl Into<String>) -> Self {
-        Self::new("forbidden", message, None)
-    }
-
-    pub fn busy(message: impl Into<String>) -> Self {
-        Self::new("busy", message, None)
-    }
-
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new("internal", message, None)
-    }
-
-    /// The runtime's alone (O2): a handler never sees a fan-out call to an
-    /// operation that forbids one.
-    pub(crate) fn fanout_forbidden(message: impl Into<String>) -> Self {
-        Self::new("fanout_forbidden", message, None)
-    }
-
-    /// `app`, with a value of the operation's declared `error` type: for a
-    /// JSON or CBOR envelope (§5.2).
-    pub fn app<T: Serialize>(message: impl Into<String>, detail: &T) -> Self {
-        match serde_json::to_value(detail) {
-            Ok(v) => Self(Envelope {
-                code: "app".to_owned(),
-                message: message.into(),
-                cause: None,
-                detail: Some(Detail::Value(v)),
-            }),
-            Err(e) => Self::internal(format!("the app detail does not serialize: {e}")),
-        }
-    }
-
-    /// `app`, with the declared protobuf `error` message, already encoded:
-    /// for a protobuf envelope (§5.2).
-    pub fn app_bytes(message: impl Into<String>, detail: Vec<u8>) -> Self {
-        Self(Envelope {
-            code: "app".to_owned(),
-            message: message.into(),
-            cause: None,
-            detail: Some(Detail::Bytes(detail)),
-        })
-    }
-
-    #[must_use]
-    pub fn envelope(&self) -> &Envelope {
-        &self.0
-    }
-
-    #[must_use]
-    pub fn into_envelope(self) -> Envelope {
-        self.0
-    }
-}
-
-impl fmt::Display for OpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.0.code, self.0.message)
-    }
-}
-
-impl std::error::Error for OpError {}
-
-/// A runtime error inside a handler is the owner's failure: `internal`.
-impl From<Error> for OpError {
-    fn from(e: Error) -> Self {
-        Self::internal(e.to_string())
-    }
-}
-
-/// An envelope received from elsewhere (a proxy relaying a refusal).
-impl From<Envelope> for OpError {
-    fn from(e: Envelope) -> Self {
-        Self(e)
-    }
-}
 
 /// The operation body of a resource.
 pub(crate) fn operation(iface: &IfaceId, r: &Resource) -> Result<Operation> {
@@ -292,16 +130,8 @@ pub(crate) fn decode_value<T: DeserializeOwned>(
     sample: Option<&Encoding>,
     wire: Option<WireEncoding>,
 ) -> std::result::Result<T, String> {
-    let cbor = match sample.map(ToString::to_string) {
-        Some(e) if e.starts_with("application/cbor") => true,
-        Some(e) if e.starts_with("application/json") => false,
-        _ => wire == Some(WireEncoding::Cbor),
-    };
-    if cbor {
-        ciborium::from_reader(bytes).map_err(|e| format!("CBOR: {e}"))
-    } else {
-        serde_json::from_slice(bytes).map_err(|e| format!("JSON: {e}"))
-    }
+    let sample = sample.map(ToString::to_string);
+    crate::codec::decode_json(bytes, crate::codec::wire_of(sample.as_deref(), wire))
 }
 
 /// Every member of an operation's template on `addr`: each parameter
@@ -1043,24 +873,8 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use super::{CallMetadata, OpError, envelope_encoding};
+    use super::{OpError, envelope_encoding};
     use zenkey_model::envelope;
-
-    #[test]
-    fn call_metadata_is_two_optional_strings() {
-        let m = CallMetadata::new("op@ws-01", "r-1");
-        assert_eq!(CallMetadata::from_bytes(&m.to_bytes()), Some(m));
-        assert_eq!(
-            CallMetadata::from_bytes(br#"{"actor": "a", "other": 1}"#),
-            Some(CallMetadata {
-                actor: Some("a".into()),
-                request_id: None
-            })
-        );
-        for bad in [&b"[]"[..], br#"{"actor": 3}"#, b"not json"] {
-            assert_eq!(CallMetadata::from_bytes(bad), None);
-        }
-    }
 
     #[test]
     fn an_app_detail_that_does_not_fit_goes_out_as_internal() {

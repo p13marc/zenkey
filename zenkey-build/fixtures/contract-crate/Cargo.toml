@@ -1,0 +1,21 @@
+[package]
+name = "zk2-walkthrough-contract"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "zenkey-build's contract-crate fixture: the walkthrough's interfaces as a crate with no zenoh dependency by default (#611)"
+publish = false
+
+[features]
+# The generated runtime items (Server, Consumer, Client, Fleet): what a
+# daemon serving the contract, or a client of it, enables.
+zenoh = ["zenkey/zenoh"]
+
+[dependencies]
+# Without its `zenoh` feature, zenkey is the model, Implementation and the
+# call vocabulary: no zenoh crate beyond zenoh-keyexpr.
+zenkey = { path = "../../../zenkey", default-features = false }
+
+[build-dependencies]
+zenkey-build = { path = "../.." }

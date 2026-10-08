@@ -29,7 +29,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zenkey_model::contract::{Contract, Fanout, Operation, Replies as RepliesKind, Resource};
-use zenkey_model::envelope::{self, Envelope, EnvelopeError};
+use zenkey_model::envelope::{self, Envelope};
 use zenkey_model::grammar::{Addr, IfaceId, Key, KindToken, ZkKey, data_key};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
@@ -38,6 +38,8 @@ use zenoh::key_expr::OwnedKeyExpr;
 use zenoh::query::{ConsolidationMode, QueryTarget, Reply, ReplyError};
 use zenoh::sample::Sample;
 
+use crate::call::Replier as ReplierOf;
+pub use crate::call::{Attribution, Malformed, Silence};
 use crate::consumer::{Presence, Provider};
 use crate::error::{Error, Result, zenoh};
 use crate::operation::{CallMetadata, SUMMARY, decode_value, find_resource, operation, values_of};
@@ -77,14 +79,6 @@ impl Answer {
     }
 }
 
-/// An error reply that claims an envelope encoding and is not an envelope
-/// (§5.2's decoding refusals): a broken server, not a silent one.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Malformed {
-    pub encoding: String,
-    pub error: EnvelopeError,
-}
-
 /// What an error reply is (§5.2): an envelope, a malformed one, or the
 /// transport's own error (a query timeout, `zenoh/string`).
 #[derive(Debug, Clone, PartialEq)]
@@ -110,150 +104,17 @@ pub fn classify(e: &ReplyError) -> ErrorReply {
     }
 }
 
-/// What presence says of a service that did not answer (O5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Attribution {
-    /// It holds the interface's token: it is up and did not answer. The
-    /// access control refused the call, the server is frozen, or the reply
-    /// was lost.
-    Present,
-    /// It holds an instance token, not this interface's: a standby, or the
-    /// interface is in its tokenless set (§8.1).
-    InstanceOnly,
-    /// No token of the service is visible.
-    Absent,
-    /// Presence cannot be observed from here (R7): a constrained face.
-    Unobservable,
-}
-
-/// No answer (O5): no value and no envelope.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Silence {
-    /// Calls made: more than one only for an idempotent operation (O4).
-    pub attempts: u32,
-    /// The transport's last error reply, such as `zenoh/string: Timeout`.
-    pub transport: Option<String>,
-    pub presence: Attribution,
-}
-
-/// The outcome of a one-reply call. Each case is distinct: silence is never
-/// an error reply, and never a verdict (O5).
-#[derive(Debug, Clone)]
-pub enum Outcome {
-    /// A value reply on the operation's concrete key.
-    Value(Answer),
-    /// A `reply_err` carrying a valid envelope (O3).
-    Refused(Envelope),
-    /// A `reply_err` claiming an envelope encoding that does not decode.
-    Malformed(Malformed),
-    /// No answer.
-    NoAnswer(Silence),
-}
-
-impl Outcome {
-    #[must_use]
-    pub fn answer(&self) -> Option<&Answer> {
-        match self {
-            Self::Value(a) => Some(a),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub fn refusal(&self) -> Option<&Envelope> {
-        match self {
-            Self::Refused(e) => Some(e),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub fn silence(&self) -> Option<&Silence> {
-        match self {
-            Self::NoAnswer(s) => Some(s),
-            _ => None,
-        }
-    }
-}
+/// The outcome of a one-reply call, the reply attributed (O5).
+pub type Outcome = crate::call::Outcome<Answer>;
 
 /// Every value and summary one concrete key carried (O6).
-#[derive(Debug, Clone)]
-pub struct Replier {
-    pub addr: Addr,
-    /// The operation key the replies went on.
-    pub key: String,
-    /// Its template's values, unslugged.
-    pub params: Bindings,
-    pub values: Vec<Answer>,
-    /// Summary replies: exactly one when the replier finished (O6). Two
-    /// instances replying on one key (a split-brain, `replicated`) give two.
-    pub summaries: Vec<Answer>,
-}
-
-impl Replier {
-    /// The summary, when exactly one arrived.
-    #[must_use]
-    pub fn summary(&self) -> Option<&Answer> {
-        match self.summaries.as_slice() {
-            [s] => Some(s),
-            _ => None,
-        }
-    }
-}
+pub type Replier = crate::call::Replier<Answer, Answer>;
 
 /// Every reply to a many-reply or fan-out call, attributed (O6).
-#[derive(Debug, Clone, Default)]
-pub struct Replies {
-    /// Whether the operation declares a `summary`, so that a replier's
-    /// completion can be told.
-    pub summary_declared: bool,
-    /// One per concrete key, in the order of first arrival.
-    pub repliers: Vec<Replier>,
-    /// Envelopes. A `reply_err` carries no key, so a refusal is never
-    /// attributed to a replier.
-    pub refusals: Vec<Envelope>,
-    pub malformed: Vec<Malformed>,
-    /// The transport's error replies, such as a timeout.
-    pub transport: Vec<String>,
-    /// Value replies discarded: on a key that is not concrete (R6), or not
-    /// a member of the operation called.
-    pub discarded: u64,
-}
+pub type Replies = crate::call::Replies<Answer, Answer>;
 
-impl Replies {
-    fn new(op: &Operation) -> Self {
-        Self {
-            summary_declared: op.summary.is_some(),
-            ..Self::default()
-        }
-    }
-
-    /// No value, no envelope, nothing malformed: silence (O5).
-    #[must_use]
-    pub fn is_silent(&self) -> bool {
-        self.repliers.is_empty() && self.refusals.is_empty() && self.malformed.is_empty()
-    }
-
-    /// Every value, across repliers.
-    pub fn values(&self) -> impl Iterator<Item = &Answer> {
-        self.repliers.iter().flat_map(|r| r.values.iter())
-    }
-
-    /// The repliers whose answer may be partial: with a declared summary,
-    /// those that did not end with exactly one (O6). Without one, a
-    /// replier's completion cannot be told, and none is listed.
-    #[must_use]
-    pub fn partial(&self) -> Vec<&Replier> {
-        if !self.summary_declared {
-            return Vec::new();
-        }
-        self.repliers
-            .iter()
-            .filter(|r| r.summary().is_none())
-            .collect()
-    }
-
-    fn push(&mut self, reply: Reply, iface: &IfaceId, r: &Resource) {
+impl crate::call::Replies<Answer, Answer> {
+    pub(crate) fn push(&mut self, reply: Reply, iface: &IfaceId, r: &Resource) {
         match reply.into_result() {
             Ok(sample) => {
                 let key = sample.key_expr().as_str().to_owned();
@@ -270,7 +131,7 @@ impl Replies {
                 let i = match self.repliers.iter().position(|x| x.key == key) {
                     Some(i) => i,
                     None => {
-                        self.repliers.push(Replier {
+                        self.repliers.push(ReplierOf {
                             addr: addr.clone(),
                             key,
                             params,
@@ -448,7 +309,7 @@ impl Client {
         &self.providers
     }
 
-    fn op(&self, resource: &str) -> Result<(Resource, Operation)> {
+    pub(crate) fn op(&self, resource: &str) -> Result<(Resource, Operation)> {
         let r = find_resource(&self.contract, resource)?;
         Ok((r.clone(), operation(&self.contract.iface, r)?))
     }
@@ -756,7 +617,7 @@ impl Fleet {
         &self.selection
     }
 
-    fn op(&self, resource: &str) -> Result<(Resource, Operation)> {
+    pub(crate) fn op(&self, resource: &str) -> Result<(Resource, Operation)> {
         let r = find_resource(&self.contract, resource)?;
         let op = operation(&self.contract.iface, r)?;
         if op.fanout != Fanout::Allowed {

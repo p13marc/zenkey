@@ -43,6 +43,11 @@ pub enum Error {
     /// stops writing state until the drift is gone (spec §4.3, S7).
     #[error("this owner's clock is ahead of its router: state writes stop (spec §4.3)")]
     ClockAhead,
+    /// A payload does not encode or decode as its declared type (§7.2): a
+    /// value reply or a sample that is not what the contract says, or a
+    /// value its codec cannot write.
+    #[error("payload: {0}")]
+    Payload(String),
     /// The descriptor this service would serve fails the descriptor check
     /// (spec §3.3); the codes are listed. A bug in the runtime or its
     /// caller, never a network condition.
@@ -50,6 +55,7 @@ pub enum Error {
     Descriptor(String),
 }
 
+#[cfg_attr(not(feature = "zenoh"), allow(dead_code))]
 pub(crate) fn zenoh(e: impl std::fmt::Display) -> Error {
     Error::Zenoh(e.to_string())
 }

@@ -194,6 +194,24 @@ impl ServiceBuilder {
         Ok(self)
     }
 
+    /// Whether this service implements `iface` already.
+    #[must_use]
+    pub fn implements(&self, iface: &IfaceId) -> bool {
+        self.impls.iter().any(|s| s.imp.iface() == iface)
+    }
+
+    /// Whether an optional resource is absent here (§3.3): gated on a
+    /// capability not held, or listed [`ServiceBuilder::unavailable`]. A
+    /// required resource is never absent. Generated servers declare what is
+    /// not (#611).
+    pub fn is_absent(&self, iface: &IfaceId, resource: &str) -> Result<bool> {
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?;
+        Ok(r.optional
+            && (missing_capability(r, &self.config.capabilities).is_some()
+                || s.unavailable.contains_key(resource)))
+    }
+
     /// Declares a role from the component's manifest (§3.1), not from a
     /// contract. Its bindings come from the configuration.
     pub fn require(&mut self, role: &str, interface: IfaceId, optional: bool) -> &mut Self {

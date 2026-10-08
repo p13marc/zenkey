@@ -262,9 +262,30 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   `redundancy.v1`'s (#613).
   Everything session-free stays in `zenkey-model`, including `decode`, the
   bundle-only decoder tools use (§7.2).
+  Codegen's runtime half (#611, FI): `codec` (a Rust type and how it is
+  carried), `typed` (the generic handles generated code is written
+  against), and `call`, the session-free vocabulary (`OpError`,
+  `CallInfo`, `Sink`, `Outcome<T>`, `Replies<V, S>`). The default `zenoh`
+  feature gates everything holding a session; without it the crate is the
+  model, `config`, `Implementation`, `call` and `codec`, so a contract
+  crate's traits build without zenoh.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. On `main` it shares the
   name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.
+- **`zenkey-build/`** 0.20.0 (MIT, unpublished; the v1 tools keep
+  `zenkey-build =0.11.1` from crates.io, side by side) is zk2's codegen
+  (#611, FI; the design is `docs/zk2/codegen.md`). A consumer's build
+  script runs `zenkey-model`'s lints and the history's compatibility gate
+  (breaking fails, review warns), embeds each bundle as `zenkey-model` builds
+  it, and generates one module per interface: prost types from the bundles'
+  own descriptor sets (no `protoc`), typify types or a name hint for JSON
+  Schema (`check_schema` keeps a hinted type and its schema in step), and
+  `Handlers`/`Api` traits with `Server`/`Consumer`/`Client`/`Fleet` over
+  `zenkey::typed`. `contract_crate(true)` puts the runtime items behind a
+  `zenoh` feature. Its fixtures are workspace members:
+  `zenkey-build/fixtures/codegen-test` (the walkthrough and tcgui contracts,
+  on a bus and with an `Api` double) and `fixtures/contract-crate` (no zenoh
+  by default).
 - **`spec/`** holds what every implementation must agree on:
   `contract.schema.json`, generated from `zenkey-model`'s authoring types,
   and `conformance/` fixtures. Both are checked by
