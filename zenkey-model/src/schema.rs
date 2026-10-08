@@ -11,7 +11,8 @@
 //!   the listed files; `json:<stem>#<Name>` names one in the file whose stem
 //!   is `<stem>`. A cross-file `$ref` may point only at listed files, and
 //!   in a bundle it resolves by the file stem of its path, so stems are
-//!   unique per contract.
+//!   unique per contract, and so are ids: two listed files with one JCS
+//!   form would be one artifact under one name (spec §9.4, 0.6).
 //! - **Raw:** a media type (`image/jpeg`) or family (`video/*`), with no
 //!   artifact.
 //!
@@ -299,6 +300,21 @@ impl SchemaSet {
                 data: ArtifactData::Json(doc.clone()),
             };
             let id = art.id();
+            // One id, one name (spec §9.4, 0.6): a later file with an earlier
+            // one's JCS bytes would share its id, and the canonical form
+            // could list it under one name only, so a bundle `$ref` naming
+            // the other stem would resolve to nothing.
+            if let Some(first) = self.json.iter().find(|j| j.artifact == id) {
+                report.push(Diagnostic::error(
+                    "E024",
+                    at,
+                    format!(
+                        "the same document as {:?} (one id); list it once",
+                        first.stem
+                    ),
+                ));
+                continue;
+            }
             self.artifacts.insert(id.clone(), art);
             self.json.push(JsonFile {
                 stem,
@@ -727,6 +743,33 @@ mod tests {
             .is_none()
         );
         assert_eq!(report.codes(), ["E023"]);
+    }
+
+    /// Spec §9.4 (0.6, F-62): a later listed file with an earlier one's id
+    /// (equal JCS bytes, whatever the file bytes) is E024 and not loaded, so
+    /// every name a `$ref` can use stays one artifact's in the bundle.
+    #[test]
+    fn a_listed_file_with_a_taken_id_is_e024() {
+        let dir = std::env::temp_dir().join(format!("zk2-schema-ids-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.json"), r#"{"$defs": {"X": {"type": "string"}}}"#).unwrap();
+        std::fs::write(dir.join("b.json"), "{\"$defs\":{\"X\":{\"type\":\"string\"}}}\n").unwrap();
+        std::fs::write(
+            dir.join("c.json"),
+            r#"{"$defs": {"Y": {"$ref": "a.json#/$defs/X"}}}"#,
+        )
+        .unwrap();
+        let sec = SchemasSection {
+            jsonschema: vec!["a.json".into(), "b.json".into(), "c.json".into()],
+            ..SchemasSection::default()
+        };
+        let mut report = Report::default();
+        let set = SchemaSet::load(&dir, &sec, &mut report);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(report.codes(), ["E024"], "{report}");
+        let names: Vec<&str> = set.artifacts().values().map(|a| a.name.as_str()).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"a") && names.contains(&"c"), "{names:?}");
     }
 
     #[test]

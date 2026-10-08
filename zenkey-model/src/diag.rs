@@ -197,7 +197,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("E023", "a type reference does not resolve"),
     (
         "E024",
-        "a `json:` name is ambiguous across the listed files, or two listed files share a stem",
+        "a `json:` name is ambiguous across the listed files, or two listed files share a stem or an id",
     ),
     (
         "E025",

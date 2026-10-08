@@ -239,10 +239,14 @@ fn cbor_to_json(v: ciborium::Value) -> Result<Value, EnvelopeError> {
     Ok(match v {
         C::Null => Value::Null,
         C::Bool(b) => Value::Bool(b),
+        // A signed or an unsigned 64-bit value: −2^63 to 2^64−1, what JSON
+        // decoding holds, and what this module's own encoder writes for a
+        // `u64` (spec §5.2, 0.6). CBOR's −2^64 to −2^63−1 is out of range.
         C::Integer(i) => {
             let n = i128::from(i);
             i64::try_from(n)
                 .map(Value::from)
+                .or_else(|_| u64::try_from(n).map(Value::from))
                 .map_err(|_| EnvelopeError::Decode("integer out of range".into()))?
         }
         C::Float(f) => serde_json::Number::from_f64(f)
@@ -304,6 +308,33 @@ mod tests {
             detail("c11a00000001"),
             Ok(Some(Detail::Value(Value::from(1))))
         );
+    }
+
+    /// Spec §5.2 (0.6, F-58): a CBOR integer decodes from −2^63 to 2^64−1,
+    /// and an envelope this module encodes with a `u64` above `i64::MAX`
+    /// decodes back.
+    #[test]
+    fn cbor_integers_are_64_bit_signed_or_unsigned() {
+        let detail = |item: &str| decode(CBOR, &app_with(item)).map(|e| e.detail);
+        let value = |v: Value| Ok(Some(Detail::Value(v)));
+        assert_eq!(detail("1bffffffffffffffff"), value(Value::from(u64::MAX)));
+        assert_eq!(detail("1b8000000000000000"), value(Value::from(1_u64 << 63)));
+        assert_eq!(detail("3b7fffffffffffffff"), value(Value::from(i64::MIN)));
+        for below in ["3b8000000000000000", "3bffffffffffffffff"] {
+            assert_eq!(
+                decode(CBOR, &app_with(below)).map_err(|e| e.tag()),
+                Err("decode"),
+                "{below}"
+            );
+        }
+        let env = Envelope {
+            code: "app".into(),
+            message: "x".into(),
+            cause: None,
+            detail: Some(Detail::Value(Value::from(u64::MAX))),
+        };
+        let bytes = encode(&env, CBOR).unwrap();
+        assert_eq!(decode(CBOR, &bytes), Ok(env));
     }
 
     #[test]
