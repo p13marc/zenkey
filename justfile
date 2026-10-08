@@ -219,3 +219,15 @@ features:
     done
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked
     ./scripts/check-model-zenoh-free.sh
+
+# Builds target/py-venv with the standard library only (no ensurepip
+# needed), then a pinned, hash-checked pip, the pinned requirements, and
+# protoc 3.21.12 when the one on PATH is not that version
+# (impl/python/README.md).
+# The Python zk2 implementation (#609) against spec/conformance and the examples.
+py-conformance:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.conformance spec/conformance

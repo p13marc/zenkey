@@ -1,0 +1,11 @@
+# zk2py's pinned dependencies (#609). Installed by `just py-conformance`
+# through impl/python/bootstrap.py into target/py-venv.
+#
+# RFC 8785 (JCS) serialization: canonical bytes, fingerprints, bundle files
+# (core.md §9.5, §9.6).
+rfc8785==0.1.4
+# FileDescriptorSet parsing for the protobuf half of the classifier and the
+# retention identity check (core.md §9.7, §9.8). The descriptor *bytes* are
+# never produced by this library: they come from protoc 3.21.12, which
+# bootstrap.py pins separately (core.md §9.4, §9.5 "Portability").
+protobuf==6.33.5
