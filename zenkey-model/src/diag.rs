@@ -144,7 +144,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("D010", "a profile id is not <name>.v<major>"),
     (
         "E000",
-        "the file is not valid TOML, or does not fit the authoring format's shape",
+        "the file is not valid TOML 1.0, or does not fit the authoring format's shape",
     ),
     ("E001", "interface name or major invalid"),
     ("E002", "a `uses` entry is not a profile id <name>.v<major>"),

@@ -55,3 +55,4 @@ pub mod schema;
 pub mod slug;
 mod strict;
 pub mod template;
+mod toml10;

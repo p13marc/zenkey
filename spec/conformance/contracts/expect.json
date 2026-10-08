@@ -6,6 +6,36 @@
       ],
       "fingerprint": null
     },
+    "e000-toml11-escape-e": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e000-toml11-escape-x": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e000-toml11-inline-newline": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e000-toml11-time": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
+    "e000-toml11-trailing-comma": {
+      "codes": [
+        "E000"
+      ],
+      "fingerprint": null
+    },
     "e000-unknown-field": {
       "codes": [
         "E000"

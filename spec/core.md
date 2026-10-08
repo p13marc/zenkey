@@ -1,8 +1,8 @@
 # zk2 core specification
 
-**Version 0.3** (0.1 accepted on 2026-10-08, #606; amended the same day:
-U23 in 0.2, the classifier's rule set in 0.3). Every change goes through [`CHANGELOG.md`](CHANGELOG.md),
-amendment-style.
+**Version 0.4** (0.1 accepted on 2026-10-08, #606; amended the same day:
+U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4).
+Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
 applications built on Zenoh. It is written so that an implementation in any
@@ -874,10 +874,15 @@ this text has a bug.
 
 A contract is a **TOML 1.0** file, one per interface major, named
 `<name>.v<major>.toml` (W107 otherwise; the fixtures do not check file
-names). A reader MAY accept later TOML, but a contract MUST NOT need it.
-The reference reader does not yet refuse TOML 1.1 syntax, so a 1.1-only
-contract can load in Rust and fail in a 1.0 reader. A lint for this is
-owed (#607 follow-up).
+names). A reader MAY accept later TOML, but a contract MUST NOT need it,
+so syntax that only TOML 1.1 has is **E000**:
+- a newline, a comment or a trailing comma inside an inline table;
+- the `\e` and `\xHH` escapes;
+- a time without seconds.
+
+`[F: contracts/e000-toml11-inline-newline, e000-toml11-trailing-comma,
+e000-toml11-escape-e, e000-toml11-escape-x, e000-toml11-time]`
+
 Its shape is [`contract.schema.json`](contract.schema.json) (JSON Schema
 2020-12). An unknown table or field, a value of the wrong type, or text that
 is not TOML is **E000**, reported once, and it stops the load.
@@ -919,7 +924,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 
 | Code | Condition | Reported |
 |---|---|---|
-| E000 | not TOML, or outside the format's shape | once; stops the load |
+| E000 | not TOML 1.0, or outside the format's shape | once; stops the load |
 | E001 | the interface name is not one or more `.`-joined segments `[a-z][a-z0-9_]*`, or it ends in, or is, a segment `v<digits>` | once |
 | E002 | a `uses` entry is not `<name>.v<major>` | per entry |
 | E010 | a template is empty, has an empty segment, a literal that is not a plain chunk or starts with `x-`, a parameter name not `[a-z][a-z0-9_]*`, a repeated parameter, or a rest parameter that is not last | per resource; stops that resource's other checks |
