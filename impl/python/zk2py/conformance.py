@@ -191,6 +191,92 @@ def family_errors(root: Path) -> list[Result]:
     return out
 
 
+# -- compat/ (core.md §9.7 retention, §9.8) ----------------------------------
+
+def _json_revision(path: Path, type_ref: str):
+    """One JSON Schema payload revision: (world, stem, node), or None when it
+    does not load (any E… finding: the ``invalid`` class)."""
+    from .compat import JsonWorld
+    from .schemas import SchemaSet
+
+    s = SchemaSet.load(path.parent, [path.name], [], None)
+    if any(f.code.startswith("E") for f in s.findings):
+        return None
+    obj, findings = s.resolve(type_ref)
+    if obj is None or findings:
+        return None
+    art = s.json_files[0]
+    return JsonWorld({art.name: art.data}), art.name, art.data["$defs"][obj["name"]]
+
+
+def _proto_revision(directory: Path) -> bytes | None:
+    from . import protoc
+
+    try:
+        return protoc.compile_file("m.proto", [directory])
+    except protoc.CompileError:
+        return None
+
+
+def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
+    from . import compat
+    from .contract import load_contract
+
+    d = root / "compat" / case
+    got: dict[str, Any] = {}
+    family = case.split("/")[0]
+    if family == "contract":
+        old = load_contract(d / "old.toml", spec_dir=root.parent)
+        new = load_contract(d / "new.toml", spec_dir=root.parent)
+        if not (old.valid and new.valid):
+            return {"class": compat.INVALID, "warnings": []}
+
+        def rev(c):
+            return compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
+
+        v = compat.contract_compare(rev(old), rev(new))
+        return {"class": v.cls, "warnings": sorted(v.warnings)}
+
+    kind = case.split("/")[1] if family == "payload" else ("jsonschema" if "jsonschema" in case else "protobuf")
+    names = ["old", "new"] if family == "payload" else [*want["history"], want["candidate"]]
+    if kind == "jsonschema":
+        revs = [_json_revision(d / f"{n}.json", want["type"]) for n in names]
+        if any(r is None for r in revs):
+            return {"class": compat.INVALID, "warnings": []}
+
+        def compare(a, b):
+            return compat.json_compare(a[0], a[1], a[2], b[0], b[1], b[2])
+    else:
+        sets = [_proto_revision(d / n) for n in names]
+        if any(s is None for s in sets):
+            return {"class": compat.INVALID, "warnings": []}
+        message = "." + want["type"]
+        revs = [compat.ProtoWorld.from_sets([s]) for s in sets]
+
+        def compare(a, b):
+            return compat.proto_compare_message(a, message, b, message)
+
+        if family == "payload":
+            got["same_revision"] = compat.proto_same_revision([sets[0]], [sets[1]])
+    total, each = compat.full_transitive(revs[:-1], revs[-1], compare)
+    got.update({"class": total.cls, "warnings": total.warnings})
+    if family == "transitive":
+        got["against"] = {n: v.cls for n, v in zip(names[:-1], each)}
+    return got
+
+
+def family_compat(root: Path) -> list[Result]:
+    out = []
+    for case, want in sorted(_load_json(root / "compat" / "expect.json")["cases"].items()):
+        got = _compat_case(root, case, want)
+        out.append(_check(case, got, {k: want[k] for k in got}))
+        # Make sure nothing the fixture expects went unchecked.
+        unchecked = set(want) - set(got) - {"type", "history", "candidate"}
+        if unchecked:
+            out.append((case, False, f"expected members not evaluated: {sorted(unchecked)}"))
+    return out
+
+
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "keys": family_keys,
     "slugs": family_slugs,
@@ -201,6 +287,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "history": family_history,
     "descriptors": family_descriptors,
     "errors": family_errors,
+    "compat": family_compat,
 }
 
 

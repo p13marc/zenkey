@@ -75,7 +75,7 @@ def compile_file(name: str, roots: list[Path]) -> bytes:
     with tempfile.TemporaryDirectory(prefix="zk2py-protoc-") as tmp:
         out = Path(tmp) / "out.pb"
         cmd = [protoc_path(), "--include_imports", f"--descriptor_set_out={out}"]
-        cmd += [f"--proto_path={r}" for r in roots]
+        cmd += [f"--proto_path={Path(r).resolve()}" for r in roots]
         cmd.append(name)
         # Run from an empty directory so the working directory adds nothing
         # to the import path.
