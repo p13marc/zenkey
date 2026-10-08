@@ -514,10 +514,33 @@ pub enum Attribution {
     /// It holds an instance token, not this interface's: a standby, or the
     /// interface is in its tokenless set (§8.1).
     InstanceOnly,
-    /// No token of the service is visible.
+    /// No token of the service is visible to this reader, on a read that
+    /// completed. A read the access control refuses is complete and empty
+    /// too (§8.1, 0.8), so this is what the reader could see: the service
+    /// is gone, or the reader may not see its presence.
     Absent,
+    /// The presence read was possibly incomplete (it ended at its timeout,
+    /// or with another error reply, §8.1) and saw no interface token: a
+    /// token it missed is not absence.
+    Unknown,
     /// Presence cannot be observed from here (R7): a constrained face.
     Unobservable,
+}
+
+impl Attribution {
+    /// Attributes silence from one presence read of the service's `@zk`
+    /// subtree (O5, §8.1): its interface token is presence whatever else
+    /// the read missed; anything less from a read that may be incomplete
+    /// is [`Attribution::Unknown`].
+    #[must_use]
+    pub fn of_read(interface_token: bool, instance_token: bool, complete: bool) -> Self {
+        match (interface_token, instance_token, complete) {
+            (true, _, _) => Self::Present,
+            (false, _, false) => Self::Unknown,
+            (false, true, true) => Self::InstanceOnly,
+            (false, false, true) => Self::Absent,
+        }
+    }
 }
 
 /// No answer (O5): no value and no envelope.
@@ -790,6 +813,22 @@ mod tests {
         let concrete = CallInfo::new(b(&[("if", "eth0")]), None);
         assert!(concrete.member(&b(&[("if", "eth1")])).is_err());
         concrete.member(&b(&[("if", "eth0")])).unwrap();
+    }
+
+    /// O5 through §8.1 (0.8): an interface token is presence even on a read
+    /// that may be incomplete; anything less from such a read is unknown,
+    /// never absence or a standby.
+    #[test]
+    fn silence_is_attributed_by_what_a_read_could_see() {
+        use super::Attribution::{self, Absent, InstanceOnly, Present, Unknown};
+        for complete in [true, false] {
+            assert_eq!(Attribution::of_read(true, false, complete), Present);
+            assert_eq!(Attribution::of_read(true, true, complete), Present);
+        }
+        assert_eq!(Attribution::of_read(false, true, true), InstanceOnly);
+        assert_eq!(Attribution::of_read(false, false, true), Absent);
+        assert_eq!(Attribution::of_read(false, true, false), Unknown);
+        assert_eq!(Attribution::of_read(false, false, false), Unknown);
     }
 
     /// A minimal executor for futures that never wait on anything.
