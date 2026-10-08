@@ -1,16 +1,18 @@
 //! TOML 1.0 only (spec `core.md` §9.1): a contract MUST NOT need TOML 1.1,
 //! because a 1.0 reader (Python's `tomllib`, for one) refuses it. The `toml`
 //! crate reads 1.1, so the syntax that only 1.1 has is found here, on
-//! `toml_parser`'s event stream, and reported as E000.
+//! `toml_parser`'s event stream, and reported as E000. So is an integer
+//! outside TOML 1.0's 64-bit range, which readers disagree on: the `toml`
+//! crate reads up to 2^64−1, `tomllib` any size.
 
 use toml_parser::decoder::Encoding;
 use toml_parser::parser::{EventReceiver, parse_document};
 use toml_parser::{ErrorSink, Source, Span};
 
-/// The first piece of TOML 1.1-only syntax in `text`: its 1-based line and
-/// what it is. `text` is expected to parse; a parse error is the parser's to
-/// report, and is ignored here.
-pub(crate) fn first_toml11(text: &str) -> Option<(usize, &'static str)> {
+/// The first piece of TOML 1.1-only syntax, or the first integer beyond 64
+/// bits, in `text`: its 1-based line and what it is. `text` is expected to
+/// parse; a parse error is the parser's to report, and is ignored here.
+pub(crate) fn first_beyond_toml10(text: &str) -> Option<(usize, &'static str)> {
     let tokens = Source::new(text).lex().into_vec();
     let mut scan = Scan {
         text,
@@ -113,14 +115,44 @@ impl EventReceiver for Scan<'_> {
                 {
                     self.found(span, "a time without seconds");
                 }
+                if integer_beyond_64_bits(raw) {
+                    self.found(span, "an integer outside TOML 1.0's 64-bit range");
+                }
             }
         }
     }
 }
 
+/// Whether a bare value is a TOML integer that a 64-bit signed integer
+/// cannot hold. TOML 1.0 bounds integers to −2^63..2^63−1 and requires an
+/// error beyond; the `toml` crate reads up to 2^64−1, and Python's
+/// `tomllib` any size, so the bound is checked here (spec §9.1).
+fn integer_beyond_64_bits(raw: &str) -> bool {
+    let digits: String = raw.chars().filter(|c| *c != '_').collect();
+    let (negative, body) = match digits.as_bytes().first() {
+        Some(b'-') => (true, &digits[1..]),
+        Some(b'+') => (false, &digits[1..]),
+        _ => (false, digits.as_str()),
+    };
+    let (radix, body) = match body.get(..2) {
+        Some("0x") => (16, &body[2..]),
+        Some("0o") => (8, &body[2..]),
+        Some("0b") => (2, &body[2..]),
+        _ => (10, body),
+    };
+    if body.is_empty() || !body.chars().all(|c| c.is_digit(radix)) {
+        return false;
+    }
+    match u128::from_str_radix(body, radix) {
+        Ok(n) if negative => n > 1 << 63,
+        Ok(n) => n > (1 << 63) - 1,
+        Err(_) => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::first_toml11;
+    use super::first_beyond_toml10;
 
     #[test]
     fn toml11_only_syntax_is_found() {
@@ -137,10 +169,14 @@ mod tests {
             ("t = 1979-05-27T07:32Z\n", "a time without seconds"),
             ("t = 1979-05-27 07:32\n", "a time without seconds"),
         ] {
-            assert_eq!(first_toml11(text).map(|(_, w)| w), Some(what), "{text:?}");
+            assert_eq!(
+                first_beyond_toml10(text).map(|(_, w)| w),
+                Some(what),
+                "{text:?}"
+            );
         }
         assert_eq!(
-            first_toml11("a = 1\n\nb = { c = 1, }\n"),
+            first_beyond_toml10("a = 1\n\nb = { c = 1, }\n"),
             Some((3, "a trailing comma in an inline table"))
         );
     }
@@ -161,8 +197,32 @@ mod tests {
             "d = 1979-05-27\n",
             "t = { a = 1 } # a comment after it\n",
             "[x]\n# comment\nk = \"v\" # trailing\n",
+            "i = 9223372036854775807\n",
+            "i = -9_223_372_036_854_775_808\n",
+            "i = 0x7fffffffffffffff\n",
+            "f = 1e300\n",
+            "f = nan\n",
         ] {
-            assert_eq!(first_toml11(text), None, "{text:?}");
+            assert_eq!(first_beyond_toml10(text), None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn integers_beyond_64_bits_are_found() {
+        for text in [
+            "i = 9223372036854775808\n",
+            "i = +9_223_372_036_854_775_808\n",
+            "i = -9223372036854775809\n",
+            "i = 0x8000000000000000\n",
+            "i = 0o1000000000000000000000\n",
+            "t = { a = [1, 18446744073709551616] }\n",
+            "i = 340282366920938463463374607431768211456\n",
+        ] {
+            assert_eq!(
+                first_beyond_toml10(text).map(|(_, w)| w),
+                Some("an integer outside TOML 1.0's 64-bit range"),
+                "{text:?}"
+            );
         }
     }
 }

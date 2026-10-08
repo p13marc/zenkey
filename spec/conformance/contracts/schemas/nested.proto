@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package seed.v1;
+
+message Outer {
+  message Inner {
+    double x = 1;
+  }
+  Inner inner = 1;
+  Mode mode = 2;
+}
+
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  MODE_ON = 1;
+}

@@ -1,0 +1,19 @@
+# E021 is a table-wide check: it does not take a resource out of the W101
+# overlap check, so two same-shape templates with different types give both
+# (§9.2, cascades 3 and 4).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources."a/{x}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { x = "string" }
+cardinality = 2
+
+[resources."a/{y}"]
+kind = "state"
+type = { raw = "image/png" }
+params = { y = "string" }
+cardinality = 2

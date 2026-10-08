@@ -294,6 +294,15 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             ));
         }
     }
+    // Like a capability (D008) and an interface (D003), a profile is listed
+    // once.
+    if d.profiles.iter().collect::<BTreeSet<_>>().len() != d.profiles.len() {
+        report.push(Diagnostic::error(
+            "D010",
+            "profiles",
+            "a profile is listed twice",
+        ));
+    }
     (Some(d), report)
 }
 

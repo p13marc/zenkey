@@ -10,6 +10,53 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The member under which a float that is not finite (`nan`, `inf`) is
+/// carried through an annotation value. JSON has no such number, and
+/// `serde_json` would turn it into `null` without a word; carried this way,
+/// the canonical-form restriction refuses it (E028, spec §9.5).
+pub const NON_FINITE: &str = "$__zk2_private_non_finite";
+
+/// The member under which the `toml` crate hands a datetime to serde. An
+/// annotation value holding one is E020 (spec §9.1).
+pub const DATETIME: &str = "$__toml_private_datetime";
+
+/// Annotation values are read as TOML values, then turned into JSON: a
+/// datetime and a float that is not finite are kept as marker objects
+/// ([`DATETIME`], [`NON_FINITE`]) for the lints to refuse.
+fn annotations<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, Value>, D::Error> {
+    let raw = BTreeMap::<String, toml::Value>::deserialize(d)?;
+    Ok(raw.into_iter().map(|(k, v)| (k, from_toml(v))).collect())
+}
+
+fn from_toml(v: toml::Value) -> Value {
+    match v {
+        toml::Value::String(s) => Value::String(s),
+        toml::Value::Integer(i) => Value::from(i),
+        toml::Value::Float(f) => serde_json::Number::from_f64(f).map_or_else(
+            || {
+                Value::Object(
+                    [(NON_FINITE.to_owned(), Value::String(f.to_string()))]
+                        .into_iter()
+                        .collect(),
+                )
+            },
+            Value::Number,
+        ),
+        toml::Value::Boolean(b) => Value::Bool(b),
+        toml::Value::Datetime(dt) => Value::Object(
+            [(DATETIME.to_owned(), Value::String(dt.to_string()))]
+                .into_iter()
+                .collect(),
+        ),
+        toml::Value::Array(a) => Value::Array(a.into_iter().map(from_toml).collect()),
+        toml::Value::Table(t) => {
+            Value::Object(t.into_iter().map(|(k, v)| (k, from_toml(v))).collect())
+        }
+    }
+}
+
 /// One contract file: one interface major.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -31,9 +78,11 @@ pub struct ContractFile {
 pub struct InterfaceSection {
     /// `[a-z][a-z0-9_]*` segments joined by `.`; never ending in `.v<int>`.
     pub name: String,
+    #[schemars(range(max = 4_294_967_295_u32))]
     pub major: u32,
     /// Informative; CI keeps it monotonic; not in the fingerprint.
     #[serde(default)]
+    #[schemars(range(max = 4_294_967_295_u32))]
     pub minor: Option<u32>,
     /// Documentation; not in the fingerprint.
     #[serde(default)]
@@ -63,7 +112,7 @@ pub struct SchemasSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsBlock {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "annotations")]
     pub annotations: BTreeMap<String, Value>,
     pub encoding: Option<Encoding>,
     pub attachment_encoding: Option<Encoding>,
@@ -83,7 +132,7 @@ pub struct DefaultsBlock {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsSection {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "annotations")]
     pub annotations: BTreeMap<String, Value>,
     pub encoding: Option<Encoding>,
     pub attachment_encoding: Option<Encoding>,
@@ -154,7 +203,7 @@ pub struct ResourceSpec {
     pub gate: Option<Gate>,
     #[serde(default)]
     pub deprecated: Option<Deprecated>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "annotations")]
     pub annotations: BTreeMap<String, Value>,
     // stream, state, event
     #[serde(default, rename = "type")]
@@ -217,7 +266,7 @@ pub struct Requirement {
     pub optional: bool,
     #[serde(default)]
     pub doc: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "annotations")]
     pub annotations: BTreeMap<String, Value>,
 }
 
@@ -360,6 +409,7 @@ pub enum History {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HistoryParams {
+    #[schemars(range(max = 4_294_967_295_u32))]
     pub depth: u32,
     #[serde(default)]
     pub miss_detection_ms: Option<u64>,
@@ -368,6 +418,7 @@ pub struct HistoryParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Deprecated {
+    #[schemars(range(max = 4_294_967_295_u32))]
     pub since: u32,
     #[serde(default)]
     pub replaced_by: Option<String>,

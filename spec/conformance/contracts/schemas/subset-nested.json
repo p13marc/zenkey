@@ -1,0 +1,14 @@
+{
+  "$defs": {
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "a": {"allOf": [{"pattern": "^x"}, {"if": {"const": 1}, "then": {}}]},
+        "b": {"not": {"patternProperties": {"^y": {}}}}
+      }
+    }
+  },
+  "definitions": {
+    "Old": {"contains": {"type": "string"}}
+  }
+}

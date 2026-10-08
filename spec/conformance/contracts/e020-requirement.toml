@@ -1,0 +1,14 @@
+# A requirement's annotations are checked like a resource's (§9.2): here a
+# profile not listed in `uses`.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[requires.src]
+interface = "cmd.v1"
+annotations = { "arbitration.policy" = "first" }

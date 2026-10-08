@@ -100,8 +100,15 @@ pub fn decode(encoding: &str, bytes: &[u8]) -> Result<Envelope, EnvelopeError> {
             from_value(v)?
         }
         CBOR => {
-            let item: ciborium::Value =
-                ciborium::from_reader(bytes).map_err(|e| EnvelopeError::Decode(e.to_string()))?;
+            let mut rest = bytes;
+            let item: ciborium::Value = ciborium::from_reader(&mut rest)
+                .map_err(|e| EnvelopeError::Decode(e.to_string()))?;
+            if !rest.is_empty() {
+                return Err(EnvelopeError::Decode(format!(
+                    "{} bytes after the CBOR item",
+                    rest.len()
+                )));
+            }
             from_value(cbor_to_json(item)?)?
         }
         PROTOBUF => {
@@ -223,7 +230,10 @@ fn check(env: &Envelope) -> Result<(), EnvelopeError> {
     Ok(())
 }
 
-/// CBOR → JSON, for the envelope's members. Map keys must be text.
+/// CBOR → JSON, for the envelope's members (spec §5.2). Map keys must be
+/// text. A tag decodes as its content, `undefined` as `null`, and a byte
+/// string as base64 text (RFC 4648 §4, padded): the JSON form of bytes
+/// (spec §7.2), so a CBOR detail reads like the same detail sent as JSON.
 fn cbor_to_json(v: ciborium::Value) -> Result<Value, EnvelopeError> {
     use ciborium::Value as C;
     Ok(match v {
@@ -239,7 +249,10 @@ fn cbor_to_json(v: ciborium::Value) -> Result<Value, EnvelopeError> {
             .map(Value::Number)
             .ok_or_else(|| EnvelopeError::Decode("non-finite float".into()))?,
         C::Text(s) => Value::String(s),
-        C::Bytes(b) => Value::Array(b.into_iter().map(Value::from).collect()),
+        C::Bytes(b) => {
+            use base64::Engine as _;
+            Value::String(base64::engine::general_purpose::STANDARD.encode(b))
+        }
         C::Array(a) => Value::Array(a.into_iter().map(cbor_to_json).collect::<Result<_, _>>()?),
         C::Map(m) => {
             let mut out = Map::new();
@@ -256,4 +269,59 @@ fn cbor_to_json(v: ciborium::Value) -> Result<Value, EnvelopeError> {
         C::Tag(_, inner) => cbor_to_json(*inner)?,
         _ => return Err(EnvelopeError::Decode("an unsupported CBOR item".into())),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(h: &str) -> Vec<u8> {
+        (0..h.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// `{"code": "app", "message": "x", "detail": <item>}`.
+    fn app_with(item: &str) -> Vec<u8> {
+        hex(&format!(
+            "a364636f646563617070676d65737361676561786664657461696c{item}"
+        ))
+    }
+
+    #[test]
+    fn cbor_items_map_to_json() {
+        let detail = |item: &str| decode(CBOR, &app_with(item)).map(|e| e.detail);
+        // A byte string is base64 text, as bytes are in JSON (spec §7.2).
+        assert_eq!(
+            detail("420102"),
+            Ok(Some(Detail::Value(Value::String("AQI=".into()))))
+        );
+        // `undefined` is `null`, so no detail.
+        assert_eq!(detail("f7"), Ok(None));
+        // A tag decodes as its content.
+        assert_eq!(
+            detail("c11a00000001"),
+            Ok(Some(Detail::Value(Value::from(1))))
+        );
+    }
+
+    #[test]
+    fn trailing_bytes_are_malformed() {
+        let mut bytes = hex("a264636f646563617070676d6573736167656178");
+        assert!(decode(CBOR, &bytes).is_ok());
+        bytes.push(0);
+        assert_eq!(decode(CBOR, &bytes).map_err(|e| e.tag()), Err("decode"));
+    }
+
+    #[test]
+    fn encodings_match_exactly() {
+        for enc in [
+            "application/json;charset=utf-8",
+            "application/protobuf",
+            "application/protobuf;other.Error",
+        ] {
+            assert_eq!(decode(enc, b"{}").map_err(|e| e.tag()), Err("encoding"));
+        }
+    }
 }

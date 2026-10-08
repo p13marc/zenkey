@@ -205,6 +205,7 @@ impl Bundle {
             let data = entry
                 .get("data")
                 .ok_or_else(|| shape(&format!("schema {id} has no `data`")))?;
+            only_members(entry, &["kind", "data"], &format!("schema {id}"))?;
             let got = match kind.as_str() {
                 "protobuf" => {
                     let b64 = data
@@ -215,7 +216,7 @@ impl Bundle {
                         .map_err(|e| shape(&format!("schema {id}: {e}")))?;
                     sha256_id(&bytes)
                 }
-                "jsonschema" => sha256_id(&jcs(data)),
+                "jsonschema" => json_id(data),
                 other => return Err(shape(&format!("schema {id}: unknown kind {other:?}"))),
             };
             if &got != id {
@@ -229,7 +230,11 @@ impl Bundle {
             let data = e
                 .get("data")
                 .ok_or_else(|| shape(&format!("extra {id} has no `data`")))?;
-            let got = sha256_id(&jcs(data));
+            only_members(e, &["media_type", "data"], &format!("extra {id}"))?;
+            if e.get("media_type").is_some_and(|m| !m.is_string()) {
+                return Err(shape(&format!("extra {id}: `media_type` is not a string")));
+            }
+            let got = json_id(data);
             if &got != id {
                 return Err(BundleError::ExtraHash {
                     id: id.clone(),
@@ -270,6 +275,28 @@ impl Bundle {
 
 fn shape(s: &str) -> BundleError {
     BundleError::Shape(s.to_owned())
+}
+
+/// An entry carries no member besides `allowed`: nothing rides along
+/// unverified (spec §9.6, steps 9 and 10).
+fn only_members(entry: &Value, allowed: &[&str], what: &str) -> Result<(), BundleError> {
+    match entry.as_object() {
+        Some(m) => match m.keys().find(|k| !allowed.contains(&k.as_str())) {
+            Some(k) => Err(shape(&format!("{what}: unknown member {k:?}"))),
+            None => Ok(()),
+        },
+        None => Err(shape(&format!("{what} is not an object"))),
+    }
+}
+
+/// The id of a JSON document: the sha256 of its JCS bytes. A document
+/// holding a number outside ±(2^53−1) has no JCS bytes every implementation
+/// agrees on, so it has no id, and matches none (spec §9.6, step 9).
+fn json_id(data: &Value) -> String {
+    if crate::schema::unsafe_integer(data).is_some() {
+        return "none: a number outside ±(2^53−1)".to_owned();
+    }
+    sha256_id(&jcs(data))
 }
 
 /// The artifacts a canonical contract references as extras: every
@@ -338,5 +365,20 @@ response = "google.protobuf.Timestamp"
             Bundle::verify(dup.as_bytes()),
             Err(BundleError::Json(_))
         ));
+    }
+
+    /// Nothing rides along unverified: an entry holds exactly its members.
+    #[test]
+    fn entries_hold_only_their_members() {
+        let b = Bundle::build(&sample());
+        let id = b.schemas.keys().next().unwrap().clone();
+        let mut v = b.to_value();
+        v["schemas"][&id]["sig"] = json!("x");
+        let err = Bundle::verify(&jcs(&v)).unwrap_err();
+        assert_eq!(err.tag(), "shape", "{err}");
+        let mut v = b.to_value();
+        v["schemas"][&id] = json!(3);
+        let err = Bundle::verify(&jcs(&v)).unwrap_err();
+        assert_eq!(err.tag(), "schema_kind", "{err}");
     }
 }

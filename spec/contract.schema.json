@@ -357,6 +357,7 @@
         "since": {
           "type": "integer",
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         }
       },
@@ -410,6 +411,7 @@
         "depth": {
           "type": "integer",
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         },
         "miss_detection_ms": {
@@ -434,6 +436,7 @@
         "major": {
           "type": "integer",
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         },
         "minor": {
@@ -444,6 +447,7 @@
           ],
           "format": "uint32",
           "default": null,
+          "maximum": 4294967295,
           "minimum": 0
         },
         "name": {

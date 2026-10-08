@@ -1,0 +1,11 @@
+# One key, two E020: its value holds a datetime (a local date), and the key
+# is not <profile>.<key> (§9.2).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "loose" = [1979-05-27] }

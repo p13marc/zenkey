@@ -1,0 +1,5 @@
+{
+  "$defs": {
+    "Other": {"type": "string"}
+  }
+}

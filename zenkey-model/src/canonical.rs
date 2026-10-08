@@ -8,9 +8,10 @@
 //! - **`schemas` lists every artifact the contract carries**, so a change
 //!   to any schema file, including one that is only `$ref`'d, changes the
 //!   fingerprint (over-detect, never under-detect).
-//! - **Restrictions (r3.1):** every string printable ASCII (E027), every
-//!   integer within ±(2^53−1) (E028). On that domain every JCS
-//!   implementation agrees.
+//! - **Restrictions (spec §9.5):** every string printable ASCII (E027),
+//!   every integer within ±(2^53−1), every float finite and, when JCS writes
+//!   it as an integer, within the same range (E028). On that domain every
+//!   JCS implementation agrees.
 //! - **The fingerprint** is `sha256:` + hex of the sha256 of the JCS bytes.
 
 use std::fmt;
@@ -148,13 +149,42 @@ pub fn canonical_bytes(c: &Contract) -> Vec<u8> {
     jcs(&canonical(c))
 }
 
-/// Reports every string outside printable ASCII (E027) and every integer
-/// outside ±(2^53−1) (E028), with its JSON path.
+/// Whether a JSON number is outside the canonical form's domain: an
+/// integer beyond ±(2^53−1), or a float that JCS writes as such an integer
+/// (an integral value below 10^21, where ECMAScript switches to exponent
+/// form). `1e16` is the integer `10000000000000000` once serialized, so a
+/// reader of the bytes sees an integer beyond the range (spec §9.5).
+#[must_use]
+pub fn outside_safe_range(n: &serde_json::Number) -> bool {
+    #[allow(clippy::cast_precision_loss)] // 2^53 − 1 is exact in an f64
+    let max = MAX_SAFE_INTEGER as f64;
+    match (n.as_u64(), n.as_i64(), n.as_f64()) {
+        (Some(u), _, _) => u > MAX_SAFE_INTEGER,
+        (None, Some(i), _) => i.unsigned_abs() > MAX_SAFE_INTEGER,
+        (None, None, Some(f)) => f.fract() == 0.0 && f.abs() > max && f.abs() < 1e21,
+        _ => false,
+    }
+}
+
+/// Reports every string outside printable ASCII (E027) and every number
+/// outside the canonical form's domain (E028, [`outside_safe_range`]), with
+/// its JSON path. Bundle verification runs this on the contract it reads.
 pub fn check_restrictions(v: &Value, report: &mut Report) {
+    walk_restrictions(v, false, report);
+}
+
+/// [`check_restrictions`] on a contract being linted, which can also hold a
+/// float that is not finite: an annotation's `nan` or `inf`, carried as a
+/// [`crate::authoring::NON_FINITE`] marker. JSON has no such number (E028).
+pub(crate) fn check_contract_restrictions(v: &Value, report: &mut Report) {
+    walk_restrictions(v, true, report);
+}
+
+fn walk_restrictions(v: &Value, lint: bool, report: &mut Report) {
     fn ascii(s: &str) -> bool {
         s.bytes().all(|b| (0x20..=0x7e).contains(&b))
     }
-    fn go(v: &Value, path: &mut String, report: &mut Report) {
+    fn go(v: &Value, lint: bool, path: &mut String, report: &mut Report) {
         match v {
             Value::String(s) if !ascii(s) => report.push(Diagnostic::error(
                 "E027",
@@ -162,16 +192,11 @@ pub fn check_restrictions(v: &Value, report: &mut Report) {
                 format!("{s:?} is not printable ASCII"),
             )),
             Value::Number(n) => {
-                let out = match (n.as_u64(), n.as_i64()) {
-                    (Some(u), _) => u > MAX_SAFE_INTEGER,
-                    (None, Some(i)) => i.unsigned_abs() > MAX_SAFE_INTEGER,
-                    _ => false,
-                };
-                if out {
+                if outside_safe_range(n) {
                     report.push(Diagnostic::error(
                         "E028",
                         format!("canonical{path}"),
-                        format!("{n} is outside ±(2^53−1)"),
+                        format!("{n} is, or serializes as, an integer outside ±(2^53−1)"),
                     ));
                 }
             }
@@ -179,9 +204,21 @@ pub fn check_restrictions(v: &Value, report: &mut Report) {
                 for (i, x) in a.iter().enumerate() {
                     let len = path.len();
                     path.push_str(&format!("[{i}]"));
-                    go(x, path, report);
+                    go(x, lint, path, report);
                     path.truncate(len);
                 }
+            }
+            Value::Object(m)
+                if lint && m.len() == 1 && m.contains_key(crate::authoring::NON_FINITE) =>
+            {
+                report.push(Diagnostic::error(
+                    "E028",
+                    format!("canonical{path}"),
+                    format!(
+                        "{} is not a finite number; JSON has none",
+                        m[crate::authoring::NON_FINITE]
+                    ),
+                ));
             }
             Value::Object(m) => {
                 for (k, x) in m {
@@ -194,14 +231,14 @@ pub fn check_restrictions(v: &Value, report: &mut Report) {
                         ));
                     }
                     path.push_str(&format!(".{k}"));
-                    go(x, path, report);
+                    go(x, lint, path, report);
                     path.truncate(len);
                 }
             }
             _ => {}
         }
     }
-    go(v, &mut String::new(), report);
+    go(v, lint, &mut String::new(), report);
 }
 
 /// A contract fingerprint: the sha256 of its canonical bytes.
@@ -311,5 +348,56 @@ type = { raw = "text/plain" }
             load_str(&src, Path::new("."), None).report.codes(),
             ["E020"]
         );
+    }
+
+    /// Spec §9.5: a float is in the domain when it is finite and, if JCS
+    /// writes it as an integer (integral, below 10^21), within ±(2^53−1).
+    #[test]
+    fn floats_outside_the_domain() {
+        let codes = |v: &str| {
+            let src = format!(
+                "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\
+                 [resources.a]\nkind = \"stream\"\ntype = {{ raw = \"text/plain\" }}\n\
+                 annotations = {{ \"freshness.ttl_s\" = {v} }}\n"
+            );
+            load_str(&src, Path::new("."), None).report.codes()
+        };
+        for bad in [
+            "nan",
+            "+inf",
+            "-inf",
+            "1e16",
+            "-1e16",
+            "9007199254740992.0",
+            "[1, nan]",
+        ] {
+            assert_eq!(codes(bad), ["E028"], "{bad}");
+        }
+        for ok in [
+            "1.0",
+            "1.5",
+            "9007199254740991.0",
+            "1e21",
+            "1e300",
+            "-0.0",
+            "0.1",
+        ] {
+            assert!(codes(ok).is_empty(), "{ok}");
+        }
+        // `1.0` and `1` have the same canonical bytes.
+        let one = |v: &str| {
+            let src = format!(
+                "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\
+                 [resources.a]\nkind = \"stream\"\ntype = {{ raw = \"text/plain\" }}\n\
+                 annotations = {{ \"freshness.ttl_s\" = {v} }}\n"
+            );
+            canonical_bytes(&load_str(&src, Path::new("."), None).contract.unwrap())
+        };
+        assert_eq!(one("1.0"), one("1"));
+        // Bundle verification reads bytes, where no float is ever `nan`; an
+        // integral float written with a fraction is still out of range.
+        let mut r = Report::default();
+        check_restrictions(&json!({"a": 1e16, "b": 1.5, "c": 1e21}), &mut r);
+        assert_eq!(r.codes(), ["E028"]);
     }
 }

@@ -141,7 +141,10 @@ pub const CODES: &[(&str, &str)] = &[
         "D009",
         "a requirement entry is invalid (role, interface, declared_by, bindings)",
     ),
-    ("D010", "a profile id is not <name>.v<major>"),
+    (
+        "D010",
+        "a profile id is not <name>.v<major>, or is listed twice",
+    ),
     (
         "E000",
         "the file is not valid TOML 1.0, or does not fit the authoring format's shape",

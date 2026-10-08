@@ -1,0 +1,11 @@
+# An empty gate list is no gate: no E016 without `optional = true`, and the
+# canonical `gate` is [] either way (§2.3).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+gate = []

@@ -1,0 +1,5 @@
+{
+  "$defs": {
+    "Point": {"type": "object", "type": "array"}
+  }
+}

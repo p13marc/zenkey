@@ -1,0 +1,17 @@
+# E018 and E033 judge resolved values (§9.3): `idempotent` and `replies`
+# come from `[defaults.operation]` here.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[defaults.operation]
+idempotent = true
+replies = "many"
+
+[resources.scan]
+kind = "operation"
+request = { raw = "text/plain" }
+response = { raw = "text/plain" }
+summary = { raw = "text/plain" }
+serving = "replicated"
