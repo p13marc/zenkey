@@ -1,0 +1,4 @@
+{"zrec":1,"selectors":["prod/zk2/host-a/tc/tc.netif.v1/stream/**","prod/legacy/**"],"base":"prod","captured_at":"2026-10-08T00:00:00Z"}
+{"key":"prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0","t":0,"delete":false,"bytes":"eyJyeF9icHMiOjF9","encoding":"application/json"}
+{"key":"prod/legacy/temperature","t":100000,"delete":false,"bytes":"MjE=","encoding":"text/plain"}
+{"key":"prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0","t":200000,"delete":false,"bytes":"eyJyeF9icHMiOjJ9","encoding":"application/json"}

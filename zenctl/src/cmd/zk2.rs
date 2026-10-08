@@ -1,6 +1,7 @@
 //! What zenctl's zk2 verbs share (#612, FJ4): contracts loaded offline, one
-//! presence read with its completion names remembered, and which revision an
-//! `<iface>[@<fingerprint>]` names.
+//! presence read with its completion names remembered, which revision an
+//! `<iface>[@<fingerprint>]` names — among every provider, or among those a
+//! verb aims at (FJ5) — and the `--param` values a verb was given.
 //!
 //! Everything that *means* something is the fleet's — `zenkey_fleet`'s
 //! `Catalog`, `ContractSet` and `BundleStore` — and what is left here is
@@ -11,8 +12,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::Result;
-use zenkey_fleet::{BundleStore, Catalog, ContractSet, ContractState, PresenceScope, Revision};
+use zenkey_fleet::{
+    BundleStore, Catalog, ContractSet, ContractState, PresenceScope, ResolvedTarget, Revision,
+};
 use zenkey_model::canonical::Fingerprint;
+use zenkey_model::template::Bindings;
 
 use crate::bus::Deployment;
 use crate::cli::{ContractArgs, RevisionSpec};
@@ -146,6 +150,22 @@ pub async fn revision(
     spec: &RevisionSpec,
     session: &mut Option<zenoh::Session>,
 ) -> Result<Arc<Revision>> {
+    revision_at(dep, contracts, spec, None, session).await
+}
+
+/// [`revision`], for a verb aimed at `target` (FJ5): the presence read is
+/// scoped to it, and only the revisions its providers' descriptors name are
+/// candidates — so `call host-a/tc tc.netif.v1 …` takes the revision
+/// `host-a/tc` serves, whatever other hosts run. A pattern whose providers
+/// name several revisions is refused until one is named (`iface@fp`); any
+/// of them reads the interface (R4).
+pub async fn revision_at(
+    dep: &Deployment,
+    contracts: &ContractSet,
+    spec: &RevisionSpec,
+    target: Option<&ResolvedTarget>,
+    session: &mut Option<zenoh::Session>,
+) -> Result<Arc<Revision>> {
     let iface = &spec.iface;
     let offline: BTreeSet<Fingerprint> = contracts
         .of_iface(iface)
@@ -164,15 +184,22 @@ pub async fn revision(
     let fp = if full {
         pick(spec, &offline)?
     } else {
-        let catalog = presence(dep, s, &PresenceScope::all()).await?;
+        let catalog = presence(dep, s, &scope_of(target)?).await?;
         let mut known = offline.clone();
-        known.extend(catalog.fingerprints_of(iface));
+        match target {
+            None => known.extend(catalog.fingerprints_of(iface)),
+            Some(t) => {
+                for addr in catalog.addresses().filter(|a| t.matches(a)) {
+                    known.extend(catalog.revisions_of(addr, iface));
+                }
+            }
+        }
         pick(spec, &known)?
     };
     let Some(fp) = fp else {
         return Err(unanswered!(
             "no revision of {iface}{}: --contracts holds none{}, and no provider's \
-             descriptor in {} names one",
+             descriptor{} in {} names one",
             spec.fingerprint
                 .as_ref()
                 .map(|p| format!(" matches {p}"))
@@ -182,6 +209,9 @@ pub async fn revision(
             } else {
                 " that matches"
             },
+            target
+                .map(|t| format!(" at {}", t.address))
+                .unwrap_or_default(),
             namespace_phrase(dep.namespace())
         ));
     };
@@ -206,6 +236,32 @@ pub async fn revision(
             "{iface}@{fp} verified and does not read with this build: {reason}"
         )),
     }
+}
+
+/// The presence read a verb aimed at `target` needs: the one service, one
+/// system's services, or every service.
+fn scope_of(target: Option<&ResolvedTarget>) -> Result<PresenceScope> {
+    Ok(match target {
+        Some(ResolvedTarget {
+            concrete: Some(addr),
+            ..
+        }) => PresenceScope::service(addr),
+        Some(t) => match t.address.split_once('/') {
+            Some((system, _)) if system != "*" => PresenceScope::system(system)?,
+            _ => PresenceScope::all(),
+        },
+        None => PresenceScope::all(),
+    })
+}
+
+/// The `--param NAME=VALUE` values a verb was given, as template bindings:
+/// a name given twice is a rest parameter's chunks, in order.
+pub fn bindings(params: &[(String, String)]) -> Bindings {
+    let mut out = Bindings::new();
+    for (name, value) in params {
+        out.entry(name.clone()).or_default().push(value.clone());
+    }
+    out
 }
 
 /// How a sentence names a namespace: `namespace "x"`, or the bus root.

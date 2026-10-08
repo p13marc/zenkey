@@ -1,4 +1,10 @@
-//! `zenctl get` — the fleet discipline on any selector (#114).
+//! `zenctl get` — the fleet discipline on any selector (#114), and `get
+//! state`, a zk2 state resource read through its contract (#612, FJ5).
+//!
+//! The two forms never share a positional: `get <SELECTOR>` is RAW — a wire
+//! selector on a session in no namespace, any bus — and `get state
+//! <ADDRESS> <IFACE> <STATE>` is RESOLVED, in the deployment's namespace,
+//! through the runtime's consumer ([`state`]).
 //!
 //! A plain fan-in GET: target `All`, consolidation `None`, every reply
 //! attributed by its own key (RFC 05 §2.1), error envelopes rendered as
@@ -7,6 +13,7 @@
 //! `echo`: served-schema decode → structural → text → hex.
 
 use anyhow::Result;
+use zenkey_model::authoring::Kind;
 
 use super::sample::{
     self, SampleLine, attachment_display, attachment_json, format_sample, hex, type_tag,
@@ -40,8 +47,11 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         hex: hex_payload,
         fmt,
         no_decode,
+        cmd: _,
         bus: _,
     } = cli;
+    // Clap requires it whenever `state` is not given.
+    let selector = selector.ok_or_else(|| crate::exit::unaskable!("a selector is required"))?;
     let (selector, body, fmt) = (selector.as_str(), body.as_ref(), fmt.as_deref());
     // The raw seam: `$*` never reaches the session (RFC 03 §2).
     let selector = super::raw_selector(selector)?;
@@ -228,8 +238,8 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
             }
         }
     }
-    // Exit-code discipline shared with `service call`: 1 = an error reply,
-    // 2 = zero replies (silence stays a distinct non-verdict — RFC 05 §3.1).
+    // Exit-code discipline shared with `call`: 1 = an error reply, 2 = zero
+    // replies (silence stays a distinct non-verdict — RFC 05 §3.1).
     let code = exit_code(&answers);
     if code != 0 {
         std::process::exit(code);
@@ -318,6 +328,52 @@ fn value_row(a: &FleetAnswer, d: &sample::Decoded) -> serde_json::Value {
         }
     }
     obj
+}
+
+/// `get state <address> <iface>[@fp] <state> [--last-known <archive>]`:
+/// the owner's current state (S4), or an archive's last-known state (S5),
+/// through the contract. Exit 2 on silence: never "no value" (S6).
+pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
+    use crate::cmd::zk2;
+    let dep = crate::bus::Deployment::resolve(&cli.ns)?;
+    let contracts = zk2::load_contracts(&cli.contracts)?;
+    let target = zenkey_fleet::ResolvedTarget::parse(&cli.address.to_string())?;
+    let values = zk2::bindings(&cli.params);
+    let mut session = None;
+    let revision =
+        zk2::revision_at(&dep, &contracts, &cli.target, Some(&target), &mut session).await?;
+    let r = zenkey_fleet::resolve_resource(&revision, &cli.resource, &[Kind::State])?;
+    let unbound = zenkey_fleet::check_values(r, &values)?;
+    if cli.last_known.is_some() && !unbound.is_empty() {
+        return Err(crate::exit::unaskable!(
+            "--last-known reads an archive one key at a time (spec §4.4): give {}",
+            unbound
+                .iter()
+                .map(|n| format!("--param {n}=…"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let session = match session {
+        Some(s) => s,
+        None => dep.session().await?,
+    };
+    let read = zenkey_fleet::StateRead {
+        revision: &revision,
+        owner: &cli.address,
+        resource: r,
+        values: &values,
+        timeout: dep.timeout(),
+    };
+    let report = match &cli.last_known {
+        None => zenkey_fleet::get_state(&session, read).await?,
+        Some(archive) => zenkey_fleet::last_known_state(&session, read, archive).await?,
+    };
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    if report.rows.is_empty() {
+        std::process::exit(crate::exit::NO_VERDICT);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

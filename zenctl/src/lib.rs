@@ -24,6 +24,10 @@
 //! alias `--base`; decided 2026-10-08), with `--contracts` for revisions
 //! known offline. They replaced v1's `topic`, `node`, `base`, `interface`
 //! and `registry`; the rest of the tree is ported verb by verb until FJ9.
+//! FJ5 added the acts and reads through a contract — `call` (which
+//! replaced v1's `service call`), `get state` and `watch` — and the P3
+//! guard on `pub`; `retire` is gone, and `replay --namespace` writes
+//! through a session in a deployment namespace.
 //!
 //! Two seams carry the shape of the tool rather than the shape of a command:
 //! [`cli`] is the clap tree and the vocabulary it enforces (#307), and
@@ -53,8 +57,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AclCmd, AdminCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, IfaceCmd, KeyCmd,
-    NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
+    AclCmd, AdminCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, GetSub, IfaceCmd,
+    KeyCmd, NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -110,7 +114,6 @@ pub async fn run() -> Result<()> {
         // ── Nouns ────────────────────────────────────────────────────────
         Command::Service(ServiceCmd::List(a)) => cmd::service::list(a).await,
         Command::Service(ServiceCmd::Show(a)) => cmd::service::show(a).await,
-        Command::Service(ServiceCmd::Call(a)) => cmd::call::run(a).await,
         Command::Iface(IfaceCmd::List(a)) => cmd::iface::list(a).await,
         Command::Iface(IfaceCmd::Show(a)) => cmd::iface::show(a).await,
         Command::Namespace(NamespaceCmd::List(a)) => cmd::namespace::list(a).await,
@@ -141,10 +144,14 @@ pub async fn run() -> Result<()> {
         Command::Bench(BenchCmd::Rpc(a)) => cmd::bench::rpc(a).await,
 
         // ── Wire verbs ───────────────────────────────────────────────────
-        Command::Get(a) => cmd::get::run(a).await,
+        Command::Get(a) => match a.cmd {
+            Some(GetSub::State(s)) => cmd::get::state(*s).await,
+            None => cmd::get::run(a).await,
+        },
+        Command::Call(a) => cmd::call::run(a).await,
+        Command::Watch(a) => cmd::subscribe::run(a).await,
         Command::Echo(a) => cmd::echo::run(a).await,
         Command::Pub(a) => cmd::publish::dispatch(a).await,
-        Command::Retire(a) => cmd::publish::retire(a).await,
         Command::Rate(a) => cmd::rate::run(a).await,
         Command::Field(a) => cmd::field::run(a).await,
         Command::Record(a) => cmd::record::run(a).await,

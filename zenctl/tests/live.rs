@@ -163,32 +163,6 @@ async fn a_base_relative_selector_is_hinted_on_stderr() {
     );
 }
 
-/// `service call` reaches a procedure the producer serves, typed by the
-/// served slice, and prints its reply.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn service_call_reaches_a_served_procedure() {
-    let bus = Bus::up().await;
-    let run = bus
-        .until(
-            &[
-                "service", "call", HOST, PRODUCER, "ping", "--format", "json",
-            ],
-            |r| r.code == 0,
-        )
-        .await;
-    exits(&run, 0);
-    let doc = run.json();
-    assert_eq!(
-        doc["key"],
-        json!(bus.key(&format!("v1/{HOST}/@rpc/{PRODUCER}/ping")))
-    );
-    assert_eq!(
-        doc["rows"],
-        json!([{ "row": "answer", "origin": HOST, "ok": true, "value": { "pong": true } }]),
-        "{run}"
-    );
-}
-
 // ── acts ────────────────────────────────────────────────────────────────
 
 type Sub = zenoh::pubsub::Subscriber<zenoh::handlers::FifoChannelHandler<zenoh::sample::Sample>>;
@@ -241,42 +215,6 @@ async fn pub_is_received_by_a_subscriber() {
     exits(&run, 0);
     assert!(run.stdout.is_empty(), "pub has no document (#242)\n{run}");
     assert_eq!(sample.key_expr().as_str(), key);
-}
-
-/// `retire` sends a tombstone — a delete, not an empty put (RFC 04 §1.2).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retire_is_received_as_a_delete() {
-    let bus = Bus::up().await;
-    let key = bus.key(&format!("v1/{HOST}/state/{PRODUCER}/lease/a1"));
-    let sub = bus.subscribe(&key).await;
-    let (run, sample) = act_until_heard(&bus, &["retire", &key], &sub, |s| {
-        s.kind() == SampleKind::Delete
-    })
-    .await;
-    exits(&run, 0);
-    assert!(
-        run.stdout.is_empty(),
-        "retire has no document (#242)\n{run}"
-    );
-    assert!(run.stderr.contains(&format!("retired {key}")), "{run}");
-    assert_eq!(sample.key_expr().as_str(), key);
-}
-
-/// A wildcard tombstone is refused outright — 2, this tool refusing its
-/// input, and `--i-know` does not move it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retire_refuses_a_wildcard() {
-    let bus = Bus::up().await;
-    let wild = bus.key(&format!("v1/{HOST}/state/{PRODUCER}/*"));
-    for args in [vec!["retire", &wild], vec!["retire", &wild, "--i-know"]] {
-        let run = bus.zenctl(&args).await;
-        exits(&run, 2);
-        assert!(run.stdout.is_empty(), "{run}");
-        assert!(
-            run.stderr.contains("is a wildcard") && run.stderr.contains("Not overridable"),
-            "{run}"
-        );
-    }
 }
 
 /// Everything `sub` hears within `window` whose payload is `body`.
@@ -369,49 +307,6 @@ async fn pub_from_ndjson_refuses_a_wildcard_row() {
         );
     }
     assert_eq!(wild, 0, "a refused row was delivered");
-}
-
-/// A fleet `service call` with `--no-validate` has no registry to say what
-/// the procedure is, so it is refused — 2 — and the producer's queryable is
-/// never asked (#505). `--i-know` is the one acknowledgement, and with it
-/// the same call reaches the same queryable: the witness can hear.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn service_call_fleet_without_a_registry_needs_i_know() {
-    let mut bus = Bus::up().await;
-    let heard = bus
-        .counting_responder(&bus.key(&format!("v1/{HOST}/@rpc/{PRODUCER}/reset")))
-        .await;
-    let call = ["service", "call", "*", PRODUCER, "reset", "--no-validate"];
-
-    let refused = bus.zenctl(&call).await;
-    exits(&refused, 2);
-    assert!(refused.stdout.is_empty(), "{refused}");
-    assert!(
-        refused.stderr.contains("could not be established") && refused.stderr.contains("--i-know"),
-        "{refused}"
-    );
-
-    let mut forced = call.to_vec();
-    forced.extend(["--i-know", "--format", "json"]);
-    let run = bus.until(&forced, |r| r.code == 0).await;
-    exits(&run, 0);
-    assert_eq!(
-        run.json()["rows"],
-        json!([{ "row": "answer", "origin": HOST, "ok": true, "value": { "done": true } }]),
-        "{run}"
-    );
-    // Every query the witness heard came from a forced run; the refused one
-    // never opened a session to send one.
-    let forced_runs = heard.load(std::sync::atomic::Ordering::SeqCst);
-    assert!(forced_runs >= 1, "the forced call reached the producer");
-    let again = bus.zenctl(&call).await;
-    exits(&again, 2);
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(
-        heard.load(std::sync::atomic::Ordering::SeqCst),
-        forced_runs,
-        "a refused call reached the producer\n{again}"
-    );
 }
 
 // ── verdicts ────────────────────────────────────────────────────────────

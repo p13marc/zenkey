@@ -1,0 +1,38 @@
+`pub` refuses a key a zk2 service owns (#612, FJ5).
+
+A key is written only by the service that owns it (P3, spec §6): every key
+under `zk2/<system>/<service>/` is that service's, its data and its `@zk`
+control keys alike. A tool acts on a service through its operations —
+`zenctl call` — so `pub` refuses such a key before the body is read or a
+session opens, exits **2**, and no flag moves it.
+
+```console
+$ zenctl pub zk2/host-a/tc/tc.netif.v1/state/namespaces '[]'
+? 2
+Error: zk2/host-a/tc/tc.netif.v1/state/namespaces is a key host-a/tc owns, and only the owner writes its keys (P3, spec §6) — act on the service through its operations: zenctl call
+
+```
+
+`pub` is a raw verb, so a key is a wire key: the owner's key under a
+deployment namespace is the owner's all the same.
+
+```console
+$ zenctl pub prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics '{}'
+? 2
+Error: prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics is a key host-a/tc owns, and only the owner writes its keys (P3, spec §6) — act on the service through its operations: zenctl call
+
+```
+
+A foreign key is still written: here it passes the guard and stops at the
+dead-bus fixture's session, whose 2 is the session's. So does a contract
+bundle's location-free key, which is no service's.
+
+```console
+$ zenctl pub prod/legacy/temperature 21 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

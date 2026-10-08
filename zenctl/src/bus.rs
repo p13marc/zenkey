@@ -134,6 +134,23 @@ impl Bus {
         self.session_reporting().await.map_err(open_error)
     }
 
+    /// A session **in** `namespace` over this bus's connection: the one
+    /// act that writes as a deployment's own participant, `replay
+    /// --namespace` (#612, FJ5; spike S13). The explorer's view stays
+    /// un-namespaced everywhere else.
+    pub(crate) async fn session_in(&self, namespace: &str) -> Result<zenoh::Session> {
+        let t = &self.transport;
+        zenkey_fleet::open_in_namespace(
+            namespace,
+            t.file.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await
+        .map_err(open_error)
+    }
+
     /// The same, saying which half failed — so a caller holding `--registry`
     /// dirs can tell "the transport would not come up" (answerable from disk)
     /// from "the config file you named does not parse" (yours to fix, #196).
@@ -309,6 +326,9 @@ pub(crate) struct Link {
     context: Option<String>,
     transport: resolve::Transport,
     timeout: Duration,
+    /// The timeout the user chose, by flag or context; `None` when the
+    /// default stands.
+    chosen_timeout: Option<Duration>,
     out: OutputArgs,
 }
 
@@ -331,6 +351,10 @@ impl Link {
                 stored,
             ),
             timeout: resolve::timeout(args.timeout, stored),
+            chosen_timeout: args
+                .timeout
+                .or_else(|| stored.and_then(|c| c.timeout))
+                .map(Duration::from_secs),
             out: args.out,
         }
     }
@@ -345,6 +369,13 @@ impl Link {
 
     pub(crate) fn timeout(&self) -> Duration {
         self.timeout
+    }
+
+    /// The timeout the user chose (`--timeout`, or the context's), `None`
+    /// when the default stands: a call then waits what its contract
+    /// recommends (spec §5.1, "The timeout").
+    pub(crate) fn chosen_timeout(&self) -> Option<Duration> {
+        self.chosen_timeout
     }
 
     /// The `--context` name this invocation was given, if any — what the
@@ -411,6 +442,10 @@ impl Deployment {
 
     pub(crate) fn timeout(&self) -> Duration {
         self.link.timeout()
+    }
+
+    pub(crate) fn chosen_timeout(&self) -> Option<Duration> {
+        self.link.chosen_timeout()
     }
 
     /// A session **in** the namespace (decided 2026-10-08): what this

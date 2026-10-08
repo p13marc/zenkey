@@ -58,7 +58,7 @@ Options:
           Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
           Zenoh JSON5 config file: the passthrough that reaches a secured bus.
@@ -129,7 +129,7 @@ Options:
           Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
           Zenoh JSON5 config file: the passthrough that reaches a secured bus.

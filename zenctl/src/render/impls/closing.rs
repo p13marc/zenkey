@@ -169,6 +169,12 @@ impl Render for ReplayReport {
             self.header.selectors.join(" + "),
             self.header.captured_at,
         ));
+        if let Some(ns) = &self.namespace {
+            t.line(format!(
+                "into namespace {ns:?}, each key moved from the capture's base {:?}",
+                self.header.base
+            ));
+        }
         if self.malformed > 0 || self.refused > 0 {
             let mut g = Grid::unheaded(1);
             for e in &self.first_errors {

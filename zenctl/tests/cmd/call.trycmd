@@ -1,0 +1,87 @@
+`call` (#612, FJ5): one operation of a zk2 service, through its contract. It
+replaced v1's `service call`. Everything it can refuse, it refuses before
+anything is sent — and, with `--contracts` holding the revision, before a
+session opens — and exits **2** (`zenctl/src/exit.rs`).
+
+A fan-out reaches an operation only when the operation declares
+`fanout = "allowed"` (spec §5.1 O2). A `*` in the address makes one:
+
+```console
+$ zenctl call '*/tc' tc.netif.v1 'interfaces/{ns}/{iface}/set' '{"up":true}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: tc.netif.v1 @op/interfaces/{ns}/{iface}/set: declares fanout = "forbidden", and this call is a fan-out: the address */tc has a `*`. Call one address with every parameter given (spec §5.1 O2); nothing was sent
+
+```
+
+So does a template parameter left out: it is a wildcard in the key.
+
+```console
+$ zenctl call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' '{"up":true}' --param ns=default --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: tc.netif.v1 @op/interfaces/{ns}/{iface}/set: declares fanout = "forbidden", and this call is a fan-out: a parameter is not given (--param iface=…). Call one address with every parameter given (spec §5.1 O2); nothing was sent
+
+```
+
+The request is encoded as the operation's type, and one that does not
+encode is refused: JSON for a JSON Schema type, and a protobuf message in its
+JSON form, read through the bundle's descriptor set.
+
+```console
+$ zenctl call host-a/tc tc.netif.v1 diagnostics '{not json' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: the request for @op/diagnostics: not JSON (key must be a string at line 1 column 2); a JSON Schema request is given as JSON
+
+```
+
+```console
+$ zenctl call vehicle-01/thruster-l thruster.v1 arm '{"nope": 1}' --contracts ../examples/zk2/walkthrough/thruster.v1.toml
+? 2
+Error: the request for @op/arm: not a thruster.v1.ArmRequest in its JSON form: unrecognized field name 'nope'
+
+```
+
+An operation the revision does not declare, a resource that is not an
+operation, and a parameter the template does not have:
+
+```console
+$ zenctl call host-a/tc tc.netif.v1 nope --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: nope: tc.netif.v1 declares no operation resource "nope"; it declares: @op/diagnostics, @op/interfaces/{ns}/{iface}/set
+
+```
+
+```console
+$ zenctl call host-a/tc tc.netif.v1 namespaces --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: namespaces: tc.netif.v1 declares no operation resource "namespaces"; it declares: @op/diagnostics, @op/interfaces/{ns}/{iface}/set
+
+```
+
+```console
+$ zenctl call host-a/tc tc.netif.v1 diagnostics --param ns=default --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: --param ns: diagnostics has no template parameters
+
+```
+
+An address is `<system>/<service>`:
+
+```console
+$ zenctl call host-a tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: host-a: binding "host-a" is not <system>/<service> (each a name or *)
+
+```
+
+A call that passes every check goes on to its session — here the dead-bus
+fixture, so it stops there, and the 2 is the session's:
+
+```console
+$ zenctl call '*/tc' tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

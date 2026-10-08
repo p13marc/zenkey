@@ -69,7 +69,7 @@ fn undescribed_note(undescribed: &[InstanceRef]) -> Option<Note> {
 /// A fingerprint short enough for a table: `sha256:` and its first 16 hex
 /// digits — the token's prefix, so the two line up. The document carries
 /// the whole of it.
-fn short_fp(fp: &str) -> String {
+pub(super) fn short_fp(fp: &str) -> String {
     let hex = fp.strip_prefix("sha256:").unwrap_or(fp);
     if hex.len() > 16 {
         format!("sha256:{}…", &hex[..16])

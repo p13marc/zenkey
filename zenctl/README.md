@@ -166,11 +166,14 @@ What the session every verb opens is, and is not (RFC 09 §5):
   session.
 * **No silent empty bus.** A router that does not answer fails the session,
   and an endpoint that does not parse (`-c 127.0.0.1:7447`, no `tcp/`) is
-  refused by name: both exit **2** for every verb, `pub` and `retire`
-  included. A verb holding `--registry` dirs still answers from them, and says
-  so.
-* **Un-namespaced**, so it sees the wire as it is — including traffic from
-  outside the deployment, which is how a leak is spotted.
+  refused by name: both exit **2** for every verb, `pub` included. A verb
+  holding `--registry` dirs still answers from them, and says so.
+* **Un-namespaced** for the raw verbs (`get <selector>`, `echo`, `pub`, the
+  admin space…), so they see the wire as it is — including traffic from
+  outside the deployment, which is how a leak is spotted. zk2's resolved verbs
+  (`service`, `iface`, `call`, `get state`, `watch`, …) open their session
+  **in** the deployment namespace, and `replay --namespace` writes through
+  one.
 
 ## Exit codes
 
@@ -247,9 +250,11 @@ reach further than one concrete thing:
 | verb | refused (exit 2) | to mean it |
 |---|---|---|
 | `pub` | a wildcard key (a blast radius, not a publication) | not overridable — name the key |
+| `pub` | a key a zk2 service owns (`…/zk2/<system>/<service>/…`): only the owner writes it (P3) | not overridable — act through `call` |
 | `pub --from ndjson`, `replay` | a put row on a wildcard key (refused and counted, exit 1) | not overridable |
-| `retire` | a wildcard; a key that is not state-shaped | `--i-know` for the non-state key |
-| `service call` | a `*` fan-out to a procedure nobody could establish as fan-out-safe | `--i-know`; a declared forbidden fan-out is never overridable |
+| `pub --from ndjson` | a row on a key a zk2 service owns (refused and counted, exit 1) | not overridable |
+| `call` | a fan-out (a `*` in the address, or a template parameter not given) to an operation that does not declare `fanout = "allowed"` (spec §5.1 O2) | not overridable — call one address with every parameter |
+| `replay` | a zk2 service's own key replayed where it runs: as recorded, or into the namespace it was recorded in (refused and counted, exit 1) | `--namespace` of your own; or `--i-know` |
 | `config set` | a windowed (`--confirm`) change with no read-back, from a script | `--yes` |
 | `replay` | a capture whose base differs from the target's, or empty onto empty | `--force-base` (always `--dry-run` first) |
 | `serve` | a wildcard key expression; `--complete` | `--i-know` |
@@ -284,7 +289,10 @@ scout` (raw scouting Hellos) · `zenctl key includes|intersects|canon`
 
 **Watch — live traffic.**
 `zenctl get <selector>` (a fan-in GET, every reply attributed to its key;
-`@/**` browses the admin space) · `zenctl echo` (subscribe and decode; `--seed`
+`@/**` browses the admin space) · `zenctl get state <address> <iface>
+<state>` (a zk2 state resource, the owner's current answer; `--last-known
+<archive>` an archive's) · `zenctl watch <address> <iface> <resource>` (a zk2
+subscription, decoded through the contract) · `zenctl echo` (subscribe and decode; `--seed`
 pulls current state first) · `zenctl rate` (per-key rates, `--bytes` for
 bandwidth) · `zenctl field --for 60` (per-field statistics: the stuck sensor,
 the vanished field, the field the schema never declared) · `zenctl timeline
@@ -296,15 +304,17 @@ a capture).
 fell) · `zenctl record -o incident.zrec --on 'silent-for prod/v1/** 30' --pre
 30` (armed: written only when a rule fires, with the thirty seconds before it
 and a state preamble) · `zenctl replay bus.zrec --dry-run` (replay is
-publishing: preview first) · `zenctl snapshot -o fleet.zsnap` (the fleet's
+publishing: preview first; `--namespace replay` stands in for the recorded
+owners in a namespace of its own) · `zenctl snapshot -o fleet.zsnap` (the fleet's
 current values, collected over a span) and `zenctl snapshot diff a.zsnap
 b.zsnap` (`--normalize-origins` across two deployments).
 
 **Act — write to the bus.**
-`zenctl pub <key> <body>` (through a declared publisher, encoded against the
-served schema; `--from ndjson` reads `echo`'s rows back) · `zenctl retire <key>`
-(an authoritative tombstone) · `zenctl service call <origin> <producer>
-<procedure>` (`--trace` subscribes first, then calls) · `zenctl config
+`zenctl call <address> <iface> <operation> [request]` (a zk2 operation,
+through its contract; a `*` or a parameter left out fans it out) · `zenctl pub
+<key> <body>` (a key no zk2 service owns, through a declared publisher,
+encoded against the served schema; `--from ndjson` reads `echo`'s rows back)
+· `zenctl config
 get|set|confirm|cancel|extend|persist` (a producer's live configuration, typed
 against its served schema, with confirmed changes driven to their end) ·
 `zenctl serve <keyexpr> <reply>` (a mock queryable that logs every ask) ·
@@ -345,8 +355,10 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 > refused input exits 2 everywhere. No aliases, no shims — the old spellings
 > are gone. FJ4 (#612) moved v1's registry nouns the same way — `topic`,
 > `node`, `base`, `interface` and `registry` → zk2's `service`, `iface`,
-> `schema`, `namespace`, `graph` and `compat`. [`CHANGELOG.md`](CHANGELOG.md)
-> has the full old→new tables and the exit-code contract.
+> `schema`, `namespace`, `graph` and `compat`; FJ5 replaced `service call`
+> with zk2's `call`, added `get state` and `watch`, and dropped `retire`.
+> [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
+> exit-code contract.
 
 ## Two registry sources, kept visibly apart
 
@@ -391,6 +403,61 @@ did not answer, a contract never retrieved — renders as `—`, never as empty.
 `compat` runs the contract CI's own classifier (`zk2 contract compat`, spec
 §9.8), so the tool and the build cannot disagree about what breaks.
 
+## zk2 acts and reads
+
+`call`, `get state` and `watch` (#612, FJ5) aim at an **address** (one
+service, or for `call` and `watch` a pattern like `*/tc`), an **interface
+revision** and one **resource** of its contract, and go through the zk2
+runtime's own client and consumer, in the deployment's namespace:
+
+```bash
+zenctl call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' '{"up":true}' \
+    --param ns=default --param iface=eth0 --namespace acme   # one address: BestMatching, None
+zenctl call '*/tc' tc.netif.v1 diagnostics --namespace acme   # a fan-out: only to fanout = "allowed"
+zenctl get state host-a/tc tc.netif.v1 namespaces --namespace acme   # the owner's current state (S4)
+zenctl get state host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --param ns=default \
+    --param iface=eth0 --last-known ground/archive                  # LAST-KNOWN, never current (S5)
+zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --for 10   # every sample, decoded; R6 counted
+zenctl replay bus.zrec --namespace replay                           # stand in for the recorded owners
+```
+
+**`get` has two forms, and they cannot be confused.** `zenctl get
+<SELECTOR>` is **raw**: any key expression, on a session in no namespace, so
+the selector is the wire key exactly (`acme/zk2/host-a/tc/…`, `v1/…`,
+`@/**`), on any bus. `zenctl get state <ADDRESS> <IFACE> <STATE>` is
+**resolved**: a subcommand — the raw form's flags do not reach it — that
+reads one zk2 state resource of one owner through its contract, in the
+deployment's namespace. The first asks the wire what it holds; the second
+asks an owner what its state is.
+
+- **`call`** encodes the request (JSON, `@file` or `-`) as the operation's
+  type: JSON or CBOR for a JSON Schema type, protobuf from its JSON form
+  through the bundle's descriptor set, a raw type's bytes as given. One
+  address is called on its concrete key, and only an idempotent operation is
+  retried (`--retries`, after silence). A `*` in the address, or a template
+  parameter not given, makes a **fan-out**, refused before anything is sent
+  unless the operation declares `fanout = "allowed"`. A value, an envelope
+  and silence are kept apart: exit 0, 1, 2. Silence is attributed through
+  presence, and "no token visible" is what *this reader* could see, since an
+  access-control refusal answers a presence read empty too (spec §8.1). A
+  fan-out's envelopes are reported unattributed (a `reply_err` carries no
+  key), and a replier with no summary, or two, as possibly partial.
+- **`get state`** is the owner's answer to a GET on its keys (target All,
+  consolidation Latest): one member when every parameter is given, every
+  member otherwise. A deletion is a deletion, each stamp names its clock, and
+  silence is exit 2, never "no value". `--last-known <ARCHIVE>` reads an
+  `archive.v1` service instead, one key at a time, and every format labels
+  the answer **last-known, never current**, with whether alignment confirmed
+  it.
+- **`watch`** subscribes to a stream, state or event resource, renders every
+  sample through the contract (or says how far it got), and counts the
+  samples put on a wildcard key — discarded by rule (R6), not lost — apart
+  from any it lagged behind. It stops at `--count`, `--for` or ctrl-c, and
+  exits 2 when nothing arrived.
+- **`pub`** refuses a key a zk2 service owns: a tool acts on a service
+  through its operations. **`retire` is gone**: a tombstone has no zk2
+  meaning a tool may send.
+
 ## A cheat sheet
 
 ```bash
@@ -400,12 +467,12 @@ zenctl graph --namespace acme           # the binding graph (--dot for Graphviz)
 zenctl echo --base acme                 # subscribe + decode (defaults to <base>/v1/**)
 zenctl storage list --base acme --watch --every 5  # poll+diff; +/- marks
 zenctl rate --base acme --per-key       # per-key sample rates; --bytes for bandwidth
-zenctl service call --base acme '*' sysinfo processes --param sort=cpu
-zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
+zenctl call '*/tc' tc.netif.v1 diagnostics --namespace acme   # a zk2 fan-out (fanout = "allowed" only)
+zenctl get state host-a/tc tc.netif.v1 namespaces --namespace acme   # a zk2 owner's current state
+zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace acme   # zk2 samples, decoded
 zenctl get 'acme/v1/*/state/**'         # fan-in GET on any selector, replies attributed
 zenctl get '@/**'                       # …including the zenoh admin space (was: admin get)
 zenctl pub k '{"v":1}' --attachment meta        # attachments ship and render (#117)
-zenctl retire acme/v1/h-3fa9…/state/sysinfo/health  # RFC 04 §1.2 tombstone, class-guarded
 zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
 zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who queries this key?)
 zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
@@ -456,7 +523,7 @@ envelope leads rather than trails so that a stream cut short — `| head`, a
 closed pipe — still carries what was asked and what the bounds cost, which is
 exactly the claim a truncated stream needs (RFC 09 §5.1 O5/O6).
 
-Streaming verbs (`echo`, `serve`, `replay`, `gen`) emit tagged rows with
+Streaming verbs (`echo`, `watch`, `serve`, `replay`, `gen`) emit tagged rows with
 **no** envelope: their coverage is not known before the first row, and
 `echo`'s rows are an *input* format that `zenctl pub --from ndjson` and
 `.zrec` read back (RFC 09 §5.2), so nothing may precede them.
@@ -465,10 +532,10 @@ A field that is absent is a question nobody asked; it is never `null`
 (RFC 09 §5.1 O4). In the table, that reads `—`, and an empty cell means the
 question was asked and the answer was nothing.
 
-**`pub` and `retire` put nothing on stdout, in any format.** Their
-answer is "it went out", which is not a document — and the empty stdout is what
-lets `zenctl echo --format ndjson | zenctl pub --from ndjson` compose. Everything
-they say goes to stderr.
+**`pub` puts nothing on stdout, in any format.** Its answer is "it went
+out", which is not a document — and the empty stdout is what lets `zenctl echo
+--format ndjson | zenctl pub --from ndjson` compose. Everything it says goes
+to stderr.
 
 **`--as` and `--dot` are neither, because they are somebody else's schema.**
 `--format` selects among zenctl's own three renderings of a report; `registry
@@ -483,16 +550,13 @@ anything.
 consolidation None, every reply attributed by its own key, RFC 05 §3 error
 envelopes rendered as errors, and exit codes scripts can branch on (0 values,
 1 an error reply, 2 silence — which still prints its non-verdict paragraph).
-`retire` publishes an authoritative tombstone through a declared
-publisher: state keys retire freely, anything else is the RFC 04 §1.2 (v1.12)
-operator act and needs `--i-know`; wildcards are refused outright. `scout` is
+`scout` is
 the one verb where multicast is on by default — it only listens, and an empty
 result names the boundary it heard.
 
-`pub` and `service call` **encode** a JSON body against the producer's
-served schema (request types come from the slice's procedure declaration),
-and those encoded bytes are what goes on the wire, labelled with the declared
-`Encoding`. Publishing to a subject that declares `application/protobuf`
+`pub` **encodes** a JSON body against the producer's served schema, and
+those encoded bytes are what goes on the wire, labelled with the declared
+`Encoding` (zk2's `call` encodes through the contract instead, above). Publishing to a subject that declares `application/protobuf`
 therefore puts protobuf on the bus, not the JSON you typed; `echo`
 decodes it back through the same descriptor set.
 

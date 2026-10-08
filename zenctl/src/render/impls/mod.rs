@@ -15,6 +15,7 @@
 //!   should not have to identify a line by guessing at its fields.
 
 mod acl;
+pub mod acts;
 mod bench;
 mod blobs;
 mod calls;

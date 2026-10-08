@@ -1,0 +1,35 @@
+`watch` (#612, FJ5): a zk2 subscription through a contract. Its refusals,
+like `call`'s, need no bus when `--contracts` holds the revision, and exit
+**2**.
+
+A stream, a state or an event is watched; an operation is called:
+
+```console
+$ zenctl watch '*/tc' tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: diagnostics: tc.netif.v1 declares no stream or state or event resource "diagnostics"; it declares: state/interfaces/{ns}/{iface}, state/namespaces, stream/bandwidth/{ns}/{iface}
+
+```
+
+`--count` is a stop bound, so it is at least 1; leaving it out runs until
+`--for` or ctrl-c:
+
+```console
+$ zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --count 0 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: --count is a stop bound and must be at least 1; leave it out to run until interrupted
+
+```
+
+A stream has no single document, so a typed `--format json` is refused:
+
+```console
+$ zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --format json --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
+
+Usage: zenctl <COMMAND>
+
+For more information, try '--help'.
+
+```

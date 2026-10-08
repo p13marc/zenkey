@@ -1,14 +1,22 @@
-//! `zenctl pub` / `zenctl retire` — publish through the write facade
-//! (issue #47): a declared publisher, never an ad-hoc put (P7); and since
-//! #97, a body that actually ships in the encoding the subject declares.
+//! `zenctl pub` — publish through the write facade (issue #47): a declared
+//! publisher, never an ad-hoc put (P7); and since #97, a body that actually
+//! ships in the encoding the subject declares.
 //!
 //! Top-level since #307 — publishing is an act on the wire, not a verb of
 //! the `topic` noun, which is what the registry declares.
 //!
+//! ## A zk2 service's own key is refused (#612, FJ5)
+//!
+//! A key is written only by the service that owns it (P3, spec §6, decided
+//! 2026-10-08): `pub` refuses a key a zk2 service owns, with exit 2 and no
+//! flag that moves it, and still writes every foreign key. A tool acts on a
+//! service through its operations — `zenctl call`. v1's `retire` went with
+//! it: a tombstone has no zk2 meaning a tool may send.
+//!
 //! ## An empty stdout is the contract (#242)
 //!
 //! Every sentence this module prints goes to **stderr**, and every one of the
-//! sixteen is deliberate. `pub` and `retire` have no document to emit: their
+//! sentences is deliberate. `pub` has no document to emit: its
 //! answer is "it went out", and inventing a wire shape for that would be a
 //! shape with no reader. What the empty stdout buys is composition — `zenctl
 //! echo --format ndjson | zenctl pub --from ndjson` is the same row shape in
@@ -28,7 +36,7 @@ use crate::Bus;
 use crate::input::Source;
 
 /// Which of the engine's three preparation modes the flags select. Shared
-/// with `service call` so both write paths read the same flags the same way.
+/// with `get --body`, so both write paths read the same flags the same way.
 pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
     match (raw, no_validate) {
         (true, _) => PrepareMode::Raw,
@@ -153,8 +161,10 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
         attachment,
     } = p;
     // A wildcard key is a blast radius, not a publication (#504) — refused
-    // first, before the body or the bus, and no flag moves it.
+    // first, before the body or the bus, and no flag moves it. Nor does one
+    // move P3: a zk2 service's own key is its owner's alone to write.
     zenkey_fleet::check_concrete(key, zenkey_fleet::WriteAct::Put)?;
+    refuse_owned(key)?;
     // A key is a wire key too: `v1/…` under a non-empty base publishes
     // where none of the deployment listens (#512). Said, not rewritten.
     super::hint_off_base(key, args);
@@ -228,6 +238,27 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
     Ok(())
 }
 
+/// Refuses a key a zk2 service owns (P3, spec §6): exit 2, and no flag moves
+/// it. The prefix before its `zk2` chunk is not read as a namespace (the
+/// tooling guide's O3): an owner exists, wherever it runs.
+fn refuse_owned(key: &str) -> Result<()> {
+    match owned_refusal(key) {
+        Some(why) => Err(crate::exit::unaskable!("{key} {why}")),
+        None => Ok(()),
+    }
+}
+
+/// Why `pub` will not write `key`, when it is a zk2 service's own.
+fn owned_refusal(key: &str) -> Option<String> {
+    zenkey_fleet::owned_key(key).map(|o| {
+        format!(
+            "is a key {} owns, and only the owner writes its keys (P3, spec §6) — act on \
+             the service through its operations: zenctl call",
+            o.owner
+        )
+    })
+}
+
 /// The #38 matching note: a routing fact about **this** publisher.
 ///
 /// Informative, never gating, and never a fleet verdict — a zero here means
@@ -235,9 +266,8 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
 /// "nobody is listening" (RFC 05 §3.1). `None` when the status could not be
 /// read at all: an unanswerable question earns no sentence.
 ///
-/// One spelling, because `pub` and `retire` print the same fact and the second
-/// site's comment said so — "the same routing fact pub prints" — beside a
-/// verbatim copy of it (#210).
+/// One spelling, once `retire` printed the same fact beside a verbatim copy
+/// of it (#210); `retire` is gone (FJ5) and the one spelling stays.
 async fn matching_note(
     publication: &zenkey_fleet::Publication,
     key: &str,
@@ -252,57 +282,6 @@ async fn matching_note(
         ))),
         Err(_) => None,
     }
-}
-
-/// `zenctl retire` — the RFC 04 §1.2 tombstone, class-guarded (#115).
-pub async fn retire(cli: crate::cli::RetireArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
-    let crate::cli::RetireArgs {
-        key,
-        qos,
-        i_know,
-        bus: _,
-    } = cli;
-    let (key, qos) = (key.as_str(), qos.as_str());
-    let qos = parse_qos(qos)?;
-    // The tombstone lands where the key says, which is not this deployment
-    // when `v1/…` is typed under a non-empty base (#512).
-    super::hint_off_base(key, args);
-    // Slices enrich the guard rather than deciding it — a state key still
-    // passes with none, because the class is in the key.
-    let slices = args.slices_optional().await?;
-    let verdict = zenkey_fleet::check_retire(args.base(), key, slices.as_ref(), i_know)?;
-    match &verdict {
-        zenkey_fleet::RetireClass::State { registered, ttl_s } => match (registered, ttl_s) {
-            (true, Some(ttl)) => eprintln!(
-                "retiring a state key — the tombstone stays observable ≥ {ttl}s \
-                 where storages enforce gc.lifespan (RFC 04 §1.2)"
-            ),
-            (true, None) => eprintln!("retiring a state key (no ttl_s declared)"),
-            (false, _) => eprintln!(
-                "retiring an unregistered state key — the tombstone is still \
-                 authoritative; no ttl_s bounds its observability"
-            ),
-        },
-        zenkey_fleet::RetireClass::NonState { class } => eprintln!(
-            "retiring a {class} key as an operator cleanup (RFC 04 §1.2, v1.12) — \
-             --i-know acknowledged"
-        ),
-        zenkey_fleet::RetireClass::Unclassified { reason } => {
-            eprintln!("retiring an unclassified key ({reason}) — --i-know acknowledged")
-        }
-    }
-
-    let session = args.session().await?;
-    let publication = zenkey_fleet::declare_publication(&session, key, qos, None).await?;
-    if let Some(note) = matching_note(&publication, key).await {
-        eprintln!("{}", note.to_line());
-    }
-    publication.retire().await?;
-    eprintln!("retired {key}");
-    publication.undeclare().await?;
-    Ok(())
 }
 
 /// Where `zenctl pub` reads from, besides its arguments.
@@ -366,15 +345,21 @@ pub async fn run_from_ndjson(
         // A delete row is a tombstone (RFC 04 §1.2): even in a pipe, the
         // off-state operator act keeps its price (v1.12) — refused rows are
         // counted, never silently dropped. A put row on a wildcard is the
-        // same blast radius as a wildcard delete (#504), and `--i-know`
-        // moves neither.
-        let refusal = if row.delete {
-            zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know).err()
+        // same blast radius as a wildcard delete (#504), and a zk2 service's
+        // own key is its owner's alone (P3); `--i-know` moves neither.
+        let refusal = if let Some(why) = owned_refusal(&row.key) {
+            Some(format!("{}: {why}", row.key))
+        } else if row.delete {
+            zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know)
+                .err()
+                .map(|e| e.to_string())
         } else {
-            zenkey_fleet::check_concrete(&row.key, zenkey_fleet::WriteAct::Put).err()
+            zenkey_fleet::check_concrete(&row.key, zenkey_fleet::WriteAct::Put)
+                .err()
+                .map(|e| e.to_string())
         };
         if let Some(e) = refusal {
-            record_err(line_no, e.to_string(), &mut refused);
+            record_err(line_no, e, &mut refused);
             continue;
         }
         let publication = match publications.entry(row.key.clone()) {

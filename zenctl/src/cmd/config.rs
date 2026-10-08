@@ -1,7 +1,7 @@
 //! `config get|set|confirm|cancel|extend|persist` — the configuration
 //! convention's client side (RFC 05 §5.1, v1.42).
 //!
-//! Six verbs on the `@rpc` plane, and every one of them is a `service call`
+//! Six verbs on the `@rpc` plane, and every one of them is a v1 `@rpc` call
 //! with the key spelled by the convention rather than by the operator. What
 //! the noun adds is the part a generic call cannot do: it reads the served
 //! schema first, so a change is typed against the declared kind rather than

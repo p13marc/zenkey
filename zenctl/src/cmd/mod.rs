@@ -6,13 +6,13 @@
 //! render, `crate::render::impls::local` for the ones only this tool has —
 //! put through the `render` seam.
 //!
-//! Two verbs put **nothing** on stdout, and that is the contract rather than
-//! an omission: `pub` and `retire` answer "it went out", which is
-//! not a document. All of their prose is stderr, which is what lets
-//! `echo --format ndjson | pub --from ndjson` compose in either
-//! direction without a wire shape being invented for a verb that has no
-//! answer to give (#242). Their `--format` still chooses how the *notes* are
-//! spelled, and `--format json` on them is an empty stdout by design.
+//! One verb puts **nothing** on stdout, and that is the contract rather than
+//! an omission: `pub` answers "it went out", which is not a document. All of
+//! its prose is stderr, which is what lets `echo --format ndjson | pub
+//! --from ndjson` compose in either direction without a wire shape being
+//! invented for a verb that has no answer to give (#242). Its `--format`
+//! still chooses how the *notes* are spelled, and `--format json` on it is an
+//! empty stdout by design. (`retire` was the other, until FJ5 dropped it.)
 
 pub mod acl;
 pub mod admin;
@@ -48,6 +48,7 @@ pub mod serve;
 pub mod service;
 pub mod snapshot;
 pub mod storage;
+pub mod subscribe;
 pub mod timeline;
 pub mod watch;
 pub mod watchdog;
@@ -249,7 +250,7 @@ pub fn positive_secs(flag: &str, secs: f64) -> Result<std::time::Duration> {
 /// `-` in a call's producer position, against its target (#509).
 ///
 /// `-` stands for *no producer chunk*, which only a service origin's `@rpc`
-/// has (RFC 06 §5) — clap admits it for `service call` and `bench rpc` and
+/// has (RFC 06 §5) — clap admits it for `bench rpc` and
 /// cannot see the origin beside it. A host or the fleet needs a name, and
 /// the key builders assert on `-` exactly as on any illegal chunk, so it is
 /// refused here as this tool's own refusal of the input: exit 2.

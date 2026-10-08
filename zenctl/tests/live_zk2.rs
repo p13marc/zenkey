@@ -14,6 +14,13 @@
 //!   `*/tc` — `netif` and `netem`, which select both hosts, and `scenario`,
 //!   which no service provides.
 //!
+//! FJ5's acts and reads (`call`, `get state`, `watch`, `replay
+//! --namespace`) bring up services of their own on a bare bus
+//! ([`Bus::bare`]): operations.md's common setup (`tc.v1`, from the
+//! runtime's scenario contracts), a `tc.netif.v1` owner with its state and
+//! its stream, and an `archive.v1` recording it. Each case cites the
+//! scenario section it runs.
+//!
 //! What is asserted is what zenctl adds on top of the fleet's zk2 core (whose
 //! own suite, `zenkey-fleet/tests/zk2_core.rs`, pins the projections): the
 //! namespaced session, the flags, the JSON each verb prints and its exit
@@ -24,13 +31,16 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
+use zk2::archive::{Archive, ArchiveConfig, Recorded};
 use zk2::model::contract::{Contract, load_path};
 use zk2::model::grammar::IfaceId;
-use zk2::{Implementation, Service, ServiceBuilder, ServiceConfig};
+use zk2::model::template::Bindings;
+use zk2::{Call, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
 
 /// The net a case waits under before calling a hang a hang.
 const SETTLE: Duration = Duration::from_secs(20);
@@ -152,13 +162,15 @@ async fn tcgui(owners: &zenoh::Session) -> Vec<Service> {
 }
 
 /// One case's bus: the router, the owners and their services, and where
-/// zenctl connects.
+/// zenctl connects. `keep` holds whatever else a case brings up and must
+/// outlive its runs: operation servers, an archive, a publishing task.
 struct Bus {
     endpoint: String,
     home: PathBuf,
     _router: zenoh::Session,
-    _owners: zenoh::Session,
-    _services: Vec<Service>,
+    owners: zenoh::Session,
+    services: Vec<Service>,
+    keep: Vec<Box<dyn std::any::Any + Send>>,
 }
 
 impl Drop for Bus {
@@ -170,10 +182,17 @@ impl Drop for Bus {
 impl Bus {
     /// The tcgui deployment, in `namespace` when given.
     async fn up(namespace: Option<&str>) -> Bus {
+        let mut bus = Bus::bare(namespace).await;
+        bus.services = tcgui(&bus.owners).await;
+        bus
+    }
+
+    /// A router and an owners' session, in `namespace` when given, and no
+    /// service yet: for a case that brings up its own (FJ5).
+    async fn bare(namespace: Option<&str>) -> Bus {
         static NTH: AtomicU64 = AtomicU64::new(0);
         let (router, endpoint) = router().await;
         let owners = client(&endpoint, namespace).await;
-        let services = tcgui(&owners).await;
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-zk2-home")
             .join(format!(
@@ -186,9 +205,15 @@ impl Bus {
             endpoint,
             home,
             _router: router,
-            _owners: owners,
-            _services: services,
+            owners,
+            services: Vec::new(),
+            keep: Vec::new(),
         }
+    }
+
+    /// Keeps `t` alive as long as the bus.
+    fn keep<T: Send + 'static>(&mut self, t: T) {
+        self.keep.push(Box::new(t));
     }
 
     /// `zenctl <args> -c <endpoint>`, once.
@@ -755,4 +780,821 @@ async fn a_namespaced_deployment_is_found_and_read_in_its_namespace() {
         .await;
     exits(&run, 2);
     assert!(run.stderr.contains("no revision of tc.netif.v1"), "{run}");
+}
+
+// ── FJ5: acting and reading through a contract ─────────────────────────────
+
+/// The runtime's scenario contracts (`zenkey/tests/contracts`): `tc.v1` is
+/// operations.md's common setup — an exclusive templated `set` with a
+/// `TcError`, a fan-out `diagnostics`, and a many-reply `listing` with a
+/// per-replier summary.
+fn scenario_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../zenkey/tests/contracts/{name}.toml"))
+}
+
+fn scenario_contract(name: &str) -> Contract {
+    let l = load_path(&scenario_path(name));
+    l.contract
+        .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
+}
+
+/// How one operations.md `tc` instance answers.
+#[derive(Clone, Copy, Default)]
+struct Tc {
+    /// `diagnostics` holds every call past any caller's timeout.
+    frozen: bool,
+    /// `diagnostics` refuses every call `busy`.
+    busy: bool,
+    /// `listing` sends its values and returns before its summary.
+    cut: bool,
+}
+
+/// The executions an instance saw: every call that reached a handler.
+#[derive(Default)]
+struct Seen {
+    set: AtomicU64,
+}
+
+/// A task that stops when the case ends.
+struct Task(tokio::task::JoinHandle<()>);
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// operations.md's `tc` at `address`, on the owners' session: `set` over its
+/// template (`eth9` is refused `app`, with a `TcError` detail),
+/// `diagnostics`, and `listing` (three values, then the summary unless
+/// `cut`). Every other resource is exposed and left unserved.
+async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
+    let tc = iface("tc.v1");
+    let seen = Arc::new(Seen::default());
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new(address.parse().expect("an address")),
+    );
+    b.implement(Implementation::new(scenario_contract("tc.v1")))
+        .expect("implement");
+    let s = Arc::clone(&seen);
+    let set = b
+        .serve(&tc, "@op/interfaces/{if}/set", None, move |call: Call| {
+            let s = Arc::clone(&s);
+            async move {
+                let req: Value = call.request()?;
+                s.set.fetch_add(1, Ordering::SeqCst);
+                let eth9 = call
+                    .values()
+                    .and_then(|v| v.get("if"))
+                    .is_some_and(|v| v.first().is_some_and(|i| i == "eth9"));
+                if eth9 {
+                    return Err(OpError::app(
+                        "the kernel refused",
+                        &json!({"kind": "kernel", "message": "no such device"}),
+                    ));
+                }
+                call.reply_value(&json!({"up": req["up"]})).await?;
+                Ok(())
+            }
+        })
+        .await
+        .expect("serve set");
+    let host = address.to_owned();
+    let diagnostics = b
+        .serve_value(
+            &tc,
+            "@op/diagnostics",
+            None,
+            move |_call: Call, _req: Value| {
+                let host = host.clone();
+                async move {
+                    if how.frozen {
+                        tokio::time::sleep(Duration::from_secs(4)).await;
+                    }
+                    if how.busy {
+                        return Err(OpError::busy("a scan is running"));
+                    }
+                    Ok(json!({"ok": true, "host": host}))
+                }
+            },
+        )
+        .await
+        .expect("serve diagnostics");
+    let listing = b
+        .serve(&tc, "@op/listing", None, move |call: Call| async move {
+            for n in 0..3 {
+                call.reply_value(&json!({"n": n})).await?;
+            }
+            if !how.cut {
+                call.summary_value(&json!({"count": 3})).await?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("serve listing");
+    let names: Vec<String> = scenario_contract("tc.v1")
+        .resources
+        .iter()
+        .map(zk2::implementation::resource_name)
+        .collect();
+    for n in names {
+        let _ = b.expose(&tc, &n);
+    }
+    bus.services.push(b.start().await.expect("start"));
+    bus.keep((set, diagnostics, listing));
+    seen
+}
+
+/// A tcgui `host-a/tc` implementing `tc.netif.v1`, every resource exposed,
+/// its state served: the owner of the state and the stream cases.
+async fn netif_owner(bus: &Bus) -> Service {
+    let netif = iface("tc.netif.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("host-a/tc".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(contract("tcgui/tc.netif.v1")))
+        .expect("implement");
+    for r in &contract("tcgui/tc.netif.v1").resources {
+        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+    }
+    b.serve_state(&netif).expect("serve state");
+    b.start().await.expect("start")
+}
+
+fn member(ns: &str, iface_name: &str) -> Bindings {
+    [
+        ("ns".to_owned(), vec![ns.to_owned()]),
+        ("iface".to_owned(), vec![iface_name.to_owned()]),
+    ]
+    .into()
+}
+
+/// Until `service list` shows every one of `addresses` with its descriptor
+/// served: a service is up when presence says so.
+async fn wait_for(bus: &Bus, addresses: &[&str]) {
+    let want: BTreeSet<String> = addresses.iter().map(|a| (*a).to_owned()).collect();
+    let run = bus
+        .until(
+            &["service", "list", "--timeout", "2", "--format", "json"],
+            |r| {
+                r.code == 0
+                    && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                        let served: BTreeSet<String> = d["rows"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|i| i["descriptor"]["answer"] == "served")
+                            .filter_map(|i| i["address"].as_str().map(str::to_owned))
+                            .collect();
+                        want.is_subset(&served)
+                    })
+            },
+        )
+        .await;
+    exits(&run, 0);
+}
+
+/// The rows of a `--format json` document, by tag.
+fn rows_of<'a>(doc: &'a Value, tag: &str) -> Vec<&'a Value> {
+    doc["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["row"] == tag)
+        .collect()
+}
+
+/// operations.md §3 and §5 (with §4's retry), through `call`: a value on
+/// the call's own key, rendered through the contract retrieved from the
+/// service (§8.4); an `app` refusal with its detail rendered through the
+/// `error` type; silence from a frozen server attributed `present`, an
+/// idempotent operation called again after it; and silence from an address
+/// no token names, worded as what this reader could see.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn call_keeps_a_value_a_refusal_and_an_attributed_silence_apart() {
+    let mut bus = Bus::bare(None).await;
+    let seen = tc_instance(
+        &mut bus,
+        "h1/tc",
+        Tc {
+            frozen: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    wait_for(&bus, &["h1/tc"]).await;
+
+    let set = |member: &'static str| {
+        vec![
+            "call",
+            "h1/tc",
+            "tc.v1",
+            "interfaces/{if}/set",
+            r#"{"up":true}"#,
+            "--param",
+            member,
+            "--format",
+            "json",
+        ]
+    };
+    let run = bus.until(&set("if=eth0"), |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "operation");
+    assert_eq!(doc["answer"], "value", "{run}");
+    assert_eq!(doc["mode"], "concrete");
+    assert_eq!(
+        doc["selectors"],
+        json!(["zk2/h1/tc/tc.v1/@op/interfaces/eth0/set"])
+    );
+    assert_eq!(
+        doc["fingerprint"],
+        Implementation::new(scenario_contract("tc.v1"))
+            .fingerprint()
+            .to_string()
+    );
+    assert_eq!(
+        doc["reply"]["key"],
+        "zk2/h1/tc/tc.v1/@op/interfaces/eth0/set"
+    );
+    assert_eq!(doc["reply"]["as"], "value");
+    assert_eq!(doc["reply"]["declared"], "json:SetResponse");
+    assert_eq!(doc["reply"]["value"], json!({"up": true}));
+    assert_eq!(doc["reply"]["resource"]["member"], "response");
+
+    let run = bus.zenctl(&set("if=eth9")).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "refused", "{run}");
+    assert_eq!(doc["envelope"]["code"], "app");
+    assert_eq!(doc["envelope"]["message"], "the kernel refused");
+    assert_eq!(doc["envelope"]["detail"]["declared"], "json:TcError");
+    assert_eq!(doc["envelope"]["detail"]["value"]["kind"], "kernel");
+    assert!(
+        seen.set.load(Ordering::SeqCst) >= 2,
+        "both reached the server"
+    );
+
+    let run = bus
+        .zenctl(&[
+            "call",
+            "h1/tc",
+            "tc.v1",
+            "diagnostics",
+            "--timeout",
+            "1",
+            "--retries",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "silent", "{run}");
+    assert_eq!(doc["silence"]["presence"], "present");
+    assert_eq!(
+        doc["silence"]["attempts"], 2,
+        "idempotent: called again after silence (O4)"
+    );
+    assert!(
+        doc["notes"]
+            .to_string()
+            .contains("never \\\"no such operation\\\""),
+        "{run}"
+    );
+
+    // No token names `h9/tc`: the revision comes from --contracts, and the
+    // silence is what this reader could see, not a verdict that it is gone.
+    let path = scenario_path("tc.v1");
+    let run = bus
+        .zenctl(&[
+            "call",
+            "h9/tc",
+            "tc.v1",
+            "diagnostics",
+            "--timeout",
+            "1",
+            "--contracts",
+            path.to_str().expect("a UTF-8 path"),
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 2);
+    assert_eq!(
+        run.json()["silence"]["presence"],
+        "no_token_visible",
+        "{run}"
+    );
+}
+
+/// operations.md §2 and §5, through `call`: a fan-out to an operation that
+/// allows one reaches every holder of the interface, each value attributed
+/// by its key; a `busy` envelope is reported unattributed, and the holder
+/// that sent no value is named from presence. A fan-out to an operation
+/// that forbids one — a `*` in the address, or a parameter left out — is
+/// refused before anything is sent: no handler runs (O2).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fan_out_is_attributed_by_key_and_one_the_operation_forbids_is_never_sent() {
+    let mut bus = Bus::bare(None).await;
+    let h1 = tc_instance(&mut bus, "h1/tc", Tc::default()).await;
+    let h2 = tc_instance(&mut bus, "h2/tc", Tc::default()).await;
+    let h3 = tc_instance(
+        &mut bus,
+        "h3/tc",
+        Tc {
+            busy: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    wait_for(&bus, &["h1/tc", "h2/tc", "h3/tc"]).await;
+
+    let run = bus
+        .until(
+            &[
+                "call",
+                "*/tc",
+                "tc.v1",
+                "diagnostics",
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                r.code == 1
+                    && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                        rows_of(&d, "replier").len() == 2
+                            && d["replies"]["presence"]["unheard"] == json!(["h3/tc"])
+                    })
+            },
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["answer"], "replies", "{run}");
+    assert_eq!(doc["mode"], "fanout");
+    assert_eq!(doc["selectors"], json!(["zk2/*/tc/tc.v1/@op/diagnostics"]));
+    let mut heard = BTreeSet::new();
+    for r in rows_of(&doc, "replier") {
+        let address = r["address"].as_str().expect("an address");
+        assert_eq!(r["key"], format!("zk2/{address}/tc.v1/@op/diagnostics"));
+        assert_eq!(r["replies"][0]["value"]["host"], address, "{r}");
+        heard.insert(address.to_owned());
+    }
+    assert_eq!(
+        heard,
+        BTreeSet::from(["h1/tc".to_owned(), "h2/tc".to_owned()])
+    );
+    assert_eq!(
+        doc["replies"]["refusals"],
+        json!([{"code": "busy", "message": "a scan is running"}]),
+        "unattributed: a reply_err carries no key"
+    );
+    assert_eq!(doc["replies"]["presence"]["complete"], true);
+
+    for args in [
+        vec![
+            "call",
+            "*/tc",
+            "tc.v1",
+            "interfaces/{if}/set",
+            r#"{"up":true}"#,
+            "--param",
+            "if=eth0",
+        ],
+        vec![
+            "call",
+            "h1/tc",
+            "tc.v1",
+            "interfaces/{if}/set",
+            r#"{"up":true}"#,
+        ],
+    ] {
+        let run = bus.zenctl(&args).await;
+        exits(&run, 2);
+        assert!(run.stdout.is_empty(), "{run}");
+        assert!(
+            run.stderr.contains(r#"fanout = "forbidden""#)
+                && run.stderr.contains("nothing was sent"),
+            "{run}"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for seen in [&h1, &h2, &h3] {
+        assert_eq!(seen.set.load(Ordering::SeqCst), 0, "no handler ran");
+    }
+}
+
+/// operations.md §6, through `call`: a many-reply fan-out keeps every value
+/// and each replier's summary, and a replier whose handler returned before
+/// its summary is reported possibly partial, beside the runtime's
+/// `internal` envelope; one address alone is a concrete many-reply call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_many_reply_call_reports_a_replier_without_its_summary_possibly_partial() {
+    let mut bus = Bus::bare(None).await;
+    tc_instance(&mut bus, "h1/tc", Tc::default()).await;
+    tc_instance(
+        &mut bus,
+        "h2/tc",
+        Tc {
+            cut: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    wait_for(&bus, &["h1/tc", "h2/tc"]).await;
+
+    let run = bus
+        .until(
+            &[
+                "call",
+                "*/tc",
+                "tc.v1",
+                "listing",
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                serde_json::from_str::<Value>(&r.stdout)
+                    .is_ok_and(|d| rows_of(&d, "replier").len() == 2)
+            },
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["replies"]["summary_declared"], true, "{run}");
+    let by: std::collections::BTreeMap<String, &Value> = rows_of(&doc, "replier")
+        .into_iter()
+        .map(|r| (r["address"].as_str().expect("an address").to_owned(), r))
+        .collect();
+    let (whole, cut) = (by["h1/tc"], by["h2/tc"]);
+    assert_eq!(whole["replies"].as_array().map(Vec::len), Some(3));
+    assert_eq!(whole["summaries"][0]["value"], json!({"count": 3}));
+    assert_eq!(whole["summaries"][0]["resource"]["member"], "summary");
+    assert_eq!(whole["possibly_partial"], false);
+    assert_eq!(cut["replies"].as_array().map(Vec::len), Some(3));
+    assert!(cut.get("summaries").is_none(), "{cut}");
+    assert_eq!(cut["possibly_partial"], true);
+    assert_eq!(doc["replies"]["refusals"][0]["code"], "internal", "{run}");
+
+    let run = bus
+        .zenctl(&["call", "h1/tc", "tc.v1", "listing", "--format", "json"])
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["mode"], "concrete");
+    assert_eq!(doc["selectors"], json!(["zk2/h1/tc/tc.v1/@op/listing"]));
+    let rows = rows_of(&doc, "replier");
+    assert_eq!(rows.len(), 1, "{run}");
+    assert_eq!(rows[0]["possibly_partial"], false);
+}
+
+/// state.md §3 and §4, through `get state`: the owner's current state with
+/// the stamp of the owner's own clock (S1, S4); every member when a
+/// parameter is left out; silence once the owner is gone — exit 2, never
+/// "no value" (S6); and the same key's last-known state from a running
+/// archive, labelled last-known (S5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
+    let bus = Bus::bare(None).await;
+    let origin = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("ground/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "host-a/tc".parse().expect("an address"),
+                selector: "zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*".to_owned(),
+                implementation: Implementation::new(contract("tcgui/tc.netif.v1")),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let mut owner = netif_owner(&bus).await;
+    let writer = owner
+        .state_writer(
+            &iface("tc.netif.v1"),
+            "state/interfaces/{ns}/{iface}",
+            &member("default", "eth0"),
+        )
+        .await
+        .expect("a state writer");
+    let value = json!({"name": "eth0", "is_up": true});
+    writer.put_value(&value).await.expect("a put");
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(origin).is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        archive.confirmed(origin).is_some(),
+        "the archive recorded it"
+    );
+
+    let one = [
+        "get",
+        "state",
+        "host-a/tc",
+        "tc.netif.v1",
+        "interfaces/{ns}/{iface}",
+        "--param",
+        "ns=default",
+        "--param",
+        "iface=eth0",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&one, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "state");
+    assert_eq!(doc["reading"], "current", "{run}");
+    assert!(doc.get("archive").is_none());
+    assert_eq!(doc["selectors"], json!([origin]));
+    let row = &doc["rows"][0];
+    assert_eq!(row["key"], origin);
+    assert_eq!(row["state"], "value");
+    assert_eq!(row["payload"]["declared"], "json:NetworkInterface");
+    assert_eq!(row["payload"]["value"], value);
+    assert_eq!(
+        row["timestamp"]["clock"],
+        bus.owners.zid().to_string(),
+        "the owner's own stamp (S1)"
+    );
+    assert!(row.get("confirmed").is_none(), "a current read has none");
+
+    let run = bus
+        .zenctl(&[
+            "get",
+            "state",
+            "host-a/tc",
+            "tc.netif.v1",
+            "interfaces/{ns}/{iface}",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 0);
+    assert_eq!(
+        run.json()["selectors"],
+        json!(["zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*"]),
+        "{run}"
+    );
+
+    drop(writer);
+    owner.close().await.expect("the owner closes");
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path");
+    let mut silent = one.to_vec();
+    silent.extend(["--timeout", "1", "--contracts", netif]);
+    let run = bus.until(&silent, |r| r.code == 2).await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["reading"], "current");
+    assert!(
+        doc.get("rows").is_none(),
+        "silence is no rows, never \"no value\": {run}"
+    );
+    assert!(doc["notes"].to_string().contains("silence"), "{run}");
+
+    let mut last = silent.clone();
+    last.extend(["--last-known", "ground/archive"]);
+    let run = bus.until(&last, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["reading"], "last_known", "{run}");
+    assert_eq!(doc["archive"], "ground/archive");
+    assert_eq!(
+        doc["selectors"],
+        json!([zk2::archive::archive_key(
+            &"ground/archive".parse().expect("an address"),
+            origin
+        )])
+    );
+    let row = &doc["rows"][0];
+    assert_eq!(row["key"], origin);
+    assert_eq!(row["payload"]["value"], value);
+    assert!(row["confirmed"].is_boolean(), "{row}");
+    assert_eq!(row["identity"]["iface"], "tc.netif.v1");
+    assert!(
+        doc["notes"]
+            .to_string()
+            .contains("last-known, never current"),
+        "{run}"
+    );
+    drop(archive);
+}
+
+/// bindings.md §4 (R6), through `watch`: every sample the provider puts on
+/// its own concrete key is delivered and rendered through the contract,
+/// with its provider and its template values; a put on a wildcard key
+/// reaches the subscription and is discarded by rule, counted apart from
+/// any loss. `--count` and `--for` both end it, and say which did.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn watch_decodes_each_sample_and_counts_r6_discards_apart() {
+    let mut bus = Bus::bare(None).await;
+    let owner = netif_owner(&bus).await;
+    let writer = owner
+        .writer(
+            &iface("tc.netif.v1"),
+            "stream/bandwidth/{ns}/{iface}",
+            &member("default", "eth0"),
+        )
+        .await
+        .expect("a stream writer");
+    bus.services.push(owner);
+    let principal = client(&bus.endpoint, None).await;
+    bus.keep(Task(tokio::spawn(async move {
+        let mut n = 0u64;
+        loop {
+            n += 1;
+            let _ = writer.put_value(&json!({"rx_bps": n, "tx_bps": n})).await;
+            let _ = principal
+                .put(
+                    "zk2/host-a/*/tc.netif.v1/stream/bandwidth/default/eth0",
+                    r#"{"rx_bps":0,"tx_bps":0}"#,
+                )
+                .await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/tc"]).await;
+
+    let summary_of = |r: &Run| -> Option<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["row"] == "summary")
+    };
+    let run = bus
+        .until(
+            &[
+                "watch",
+                "*/tc",
+                "tc.netif.v1",
+                "bandwidth/{ns}/{iface}",
+                "--for",
+                "2",
+                "--format",
+                "ndjson",
+            ],
+            |r| {
+                r.code == 0
+                    && summary_of(r).is_some_and(|s| {
+                        s["received"].as_u64() > Some(0) && s["discarded"].as_u64() > Some(0)
+                    })
+            },
+        )
+        .await;
+    exits(&run, 0);
+    let lines: Vec<Value> = run
+        .stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one JSON object per line"))
+        .collect();
+    assert!(
+        lines.iter().all(|l| l.get("row").is_some()),
+        "a stream has no envelope"
+    );
+    let samples: Vec<&Value> = lines.iter().filter(|l| l["row"] == "sample").collect();
+    for s in &samples {
+        assert_eq!(s["provider"], "host-a/tc");
+        assert_eq!(
+            s["key"],
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"
+        );
+        assert_eq!(s["values"], json!({"iface": ["eth0"], "ns": ["default"]}));
+        assert_eq!(s["kind"], "put");
+        assert_eq!(s["payload"]["as"], "value", "{s}");
+        assert_eq!(s["payload"]["declared"], "json:BandwidthUpdate");
+    }
+    let summary = summary_of(&run).expect("a summary");
+    assert_eq!(summary["received"], samples.len() as u64);
+    assert_eq!(summary["ended"], "window");
+    assert_eq!(summary["lagged"], 0);
+    assert_eq!(
+        summary["selectors"],
+        json!(["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*"])
+    );
+    let discarded: u64 = lines
+        .iter()
+        .filter(|l| l["row"] == "discarded")
+        .filter_map(|l| l["discarded"].as_u64())
+        .sum();
+    assert_eq!(summary["discarded"], discarded, "every discard was said");
+
+    let run = bus
+        .until(
+            &[
+                "watch",
+                "host-a/tc",
+                "tc.netif.v1",
+                "stream/bandwidth/{ns}/{iface}",
+                "--param",
+                "iface=eth0",
+                "--count",
+                "3",
+                "--for",
+                "15",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&run, 0);
+    let summary = summary_of(&run).expect("a summary");
+    assert_eq!(summary["ended"], "count", "{run}");
+    assert_eq!(summary["received"], 3);
+    assert_eq!(
+        summary["selectors"],
+        json!(["zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/eth0"])
+    );
+}
+
+/// The walkthrough's §4.1 replay (spike S13), through `replay --namespace`:
+/// a capture recorded at the bus root, republished into namespace
+/// `replay`, reaches a consumer there on the original address, and nothing
+/// reaches the bus root. Replayed as recorded instead, every row is a key
+/// its owner owns, where the owner runs: refused, and nothing published
+/// (P3, the tooling guide's §5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn replay_into_a_namespace_reaches_its_consumers_and_never_the_owners() {
+    let bus = Bus::bare(None).await;
+    let key = "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    let mut zrec = String::from(
+        r#"{"zrec":1,"selectors":["zk2/host-a/tc/tc.netif.v1/stream/**"],"base":"","captured_at":"2026-10-08T00:00:00Z"}"#,
+    );
+    for n in 0..5 {
+        let row = json!({
+            "key": key,
+            "t": n * 20_000,
+            "delete": false,
+            "value": {"rx_bps": n, "tx_bps": n},
+            "encoding": "application/json",
+        });
+        zrec.push('\n');
+        zrec.push_str(&row.to_string());
+    }
+    zrec.push('\n');
+    let file = bus.home.join("bus.zrec");
+    std::fs::write(&file, zrec).expect("the capture");
+    let file = file.to_str().expect("a UTF-8 path");
+
+    let in_replay = client(&bus.endpoint, Some("replay")).await;
+    let heard = in_replay
+        .declare_subscriber("zk2/host-a/tc/tc.netif.v1/stream/**")
+        .await
+        .expect("a consumer in `replay`");
+    let at_root = client(&bus.endpoint, None).await;
+    let root = at_root
+        .declare_subscriber("zk2/**")
+        .await
+        .expect("a consumer at the bus root");
+
+    let deadline = Instant::now() + SETTLE;
+    let (run, sample) = loop {
+        let run = bus
+            .zenctl(&["replay", file, "--namespace", "replay", "--format", "json"])
+            .await;
+        let got = tokio::time::timeout(Duration::from_millis(500), heard.recv_async()).await;
+        if let Ok(Ok(sample)) = got {
+            break (run, sample);
+        }
+        assert!(Instant::now() < deadline, "nothing reached `replay`\n{run}");
+    };
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["namespace"], "replay", "{run}");
+    assert_eq!(doc["published"], 5);
+    assert_eq!(doc["refused"], 0);
+    assert_eq!(
+        sample.key_expr().as_str(),
+        key,
+        "the original address, in the namespace"
+    );
+
+    let run = bus
+        .zenctl(&["replay", file, "--force-base", "--format", "json"])
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["published"], 0, "{run}");
+    assert_eq!(doc["refused"], 5);
+    assert!(run.stderr.contains("(P3, spec §6)"), "{run}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        root.try_recv().ok().flatten().is_none(),
+        "nothing reached the bus root, where the owners run"
+    );
 }
