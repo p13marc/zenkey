@@ -9,7 +9,9 @@
 //! - **A handler** receives its decoded request and a [`CallInfo`] (the
 //!   template values, the claimed metadata of O7), and answers a value or
 //!   an [`OpError`], the error envelope of §5.2. A `replies = "many"`
-//!   handler sends through a [`Sink`]: values, then the summary (O6).
+//!   handler sends through a [`Sink`]: values, then the summary (O6). A
+//!   handler over a whole template names the member a fan-out answers for
+//!   ([`CallInfo::member`], §5.1 "Over a template").
 //! - **A caller** gets an [`Outcome`] (O5: a value, a refusal, a malformed
 //!   refusal, or silence, each distinct) or, for a many-reply or fan-out
 //!   call, [`Replies`], attributed by replier (O3, O6).

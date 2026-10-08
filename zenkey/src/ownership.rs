@@ -393,7 +393,7 @@ mod tests {
         let d = both(&[full.clone(), descriptor(&rep, b, &[])], &[&rep]);
         assert_eq!(d.findings.len(), 1);
         // A descriptor or the contract unread: undecided, never clear.
-        let d = both(&[full.clone()], &[&rep]);
+        let d = both(std::slice::from_ref(&full), &[&rep]);
         assert!(d.findings.is_empty());
         assert_eq!(d.undecided.len(), 1);
         assert!(d.undecided[0].why[0].contains(b), "{:?}", d.undecided);
