@@ -119,3 +119,25 @@ where
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+/// A router like [`router`], with more configuration inserted, each a
+/// (key, JSON5 value) pair: access control, for one.
+pub async fn router_with(
+    upstream: Option<&str>,
+    extra: &[(&str, &str)],
+) -> (zenoh::Session, String) {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"router\"").unwrap();
+    c.insert_json5("listen/endpoints", "[\"tcp/127.0.0.1:0\"]")
+        .unwrap();
+    if let Some(up) = upstream {
+        c.insert_json5("connect/endpoints", &format!("[\"{up}\"]"))
+            .unwrap();
+    }
+    for (k, v) in extra {
+        c.insert_json5(k, v).unwrap();
+    }
+    let r = zenoh::open(c).await.expect("router");
+    let ep = bound(&r).await;
+    (r, ep)
+}

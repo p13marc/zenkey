@@ -1,0 +1,41 @@
+# operations.md: the common setup's service `tc` on every host — an
+# exclusive templated operation, a fan-out one, a many-reply listing with a
+# per-replier summary, and an optional operation gated on a capability.
+[interface]
+name = "tc"
+major = 1
+minor = 0
+
+[schemas]
+jsonschema = ["schemas/tc.json"]
+
+[resources."interfaces/{if}/set"]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+error = "json:TcError"
+params = { if = "string" }
+cardinality = 64
+
+[resources.diagnostics]
+kind = "operation"
+request = "json:DiagnosticsRequest"
+response = "json:DiagnosticsResponse"
+idempotent = true
+fanout = "allowed"
+
+[resources.listing]
+kind = "operation"
+request = "json:ListingRequest"
+response = "json:Entry"
+summary = "json:ListingSummary"
+replies = "many"
+idempotent = true
+fanout = "allowed"
+
+[resources.offload]
+kind = "operation"
+request = "json:SetRequest"
+response = "json:SetResponse"
+optional = true
+gate = ["capability:xdp"]
