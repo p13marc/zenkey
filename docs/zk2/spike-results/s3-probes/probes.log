@@ -1,0 +1,92 @@
+== s3-rf-probe --tokens 100 --bps 300
+first view: 100/100 in 85.3 s; 24259 B vehicle→ground, 1315 B ground→vehicle; 4 connections accepted
+replay after a cut: 100/100 in 59.9 s; 16755 B vehicle→ground, 816 B ground→vehicle; 3 connections accepted
+== s3-rf-probe --tokens 100 --bps 300 --extra results/s3-probes/link-batch-1k.json
+first view: 100/100 in 24.1 s; 6994 B vehicle→ground, 247 B ground→vehicle; 0 connections accepted
+replay after a cut: 100/100 in 25.6 s; 7040 B vehicle→ground, 279 B ground→vehicle; 1 connections accepted
+== s3-rf-probe --tokens 100 --bps 300 --extra results/s3-probes/link-lease-60s.json
+first view: 100/100 in 23.8 s; 6910 B vehicle→ground, 223 B ground→vehicle; 0 connections accepted
+replay after a cut: 100/100 in 25.3 s; 6962 B vehicle→ground, 255 B ground→vehicle; 1 connections accepted
+== s3-rf-probe --tokens 100 --bps 300 --extra results/s3-probes/link-batch-1k-lease-60s.json
+first view: 100/100 in 24.1 s; 7018 B vehicle→ground, 223 B ground→vehicle; 0 connections accepted
+replay after a cut: 100/100 in 25.5 s; 6998 B vehicle→ground, 255 B ground→vehicle; 1 connections accepted
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --zk 200
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 11811 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --zk 200 --acl results/s3-probes/acl-deny-zk.json
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 10530 vehicle→ground, 386 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --zk 200 --acl results/s3-probes/acl-deny-zk.json --side rv
+settled after 3.2 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 11097 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --zk 200 --acl results/s3-probes/acl-deny-zk-egress.json --side rv
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 10719 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --zk 200 --acl results/s3-probes/acl-deny-zk.json --side rg
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 11820 vehicle→ground, 385 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --data 200
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 10038 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 1 × "@zk/instance", 200 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --data 200 --acl results/s3-probes/acl-deny-data.json
+settled after 3.1 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 8737 vehicle→ground, 377 ground→vehicle
+in the vehicle→ground bytes: 1 × "@zk/instance", 200 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --client-link --zk 200
+settled after 2.9 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 322 vehicle→ground, 237 ground→vehicle
+in the vehicle→ground bytes: 1 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --client-link --zk 200 --live-sub
+settled after 3.2 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: ["zk2/v/s/@zk/instance/1"]
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 12316 vehicle→ground, 264 ground→vehicle
+in the vehicle→ground bytes: 201 × "@zk/instance", 0 × "camera.v1/state/info", 111 × "svc-1"
+== s3-acl-probe --dir /tmp/s3p.83Ed --bps 1000000 --client-link --zk 200 --acl results/s3-probes/acl-deny-zk.json --side rv
+settled after 2.9 s
+state GET: 1 replies
+tokens zk2/v/**: ["zk2/v/s/x.v1/alive"]
+tokens zk2/v/s/@zk/**: []
+subscriber zk2/v/** saw: ["zk2/v/s/x.v1/stream/b"]
+bytes: 285 vehicle→ground, 237 ground→vehicle
+in the vehicle→ground bytes: 0 × "@zk/instance", 0 × "camera.v1/state/info", 0 × "svc-1"

@@ -1,0 +1,814 @@
+{
+  "access_control": {
+    "default_permission": "allow",
+    "enabled": true,
+    "policies": [
+      {
+        "id": "thruster-l-policy",
+        "rules": [
+          "thruster-l-own-in",
+          "thruster-l-own-out",
+          "contracts-in",
+          "contracts-out",
+          "thruster-l-consume-in",
+          "thruster-l-consume-out"
+        ],
+        "subjects": [
+          "thruster-l"
+        ]
+      },
+      {
+        "id": "teleop-policy",
+        "rules": [
+          "teleop-own-in",
+          "teleop-own-out",
+          "contracts-in",
+          "contracts-out",
+          "teleop-replies-in"
+        ],
+        "subjects": [
+          "teleop"
+        ]
+      },
+      {
+        "id": "autopilot-policy",
+        "rules": [
+          "autopilot-own-in",
+          "autopilot-own-out",
+          "contracts-in",
+          "contracts-out",
+          "autopilot-replies-in"
+        ],
+        "subjects": [
+          "autopilot"
+        ]
+      },
+      {
+        "id": "safety-policy",
+        "rules": [
+          "safety-own-in",
+          "safety-own-out",
+          "contracts-in",
+          "contracts-out",
+          "safety-replies-in"
+        ],
+        "subjects": [
+          "safety"
+        ]
+      },
+      {
+        "id": "tc-h1-policy",
+        "rules": [
+          "tc-h1-own-in",
+          "tc-h1-own-out",
+          "contracts-in",
+          "contracts-out",
+          "tc-h1-replies-in"
+        ],
+        "subjects": [
+          "tc-h1"
+        ]
+      },
+      {
+        "id": "tc-h2-policy",
+        "rules": [
+          "tc-h2-own-in",
+          "tc-h2-own-out",
+          "contracts-in",
+          "contracts-out",
+          "tc-h2-replies-in"
+        ],
+        "subjects": [
+          "tc-h2"
+        ]
+      },
+      {
+        "id": "frontend-policy",
+        "rules": [
+          "frontend-own-in",
+          "frontend-own-out",
+          "contracts-in",
+          "contracts-out",
+          "frontend-consume-in",
+          "frontend-consume-out",
+          "frontend-call-in",
+          "frontend-call-out"
+        ],
+        "subjects": [
+          "frontend"
+        ]
+      },
+      {
+        "id": "fleet-mgr-policy",
+        "rules": [
+          "fleet-mgr-own-in",
+          "fleet-mgr-own-out",
+          "contracts-in",
+          "contracts-out",
+          "fleet-mgr-replies-in"
+        ],
+        "subjects": [
+          "fleet-mgr"
+        ]
+      },
+      {
+        "id": "executor-policy",
+        "rules": [
+          "executor-own-in",
+          "executor-own-out",
+          "contracts-in",
+          "contracts-out",
+          "executor-replies-in",
+          "executor-consume-in",
+          "executor-consume-out"
+        ],
+        "subjects": [
+          "executor"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "thruster-l-own-in",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "thruster-l-own-out",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/@zk/**"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "thruster-l-consume-in",
+        "key_exprs": [
+          "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/*/@zk/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "thruster-l-consume-out",
+        "key_exprs": [
+          "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd",
+          "zk2/vehicle-01/*/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "teleop-own-in",
+        "key_exprs": [
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "teleop-replies-in",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "teleop-own-out",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "autopilot-own-in",
+        "key_exprs": [
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "autopilot-replies-in",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "autopilot-own-out",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "safety-own-in",
+        "key_exprs": [
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "safety-replies-in",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "safety-own-out",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h1-own-in",
+        "key_exprs": [
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h1-replies-in",
+        "key_exprs": [
+          "zk2/*/tc/@zk/**",
+          "zk2/*/tc/tc.netem.v1/@op/**",
+          "zk2/*/tc/tc.netif.v1/state/**"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "tc-h1-own-out",
+        "key_exprs": [
+          "zk2/*/tc/@zk/**",
+          "zk2/*/tc/tc.netem.v1/@op/**",
+          "zk2/*/tc/tc.netif.v1/state/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/@zk/**"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h2-own-in",
+        "key_exprs": [
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h2-replies-in",
+        "key_exprs": [
+          "zk2/*/tc/@zk/**",
+          "zk2/*/tc/tc.netem.v1/@op/**",
+          "zk2/*/tc/tc.netif.v1/state/**"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "tc-h2-own-out",
+        "key_exprs": [
+          "zk2/*/tc/@zk/**",
+          "zk2/*/tc/tc.netem.v1/@op/**",
+          "zk2/*/tc/tc.netif.v1/state/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/@zk/**"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "frontend-own-in",
+        "key_exprs": [
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "frontend-own-out",
+        "key_exprs": [
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/@zk/**"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "frontend-consume-in",
+        "key_exprs": [
+          "zk2/*/tc/tc.netif.v1/state/**",
+          "zk2/*/tc/@zk/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "frontend-consume-out",
+        "key_exprs": [
+          "zk2/*/tc/tc.netif.v1/state/**",
+          "zk2/*/tc/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "frontend-call-in",
+        "key_exprs": [
+          "zk2/*/tc/tc.netem.v1/@op/**"
+        ],
+        "messages": [
+          "query"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "frontend-call-out",
+        "key_exprs": [
+          "zk2/*/tc/tc.netem.v1/@op/**"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "fleet-mgr-own-in",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "fleet-mgr-replies-in",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/desired.v1/state/plans/vehicle-01"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "fleet-mgr-own-out",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/plans/vehicle-01"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "executor-own-in",
+        "key_exprs": [
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "executor-replies-in",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**"
+        ],
+        "messages": [
+          "reply"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "executor-own-out",
+        "key_exprs": [
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "query",
+          "declare_subscriber"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "executor-consume-in",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/desired.v1/state/plans/vehicle-01",
+          "zk2/ground/fleet-mgr/@zk/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "executor-consume-out",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/desired.v1/state/plans/vehicle-01",
+          "zk2/ground/fleet-mgr/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "contracts-in",
+        "key_exprs": [
+          "zk2/@zk/contract/**"
+        ],
+        "messages": [
+          "declare_queryable",
+          "reply",
+          "query"
+        ],
+        "permission": "allow"
+      },
+      {
+        "flows": [
+          "egress"
+        ],
+        "id": "contracts-out",
+        "key_exprs": [
+          "zk2/@zk/contract/**"
+        ],
+        "messages": [
+          "query",
+          "reply"
+        ],
+        "permission": "allow"
+      }
+    ],
+    "subjects": [
+      {
+        "id": "thruster-l",
+        "usernames": [
+          "thruster-l"
+        ]
+      },
+      {
+        "id": "teleop",
+        "usernames": [
+          "teleop"
+        ]
+      },
+      {
+        "id": "autopilot",
+        "usernames": [
+          "autopilot"
+        ]
+      },
+      {
+        "id": "safety",
+        "usernames": [
+          "safety"
+        ]
+      },
+      {
+        "id": "tc-h1",
+        "usernames": [
+          "tc-h1"
+        ]
+      },
+      {
+        "id": "tc-h2",
+        "usernames": [
+          "tc-h2"
+        ]
+      },
+      {
+        "id": "frontend",
+        "usernames": [
+          "frontend"
+        ]
+      },
+      {
+        "id": "fleet-mgr",
+        "usernames": [
+          "fleet-mgr"
+        ]
+      },
+      {
+        "id": "executor",
+        "usernames": [
+          "executor"
+        ]
+      }
+    ]
+  },
+  "transport/auth/usrpwd/dictionary_file": "results/s14/users.txt"
+}

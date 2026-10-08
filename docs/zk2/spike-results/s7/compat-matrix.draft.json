@@ -1,0 +1,461 @@
+{
+  "description": "Draft directional compatibility cases for #607 (from S7, #603). `class` is the zk2 verdict for FULL_TRANSITIVE (both directions). Protobuf is judged with WIRE_JSON reader/writer semantics plus renumber detection; `wire_only` shows the binary-only alternative. JSON Schema is judged on the zk2 subset with tolerant readers. Contract metadata rows come from r3 \u00a73.11 and await #618.",
+  "cases": [
+    {
+      "id": "protobuf/add-enum-value",
+      "kind": "protobuf",
+      "input": "s7/matrix/add-enum-value/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "ok",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/add-field",
+      "kind": "protobuf",
+      "input": "s7/matrix/add-field/{old,new}/m.proto",
+      "class": "compatible",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "ok",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/delete-enum-value",
+      "kind": "protobuf",
+      "input": "s7/matrix/delete-enum-value/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "ok"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/delete-field",
+      "kind": "protobuf",
+      "input": "s7/matrix/delete-field/{old,new}/m.proto",
+      "class": "compatible",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "ok"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/delete-field-reserved",
+      "kind": "protobuf",
+      "input": "s7/matrix/delete-field-reserved/{old,new}/m.proto",
+      "class": "compatible",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "ok",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/doc-only",
+      "kind": "protobuf",
+      "input": "s7/matrix/doc-only/{old,new}/m.proto",
+      "class": "compatible",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "ok",
+        "old_vs_new": "ok"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/int32-to-int64",
+      "kind": "protobuf",
+      "input": "s7/matrix/int32-to-int64/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "breaking",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/json-name-option",
+      "kind": "protobuf",
+      "input": "s7/matrix/json-name-option/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/move-into-oneof",
+      "kind": "protobuf",
+      "input": "s7/matrix/move-into-oneof/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "breaking",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/rename-enum-value",
+      "kind": "protobuf",
+      "input": "s7/matrix/rename-enum-value/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/rename-field",
+      "kind": "protobuf",
+      "input": "s7/matrix/rename-field/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "compatible",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/renumber-field",
+      "kind": "protobuf",
+      "input": "s7/matrix/renumber-field/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "breaking",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/scalar-to-repeated",
+      "kind": "protobuf",
+      "input": "s7/matrix/scalar-to-repeated/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "breaking",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "protobuf/string-to-bytes",
+      "kind": "protobuf",
+      "input": "s7/matrix/string-to-bytes/{old,new}/m.proto",
+      "class": "breaking",
+      "wire_only": "breaking",
+      "buf_wire_json": {
+        "new_vs_old": "breaking",
+        "old_vs_new": "breaking"
+      },
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/add-enum-value",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/add-enum-value/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/add-optional-property",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/add-optional-property/{old,new}.json",
+      "class": "compatible",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/add-optional-property-closed",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/add-optional-property-closed/{old,new}.json",
+      "class": "compatible",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/add-pattern",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/add-pattern/{old,new}.json",
+      "class": "refused",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/add-required-property",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/add-required-property/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/description-only",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/description-only/{old,new}.json",
+      "class": "compatible",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/integer-to-number",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/integer-to-number/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/loosen-maxlength",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/loosen-maxlength/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/number-to-integer",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/number-to-integer/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/oneof-add-branch",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/oneof-add-branch/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/optional-to-required",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/optional-to-required/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/remove-enum-value",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/remove-enum-value/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/remove-optional-property",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/remove-optional-property/{old,new}.json",
+      "class": "compatible",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/required-to-optional",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/required-to-optional/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(1), deserializer: exit Some(0)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "jsonschema/tighten-maximum",
+      "kind": "jsonschema",
+      "input": "s7/json-matrix/tighten-maximum/{old,new}.json",
+      "class": "breaking",
+      "jsoncompat": "serializer: exit Some(0), deserializer: exit Some(1)",
+      "source": "S7, measured"
+    },
+    {
+      "id": "contract/idempotent/idempotent true -> false",
+      "kind": "contract",
+      "change": "idempotent true -> false",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/fanout/fanout allowed -> forbidden",
+      "kind": "contract",
+      "change": "fanout allowed -> forbidden",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/fanout/fanout forbidden -> allowed",
+      "kind": "contract",
+      "change": "fanout forbidden -> allowed",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/reliability/reliability reliable -> best_effort",
+      "kind": "contract",
+      "change": "reliability reliable -> best_effort",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/optional/optional -> required (a resource)",
+      "kind": "contract",
+      "change": "optional -> required (a resource)",
+      "class": "breaking (implementers)",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/priority/priority changed",
+      "kind": "contract",
+      "change": "priority changed",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/express/express toggled",
+      "kind": "contract",
+      "change": "express toggled",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/congestion/congestion drop -> block",
+      "kind": "contract",
+      "change": "congestion drop -> block",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/explicit/explicit false -> true",
+      "kind": "contract",
+      "change": "explicit false -> true",
+      "class": "breaking (ambient consumers)",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/explicit/explicit true -> false",
+      "kind": "contract",
+      "change": "explicit true -> false",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/replies/replies one -> many",
+      "kind": "contract",
+      "change": "replies one -> many",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/serving/serving exclusive -> replicated",
+      "kind": "contract",
+      "change": "serving exclusive -> replicated",
+      "class": "review (needs idempotent)",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/timeout_ms/timeout_ms changed",
+      "kind": "contract",
+      "change": "timeout_ms changed",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/history/history added or depth changed",
+      "kind": "contract",
+      "change": "history added or depth changed",
+      "class": "review",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/required/required role added",
+      "kind": "contract",
+      "change": "required role added",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/optional/optional role added",
+      "kind": "contract",
+      "change": "optional role added",
+      "class": "compatible",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/role's/role's interface or cardinality changed",
+      "kind": "contract",
+      "change": "role's interface or cardinality changed",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/resource/resource added (optional or gated)",
+      "kind": "contract",
+      "change": "resource added (optional or gated)",
+      "class": "compatible",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/resource/resource removed",
+      "kind": "contract",
+      "change": "resource removed",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/kind/kind changed",
+      "kind": "contract",
+      "change": "kind changed",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/template/template changed (shape or parameters)",
+      "kind": "contract",
+      "change": "template changed (shape or parameters)",
+      "class": "breaking",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/annotation/annotation changed",
+      "kind": "contract",
+      "change": "annotation changed",
+      "class": "review (per profile)",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/deprecated/deprecated added",
+      "kind": "contract",
+      "change": "deprecated added",
+      "class": "compatible",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    },
+    {
+      "id": "contract/documentation/documentation only (doc, summary)",
+      "kind": "contract",
+      "change": "documentation only (doc, summary)",
+      "class": "compatible (not fingerprinted)",
+      "source": "r3 \u00a73.11 tables; not yet exercised by a classifier (#618)"
+    }
+  ]
+}

@@ -1,0 +1,821 @@
+{
+  "access_control": {
+    "default_permission": "allow",
+    "enabled": true,
+    "policies": [
+      {
+        "id": "thruster-l-policy",
+        "rules": [
+          "thruster-l-deny-write",
+          "thruster-l-deny-read"
+        ],
+        "subjects": [
+          "thruster-l"
+        ]
+      },
+      {
+        "id": "teleop-policy",
+        "rules": [
+          "teleop-deny-write",
+          "teleop-deny-read"
+        ],
+        "subjects": [
+          "teleop"
+        ]
+      },
+      {
+        "id": "autopilot-policy",
+        "rules": [
+          "autopilot-deny-write",
+          "autopilot-deny-read"
+        ],
+        "subjects": [
+          "autopilot"
+        ]
+      },
+      {
+        "id": "safety-policy",
+        "rules": [
+          "safety-deny-write",
+          "safety-deny-read"
+        ],
+        "subjects": [
+          "safety"
+        ]
+      },
+      {
+        "id": "tc-h1-policy",
+        "rules": [
+          "tc-h1-deny-write",
+          "tc-h1-deny-read"
+        ],
+        "subjects": [
+          "tc-h1"
+        ]
+      },
+      {
+        "id": "tc-h2-policy",
+        "rules": [
+          "tc-h2-deny-write",
+          "tc-h2-deny-read"
+        ],
+        "subjects": [
+          "tc-h2"
+        ]
+      },
+      {
+        "id": "frontend-policy",
+        "rules": [
+          "frontend-deny-write",
+          "frontend-deny-read"
+        ],
+        "subjects": [
+          "frontend"
+        ]
+      },
+      {
+        "id": "fleet-mgr-policy",
+        "rules": [
+          "fleet-mgr-deny-write",
+          "fleet-mgr-deny-read"
+        ],
+        "subjects": [
+          "fleet-mgr"
+        ]
+      },
+      {
+        "id": "executor-policy",
+        "rules": [
+          "executor-deny-write",
+          "executor-deny-read"
+        ],
+        "subjects": [
+          "executor"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "thruster-l-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "thruster-l-deny-read",
+        "key_exprs": [
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "teleop-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "teleop-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "autopilot-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "autopilot-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "safety-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "safety-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h1-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h1-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h2-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "tc-h2-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "frontend-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "frontend-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "fleet-mgr-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/vehicle-01/executor/**",
+          "zk2/vehicle-01/executor/*/@stream/**",
+          "zk2/vehicle-01/executor/*/@state/**",
+          "zk2/vehicle-01/executor/*/@op/**",
+          "zk2/vehicle-01/executor/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "fleet-mgr-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/**"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "executor-deny-write",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/**",
+          "zk2/vehicle-01/thruster-l/*/@stream/**",
+          "zk2/vehicle-01/thruster-l/*/@state/**",
+          "zk2/vehicle-01/thruster-l/*/@op/**",
+          "zk2/vehicle-01/thruster-l/@zk/**",
+          "zk2/vehicle-01/teleop/**",
+          "zk2/vehicle-01/teleop/*/@stream/**",
+          "zk2/vehicle-01/teleop/*/@state/**",
+          "zk2/vehicle-01/teleop/*/@op/**",
+          "zk2/vehicle-01/teleop/@zk/**",
+          "zk2/vehicle-01/autopilot/**",
+          "zk2/vehicle-01/autopilot/*/@stream/**",
+          "zk2/vehicle-01/autopilot/*/@state/**",
+          "zk2/vehicle-01/autopilot/*/@op/**",
+          "zk2/vehicle-01/autopilot/@zk/**",
+          "zk2/vehicle-01/safety/**",
+          "zk2/vehicle-01/safety/*/@stream/**",
+          "zk2/vehicle-01/safety/*/@state/**",
+          "zk2/vehicle-01/safety/*/@op/**",
+          "zk2/vehicle-01/safety/@zk/**",
+          "zk2/h1/tc/**",
+          "zk2/h1/tc/*/@stream/**",
+          "zk2/h1/tc/*/@state/**",
+          "zk2/h1/tc/*/@op/**",
+          "zk2/h1/tc/@zk/**",
+          "zk2/h2/tc/**",
+          "zk2/h2/tc/*/@stream/**",
+          "zk2/h2/tc/*/@state/**",
+          "zk2/h2/tc/*/@op/**",
+          "zk2/h2/tc/@zk/**",
+          "zk2/ops/frontend/**",
+          "zk2/ops/frontend/*/@stream/**",
+          "zk2/ops/frontend/*/@state/**",
+          "zk2/ops/frontend/*/@op/**",
+          "zk2/ops/frontend/@zk/**",
+          "zk2/ground/fleet-mgr/**",
+          "zk2/ground/fleet-mgr/*/@stream/**",
+          "zk2/ground/fleet-mgr/*/@state/**",
+          "zk2/ground/fleet-mgr/*/@op/**",
+          "zk2/ground/fleet-mgr/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_queryable",
+          "reply",
+          "liveliness_token"
+        ],
+        "permission": "deny"
+      },
+      {
+        "flows": [
+          "ingress"
+        ],
+        "id": "executor-deny-read",
+        "key_exprs": [
+          "zk2/vehicle-01/thruster-l/thruster.v1/state/status",
+          "zk2/vehicle-01/*/@zk/**",
+          "zk2/ground/fleet-mgr/desired.v1/state/plans/vehicle-02"
+        ],
+        "messages": [
+          "declare_subscriber",
+          "query",
+          "declare_liveliness_subscriber",
+          "liveliness_query"
+        ],
+        "permission": "deny"
+      }
+    ],
+    "subjects": [
+      {
+        "id": "thruster-l",
+        "usernames": [
+          "thruster-l"
+        ]
+      },
+      {
+        "id": "teleop",
+        "usernames": [
+          "teleop"
+        ]
+      },
+      {
+        "id": "autopilot",
+        "usernames": [
+          "autopilot"
+        ]
+      },
+      {
+        "id": "safety",
+        "usernames": [
+          "safety"
+        ]
+      },
+      {
+        "id": "tc-h1",
+        "usernames": [
+          "tc-h1"
+        ]
+      },
+      {
+        "id": "tc-h2",
+        "usernames": [
+          "tc-h2"
+        ]
+      },
+      {
+        "id": "frontend",
+        "usernames": [
+          "frontend"
+        ]
+      },
+      {
+        "id": "fleet-mgr",
+        "usernames": [
+          "fleet-mgr"
+        ]
+      },
+      {
+        "id": "executor",
+        "usernames": [
+          "executor"
+        ]
+      }
+    ]
+  },
+  "transport/auth/usrpwd/dictionary_file": "results/s14/users.txt"
+}

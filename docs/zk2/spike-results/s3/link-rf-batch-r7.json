@@ -1,0 +1,50 @@
+{
+  "access_control": {
+    "default_permission": "allow",
+    "enabled": true,
+    "policies": [
+      {
+        "id": "r7",
+        "rules": [
+          "zk-off-the-link"
+        ],
+        "subjects": [
+          "link"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "flows": [
+          "egress",
+          "ingress"
+        ],
+        "id": "zk-off-the-link",
+        "key_exprs": [
+          "zk2/**/@zk/**"
+        ],
+        "messages": [
+          "put",
+          "delete",
+          "declare_subscriber",
+          "query",
+          "reply",
+          "declare_queryable",
+          "liveliness_token",
+          "liveliness_query",
+          "declare_liveliness_subscriber"
+        ],
+        "permission": "deny"
+      }
+    ],
+    "subjects": [
+      {
+        "id": "link",
+        "link_protocols": [
+          "tcp"
+        ]
+      }
+    ]
+  },
+  "transport/link/tx/batch_size": 1024
+}
