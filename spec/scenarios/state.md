@@ -2,7 +2,7 @@
 
 Common setup: an owner `ground/fleet-mgr` with a state template
 `plans/{vehicle}`, HLC enabled, a tombstone window W (60 s unless stated).
-A consumer `vehicle-01/executor`, bound with `{vehicle} = self`.
+A consumer `vehicle-01/executor`, bound with `{vehicle} = self.system`.
 
 ## §1 Stamped mutations (S1, S2, §4.3 minting)
 
@@ -29,11 +29,16 @@ Within W, the consumer GETs `plans/b`, then the selector `plans/*`.
 **Setup.** As above. A storage manager is deployed covering
 `zk2/ground/fleet-mgr/**`.
 
-**Steps.** A tool inspects the routers' storage admin space.
+**Steps.**
+1. A tool inspects the routers' storage admin space.
+2. Without the storage, the consumer GETs its plan, through a session whose
+   outgoing queries the test captures.
 
-**Expected.** The tool reports the storage as a finding: no storage may
-answer on an owner's state keys. Without the storage, a consumer's GET is
-answered by the owner alone.
+**Expected.**
+1. The tool reports the storage as a finding: no storage may answer on an
+   owner's state keys.
+2. The consumer's query carries target `All` and consolidation `Latest`,
+   and the owner alone answers it.
 
 ## §4 Last-known from an archive (S5, S6)
 

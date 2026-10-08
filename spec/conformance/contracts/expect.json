@@ -61,6 +61,13 @@
       ],
       "fingerprint": null
     },
+    "e015-event": {
+      "codes": [
+        "E015",
+        "E015"
+      ],
+      "fingerprint": null
+    },
     "e015-required": {
       "codes": [
         "E015"

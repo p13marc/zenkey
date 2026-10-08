@@ -228,6 +228,14 @@
    "expect": {
     "refused": "detail"
    }
+  },
+  {
+   "name": "refuse-pb-empty-code",
+   "encoding": "application/protobuf;zk2.core.v1.Error",
+   "hex": "12076e6f20636f6465",
+   "expect": {
+    "refused": "code"
+   }
   }
  ]
 }
