@@ -324,9 +324,9 @@ def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool
 
     - A concrete call uses target ``BestMatching`` (O1); a call to a fan-out
       operation, target ``All`` and consolidation ``None`` (O2).
-    - Consolidation is ``None`` for a ``replies = "one"`` call too, which no
-      rule names (SPEC-FINDINGS F-64): every reply, an error included, is
-      seen as it arrives.
+    - Consolidation is ``None`` for a concrete call too: §5.1 O1 (0.7) says
+      "a concrete call MUST set BestMatching and None", since ``Latest``
+      would hold the reply until the query completes.
     - A value reply is the result; a reply error is decoded by its encoding
       (§5.2). Only ``application/json``, ``application/cbor`` and
       ``application/protobuf;zk2.core.v1.Error`` carry an envelope; any

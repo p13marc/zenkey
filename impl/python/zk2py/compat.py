@@ -173,6 +173,108 @@ def as_written(node: Any) -> Any:
     return out
 
 
+def _ref_target(world: JsonWorld, where: str, ref: Any) -> tuple[str, str, Any] | None:
+    """(target stem, fragment, target node) of a $ref, or None (§9.4)."""
+    if not isinstance(ref, str):
+        return None
+    file_part, _, frag = ref.partition("#")
+    target = stem(posixpath.basename(file_part)) if file_part else where
+    found, node = json_pointer(world.docs.get(target), frag)
+    return (target, frag, node) if found else None
+
+
+def written(world: JsonWorld, where: str, node: Any, following: frozenset = frozenset()) -> Any:
+    """A schema inside ``oneOf``, ``anyOf`` or ``prefixItems`` (§9.8, 0.7):
+    "compared as written, in order, with annotations dropped at schema
+    positions … A $ref there is compared by what it resolves to, followed
+    and its siblings added …, so a change to a definition reached only from
+    inside one is a change inside it, and inlining a definition is none. A
+    $ref back to a target already being followed is compared as written,
+    which ends a recursive type, and one that resolves to nothing is
+    schema_unreadable" (marked UNRESOLVED here)."""
+    if not isinstance(node, dict):
+        return node
+    if "$ref" not in node:
+        return _written_keywords(world, where, node, following)
+    ref = node["$ref"]
+    hit = _ref_target(world, where, ref)
+    if hit is None:
+        return {UNRESOLVED: _absolute(ref, where)}
+    tstem, frag, tnode = hit
+    tid = (tstem, frag)
+    if tid in following:
+        base: Any = {"$ref": f"{tstem}.json#{frag}"}
+    else:
+        base = written(world, tstem, tnode, following | {tid})
+    rest = _written_keywords(world, where, {k: v for k, v in node.items() if k not in ("$ref", "$defs")},
+                             following)
+    if isinstance(base, dict):
+        return {**base, **rest}
+    return base if not rest else {"$ref": f"{tstem}.json#{frag}", **rest}
+
+
+def _written_keywords(world: JsonWorld, where: str, node: dict[str, Any], following: frozenset) -> dict:
+    out: dict[str, Any] = {}
+    for k, v in node.items():
+        if k in ANNOTATIONS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {p: written(world, where, x, following) for p, x in v.items()}
+        elif k in ("items", "additionalProperties") and isinstance(v, dict):
+            out[k] = written(world, where, v, following)
+        elif k in ("prefixItems", "oneOf", "anyOf") and isinstance(v, list):
+            out[k] = [written(world, where, x, following) for x in v]
+        else:
+            out[k] = v
+    return out
+
+
+def _has_unresolved(v: Any) -> bool:
+    if isinstance(v, dict):
+        return UNRESOLVED in v or any(_has_unresolved(x) for x in v.values())
+    if isinstance(v, list):
+        return any(_has_unresolved(x) for x in v)
+    return False
+
+
+def _is_null_schema(node: Any) -> bool:
+    """§7.3 (0.7): "the null schema, whose type is exactly null and which
+    holds nothing else that carries meaning"."""
+    return isinstance(node, dict) and set(node) - ANNOTATIONS == {"type"} and node["type"] == "null"
+
+
+def nullable_reading(world: JsonWorld, where: str, node: Any) -> tuple[bool, Any]:
+    """§7.3 (0.7), the nullable form ``{"anyOf": [S, {"type": "null"}]}``,
+    "an anyOf with nothing beside it that carries meaning, holding two
+    branches in either order: the null schema … and any schema S". Its
+    reading "is S, its $refs followed, with null added to its type and,
+    where it has one, to its enum", and exists "when that S is an object
+    with a type, and without const, oneOf or anyOf".
+
+    Returns (is a form, its reading or None)."""
+    if not isinstance(node, dict) or set(node) - ANNOTATIONS != {"anyOf"}:
+        return False, None
+    branches = node["anyOf"]
+    if not isinstance(branches, list) or len(branches) != 2:
+        return False, None
+    if _is_null_schema(branches[1]):
+        s_branch = branches[0]
+    elif _is_null_schema(branches[0]):
+        s_branch = branches[1]
+    else:
+        return False, None
+    sch = world.resolve(where, s_branch)
+    if not isinstance(sch, dict) or "type" not in sch or UNRESOLVED in sch \
+            or {"const", "oneOf", "anyOf"} & set(sch):
+        return True, None
+    reading = dict(sch)
+    types = [sch["type"]] if isinstance(sch["type"], str) else list(sch["type"])
+    reading["type"] = types + ([] if "null" in types else ["null"])
+    if "enum" in sch and isinstance(sch["enum"], list):
+        reading["enum"] = sch["enum"] + ([] if None in sch["enum"] else [None])
+    return True, reading
+
+
 def _canon(v: Any) -> str:
     return json.dumps(v, sort_keys=True, separators=(",", ":"))
 
@@ -203,6 +305,18 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     if (isinstance(o, dict) and UNRESOLVED in o) or (isinstance(n, dict) and UNRESOLVED in n):
         v.add(REVIEW, "schema_unreadable", f"{at}: a $ref resolves to nothing")
         return v
+    # §9.8 (0.7): "A nullable form with a reading is compared as its
+    # reading … The one exception: a form against an anyOf that is not a
+    # form with a reading. Both are then compared as written."
+    o_form, o_read = nullable_reading(old, old_where, o)
+    n_form, n_read = nullable_reading(new, new_where, n)
+    o_other_anyof = isinstance(o, dict) and "anyOf" in o and o_read is None
+    n_other_anyof = isinstance(n, dict) and "anyOf" in n and n_read is None
+    if not ((o_read is not None and n_other_anyof) or (n_read is not None and o_other_anyof)):
+        if o_read is not None:
+            o = o_read
+        if n_read is not None:
+            n = n_read
     # "A boolean schema … changed, to or from anything, is review
     # (boolean_schema_changed)."
     if not isinstance(o, dict) or not isinstance(n, dict):
@@ -262,8 +376,11 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     # (oneof_branch_added): the candidate's oneOf has more branches than the
     # earlier one's, whatever they hold"; any other change, review.
     for kw in ("oneOf", "anyOf", "prefixItems"):
-        ob = [as_written(s) for s in o.get(kw, [])] if isinstance(o.get(kw, []), list) else o.get(kw)
-        nb = [as_written(s) for s in n.get(kw, [])] if isinstance(n.get(kw, []), list) else n.get(kw)
+        ob = [written(old, ow, x) for x in o.get(kw, [])] if isinstance(o.get(kw, []), list) else o.get(kw)
+        nb = [written(new, nw, x) for x in n.get(kw, [])] if isinstance(n.get(kw, []), list) else n.get(kw)
+        if _has_unresolved(ob) or _has_unresolved(nb):
+            v.add(REVIEW, "schema_unreadable", f"{at}: a $ref inside {kw} resolves to nothing")
+            continue
         if _canon(ob) == _canon(nb) and (kw in o) == (kw in n):
             continue
         # 0.6: "oneof_branch_added needs a oneOf on both sides. Adding the

@@ -1,7 +1,10 @@
-# zk2py's contract for the refusal scenario (presence.md §2 step 4, core
-# §3.2): one raw state, and a required role. An owner whose configuration
-# binds the role to nothing must not start; with it bound, it starts (the
-# control). It must load with no finding at all.
+# zk2py's contract for the refusal scenarios (presence.md §2 steps 4 and 5,
+# core §3.2, §8.2 step 2): one raw state, an optional state gated on a
+# capability, and a required role. An owner whose configuration binds the
+# role to nothing must not start (step 4); one holding the capability that
+# neither exposes the gated state nor lists it unavailable must not start
+# either (step 5). Each has a control that starts. It must load with no
+# finding at all.
 [interface]
 name    = "zk2py_needs"
 major   = 1
@@ -11,6 +14,12 @@ summary = "zk2py's refusal-scenario interface"
 [resources.health]
 kind = "state"
 type = { raw = "text/plain" }
+
+[resources.calibration]
+kind     = "state"
+type     = { raw = "text/plain" }
+optional = true
+gate     = "capability:cal"
 
 [requires.upstream]
 interface = "zk2py_echo.v1"
