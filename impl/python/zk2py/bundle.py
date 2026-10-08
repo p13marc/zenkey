@@ -38,7 +38,7 @@ def extra_ids(contract: dict[str, Any]) -> set[str]:
     """§9.6: extras are exactly the documents that the contract's
     ``views.document`` annotations reference ("of the contract's resources",
     step 11). A value is one ``sha256:…`` id; a list of ids is accepted too
-    (SPEC-FINDINGS: views.document value shape)."""
+    (SPEC-FINDINGS F-26)."""
     out: set[str] = set()
     resources = contract.get("resources")
     if not isinstance(resources, list):
@@ -58,7 +58,7 @@ def build(contract: Contract) -> bytes:
 
     The spec does not say where a builder finds an extra document from its
     id, so a contract that uses ``views.document`` is refused here, as the
-    reference builder refuses it (§9.6; SPEC-FINDINGS: extras source).
+    reference builder refuses it (§9.6; SPEC-FINDINGS F-26).
     """
     if not contract.valid or contract.canonical is None or contract.schemas is None:
         raise ValueError(f"{contract.path}: not a valid contract: {contract.codes}")

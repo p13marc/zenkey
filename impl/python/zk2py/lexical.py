@@ -28,7 +28,7 @@ FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}")
 #: core.md §1.2: a ULID chunk is 26 characters of Crockford's base32 in
 #: lowercase: digits, and lowercase letters except i, l, o, u.
 #: (The spec does not restrict the first character to 0-7, the 128-bit
-#: bound of a real ULID; see SPEC-FINDINGS F-07.)
+#: bound of a real ULID; see SPEC-FINDINGS F-01.)
 ULID = re.compile(r"[0-9a-hjkmnp-tv-z]{26}")
 
 #: core.md §2.2: a parameter name is ``[a-z][a-z0-9_]*``; §9.2 E030 uses the

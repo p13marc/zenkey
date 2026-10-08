@@ -24,7 +24,7 @@ def check_history(root: Path) -> list[tuple[str, str]]:
     One problem per file at most: the first of verification (with the
     fingerprint the file name implies, so a mismatch is the bundle tag
     ``fingerprint``), the interface against the directory, then the JCS
-    form (SPEC-FINDINGS: history check order).
+    form (SPEC-FINDINGS F-27).
     """
     problems: list[tuple[str, str]] = []
     for d in sorted(root.iterdir(), key=lambda p: p.name):

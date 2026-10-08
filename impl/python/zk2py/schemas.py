@@ -36,7 +36,7 @@ ANNOTATIONS = {
 }
 # Where a 2020-12 keyword's value holds schemas: the positions walked for the
 # subset check and for $ref. Refused applicators are walked too, because
-# their values are schema positions in 2020-12 (SPEC-FINDINGS: E037 nesting).
+# their values are schema positions in 2020-12 (SPEC-FINDINGS F-09).
 _SCHEMA_VALUED = {"additionalProperties", "items", "not", "if", "then", "else", "contains",
                   "propertyNames", "unevaluatedProperties", "unevaluatedItems"}
 _SCHEMA_LISTS = {"prefixItems", "oneOf", "anyOf", "allOf"}
@@ -183,7 +183,7 @@ class SchemaSet:
     def _check_stems(self) -> None:
         # §9.4: the name "MUST be unique among the listed files (E024)";
         # §9.2: "per … file". One E024 per file whose stem an earlier file
-        # already took (SPEC-FINDINGS: E024 per file).
+        # already took (SPEC-FINDINGS F-13).
         seen: set[str] = set()
         for a in self.json_files:
             if a.name in seen:
@@ -212,7 +212,7 @@ class SchemaSet:
             by_path = {posixpath.normpath(a.listed): a for a in self.json_files}
         file_part, _, fragment = ref.partition("#")
         if ":" in file_part:
-            return None  # a scheme (§9.4); SPEC-FINDINGS: "$ref scheme"
+            return None  # a scheme (§9.4); SPEC-FINDINGS F-10
         if file_part:
             target_path = posixpath.normpath(
                 posixpath.join(posixpath.dirname(art.listed), file_part))
@@ -247,7 +247,7 @@ class SchemaSet:
                 name = norm[len(r) + 1:]
                 break
         if name is None:
-            # SPEC-FINDINGS "proto file outside its roots": the artifact name is
+            # SPEC-FINDINGS F-15: the artifact name is
             # the path relative to its import root, which it does not have.
             self._err("E029", f"{listed}: not under an import root {roots}")
             self.broken.add(PROTOBUF)

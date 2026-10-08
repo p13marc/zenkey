@@ -6,7 +6,7 @@ against the fixture contract."
 
 The prose names D005, D006, D007 and D009 only. The meaning of every other
 code below is *derived from the fixture file names and expected values*,
-and each is listed in SPEC-FINDINGS as a gap:
+and SPEC-FINDINGS F-04 and F-05 record them as gaps:
 
 ====  =====================================================================
 D000  not JSON (a duplicate member included), or outside
@@ -85,7 +85,7 @@ def check_descriptor(data: bytes, contract: Contract, spec_dir: Path | None = No
         if iface != contract.interface or not well_formed:
             # Another contract: syntax only. A malformed fingerprint is D003
             # alone, not also D004 (descriptors/d003-fingerprint;
-            # SPEC-FINDINGS: descriptor cascades).
+            # SPEC-FINDINGS F-05).
             continue
         if entry["contract"] != contract.fingerprint:
             codes.append("D004")

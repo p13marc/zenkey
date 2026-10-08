@@ -13,7 +13,7 @@ needs more is noticed rather than silently ignored.
 ``format`` is asserted for the integer formats the schemas use (``uint32``,
 ``uint64``): JSON Schema 2020-12 treats ``format`` as an annotation, but
 core.md §9.1 bounds ``major`` to 0..2^32−1, and nothing else in the schema
-does. See SPEC-FINDINGS (schema integer bounds).
+does. See SPEC-FINDINGS F-17.
 """
 
 from __future__ import annotations

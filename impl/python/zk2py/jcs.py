@@ -98,7 +98,7 @@ def restriction_violations(value: Any) -> tuple[int, int]:
     A float whose JCS form is an integer literal beyond the bound (``1e16``
     serializes as ``10000000000000000``) is counted as an integer too: once
     serialized, every reader parses it as one, and a bundle verifier would
-    refuse it with ``restrictions``. See SPEC-FINDINGS F-21.
+    refuse it with ``restrictions``. See SPEC-FINDINGS F-19.
     """
     ascii_bad = 0
     int_bad = 0

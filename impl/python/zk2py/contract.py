@@ -189,7 +189,7 @@ class _Loader:
         if _beyond_i64(doc):
             # TOML 1.0: "If an integer cannot be represented losslessly [as a
             # 64-bit signed integer], an error must be thrown." Python's
-            # tomllib does not; this reader does (SPEC-FINDINGS F-15).
+            # tomllib does not; this reader does (SPEC-FINDINGS F-16).
             self.diag("E000", "not TOML 1.0: an integer beyond 64 bits")
             return None
         errors = Checker(load_schema("contract.schema.json", self.spec_dir)).errors(doc)
@@ -399,7 +399,7 @@ class _Loader:
         self.c.types[text] = resolved
 
         if kind == "operation":
-            # E018 / E033 on resolved values (SPEC-FINDINGS: resolved or written).
+            # E018 / E033 on resolved values (SPEC-FINDINGS F-22).
             serving = self.resolved(kind, spec, "serving", "exclusive")
             idempotent = self.resolved(kind, spec, "idempotent", False)
             if serving == "replicated" and idempotent is not True:
@@ -411,11 +411,16 @@ class _Loader:
             req = resolved.get("request")
             if req is not None and set(self.request_fields(req)) & set(tparams):
                 self.diag("W102", f"{text}: request repeats a template parameter", text)
+        # W103 judges only types that resolved: an unresolved one is already
+        # an error, and whether a JSON Schema type "takes" the encoding is then
+        # unknown.
+        unresolved = any(f in spec and f in LEGAL[kind] and f not in resolved for f in TYPE_FIELDS)
+        if kind == "operation":
             json_any = any(resolved.get(f, {}).get("kind") == JSON
                            for f in ("request", "response", "error", "summary"))
-            if "encoding" in spec and not json_any:
+            if "encoding" in spec and not json_any and not unresolved:
                 self.diag("W103", f"{text}: encoding on an operation with no JSON Schema type", text)
-        else:
+        elif not unresolved:
             if "encoding" in spec and resolved.get("type", {}).get("kind") != JSON:
                 self.diag("W103", f"{text}: encoding on a non-JSON-Schema type", text)
             if "attachment_encoding" in spec and resolved.get("attachment", {}).get("kind") != JSON:

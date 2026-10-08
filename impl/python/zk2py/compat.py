@@ -7,7 +7,7 @@ against every revision in the history, in both directions." A change is
 over both directions and every earlier revision"; a revision that does not
 load is *invalid*.
 
-How this module reads "both directions" (SPEC-FINDINGS: both directions):
+How this module reads "both directions" (SPEC-FINDINGS F-29):
 each rule of §9.8 classifies a transition *from an earlier revision to the
 candidate*, and its class already accounts for both reader/writer roles
 (the JSON rules say so: "a tightened maximum breaks old writers, and a
@@ -16,7 +16,7 @@ reverse too would make ``explicit`` true → false breaking, where
 ``compat/expect.json`` says review.
 
 A change §9.8 does not list is classed **review** here: a human looks at it
-before publication. Every such guess is listed in SPEC-FINDINGS.
+before publication. Every such guess is listed in SPEC-FINDINGS F-31, F-32 and F-35.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class JsonWorld:
     A ``$ref``'s file part is resolved by the stem of its last path
     component. In a source tree §9.4 resolves it as a path; in a bundle only
     stems exist, and §9.4's stem uniqueness (E024) makes the stem enough
-    (SPEC-FINDINGS: $ref inside a bundle).
+    (SPEC-FINDINGS F-11).
     """
 
     docs: dict[str, Any]
@@ -186,7 +186,7 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     for name in sorted(set(op) - set(np_)):
         # "Compatible: an optional property … removed". A required one
         # removed is not listed; it breaks new writers → old readers
-        # (SPEC-FINDINGS: unlisted JSON Schema changes).
+        # (SPEC-FINDINGS F-32).
         if name in oreq:
             v.add(BREAKING, f"{path}/{name}: a required property removed")
     loose = (oreq ^ nreq) - set(op) - set(np_)
@@ -285,7 +285,7 @@ def _real_oneof(m: descriptor_pb2.DescriptorProto, f: Any) -> str | None:
 
 def json_name_default(name: str) -> str:
     """protoc's default ``json_name``: underscores dropped, the next letter
-    upper-cased (SPEC-FINDINGS: default json_name)."""
+    upper-cased (SPEC-FINDINGS F-28)."""
     out, up = [], False
     for c in name:
         if c == "_":
@@ -346,7 +346,7 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
         if of.name in new_by_name:
             # "it is renumbered: a deletion plus an addition of the same
             # field, which silently drops the data both ways". The same
-            # field is the same name (SPEC-FINDINGS: renumber identity); the
+            # field is the same name (SPEC-FINDINGS F-34); the
             # deletion is then not also a warning (compat/renumber-field).
             moved = new_by_name.pop(of.name)
             added.discard(moved)
