@@ -185,6 +185,38 @@ impl Writer {
         .map_err(zenoh)
     }
 
+    /// Puts with the owner's stamp (state, S1).
+    pub(crate) async fn put_stamped(
+        &self,
+        payload: ZBytes,
+        ts: zenoh::time::Timestamp,
+    ) -> Result<()> {
+        match &self.inner {
+            Inner::Plain(p) => p.put(payload).timestamp(ts).await,
+            Inner::Advanced(p) => p.put(payload).timestamp(ts).await,
+        }
+        .map_err(zenoh)
+    }
+
+    /// Deletes with the owner's stamp (state, S1).
+    pub(crate) async fn delete_stamped(&self, ts: zenoh::time::Timestamp) -> Result<()> {
+        match &self.inner {
+            Inner::Plain(p) => p.delete().timestamp(ts).await,
+            Inner::Advanced(p) => p.delete().timestamp(ts).await,
+        }
+        .map_err(zenoh)
+    }
+
+    /// A value of this resource's JSON Schema type, in its wire encoding.
+    pub(crate) fn encode<T: Serialize>(&self, value: &T) -> Result<Vec<u8>> {
+        if !self.json_typed {
+            return Err(Error::Contract(
+                "a JSON Schema value for a resource whose type is not one".to_owned(),
+            ));
+        }
+        encode_value(value, self.wire)
+    }
+
     /// Puts a value of a JSON Schema type, encoded as the contract says:
     /// JSON by default, CBOR when `encoding = "cbor"` (§7.2).
     pub async fn put_value<T: Serialize>(&self, value: &T) -> Result<()> {

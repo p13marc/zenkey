@@ -39,6 +39,10 @@ pub enum Error {
     /// No token was declared.
     #[error("not started: {0}")]
     NotExposed(String),
+    /// This owner's clock is ahead of its router beyond the HLC delta: it
+    /// stops writing state until the drift is gone (spec §4.3, S7).
+    #[error("this owner's clock is ahead of its router: state writes stop (spec §4.3)")]
+    ClockAhead,
     /// The descriptor this service would serve fails the descriptor check
     /// (spec §3.3); the codes are listed. A bug in the runtime or its
     /// caller, never a network condition.
