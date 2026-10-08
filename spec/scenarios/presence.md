@@ -153,8 +153,10 @@ whose router-to-client direction the test can stall.
 1. The owner starts. Wait until R1's own session reads its interface
    token: R1 has no face of its own, so no rule applies to it.
 2. The tool reads `zk2/*/*/@zk/instance/*`, then `zk2/*/*/@zk/alive/**`.
-3. The second tool reads `zk2/**` with the link flowing, then again with
-   R1's replies held back past the read's timeout.
+3. The second tool reads `zk2/*/*/@zk/instance/*` with the link flowing,
+   then again with R1's replies held back past the read's timeout. (0.8
+   read `zk2/**` here, which by core §1.3's guard selects no control
+   token, so the "no token" below could never fail: F-75, fixed in 0.9.)
 
 **Expected.**
 1. R1 reads the token.
@@ -162,9 +164,9 @@ whose router-to-client direction the test can stall.
    The alive read is answered: a final reply, no token and no error reply,
    the same as a selector no token matches. A tool cannot tell it from
    absence (core §8.1, "A refused read").
-3. The first read ends with no error reply. The second ends with the error
-   reply `Timeout` and no token, and the tool reports it as possibly
-   incomplete, never as absence.
+3. The first read holds the owner's instance token, and ends with no error
+   reply. The second ends with the error reply `Timeout` and no token, and
+   the tool reports it as possibly incomplete, never as absence.
 
 *Measured (0.8) on zenoh 1.10.1, with the reference runtime: as above.
 The same deny on the `egress` flow alone refused nothing: the alive read

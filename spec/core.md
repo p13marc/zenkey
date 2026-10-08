@@ -1,11 +1,12 @@
 # zk2 core specification
 
-**Version 0.8** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.9** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
-operations runtime's decisions and the codegen's gaps, and in 0.8 what
-implementing 0.7 found, a refused presence read first).
+operations runtime's decisions and the codegen's gaps, in 0.8 what
+implementing 0.7 found, a refused presence read first, and in 0.9 the
+order of an owner's refusals and a scenario 0.8 got wrong).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -773,7 +774,25 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
   a handler that ends without it is answered `internal`, after any values
   it sent (O6). Without one, zero values then completion is the
   operation's own answer, which a caller cannot tell from silence.
-  `[Sc: operations.md §3, §6]`
+  - **Sending nothing needs no member** (0.9, F-76). Only a reply needs a
+    key (below, "Over a template"). So a server over a template whose
+    handler names no member and sends nothing ends the call as zero values
+    then completion, when no `summary` is declared, and is answered
+    `internal` when one is.
+
+  `[Sc: operations.md §2, §3, §6]`
+- **The order of refusals** (0.9, F-74). Before any handler runs, an owner
+  refuses a call for the first of these that applies, in this order:
+  1. a key expression that is not concrete, on an operation that forbids
+     fan-out: `fanout_forbidden` (O2);
+  2. an operation the instance does not expose now: `unavailable`, with
+     its cause (O3);
+  3. a key that names no member (below): `invalid_request`.
+
+  So a wildcard call to an operation that forbids fan-out is
+  `fanout_forbidden`, whatever its other chunks hold. A request that does
+  not decode is refused after these, by the server's decode (below).
+  `[Sc: operations.md §2]`
 - **A key that names no member.** A concrete call whose resource chunks
   resolve to no member of the operation's template, because a parameter
   chunk is not a canonical slug (§1.4, §2.2), is refused with

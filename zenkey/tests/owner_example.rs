@@ -56,7 +56,8 @@ async fn get(
 /// GET made the moment the interface token appears finds it (presence.md
 /// §1, F-68), stamped with the owner's own zid, not R1's, where an
 /// unstamped put through R1 carries R1's (state.md §1, F-69). Its
-/// operations echo, or refuse `app` without a detail (F-65).
+/// operations echo, or refuse `app` without a detail (F-65), templated
+/// ones included (#670).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_owner_example_as_a_client_of_a_separate_router() {
     let (r1, ep) = router(None).await;
@@ -182,6 +183,34 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     assert_eq!(err.encoding().to_string(), envelope::JSON);
     let env = envelope::decode(envelope::JSON, &err.payload().to_bytes()).unwrap();
     assert_eq!((env.code.as_str(), env.detail), ("app", None));
+
+    // A templated operation is served too (#670, §8.2 "Exposed"): a call
+    // whose key binds the parameter is echoed on that member's key; a
+    // fan-out that leaves it unbound names no member, so it is refused
+    // `internal`, never silent (§5.1).
+    let member = "zk2/ex/owner/interop.v1/@op/ports/p1/echo";
+    let one = get(
+        &tool,
+        member,
+        b"pong",
+        QueryTarget::BestMatching,
+        ConsolidationMode::None,
+    )
+    .await;
+    let value = one.iter().find_map(|r| r.result().ok()).expect("a value");
+    assert_eq!(value.key_expr().as_str(), member);
+    assert_eq!(&*value.payload().to_bytes(), b"pong");
+    let fan = get(
+        &tool,
+        "zk2/ex/owner/interop.v1/@op/ports/*/echo",
+        b"pong",
+        QueryTarget::All,
+        ConsolidationMode::None,
+    )
+    .await;
+    let err = fan.iter().find_map(|r| r.result().err()).expect("answered");
+    let env = envelope::decode(&err.encoding().to_string(), &err.payload().to_bytes()).unwrap();
+    assert_eq!(env.code, "internal", "{env:?}");
 
     stop.send(()).unwrap();
     running.await.unwrap().unwrap();
