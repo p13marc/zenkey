@@ -98,11 +98,109 @@ def family_contracts(root: Path) -> list[Result]:
     return out
 
 
+# -- sets/ (core.md §9.2 E035, E036) -----------------------------------------
+
+def family_sets(root: Path) -> list[Result]:
+    from .sets import SetLoadError, check_set
+
+    d = root / "sets"
+    out = []
+    for name, want in sorted(_load_json(d / "expect.json")["sets"].items()):
+        try:
+            got = check_set(sorted((d / name).glob("*.toml")), spec_dir=root.parent).codes
+        except SetLoadError as e:
+            out.append((name, False, str(e)))
+            continue
+        out.append(_check(name, {"codes": got}, want))
+    return out
+
+
+# -- bundles/ (core.md §9.6) -------------------------------------------------
+
+def family_bundles(root: Path) -> list[Result]:
+    from . import bundle
+    from .contract import load_contract
+
+    d = root / "bundles"
+    out = []
+    for name, want in sorted(_load_json(d / "expect.json")["cases"].items()):
+        data = (d / name).read_bytes()
+        try:
+            v = bundle.verify(data, want.get("expect_fingerprint"))
+            got: dict[str, Any] = {"ok": True, "fingerprint": v.fingerprint}
+        except bundle.BundleError as e:
+            got = {"ok": False, "error": e.tag}
+        want_cmp = {k: v for k, v in want.items() if k != "expect_fingerprint"}
+        out.append(_check(name, got, want_cmp))
+    # Build: the README says the fixtures are "Built from seed.toml"; the
+    # valid bundle is that build, byte for byte (one revision, one bundle).
+    seed = load_contract(d / "seed.toml", spec_dir=root.parent)
+    built = bundle.build(seed)
+    ok = built == (d / "valid.bundle.json").read_bytes()
+    out.append(("build seed.toml == valid.bundle.json", ok, "" if ok else f"got {built[:200]!r}…"))
+    return out
+
+
+# -- history/ (core.md §9.7) -------------------------------------------------
+
+def family_history(root: Path) -> list[Result]:
+    from .history import check_history
+
+    d = root / "history"
+    out = []
+    for name, want in sorted(_load_json(d / "expect.json")["cases"].items()):
+        got = [list(p) for p in check_history(d / name)]
+        out.append(_check(name, got, want))
+    return out
+
+
+# -- descriptors/ (core.md §3.3) ---------------------------------------------
+
+def family_descriptors(root: Path) -> list[Result]:
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+
+    d = root / "descriptors"
+    contract = load_contract(d / "contracts" / "nav.v2.toml", spec_dir=root.parent)
+    if not contract.valid:
+        raise CannotRun(f"the fixture contract does not load: {contract.codes}")
+    out = []
+    for name, want in sorted(_load_json(d / "expect.json")["cases"].items()):
+        path = d / f"{name}.json"
+        if not path.exists():
+            out.append((name, False, f"{path.name} is missing"))
+            continue
+        got = check_descriptor(path.read_bytes(), contract, spec_dir=root.parent)
+        out.append(_check(name, {"codes": got}, want))
+    return out
+
+
+# -- errors/ (core.md §5.2) --------------------------------------------------
+
+def family_errors(root: Path) -> list[Result]:
+    from .envelope import EnvelopeError, decode
+
+    out = []
+    for c in _load_json(root / "errors" / "cases.json")["cases"]:
+        payload = c["text"].encode("utf-8") if "text" in c else bytes.fromhex(c["hex"])
+        try:
+            got: Any = decode(c["encoding"], payload)
+        except EnvelopeError as e:
+            got = {"refused": e.tag}
+        out.append(_check(c["name"], got, c["expect"]))
+    return out
+
+
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "keys": family_keys,
     "slugs": family_slugs,
     "templates": family_templates,
     "contracts": family_contracts,
+    "sets": family_sets,
+    "bundles": family_bundles,
+    "history": family_history,
+    "descriptors": family_descriptors,
+    "errors": family_errors,
 }
 
 
