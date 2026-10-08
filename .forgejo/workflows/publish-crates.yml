@@ -61,6 +61,11 @@ jobs:
             version=$(cargo metadata --no-deps --format-version 1 \
               | python3 -c "import sys,json;print(next((p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'), ''))")
             if [ -z "$version" ]; then echo "$crate is not in this tree — skipping"; continue; fi
+            # zk2 re-creates these names at 0.20.0 with `publish = false`
+            # (#612): cargo metadata reports that as an empty registry list.
+            unpublished=$(cargo metadata --no-deps --format-version 1 \
+              | python3 -c "import sys,json;print(next((p['publish']==[] for p in json.load(sys.stdin)['packages'] if p['name']=='$crate'), False))")
+            if [ "$unpublished" = "True" ]; then echo "$crate $version is publish = false here — skipping"; continue; fi
             code=$(curl -sS -o /dev/null -w '%{http_code}' \
               -A 'zenkey-release-lane (https://git.marcpardo.eu/marcpardo/zenkey)' \
               "https://crates.io/api/v1/crates/$crate/$version")

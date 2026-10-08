@@ -5,7 +5,11 @@ readme = "README.md"
 keywords = ["zenoh", "keyspace", "explorer", "fleet"]
 categories = ["network-programming", "development-tools"]
 license = "Apache-2.0"
-version = "0.18.0"
+version = "0.20.0"
+# Being ported to zk2 (#612). 0.18.0 on crates.io is the v1 engine zengui and
+# zenwatch pin until #614 re-targets them; nothing is published from `main`
+# until the port completes (decided 2026-10-08).
+publish = false
 rust-version.workspace = true
 edition.workspace = true
 repository.workspace = true

@@ -8633,7 +8633,7 @@ dependencies = [
  "zenkey 0.11.1",
  "zenkey-build 0.11.1",
  "zenkey-explorer-config",
- "zenkey-fleet",
+ "zenkey-fleet 0.20.0",
  "zenkey-report-fixtures",
  "zenoh",
 ]
@@ -8658,7 +8658,7 @@ dependencies = [
  "ttf-parser",
  "zenkey 0.11.1",
  "zenkey-explorer-config",
- "zenkey-fleet",
+ "zenkey-fleet 0.18.0",
  "zenoh",
 ]
 
@@ -8762,6 +8762,32 @@ dependencies = [
 [[package]]
 name = "zenkey-fleet"
 version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a900bd8214e3226472db4c3841e9f7f52275bda4f858daadb49d34dc9d7e5dd7"
+dependencies = [
+ "arc-swap",
+ "base64 0.23.1",
+ "ciborium",
+ "futures-core",
+ "futures-util",
+ "json5 1.3.1",
+ "prost-reflect",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sipper",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "zblob",
+ "zenkey 0.11.1",
+ "zenoh",
+ "zenoh-ext",
+]
+
+[[package]]
+name = "zenkey-fleet"
+version = "0.20.0"
 dependencies = [
  "arc-swap",
  "base64 0.23.1",
@@ -8816,7 +8842,7 @@ dependencies = [
  "base64 0.23.1",
  "serde_json",
  "zenkey 0.11.1",
- "zenkey-fleet",
+ "zenkey-fleet 0.20.0",
 ]
 
 [[package]]
@@ -9382,7 +9408,7 @@ dependencies = [
  "zenkey 0.11.1",
  "zenkey-build 0.11.1",
  "zenkey-explorer-config",
- "zenkey-fleet",
+ "zenkey-fleet 0.18.0",
  "zenoh",
  "zenoh-ext",
 ]

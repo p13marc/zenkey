@@ -170,6 +170,9 @@ serde_yaml = "0.9"
 # are semver-incompatible.
 zenkey = { version = "=0.11.1" }
 zenkey-build = { version = "=0.11.1" }
-zenkey-fleet = { version = "0.18.0", path = "zenkey-fleet" }
+# zengui and zenwatch keep the v1 engine from crates.io (#612, FJ1), the same
+# move #615 made for `zenkey`; the in-tree `zenkey-fleet` is 0.20.0, being
+# ported to zk2, and zenctl depends on it by path.
+zenkey-fleet = { version = "=0.18.0" }
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }
