@@ -699,7 +699,7 @@ impl Service {
         let b = self.config.bindings.get(role).cloned().unwrap_or_default();
         Consumer::new(
             &self.session,
-            &self.config.address,
+            Some(&self.config.address),
             role,
             contract,
             &b.providers,

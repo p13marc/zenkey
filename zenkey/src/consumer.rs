@@ -145,7 +145,7 @@ struct Seen {
 impl Consumer {
     pub(crate) fn new(
         session: &zenoh::Session,
-        me: &Addr,
+        me: Option<&Addr>,
         role: &str,
         contract: Arc<Contract>,
         providers: &[String],
@@ -158,14 +158,19 @@ impl Consumer {
         let params = params
             .iter()
             .map(|(k, v)| {
-                let v = match v.as_str() {
-                    "self.system" => me.system.to_string(),
-                    "self.service" => me.service.to_string(),
-                    other => other.to_owned(),
+                let v = match (v.as_str(), me) {
+                    ("self.system", Some(me)) => me.system.to_string(),
+                    ("self.service", Some(me)) => me.service.to_string(),
+                    ("self.system" | "self.service", None) => {
+                        return Err(Error::Contract(format!(
+                            "parameter {k:?} = {v:?} needs a service of its own (R2); a tool has none"
+                        )));
+                    }
+                    (other, _) => other.to_owned(),
                 };
-                (k.clone(), v)
+                Ok((k.clone(), v))
             })
-            .collect();
+            .collect::<Result<_>>()?;
         Ok(Self {
             session: session.clone(),
             role: role.to_owned(),
@@ -174,6 +179,22 @@ impl Consumer {
             params,
             presence: Presence::Observable,
         })
+    }
+
+    /// A consumer for a tool, which has no service of its own: `contract`
+    /// is typically built from a retrieved bundle
+    /// ([`crate::Implementation::from_bundle`]), `providers` are service
+    /// addresses, exact or wildcard (R1), and `params` binds template
+    /// parameters to values (R2; `self.*` needs a service and is refused).
+    /// It appears in no graph: a component that should is a service.
+    pub fn for_tool(
+        session: &zenoh::Session,
+        contract: Arc<Contract>,
+        providers: &[&str],
+        params: &BTreeMap<String, String>,
+    ) -> Result<Self> {
+        let providers: Vec<String> = providers.iter().map(|p| (*p).to_owned()).collect();
+        Self::new(session, None, "tool", contract, &providers, params)
     }
 
     /// Marks presence unobservable for this role's providers (R7): set by a
