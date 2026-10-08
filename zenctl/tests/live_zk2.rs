@@ -826,8 +826,9 @@ impl Drop for Task {
 
 /// operations.md's `tc` at `address`, on the owners' session: `set` over its
 /// template (`eth9` is refused `app`, with a `TcError` detail),
-/// `diagnostics`, and `listing` (three values, then the summary unless
-/// `cut`). Every other resource is exposed and left unserved.
+/// `diagnostics`, `listing` (three values, then the summary unless `cut`),
+/// and `reset` on its members `eth0` and `eth1`, a queryable each. Every
+/// other resource is exposed and left unserved.
 async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
     let tc = iface("tc.v1");
     let seen = Arc::new(Seen::default());
@@ -893,6 +894,25 @@ async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
         })
         .await
         .expect("serve listing");
+    // §2's `reset`, a fan-out over a template, served per member.
+    let mut resets = Vec::new();
+    for member in ["eth0", "eth1"] {
+        let host = address.to_owned();
+        let values: Bindings = [("if".to_owned(), vec![member.to_owned()])].into();
+        resets.push(
+            b.serve_value(
+                &tc,
+                "@op/interfaces/{if}/reset",
+                Some(&values),
+                move |_call: Call, _req: Value| {
+                    let host = host.clone();
+                    async move { Ok(json!({"ok": true, "host": host, "if": member})) }
+                },
+            )
+            .await
+            .expect("serve reset"),
+        );
+    }
     let names: Vec<String> = scenario_contract("tc.v1")
         .resources
         .iter()
@@ -902,7 +922,7 @@ async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
         let _ = b.expose(&tc, &n);
     }
     bus.services.push(b.start().await.expect("start"));
-    bus.keep((set, diagnostics, listing));
+    bus.keep((set, diagnostics, listing, resets));
     seen
 }
 
@@ -1094,7 +1114,9 @@ async fn call_keeps_a_value_a_refusal_and_an_attributed_silence_apart() {
 /// operations.md §2 and §5, through `call`: a fan-out to an operation that
 /// allows one reaches every holder of the interface, each value attributed
 /// by its key; a `busy` envelope is reported unattributed, and the holder
-/// that sent no value is named from presence. A fan-out to an operation
+/// that sent no value is named from presence. Over a template (step 3),
+/// the parameter left out is a wildcard, and each member's reply is
+/// attributed by its own concrete key. A fan-out to an operation
 /// that forbids one — a `*` in the address, or a parameter left out — is
 /// refused before anything is sent: no handler runs (O2).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1156,6 +1178,49 @@ async fn a_fan_out_is_attributed_by_key_and_one_the_operation_forbids_is_never_s
         "unattributed: a reply_err carries no key"
     );
     assert_eq!(doc["replies"]["presence"]["complete"], true);
+
+    // Over a template: the parameter left out is a wildcard in the key, and
+    // each member's reply is attributed by its own concrete key.
+    let run = bus
+        .until(
+            &[
+                "call",
+                "*/tc",
+                "tc.v1",
+                "interfaces/{if}/reset",
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                r.code == 0
+                    && serde_json::from_str::<Value>(&r.stdout)
+                        .is_ok_and(|d| rows_of(&d, "replier").len() == 6)
+            },
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["mode"], "fanout", "{run}");
+    assert_eq!(
+        doc["selectors"],
+        json!(["zk2/*/tc/tc.v1/@op/interfaces/*/reset"])
+    );
+    let mut members = BTreeSet::new();
+    for r in rows_of(&doc, "replier") {
+        let (address, member) = (
+            r["address"].as_str().expect("an address"),
+            r["values"]["if"][0].as_str().expect("a member"),
+        );
+        assert_eq!(
+            r["key"],
+            format!("zk2/{address}/tc.v1/@op/interfaces/{member}/reset")
+        );
+        assert_eq!(r["replies"][0]["value"]["if"], member, "{r}");
+        members.insert(format!("{address} {member}"));
+    }
+    assert_eq!(members.len(), 6, "every host, every member: {members:?}");
 
     for args in [
         vec![
