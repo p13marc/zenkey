@@ -1,0 +1,123 @@
+{
+  "cases": {
+    "d000-bad-cause": {
+      "codes": [
+        "D000"
+      ]
+    },
+    "d000-unknown-field": {
+      "codes": [
+        "D000"
+      ]
+    },
+    "d001-format": {
+      "codes": [
+        "D001"
+      ]
+    },
+    "d002-instance": {
+      "codes": [
+        "D002"
+      ]
+    },
+    "d002-service": {
+      "codes": [
+        "D002"
+      ]
+    },
+    "d003-duplicate": {
+      "codes": [
+        "D003"
+      ]
+    },
+    "d003-fingerprint": {
+      "codes": [
+        "D003"
+      ]
+    },
+    "d003-iface": {
+      "codes": [
+        "D003",
+        "D009"
+      ]
+    },
+    "d004-revision": {
+      "codes": [
+        "D004"
+      ]
+    },
+    "d005-required": {
+      "codes": [
+        "D005"
+      ]
+    },
+    "d005-unknown-resource": {
+      "codes": [
+        "D005"
+      ]
+    },
+    "d006-implied": {
+      "codes": [
+        "D006"
+      ]
+    },
+    "d007-not-templated": {
+      "codes": [
+        "D007"
+      ]
+    },
+    "d007-raise": {
+      "codes": [
+        "D007"
+      ]
+    },
+    "d008-capability": {
+      "codes": [
+        "D008"
+      ]
+    },
+    "d008-twice": {
+      "codes": [
+        "D008"
+      ]
+    },
+    "d009-binding": {
+      "codes": [
+        "D009"
+      ]
+    },
+    "d009-declared-by": {
+      "codes": [
+        "D009"
+      ]
+    },
+    "d009-param": {
+      "codes": [
+        "D009"
+      ]
+    },
+    "d010-profile": {
+      "codes": [
+        "D010"
+      ]
+    },
+    "not-json": {
+      "codes": [
+        "D000"
+      ]
+    },
+    "ok-full": {
+      "codes": []
+    },
+    "ok-held-capability-unavailable": {
+      "codes": []
+    },
+    "ok-minimal": {
+      "codes": []
+    },
+    "ok-unknown-revision": {
+      "codes": []
+    }
+  },
+  "description": "<name>.json → the sorted D… codes check() reports against contracts/nav.v2.toml. A document whose interface names another contract is checked for syntax only."
+}

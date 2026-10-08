@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Position": {
+      "type": "object",
+      "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}},
+      "required": ["lat", "lon"]
+    }
+  }
+}

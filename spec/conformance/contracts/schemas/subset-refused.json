@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "subset-refused",
+  "$defs": {
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "pattern": {"type": "string", "pattern": "^[a-z]+$"},
+        "contains": {"type": "array", "items": {"type": "string"}},
+        "limit": {"allOf": [{"minimum": 0}, {"maximum": 10}]},
+        "mode": {"if": {"const": "a"}, "then": {"type": "string"}},
+        "tags": {"type": "object", "patternProperties": {"^x-": {"type": "string"}}}
+      },
+      "required": ["pattern"],
+      "additionalProperties": {"not": {"type": "null"}}
+    },
+    "Allowed": {
+      "description": "Every allowed form: a nullable anyOf, a tagged oneOf, a tuple.",
+      "type": "object",
+      "properties": {
+        "maybe": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        "shape": {"oneOf": [
+          {"type": "object", "properties": {"kind": {"const": "circle"}, "r": {"type": "number", "exclusiveMinimum": 0}}, "required": ["kind", "r"]},
+          {"type": "object", "properties": {"kind": {"const": "square"}, "side": {"type": "number"}}, "required": ["kind", "side"]}
+        ]},
+        "point": {"type": "array", "prefixItems": [{"type": "integer"}, {"type": "number"}], "items": false, "minItems": 2, "maxItems": 2}
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "The error envelope of a failed zk2 operation call (spec core.md §5.2), for operations whose types are JSON Schema types: encoded in the operation's `encoding`, JSON or CBOR.",
+  "$defs": {
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": ["invalid_request", "not_found", "unavailable", "forbidden", "fanout_forbidden", "busy", "internal", "app"]
+        },
+        "message": {"type": "string"},
+        "cause": {"enum": ["build", "config", "capability", null]},
+        "detail": {"description": "With `app` only: the value of the operation's declared `error` type, inline."}
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

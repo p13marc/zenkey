@@ -1,6 +1,6 @@
 # zk2 conformance fixtures
 
-Seeded by `zenkey-model` (#608); #607 grows them into the full suite. An
+Seeded by `zenkey-model` (#608), completed by #607. The normative text they check is [`../core.md`](../core.md). An
 implementation conforms when it produces every `expect` here. The Rust
 runner is `zenkey-model/tests/conformance.rs`; the Python implementation
 (#609) runs the same files.
@@ -12,6 +12,11 @@ runner is `zenkey-model/tests/conformance.rs`; the Python implementation
 | [`templates.json`](templates.json) | Templates + resource chunks → the winning template (most-literal-first, r3.3 D1) and its unslugged bindings, or `null`. |
 | [`contracts/`](contracts/) | `<stem>.toml` → the sorted diagnostic codes and the fingerprint (`expect.json`), plus the canonical JCS bytes of a valid contract (`<stem>.canonical.json`). |
 | [`bundles/`](bundles/) | `<name>.bundle.json` → verified with its fingerprint, or refused with a tag (`expect.json`). Built from `seed.toml`. |
+| [`sets/`](sets/) | A directory of contracts → the set checks' codes (E035, E036). Hand-written. |
+| [`history/`](history/) | A `.history` root → its problems as `[at, tag]`. Hand-written. |
+| [`descriptors/`](descriptors/) | A descriptor document → its `D…` codes, checked against `contracts/nav.v2.toml` (`expect.json`). |
+| [`errors/`](errors/) | An error envelope and its Zenoh encoding → the decoded envelope, or a refusal tag. Written by an encoder independent of the reference implementation. |
+| [`compat/`](compat/) | Old/new payload schemas, contract pairs, and transitive histories → the FULL_TRANSITIVE class (`expect.json`). Evaluated by the classifier (#618); until then, the runner checks that every input loads. |
 
 ## What the contract fixtures pin
 

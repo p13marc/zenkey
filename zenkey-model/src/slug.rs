@@ -6,9 +6,9 @@
 //! chunk under zk2.
 //!
 //! Rules:
-//! - **IPs are always slugged**, even charset-legal dotted IPv4 (dotted forms
-//!   are non-canonical chunks). IPv6 is canonicalized per RFC 5952 and IPv4 to
-//!   minimal dotted-quad first, then `.`/`:` → `-`.
+//! - **No IP special case.** v1's `ip_slug` (dotted forms → `-`) is not
+//!   part of zk2: an IP value is canonicalized by its owner (RFC 5952, minimal
+//!   dotted-quad) and then slugged like any value (spec `core.md` §1.4).
 //! - Other values (unit names, filenames, device names) stay literal when
 //!   already legal per the chunk charset *and* not starting with the reserved
 //!   prefix `x-`; otherwise the chunk is `x-` plus an escaped body in which
@@ -18,22 +18,7 @@
 //!   not injective. [`chunk_unslug`] is the decoder, shipped beside the
 //!   encoder as the RFC requires.
 
-use std::net::IpAddr;
-
 use crate::chunk::is_plain_chunk as is_valid_plain_chunk;
-
-/// Slug an IP address (RFC 03 §2). `std`'s `Display` for `Ipv6Addr` is
-/// RFC 5952-conformant (lowercase, `::` compression), so parsing + formatting
-/// *is* the canonicalization.
-pub fn ip_slug(ip: IpAddr) -> String {
-    ip.to_string().replace(['.', ':'], "-")
-}
-
-/// Parse-and-slug a textual IP; returns `None` when the text is not an IP
-/// (callers then fall back to [`chunk_slug`] for hostnames).
-pub fn ip_slug_str(text: &str) -> Option<String> {
-    text.parse::<IpAddr>().ok().map(ip_slug)
-}
 
 /// Lowercase a ULID-shaped identifier for key encoding — or refuse.
 ///
@@ -182,23 +167,6 @@ pub fn chunk_unslug(chunk: &str) -> Option<String> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-
-    #[test]
-    fn ipv4_always_slugged() {
-        assert_eq!(ip_slug_str("10.0.0.7").unwrap(), "10-0-0-7");
-        assert_eq!(ip_slug_str("93.184.216.34").unwrap(), "93-184-216-34");
-    }
-
-    #[test]
-    fn ipv6_rfc5952_canonical_before_slugging() {
-        // Two spellings of one address MUST slug identically (RFC 03 §2).
-        let a = ip_slug_str("2001:db8::1").unwrap();
-        let b = ip_slug_str("2001:db8:0:0:0:0:0:1").unwrap();
-        let c = ip_slug_str("2001:DB8::1").unwrap();
-        assert_eq!(a, "2001-db8--1");
-        assert_eq!(a, b);
-        assert_eq!(a, c);
-    }
 
     /// The corpus every slug property is checked over: the RFC's motivating
     /// counterexamples, boundary bytes, both v1.31 collision pairs, and the

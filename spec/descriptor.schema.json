@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Descriptor",
+  "description": "One instance's descriptor.",
+  "type": "object",
+  "properties": {
+    "capabilities": {
+      "description": "The capabilities this instance holds, naming the `capability:` gates\nof its contracts.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "format": {
+      "description": "`zk2-descriptor/0.1`.",
+      "type": "string"
+    },
+    "instance": {
+      "description": "The instance id: 16 lowercase hex digits.",
+      "type": "string"
+    },
+    "interfaces": {
+      "description": "The interfaces this instance implements.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/InterfaceEntry"
+      }
+    },
+    "meta": {
+      "description": "Host, process, build, zid: informative, never interpreted.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "profiles": {
+      "description": "The profiles this instance follows, as `<name>.v<major>`.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "requires": {
+      "description": "Every requirement, with its bindings as declared (R3).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RequireEntry"
+      }
+    },
+    "service": {
+      "description": "`<system>/<service>`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "service",
+    "instance",
+    "interfaces"
+  ],
+  "$defs": {
+    "Cause": {
+      "description": "Why a resource is absent here (r3.3 D4).",
+      "type": "string",
+      "enum": [
+        "build",
+        "config",
+        "capability"
+      ]
+    },
+    "InterfaceEntry": {
+      "description": "One implemented interface.",
+      "type": "object",
+      "properties": {
+        "cardinality": {
+          "description": "A lower population bound for this instance, per templated resource,\nkeyed `<kind token>/<template>`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "default": {}
+        },
+        "contract": {
+          "description": "The contract's fingerprint, `sha256:` + 64 lowercase hex digits.",
+          "type": "string"
+        },
+        "iface": {
+          "description": "`<name>.v<major>`.",
+          "type": "string"
+        },
+        "minor": {
+          "description": "The contract's informative minor.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "unavailable": {
+          "description": "Optional resources that are absent here although no missing\ncapability implies it.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Unavailable"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "iface",
+        "contract",
+        "minor"
+      ]
+    },
+    "RequireEntry": {
+      "description": "One requirement and its bindings.",
+      "type": "object",
+      "properties": {
+        "bindings": {
+          "description": "Service addresses, `<system>/<service>`; either chunk may be `*`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "declared_by": {
+          "description": "The interface whose contract declares the role, or `null` when the\ncomponent's own manifest does.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "interface": {
+          "description": "The required interface, `<name>.v<major>`.",
+          "type": "string"
+        },
+        "params": {
+          "description": "Template parameters bound by the binding (R2): parameter name →\n`self.system`, `self.service`, or a value.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "role": {
+          "description": "The role's name, `[a-z][a-z0-9_]*`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "interface",
+        "bindings"
+      ]
+    },
+    "Unavailable": {
+      "description": "An optional resource this instance does not expose.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/Cause"
+        },
+        "reason": {
+          "description": "For a human; never parsed.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "resource": {
+          "description": "`<kind token>/<template>`, as in `state/covariance` or `@op/arm`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resource",
+        "cause"
+      ]
+    }
+  }
+}

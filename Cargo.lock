@@ -8634,6 +8634,7 @@ name = "zenkey-model"
 version = "0.20.0"
 dependencies = [
  "base64 0.23.1",
+ "ciborium",
  "prost",
  "prost-reflect",
  "prost-types",

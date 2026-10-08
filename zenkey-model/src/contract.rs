@@ -328,6 +328,18 @@ fn resolve(
     });
     check_shapes(file, cx.report);
     check_overlaps(&resources, cx.report);
+    // Member keys carry no template (r3.3 D9b), so one interface has at most
+    // one `epoch` template: a second would share its member keys.
+    let mut epochs = file.resources.iter().filter(|(_, s)| s.epoch.is_some());
+    if epochs.next().is_some() {
+        for (raw, _) in epochs {
+            cx.report.push(Diagnostic::error(
+                "E022",
+                at_res(raw),
+                "a second `epoch` template in one interface: member keys carry no template",
+            ));
+        }
+    }
     for (raw, spec) in &file.resources {
         if let Some(d) = &spec.deprecated
             && let Some(to) = &d.replaced_by
@@ -471,6 +483,7 @@ fn spec_fields(s: &ResourceSpec) -> Vec<&'static str> {
 
 fn check_defaults(cx: &mut Ctx<'_>) {
     check_annotations(&cx.base.annotations, "defaults", &cx.profiles, cx.report);
+    check_history(cx.base.history.as_ref(), "defaults", cx.report);
     for kind in [Kind::Stream, Kind::State, Kind::Event, Kind::Operation] {
         let Some(b) = cx.defaults.for_kind(kind) else {
             continue;
@@ -532,7 +545,14 @@ fn check_annotations(
     profiles: &BTreeSet<String>,
     report: &mut Report,
 ) {
-    for k in map.keys() {
+    for (k, v) in map {
+        if has_datetime(v) {
+            report.push(Diagnostic::error(
+                "E020",
+                at,
+                format!("annotation {k:?}: a TOML datetime has no JSON value"),
+            ));
+        }
         let Some((p, key)) = k.rsplit_once('.') else {
             report.push(Diagnostic::error(
                 "E020",
@@ -562,6 +582,17 @@ fn check_annotations(
                 format!("annotation {k:?} is not in {p}'s interim vocabulary {keys:?}"),
             ));
         }
+    }
+}
+
+/// A TOML datetime reaches serde as an object with this private key.
+fn has_datetime(v: &Value) -> bool {
+    match v {
+        Value::Object(m) => {
+            m.contains_key("$__toml_private_datetime") || m.values().any(has_datetime)
+        }
+        Value::Array(a) => a.iter().any(has_datetime),
+        _ => false,
     }
 }
 

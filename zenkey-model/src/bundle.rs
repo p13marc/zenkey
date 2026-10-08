@@ -15,7 +15,7 @@
 //! always produces the same bytes. `extras` (`views.v1` documents, D18) are
 //! carried and hashed, never interpreted.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
@@ -51,6 +51,8 @@ pub enum BundleError {
     SchemaHash { id: String, got: String },
     #[error("extra {id}: its content hashes to {got}")]
     ExtraHash { id: String, got: String },
+    #[error("the extras are not exactly the artifacts the contract references: {0}")]
+    Extras(String),
     #[error("the bundle's fingerprint is {got}, not the expected {want}")]
     Fingerprint { got: Fingerprint, want: Fingerprint },
 }
@@ -70,6 +72,7 @@ impl BundleError {
             Self::SchemaKind { .. } => "schema_kind",
             Self::SchemaHash { .. } => "schema_hash",
             Self::ExtraHash { .. } => "extra_hash",
+            Self::Extras(_) => "extras",
             Self::Fingerprint { .. } => "fingerprint",
         }
     }
@@ -234,6 +237,15 @@ impl Bundle {
                 });
             }
         }
+        let referenced = referenced_extras(&contract);
+        let carried: BTreeSet<String> = extras.keys().cloned().collect();
+        if referenced != carried {
+            let missing: Vec<_> = referenced.difference(&carried).collect();
+            let unreferenced: Vec<_> = carried.difference(&referenced).collect();
+            return Err(BundleError::Extras(format!(
+                "missing {missing:?}, unreferenced {unreferenced:?}"
+            )));
+        }
         Ok(Self {
             contract,
             schemas,
@@ -258,6 +270,20 @@ impl Bundle {
 
 fn shape(s: &str) -> BundleError {
     BundleError::Shape(s.to_owned())
+}
+
+/// The artifacts a canonical contract references as extras: every
+/// `views.document` annotation value (r3.3 D18), the only extra-carrying
+/// annotation in this version.
+fn referenced_extras(contract: &Value) -> BTreeSet<String> {
+    contract
+        .get("resources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r.get("annotations")?.get("views.document")?.as_str())
+        .map(str::to_owned)
+        .collect()
 }
 
 #[cfg(test)]

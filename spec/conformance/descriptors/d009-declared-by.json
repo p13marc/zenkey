@@ -1,0 +1,44 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/navigation",
+ "instance": "3fa9c2d41b7e0012",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+   "minor": 1,
+   "unavailable": [
+    {
+     "resource": "state/diagnostics",
+     "cause": "config",
+     "reason": "diagnostics disabled"
+    }
+   ],
+   "cardinality": {
+    "state/tracks/{track}": 20
+   }
+  }
+ ],
+ "capabilities": [
+  "gnss"
+ ],
+ "requires": [
+  {
+   "role": "cmd",
+   "interface": "twist_cmd.v1",
+   "declared_by": "geo.v1",
+   "bindings": [
+    "vehicle-01/safety",
+    "vehicle-01/*"
+   ]
+  }
+ ],
+ "profiles": [
+  "freshness.v1"
+ ],
+ "meta": {
+  "host": "h-3fa9c2d41b7e",
+  "build": "1.0.0",
+  "zid": "0123456789abcdef"
+ }
+}

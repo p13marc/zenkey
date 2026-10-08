@@ -1,5 +1,9 @@
 {
   "cases": {
+    "contract-schemas-not-a-list.bundle.json": {
+      "error": "shape",
+      "ok": false
+    },
     "duplicate-key.bundle.json": {
       "error": "json",
       "ok": false
@@ -8,12 +12,29 @@
       "error": "extra_hash",
       "ok": false
     },
+    "extras-unreferenced.bundle.json": {
+      "error": "extras",
+      "ok": false
+    },
+    "fingerprint.bundle.json": {
+      "error": "fingerprint",
+      "expect_fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "ok": false
+    },
     "format.bundle.json": {
       "error": "format",
       "ok": false
     },
     "missing-schema.bundle.json": {
       "error": "missing_schema",
+      "ok": false
+    },
+    "no-contract.bundle.json": {
+      "error": "shape",
+      "ok": false
+    },
+    "not-utf8.bundle.json": {
+      "error": "shape",
       "ok": false
     },
     "restrictions.bundle.json": {
@@ -30,6 +51,10 @@
     },
     "schema-kind.bundle.json": {
       "error": "schema_kind",
+      "ok": false
+    },
+    "unknown-member.bundle.json": {
+      "error": "shape",
       "ok": false
     },
     "unlisted-schema.bundle.json": {

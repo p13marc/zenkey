@@ -118,6 +118,53 @@
       "templates": [
         "interfaces/{iface}"
       ]
+    },
+    {
+      "chunks": [
+        "a",
+        "x-ABC"
+      ],
+      "expect": null,
+      "templates": [
+        "a/{x}"
+      ]
+    },
+    {
+      "chunks": [
+        "a",
+        "b",
+        "c"
+      ],
+      "expect": {
+        "bindings": {
+          "y": [
+            "c"
+          ]
+        },
+        "winner": "a/b/{y}"
+      },
+      "templates": [
+        "a/b/{y}",
+        "a/{x}/{z}"
+      ]
+    },
+    {
+      "chunks": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "bindings": {
+          "x": [
+            "b"
+          ]
+        },
+        "winner": "a/{x}"
+      },
+      "templates": [
+        "a/{x...}",
+        "a/{x}"
+      ]
     }
   ],
   "description": "Template matching and most-literal-first precedence (r3.3 D1). `expect` is the winning template with its unslugged bindings, or null when none matches."

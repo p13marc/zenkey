@@ -17,7 +17,9 @@ pub enum Severity {
 /// One finding about a contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
-    /// `E…` for errors, `W…` for warnings; stable across releases.
+    /// `E…` for contract errors, `W…` for contract warnings, `D…` for
+    /// descriptor findings (`spec/conformance/descriptors/`); stable across
+    /// releases.
     pub code: &'static str,
     pub severity: Severity,
     /// Where: `interface`, `schemas`, `resources."<template>"`, `requires.<role>`, …
@@ -100,12 +102,56 @@ impl fmt::Display for Report {
 /// the contract lints cite this table.
 pub const CODES: &[(&str, &str)] = &[
     (
+        "D000",
+        "the descriptor is not strict JSON, or does not fit the record's shape",
+    ),
+    (
+        "D001",
+        "the descriptor's `format` is not zk2-descriptor/0.1",
+    ),
+    (
+        "D002",
+        "`service` is not <system>/<service>, or `instance` is not 16 lowercase hex digits",
+    ),
+    (
+        "D003",
+        "an interface entry's id or contract fingerprint is invalid, or the interface is listed twice",
+    ),
+    (
+        "D004",
+        "an interface entry names a contract revision that was not supplied",
+    ),
+    (
+        "D005",
+        "`unavailable` names a resource the contract does not declare, or a required one",
+    ),
+    (
+        "D006",
+        "`unavailable` lists a resource that a capability not held already implies (not compact)",
+    ),
+    (
+        "D007",
+        "a `cardinality` entry names no templated resource, or is not within 1..=the contract's ceiling",
+    ),
+    (
+        "D008",
+        "a capability name is not [a-z0-9][a-z0-9_.-]*, or is listed twice",
+    ),
+    (
+        "D009",
+        "a requirement entry is invalid (role, interface, declared_by, bindings)",
+    ),
+    ("D010", "a profile id is not <name>.v<major>"),
+    (
         "E000",
         "the file is not valid TOML, or does not fit the authoring format's shape",
     ),
     ("E001", "interface name or major invalid"),
     ("E002", "a `uses` entry is not a profile id <name>.v<major>"),
-    ("E010", "template syntax"),
+    (
+        "E010",
+        "template syntax (a literal is a plain chunk not starting with x-)",
+    ),
     (
         "E011",
         "template parameters and the `params` table disagree",
@@ -138,12 +184,12 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     (
         "E020",
-        "annotation key is not <profile>.<key>, or its profile is not in `uses`",
+        "annotation key is not <profile>.<key>, its profile is not in `uses`, or its value holds a TOML datetime",
     ),
     ("E021", "two templates under one kind token share a shape"),
     (
         "E022",
-        "`epoch` does not name one single-chunk parameter of the template",
+        "`epoch` does not name one single-chunk parameter of the template, or a second template of the interface declares `epoch`",
     ),
     ("E023", "a type reference does not resolve"),
     (
@@ -156,7 +202,10 @@ pub const CODES: &[(&str, &str)] = &[
     ),
     ("E026", "`rate` or `retention` syntax"),
     ("E027", "a canonical string is not printable ASCII"),
-    ("E028", "a canonical integer is outside ±(2^53−1)"),
+    (
+        "E028",
+        "an integer in the canonical contract or a JSON Schema artifact is outside ±(2^53−1)",
+    ),
     (
         "E029",
         "a schema file is missing, unreadable, or does not compile",
@@ -182,6 +231,10 @@ pub const CODES: &[(&str, &str)] = &[
     (
         "E036",
         "two contract files declare the same interface id (set check)",
+    ),
+    (
+        "E037",
+        "a JSON Schema uses a keyword outside the zk2 subset (pattern, allOf, not, if/then/else, …)",
     ),
     (
         "W101",
@@ -220,7 +273,7 @@ mod tests {
         }
         for (c, _) in CODES {
             let ok = c.len() == 4
-                && (c.starts_with('E') || c.starts_with('W'))
+                && (c.starts_with('D') || c.starts_with('E') || c.starts_with('W'))
                 && c[1..].bytes().all(|b| b.is_ascii_digit());
             assert!(ok, "{c}");
         }
@@ -234,6 +287,7 @@ mod tests {
             include_str!("contract.rs"),
             include_str!("schema.rs"),
             include_str!("canonical.rs"),
+            include_str!("descriptor.rs"),
         ];
         let mut found = 0;
         for text in src {
@@ -241,7 +295,7 @@ mod tests {
             for i in 0..b.len().saturating_sub(5) {
                 let w = &b[i..i + 6];
                 let is_code = w[0] == b'"'
-                    && (w[1] == b'E' || w[1] == b'W')
+                    && (w[1] == b'D' || w[1] == b'E' || w[1] == b'W')
                     && w[2..5].iter().all(u8::is_ascii_digit)
                     && w[5] == b'"';
                 if is_code {

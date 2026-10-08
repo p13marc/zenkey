@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 base64 = { workspace = true }
 schemars = { workspace = true }
 prost = { workspace = true }
+ciborium = { workspace = true }
 prost-reflect = { workspace = true }
 prost-types = "0.14"
 protox = "0.9"

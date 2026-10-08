@@ -1,0 +1,12 @@
+[interface]
+name = "drive"
+major = 1
+minor = 0
+
+[resources.status]
+kind = "state"
+type = { raw = "application/octet-stream" }
+
+[requires.cmd]
+interface = "cmd.v1"
+resources = ["twist", "wrench"]

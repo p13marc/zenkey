@@ -38,10 +38,40 @@ pub fn append(root: &Path, c: &Contract) -> std::io::Result<(PathBuf, bool)> {
     Ok((path, true))
 }
 
+/// One problem found in a history directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    /// `<iface dir>` or `<iface dir>/<file>`.
+    pub at: String,
+    /// A stable name for the problem, as `spec/conformance/history/` spells
+    /// it: `directory`, `file_name`, `io`, `interface`, `jcs`, or a bundle
+    /// refusal tag ([`crate::bundle::BundleError::tag`]).
+    pub tag: &'static str,
+    pub message: String,
+}
+
 /// Verifies a history directory. Returns one message per problem.
 #[must_use]
 pub fn check(root: &Path) -> Vec<String> {
+    check_tagged(root)
+        .into_iter()
+        .map(|p| format!("{}: {}", p.at, p.message))
+        .collect()
+}
+
+/// Verifies a history directory: the layout, each bundle's integrity, its
+/// fingerprint against its file name, its interface against its directory,
+/// and its JCS form.
+#[must_use]
+pub fn check_tagged(root: &Path) -> Vec<Problem> {
     let mut out = Vec::new();
+    let mut push = |at: &str, tag: &'static str, message: String| {
+        out.push(Problem {
+            at: at.to_owned(),
+            tag,
+            message,
+        });
+    };
     let Ok(dirs) = std::fs::read_dir(root) else {
         return out;
     };
@@ -50,13 +80,15 @@ pub fn check(root: &Path) -> Vec<String> {
     for d in dirs {
         let name = d.file_name().to_string_lossy().into_owned();
         let Ok(iface) = name.parse::<IfaceId>() else {
-            out.push(format!(
-                "{name}: not an interface directory <name>.v<major>"
-            ));
+            push(
+                &name,
+                "directory",
+                "not an interface directory <name>.v<major>".into(),
+            );
             continue;
         };
         let Ok(files) = std::fs::read_dir(d.path()) else {
-            out.push(format!("{name}: not a directory"));
+            push(&name, "directory", "not a directory".into());
             continue;
         };
         let mut files: Vec<_> = files.flatten().collect();
@@ -68,26 +100,34 @@ pub fn check(root: &Path) -> Vec<String> {
                 .strip_suffix(".bundle.json")
                 .and_then(|h| Fingerprint::parse(&format!("sha256:{h}")).ok())
             else {
-                out.push(format!("{at}: not <64 lowercase hex>.bundle.json"));
+                push(
+                    &at,
+                    "file_name",
+                    "not <64 lowercase hex>.bundle.json".into(),
+                );
                 continue;
             };
             let bytes = match std::fs::read(f.path()) {
                 Ok(b) => b,
                 Err(e) => {
-                    out.push(format!("{at}: {e}"));
+                    push(&at, "io", e.to_string());
                     continue;
                 }
             };
             match Bundle::verify_expecting(&bytes, &fp) {
-                Err(e) => out.push(format!("{at}: {e}")),
+                Err(e) => push(&at, e.tag(), e.to_string()),
                 Ok(b) => {
                     if b.contract.get("interface").and_then(|v| v.as_str())
                         != Some(&iface.to_string())
                     {
-                        out.push(format!("{at}: the bundle's interface is not {iface}"));
+                        push(
+                            &at,
+                            "interface",
+                            format!("the bundle's interface is not {iface}"),
+                        );
                     }
                     if b.to_bytes() != bytes {
-                        out.push(format!("{at}: not in JCS form"));
+                        push(&at, "jcs", "not in JCS form".into());
                     }
                 }
             }

@@ -1,0 +1,20 @@
+// The error envelope of a failed zk2 operation call (spec core.md §5.2).
+//
+// A protobuf operation replies with `reply_err`, this message as the
+// payload, and the Zenoh encoding `application/protobuf` with the schema
+// suffix `zk2.core.v1.Error`.
+syntax = "proto3";
+
+package zk2.core.v1;
+
+message Error {
+  // invalid_request | not_found | unavailable | forbidden | fanout_forbidden
+  // | busy | internal | app
+  string code = 1;
+  // For a human. Tools never parse it.
+  string message = 2;
+  // With `unavailable` only, and then required: build | config | capability.
+  optional string cause = 3;
+  // With `app` only: the operation's declared `error` message, encoded.
+  optional bytes detail = 4;
+}
