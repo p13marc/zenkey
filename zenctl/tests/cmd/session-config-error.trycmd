@@ -8,9 +8,20 @@ touches no network at all: the file is rejected before a session is attempted,
 which is why it can be a test.
 
 ```console
-$ zenctl topic list --zenoh-config tests/cmd/fixtures/namespaced.json5
+$ zenctl storage list --zenoh-config tests/cmd/fixtures/namespaced.json5
 ? 2
 Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespace ("zensight") — an explorer runs un-namespaced so it sees the wire as it really is (RFC 09 §5); remove the namespace from the file, or use --base to name the deployment
+
+```
+
+zk2's resolved verbs *do* run in a namespace (decided 2026-10-08, #612) — but
+the namespace is `--namespace`'s to set (`--base` is the same flag), so a file
+that sets one of its own is refused the same way: one source, the caller's.
+
+```console
+$ zenctl service list --zenoh-config tests/cmd/fixtures/namespaced.json5
+? 2
+Error: zenoh config tests/cmd/fixtures/namespaced.json5: sets a session namespace ("zensight") — the namespace has one source, the caller's (--namespace, alias --base); remove it from the file
 
 ```
 
@@ -21,7 +32,7 @@ a typo that read as an empty fleet. The missing protocol is the typo worth
 naming, so it gets its own sentence; it is refused before any session exists.
 
 ```console
-$ zenctl node list -c 127.0.0.1:7461 --base prod
+$ zenctl service list -c 127.0.0.1:7461 --namespace prod
 ? 2
 Error: connect endpoint "127.0.0.1:7461": has no protocol — an endpoint is <protocol>/<address>, so this is probably tcp/127.0.0.1:7461
 
@@ -53,7 +64,7 @@ what #209 changed: resolution used to happen at whichever accessor was reached
 first, so a bad name could surface after output had already been printed.
 
 ```console
-$ zenctl topic list --context no-such-context
+$ zenctl service list --context no-such-context
 ? 2
 Error: context "no-such-context" not found in [..]config.toml — `zenctl context list`
 

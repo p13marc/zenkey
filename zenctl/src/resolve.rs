@@ -226,7 +226,7 @@ pub mod notes {
         Note::coverage(format!(
             "the fleet does not agree with itself about {producer}: {} — \
              this answer used one of them, and which one is arrival order \
-             (`zenctl registry diff --registry <dir>` names them)",
+             (`zenctl doctor --registry <dir>` compares each origin)",
             who.join(", ")
         ))
         .cite("RFC 13 §3 O4")
@@ -245,7 +245,7 @@ pub mod notes {
             crate::render::NoteKind::Silence,
             format!(
                 "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-             `zenctl node list --base {base:?}` says who is actually up.\n\
+             `zenctl doctor --base {base:?}` says who is actually up.\n\
              (offline alternative: --registry <dir> with the app's registry TOMLs)"
             ),
         )
@@ -409,7 +409,7 @@ mod tests {
             1,
             "the citation is spent once — `Note::silence` would append a second: {line}"
         );
-        assert!(line.contains("node list --base"), "{line}");
+        assert!(line.contains("doctor --base"), "{line}");
         assert!(
             line.contains("--registry <dir>"),
             "the offline alternative rides along: {line}"

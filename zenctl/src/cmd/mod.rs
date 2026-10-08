@@ -16,12 +16,11 @@
 
 pub mod acl;
 pub mod admin;
-pub mod base;
 pub mod bench;
 pub mod blob;
-pub mod budget;
 pub mod cache;
 pub mod call;
+pub mod compat;
 pub mod config;
 pub mod conform;
 pub mod cutover;
@@ -32,15 +31,16 @@ pub mod export;
 pub mod field;
 pub mod generate;
 pub mod get;
-pub mod interface;
+pub mod graph;
+pub mod iface;
 pub mod key;
-pub mod node;
+pub mod namespace;
 pub mod probe;
 pub mod publish;
 pub mod rate;
 pub mod record;
-pub mod registry;
 pub mod replay;
+pub mod retired;
 pub mod sample;
 pub mod schema;
 pub mod scout;
@@ -49,10 +49,10 @@ pub mod service;
 pub mod snapshot;
 pub mod storage;
 pub mod timeline;
-pub mod topic;
 pub mod watch;
 pub mod watchdog;
 pub mod why;
+pub mod zk2;
 
 use anyhow::Result;
 

@@ -1,0 +1,77 @@
+Namespaces: which deployments are on this bus (#612, FJ4).
+
+The raw half of the FJ decision (2026-10-08): every resolved verb runs *in* one
+namespace, so finding which namespaces exist is asked of a session in none —
+one liveliness read of `**/zk2/*/*/@zk/instance/*`, each token attributed to the
+prefix before its `zk2/`. It replaced v1's `base list`, and like it, it is the
+command to run before you know what to pass to `--namespace`; it takes no
+namespace itself.
+
+```console
+$ zenctl namespace --help
+Deployment namespaces in use on the bus (needs no --namespace)
+
+Usage: zenctl namespace <COMMAND>
+
+Commands:
+  list  The namespaces zk2 services hold instance tokens in
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+
+$ zenctl namespace list --help
+The namespaces zk2 services hold instance tokens in.
+
+The command to run *before* you have a namespace: one liveliness read of `**/zk2/*/*/@zk/instance/*` on a session in no namespace, every token attributed to the prefix before its `zk2/`. The bus-root deployment (no namespace) is listed as `(empty)` and selected with `--namespace ''`.
+
+Usage: zenctl namespace list [OPTIONS]
+
+Options:
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

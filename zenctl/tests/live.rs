@@ -42,55 +42,11 @@ fn exits(run: &Run, code: i32) {
     assert_eq!(run.code, code, "wrong exit code\n{run}");
 }
 
-// ── listings ────────────────────────────────────────────────────────────
-
-/// `node list` sees the producer by its `alive` token (RFC 04 §5).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn node_list_sees_the_producer() {
-    let bus = Bus::up().await;
-    let node = json!({ "row": "node", "origin": HOST, "producer": PRODUCER });
-    let run = bus
-        .until(&["node", "list", "--format", "ndjson"], |r| {
-            r.code == 0 && r.ndjson().contains(&node)
-        })
-        .await;
-    exits(&run, 0);
-    assert_eq!(run.rows("node"), [node], "exactly the one producer\n{run}");
-}
-
-/// `topic list` reads the subjects off the served slice (RFC 08 §6) — no
-/// `--registry` anywhere.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn topic_list_reads_the_served_slice() {
-    let bus = Bus::up().await;
-    let run = bus
-        .until(&["topic", "list", "--format", "ndjson"], |r| {
-            r.code == 0 && r.rows("subject").len() == 2
-        })
-        .await;
-    exits(&run, 0);
-    let subjects: Vec<(Value, Value, Value)> = run
-        .rows("subject")
-        .into_iter()
-        .map(|r| {
-            (
-                r["path"].clone(),
-                r["class"].clone(),
-                r["type_name"].clone(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        subjects,
-        [
-            (json!("health"), json!("state"), json!("Health")),
-            (json!("cpu"), json!("telemetry"), json!("Cpu")),
-        ],
-        "{run}"
-    );
-}
-
 // ── reads ───────────────────────────────────────────────────────────────
+//
+// v1's listings — `node list`, `topic list` — left with their nouns at FJ4
+// (#612); zk2's `service`, `iface`, `graph` and `namespace` are pinned
+// against live services in `tests/live_zk2.rs`.
 
 /// `get` answers 0 with the stored value, decoded against the served schema;
 /// a key nobody answers is silence, and silence is 2 — never an empty 0

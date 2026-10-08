@@ -10,8 +10,15 @@ against*; the point of that requirement is that "generic explorer tooling — th
 that tooling: nothing application-specific is compiled in.
 
 ```bash
-zenctl node list --base acme -c tcp/127.0.0.1:7447
+zenctl service list --namespace acme -c tcp/127.0.0.1:7447
 ```
+
+**`main` is the zk2 line** (epic #585): the inspection nouns — `service`,
+`iface`, `schema`, `namespace`, and the `graph` and `compat` verbs — read
+zk2's presence, descriptors and contract bundles, through a session opened
+**in** the deployment's namespace (`--namespace`, with `--base` as its alias).
+The rest of the tree is still v1's, ported verb by verb until FJ9; the `v1`
+branch carries the v1 tool whole. See [zk2 inspection](#zk2-inspection).
 
 **For an operator**, in order: [Install](#install) ·
 [Production quickstart](#production-quickstart) ·
@@ -27,7 +34,8 @@ spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it has to be
 told about a *named* base. Left unset, it defaults to the **empty base** — the
 base-less bus-root deployment whose keys start at `v1/`, the RFC v1.6 default —
 so against a default-configured fleet `zenctl` works with no `--base` at all.
-Don't know the base? `zenctl base list` discovers the bases actually in use.
+Don't know the namespace? `zenctl namespace list` finds the ones zk2 services
+use.
 
 **Selectors are wire keys.** `--base` is for discovery and for the selectors
 zenctl composes itself; a selector you type is used exactly as typed. Under
@@ -139,7 +147,7 @@ or `-c tls/other:7447` overrides it for one invocation.
 **3. Ask.**
 
 ```bash
-zenctl node list                                   # who is alive (liveliness roster)
+zenctl service list                                # which zk2 services are up, and what they serve
 zenctl doctor --registry path/to/registry          # does the fleet match what we ship?
 zenctl echo --class state                          # current state traffic, decoded
 ```
@@ -262,15 +270,17 @@ the RFC sections behind each behaviour. Grouped the way the tree is built
 root; judgements are exit-coded):
 
 **Discover — what exists.**
-`zenctl base list` (the deployment bases in use; needs no `--base`) ·
-`zenctl node list|info` (the liveliness roster; one node's producers, versions,
-capabilities) · `zenctl topic list|info` (subjects the registry declares; one
-key refined against it) · `zenctl service list|info` (procedures) ·
-`zenctl interface list|show` (payload types) · `zenctl schema show <producer>`
-(the served `describe` shapes) · `zenctl admin routers|graph` (zenoh's admin
-space: routers and peers with version and locators; the mesh, `--dot` for
-Graphviz) · `zenctl scout` (raw scouting Hellos) · `zenctl key
-includes|intersects|canon` (key-expression algebra, offline).
+`zenctl namespace list` (the zk2 deployment namespaces in use; needs no
+`--namespace`) · `zenctl service list|show` (running services: instances,
+interface tokens and descriptors; one service's descriptor) · `zenctl iface
+list|show` (interfaces: providers, consumers, each revision's contract) ·
+`zenctl schema show <iface> [resource]` (a revision's schema artifacts, from
+its bundle) · `zenctl graph` (the binding graph, `--dot` for Graphviz) ·
+`zenctl compat <old> <new>` (two contract revisions, compatible, review or
+breaking) · `zenctl admin routers|graph` (zenoh's admin space: routers and
+peers with version and locators; the mesh, `--dot` for Graphviz) · `zenctl
+scout` (raw scouting Hellos) · `zenctl key includes|intersects|canon`
+(key-expression algebra, offline).
 
 **Watch — live traffic.**
 `zenctl get <selector>` (a fan-in GET, every reply attributed to its key;
@@ -315,9 +325,6 @@ fleet against the contracts it claims) · `zenctl why <key>` (why it is silent)
 (the bus and its contract as Prometheus metrics, the observer's own blind spots
 included).
 
-**The registry — as a document.** See [below](#registry--the-registry-as-a-document):
-`zenctl registry export|diff|lint|lock|consumers|impact|infer|migrate`.
-
 **Router configuration — generated, then checked.**
 `zenctl storage list` (configured storages, and which declared state they
 cover) · `zenctl storage gen --deployment storages.toml --json5` (the
@@ -336,8 +343,10 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 > retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
 > observation window is `--for <SECS>`; `why` exits 1 on a finding, and a
 > refused input exits 2 everywhere. No aliases, no shims — the old spellings
-> are gone. [`CHANGELOG.md`](CHANGELOG.md) has the full old→new table and the
-> exit-code contract.
+> are gone. FJ4 (#612) moved v1's registry nouns the same way — `topic`,
+> `node`, `base`, `interface` and `registry` → zk2's `service`, `iface`,
+> `schema`, `namespace`, `graph` and `compat`. [`CHANGELOG.md`](CHANGELOG.md)
+> has the full old→new tables and the exit-code contract.
 
 ## Two registry sources, kept visibly apart
 
@@ -347,50 +356,49 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 | **the bus** (default) | each producer's served introspect slice | no | what *does* exist (served) |
 
 The gap between those two is where drift lives, and `doctor` is the command
-that reports it.
+that reports it. These are the v1 verbs' sources; zk2's are below.
+
+## zk2 inspection
+
+The zk2 nouns (#612, FJ4) read no registry slice at all. A zk2 service holds
+an **instance token** and one **interface token** per interface it provides
+(spec §8.1), and serves a **descriptor** (§3.3) naming each interface's full
+contract fingerprint, its tokenless set and its roles' bindings; a contract
+revision travels as a **bundle**, retrieved from its holders by fingerprint
+(§8.4) or loaded offline with `--contracts` (an authoring file, a directory
+of them, or a `.history` root). The resolved verbs open their session **in**
+the deployment's namespace, so they read `zk2/<system>/<service>/…` exactly as
+the deployment's own consumers do.
 
 ```bash
-zenctl topic list --base acme [--producer sysinfo] [--class telemetry] [--type TelemetryPoint]
-zenctl topic list --base acme --deprecated   # + each slice's [[deprecated]] ledger rows
-zenctl topic info --base acme acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
-zenctl service list --base acme [--producer sysinfo]
-zenctl interface list --base acme
-zenctl interface show --base acme TelemetryPoint
-# any of the above, offline:  --registry path/to/registry
+zenctl namespace list -c tcp/127.0.0.1:7447          # which namespaces hold zk2 services (no --namespace)
+zenctl service list --namespace acme [--system host-a]   # instances, tokens beside descriptors; the tokenless set
+zenctl service show host-a/tc --namespace acme       # one service's descriptor (exit 2 when nothing shows)
+zenctl iface list --namespace acme                   # every interface provided or required, and by whom
+zenctl iface show tc.netif.v1 --namespace acme       # providers, consumers, exposure, each revision's contract
+zenctl iface show tc.netif.v1@4f53 --contracts .history   # one revision, held offline: never retrieved
+zenctl schema show camera.v1 image --contracts camera.v1.toml   # a resource's types and documents, no session
+zenctl graph --namespace acme --dot | dot -Tsvg > graph.svg     # the binding graph, never inferred from traffic
+zenctl compat tc.netif.v1 tc.netif.v1.toml --namespace acme     # 0 compatible, 1 review or breaking, 2 no verdict
 ```
 
-`topic info` runs the registry's **parse** direction (RFC 08 §1) — the thing
-that replaced positional `split('/')` re-parsing. Variables come back *named*:
-
-```
-$ zenctl topic info --base acme acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
-key       acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/root/usage_percent
-origin    h-3fa9c2d41b7e
-producer  sysinfo
-class     telemetry
-subject   disk/{mount}/usage_percent
-variables
-  mount = root
-payload   TelemetryPoint
-  (`zenctl schema show sysinfo --type TelemetryPoint` for the served shape)
-qos       sampled
-cardinality  ~512 keys expected
-```
-
-**Declared is not observed.** A pattern with a trailing rest-variable
-(`{device}/{path...}`) fixes a *shape*, not its members — proxy producers
-register that way by design, because their metric tree belongs to the polled
-device. `topic list` flags those `[open-ended]`; `echo` is what
-enumerates them.
+Three honesty rules carry over from v1 and have a place in every report:
+a presence read that ran to its timeout says it is **possibly incomplete** (a
+service missing from it may still be up); a token and a descriptor are **two
+sources** and stay side by side, so "tokenless" (configured) and "no token"
+(missing) never read alike; and what was **not asked** — a descriptor that
+did not answer, a contract never retrieved — renders as `—`, never as empty.
+`compat` runs the contract CI's own classifier (`zk2 contract compat`, spec
+§9.8), so the tool and the build cannot disagree about what breaks.
 
 ## A cheat sheet
 
 ```bash
-zenctl base list -c tcp/127.0.0.1:7447  # discover deployment bases (needs no --base)
-zenctl node list --base acme            # the liveliness roster (--verbose joins introspect)
-zenctl node list --base acme --watch    # …re-rendered per liveliness event (no polling)
+zenctl namespace list -c tcp/127.0.0.1:7447  # discover zk2 namespaces (needs no --namespace)
+zenctl service list --namespace acme    # zk2 services: instances, tokens, descriptors
+zenctl graph --namespace acme           # the binding graph (--dot for Graphviz)
 zenctl echo --base acme                 # subscribe + decode (defaults to <base>/v1/**)
-zenctl topic list --base acme --watch --every 5  # topic/storage/base list poll+diff; +/- marks
+zenctl storage list --base acme --watch --every 5  # poll+diff; +/- marks
 zenctl rate --base acme --per-key       # per-key sample rates; --bytes for bandwidth
 zenctl service call --base acme '*' sysinfo processes --param sort=cpu
 zenctl service call --base acme h-3fa9 netring capture/trigger --body @trigger.json
@@ -419,8 +427,7 @@ zenctl context edit                     # the whole config file, in $EDITOR, val
 `--watch` re-renders on change (appeared rows mark `+` for one cycle,
 disappeared rows linger one cycle marked `-`, and a row whose *value* changed
 shows as both); `--watch --format ndjson` streams one envelope plus its rows
-per cycle, tagged with a monotonic `tick`. `node list --watch` is event-driven
-— a producer stopping shows within one liveliness event, not one poll interval.
+per cycle, tagged with a monotonic `tick`.
 
 ## What `--format` promises
 
@@ -518,50 +525,18 @@ letting them look alike.
 `pub` also prints a matching note ("a subscriber currently matches …")
 — a routing fact about *this* publisher, never a fleet verdict.
 
-`node list` is a liveliness query on `<base>/v1/*/state/*/alive` — RFC 04 §5's
-"entire fleet-presence protocol, zero payload bytes". The token *key* is the
-record.
+`service list` is a liveliness query on `zk2/*/*/@zk/**` — zk2's presence
+protocol (spec §8.1), zero payload bytes: the token *key* is the record, and
+the descriptor is one GET per instance.
 
 `echo` walks wire key → subject → payload type → value with nothing
 compiled in: the registry slices bind one payload type per subject (P5), and
 the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
 tagged with the declared type name).
 
-`schema show <producer>` dumps the served `describe` reply (RFC 08 §7) and
-`interface show <Type> --schema` asks every producer that carries the type, so
-two producers disagreeing about one name shows up as the drift it is. A
-producer serving no `describe` says so — undescribed is not shapeless.
-
-## `registry` — the registry as a document
-
-```bash
-zenctl registry export --as toml       # round-trips back through --registry (--as kdl too)
-zenctl registry export --as jsonschema # bundled from the served describe sets
-zenctl registry export --as asyncapi   # channels from subjects, ops from procedures
-zenctl registry diff                   # local --registry dirs vs what the fleet serves
-zenctl registry lint <dir>             # the consumer build's own RFC 08 §5 lints
-zenctl registry lock <dir>             # write/update registry.lock; an incompatible edit is refused
-zenctl registry consumers sysinfo/health  # who declares a reader of it, one row per session
-zenctl registry impact sysinfo/health  # its readers, storage coverage, family, deprecation — one document
-zenctl registry infer --out draft/ --for 60   # a draft registry from the wire, marked draft
-zenctl registry migrate --to kdl registry --out registry-kdl  # TOML → KDL, all or nothing
-```
-
-A registry directory may be written in TOML or in KDL — the same document in
-two spellings (RFC 08 §5.1) — and every `--registry <dir>` reads either.
-`lock` keeps the compatibility pins (RFC 08 §3.1): additive evolution and
-`[[deprecated]]` retirement regenerate cleanly, an incompatible change to an
-existing path is refused, and `--force` overrides out loud. `consumers` and
-`impact` are what to run *before* changing a subject: a declaration is not
-proof of use, and an admin space that does not answer reads "not asked",
-never "nobody". `infer`'s draft is refused by `zenkey-build` until a review
-removes the marker; `registry lint --allow-drafts` checks it meanwhile.
-
-`lint` runs `zenkey-build`'s lints, not a second copy of them — the diagnostic
-is byte-for-byte what the application's `build.rs` would print, which is the
-only version worth having. `diff` is the side-by-side that `doctor` turns into
-judgements: a producer present on one side only is a fact with two very
-different explanations, and the output says which.
+`schema show <iface>` prints a contract revision's schema artifacts from its
+bundle (spec §9.5), verified against the revision's fingerprint: a JSON
+Schema as carried, a protobuf descriptor set as its messages and enums.
 
 ## Completions
 
@@ -637,7 +612,8 @@ wrong `--base` looks exactly like that, and it is never green (#510).
 
 - **Silence is never a verdict.** RFC 05 §3.1: an empty reply set conflates an
   offline host, a mistyped origin, and a procedure that is not served. `service
-  call` says so rather than guessing; `node list` is what attributes it.
+  call` says so rather than guessing; presence (`service list`) is what
+  attributes it.
 - **Errors are never dressed up as success.** RFC 05 §3: a value reply always
   means success, a failure always rides `reply_err`. An error reply goes to
   stderr with its `error/...` name.
@@ -649,11 +625,12 @@ wrong `--base` looks exactly like that, and it is never green (#510).
   production fleet.
 - **Payload schemas are shown, not invented.** RFC 01 §5 keeps payload
   *definitions* with the owning applications, and this tool has no opinion
-  about their contents. But since RFC 08 §7, a producer **serves** its shapes
-  on `@rpc/<producer>/describe`, so `zenctl schema show <producer>` and
-  `interface show --schema` print served data rather than sending you to
-  `curl`. (This bullet used to say the opposite; it predated §7.) A producer
-  serving no `describe` degrades honestly — "undescribed" is not "no shape".
+  about their contents. But a zk2 contract's bundle **carries** its shapes
+  (spec §9.5), so `zenctl schema show <iface>` prints carried data rather
+  than sending you to the application's source. (This bullet used to say the
+  opposite; it predated RFC 08 §7's served `describe`, which v1's
+  `check schema` still reads.) A raw type renders as its media type — the
+  contract says its bytes are not a tool's to read.
 
 ## Fan-in discipline
 

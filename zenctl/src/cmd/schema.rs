@@ -1,64 +1,41 @@
-//! `zenctl schema show <producer>` and `interface show --schema` (issue #51)
-//! — the served payload shapes, shown. Plus [`check`](check), which answers
-//! under `check schema` (#307) and reads the same served documents.
+//! `zenctl schema show` (#612, FJ4) — one zk2 revision's schema artifacts,
+//! as its bundle carries them — and [`check`](check), which answers under
+//! `check schema` (#307) and still checks a payload against a v1 producer's
+//! served `describe` or a SchemaSet file until FJ8 re-cuts it.
 //!
-//! `schema <producer>` used to be its own spelling: a noun that was also a
-//! verb, with `schema check` hanging off it and a bare `zenctl schema`
-//! exiting **1** through an `anyhow` message where every other missing
-//! argument in this tool exits 2. `show` is the verb it always was.
-//!
-//! zenctl's README used to *decline* to show schemas ("maps the type
-//! vocabulary rather than pretending to reproduce the shapes"). That stance
-//! predates RFC 08 §7: since `describe` and `SchemaStore` shipped, the shapes
-//! are **served data**, not something a tool would be inventing. Refusing to
-//! print them only sent people to `curl`.
-//!
-//! Two honesty rules the whole command hangs on:
-//!
-//! - a producer serving no `describe` is a *degradation*, not an error — §7 is
-//!   a SHOULD, and silence about a type is not a claim about it;
-//! - the same type name served with different hashes is RFC 08 §7's **drift**
-//!   finding, and `interface show --schema` is where a user is already looking
-//!   at that type, so it surfaces there rather than only in `doctor`.
+//! v1's `schema show <producer>` read a producer's served `describe`. In zk2
+//! the shapes travel *with the contract*: a bundle carries every schema
+//! artifact its types live in (spec §9.5), verified against the revision's
+//! fingerprint, so a tool that was never compiled against the contract reads
+//! them from there — offline from `--contracts`, or retrieved from the
+//! revision's holders (spec §8.4).
 
 use anyhow::Result;
 
 use crate::Bus;
+use crate::bus::Deployment;
+use crate::cmd::zk2;
+use crate::exit::unaskable;
 
 /// The verdict verb's name, spelled once (#355) — the dispatcher
 /// uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check schema");
 
-/// `zenctl schema show <producer> [--type X] [--full]`.
+/// `schema show <iface>[@<fingerprint>] [resource] [--full]`.
+///
+/// No session when `--contracts` settles which revision is meant; exit 2
+/// when no revision can be had (`crate::exit::Unanswered`), and when the
+/// revision declares no such resource (the input, refused).
 pub async fn show(cli: crate::cli::SchemaShowArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
-    let crate::cli::SchemaShowArgs {
-        producer,
-        type_name: type_filter,
-        full,
-        bus: _,
-    } = cli;
-    let (producer, type_filter) = (producer.as_str(), type_filter.as_deref());
-    let session = args.session().await?;
-    // Slices enrich the dump — the *types* come from the producer's served
-    // `describe` (`zenkey_fleet::schema_dump`); slices only compute
-    // which declared ones are missing. `None` here is the honest degradation
-    // (`slices_optional` says so out loud), and it stays `None` into the dump
-    // so "totality not checked" cannot render as "nothing missing"
-    // (RFC 09 §5.1 O4; #246).
-    let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let report = zenkey_fleet::schema_dump(
-        &store,
-        &session,
-        slices.as_ref(),
-        producer,
-        type_filter,
-        full,
-    )
-    .await;
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
+    let dep = Deployment::resolve(&cli.ns)?;
+    let contracts = zk2::load_contracts(&cli.contracts)?;
+    let mut session = None;
+    let revision = zk2::revision(&dep, &contracts, &cli.target, &mut session).await?;
+    let documents = cli.full || cli.resource.is_some();
+    let view = revision
+        .schema_view(cli.resource.as_deref(), documents)
+        .map_err(|e| unaskable!("{e}"))?;
+    crate::render::emit_with(&mut std::io::stdout(), &view, dep.format(), dep.color())
 }
 
 /// `zenctl check schema` (#159): one payload against one schema, exit-coded
@@ -196,67 +173,4 @@ fn not_checked(reason: &str) -> ! {
     // the code and the message itself, so it was a fourth statement of a
     // contract `crate::exit` exists to state once.
     ASKING.unobservable(format_args!("not checked: {reason}"))
-}
-
-/// The producers that carry a type name, from the loaded slices — who to ask
-/// for its schema. A type carried nowhere is asked of nobody, which is why
-/// `interface show` refuses an unknown name before this runs.
-pub fn carriers_of(slices: &[zenkey::slice::RegistrySlice], type_name: &str) -> Vec<String> {
-    let mut out: Vec<String> = slices
-        .iter()
-        .filter(|s| {
-            s.subjects.iter().any(|d| d.type_name == type_name)
-                || s.procedures.iter().any(|p| {
-                    p.reply.as_deref() == Some(type_name) || p.request.as_deref() == Some(type_name)
-                })
-                || s.blob
-                    .iter()
-                    .any(|b| b.reference.as_deref() == Some(type_name))
-        })
-        .map(|s| s.name.clone())
-        .collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use zenkey::slice::{BlobDecl, ProcedureDecl, RegistrySlice, SubjectDecl};
-
-    fn slice(name: &str, subject_type: &str, reply: Option<&str>) -> RegistrySlice {
-        let mut subject = SubjectDecl::new("p", zenkey::Class::Telemetry);
-        subject.type_name = subject_type.into();
-        let mut blob = BlobDecl::new(zenkey::BlobTier::Artifact);
-        blob.reference = Some("BlobRef".into());
-        let mut slice = RegistrySlice::new("1.0", "t", name);
-        slice.subjects = vec![subject];
-        slice.blob = vec![blob];
-        slice.procedures = reply
-            .map(|r| {
-                let mut p = ProcedureDecl::new("proc");
-                p.kind = Some(zenkey::ProcedureKind::Read.into());
-                p.reply = Some(r.into());
-                p.idempotent = Some(true);
-                vec![p]
-            })
-            .unwrap_or_default();
-        slice
-    }
-
-    /// Every binding site counts as carrying the type — subject, procedure
-    /// reply *and* request, and a blob reference. Asking only the producers
-    /// that carry it is what keeps `--schema` from fanning out to the fleet.
-    #[test]
-    fn carriers_cover_every_binding_site() {
-        let slices = vec![
-            slice("a", "Point", None),
-            slice("b", "Other", Some("Point")),
-            slice("c", "Other", None),
-        ];
-        assert_eq!(carriers_of(&slices, "Point"), vec!["a", "b"]);
-        assert_eq!(carriers_of(&slices, "BlobRef"), vec!["a", "b", "c"]);
-        assert!(carriers_of(&slices, "Nothing").is_empty());
-    }
 }

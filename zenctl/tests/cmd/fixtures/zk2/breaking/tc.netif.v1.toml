@@ -1,0 +1,42 @@
+# zenctl's compat corpus (#612, FJ4): examples/zk2/tcgui/tc.netif.v1.toml with
+# one breaking change — the `namespaces` state resource removed.
+[interface]
+name    = "tc.netif"
+major   = 1
+minor   = 1
+summary = "Network namespaces and interfaces of one host, and their control"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["../schemas/tc.json"]
+
+[resources."interfaces/{ns}/{iface}"]
+kind        = "state"
+type        = "json:NetworkInterface"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "One interface; a delete means the NIC is gone, is_up = false means disabled."
+annotations = { "freshness.ttl_s" = 60 }
+
+[resources."bandwidth/{ns}/{iface}"]
+kind        = "stream"
+type        = "json:BandwidthUpdate"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+
+[resources."interfaces/{ns}/{iface}/set"]
+kind        = "operation"
+request     = "json:InterfaceControlRequest"
+response    = "json:InterfaceControlResponse"
+error       = "json:TcError"
+params      = { ns = "string", iface = "string" }
+cardinality = 1024
+doc         = "Enable or disable one interface. Kernel side effect: the backend also holds an out-of-bus lock (r3 §3.8)."
+
+[resources.diagnostics]
+kind       = "operation"
+request    = "json:DiagnosticsRequest"
+response   = "json:DiagnosticsResponse"
+idempotent = true
+fanout     = "allowed"
+doc        = "Run interface/TC diagnostics; callable across hosts (zk2/*/tc/tc.netif.v1/@op/diagnostics)."

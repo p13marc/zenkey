@@ -14,20 +14,23 @@
 //!
 //! Only verbs that answer **without a bus**. That is more than it sounds:
 //! `--help` for every leaf verb (which alone would have caught #195's runs of
-//! spaces), the key-expression algebra, `registry lint`, `check schema
-//! --schema-set`, and both halves of #196's open-failure fork. The cases here
-//! that open a session point at `fixtures/dead-bus.json5`, so the only bus
-//! outcome this corpus can pin is the exit-2 "no verdict".
+//! spaces), the key-expression algebra, `compat` and `schema show` over
+//! `--contracts` (zk2, FJ4), `check schema --schema-set`, and both halves of
+//! #196's open-failure fork. The cases here that open a session point at
+//! `fixtures/dead-bus.json5`, so the only bus outcome this corpus can pin is
+//! the exit-2 "no verdict".
 //!
 //! Verbs that must reach a producer to say anything are pinned by
 //! **`tests/live.rs`** (#499): the real binary against an in-process producer
-//! on an OS-given port — `node list`, `topic list`, `get`, `echo`, `rate`,
-//! `pub`, `retire`, `service call`, every 0 and 1 of `check expect`, `why` and
-//! `doctor --fail-on`, and the `config` write lifecycle against an RFC 05
-//! §5.1 double (#500). This file used to call anything on a bus "a flake
-//! wearing a test's name"; that was true of hand-carved fixed ports, and
-//! stopped being true when #301 moved every bus suite to ephemeral ports on
-//! in-process sessions — the footing the live suite stands on. Their
+//! on an OS-given port — `get`, `echo`, `rate`, `pub`, `retire`, `service
+//! call`, every 0 and 1 of `check expect`, `why` and `doctor --fail-on`, and
+//! the `config` write lifecycle against an RFC 05 §5.1 double (#500) — and by
+//! **`tests/live_zk2.rs`** (FJ4): `service`, `iface`, `graph`, `namespace`,
+//! `schema` and `compat` against services the zk2 runtime brings up from the
+//! tcgui contracts, namespaced and not. This file used to call anything on a
+//! bus "a flake wearing a test's name"; that was true of hand-carved fixed
+//! ports, and stopped being true when #301 moved every bus suite to ephemeral
+//! ports on in-process sessions — the footing the live suites stand on. Their
 //! *rendering* is pinned by the render snapshots as well, which exercise the
 //! same code with no process and no network.
 //!
@@ -137,7 +140,7 @@ fn the_offline_surface_prints_what_it_has_always_printed() {
 /// The context/cache family (`tests/cmd/contexts/`) runs in a home of its
 /// own. Its cases *write* the home they run in — a context they create is
 /// every concurrent case's active context, and any case that loads slices
-/// (`topic info --registry …`, session-transport-fallback) fills the cache
+/// (`blob list --registry …`, session-transport-fallback) fills the cache
 /// keyed by whatever context is active at that instant — so sharing the
 /// glob's home makes `cache clear`'s pinned `existed:false` a race against
 /// trycmd's file scheduling. Same `cli-home` root, so one
@@ -290,8 +293,11 @@ fn the_command_lists_speak_to_an_operator() {
         bad.len(),
         bad.join("\n")
     );
+    // 75 since FJ4 (#612) retired v1's `topic`, `node`, `base`, `interface`
+    // and `registry` for zk2's smaller tree; the floor catches a walk that
+    // stopped short, not a tree that shrank on purpose.
     assert!(
-        seen >= 80,
+        seen >= 70,
         "the walk saw only {seen} commands — it stopped short"
     );
 }

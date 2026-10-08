@@ -15,11 +15,12 @@
 //! Three kinds of thing, and the depth says which:
 //!
 //! * a **noun** is something declared, alive or persisted, and gets a family
-//!   with verbs under it — `topic`, `node`, `base`, `service`, `interface`,
-//!   `schema`, `registry`, `storage`, `blob`, `admin`, `key`;
+//!   with verbs under it — `service`, `iface`, `schema`, `namespace`,
+//!   `config`, `storage`, `acl`, `blob`, `admin`, `key`, `bench`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `echo`, `pub`, `retire`, `rate`, `field`, `record`,
-//!   `replay`, `timeline`, `snapshot`, `export`, `serve`, `gen`, `scout`;
+//!   `replay`, `timeline`, `snapshot`, `graph`, `compat`, `export`, `serve`,
+//!   `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
@@ -29,6 +30,19 @@
 //! and gathered `expect`/`cutover`/`retired`/`probe`/`schema check` under
 //! `check`. No aliases and no shims: the old spellings are gone, and
 //! `zenctl/CHANGELOG.md` carries the table.
+//!
+//! ## zk2's nouns (#612, FJ4)
+//!
+//! `service list|show`, `iface list|show`, `schema show`, `graph` and a live
+//! `compat` are **resolved** verbs: they read zk2's base-relative keys
+//! through a session opened *in* the deployment's namespace
+//! (`NamespaceArgs`: `--namespace`, with `--base` as its alias and the
+//! context file's `base` as its rung), which ends RFC 09 §5's "explorers are
+//! never namespaced" for zk2 (decided 2026-10-08). `namespace list` is the
+//! raw half: it looks across namespaces, so its session (`SessionArgs`)
+//! takes none. They replaced v1's `topic`, `node`, `base`, `interface` and
+//! `registry`, and v1's `service list|info` and `schema show <producer>`;
+//! `service call` stays v1 until FJ5's `call`.
 //!
 //! ## The flag vocabulary (#307)
 //!
@@ -85,30 +99,6 @@ pub(crate) enum ScoutWhat {
     Router,
     Peer,
     Client,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum ExportAs {
-    /// Registry TOML — round-trippable through `SliceSet::from_dirs`.
-    Toml,
-    /// Registry KDL, the second spelling (RFC 08 §5.1) — the same document,
-    /// round-trippable through `SliceSet::from_dirs` as `<producer>.kdl`.
-    Kdl,
-    /// A JSON Schema bundle built from the producers' served `describe`
-    /// replies (RFC 08 §7).
-    Jsonschema,
-    /// An AsyncAPI 3.0 document: channels from subjects, operations from
-    /// procedures.
-    Asyncapi,
-}
-
-/// The spelling `registry migrate` respells into (RFC 08 §5.1). Closed, and
-/// one value for now: TOML → KDL is the direction the epic needs (#374), and
-/// a flag that must be typed keeps the command line stating it.
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub(crate) enum MigrateTo {
-    /// KDL 2.0: each `<stem>.toml` becomes `<stem>.kdl`.
-    Kdl,
 }
 
 /// Which clock `timeline` orders on (#216).
@@ -535,18 +525,14 @@ pub(crate) struct DoctorArgs {
 #[derive(Subcommand)]
 pub(crate) enum Command {
     // ── Nouns: what is declared, alive, or persisted ──────────────────────
-    /// Subjects: what the registry declares, and what it means.
-    #[command(subcommand)]
-    Topic(TopicCmd),
-    /// Producers: who is alive on the bus.
-    #[command(subcommand)]
-    Node(NodeCmd),
-    /// Deployment bases discovered from the wire (needs no --base).
-    #[command(subcommand)]
-    Base(BaseCmd),
-    /// Procedures producers offer: list them, describe them, call them.
+    /// Running services: their instances, interfaces and descriptors.
     ///
-    /// The `@rpc` plane.
+    /// zk2's presence plane (spec §8.1, §3.3): every instance holds an
+    /// instance token and a token per interface it provides, and serves a
+    /// descriptor naming each interface's full contract fingerprint, its
+    /// tokenless set and its roles' bindings. `list` and `show` read both
+    /// through a session in the deployment's namespace. `call` is v1's `@rpc`
+    /// call until `call` replaces it.
     #[command(subcommand)]
     Service(ServiceCmd),
     /// Read and change a producer's live configuration.
@@ -556,20 +542,27 @@ pub(crate) enum Command {
     /// against it, and drive a confirmed change to its end.
     #[command(subcommand)]
     Config(ConfigCmd),
-    /// Payload types declared by the registry slices.
-    #[command(subcommand)]
-    Interface(InterfaceCmd),
-    /// Payload schemas as producers serve them.
+    /// Interfaces: who provides each, who requires it, and its contract.
     ///
-    /// The `describe` procedure (RFC 08 §7). The shapes are served data, not
-    /// registry data: the TOMLs carry type *names*. A producer that serves no
-    /// `describe` degrades honestly — it is not an error. Validating a payload
-    /// against one is `check schema`.
+    /// A zk2 interface is a contract, `<name>.v<major>`, and each revision of
+    /// it is a fingerprint (spec §9). Providers come from interface tokens
+    /// and, for the tokenless set, from descriptors; consumers from the roles
+    /// descriptors declare (R3); contracts from `--contracts` or retrieved
+    /// from their holders by fingerprint (§8.4).
+    #[command(subcommand)]
+    Iface(IfaceCmd),
+    /// Payload schemas, as a contract's bundle carries them.
+    ///
+    /// The schema artifacts of one revision (spec §7.1, §9.5): JSON Schema
+    /// documents and protobuf descriptor sets, and which resource member
+    /// names which type. Offline from `--contracts`, or retrieved from the
+    /// bus. Validating a v1 payload against a served schema is `check
+    /// schema`.
     #[command(subcommand)]
     Schema(SchemaCmd),
-    /// The registry as a document: export it, diff it, lint it, lock it.
+    /// Deployment namespaces in use on the bus (needs no --namespace).
     #[command(subcommand)]
-    Registry(RegistryCmd),
+    Namespace(NamespaceCmd),
     /// Storages: what the mesh persists, and the router config behind it.
     ///
     /// What the mesh persists, joined against declared state — and the
@@ -699,6 +692,28 @@ pub(crate) enum Command {
     /// fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2
     /// nobody answered (silence is not a snapshot).
     Snapshot(SnapshotArgs),
+    /// The data-flow graph: each role bound to the providers it selects.
+    ///
+    /// Read from descriptors and interface tokens only, never inferred from
+    /// traffic (spec §3.2 R3): a node per service, and an edge per binding
+    /// that selects a provider present now — the edges the runtime itself
+    /// computes. A role whose bindings select nothing stays on its node with
+    /// no edge; whether that is wrong is `doctor`'s question. An instance
+    /// whose descriptor did not answer is listed, because its roles and its
+    /// tokenless interfaces are missing from the graph. `--dot` emits
+    /// Graphviz (pipe to `dot -Tsvg`).
+    Graph(GraphArgs),
+    /// Compare two contract revisions: compatible, review or breaking.
+    ///
+    /// The contract CI's own classifier (spec §9.8, FULL_TRANSITIVE within a
+    /// major, both directions), on two revisions each given as an authoring
+    /// file (`*.toml`), a bundle file (`*.bundle.json`), or `<iface>[@<fp>]`
+    /// — a revision `--contracts` holds, or one a provider's descriptor
+    /// names, retrieved from its holder (spec §8.4); a fingerprint prefix is
+    /// enough when it names one revision. Exit 0 compatible, 1 review or
+    /// breaking (the finding), 2 no verdict: an input that does not read, or
+    /// a revision that could not be had.
+    Compat(CompatArgs),
     /// Serve the bus and its contract as Prometheus metrics.
     ///
     /// Key series named and united by the registry, and the observer's own
@@ -745,7 +760,7 @@ pub(crate) enum Command {
     Gen(GenArgs),
     /// Listen for raw scouting Hellos: zid, whatami, locators.
     ///
-    /// The layer *below* `base list`: no session is opened, so this answers
+    /// The layer *below* `namespace list`: no session is opened, so this answers
     /// "is anything out there at all" and "is multicast working on this
     /// segment". It is also the one zenctl verb where multicast is ON by
     /// default — scouting is the point, and a scout only listens for Hellos
@@ -768,9 +783,9 @@ pub(crate) enum Command {
     ///
     /// Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between
     /// introspection and the checked-in TOML is a finding, not an ambiguity."
-    /// This prints the findings — `registry diff` shows the two registries side
-    /// by side; doctor *judges* the deployment. The local truth comes from
-    /// `--registry <dir>`; without it only the roster-vs-introspect check runs.
+    /// Doctor *judges* the deployment, finding by finding. The local truth
+    /// comes from `--registry <dir>`; without it only the roster-vs-introspect
+    /// check runs.
     Doctor(DoctorArgs),
     /// Explain why a key is silent, one established fact at a time.
     ///
@@ -968,88 +983,51 @@ pub(crate) enum BenchCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum SchemaCmd {
-    /// Dump a producer's served payload schemas (`@rpc/<producer>/describe`).
+    /// One revision's schema artifacts, and the type each member names.
+    ///
+    /// `<iface>` alone is the one revision `--contracts` holds or the
+    /// deployment's descriptors name; `@<fingerprint>` (or a prefix of one)
+    /// picks one among several. Without `--full` each artifact is listed by
+    /// id, kind and name; with it, or with a resource named, its document
+    /// follows — a JSON Schema as carried, a protobuf descriptor set read as
+    /// its messages and enums. Answered from `--contracts` with no session
+    /// when it holds the revision. Exit 2 when the revision cannot be had.
     Show(SchemaShowArgs),
 }
 
 #[derive(Subcommand)]
-pub(crate) enum RegistryCmd {
-    /// Export the loaded slice set as a document.
+pub(crate) enum IfaceCmd {
+    /// Every interface provided or required, and by whom.
     ///
-    /// `--as toml` and `--as kdl` (RFC 08 §5.1) round-trip through
-    /// `--registry <dir>`; `--as jsonschema`
-    /// bundles the producers' served `describe` schemas (RFC 08 §7);
-    /// `--as asyncapi` maps subjects to channels and procedures to operations.
-    Export(RegistryExportArgs),
-    /// Diff local `--registry` files against what the fleet serves.
+    /// From one presence read and every instance's descriptor: providers by
+    /// interface token or, for the tokenless set, by descriptor; consumers
+    /// by the roles descriptors declare; the revisions providers name. A read
+    /// that ran to its timeout is possibly incomplete, and says so.
+    List(IfaceListArgs),
+    /// One interface: providers, consumers, and each revision's contract.
     ///
-    /// RFC 08 §6: a disagreement is a finding, not an ambiguity. `doctor`
-    /// judges a deployment; this just shows the two registries side by side.
-    Diff {
-        #[command(flatten)]
-        bus: BusArgs,
-    },
-    /// Run the registry lints on a directory, as a build would.
+    /// Each provider with its token and its descriptor's fingerprint, the
+    /// resources it exposes by the compact rule (spec §3.3) when its
+    /// revision is in hand, its unavailable list and cardinality bounds; each
+    /// role bound to the interface; and each revision's contract —
+    /// resources, kinds, QoS, fan-out, types — from `--contracts` or
+    /// retrieved from its holders (spec §8.4). `@<fingerprint>` narrows the
+    /// view to one revision, and shows its contract even when no provider
+    /// names it now. Exit 2 when nothing provides, requires or describes the
+    /// interface: silence is not an answer.
+    Show(IfaceShowArgs),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum NamespaceCmd {
+    /// The namespaces zk2 services hold instance tokens in.
     ///
-    /// The RFC 08 §5 lints, the very ones `zenkey-build` fails a consumer's
-    /// build with.
-    Lint(RegistryLintArgs),
-    /// Write or update the registry's compatibility lock (registry.lock).
-    ///
-    /// The RFC 08 §3.1 lock. Additive evolution and `[[deprecated]]` retirement regenerate cleanly;
-    /// an INCOMPATIBLE edit (changed type/class/kind/shape on an existing
-    /// path) is refused — retire and add a sibling instead. `--force`
-    /// overrides, and prints every broken pin: the escape hatch is legal,
-    /// silent it is not.
-    Lock(RegistryLockArgs),
-    /// Who declares a reader of a subject: subscribers and queriers, per session.
-    ///
-    /// Every declared subscriber and querier the admin space serves (#224),
-    /// related to the target by key algebra and ranked, one row per session,
-    /// joined to the origin its alive token attaches.
-    ///
-    /// A declaration is not proof of use, a `**` declaration intersects
-    /// everything and is shown as such, and an admin space that does not
-    /// answer is *not asked* — never an empty consumer set (RFC 13 §3 O4).
-    Consumers(RegistryConsumersArgs),
-    /// The blast radius of changing one subject: readers, storage, deprecation.
-    ///
-    /// One document (#224): its consumers, its storage coverage, what else
-    /// declares on its family, and its `[[deprecated]]` entry.
-    Impact(RegistryImpactArgs),
-    /// Draft a registry from observed traffic, marked as a draft for review.
-    ///
-    /// #225, RFC 08 §6.1: one `<producer>.toml` per producer seen, a
-    /// `types.toml` with inferred JSON Schemas, `compat = "none"`,
-    /// `draft = true`, no `since`.
-    ///
-    /// Every field is a guess — `{var}`s from sibling structure and
-    /// per-origin populations, units from RFC 08 §4's suffixes, rates and
-    /// ttl hints from counts over the window — and what could not be
-    /// established is absent, never defaulted. Observed QoS is a comment.
-    /// zenkey-build REFUSES the draft until a review drops the marker;
-    /// `registry lint --allow-drafts <dir>` checks it meanwhile.
-    Infer(RegistryInferArgs),
-    /// Rewrite a registry directory from TOML into KDL, all or nothing.
-    ///
-    /// RFC 08 §5.1, #374: every `<stem>.toml` — producers, services, the type table — becomes
-    /// `<stem>.kdl` meaning the same document, and every other file (the
-    /// `.lock` ledgers, which stay line files) is kept beside unchanged.
-    ///
-    /// The document crosses whole, columns this build does not read
-    /// included. Comments cross too: a table's comment block becomes its
-    /// node's, and the file's header and trailer stay where they were. The
-    /// honest bound: a KDL node has no place for a comment *on* one
-    /// property, so a comment written on or above a key is hoisted into its
-    /// node's leading block as `// <key>: …` — kept and named, not placed.
-    ///
-    /// All or nothing: the source must lint as its build would; the
-    /// conversion is staged, proven to read back to the same tree, and
-    /// linted again before anything is written. `--out` writes a new
-    /// directory and refuses a non-empty one; `--in-place` writes each
-    /// `.kdl` and then removes each `.toml`. A refusal exits 2 and a
-    /// migration that failed exits 1; either way the source is as it was.
-    Migrate(RegistryMigrateArgs),
+    /// The command to run *before* you have a namespace: one liveliness read
+    /// of `**/zk2/*/*/@zk/instance/*` on a session in no namespace, every
+    /// token attributed to the prefix before its `zk2/`. The bus-root
+    /// deployment (no namespace) is listed as `(empty)` and selected with
+    /// `--namespace ''`.
+    List(NamespaceListArgs),
 }
 
 #[derive(Subcommand)]
@@ -1283,89 +1261,259 @@ pub(crate) enum ContextCmd {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum TopicCmd {
-    /// List registered subjects.
-    ///
-    /// Reads each producer's served introspect slice off the live bus by
-    /// default — so it works against *any* keyspace-v2 fleet (RFC 08 §6).
-    /// With `--registry <dir>` it answers offline from local registry TOMLs.
-    List(TopicListArgs),
-    /// Describe one key or subject pattern.
-    ///
-    /// Accepts a full wire key (`<base>/v1/h-abc.../telemetry/sysinfo/cpu/usage`)
-    /// and refines it against the producer's registry slice (bus-served, or
-    /// local with `--registry`).
-    Info {
-        /// A concrete wire key, as it appears on the bus.
-        #[arg(add = ArgValueCandidates::new(completion::keys))]
-        key: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
-}
-
-#[derive(Subcommand)]
-pub(crate) enum NodeCmd {
-    /// One node's full story: producers, versions, capabilities, freshness.
-    ///
-    /// RFC 08 §6's capability-and-version inventory, per node (issue #49).
-    Info {
-        /// The origin id (`h-<12hex>`). A hostname is refused — resolve it
-        /// through the catalog first (RFC 06 §6).
-        origin: String,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
-    /// List live producers from the liveliness roster (on-bus).
-    List(NodeListArgs),
-}
-
-#[derive(Subcommand)]
-pub(crate) enum BaseCmd {
-    /// Sweep liveliness tokens and storage configs for the bases in use.
-    ///
-    /// The command to run *before* you have a base: the un-namespaced sweep
-    /// (`**/v1/*/state/*/alive`, plus `@catalog` by name and the router
-    /// storage configs) attributes every alive token to its base. An empty
-    /// base (keys start at `v1/` on the wire) is reported as `(empty)` and
-    /// selected with `--base ""`.
-    List(BaseListArgs),
-}
-
-#[derive(Subcommand)]
 pub(crate) enum ServiceCmd {
-    /// List registered procedures (bus-served slices, or `--registry`).
-    List {
-        /// Only this producer.
-        #[arg(long, value_parser = chunk_arg,
-              add = ArgValueCandidates::new(completion::producers))]
-        producer: Option<String>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
-    /// One producer's `@rpc` surface, with the key shape a call would use.
+    /// Every running service: instances, interfaces, descriptors.
     ///
-    /// `service list` says what exists across the fleet; this says what one
-    /// producer offers and how to reach it — the question left over, and the
-    /// one you have immediately before `service call`.
-    Info(ServiceInfoArgs),
+    /// One liveliness read of `zk2/*/*/@zk/**` in the deployment's namespace
+    /// (spec §8.1), then every instance's descriptor (§3.3). Each interface
+    /// row keeps its two sources apart — the token's fingerprint prefix
+    /// beside the descriptor's full fingerprint — and an interface in the
+    /// tokenless set (U22) is known from the descriptor alone. A pure
+    /// consumer is listed too: every instance holds an instance token. A read
+    /// that ran to its timeout is possibly incomplete, and says so: a service
+    /// missing from it may still be up.
+    List(ServiceListArgs),
+    /// One service: each instance's tokens and the descriptor it serves.
+    ///
+    /// The descriptor as served (spec §3.3): its interfaces with their full
+    /// fingerprints, the tokenless set, capabilities, unavailable resources
+    /// and cardinality bounds, and every role with its bindings. Exit 2 when
+    /// presence shows no instance: silence is not an answer.
+    Show(ServiceShowArgs),
     /// Call a procedure (on-bus).
+    ///
+    /// The v1 `@rpc` plane, until the zk2 `call` verb replaces it.
     Call(ServiceCallArgs),
 }
 
-#[derive(Subcommand)]
-pub(crate) enum InterfaceCmd {
-    /// List every payload type the registry slices declare.
-    List {
-        #[command(flatten)]
-        bus: BusArgs,
-    },
-    /// Show one payload type and every subject that carries it.
-    Show(InterfaceShowArgs),
+/// How a session reaches the bus, and nothing about which deployment it
+/// reads: the connection half of every zk2 verb (#612, FJ4).
+///
+/// `namespace list` takes it alone, because it looks *across* namespaces;
+/// every resolved verb takes it inside `NamespaceArgs`. The ladders are the
+/// v1 flags' (flag > env > active context > default), and the help is theirs.
+#[derive(Args, Clone)]
+pub(crate) struct SessionArgs {
+    /// Use a named context from the config file for this invocation
+    /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
+    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
+    pub(crate) context: Option<String>,
+    /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+    ///
+    /// The session is a zenoh client of these endpoints: no listener of its
+    /// own, no gossip, nothing the mesh can route through. An endpoint
+    /// nothing answers fails the command (exit 2) rather than reading as an
+    /// empty bus, and one that does not parse is refused by name (exit 2).
+    #[arg(long, short = 'c')]
+    pub(crate) connect: Vec<String>,
+    /// Endpoint to listen on, repeatable — which makes the session a peer.
+    #[arg(long, short = 'l')]
+    pub(crate) listen: Vec<String>,
+    /// Enable multicast scouting (off by default, and think first).
+    #[arg(long)]
+    pub(crate) scouting: bool,
+    /// Seconds to wait for replies (default 5; a context may override the
+    /// default). Bounds the presence read, each descriptor GET and each
+    /// contract retrieval.
+    #[arg(long, value_name = "SECS")]
+    pub(crate) timeout: Option<u64>,
+    /// Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+    ///
+    /// Loaded as the base layer; --connect/--listen/--scouting apply on top
+    /// when given. A file that sets a session namespace is refused: the
+    /// namespace is `--namespace`'s to set.
+    #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
+    pub(crate) zenoh_config: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
 }
 
-/// Options shared by every command: the deployment base, the registry source,
-/// and the connection.
+/// A zk2 resolved verb's bus: the deployment's namespace, and the
+/// connection (#612, FJ4).
+#[derive(Args, Clone)]
+pub(crate) struct NamespaceArgs {
+    /// The deployment namespace: the session is opened in it.
+    ///
+    /// zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a
+    /// deployment's services run in a zenoh session namespace that prefixes
+    /// them on the wire. A resolved verb opens its session in the same one,
+    /// so it reads what a consumer of the deployment reads. `--base` is the
+    /// same flag, and so is the active context's `base`. Resolution: flag >
+    /// env > active context > empty — the bus-root deployment, no namespace.
+    /// `zenctl namespace list` finds the namespaces in use.
+    #[arg(long, visible_alias = "base", value_name = "NS", env = "ZENCTL_BASE",
+          add = ArgValueCandidates::new(completion::namespaces))]
+    pub(crate) namespace: Option<String>,
+    #[command(flatten)]
+    pub(crate) session: SessionArgs,
+}
+
+/// Contracts known without the bus (#612, FJ4).
+#[derive(Args, Clone)]
+pub(crate) struct ContractArgs {
+    /// Contracts known offline, repeatable: an authoring file (`*.toml`), a
+    /// directory of them, or a `.history` root.
+    ///
+    /// They seed the contract store, so a revision held here is never
+    /// retrieved from the bus (spec §8.5) — and a question they answer alone
+    /// opens no session at all. A file that is not a valid contract is
+    /// reported on stderr; a path that loads nothing is refused (exit 2).
+    #[arg(long = "contracts", value_name = "PATH")]
+    pub(crate) contracts: Vec<PathBuf>,
+}
+
+/// `service list`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct ServiceListArgs {
+    /// Only this system's services (`zk2/<system>/*`).
+    #[arg(long, value_name = "SYSTEM")]
+    pub(crate) system: Option<String>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `service show`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct ServiceShowArgs {
+    /// The service address, `<system>/<service>`.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `iface list`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct IfaceListArgs {
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `iface show`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct IfaceShowArgs {
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `schema show`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct SchemaShowArgs {
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// Only this resource: `<kind token>/<template>`
+    /// (`stream/bandwidth/{ns}/{iface}`), or its template alone when only
+    /// one resource has it. Implies the full documents.
+    pub(crate) resource: Option<String>,
+    /// Print every artifact's document, not just its id, kind and name.
+    #[arg(long)]
+    pub(crate) full: bool,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `namespace list`'s flags: a connection, and no namespace.
+#[derive(clap::Args)]
+pub(crate) struct NamespaceListArgs {
+    #[command(flatten)]
+    pub(crate) session: SessionArgs,
+}
+
+/// `graph`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct GraphArgs {
+    /// Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
+    ///
+    /// A foreign schema, so `--format` has no say over it: passing both is
+    /// a usage error, not a silent preference.
+    // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
+    #[arg(long)]
+    pub(crate) dot: bool,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `compat`'s flags.
+#[derive(clap::Args)]
+pub(crate) struct CompatArgs {
+    /// The earlier revision: `*.toml`, `*.bundle.json`, or `<iface>[@<fp>]`.
+    pub(crate) old: String,
+    /// The candidate revision, in any of the same spellings.
+    pub(crate) new: String,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `<name>.v<major>[@<fingerprint>]`, as `iface show`, `schema show` and
+/// `compat` take it: an interface, and optionally which revision of it —
+/// the full fingerprint (`sha256:` optional) or a prefix of its hex.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RevisionSpec {
+    pub(crate) iface: zenkey_model::grammar::IfaceId,
+    /// Lowercase hex, 1 to 64 digits, without `sha256:`.
+    pub(crate) fingerprint: Option<String>,
+}
+
+impl std::fmt::Display for RevisionSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.fingerprint {
+            Some(fp) => write!(f, "{}@{fp}", self.iface),
+            None => write!(f, "{}", self.iface),
+        }
+    }
+}
+
+/// Parse a `RevisionSpec` — clap's refusal, exit 2, naming the argument.
+pub(crate) fn revision_arg(s: &str) -> Result<RevisionSpec, String> {
+    let (iface, fp) = match s.split_once('@') {
+        Some((i, f)) => (i, Some(f)),
+        None => (s, None),
+    };
+    let iface = iface
+        .parse::<zenkey_model::grammar::IfaceId>()
+        .map_err(|e| format!("{e} (e.g. `tc.netif.v1`)"))?;
+    let fingerprint = match fp {
+        None => None,
+        Some(f) => {
+            let hex = f.strip_prefix("sha256:").unwrap_or(f);
+            if hex.is_empty()
+                || hex.len() > 64
+                || !hex
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            {
+                return Err(format!(
+                    "{f:?} is not a fingerprint: 1 to 64 lowercase hex digits, \
+                     `sha256:` optional"
+                ));
+            }
+            Some(hex.to_owned())
+        }
+    };
+    Ok(RevisionSpec { iface, fingerprint })
+}
+
+/// Parse a service address, `<system>/<service>`.
+fn addr_arg(s: &str) -> Result<zenkey_model::grammar::Addr, String> {
+    s.parse().map_err(|e| format!("{e}"))
+}
+
+/// Options shared by every v1 command: the deployment base, the registry
+/// source, and the connection. zk2's verbs take `NamespaceArgs` (or
+/// `SessionArgs` alone) instead, until FJ9 retires this struct.
 #[derive(Args, Clone)]
 pub(crate) struct BusArgs {
     /// The deployment base — the first chunk(s) of every key on the wire.
@@ -1377,7 +1525,8 @@ pub(crate) struct BusArgs {
     /// leak. So it has to be told what the base is.
     /// Resolution: flag > env > active context (`zenctl context …`) > empty —
     /// the base-less bus-root deployment, the RFC v1.6 default, whose wire
-    /// keys start at `v1/`. `zenctl base list` discovers the bases in use.
+    /// keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2
+    /// services use.
     #[arg(long, env = "ZENCTL_BASE")]
     pub(crate) base: Option<String>,
     /// Use a named context from the config file for this invocation
@@ -1434,7 +1583,7 @@ pub(crate) struct BusArgs {
 }
 
 /// `--format` selects among **zenkey's own three renderings** of a report. A
-/// foreign document format — `--as toml|jsonschema|asyncapi`, `--dot`,
+/// foreign document format — `--dot` (`admin graph`, `graph`),
 /// `--json5`, `export --prom` — is somebody else's schema, so the two are
 /// mutually exclusive (#243).
 ///
@@ -1454,7 +1603,7 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
     use clap::CommandFactory as _;
     use clap::parser::ValueSource;
 
-    // Walk to the leaf: `admin graph` and `registry export` are both two deep,
+    // Walk to the leaf: `admin graph` and `storage gen` are both two deep,
     // and the flags live on the leaf's own matches.
     let mut m = matches;
     while let Some((_, sub)) = m.subcommand() {
@@ -1468,12 +1617,7 @@ pub(crate) fn refuse_foreign_format(matches: &clap::ArgMatches) {
     if !typed("format") {
         return;
     }
-    for (id, flag) in [
-        ("target", "--as"),
-        ("dot", "--dot"),
-        ("json5", "--json5"),
-        ("prom", "--prom"),
-    ] {
+    for (id, flag) in [("dot", "--dot"), ("json5", "--json5"), ("prom", "--prom")] {
         if typed(id) {
             // A clap error, not an `anyhow` one: this is a usage error, and
             // usage errors in this tool exit 2 and print a usage line. The
@@ -2173,154 +2317,6 @@ pub(crate) struct BenchRpcArgs {
     pub(crate) bus: BusArgs,
 }
 
-/// The `schema show` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct SchemaShowArgs {
-    /// Producer name, e.g. `sysinfo`.
-    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: String,
-    /// Show only this type (implies the full document).
-    #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-    pub(crate) type_name: Option<String>,
-    /// Print every schema document in full, not just kind + hash.
-    #[arg(long)]
-    pub(crate) full: bool,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `registry export` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryExportArgs {
-    /// Output document. A foreign schema, so `--format` has no say over
-    /// it: passing both is a usage error, not a silent preference.
-    // #243. Enforced in `refuse_foreign_format` rather than by
-    // `conflicts_with`, which would fire on `ZENCTL_FORMAT` too.
-    #[arg(long = "as", value_enum, default_value = "toml")]
-    pub(crate) target: ExportAs,
-    /// Only this producer.
-    #[arg(long, value_parser = chunk_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: Option<String>,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `registry lint` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryLintArgs {
-    /// The registry directory (the one a build script points at).
-    pub(crate) dir: PathBuf,
-    /// Deprecation ledger; defaults to `<dir>/deprecated.lock`.
-    #[arg(long, value_name = "FILE")]
-    pub(crate) ledger: Option<PathBuf>,
-    /// Admit `draft = true` files (RFC 08 §6.1) — what `registry infer`
-    /// writes — instead of refusing them, as a build with
-    /// `Config::allow_drafts()` would. Each draft is still a warning.
-    #[arg(long)]
-    pub(crate) allow_drafts: bool,
-    #[command(flatten)]
-    pub(crate) out: OutputArgs,
-}
-
-/// The `registry infer` verb's flags — one struct the dispatcher hands over
-/// whole, destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryInferArgs {
-    /// What to infer from: a full wire selector to watch for `--for`
-    /// seconds (default `<base>/v1/**`), or a `.zrec` capture to read —
-    /// a path that exists and ends in `.zrec` is a capture, anything else
-    /// a selector. A capture is read under its own stated base.
-    #[arg(long, value_name = "SELECTOR|FILE", add = ArgValueCandidates::new(completion::keys))]
-    pub(crate) from: Option<String>,
-    /// The passive window, seconds (default 60). Not with a capture: its
-    /// span is in its rows.
-    #[arg(long = "for", value_name = "SECS")]
-    pub(crate) for_secs: Option<f64>,
-    /// Output directory. Created if missing; refused whole if it already
-    /// holds any file this run would write.
-    #[arg(long, value_name = "DIR")]
-    pub(crate) out: PathBuf,
-    /// The `app` the draft header names (default `"unknown"` — a draft
-    /// cannot know the owning application).
-    #[arg(long, value_name = "NAME")]
-    pub(crate) app: Option<String>,
-    /// Bound on distinct keys retained (O6); the draft covers the retained
-    /// set and reports the refused count.
-    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::model::infer::DEFAULT_MAX_KEYS)]
-    pub(crate) max_keys: usize,
-    /// Bound on the per-path table across every key's documents (O6).
-    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::model::infer::DEFAULT_MAX_PATHS)]
-    pub(crate) max_paths: usize,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `registry migrate` verb's flags — one struct the dispatcher hands
-/// over whole, destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-// The group is not named `target`: `refuse_foreign_format` reads that id
-// as `registry export --as`.
-#[command(group = clap::ArgGroup::new("destination").required(true).args(["in_place", "out"]))]
-pub(crate) struct RegistryMigrateArgs {
-    /// The spelling to migrate into.
-    #[arg(long, value_enum)]
-    pub(crate) to: MigrateTo,
-    /// The registry directory (the one a build script points at).
-    pub(crate) dir: PathBuf,
-    /// Rewrite the directory itself: each `.kdl` written, then each `.toml`
-    /// removed.
-    #[arg(long)]
-    pub(crate) in_place: bool,
-    /// Write the migrated directory here instead, leaving the source as it
-    /// is. Created if missing; refused if it holds anything.
-    #[arg(long, value_name = "DIR")]
-    pub(crate) out: Option<PathBuf>,
-    #[command(flatten)]
-    pub(crate) output: OutputArgs,
-}
-
-/// The `registry lock` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryLockArgs {
-    /// The registry directory (the one a build script points at).
-    pub(crate) dir: PathBuf,
-    /// Rewrite pins over an incompatible edit — the loud break.
-    #[arg(long)]
-    pub(crate) force: bool,
-    #[command(flatten)]
-    pub(crate) out: OutputArgs,
-}
-
-/// The `registry consumers` verb's flags — one struct the dispatcher hands
-/// over whole, destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryConsumersArgs {
-    /// `<producer>/<subject-path>` as the registry spells it (resolved to the
-    /// family's wire selector under the base), or a raw key or selector —
-    /// anything carrying `*` or `@`, or starting at the base or `v1/`.
-    #[arg(add = ArgValueCandidates::new(completion::keys))]
-    pub(crate) target: String,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `registry impact` verb's flags — one struct the dispatcher hands over
-/// whole, destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct RegistryImpactArgs {
-    /// `<producer>/<subject-path>` as the registry spells it. A path that
-    /// survives only in the `[[deprecated]]` ledger still resolves — who
-    /// still reads a retired subject is the ledger's own question.
-    pub(crate) target: String,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
 /// The `admin graph` verb's flags — one struct the dispatcher hands over whole,
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
@@ -2526,95 +2522,6 @@ pub(crate) struct BlobFetchArgs {
     /// Suppress progress on stderr.
     #[arg(long, short = 'q')]
     pub(crate) quiet: bool,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `topic list` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct TopicListArgs {
-    /// Only this producer.
-    #[arg(long, value_parser = chunk_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: Option<String>,
-    /// Only this class: telemetry, state, or events.
-    #[arg(long, add = ArgValueCandidates::new(completion::classes))]
-    pub(crate) class: Option<zenkey::Class>,
-    /// Only subjects carrying this payload type.
-    #[arg(long, value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-    pub(crate) r#type: Option<String>,
-    /// Also list retired subjects from each slice's `[[deprecated]]`
-    /// ledger (RFC 08 §6: which hosts still serve a deprecated subject).
-    #[arg(long)]
-    pub(crate) deprecated: bool,
-    /// Re-render on change. Appeared and disappeared subjects are marked
-    /// for one cycle; ndjson streams one snapshot object per cycle.
-    #[arg(long, conflicts_with = "budget")]
-    pub(crate) watch: bool,
-    /// With --watch: seconds between re-renders.
-    #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
-    pub(crate) every: f64,
-    /// Observe the bus and add a declared-vs-observed key-population
-    /// column (#221): distinct keys per `{var}` family, judged per origin
-    /// against the declared `cardinality` (RFC 08 §2). Over is a finding;
-    /// under is not — a bounded window proves a lower bound, never the
-    /// population — and `{path...}` families are exempt and say so.
-    #[arg(long)]
-    pub(crate) budget: bool,
-    /// With --budget: seconds to observe the key population.
-    #[arg(
-        long = "for",
-        value_name = "SECS",
-        default_value_t = 10.0,
-        requires = "budget"
-    )]
-    pub(crate) for_secs: f64,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `node list` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct NodeListArgs {
-    /// Join each producer against its served introspect slice (app +
-    /// registry version).
-    #[arg(long)]
-    pub(crate) verbose: bool,
-    /// Re-render on liveliness events (no polling — the bus pushes the
-    /// roster, so there is no `--every` here). Reflects a producer
-    /// stopping within one event.
-    #[arg(long)]
-    pub(crate) watch: bool,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `base list` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct BaseListArgs {
-    /// Re-render on change.
-    #[arg(long)]
-    pub(crate) watch: bool,
-    /// With --watch: seconds between re-renders.
-    #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
-    pub(crate) every: f64,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `service info` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct ServiceInfoArgs {
-    /// Producer name.
-    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: String,
-    /// Only this procedure path, e.g. `introspect`.
-    #[arg(value_parser = procedure_arg, add = ArgValueCandidates::new(completion::procedures))]
-    pub(crate) procedure: Option<String>,
     #[command(flatten)]
     pub(crate) bus: BusArgs,
 }
@@ -2830,22 +2737,4 @@ pub(crate) struct ConfigExtendArgs {
     /// The new rollback window, seconds from now.
     #[arg(long, value_name = "SECS")]
     pub(crate) by: u64,
-}
-
-/// The `interface show` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct InterfaceShowArgs {
-    /// Type name, e.g. `TelemetryPoint`.
-    #[arg(add = ArgValueCandidates::new(completion::types))]
-    pub(crate) type_name: String,
-    /// Also fetch the served schema from every producer that carries it
-    /// (RFC 08 §7). Disagreeing hashes are reported as drift.
-    #[arg(long)]
-    pub(crate) schema: bool,
-    /// With --schema, print each schema document in full.
-    #[arg(long)]
-    pub(crate) full: bool,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
 }

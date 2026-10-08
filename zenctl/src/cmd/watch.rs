@@ -1,6 +1,8 @@
-//! `--watch` on list commands (#56): re-render on an interval (or on
-//! liveliness events, for `node list`), diff-aware — appeared rows are
-//! marked `+` for one cycle, disappeared rows linger one cycle marked `-`.
+//! `--watch` on list commands (#56): re-render on an interval, diff-aware —
+//! appeared rows are marked `+` for one cycle, disappeared rows linger one
+//! cycle marked `-`. `storage list` is the one watchable verb left since FJ4
+//! (#612) retired `topic`, `base` and `node`; the loop stays generic over
+//! any report.
 //! Deliberately **not a TUI** (§6.1: "the TUI is the GUI's job"): table mode
 //! is a plain clear-and-redraw, and `--format ndjson` streams one snapshot
 //! per cycle for scripting.
@@ -226,60 +228,6 @@ pub fn interval_of(secs: f64) -> Result<Duration> {
     Ok(Duration::from_secs_f64(secs))
 }
 
-/// The `topic list` filter flags, shared by the one-shot and watch paths.
-pub struct TopicFilter {
-    pub producer: Option<String>,
-    pub class: Option<zenkey::Class>,
-    pub type_name: Option<String>,
-    pub deprecated: bool,
-}
-
-impl TopicFilter {
-    pub fn apply(&self, slices: &zenkey_fleet::SliceSet) -> Result<crate::report::TopicList> {
-        slices
-            .topic_list(
-                self.producer.as_deref(),
-                self.class,
-                self.type_name.as_deref(),
-                self.deprecated,
-            )
-            .map_err(anyhow::Error::from)
-    }
-}
-
-pub async fn topic_list(secs: f64, filter: &TopicFilter, args: &crate::Bus) -> Result<()> {
-    validate_format(args.format())?;
-    let interval = interval_of(secs)?;
-    let dirs = args.registry_dirs();
-    if dirs.is_empty() {
-        // The recurring sweep holds one declared registry querier across
-        // cycles (#37) instead of re-declaring per poll.
-        let session = args.session().await?;
-        let repeating =
-            zenkey_fleet::RepeatingRegistry::declare(&args.fleet(&session), args.timeout()).await?;
-        let fetch = async || {
-            let slices: Vec<zenkey::RegistrySlice> = repeating
-                .fetch()
-                .await?
-                .into_iter()
-                .map(|(s, _)| s)
-                .collect();
-            filter.apply(&zenkey_fleet::SliceSet::from_slices(slices))
-        };
-        poll_loop(interval, args.format(), args.color(), fetch).await?;
-        repeating.undeclare().await?;
-        Ok(())
-    } else {
-        // Dirs given: the union set (bus wins, dirs fill) per cycle, same
-        // sourcing as the one-shot command.
-        let fetch = async || {
-            let slices = args.slice_set().await?;
-            filter.apply(&slices)
-        };
-        poll_loop(interval, args.format(), args.color(), fetch).await
-    }
-}
-
 pub async fn storage_list(secs: f64, args: &crate::Bus) -> Result<()> {
     validate_format(args.format())?;
     let interval = interval_of(secs)?;
@@ -288,17 +236,6 @@ pub async fn storage_list(secs: f64, args: &crate::Bus) -> Result<()> {
         let storages = zenkey_fleet::storages(&session, args.timeout()).await?;
         let coverage = super::storage::coverage(args, &storages).await;
         Ok(crate::report::StorageList { storages, coverage })
-    };
-    poll_loop(interval, args.format(), args.color(), fetch).await
-}
-
-pub async fn base_list(secs: f64, args: &crate::Bus) -> Result<()> {
-    validate_format(args.format())?;
-    let interval = interval_of(secs)?;
-    let session = args.session().await?;
-    let fetch = async || {
-        let bases = zenkey_fleet::discover_bases(&session, args.timeout()).await?;
-        Ok(crate::report::BaseList { bases })
     };
     poll_loop(interval, args.format(), args.color(), fetch).await
 }
