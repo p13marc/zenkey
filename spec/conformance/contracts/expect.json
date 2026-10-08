@@ -217,6 +217,12 @@
       ],
       "fingerprint": null
     },
+    "e024-identical": {
+      "codes": [
+        "E024"
+      ],
+      "fingerprint": null
+    },
     "e024-stem": {
       "codes": [
         "E023",
@@ -231,6 +237,13 @@
       "fingerprint": null
     },
     "e026-rate": {
+      "codes": [
+        "E026",
+        "E026"
+      ],
+      "fingerprint": null
+    },
+    "e026-retention-range": {
       "codes": [
         "E026",
         "E026"
@@ -259,6 +272,12 @@
     "e028-non-finite": {
       "codes": [
         "E028",
+        "E028"
+      ],
+      "fingerprint": null
+    },
+    "e028-retention": {
+      "codes": [
         "E028"
       ],
       "fingerprint": null
@@ -364,6 +383,10 @@
         "E037"
       ],
       "fingerprint": null
+    },
+    "ok-cardinality-no-ceiling": {
+      "codes": [],
+      "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
     },
     "ok-defaults-defaulted": {
       "codes": [],

@@ -1,0 +1,10 @@
+{
+  "$defs": {
+    "Track": {
+      "type": "object",
+      "properties": {
+        "at": {"$ref": "same-a.json#/$defs/Point"}
+      }
+    }
+  }
+}

@@ -455,6 +455,33 @@ fn bless_bundles(dir: &Path) {
         json!({"ok": false, "error": "schema_hash"}),
     ));
 
+    // Verification checks hashes, not content (§9.6). What 0.5's rule built
+    // from `contracts/e024-identical` — the shared id listed once, under
+    // the later name `same-b` — beside the seed's artifacts: the `$ref`
+    // `same-a.json#/$defs/Point` names a stem no artifact has. It verifies;
+    // no 0.6 builder writes it (E024), and the classifier reads that `$ref`
+    // as `schema_unreadable` (§9.8).
+    let point = json!({"$defs": {"Point": {"type": "object", "properties": {
+        "x": {"type": "number"}, "y": {"type": "number"}}}}});
+    let refs = json!({"$defs": {"Track": {"type": "object", "properties": {
+        "at": {"$ref": "same-a.json#/$defs/Point"}}}}});
+    let mut v = valid.clone();
+    let mut listed = v["contract"]["schemas"].as_array().unwrap().clone();
+    for (name, doc) in [("same-b", &point), ("refs-same", &refs)] {
+        let id = zenkey_model::schema::sha256_id(&jcs(doc));
+        listed.push(json!({"id": id, "kind": "jsonschema", "name": name}));
+        v["schemas"][&id] = json!({"kind": "jsonschema", "data": doc});
+    }
+    listed.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    v["contract"]["schemas"] = Value::Array(listed);
+    let bytes = jcs(&v);
+    let fp_refs = Bundle::verify(&bytes).unwrap().fingerprint().to_string();
+    out.push((
+        "ref-names-no-artifact.bundle.json",
+        bytes,
+        json!({"ok": true, "fingerprint": fp_refs}),
+    ));
+
     // Step 10: an extra holds `media_type` and `data`, nothing else.
     let mut v = valid.clone();
     v["extras"]["sha256:".to_owned() + &"0".repeat(64)] =

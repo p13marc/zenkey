@@ -43,9 +43,11 @@ use crate::implementation::Implementation;
 use crate::service::{Service, ServiceBuilder};
 use crate::state::DEFAULT_WINDOW;
 
-/// `archive.v1`'s minimal contract. Its population is the sum of what it
-/// records, which no contract can fix in advance (§4.4); the cardinality
-/// below is a placeholder ceiling until `archive.v1` is specified (#613).
+/// `archive.v1`'s minimal contract, until `archive.v1` is specified (#613).
+/// Its population is the sum of what it records, which no contract can fix
+/// in advance (§4.4), yet E013 wants a `cardinality` on a templated
+/// resource: 4294967295 (2^32−1) is the conventional "no ceiling" (spec
+/// §2.2, 0.6), never a bound a tool may budget against.
 pub const CONTRACT: &str = r#"[interface]
 name = "archive"
 major = 1
@@ -175,6 +177,16 @@ fn origin_of(archive_key: &str) -> Option<String> {
     let (_, tail) = archive_key.split_once("/archive.v1/@state/")?;
     let chunks: Option<Vec<String>> = tail.split('/').map(chunk_unslug).collect();
     Some(format!("zk2/{}", chunks?.join("/")))
+}
+
+/// The origin a peer archive's reply stands for, if `selector` selects it.
+/// A wildcard of the selector's archive form also matches a slugged
+/// verbatim chunk (`x-_x40state` is plain), which the selector itself never
+/// does (§1.3): the decoded origin is checked against the selector (§4.4).
+fn peer_origin(selector: &OwnedKeyExpr, reply_key: &str) -> Option<String> {
+    let origin = origin_of(reply_key)?;
+    let ke = OwnedKeyExpr::try_from(origin.clone()).ok()?;
+    selector.intersects(&ke).then_some(origin)
 }
 
 impl Inner {
@@ -312,9 +324,10 @@ impl Inner {
             } else {
                 let mut found = (AlignedFrom::Nothing, Vec::new());
                 for peer in &self.peers {
-                    let got = self
+                    let mut got = self
                         .read(&archive_key(peer, &src.rec.selector), timeout)
                         .await?;
+                    got.retain(|s| peer_origin(&src.selector, s.key_expr().as_str()).is_some());
                     if !got.is_empty() {
                         found = (AlignedFrom::Peer(peer.clone()), got);
                         break;
@@ -574,7 +587,7 @@ pub async fn last_known(
 
 #[cfg(test)]
 mod tests {
-    use super::{archive_key, contract, origin_of};
+    use super::{OwnedKeyExpr, archive_key, contract, origin_of, peer_origin};
 
     #[test]
     fn the_archive_key_slugs_the_origin_as_a_rest_parameter() {
@@ -595,5 +608,34 @@ mod tests {
         assert!(zenkey_model::grammar::parse(&k).is_ok());
         assert_eq!(origin_of(&x).as_deref(), Some("zk2/g/s/i.v1/@state/x"));
         assert_eq!(contract().iface.to_string(), "archive.v1");
+    }
+
+    /// Spec §4.4 (0.6, G-3): a selector's archive form keeps `*` and `**`,
+    /// which there also match a slugged verbatim chunk; a peer's reply
+    /// counts only when the selector selects its decoded origin.
+    #[test]
+    fn a_peer_reply_counts_only_when_the_selector_selects_its_origin() {
+        let peer = "ground/archive".parse().unwrap();
+        let selector = "zk2/g/s/i.v1/*/plans/*";
+        let pattern = archive_key(&peer, selector);
+        assert_eq!(
+            pattern,
+            "zk2/ground/archive/archive.v1/@state/g/s/i.v1/*/plans/*"
+        );
+        let sel = OwnedKeyExpr::try_from(selector.to_owned()).unwrap();
+        let plain = archive_key(&peer, "zk2/g/s/i.v1/state/plans/a");
+        let verbatim = archive_key(&peer, "zk2/g/s/i.v1/@state/plans/a");
+        let pat = OwnedKeyExpr::try_from(pattern).unwrap();
+        for k in [&plain, &verbatim] {
+            assert!(
+                pat.intersects(&OwnedKeyExpr::try_from(k.clone()).unwrap()),
+                "{k}"
+            );
+        }
+        assert_eq!(
+            peer_origin(&sel, &plain).as_deref(),
+            Some("zk2/g/s/i.v1/state/plans/a")
+        );
+        assert_eq!(peer_origin(&sel, &verbatim), None);
     }
 }

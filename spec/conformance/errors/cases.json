@@ -341,6 +341,36 @@
    "expect": {
     "refused": "cause"
    }
+  },
+  {
+   "name": "cbor-detail-u64-max",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696c1bffffffffffffffff",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": 18446744073709551615
+   }
+  },
+  {
+   "name": "cbor-detail-i64-min",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696c3b7fffffffffffffff",
+   "expect": {
+    "code": "app",
+    "message": "x",
+    "cause": null,
+    "detail": -9223372036854775808
+   }
+  },
+  {
+   "name": "refuse-cbor-integer-below-i64",
+   "encoding": "application/cbor",
+   "hex": "a364636f646563617070676d65737361676561786664657461696c3b8000000000000000",
+   "expect": {
+    "refused": "decode"
+   }
   }
  ]
 }
