@@ -678,7 +678,8 @@ async fn s8_split_brain_diagnosis() {
     wait_present(&tool, "h1/tc", 2).await;
     let found = ownership::split_brain(&tool, alive, GRACE, T)
         .await
-        .unwrap();
+        .unwrap()
+        .findings;
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].service, addr("h1/tc"));
     assert_eq!(found[0].iface, tc());
@@ -699,7 +700,7 @@ async fn s8_split_brain_diagnosis() {
     tokio::time::sleep(GRACE / 3).await;
     let next = a.new_epoch().await.unwrap();
     assert!(
-        check.await.unwrap().unwrap().is_empty(),
+        check.await.unwrap().unwrap().is_clear(),
         "a re-mint is no finding"
     );
     let holders = zenkey::presence::tokens(&tool, "zk2/h1/tc/@zk/alive/**", T)
@@ -729,7 +730,7 @@ async fn s8_split_brain_diagnosis() {
         ownership::split_brain(&tool, alive, GRACE, T)
             .await
             .unwrap()
-            .is_empty(),
+            .is_clear(),
         "a standby is no finding"
     );
 }
