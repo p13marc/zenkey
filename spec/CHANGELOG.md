@@ -3,6 +3,29 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.4 — 2026-10-08: TOML 1.0, enforced (#607)
+
+**Changed:** §9.1's "a contract MUST NOT need TOML 1.1" gains its lint.
+Syntax that only TOML 1.1 has is E000, which stops the load:
+- a newline, a comment or a trailing comma inside an inline table;
+- the `\e` and `\xHH` escapes;
+- a time without seconds.
+
+The reference reader (the `toml` crate, which reads 1.1) now finds these
+on `toml_parser`'s event stream. Before, a 1.1-only contract loaded in
+Rust and failed in a 1.0 reader such as Python's `tomllib`. Five fixtures
+(`contracts/e000-toml11-*`) cover one construct each, and `tomllib`
+refuses all five. §9.2's E000 row now reads "not TOML 1.0".
+
+**Deliberately not changed:**
+- A reader MAY still accept later TOML. The rule binds what a contract
+  needs, not what a reader parses.
+- Bare keys outside ASCII are not on the list: TOML 1.1.0 did not adopt
+  them, and both readers refuse them already.
+- In `e000-toml11-time`, the time stops the load as E000 before E020 is
+  ever reached. E020 would have refused it anyway, as an annotation
+  datetime.
+
 ## 0.3 — 2026-10-08: the classifier's rule set (#618)
 
 **Changed:** §9.8 states every rule the classifier applies, each with its
@@ -65,6 +88,6 @@ byte from §9 alone.
 
 **Recorded as open:**
 - **U23,** to be measured (`gateway.south`) before `link.v1`: settled in 0.2.
-- **A TOML 1.1 lint.**
+- **A TOML 1.1 lint:** done in 0.4.
 - **Extras in the reference bundle builder.**
 - **`compat/`,** evaluated once the classifier (#618) lands: done in 0.3.

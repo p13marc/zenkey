@@ -231,8 +231,20 @@ pub fn load_path(path: &Path) -> Loaded {
 #[must_use]
 pub fn load_str(text: &str, dir: &Path, file_name: Option<&str>) -> Loaded {
     let mut report = Report::default();
-    let file: ContractFile = match toml::from_str(text) {
-        Ok(f) => f,
+    let parsed = toml::from_str(text).map(|f| (f, crate::toml10::first_toml11(text)));
+    let file: ContractFile = match parsed {
+        Ok((_, Some((line, what)))) => {
+            report.push(Diagnostic::error(
+                "E000",
+                "file",
+                format!("line {line}: {what} is TOML 1.1; a contract is TOML 1.0 (spec §9.1)"),
+            ));
+            return Loaded {
+                contract: None,
+                report,
+            };
+        }
+        Ok((f, None)) => f,
         Err(e) => {
             let msg = e.to_string().trim().replace('\n', " ");
             report.push(Diagnostic::error("E000", "file", msg));
