@@ -169,10 +169,12 @@ def _history(value: Any) -> dict[str, Any] | None:
 
 
 class _Loader:
-    def __init__(self, path: Path, check_file_name: bool, spec_dir: Path | None):
+    def __init__(self, path: Path, check_file_name: bool, spec_dir: Path | None,
+                 text: str | None = None):
         self.c = Contract(path)
         self.check_file_name = check_file_name
         self.spec_dir = spec_dir
+        self.text = text
 
     def diag(self, code: str, message: str, resource: str | None = None) -> None:
         self.c.diagnostics.append(Diagnostic(code, message, resource))
@@ -180,11 +182,15 @@ class _Loader:
     # -- §9.1: TOML and shape -------------------------------------------
 
     def parse(self) -> dict[str, Any] | None:
+        _require_toml_1_0_reader()
         try:
-            text = self.c.path.read_bytes().decode("utf-8")
+            text = self.text if self.text is not None else self.c.path.read_bytes().decode("utf-8")
+            # §9.1 (0.4): "syntax that only TOML 1.1 has is E000". tomllib is
+            # a strict TOML 1.0 reader, so it refuses every construct §9.1
+            # lists; _require_toml_1_0_reader keeps that true.
             doc = tomllib.loads(text)
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
-            self.diag("E000", f"not TOML: {e}")
+            self.diag("E000", f"not TOML 1.0: {e}")
             return None
         if _beyond_i64(doc):
             # TOML 1.0: "If an integer cannot be represented losslessly [as a
@@ -606,9 +612,41 @@ class _Loader:
 
 
 def load_contract(path: str | Path, *, check_file_name: bool = False,
-                  spec_dir: Path | None = None) -> Contract:
+                  spec_dir: Path | None = None, text: str | None = None) -> Contract:
     """Load one contract file and run every per-file lint (§9.1–§9.5).
 
-    ``check_file_name`` enables W107; the fixtures load without it.
+    ``check_file_name`` enables W107; the fixtures load without it. With
+    ``text``, the contract is that text, as if it were the file ``path``
+    (schema paths resolve from ``path``'s directory): the compat wrappers of
+    ``compat/README.md`` load this way.
     """
-    return _Loader(Path(path), check_file_name, spec_dir).run()
+    return _Loader(Path(path), check_file_name, spec_dir, text).run()
+
+
+#: The five TOML 1.1-only constructs §9.1 lists (0.4), one probe each.
+_TOML_1_1_PROBES = (
+    "a = { b = 1,\n c = 2 }",   # a newline inside an inline table
+    "a = { b = 1, }",           # a trailing comma inside an inline table
+    'a = "\\e"',              # the \e escape
+    'a = "\\x41"',            # the \xHH escape
+    "a = 07:32",                # a time without seconds
+)
+
+
+def _require_toml_1_0_reader() -> None:
+    """zk2py's E000 for TOML 1.1-only syntax is tomllib refusing it. A
+    tomllib that reads TOML 1.1 would silently accept those contracts, so
+    refuse to run instead (SPEC-FINDINGS F-41)."""
+    global _READER_CHECKED
+    if _READER_CHECKED:
+        return
+    for probe in _TOML_1_1_PROBES:
+        try:
+            tomllib.loads(probe)
+        except tomllib.TOMLDecodeError:
+            continue
+        raise RuntimeError(f"this tomllib accepts TOML 1.1 ({probe!r}); zk2py needs a TOML 1.0 reader")
+    _READER_CHECKED = True
+
+
+_READER_CHECKED = False

@@ -34,6 +34,16 @@ class Verified:
     extras: dict[str, Any]
 
 
+def revision(v: Verified):
+    """A verified bundle as a classifier revision (§9.8 against §9.7's
+    history): its canonical contract and its artifacts by id."""
+    from .compat import Revision
+
+    artifacts = {sid: base64.b64decode(e["data"]) if e["kind"] == PROTOBUF else e["data"]
+                 for sid, e in v.schemas.items()}
+    return Revision(v.contract, artifacts)
+
+
 def extra_ids(contract: dict[str, Any]) -> set[str]:
     """§9.6: extras are exactly the documents that the contract's
     ``views.document`` annotations reference ("of the contract's resources",

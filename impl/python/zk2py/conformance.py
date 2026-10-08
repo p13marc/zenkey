@@ -193,75 +193,70 @@ def family_errors(root: Path) -> list[Result]:
 
 # -- compat/ (core.md §9.7 retention, §9.8) ----------------------------------
 
-def _json_revision(path: Path, type_ref: str):
-    """One JSON Schema payload revision: (world, stem, node), or None when it
-    does not load (any E… finding: the ``invalid`` class)."""
-    from .compat import JsonWorld
-    from .schemas import SchemaSet
-
-    s = SchemaSet.load(path.parent, [path.name], [], None)
-    if any(f.code.startswith("E") for f in s.findings):
-        return None
-    obj, findings = s.resolve(type_ref)
-    if obj is None or findings:
-        return None
-    art = s.json_files[0]
-    return JsonWorld({art.name: art.data}), art.name, art.data["$defs"][obj["name"]]
+#: compat/README.md: payload and transitive revisions are each "wrapped in a
+#: one-resource contract", verbatim.
+_WRAPPER = """[interface]
+name = "m"
+major = 1
+minor = 0
+[schemas]
+{kind} = ["{artifact}"]
+[resources.s]
+kind = "state"
+type = "{type}"
+"""
 
 
-def _proto_revision(directory: Path) -> bytes | None:
-    from . import protoc
+def _revision(contract):
+    from . import compat
 
-    try:
-        return protoc.compile_file("m.proto", [directory])
-    except protoc.CompileError:
-        return None
+    return compat.Revision(contract.canonical, {a.id: a.data for a in contract.schemas.artifacts()})
+
+
+def _wrapped(root: Path, directory: Path, kind: str, artifact: str, type_ref: str):
+    """Load one wrapped revision. The wrapper is read as if it were a file in
+    ``directory``, so ``artifact`` resolves as the README's ``<artifact>``
+    does: ``m.proto`` inside a protobuf revision's directory, or the case's
+    ``.json`` file."""
+    from .contract import load_contract
+
+    text = _WRAPPER.format(kind=kind, artifact=artifact, type=type_ref)
+    return load_contract(directory / "m.v1.toml", text=text, spec_dir=root.parent)
 
 
 def _compat_case(root: Path, case: str, want: dict[str, Any]) -> dict[str, Any]:
     from . import compat
     from .contract import load_contract
+    from .schemas import PROTOBUF
 
     d = root / "compat" / case
     got: dict[str, Any] = {}
     family = case.split("/")[0]
     if family == "contract":
-        old = load_contract(d / "old.toml", spec_dir=root.parent)
-        new = load_contract(d / "new.toml", spec_dir=root.parent)
-        if not (old.valid and new.valid):
-            return {"class": compat.INVALID, "warnings": []}
-
-        def rev(c):
-            return compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
-
-        v = compat.contract_compare(rev(old), rev(new))
-        return {"class": v.cls, "warnings": sorted(v.warnings)}
-
-    kind = case.split("/")[1] if family == "payload" else ("jsonschema" if "jsonschema" in case else "protobuf")
-    names = ["old", "new"] if family == "payload" else [*want["history"], want["candidate"]]
-    if kind == "jsonschema":
-        revs = [_json_revision(d / f"{n}.json", want["type"]) for n in names]
-        if any(r is None for r in revs):
-            return {"class": compat.INVALID, "warnings": []}
-
-        def compare(a, b):
-            return compat.json_compare(a[0], a[1], a[2], b[0], b[1], b[2])
+        contracts = [load_contract(d / f"{n}.toml", spec_dir=root.parent) for n in ("old", "new")]
     else:
-        sets = [_proto_revision(d / n) for n in names]
-        if any(s is None for s in sets):
-            return {"class": compat.INVALID, "warnings": []}
-        message = "." + want["type"]
-        revs = [compat.ProtoWorld.from_sets([s]) for s in sets]
-
-        def compare(a, b):
-            return compat.proto_compare_message(a, message, b, message)
-
-        if family == "payload":
-            got["same_revision"] = compat.proto_same_revision([sets[0]], [sets[1]])
-    total, each = compat.full_transitive(revs[:-1], revs[-1], compare)
+        kind = case.split("/")[1] if family == "payload" else (
+            "jsonschema" if (d / "v1.json").exists() else "protobuf")
+        names = ["old", "new"] if family == "payload" else [*want["history"], want["candidate"]]
+        if kind == "protobuf":
+            contracts = [_wrapped(root, d / n, kind, "m.proto", want["type"]) for n in names]
+        else:
+            contracts = [_wrapped(root, d, kind, f"{n}.json", want["type"]) for n in names]
+    # compat/README.md: `invalid` "when the new revision must not load (its
+    # only error is E037)". A history revision that does not load is
+    # reported the same way (SPEC-FINDINGS F-44).
+    if not all(c.valid for c in contracts):
+        return {"class": compat.INVALID, "warnings": []}
+    revs = [_revision(c) for c in contracts]
+    total, each = compat.full_transitive(revs[:-1], revs[-1], compat.contract_compare)
     got.update({"class": total.cls, "warnings": total.warnings})
     if family == "transitive":
         got["against"] = {n: v.cls for n, v in zip(names[:-1], each)}
+    if "same_revision" in want:
+        # §9.7's identity, over the protobuf artifacts of the two revisions.
+        def sets(c):
+            return [a.data for a in c.schemas.artifacts() if a.kind == PROTOBUF]
+        got["same_revision"] = compat.proto_same_revision(sets(contracts[0]), sets(contracts[1]))
     return got
 
 
@@ -314,10 +309,39 @@ def family_examples(root: Path) -> list[Result]:
             out.append((f"{rel} (bundle round trip)", v.fingerprint == c.fingerprint, ""))
         except bundle.BundleError as e:
             out.append((f"{rel} (bundle round trip)", False, e.tag))
+            continue
+        out += _example_against_history(ex, rel, c, data)
     histories = sorted(p for p in ex.rglob(".history") if p.is_dir())
     for h in histories:
         problems = check_history(h)
         out.append((h.relative_to(ex).as_posix(), not problems, "" if not problems else str(problems)))
+    return out
+
+
+def _example_against_history(ex: Path, rel: str, c, built: bytes) -> list[Result]:
+    """An example must be published in ``examples/zk2/.history`` and be
+    compatible with its history (§9.7, §9.8):
+    - its fingerprint names a published bundle, and the bundle zk2py builds
+      is byte-identical to it (§9.6: "one contract revision has one
+      bundle");
+    - against every published revision of its interface, FULL_TRANSITIVE,
+      the class is ``compatible``."""
+    from . import bundle, compat
+
+    hist = ex / ".history" / c.interface
+    published = hist / f"{c.fingerprint.removeprefix('sha256:')}.bundle.json"
+    out: list[Result] = []
+    if not published.is_file():
+        return [(f"{rel} (published)", False, f"{published.relative_to(ex)} is missing")]
+    same = published.read_bytes() == built
+    out.append((f"{rel} (published, byte-identical)", same, "" if same else "the built bundle differs"))
+    revisions = [bundle.revision(bundle.verify(p.read_bytes()))
+                 for p in sorted(hist.glob("*.bundle.json"))]
+    candidate = compat.Revision(c.canonical, {a.id: a.data for a in c.schemas.artifacts()})
+    total, _ = compat.full_transitive(revisions, candidate, compat.contract_compare)
+    ok = total.cls == compat.COMPATIBLE
+    out.append((f"{rel} (compatible with {len(revisions)} published)", ok,
+                "" if ok else f"{total.cls}: {total.reasons}"))
     return out
 
 

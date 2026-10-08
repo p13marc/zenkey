@@ -1,5 +1,5 @@
-"""The compatibility classifier (core.md §9.8) and the retention identity
-check (core.md §9.7).
+"""The compatibility classifier (core.md §9.8, version 0.4) and the retention
+identity check (core.md §9.7).
 
 §9.8: "Revisions inside a major are checked FULL_TRANSITIVE: a candidate
 against every revision in the history, in both directions." A change is
@@ -7,16 +7,23 @@ against every revision in the history, in both directions." A change is
 over both directions and every earlier revision"; a revision that does not
 load is *invalid*.
 
-How this module reads "both directions" (SPEC-FINDINGS F-29):
-each rule of §9.8 classifies a transition *from an earlier revision to the
-candidate*, and its class already accounts for both reader/writer roles
-(the JSON rules say so: "a tightened maximum breaks old writers, and a
-loosened maxLength breaks old readers"). Applying the contract table in
-reverse too would make ``explicit`` true → false breaking, where
-``compat/expect.json`` says review.
+Since 0.3, §9.8 states every rule in six tables (interface, resources,
+delivery, operations, roles, types) plus the protobuf and JSON Schema lists,
+each rule with a name. This module implements those tables and reports the
+reference names in its reasons ("Rule names stay informative", CHANGELOG
+0.3). Before 0.3, zk2py classed every unlisted change as review; the
+amended tables now decide them, and where zk2py's earlier guess differed
+(required → optional, a required resource added, best_effort → reliable,
+``fanout`` forbidden → allowed, ``replies`` many → one, a role removed, a
+role required → optional, ``deprecated`` added, a ``media_param`` change,
+``items`` toggles) it now follows the table.
 
-A change §9.8 does not list is classed **review** here: a human looks at it
-before publication. Every such guess is listed in SPEC-FINDINGS F-31, F-32 and F-35.
+How this module reads "both directions" (SPEC-FINDINGS F-29): each rule
+classifies a transition *from an earlier revision to the candidate*, and its
+class already accounts for both reader/writer roles.
+
+A change no table lists is classed **review** (SPEC-FINDINGS F-31, F-32,
+F-35 record what is still unlisted).
 """
 
 from __future__ import annotations
@@ -46,10 +53,15 @@ class Verdict:
     warnings: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
-    def add(self, cls: str, reason: str) -> None:
+    def add(self, cls: str, rule: str, reason: str) -> None:
+        """Record one finding: its class, §9.8's rule name, and a reason."""
         self.cls = worst(self.cls, cls)
         if cls != COMPATIBLE:
-            self.reasons.append(f"{cls}: {reason}")
+            self.reasons.append(f"{cls} {rule}: {reason}")
+
+    def warn(self, name: str, reason: str) -> None:
+        self.warnings.append(name)
+        self.reasons.append(f"warning {name}: {reason}")
 
     def merge(self, other: Verdict, prefix: str = "") -> None:
         self.cls = worst(self.cls, other.cls)
@@ -61,7 +73,7 @@ class Verdict:
 # JSON Schema payloads (§9.8, over the §7.3 subset)
 # ===========================================================================
 
-#: §7.3 bounds; §9.8: "a bound changed … breaking".
+#: §9.8 ``bound_changed``: "a bound changed, either way".
 BOUNDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
           "minLength", "maxLength", "minItems", "maxItems")
 
@@ -70,9 +82,10 @@ BOUNDS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
 class JsonWorld:
     """The JSON Schema documents of one revision, by stem.
 
-    A ``$ref``'s file part is resolved by the stem of its last path
-    component. In a source tree §9.4 resolves it as a path; in a bundle only
-    stems exist, and §9.4's stem uniqueness (E024) makes the stem enough
+    §9.8: "``$ref``s are followed, across the revision's artifacts." A
+    ``$ref``'s file part is resolved by the stem of its last path component:
+    in a source tree §9.4 resolves it as a path, but a bundle keeps only
+    stems, and §9.4's stem uniqueness (E024) makes the stem enough
     (SPEC-FINDINGS F-11).
     """
 
@@ -102,7 +115,7 @@ class JsonWorld:
         for k, v in node.items():
             if k in ANNOTATIONS:
                 continue
-            if k in ("properties",) and isinstance(v, dict):
+            if k == "properties" and isinstance(v, dict):
                 out[k] = {p: self.normalize(where, s, depth + 1) for p, s in v.items()}
             elif k in ("items", "additionalProperties") and isinstance(v, dict):
                 out[k] = self.normalize(where, v, depth + 1)
@@ -138,80 +151,74 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
     seen = set() if seen is None else seen
     ow, o = old.deref(old_where, old_node)
     nw, n = new.deref(new_where, new_node)
+    at = path or "/"
     key = (ow, id(o), nw, id(n))
     if key in seen:
         return v
     seen.add(key)
     if not isinstance(o, dict) or not isinstance(n, dict):
+        # A boolean schema where a schema object is expected: no rule names
+        # this (SPEC-FINDINGS F-32).
         if old.normalize(ow, o) != new.normalize(nw, n):
-            v.add(BREAKING, f"{path or '/'}: a boolean schema changed")
+            v.add(BREAKING, "boolean_schema_changed", f"{at}: a boolean schema changed")
         return v
     if "$ref" in o or "$ref" in n:
-        # A $ref beside other constraints: containment is not decided here.
+        # A $ref beside other keywords: no rule names it (SPEC-FINDINGS F-32).
         if old.normalize(ow, o) != new.normalize(nw, n):
-            v.add(REVIEW, f"{path or '/'}: a $ref beside other keywords changed")
+            v.add(REVIEW, "ref_with_siblings_changed", f"{at}: a $ref beside other keywords changed")
         return v
 
-    def get(d: dict[str, Any], k: str) -> Any:
-        return d.get(k, _MISSING)
-
-    # type: "integer ↔ number" and any other type change.
+    # "the type set changed, including integer ↔ number (type_changed)".
     if _types(o.get("type")) != _types(n.get("type")):
-        v.add(BREAKING, f"{path or '/'}: type {o.get('type')!r} → {n.get('type')!r}")
-    # enum: "an enum value added or removed"; const likewise.
-    if "enum" in o or "enum" in n:
-        if _multiset(o.get("enum", [])) != _multiset(n.get("enum", [])) or ("enum" in o) != ("enum" in n):
-            v.add(BREAKING, f"{path or '/'}: enum changed")
-    if get(o, "const") != get(n, "const") or ("const" in o) != ("const" in n):
-        v.add(BREAKING, f"{path or '/'}: const changed")
-    # "a bound changed: a tightened maximum breaks old writers, and a
-    # loosened maxLength breaks old readers" — either way, breaking.
+        v.add(BREAKING, "type_changed", f"{at}: type {o.get('type')!r} → {n.get('type')!r}")
+    # "an enum value added or removed (enum_changed)"; "enum values
+    # reordered" is compatible, so enum compares as a multiset.
+    if ("enum" in o) != ("enum" in n) or _multiset(o.get("enum", [])) != _multiset(n.get("enum", [])):
+        v.add(BREAKING, "enum_changed", f"{at}: enum changed")
+    # "const changed (const_changed)".
+    if o.get("const", _MISSING) != n.get("const", _MISSING):
+        v.add(BREAKING, "const_changed", f"{at}: const changed")
+    # "a bound changed, either way (bound_changed)".
     for b in BOUNDS:
         if (b in o) != (b in n) or o.get(b) != n.get(b):
-            v.add(BREAKING, f"{path or '/'}: {b} {o.get(b)!r} → {n.get(b)!r}")
+            v.add(BREAKING, "bound_changed", f"{at}: {b} {o.get(b)!r} → {n.get(b)!r}")
 
-    # properties and required.
+    # Properties: "an optional property added, even to a closed schema, or
+    # removed" is compatible; "a required property added (required_added)
+    # or removed (required_removed), or a property optional ↔ required
+    # (required_changed)" is breaking.
     op, np_ = o.get("properties", {}), n.get("properties", {})
     oreq, nreq = set(o.get("required", [])), set(n.get("required", []))
     for name in sorted(set(op) & set(np_)):
         p = f"{path}/{name}"
         if (name in oreq) != (name in nreq):
-            v.add(BREAKING, f"{p}: {'optional → required' if name in nreq else 'required → optional'}")
+            v.add(BREAKING, "required_changed",
+                  f"{p}: {'optional → required' if name in nreq else 'required → optional'}")
         v.merge(json_compare(old, ow, op[name], new, nw, np_[name], p, seen))
     for name in sorted(set(np_) - set(op)):
-        # "Compatible: an optional property added, even to a closed schema";
-        # "Breaking: a required property added".
         if name in nreq:
-            v.add(BREAKING, f"{path}/{name}: a required property added")
+            v.add(BREAKING, "required_added", f"{path}/{name}: a required property added")
     for name in sorted(set(op) - set(np_)):
-        # "Compatible: an optional property … removed". A required one
-        # removed is not listed; it breaks new writers → old readers
-        # (SPEC-FINDINGS F-32).
         if name in oreq:
-            v.add(BREAKING, f"{path}/{name}: a required property removed")
+            v.add(BREAKING, "required_removed", f"{path}/{name}: a required property removed")
     loose = (oreq ^ nreq) - set(op) - set(np_)
     if loose:
-        v.add(BREAKING, f"{path or '/'}: required names {sorted(loose)} changed")
+        # A `required` name with no property on either side (SPEC-FINDINGS F-32).
+        v.add(BREAKING, "required_changed", f"{at}: required names {sorted(loose)} changed")
 
-    # additionalProperties: "Readers tolerate unknown properties, and
-    # writers send only what their schema declares": open/closed toggles are
-    # compatible; a map's value schema is compared.
-    oa, na = o.get("additionalProperties", True), n.get("additionalProperties", True)
-    if isinstance(oa, dict) and isinstance(na, dict):
-        v.merge(json_compare(old, ow, oa, new, nw, na, f"{path}/additionalProperties", seen))
-    elif isinstance(oa, dict) != isinstance(na, dict):
-        v.add(REVIEW, f"{path or '/'}: additionalProperties changed between a schema and a boolean")
+    # additionalProperties and items: "changed between absent, true and
+    # false" is compatible; "gaining or losing a schema (members_changed)"
+    # is review; two schemas are compared.
+    for kw in ("additionalProperties", "items"):
+        oa, na = o.get(kw, True), n.get(kw, True)
+        if isinstance(oa, dict) and isinstance(na, dict):
+            v.merge(json_compare(old, ow, oa, new, nw, na, f"{path}/{kw}", seen))
+        elif isinstance(oa, dict) != isinstance(na, dict):
+            v.add(REVIEW, "members_changed", f"{at}: {kw} gained or lost a schema")
 
-    # items.
-    oi, ni = o.get("items", True), n.get("items", True)
-    if oi != ni or isinstance(oi, dict):
-        if isinstance(oi, dict) and isinstance(ni, dict):
-            v.merge(json_compare(old, ow, oi, new, nw, ni, f"{path}/items", seen))
-        elif old.normalize(ow, oi) != new.normalize(nw, ni):
-            v.add(BREAKING, f"{path or '/'}: items changed")
-
-    # oneOf / anyOf / prefixItems: "a oneOf branch added" is breaking; "any
-    # other change inside oneOf, anyOf or prefixItems" is review.
+    # oneOf / anyOf / prefixItems: "a oneOf branch added
+    # (oneof_branch_added)" is breaking; "any other change inside oneOf,
+    # anyOf or prefixItems (undecided_changed)" is review.
     for kw in ("oneOf", "anyOf", "prefixItems"):
         ob = [old.normalize(ow, s) for s in o.get(kw, [])]
         nb = [new.normalize(nw, s) for s in n.get(kw, [])]
@@ -219,16 +226,15 @@ def json_compare(old: JsonWorld, old_where: str, old_node: Any,
         if same and (kw in o) == (kw in n):
             continue
         if kw == "oneOf" and kw in o and kw in n and _is_superset(nb, ob):
-            v.add(BREAKING, f"{path or '/'}: a oneOf branch added")
+            v.add(BREAKING, "oneof_branch_added", f"{at}: a oneOf branch added")
         else:
-            v.add(REVIEW, f"{path or '/'}: a change inside {kw}")
+            v.add(REVIEW, "undecided_changed", f"{at}: a change inside {kw}")
 
-    # Anything else that differs (a keyword this module does not judge).
     judged = {"type", "enum", "const", *BOUNDS, "properties", "required",
               "additionalProperties", "items", "oneOf", "anyOf", "prefixItems"}
     for k in sorted((set(o) | set(n)) - judged - ANNOTATIONS):
         if _canon(o.get(k)) != _canon(n.get(k)):
-            v.add(REVIEW, f"{path or '/'}: {k} changed")
+            v.add(REVIEW, "unlisted_changed", f"{at}: {k} changed")
     return v
 
 
@@ -275,12 +281,34 @@ class ProtoWorld:
                 walk(f.message_type, f.enum_type, scope)
         return w
 
+    def is_map_entry(self, type_name: str) -> bool:
+        hit = self.messages.get(type_name)
+        return hit is not None and hit[0].options.map_entry
+
 
 def _real_oneof(m: descriptor_pb2.DescriptorProto, f: Any) -> str | None:
     """The name of a field's oneof, synthetic proto3-optional oneofs aside."""
     if f.HasField("oneof_index") and not f.proto3_optional:
         return m.oneof_decl[f.oneof_index].name
     return None
+
+
+def _cardinality(world: ProtoWorld, f: Any) -> str:
+    """§9.8 ``cardinality_changed``: "singular, repeated or map"."""
+    if f.label == F.LABEL_REPEATED:
+        if f.type == F.TYPE_MESSAGE and world.is_map_entry(f.type_name):
+            return "map"
+        return "repeated"
+    return "singular"
+
+
+def _presence(f: Any, syntax: str, oneof: str | None) -> bool:
+    """Explicit presence: a singular field of a message type, of a proto2
+    file, declared proto3 ``optional``, or in a oneof."""
+    if f.label == F.LABEL_REPEATED:
+        return False
+    return (f.type in (F.TYPE_MESSAGE, F.TYPE_GROUP) or syntax == "proto2"
+            or f.proto3_optional or oneof is not None)
 
 
 def json_name_default(name: str) -> str:
@@ -304,13 +332,16 @@ def _reserved(m: descriptor_pb2.DescriptorProto, number: int) -> bool:
 
 def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: str,
                           seen: set | None = None) -> Verdict:
+    """§9.8: "Fields are matched by number. A field missing by number but
+    present by name is renumbered. Messages are compared recursively, nested
+    and referenced ones included, each pair once." """
     v = Verdict()
     seen = set() if seen is None else seen
     if (oname, nname) in seen:
         return v
     seen.add((oname, nname))
-    om, _ = old.messages[oname]
-    nm, _ = new.messages[nname]
+    om, osyn = old.messages[oname]
+    nm, nsyn = new.messages[nname]
     ofields = {f.number: f for f in om.field}
     nfields = {f.number: f for f in nm.field}
     path = oname.lstrip(".")
@@ -319,21 +350,24 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
         of, nf = ofields[num], nfields[num]
         where = f"{path}.{of.name} = {num}"
         if of.type != nf.type:
-            # "a field's declared scalar type changes, including int32 →
-            # int64 and string → bytes".
-            v.add(BREAKING, f"{where}: type {F.Type.Name(of.type)} → {F.Type.Name(nf.type)}")
-        if of.label != nf.label:
-            v.add(BREAKING, f"{where}: cardinality {F.Label.Name(of.label)} → {F.Label.Name(nf.label)}")
-        if _real_oneof(om, of) != _real_oneof(nm, nf):
-            v.add(BREAKING, f"{where}: moved into or out of a oneof")
-        if of.proto3_optional != nf.proto3_optional:
-            v.add(REVIEW, f"{where}: proto3 optional toggled")
+            v.add(BREAKING, "type_changed", f"{where}: {F.Type.Name(of.type)} → {F.Type.Name(nf.type)}")
+        oc, nc = _cardinality(old, of), _cardinality(new, nf)
+        if oc != nc:
+            v.add(BREAKING, "cardinality_changed", f"{where}: {oc} → {nc}")
+        if (of.label == F.LABEL_REQUIRED) != (nf.label == F.LABEL_REQUIRED):
+            v.add(BREAKING, "required_label_changed", f"{where}: a label toggled to or from required")
+        o1, n1 = _real_oneof(om, of), _real_oneof(nm, nf)
+        if o1 != n1:
+            v.add(BREAKING, "oneof_changed", f"{where}: moved into or out of a oneof")
+        if _presence(of, osyn, o1) != _presence(nf, nsyn, n1):
+            v.add(REVIEW, "presence_changed", f"{where}: explicit presence toggled")
         if of.name != nf.name:
-            v.add(REVIEW, f"{where}: renamed to {nf.name}")
+            v.add(REVIEW, "field_renamed", f"{where}: renamed to {nf.name}")
         elif of.json_name != nf.json_name:
-            v.add(REVIEW, f"{where}: json_name {of.json_name!r} → {nf.json_name!r}")
+            v.add(REVIEW, "json_name_changed", f"{where}: json_name {of.json_name!r} → {nf.json_name!r}")
         if of.default_value != nf.default_value:
-            v.add(REVIEW, f"{where}: default changed")
+            # A proto2 default changed: no rule names it (SPEC-FINDINGS F-35).
+            v.add(REVIEW, "default_changed", f"{where}: default changed")
         if of.type == nf.type and of.type in (F.TYPE_MESSAGE, F.TYPE_GROUP):
             v.merge(proto_compare_message(old, of.type_name, new, nf.type_name, seen))
         elif of.type == nf.type == F.TYPE_ENUM:
@@ -344,20 +378,29 @@ def proto_compare_message(old: ProtoWorld, oname: str, new: ProtoWorld, nname: s
     for num in sorted(set(ofields) - set(nfields)):
         of = ofields[num]
         if of.name in new_by_name:
-            # "it is renumbered: a deletion plus an addition of the same
-            # field, which silently drops the data both ways". The same
-            # field is the same name (SPEC-FINDINGS F-34); the
-            # deletion is then not also a warning (compat/renumber-field).
+            # "it is renumbered … (renumbered)". The deletion is the move's,
+            # not also a warning (compat/payload/protobuf/renumber-field;
+            # SPEC-FINDINGS F-34).
             moved = new_by_name.pop(of.name)
             added.discard(moved)
-            v.add(BREAKING, f"{path}.{of.name}: renumbered {num} → {moved}")
+            v.add(BREAKING, "renumbered", f"{path}.{of.name}: {num} → {moved}")
             continue
-        # A field deleted: compatible under WIRE semantics; a warning when
-        # its number is not reserved.
+        if of.label == F.LABEL_REQUIRED:
+            v.add(BREAKING, "required_field_removed", f"{path}.{of.name} = {num}: a required field deleted")
         if not _reserved(nm, num):
-            v.warnings.append(FIELD_DELETED_UNRESERVED)
-            v.reasons.append(f"warning: {path}.{of.name} = {num} deleted without reserving {num}")
-    # Fields added are compatible.
+            v.warn(FIELD_DELETED_UNRESERVED, f"{path}.{of.name} = {num} deleted without reserving {num}")
+    for num in sorted(added):
+        nf = nfields[num]
+        if _reserved(om, num):
+            v.add(BREAKING, "reserved_reused", f"{path}.{nf.name} = {num}: reuses a reserved number")
+        if nf.label == F.LABEL_REQUIRED:
+            v.add(BREAKING, "required_field_added", f"{path}.{nf.name} = {num}: a required field added")
+
+    # Nested messages, by name, each pair once.
+    nested_new = {m.name for m in nm.nested_type}
+    for m in om.nested_type:
+        if m.name in nested_new and not m.options.map_entry:
+            v.merge(proto_compare_message(old, f"{oname}.{m.name}", new, f"{nname}.{m.name}", seen))
     return v
 
 
@@ -374,14 +417,16 @@ def proto_compare_enum(old: ProtoWorld, oname: str, new: ProtoWorld, nname: str)
         nnames.setdefault(val.number, set()).add(val.name)
     for num in sorted(set(onames) & set(nnames)):
         if onames[num] != nnames[num]:
-            v.add(REVIEW, f"{path}: value {num} renamed")
+            v.add(REVIEW, "enum_value_renamed", f"{path}: value {num} renamed")
     for num in sorted(set(onames) - set(nnames)):
-        v.add(REVIEW, f"{path}: value {num} deleted")
+        v.add(REVIEW, "enum_value_removed", f"{path}: value {num} deleted")
+    # "a value added to a proto2 (closed) enum (closed_enum_value_added)" is
+    # review; to a proto3 (open) enum, compatible. Closed when either
+    # revision's file is proto2 (SPEC-FINDINGS F-35).
     closed = "proto2" in (osyn, nsyn)
     for num in sorted(set(nnames) - set(onames)):
-        # "a value added to a proto3 (open) enum" is compatible; "to a proto2
-        # (closed) enum is review".
-        v.add(REVIEW if closed else COMPATIBLE, f"{path}: value {num} added")
+        if closed:
+            v.add(REVIEW, "closed_enum_value_added", f"{path}: value {num} added")
     return v
 
 
@@ -411,14 +456,15 @@ def proto_same_revision(old: list[bytes], new: list[bytes]) -> bool:
 
 
 # ===========================================================================
-# Payload types inside a contract
+# Revisions
 # ===========================================================================
 
 @dataclass
 class Revision:
     """What the classifier needs of one contract revision: the canonical
     form, and the artifacts it lists by id (JSON documents, or
-    FileDescriptorSet bytes)."""
+    FileDescriptorSet bytes). Built from a loaded contract or a verified
+    bundle alike."""
 
     canonical: dict[str, Any]
     artifacts: dict[str, Any]
@@ -434,53 +480,60 @@ class Revision:
         return ProtoWorld.from_sets([self.artifacts[s["id"]] for s in self.canonical["schemas"]
                                      if s["kind"] == PROTOBUF and s["id"] in self.artifacts])
 
-    def json_stem(self, schema_id: str) -> str:
-        return next(s["name"] for s in self.canonical["schemas"] if s["id"] == schema_id)
+    def json_stem(self, schema_id: str) -> str | None:
+        return next((s["name"] for s in self.canonical["schemas"] if s["id"] == schema_id), None)
 
 
-def type_compare(old: Revision, ot: dict[str, Any] | None,
-                 new: Revision, nt: dict[str, Any] | None, where: str) -> Verdict:
+def type_compare(old: Revision, ot: dict[str, Any], new: Revision, nt: dict[str, Any],
+                 where: str) -> Verdict:
+    """§9.8 "Types", then the payload rules for the schema kind."""
     v = Verdict()
-    if ot == nt and (ot is None or ot["kind"] == RAW):
-        return v
-    if ot is None or nt is None:
-        v.add(REVIEW, f"{where}: type {'added' if ot is None else 'removed'}")
-        return v
     if ot["kind"] != nt["kind"]:
-        v.add(BREAKING, f"{where}: type kind {ot['kind']} → {nt['kind']}")
+        v.add(BREAKING, "type_kind_changed", f"{where}: {ot['kind']} → {nt['kind']}")
         return v
     if ot["kind"] == RAW:
-        v.add(BREAKING, f"{where}: media type {ot['media_type']}/{ot['media_param']} → "
-                        f"{nt['media_type']}/{nt['media_param']}")
+        if ot["media_type"] != nt["media_type"]:
+            v.add(BREAKING, "media_type_changed", f"{where}: {ot['media_type']} → {nt['media_type']}")
+        if ot["media_param"] != nt["media_param"]:
+            v.add(REVIEW, "media_param_changed", f"{where}: {ot['media_param']} → {nt['media_param']}")
         return v
     if ot["kind"] == JSON:
         ow, nw = old.json_world(), new.json_world()
         os_, ns = old.json_stem(ot["schema"]), new.json_stem(nt["schema"])
-        v.merge(json_compare(ow, os_, ow.docs[os_]["$defs"][ot["name"]],
-                             nw, ns, nw.docs[ns]["$defs"][nt["name"]], ot["name"]), f"{where}: ")
+        onode = ((ow.docs.get(os_) or {}).get("$defs") or {}).get(ot["name"]) if os_ else None
+        nnode = ((nw.docs.get(ns) or {}).get("$defs") or {}).get(nt["name"]) if ns else None
+        if onode is None or nnode is None:
+            v.add(REVIEW, "schema_unreadable", f"{where}: an artifact lacks {ot['name']}")
+            return v
+        v.merge(json_compare(ow, os_, onode, nw, ns, nnode, ""), f"{where}: ")
         return v
-    v.merge(proto_compare_message(old.proto_world(), "." + ot["name"],
-                                  new.proto_world(), "." + nt["name"]), f"{where}: ")
+    try:
+        ow, nw = old.proto_world(), new.proto_world()
+    except Exception:  # noqa: BLE001 - bytes that do not decode as a FileDescriptorSet
+        v.add(REVIEW, "schema_unreadable", f"{where}: an artifact does not decode")
+        return v
+    oname, nname = "." + ot["name"], "." + nt["name"]
+    if oname not in ow.messages or nname not in nw.messages:
+        v.add(REVIEW, "schema_unreadable", f"{where}: an artifact lacks {ot['name']}")
+        return v
+    v.merge(proto_compare_message(ow, oname, nw, nname), f"{where}: ")
     return v
 
 
 # ===========================================================================
-# Contract metadata (§9.8 table)
+# Contracts: §9.8's interface, resources, delivery, operations and roles
 # ===========================================================================
 
-#: Directional rules of the §9.8 table: (member, old, new) → class.
-_TRANSITIONS = {
-    ("idempotent", True, False): BREAKING,
-    ("fanout", "allowed", "forbidden"): BREAKING,
-    ("reliability", "reliable", "best_effort"): REVIEW,
-    ("optional", True, False): BREAKING,  # optional → required
-    ("congestion", "drop", "block"): REVIEW,
-    ("replies", "one", "many"): BREAKING,
+#: The members the "delivery" and "operations" tables class as review when
+#: they change at all.
+_REVIEW_IF_CHANGED = {
+    "cardinality": "cardinality_changed", "epoch": "epoch_changed",
+    "gate": "gate_changed", "annotations": "annotations_changed",
+    "congestion": "congestion_changed", "priority": "priority_changed",
+    "express": "express_toggled", "history": "history_changed",
+    "rate": "rate_changed", "retention_s": "retention_changed",
+    "serving": "serving_changed", "timeout_ms": "timeout_changed",
 }
-#: Members whose change is review whatever the direction (§9.8: "priority
-#: changed, express toggled").
-_ANY_CHANGE_REVIEW = {"priority", "express"}
-_TYPE_MEMBERS = ("type", "attachment", "request", "response", "error", "summary")
 _EXPLICIT = {("stream", "@stream"), ("state", "@state")}
 
 
@@ -488,71 +541,105 @@ def contract_compare(old: Revision, new: Revision) -> Verdict:
     """Classify the transition from ``old`` to ``new`` (§9.8)."""
     v = Verdict()
     oc, nc = old.canonical, new.canonical
+    # Interface.
     if oc["interface"] != nc["interface"]:
-        v.add(BREAKING, f"interface {oc['interface']} → {nc['interface']}")
+        v.add(BREAKING, "interface_changed", f"{oc['interface']} → {nc['interface']}")
         return v
     if oc["uses"] != nc["uses"]:
-        v.add(REVIEW, "uses changed")
+        v.add(REVIEW, "uses_changed", "uses changed")
+    # Resources. §9.8 says "matched by kind token and template", but its own
+    # explicit_set / explicit_cleared rows (and compat/contract/
+    # explicit-true-to-false) need a pairing that survives a token change:
+    # zk2py pairs by template, unique within a contract (SPEC-FINDINGS F-40).
     ores = {r["template"]: r for r in oc["resources"]}
     nres = {r["template"]: r for r in nc["resources"]}
     for t in sorted(set(ores) - set(nres)):
-        v.add(BREAKING, f"resource {t!r} removed")
+        v.add(BREAKING, "resource_removed", f"{t!r} removed")
     for t in sorted(set(nres) - set(ores)):
-        # Not in §9.8's table: an optional resource is compatible, by the
-        # table's own "optional role added"; a required one is review.
-        v.add(COMPATIBLE if nres[t]["optional"] else REVIEW, f"resource {t!r} added")
+        if nres[t]["optional"]:
+            v.add(COMPATIBLE, "", f"{t!r} added, optional")
+        else:
+            v.add(BREAKING, "required_resource_added", f"{t!r} added, required")
     for t in sorted(set(ores) & set(nres)):
-        v.merge(_resource_compare(old, ores[t], new, nres[t]))
+        v.merge(_resource_compare(old, ores[t], new, nres[t]), f"{t}: ")
+    # Roles.
     oreq, nreq = oc["requires"], nc["requires"]
     for role in sorted(set(nreq) - set(oreq)):
-        # "A required role added: breaking. An optional role added:
-        # compatible."
-        v.add(COMPATIBLE if nreq[role]["optional"] else BREAKING, f"role {role!r} added")
-    for role in sorted(set(oreq) - set(nreq)):
-        v.add(REVIEW, f"role {role!r} removed")
+        if not nreq[role]["optional"]:
+            v.add(BREAKING, "required_role_added", f"role {role!r} added, required")
+    # "A role removed: compatible (deployments stop binding it)."
     for role in sorted(set(oreq) & set(nreq)):
         a, b = oreq[role], nreq[role]
-        # "A role's interface or cardinality changed: breaking."
         for m in ("interface", "cardinality"):
             if a[m] != b[m]:
-                v.add(BREAKING, f"role {role!r}: {m} {a[m]!r} → {b[m]!r}")
+                v.add(BREAKING, "role_changed", f"role {role!r}: {m} {a[m]!r} → {b[m]!r}")
         if a["optional"] and not b["optional"]:
-            v.add(BREAKING, f"role {role!r}: optional → required")
-        elif a["optional"] != b["optional"]:
-            v.add(REVIEW, f"role {role!r}: required → optional")
-        for m in ("resources", "annotations"):
-            if a[m] != b[m]:
-                v.add(REVIEW, f"role {role!r}: {m} changed")
+            v.add(BREAKING, "role_required", f"role {role!r}: optional → required")
+        if a["resources"] != b["resources"] or a["annotations"] != b["annotations"]:
+            v.add(REVIEW, "role_resources_changed", f"role {role!r}: resources or annotations changed")
     return v
 
 
 def _resource_compare(old: Revision, a: dict[str, Any], new: Revision, b: dict[str, Any]) -> Verdict:
     v = Verdict()
-    t = a["template"]
     if a["kind"] != b["kind"]:
-        v.add(BREAKING, f"{t}: kind {a['kind']} → {b['kind']}")
+        v.add(BREAKING, "kind_changed", f"kind {a['kind']} → {b['kind']}")
         return v
     if a["token"] != b["token"]:
-        # "explicit false → true: breaking for ambient consumers";
-        # "explicit true → false: review (link budgets)".
         if (a["token"], b["token"]) in _EXPLICIT:
-            v.add(BREAKING, f"{t}: explicit false → true")
+            v.add(BREAKING, "explicit_set", "explicit false → true")
         else:
-            v.add(REVIEW, f"{t}: explicit true → false")
-    for m in _TYPE_MEMBERS:
-        if m in a or m in b:
-            v.merge(type_compare(old, a.get(m), new, b.get(m), f"{t}: {m}"))
-    skip = {"template", "kind", "token", *_TYPE_MEMBERS}
-    for m in sorted((set(a) | set(b)) - skip):
-        x, y = a.get(m), b.get(m)
-        if x == y:
+            v.add(REVIEW, "explicit_cleared", "explicit true → false")
+    if a["optional"] != b["optional"]:
+        if a["optional"]:
+            v.add(BREAKING, "optional_to_required", "optional → required")
+        else:
+            v.add(BREAKING, "required_to_optional", "required → optional")
+    if a["params"] != b["params"]:
+        v.add(BREAKING, "params_changed", f"params {a['params']} → {b['params']}")
+    for m in ("encoding", "attachment_encoding"):
+        if m in a and a.get(m) != b.get(m):
+            v.add(BREAKING, "encoding_changed", f"{m} {a.get(m)!r} → {b.get(m)!r}")
+    if a["deprecated"] != b["deprecated"]:
+        if a["deprecated"] is None:
+            v.add(COMPATIBLE, "", "deprecated added")
+        else:
+            v.add(REVIEW, "deprecated_changed", "deprecated removed or changed")
+    for m, rule in _REVIEW_IF_CHANGED.items():
+        if m in a and a.get(m) != b.get(m):
+            v.add(REVIEW, rule, f"{m} {a.get(m)!r} → {b.get(m)!r}")
+    if a["kind"] == "operation":
+        _operation_rules(v, a, b)
+    else:
+        if a["reliability"] == "reliable" and b["reliability"] == "best_effort":
+            v.add(REVIEW, "reliability_lowered", "reliable → best_effort")
+    # Types: always-present ones follow the type rules; optional ones (an
+    # attachment, an error, a summary) are review when added or removed.
+    optional_types = {"attachment": "attachment_changed", "error": "error_type_changed",
+                      "summary": "summary_type_changed"}
+    for m in ("type", "request", "response", "attachment", "error", "summary"):
+        if m not in a:
             continue
-        cls = _TRANSITIONS.get((m, x, y))
-        if cls is None:
-            cls = REVIEW  # §9.8 lists it in neither direction, or not this one
-        v.add(cls, f"{t}: {m} {x!r} → {y!r}" + ("" if m in _ANY_CHANGE_REVIEW or (m, x, y) in _TRANSITIONS
-                                                 else " (not in §9.8's table)"))
+        x, y = a.get(m), b.get(m)
+        if x is None and y is None:
+            continue
+        if x is None or y is None:
+            v.add(REVIEW, optional_types[m], f"{m} {'added' if x is None else 'removed'}")
+            continue
+        v.merge(type_compare(old, x, new, y, m))
     return v
+
+
+def _operation_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
+    """§9.8 "Operations"."""
+    if a["idempotent"] and not b["idempotent"]:
+        v.add(BREAKING, "idempotent_cleared", "idempotent true → false")
+    elif b["idempotent"] and not a["idempotent"]:
+        v.add(REVIEW, "idempotent_set", "idempotent false → true")
+    if a["fanout"] == "allowed" and b["fanout"] == "forbidden":
+        v.add(BREAKING, "fanout_forbidden", "fanout allowed → forbidden")
+    if a["replies"] == "one" and b["replies"] == "many":
+        v.add(BREAKING, "replies_many", "replies one → many")
 
 
 # ===========================================================================
@@ -570,5 +657,4 @@ def full_transitive(history: list[Any], candidate: Any,
         pv = compare(h, candidate)
         each.append(pv)
         total.merge(pv)
-    total.warnings = sorted(total.warnings)
     return total, each
