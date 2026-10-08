@@ -131,3 +131,49 @@ async fn s3_static_binding_and_unobservable_liveness() {
         Liveness::Unobservable
     );
 }
+
+/// §3, the GET: the ground's GET through a static binding is answered
+/// whenever the link is up, and is silent, not a verdict, while it is cut.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s3_the_get_is_answered_whenever_the_link_is_up() {
+    use zenkey::state::StateGet;
+    let (_r1, ep1) = router(None).await;
+    let link = common::link_to(&ep1).await;
+    let (_r2, ep2) = common::router_via(&link).await;
+    let ground = client(&ep1).await;
+    let vehicle = client(&ep2).await;
+    let nav: IfaceId = "nav.v2".parse().unwrap();
+
+    let mut b = ServiceBuilder::new(&vehicle, config("vehicle-01/nav"));
+    b.implement(imp("nav.v2")).unwrap();
+    let pose = b
+        .declare_state_writer(&nav, "state/pose", &Bindings::new())
+        .await
+        .unwrap();
+    b.expose(&nav, "@op/goto").unwrap();
+    b.expose(&nav, "state/tracks/{track}").unwrap();
+    let _veh = b.start().await.unwrap();
+    pose.put("here").await.unwrap();
+
+    let mut b = ServiceBuilder::new(
+        &ground,
+        config("ground/ops").bind("nav", &["vehicle-01/nav"]),
+    );
+    b.require("nav", nav, false);
+    let ops = b.start().await.unwrap();
+    let consumer = ops
+        .consumer("nav", Arc::new(contract("nav.v2")))
+        .unwrap()
+        .with_presence(Presence::Unavailable);
+    let answered = || async {
+        matches!(
+            consumer.get("state/pose", None, T).await.unwrap(),
+            StateGet::Answered(_)
+        )
+    };
+    eventually("answered with the link up", answered).await;
+    link.cut();
+    eventually("silent while cut", || async { !answered().await }).await;
+    link.heal();
+    eventually("answered again after the heal", answered).await;
+}
