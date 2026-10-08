@@ -55,3 +55,21 @@ Every other case agrees: `doc-only` (ok), and `move-into-oneof`,
 `scalar-to-repeated`, `renumber-field`, `reserved-reused`,
 `proto2-required-added`, `proto2-required-removed`,
 `proto2-optional-to-required` (breaking).
+
+## Rule names and buf's
+
+zk2 names its own rules (§9.8), because where a buf rule exists its meaning
+often differs. The buf ids below are the ones buf 1.73.0 reported on these
+cases (`--error-format json`).
+
+| zk2 rule | buf (WIRE) | Same meaning? |
+|---|---|---|
+| `cardinality_changed` | `FIELD_WIRE_COMPATIBLE_CARDINALITY` | Yes |
+| `oneof_changed` | `FIELD_SAME_ONEOF` | Yes |
+| `required_field_added`, `required_field_removed`, `required_label_changed` | `MESSAGE_SAME_REQUIRED_FIELDS`, `FIELD_WIRE_COMPATIBLE_CARDINALITY` | Yes |
+| `type_changed` | `FIELD_WIRE_COMPATIBLE_TYPE` | No: zk2 breaks on any change of declared scalar type |
+| `renumbered` | `FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED`, as a side effect | No: buf sees a deletion, zk2 names the move |
+| `field_deleted_unreserved` (warning) | `FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED` | No: a warning, and reuse is caught against the history |
+| `enum_value_removed` | `ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED` | No: review |
+| `reserved_reused` | `RESERVED_MESSAGE_NO_DELETE` | Partly: buf flags any reservation dropped, zk2 a reserved number reused |
+| `field_renamed`, `json_name_changed`, `enum_value_renamed`, `presence_changed`, `closed_enum_value_added` | None in WIRE (`FIELD_SAME_JSON_NAME` is WIRE_JSON) | zk2 adds them, as review |
