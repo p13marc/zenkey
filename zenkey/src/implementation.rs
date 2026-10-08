@@ -51,6 +51,25 @@ impl Implementation {
         })
     }
 
+    /// An implementation from bundle bytes alone (#611): what generated
+    /// code embeds, built once by `zenkey-model`'s bundle builder. The bytes
+    /// are verified (§9.6) and must be the bundle's JCS form, so they are
+    /// served exactly as they were built; the contract is the bundle's own
+    /// ([`Contract::from_bundle`]).
+    pub fn from_bundle(bytes: &[u8]) -> Result<Self> {
+        let refuse = |e: String| Error::Contract(format!("the bundle does not verify: {e}"));
+        let b = Bundle::verify(bytes).map_err(|e| refuse(e.to_string()))?;
+        if b.to_bytes() != bytes {
+            return Err(refuse("it is not in JCS form (§9.6)".to_owned()));
+        }
+        let contract = Contract::from_bundle(&b).map_err(|e| refuse(e.to_string()))?;
+        Ok(Self {
+            fingerprint: b.fingerprint(),
+            bundle: bytes.into(),
+            contract: Arc::new(contract),
+        })
+    }
+
     #[must_use]
     pub fn iface(&self) -> &IfaceId {
         &self.contract.iface
@@ -59,6 +78,13 @@ impl Implementation {
     #[must_use]
     pub fn contract(&self) -> &Contract {
         &self.contract
+    }
+
+    /// The contract, shared: what a consumer or client of this interface
+    /// is compiled against (R4).
+    #[must_use]
+    pub fn shared_contract(&self) -> Arc<Contract> {
+        Arc::clone(&self.contract)
     }
 
     #[must_use]
@@ -93,6 +119,7 @@ pub fn resource_name(r: &Resource) -> String {
 }
 
 /// The capability a resource is gated on that `held` lacks, if any (§3.3).
+#[cfg_attr(not(feature = "zenoh"), allow(dead_code))]
 pub(crate) fn missing_capability<'r>(
     r: &'r Resource,
     held: &std::collections::BTreeSet<String>,
@@ -101,4 +128,30 @@ pub(crate) fn missing_capability<'r>(
         .iter()
         .filter_map(|g| g.strip_prefix("capability:"))
         .find(|cap| !held.contains(*cap))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::Implementation;
+
+    #[test]
+    fn an_implementation_from_its_bundle_bytes_alone() {
+        let src = "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n\
+                   [resources.a]\nkind = \"operation\"\n\
+                   request = \"google.protobuf.Empty\"\nresponse = \"google.protobuf.Empty\"\n";
+        let c = zenkey_model::contract::load_str(src, Path::new("."), None)
+            .contract
+            .unwrap();
+        let built = Implementation::new(c);
+        let back = Implementation::from_bundle(built.bundle_bytes()).unwrap();
+        assert_eq!(back.fingerprint(), built.fingerprint());
+        assert_eq!(back.bundle_bytes(), built.bundle_bytes());
+        assert!(back.resource("@op/a").is_ok());
+        let mut spaced = b" ".to_vec();
+        spaced.extend_from_slice(built.bundle_bytes());
+        assert!(Implementation::from_bundle(&spaced).is_err(), "not JCS");
+        assert!(Implementation::from_bundle(b"{}").is_err());
+    }
 }

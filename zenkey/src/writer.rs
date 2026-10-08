@@ -231,15 +231,7 @@ impl Writer {
 
 /// A value of a JSON Schema type, in its wire encoding (§7.2).
 pub(crate) fn encode_value<T: Serialize>(value: &T, wire: Option<WireEncoding>) -> Result<Vec<u8>> {
-    match wire {
-        Some(WireEncoding::Cbor) => {
-            let mut out = Vec::new();
-            ciborium::into_writer(value, &mut out)
-                .map_err(|e| Error::Contract(format!("CBOR: {e}")))?;
-            Ok(out)
-        }
-        _ => serde_json::to_vec(value).map_err(|e| Error::Contract(format!("JSON: {e}"))),
-    }
+    crate::codec::encode_json(value, wire).map_err(Error::Contract)
 }
 
 /// One-shot puts on `…/events/<template>/<ulid>`, one key per occurrence
