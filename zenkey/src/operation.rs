@@ -432,7 +432,6 @@ impl Availability {
 /// A service's operation state: the shared [`Availability`], and the
 /// queryables that answer `unavailable` for the optional operations it does
 /// not serve (O3).
-#[derive(Default)]
 pub(crate) struct Ops {
     pub(crate) availability: Arc<Availability>,
     fallbacks: Vec<Queryable<()>>,
@@ -464,9 +463,9 @@ impl Ops {
                     .complete(true)
                     .callback(move |q: Query| {
                         let e = spec.gate(&q, &avail).unwrap_or_else(|| {
-                            // Neither gated nor listed, yet not served: a
-                            // configuration the descriptor check would
-                            // already have refused at start.
+                            // Neither gated nor listed, yet not served:
+                            // start refuses that (§8.2 step 2), so only a
+                            // later `set_unavailable(.., None)` gets here.
                             OpError::unavailable(Cause::Config, "not served by this instance")
                         });
                         spec.refuse_now(&q, &e);
