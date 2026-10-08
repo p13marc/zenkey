@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Map, Value};
+use zenkey_model::compat::nullable_reading;
 
 /// The subset's keywords (spec §7.3), as `zenkey-model` lints them (E037).
 const SUBSET: &[&str] = &[
@@ -96,11 +97,44 @@ fn json_type(v: &Value) -> &'static str {
     }
 }
 
+/// The target of a nullable form's S branch, for [`nullable_reading`]: the
+/// branch itself, or the definition its local `$ref` names, with that
+/// name. `None` (the form compared as written) for a `$ref` with keywords
+/// beside it, one that names no definition, or one already being followed.
+fn local_target(
+    branch: &Value,
+    defs: &Map<String, Value>,
+    stack: &[String],
+) -> Option<(Value, Option<String>)> {
+    let Some(r) = branch.get("$ref") else {
+        return Some((branch.clone(), None));
+    };
+    let name = r.as_str()?.strip_prefix("#/$defs/")?;
+    if branch.as_object()?.len() != 1 || stack.iter().any(|s| s == name) {
+        return None;
+    }
+    Some((defs.get(name)?.clone(), Some(name.to_owned())))
+}
+
 /// What a projected schema means, so two spellings of one meaning compare
 /// equal: a local `$ref` is replaced by the definition it names (a cycle
-/// keeps its `$ref`), and a `type` that an `enum` or `const` already implies
-/// is dropped (`{"type": "string", "enum": ["a"]}` is `{"enum": ["a"]}`).
+/// keeps its `$ref`), a `type` that an `enum` or `const` already implies
+/// is dropped (`{"type": "string", "enum": ["a"]}` is `{"enum": ["a"]}`),
+/// and a nullable form is read as its reading (spec §7.3, 0.7, C-1):
+/// `{"anyOf": [S, {"type": "null"}]}` is S with `null` added to its `type`
+/// and its `enum`, by `zenkey-model`'s reading, the classifier's own
+/// ([`nullable_reading`]). So schemars's `{"type": ["integer", "null"]}`
+/// and another generator's `{"anyOf": [{"type": "integer"}, {"type":
+/// "null"}]}` are one type.
 fn normalize(v: &Value, defs: &Map<String, Value>, stack: &mut Vec<String>) -> Value {
+    if let Some((read, name)) = nullable_reading(v, |b| local_target(b, defs, stack)) {
+        stack.extend(name.clone());
+        let out = normalize(&read, defs, stack);
+        if name.is_some() {
+            stack.pop();
+        }
+        return out;
+    }
     match v {
         Value::Object(m) => {
             if let Some(Value::String(r)) = m.get("$ref")
@@ -149,7 +183,10 @@ fn normalize(v: &Value, defs: &Map<String, Value>, stack: &mut Vec<String>) -> V
 /// Checks that `T`'s schemars schema and the committed schema `file`'s
 /// `$defs/<name>` agree, read through the zk2 subset (spec §7.3): what each
 /// says once its local `$ref`s are followed, so a definition inlined on one
-/// side and referenced on the other is the same. Annotations (titles,
+/// side and referenced on the other is the same, and once a nullable form is
+/// read as its reading (§7.3, 0.7), so `Option<T>` spelled `{"type": [T,
+/// "null"]}` on one side and `{"anyOf": [S, {"type": "null"}]}` on the
+/// other is the same. Annotations (titles,
 /// descriptions, `format`) are ignored, and so is a `type` an `enum` already
 /// implies; a keyword schemars emits outside the subset is a failure, as the
 /// lints would refuse it (E037).
@@ -290,6 +327,72 @@ mod tests {
         });
         let e = check_schema::<Reading>(&renamed, "Reading").unwrap_err();
         assert!(e.contains("Simulation"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[derive(Serialize, Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct Probe {
+        count: Option<u32>,
+        source: Option<Source>,
+    }
+
+    /// `Probe`'s schemars schema, committed after `edit`.
+    fn committed_probe(
+        dir: &std::path::Path,
+        edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+    ) -> std::path::PathBuf {
+        let mut root = serde_json::to_value(schemars::schema_for!(Probe)).unwrap();
+        let mut defs = root["$defs"].take();
+        root.as_object_mut().unwrap().remove("$defs");
+        root.as_object_mut().unwrap().remove("$schema");
+        edit(root["properties"].as_object_mut().unwrap());
+        defs["Probe"] = root;
+        let p = dir.join("probe.json");
+        let doc = serde_json::json!({"$defs": defs});
+        std::fs::write(&p, serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        p
+    }
+
+    /// Spec §7.3 (0.7, C-1, #660): a nullable's two spellings are one type
+    /// to the check, read as the classifier reads them.
+    #[test]
+    fn a_nullable_is_one_type_in_either_spelling() {
+        use serde_json::json;
+        let generated = serde_json::to_value(schemars::schema_for!(Probe)).unwrap();
+        // What schemars 1 writes, the two spellings the rule names.
+        assert_eq!(
+            generated["properties"]["count"]["type"],
+            json!(["integer", "null"])
+        );
+        assert_eq!(
+            generated["properties"]["source"],
+            json!({"anyOf": [{"$ref": "#/$defs/Source"}, {"type": "null"}]})
+        );
+        let dir = std::env::temp_dir().join(format!("zk2-check-nullable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The other spelling of each, committed: the same type.
+        let swapped = committed_probe(&dir, |p| {
+            p["count"] = json!({"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]});
+            p["source"] = json!({"type": ["string", "null"], "enum": ["Probe", "Model", null]});
+        });
+        check_schema::<Probe>(&swapped, "Probe").unwrap();
+        // A change inside S is still a change.
+        let retyped = committed_probe(&dir, |p| {
+            p["count"] = json!({"anyOf": [{"type": "string"}, {"type": "null"}]});
+        });
+        let e = check_schema::<Probe>(&retyped, "Probe").unwrap_err();
+        assert!(e.contains("the type says"), "{e}");
+        // So is a null dropped: the type no longer admits one.
+        let required = committed_probe(&dir, |p| {
+            p["source"] = json!({"type": "string", "enum": ["Probe", "Model"]});
+        });
+        assert!(check_schema::<Probe>(&required, "Probe").is_err());
+        // An `anyOf` that is not the form is compared as written.
+        let other = committed_probe(&dir, |p| {
+            p["count"] = json!({"anyOf": [{"type": "integer", "minimum": 0}, {"type": "string"}]});
+        });
+        assert!(check_schema::<Probe>(&other, "Probe").is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -110,6 +110,12 @@ impl Codec for Raw {
     fn decode(bytes: &[u8], _: Option<WireEncoding>) -> Result<Vec<u8>, String> {
         Ok(bytes.to_vec())
     }
+    /// A raw `error` type's detail is its bytes as base64 text (RFC 4648
+    /// §4, padded) in the JSON envelope a raw type takes (§5.2, 0.7, F-65):
+    /// bytes would not fit it, and would go out as `internal`.
+    fn detail(value: &Vec<u8>) -> Result<Detail, String> {
+        Ok(Detail::raw(value))
+    }
 }
 
 /// The type of a `summary` an operation does not declare: nothing encodes
@@ -191,5 +197,23 @@ mod tests {
         );
         assert_eq!(Protobuf::<()>::encode(&(), None).unwrap(), Vec::<u8>::new());
         assert_eq!(Raw::decode(&[1, 2], None).unwrap(), [1, 2]);
+    }
+
+    /// Spec §5.2 (0.7, F-65): each codec's `app` detail has the form its
+    /// envelope takes: a raw type's is base64 text, never bytes.
+    #[test]
+    fn a_raw_detail_is_base64_text() {
+        use zenkey_model::envelope::Detail;
+        let d = Raw::detail(&vec![0xff, 0xd8, 0xff, 0xe0]).unwrap();
+        assert_eq!(d, Detail::Value(serde_json::json!("/9j/4A==")));
+        assert_eq!(d.raw_bytes(), Some(vec![0xff, 0xd8, 0xff, 0xe0]));
+        assert_eq!(
+            Protobuf::<()>::detail(&()).unwrap(),
+            Detail::Bytes(Vec::new())
+        );
+        assert_eq!(
+            Json::<u32>::detail(&7).unwrap(),
+            Detail::Value(serde_json::json!(7))
+        );
     }
 }

@@ -86,6 +86,15 @@ class Report:
     def info(self, run: str, text: str) -> None:
         print(f"info [{run}] {text}", flush=True)
 
+    known: list[tuple[str, str, bool, str]] = field(default_factory=list)
+
+    def known_deviation(self, run: str, name: str, ok: bool, detail: str, why: str) -> None:
+        """A rule the Rust owner example is known not to meet yet, recorded
+        by the spec as the runtime's fix to make: printed as XFAIL (or XPASS
+        once it meets it), never counted as a failure of this runner."""
+        self.known.append((run, name, ok, f"{detail} [{why}]"))
+        print(f"{'XPASS' if ok else 'XFAIL'} [{run}] {name}: {detail} [{why}]", flush=True)
+
 
 class Owner:
     """The owner example as a child process, read line by line."""
@@ -221,6 +230,14 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
             return
         time.sleep(0.2)
         pres = live.list_presence(session, selector)
+    if "zk2py_echo.v1" in by_iface and pres.alive:
+        # §8.2 (0.7) "State values": put before the tokens, so a GET made
+        # when the interface token appears finds it.
+        first = live.get_state(session, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
+        report.known_deviation(run, "a state GET on first sight of the interface token finds the value (§8.2)",
+                               [r.payload for r in first.replies] == [b"ok"],
+                               str([r.payload for r in first.replies]),
+                               "0.7 records the owner example's fix (F-68); the race may hide it")
     report.check(run, "presence GET completed before its timeout (callback handler, §8.1)",
                  pres.complete, f"{pres.elapsed_s:.3f} s, {pres.count} tokens")
     if not report.check(run, "exactly one instance token", len(pres.instances) == 1,
@@ -352,7 +369,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
 
     # -- state and operations (§4, §5) ------------------------------------
     if "zk2py_echo.v1" in by_iface:
-        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None)
+        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None, rust=True)
 
     # -- presence at scale (presence.md §4) -------------------------------
     if scale > 0:
@@ -447,11 +464,12 @@ def run_refusal(report: Report, exe: Path, service: str, paths: list[Path]) -> N
 
 ECHO = "impl/python/interop/zk2py_echo.v1.toml"
 NEEDS = "impl/python/interop/zk2py_needs.v1.toml"
+BRINGUP = "impl/python/interop/zk2py_bringup.v1.toml"
 DEFAULT_CONSUME = REPO / "target" / "debug" / "examples" / "consume"
 
 
 def _state_and_calls(report: Report, run: str, session, system: str, svc: str, owner_zid: str | None,
-                     expect_typed: str | None) -> None:
+                     expect_typed: str | None, rust: bool = False) -> None:
     """The consumer's and the caller's side, against an owner serving
     ``zk2py_echo.v1``: a state GET per S4, calls per O1–O5, envelopes per
     §5.2. ``expect_typed`` is the code the owner gives ``@op/typed``'s
@@ -489,6 +507,16 @@ def _state_and_calls(report: Report, run: str, session, system: str, svc: str, o
                  and refuse.replies[0].envelope["code"] == "app"
                  and refuse.replies[0].encoding == "application/protobuf;zk2.core.v1.Error",
                  str([(r.kind, r.encoding, r.envelope or r.refusal) for r in refuse.replies]))
+    # §5.2 (0.7): "With no error type there is no detail." @op/refuse
+    # declares none.
+    no_detail = len(refuse.replies) == 1 and refuse.replies[0].envelope is not None \
+        and refuse.replies[0].envelope["detail"] is None
+    detail = str([(r.envelope or {}).get("detail") for r in refuse.replies])
+    if rust:
+        report.known_deviation(run, "@op/refuse's app envelope carries no detail (no error type, §5.2)",
+                               no_detail, detail, "0.7 records the owner example's fix (F-65)")
+    else:
+        report.check(run, "@op/refuse's app envelope carries no detail (no error type, §5.2)", no_detail, detail)
     typed = live.call(session, f"{base}/@op/typed", b"not json")
     good = len(typed.replies) == 1 and typed.replies[0].kind == "envelope" \
         and typed.replies[0].encoding == "application/json" \
@@ -567,67 +595,236 @@ def run_python_owner(report: Report, consume: Path) -> None:
 
 
 def run_python_refusal(report: Report) -> None:
-    """presence.md §2 step 4, as written since 0.6: zk2py's owner, a client
-    of a router R1 that outlives it, is watched by a liveliness subscriber
-    through R1 declared before launch. The control, with the required role
-    bound, shows its instance token within the wait; the refusal shows none,
-    and a liveliness GET through R1 afterwards returns none."""
+    """presence.md §2 steps 4 and 5 (0.6, 0.7): zk2py's owner, a client of a
+    router R1 that outlives it, watched by a liveliness subscriber through
+    R1 declared before launch. Each refusal has its control, launched the
+    same way, which shows its instance token within the wait; the refusal
+    shows none, and a liveliness GET through R1 afterwards returns none.
+    - step 4: a required role bound to nothing (§3.2);
+    - step 5: an optional resource, its gate's capability held, neither
+      exposed nor listed unavailable (§8.2 step 2); its control lists it."""
     import zenoh
 
     from . import live
     from .contract import load_contract
-    from .owner import Owner as PyOwner, OwnerRefused, free_loopback_port
+    from .owner import Owner as PyOwner, OwnerRefused
 
     system, svc = "py-site", "needs"
-    run = f"zk2py owner {system}/{svc} ← zk2py_needs.v1.toml (watched through R1)"
     contract = load_contract(REPO / NEEDS)
-    port = free_loopback_port()
-    conf = zenoh.Config()
-    conf.insert_json5("mode", json.dumps("router"))
-    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
-    conf.insert_json5("scouting/multicast/enabled", "false")
-    r1 = zenoh.open(conf)
-    r1_endpoint = f"tcp/127.0.0.1:{port}"
+    r1, r1_endpoint, _ = _r1()
     try:
         watcher = live.open_client(r1_endpoint)
         seen: list[tuple[str, str]] = []
         sub = watcher.liveliness().declare_subscriber(
             f"zk2/{system}/{svc}/@zk/**",
-            zenoh.handlers.Callback(lambda s: seen.append((str(s.kind), str(s.key_expr)))), history=True)
+            zenoh.handlers.Callback(lambda smp: seen.append((str(smp.kind), str(smp.key_expr)))),
+            history=True)
+        bound = {"upstream": ["py-site/echo"]}
+        cases = [
+            ("step 4: an unbound required role (§3.2)",
+             dict(bindings=bound, capabilities={"cal"}),
+             dict(capabilities={"cal"})),
+            ("step 5: an optional resource neither exposed nor listed (§8.2 step 2)",
+             dict(bindings=bound, capabilities={"cal"}, unavailable={"state/calibration": "config"}),
+             dict(bindings=bound, capabilities={"cal"}, withhold={"state/calibration"})),
+        ]
         try:
-            # The control: the role bound.
-            control = PyOwner(system, svc, [contract], connect=r1_endpoint,
-                              bindings={"upstream": ["py-site/echo"]})
-            control.start()
-            deadline = time.monotonic() + PRESENCE_WAIT_S
-            while time.monotonic() < deadline and not any(k == control.instance_key for _, k in seen):
-                time.sleep(0.05)
-            report.check(run, "the control (role bound) shows its instance token to the watcher within 1 s",
-                         any(k == control.instance_key for _, k in seen), str(seen))
-            control.close()
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline and live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**").count:
-                time.sleep(0.1)
-            # The refusal: the role unbound.
-            seen.clear()
-            refused = PyOwner(system, svc, [contract], connect=r1_endpoint)
-            try:
-                refused.start()
-                outcome = "started"
-            except OwnerRefused as e:
-                outcome = f"refused: {e}"
-            time.sleep(PRESENCE_WAIT_S)
-            after = live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**")
-            report.check(run, "an unbound required role: the owner refuses, the watcher sees no token, "
-                              "and a GET through R1 returns none (§3.2, presence.md §2 step 4)",
-                         outcome.startswith("refused") and not [k for kind, k in seen if "PUT" in kind]
-                         and after.count == 0 and after.complete,
-                         f"{outcome}; watcher saw {seen}; GET after: {after.count} tokens")
-            if outcome == "started":
-                refused.close()
+            for label, control_kw, refusal_kw in cases:
+                run = f"zk2py owner {system}/{svc} ← zk2py_needs.v1.toml, {label}"
+                seen.clear()
+                control = PyOwner(system, svc, [contract], connect=r1_endpoint, **control_kw)
+                control.start()
+                deadline = time.monotonic() + PRESENCE_WAIT_S
+                while time.monotonic() < deadline and not any(k == control.instance_key for _, k in seen):
+                    time.sleep(0.05)
+                report.check(run, "the control shows its instance token to the watcher within 1 s",
+                             any(k == control.instance_key for _, k in seen), str(seen))
+                control.close()
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline and \
+                        live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**").count:
+                    time.sleep(0.1)
+                seen.clear()
+                refused = PyOwner(system, svc, [contract], connect=r1_endpoint, **refusal_kw)
+                try:
+                    refused.start()
+                    outcome = "started"
+                except OwnerRefused as e:
+                    outcome = f"refused: {e}"
+                time.sleep(PRESENCE_WAIT_S)
+                after = live.list_presence(watcher, f"zk2/{system}/{svc}/@zk/**")
+                report.check(run, "the owner refuses, the watcher sees no token, and a GET through R1 "
+                                  "returns none (presence.md §2)",
+                             outcome.startswith("refused") and not [k for kind, k in seen if "PUT" in kind]
+                             and after.count == 0 and after.complete,
+                             f"{outcome}; watcher saw {seen}; GET after: {after.count} tokens")
+                if outcome == "started":
+                    refused.close()
         finally:
             sub.undeclare()
             watcher.close()
+    finally:
+        r1.close()
+
+
+def _r1(timestamping: bool = True):
+    """A router of the runner's own, which outlives every owner it serves
+    (presence.md §2, state.md §1): (session, endpoint, zid)."""
+    import zenoh
+
+    from .owner import free_loopback_port
+
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("timestamping/enabled", "true" if timestamping else "false")
+    r1 = zenoh.open(conf)
+    return r1, f"tcp/127.0.0.1:{port}", str(r1.zid())
+
+
+def run_python_s1(report: Report) -> None:
+    """state.md §1 (0.7): the owner and the consumer are clients of R1,
+    whose timestamping is on; the control is an unstamped put through R1."""
+    import zenoh
+
+    from . import live
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    system, svc = "py-site", "stamps"
+    run = f"zk2py owner {system}/{svc} ← zk2py_echo.v1.toml (state.md §1, through R1)"
+    r1, r1_endpoint, r1_zid = _r1()
+    try:
+        consumer = live.open_client(r1_endpoint)
+        third = live.open_client(r1_endpoint)
+        owner = PyOwner(system, svc, [load_contract(REPO / ECHO)], connect=r1_endpoint)
+        key = f"zk2/{system}/{svc}/zk2py_echo.v1/state/health"
+        samples: list[Any] = []
+        control: list[Any] = []
+        sub = consumer.declare_subscriber(key, zenoh.handlers.Callback(samples.append))
+        csub = consumer.declare_subscriber(f"zk2/{system}/control/x", zenoh.handlers.Callback(control.append))
+        try:
+            time.sleep(0.3)
+            owner.start()
+            owner_zid = str(owner.session.zid())
+            time.sleep(0.3)
+            samples.clear()  # the value held at start; the steps begin here
+            owner.set_state(key, b"v1")
+            stamp_v2 = owner.set_state(key, b"v2")
+            time.sleep(0.3)
+            st = live.get_state(consumer, key)
+            owner.delete_state(key)
+            third.put(f"zk2/{system}/control/x", b"unstamped")
+            time.sleep(0.5)
+            stamps = [smp.timestamp for smp in samples]
+            ids = [None if t is None else str(t).split("/", 1)[1] for t in stamps]
+            report.check(run, "every sample, the delete included, carries the owner session's zid, not R1's",
+                         len(samples) == 3 and all(i == owner_zid for i in ids) and owner_zid != r1_zid,
+                         f"{[(str(x.kind), x.payload.to_bytes()) for x in samples]}, ids {ids}, "
+                         f"owner {owner_zid}, R1 {r1_zid}")
+            ntp = [t.get_time_as_ntp64().as_nanos() for t in stamps if t is not None]
+            report.check(run, "each timestamp is greater than the previous one", ntp == sorted(set(ntp))
+                         and len(ntp) == 3, str(ntp))
+            report.check(run, "the GET after v2 returns v2 with v2's timestamp (S2)",
+                         len(st.replies) == 1 and st.replies[0].payload == b"v2"
+                         and st.replies[0].stamp == str(stamp_v2),
+                         f"{[(r.payload, r.stamp) for r in st.replies]} vs {stamp_v2}")
+            cid = [None if x.timestamp is None else str(x.timestamp).split("/", 1)[1] for x in control]
+            report.check(run, "the control: an unstamped put through R1 arrives with R1's zid",
+                         cid == [r1_zid], f"{cid} vs {r1_zid}")
+            v3 = owner.set_state(key, b"v3")
+            v4 = owner.set_state(key, b"v4")
+            d = v4.get_time_as_ntp64().as_nanos() - v3.get_time_as_ntp64().as_nanos()
+            report.check(run, "v3, v4 back to back: v4's timestamp is greater by at least one tick (§4.3)",
+                         d >= 1, f"{d} ns")
+        finally:
+            sub.undeclare()
+            csub.undeclare()
+            owner.close()
+            third.close()
+            consumer.close()
+    finally:
+        r1.close()
+
+
+def run_python_bringup(report: Report) -> None:
+    """presence.md §1 (0.7), zk2py's owner a client of R1: a tool, up before
+    the owner, acts the moment the tokens appear."""
+    import zenoh
+
+    from . import bundle, live
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    system, svc = "py-site", "bringup"
+    run = f"zk2py owner {system}/{svc} ← zk2py_bringup.v1.toml (presence.md §1, through R1)"
+    contract = load_contract(REPO / BRINGUP)
+    base = f"zk2/{system}/{svc}/zk2py_bringup.v1"
+    r1, r1_endpoint, _ = _r1()
+    try:
+        tool = live.open_client(r1_endpoint)
+        got_instance, got_alive = threading.Event(), threading.Event()
+        tokens: list[str] = []
+
+        def on_token(smp) -> None:
+            k = str(smp.key_expr)
+            tokens.append(k)
+            if "/@zk/instance/" in k:
+                got_instance.set()
+            if "/@zk/alive/" in k:
+                got_alive.set()
+
+        descriptor_puts: list[bytes] = []
+        lsub = tool.liveliness().declare_subscriber("zk2/*/*/@zk/**", zenoh.handlers.Callback(on_token),
+                                                     history=True)
+        dsub = tool.declare_subscriber("zk2/*/*/@zk/instance/*", zenoh.handlers.Callback(
+            lambda smp: descriptor_puts.append(smp.payload.to_bytes())))
+        owner = PyOwner(system, svc, [contract], connect=r1_endpoint)
+        try:
+            time.sleep(0.3)
+            owner.start()
+            report.check(run, "the owner starts although its templated state has no member (§8.2)", True,
+                         "started")
+            seen = got_instance.wait(PRESENCE_WAIT_S)
+            d = live.get_descriptor(tool, owner.instance_key) if seen else []
+            b = live.retrieve_bundle(tool, "zk2py_bringup.v1", contract.fingerprint) if seen else None
+            report.check(run, "the moment the instance token appears: the descriptor and the bundle answer",
+                         seen and len(d) == 1 and d[0].ok and b is not None and b.available,
+                         f"token {seen}, descriptor {len(d)} replies, bundle {b and b.available}")
+            alive = got_alive.wait(PRESENCE_WAIT_S)
+            c = live.call(tool, f"{base}/@op/echo", b"ping") if alive else None
+            st = live.get_state(tool, f"{base}/state/health") if alive else None
+            report.check(run, "the moment the interface token appears: the call succeeds (alive ⇒ callable)",
+                         c is not None and [(r.kind, r.payload) for r in c.replies] == [("value", b"ping")],
+                         str(c and [(r.kind, r.payload) for r in c.replies]))
+            report.check(run, "and the state GET finds the value it started with (§8.2 \"State values\")",
+                         st is not None and [r.payload for r in st.replies] == [b"ok"],
+                         str(st and [r.payload for r in st.replies]))
+            member = live.call(tool, f"{base}/@op/reset/a1", b"")
+            malformed = live.call(tool, f"{base}/@op/reset/A1", b"")
+            codes = [[(r.envelope or {}).get("code") for r in x.replies] for x in (member, malformed)]
+            report.check(run, "a templated operation over its template: a well-formed member is not_found, "
+                              "a key naming no member invalid_request (O1, O-4)",
+                         codes == [["not_found"], ["invalid_request"]], str(codes))
+            time.sleep(0.2)
+            report.check(run, "a data subscriber up before the start received the first descriptor, "
+                              "without a GET (§3.3, §8.2 step 3)",
+                         owner.descriptor in descriptor_puts, f"{len(descriptor_puts)} puts")
+            doc = json.loads(owner.descriptor)
+            mine = [k for k in tokens if f"zk2/{system}/{svc}/" in k]
+            report.check(run, "the templated state is claimed, not listed, and no member token appears",
+                         doc["interfaces"][0]["unavailable"] == [] and not any("/@zk/member/" in k for k in mine),
+                         f"unavailable {doc['interfaces'][0]['unavailable']}, tokens {mine}")
+            report.check(run, "the owner holds an instance token and one interface token",
+                         sorted(k.split("/@zk/")[1].split("/")[0] for k in mine) == ["alive", "instance"],
+                         str(mine))
+        finally:
+            owner.close()
+            lsub.undeclare()
+            dsub.undeclare()
+            tool.close()
     finally:
         r1.close()
 
@@ -665,12 +862,17 @@ def main(argv: list[str] | None = None) -> int:
                 run_refusal(report, args.owner, service, [REPO / f for f in files])
             run_python_owner(report, args.consume)
             run_python_refusal(report)
+            run_python_s1(report)
+            run_python_bringup(report)
     except CannotRun as e:
         print(f"error: could not run: {e}", file=sys.stderr)
         return 2
     passed = sum(1 for r in report.rows if r[2])
     failed = len(report.rows) - passed
-    print(f"live interop: {passed} passed, {failed} failed")
+    print(f"live interop: {passed} passed, {failed} failed, "
+          f"{len(report.known)} known deviations of the Rust owner example")
+    for run, name, ok, detail in report.known:
+        print(f"{'XPASS' if ok else 'XFAIL'} [{run}] {name}: {detail}")
     for run, name, ok, detail in report.rows:
         if not ok:
             print(f"FAIL [{run}] {name}: {detail}")

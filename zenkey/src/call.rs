@@ -9,7 +9,9 @@
 //! - **A handler** receives its decoded request and a [`CallInfo`] (the
 //!   template values, the claimed metadata of O7), and answers a value or
 //!   an [`OpError`], the error envelope of §5.2. A `replies = "many"`
-//!   handler sends through a [`Sink`]: values, then the summary (O6).
+//!   handler sends through a [`Sink`]: values, then the summary (O6). A
+//!   handler over a whole template names the member a fan-out answers for
+//!   ([`CallInfo::member`], §5.1 "Over a template").
 //! - **A caller** gets an [`Outcome`] (O5: a value, a refusal, a malformed
 //!   refusal, or silence, each distinct) or, for a many-reply or fan-out
 //!   call, [`Replies`], attributed by replier (O3, O6).
@@ -17,7 +19,7 @@
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use zenkey_model::authoring::Encoding as WireEncoding;
@@ -135,8 +137,18 @@ impl OpError {
         Self::new("fanout_forbidden", message, None)
     }
 
+    /// `app` with no detail (§5.2, 0.7, F-65): the operation's own failure,
+    /// which any operation may refuse with. The only `app` for an operation
+    /// that declares no `error` type, which has no detail to send; with one,
+    /// the detail is optional.
+    pub fn app_without_detail(message: impl Into<String>) -> Self {
+        Self::new("app", message, None)
+    }
+
     /// `app`, with a value of the operation's declared `error` type: for a
-    /// JSON or CBOR envelope (§5.2).
+    /// JSON or CBOR envelope (§5.2). On an operation that declares no
+    /// `error` type, the runtime sends `internal` instead
+    /// ([`OpError::app_without_detail`] is that operation's `app`).
     pub fn app<T: Serialize>(message: impl Into<String>, detail: &T) -> Self {
         match serde_json::to_value(detail) {
             Ok(v) => Self(Envelope {
@@ -149,8 +161,10 @@ impl OpError {
         }
     }
 
-    /// `app`, with the declared protobuf `error` message, already encoded:
-    /// for a protobuf envelope (§5.2).
+    /// `app`, with the declared `error` type's value already encoded: a
+    /// protobuf message, carried as the envelope's bytes, or a raw type's
+    /// bytes, which the runtime sends as base64 text in its JSON envelope
+    /// (§5.2, 0.7, F-65).
     pub fn app_bytes(message: impl Into<String>, detail: Vec<u8>) -> Self {
         Self(Envelope {
             code: "app".to_owned(),
@@ -162,8 +176,9 @@ impl OpError {
 
     /// `app`, with a value of the declared `error` type through its codec:
     /// a protobuf message is encoded into the envelope's bytes, a JSON
-    /// Schema value carried as a value (§5.2). Generated code names the
-    /// codec; a handler writes `OpError::app_as::<Protobuf<NavError>>(…)`.
+    /// Schema value carried as a value, a raw type's bytes as base64 text
+    /// (§5.2). Generated code names the codec; a handler writes
+    /// `OpError::app_as::<Protobuf<NavError>>(…)`.
     pub fn app_as<C: Codec>(message: impl Into<String>, detail: &C::Value) -> Self {
         match C::detail(detail) {
             Ok(d) => Self(Envelope {
@@ -214,13 +229,23 @@ impl From<Envelope> for OpError {
     }
 }
 
-/// What a typed handler knows of its call, besides the request: the
-/// template values of the key called, and the metadata the caller claims
-/// (O7). With the `zenoh` feature, the runtime's [`crate::operation::Call`]
-/// stays reachable ([`CallInfo::call`]).
+/// What a typed handler knows of its call, besides the request: the member
+/// it answers for, what the key called binds, and the metadata the caller
+/// claims (O7). With the `zenoh` feature, the runtime's
+/// [`crate::operation::Call`] stays reachable ([`CallInfo::call`]).
+///
+/// **Over a template** (§5.1, 0.7, O-1, C-2): a fan-out's key expression can
+/// hold a wildcard where the template has a parameter, so it names no
+/// member. A handler served over the whole template learns only what the
+/// key binds ([`CallInfo::bound`]), names the member its reply answers for
+/// ([`CallInfo::member`]), and the reply goes on that member's key. When
+/// the key binds every parameter, the runtime has named it already.
+/// Clones share the naming, as the runtime's call's clones do.
 #[derive(Clone, Default)]
 pub struct CallInfo {
-    values: Option<Bindings>,
+    /// The member's values, without a bus: given, or named once.
+    member: Arc<OnceLock<Bindings>>,
+    bound: Bindings,
     metadata: Option<CallMetadata>,
     fanout: bool,
     #[cfg(feature = "zenoh")]
@@ -230,7 +255,8 @@ pub struct CallInfo {
 impl fmt::Debug for CallInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallInfo")
-            .field("values", &self.values)
+            .field("values", &self.values())
+            .field("bound", &self.bound)
             .field("metadata", &self.metadata)
             .field("fanout", &self.fanout)
             .finish_non_exhaustive()
@@ -243,8 +269,22 @@ impl CallInfo {
     #[must_use]
     pub fn new(values: Bindings, metadata: Option<CallMetadata>) -> Self {
         Self {
-            values: Some(values),
+            member: Arc::new(OnceLock::from(values.clone())),
+            bound: values,
             metadata,
+            ..Self::default()
+        }
+    }
+
+    /// A fan-out call whose key binds `bound` of the template's parameters
+    /// and no other: what a test drives a template-wide handler with,
+    /// without a bus. Keep a clone to read the member the handler names.
+    #[must_use]
+    pub fn fan_out(bound: Bindings, metadata: Option<CallMetadata>) -> Self {
+        Self {
+            bound,
+            metadata,
+            fanout: true,
             ..Self::default()
         }
     }
@@ -252,28 +292,67 @@ impl CallInfo {
     #[cfg(feature = "zenoh")]
     pub(crate) fn of(call: &crate::operation::Call) -> Self {
         Self {
-            values: call.values().cloned(),
+            member: Arc::default(),
+            bound: call.bound().clone(),
             metadata: call.metadata().cloned(),
             fanout: !call.is_concrete(),
             call: Some(call.clone()),
         }
     }
 
-    /// The template's values, unslugged: those of the concrete key called.
-    /// `None` for a fan-out call over a template, which names no member.
+    /// The template's values, unslugged, of the member this call answers
+    /// for: the concrete key called, the member a server was declared on,
+    /// or the member named ([`CallInfo::member`]). `None` for a fan-out over
+    /// a template until a member is named.
     #[must_use]
     pub fn values(&self) -> Option<&Bindings> {
-        self.values.as_ref()
+        #[cfg(feature = "zenoh")]
+        if let Some(c) = &self.call {
+            return c.values();
+        }
+        self.member.get()
+    }
+
+    /// What the key called binds (§5.1, "Over a template"): each parameter
+    /// at a concrete chunk, unslugged, and none at a wildcard. Every
+    /// parameter, for a concrete call.
+    #[must_use]
+    pub fn bound(&self) -> &Bindings {
+        &self.bound
+    }
+
+    /// Names the member this call answers for (§5.1, "Over a template"):
+    /// its replies go on that member's key, which the call must have
+    /// selected. A call answers for one member, so naming another after one
+    /// is named is refused; naming the same one again is not. Without a
+    /// member, a fan-out over a template has no key to reply on, and is
+    /// answered `internal` (O3).
+    ///
+    /// Without a bus, `values` must agree with what the key bound.
+    pub fn member(&self, values: &Bindings) -> Result<()> {
+        #[cfg(feature = "zenoh")]
+        if let Some(c) = &self.call {
+            return c.member(values);
+        }
+        if let Some((k, v)) = self.bound.iter().find(|(k, v)| values.get(*k) != Some(*v)) {
+            return Err(Error::Contract(format!(
+                "parameter {k:?} is {v:?} in the key called: not a member this call selected"
+            )));
+        }
+        let named = self.member.get_or_init(|| values.clone());
+        if named == values {
+            Ok(())
+        } else {
+            Err(Error::Contract(format!(
+                "this call answers for {named:?} already: one member per call (§5.1)"
+            )))
+        }
     }
 
     /// The value of one single-chunk template parameter.
     #[must_use]
     pub fn value(&self, param: &str) -> Option<&str> {
-        self.values
-            .as_ref()?
-            .get(param)?
-            .first()
-            .map(String::as_str)
+        self.values()?.get(param)?.first().map(String::as_str)
     }
 
     /// The call metadata the caller claims (O7).
@@ -637,6 +716,7 @@ impl<V, S> Replies<V, S> {
 mod tests {
     use super::{CallInfo, CallMetadata, OpError, Sink};
     use crate::codec::{Json, Nothing};
+    use zenkey_model::template::Bindings;
 
     #[test]
     fn call_metadata_is_two_optional_strings() {
@@ -670,6 +750,46 @@ mod tests {
         let e = OpError::app_as::<Json<serde_json::Value>>("x", &serde_json::json!({"k": 1}));
         assert_eq!(e.code(), "app");
         let _ = Sink::<u32, ()>::new::<Json<u32>, Nothing>;
+    }
+
+    /// Spec §5.2 (0.7, F-65): `app` without a detail.
+    #[test]
+    fn app_without_a_detail() {
+        let e = OpError::app_without_detail("plan rejected");
+        assert_eq!((e.code(), e.envelope().detail.as_ref()), ("app", None));
+    }
+
+    /// Spec §5.1 "Over a template" (0.7, O-1, C-2): a template-wide
+    /// handler names the member a fan-out answers for, through any clone,
+    /// and the member must agree with what the key bound.
+    #[test]
+    fn a_handler_names_the_member_of_a_fan_out() {
+        let b = |pairs: &[(&str, &str)]| -> Bindings {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), vec![(*v).to_owned()]))
+                .collect()
+        };
+        let info = CallInfo::fan_out(b(&[("ns", "lab")]), None);
+        let probe = info.clone();
+        assert!(!info.is_concrete());
+        assert_eq!(info.values(), None, "no member yet");
+        assert_eq!(info.bound(), &b(&[("ns", "lab")]));
+        assert!(
+            info.member(&b(&[("ns", "prod"), ("if", "eth0")])).is_err(),
+            "the key bound ns = lab"
+        );
+        info.member(&b(&[("ns", "lab"), ("if", "eth0")])).unwrap();
+        assert_eq!(probe.value("if"), Some("eth0"), "clones share the member");
+        info.member(&b(&[("ns", "lab"), ("if", "eth0")])).unwrap();
+        assert!(
+            info.member(&b(&[("ns", "lab"), ("if", "eth1")])).is_err(),
+            "one member per call"
+        );
+        // A concrete call answers for its own member.
+        let concrete = CallInfo::new(b(&[("if", "eth0")]), None);
+        assert!(concrete.member(&b(&[("if", "eth1")])).is_err());
+        concrete.member(&b(&[("if", "eth0")])).unwrap();
     }
 
     /// A minimal executor for futures that never wait on anything.

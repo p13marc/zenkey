@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use common::{T, client, config, contract, eventually, example, imp, router};
-use zenkey::model::descriptor::check;
+use zenkey::model::descriptor::{Cause, check};
 use zenkey::model::grammar::{IfaceId, ZkKey, parse};
 use zenkey::model::template::Bindings;
 use zenkey::presence::{self, Found};
@@ -92,10 +92,13 @@ async fn seen(tool: &zenoh::Session, svc: &Service) {
     .await;
 }
 
-/// §1: alive ⇒ callable; the descriptor and the bundle answer the moment
-/// the instance token appears; owners hold an instance and an interface
-/// token, a pure consumer an instance token only, and an interface exposing
-/// nothing has no token.
+/// §1: alive ⇒ callable, and the state the owner started with is there;
+/// the descriptor and the bundle answer the moment the instance token
+/// appears, and a subscriber up before the start receives the first
+/// descriptor without a GET; the templated state with no member is exposed
+/// by its template, unlisted, with no member token; owners hold an instance
+/// and an interface token, a pure consumer an instance token only, and an
+/// interface exposing nothing has no token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_bring_up_order_and_tokens() {
     let (_r1, ep) = router(None).await;
@@ -110,17 +113,49 @@ async fn s1_bring_up_order_and_tokens() {
         .with(flume::unbounded::<Sample>())
         .await
         .unwrap();
+    // A data subscriber to instance keys, up before the owner starts.
+    let descriptors = tool
+        .declare_subscriber("zk2/*/*/@zk/instance/*")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let probe = owner
+        .declare_publisher("zk2/p1/nav/@zk/instance/ffffffffffffffff")
+        .await
+        .unwrap();
+    eventually("the descriptor subscriber is known", || async {
+        probe.matching_status().await.unwrap().matching()
+    })
+    .await;
+    drop(probe);
 
     let starting = tokio::spawn(async move {
-        let (mut b, held) = nav_builder(&owner, "p1/nav", &[]).await;
+        let mut b = ServiceBuilder::new(&owner, config("p1/nav"));
+        b.implement(imp("nav.v2")).unwrap();
+        // The value it holds at start, put before the tokens (core §8.2,
+        // "State values", F-68).
+        let none = Bindings::new();
+        let pose = b
+            .declare_state_writer(&nav(), "state/pose", &none)
+            .await
+            .unwrap();
+        pose.put("here").await.unwrap();
+        let key = b.key(&nav(), "@op/goto", &none).unwrap().into_keyexpr();
+        let goto = b
+            .declare_queryable(&nav(), "@op/goto", Some(&none), answer(key, "ok"))
+            .await
+            .unwrap();
+        // The templated state, exposed by its template with no member.
+        b.expose(&nav(), "state/tracks/{track}").unwrap();
         // camera.v1's only resource is gated on a capability not held.
         b.implement(imp("camera.v1")).unwrap();
         let svc = b.start().await.unwrap();
-        (svc, held, owner)
+        (svc, (pose, goto), owner)
     });
 
     let goto = config("p1/nav");
     let goto_key = format!("zk2/{}/nav.v2/@op/goto", goto.address);
+    let pose_key = format!("zk2/{}/nav.v2/state/pose", goto.address);
     let (mut called, mut described) = (false, false);
     while !(called && described) {
         let s = tokio::time::timeout(common::SETTLE, sub.recv_async())
@@ -136,6 +171,17 @@ async fn s1_bring_up_order_and_tokens() {
                 let r = replies.recv_async().await.expect("the call is answered");
                 let bytes = r.result().expect("an ok reply").payload().to_bytes();
                 assert_eq!(&*bytes, b"ok", "alive ⇒ callable");
+                let state = tool
+                    .get(&pose_key)
+                    .target(zenoh::query::QueryTarget::All)
+                    .consolidation(zenoh::query::ConsolidationMode::Latest)
+                    .timeout(T)
+                    .await
+                    .unwrap();
+                let r = state.recv_async().await.expect("the state is answered");
+                let v = r.result().expect("the value it started with");
+                assert_eq!(&*v.payload().to_bytes(), b"here");
+                assert!(v.timestamp().is_some(), "stamped (S2)");
                 called = true;
             }
             ZkKey::Instance { addr, instance } if !described => {
@@ -157,6 +203,27 @@ async fn s1_bring_up_order_and_tokens() {
         }
     }
     let (svc, _held, _owner) = starting.await.unwrap();
+
+    // The first descriptor, put on the instance key (core §3.3, §8.2 step 3).
+    let put = tokio::time::timeout(common::SETTLE, descriptors.recv_async())
+        .await
+        .expect("the first descriptor is put")
+        .unwrap();
+    assert_eq!(
+        put.key_expr().as_str(),
+        svc.instance_key().unwrap().as_str()
+    );
+    let (d, report) = check(
+        std::str::from_utf8(&put.payload().to_bytes()).unwrap(),
+        &[&contract("nav.v2")],
+    );
+    assert!(report.0.is_empty(), "{report}");
+    let d = d.unwrap();
+    assert_eq!(d.instance, svc.instance().as_str());
+    assert!(
+        d.interfaces.iter().all(|e| e.unavailable.is_empty()),
+        "the template with no member is exposed, not listed"
+    );
 
     // A pure consumer: a role, bound by configuration, and nothing exposed.
     let mut b = ServiceBuilder::new(&consumer, config("p1/viewer").bind("nav", &["p1/nav"]));
@@ -182,7 +249,7 @@ async fn s1_bring_up_order_and_tokens() {
     assert_eq!(
         all.into_iter().collect::<BTreeSet<_>>(),
         want,
-        "no camera.v1 token"
+        "no camera.v1 token, and no member token"
     );
     assert_eq!(svc.tokens_held(), [nav()]);
 }
@@ -289,34 +356,105 @@ async fn s2_the_descriptor() {
         .unwrap();
     assert_eq!(again, d, "a GET returns the new descriptor");
 
+    // Steps 3 to 5, each watched through R1 and against its control.
     // 3. A required resource is missing: the owner does not start.
-    let mut b = ServiceBuilder::new(&owner, config("p2/broken"));
-    b.implement(imp("nav.v2")).unwrap();
-    b.expose(&nav(), "@op/goto").unwrap();
-    b.expose(&nav(), "state/tracks/{track}").unwrap();
-    let err = b.start().await.err().expect("refused");
-    assert!(
-        matches!(err, Error::NotExposed(ref m) if m.contains("state/pose")),
-        "{err}"
-    );
-    assert!(
-        keys(&tool, "zk2/p2/broken/@zk/**").await.is_empty(),
-        "no token appears"
-    );
+    let broken = |pose: bool| {
+        let mut b = ServiceBuilder::new(&owner, config("p2/broken"));
+        b.implement(imp("nav.v2")).unwrap();
+        b.expose(&nav(), "@op/goto").unwrap();
+        b.expose(&nav(), "state/tracks/{track}").unwrap();
+        if pose {
+            b.expose(&nav(), "state/pose").unwrap();
+        }
+        b
+    };
+    refused_while_watched(&tool, "p2/broken", broken(false), "state/pose").await;
+    controlled(&tool, "p2/broken", broken(true)).await;
 
     // 4. A required role the configuration binds to nothing: no start
-    //    (core §3.2), observed from a session that stays up.
-    let mut b = ServiceBuilder::new(&owner, config("p2/unbound"));
-    b.require("cmd", "twist_cmd.v1".parse().unwrap(), false);
+    //    (core §3.2).
+    let unbound = |bound: bool| {
+        let mut cfg = config("p2/unbound");
+        if bound {
+            cfg = cfg.bind("cmd", &["p2/teleop"]);
+        }
+        let mut b = ServiceBuilder::new(&owner, cfg);
+        b.require("cmd", "twist_cmd.v1".parse().unwrap(), false);
+        b
+    };
+    refused_while_watched(&tool, "p2/unbound", unbound(false), "cmd").await;
+    controlled(&tool, "p2/unbound", unbound(true)).await;
+
+    // 5. An optional resource neither exposed nor listed `unavailable`, its
+    //    gate's capability held: no start (core §8.2 step 2, F-70), since
+    //    its descriptor would claim it.
+    let gated = |listed: bool| {
+        let mut b = ServiceBuilder::new(&owner, config("p2/gated").capability("imu"));
+        b.implement(imp("nav.v2")).unwrap();
+        for res in ["state/pose", "@op/goto", "state/tracks/{track}"] {
+            b.expose(&nav(), res).unwrap();
+        }
+        if listed {
+            b.unavailable(&nav(), "state/covariance", Cause::Config, None)
+                .unwrap();
+        }
+        b
+    };
+    refused_while_watched(&tool, "p2/gated", gated(false), "state/covariance").await;
+    controlled(&tool, "p2/gated", gated(true)).await;
+}
+
+/// A liveliness subscriber to `address`'s tokens through R1, up and known
+/// before an owner is launched (presence.md §2, "Watching a refusal").
+async fn watch(
+    tool: &zenoh::Session,
+    address: &str,
+) -> zenoh::pubsub::Subscriber<flume::Receiver<Sample>> {
+    tool.liveliness()
+        .declare_subscriber(format!("zk2/{address}/@zk/**"))
+        .history(true)
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap()
+}
+
+/// Starts `b`, which refuses for `why`: the subscriber up before the launch
+/// receives no token of the service for the wait of core §8.1 after the
+/// refusal, and a liveliness GET afterwards finds none.
+async fn refused_while_watched(tool: &zenoh::Session, address: &str, b: ServiceBuilder, why: &str) {
+    let seen = watch(tool, address).await;
     let err = b.start().await.err().expect("refused");
     assert!(
-        matches!(err, Error::NotExposed(ref m) if m.contains("cmd")),
+        matches!(err, Error::NotExposed(ref m) if m.contains(why)),
         "{err}"
     );
+    let token = tokio::time::timeout(T, seen.recv_async()).await;
+    assert!(token.is_err(), "no token while watched: {token:?}");
     assert!(
-        keys(&tool, "zk2/p2/unbound/@zk/**").await.is_empty(),
-        "no token appears"
+        keys(tool, &format!("zk2/{address}/@zk/**"))
+            .await
+            .is_empty(),
+        "no token afterwards"
     );
+}
+
+/// The control: the same owner, its refusal fixed, launched the same way,
+/// shows its instance token to the same watch within the wait.
+async fn controlled(tool: &zenoh::Session, address: &str, b: ServiceBuilder) {
+    let seen = watch(tool, address).await;
+    let svc = b.start().await.expect("the control starts");
+    let instance = svc.instance_key().unwrap().to_string();
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let s = tokio::time::timeout_at(deadline, seen.recv_async())
+            .await
+            .expect("the control's instance token")
+            .unwrap();
+        if s.key_expr().as_str() == instance {
+            break;
+        }
+    }
+    svc.close().await.unwrap();
 }
 
 /// Tracks the live tokens under a selector from a liveliness subscriber,
@@ -510,4 +648,62 @@ async fn s5_a_tokenless_set() {
         }
     }
     assert_eq!(providers.len(), N);
+}
+
+/// A TCP proxy to `upstream` whose downstream direction a test can stall:
+/// bytes from the router are held, in order, until it is released, while the
+/// client's still flow. The client's session stays up, and hears nothing.
+async fn stalling_proxy(upstream: &str) -> (String, Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let target = upstream.trim_start_matches("tcp/").to_owned();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
+    let stalled = Arc::new(AtomicBool::new(false));
+    let s = Arc::clone(&stalled);
+    tokio::spawn(async move {
+        while let Ok((down, _)) = listener.accept().await {
+            let Ok(up) = tokio::net::TcpStream::connect(&target).await else {
+                continue;
+            };
+            let ((mut dr, mut dw), (mut ur, mut uw)) = (down.into_split(), up.into_split());
+            tokio::spawn(async move {
+                let _ = tokio::io::copy(&mut dr, &mut uw).await;
+            });
+            let s = Arc::clone(&s);
+            tokio::spawn(async move {
+                let mut buf = vec![0; 1 << 16];
+                while let Ok(n @ 1..) = ur.read(&mut buf).await {
+                    while s.load(Ordering::SeqCst) {
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                    if dw.write_all(&buf[..n]).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    (endpoint, stalled)
+}
+
+/// Core §8.1: a liveliness GET that ends at its timeout is read as possibly
+/// incomplete, and its error reply is reported, not dropped (#660). The
+/// router's replies are held back, so its final reply never comes in time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_read_that_ends_at_its_timeout_says_so() {
+    use std::sync::atomic::Ordering;
+    let (_r1, ep) = router(None).await;
+    let (proxied, stalled) = stalling_proxy(&ep).await;
+    let tool = client(&proxied).await;
+    let open = presence::liveliness_read(&tool, "zk2/**", T).await.unwrap();
+    assert!(open.complete && open.errors.is_empty(), "{open:?}");
+    stalled.store(true, Ordering::SeqCst);
+    let held = presence::liveliness_read(&tool, "zk2/**", std::time::Duration::from_millis(300))
+        .await
+        .unwrap();
+    stalled.store(false, Ordering::SeqCst);
+    assert!(!held.complete, "{held:?}");
+    assert_eq!(held.errors, ["zenoh/string: Timeout"]);
+    assert!(held.keys.is_empty(), "possibly incomplete, never absence");
 }

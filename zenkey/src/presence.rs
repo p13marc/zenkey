@@ -6,7 +6,13 @@
 //! holds a liveliness subscriber, at every size measured from 996 tokens
 //! (zenoh#2678, spike S2), and the spec forbids it. The flume channel's
 //! sender is dropped when the query finalizes, which is how a GET here knows
-//! it is complete.
+//! it has ended.
+//!
+//! **How it ended** is told by its error replies, which are counted and
+//! reported, never dropped (#660). zenoh 1.10.1 ends a liveliness GET that
+//! reaches its timeout with an error reply, `zenoh/string` `Timeout`, and
+//! one that the routers finished with no reply at all; any error reply
+//! leaves the read possibly incomplete (§8.1).
 
 use std::time::Duration;
 
@@ -21,9 +27,14 @@ use crate::error::{Error, Result, zenoh};
 pub struct PresenceRead {
     /// The token keys, sorted.
     pub keys: Vec<String>,
-    /// `false` when the GET ended at its timeout: it may have missed tokens,
-    /// and a tool reports the result as possibly incomplete (§8.1).
+    /// `false` when the GET ended at its timeout, or with any other error
+    /// reply: it may have missed tokens, and a tool reports the result as
+    /// possibly incomplete (§8.1), never as absence (O5).
     pub complete: bool,
+    /// The GET's error replies, in arrival order, each
+    /// `<encoding>: <payload>`: `zenoh/string: Timeout` for one that ended
+    /// at its timeout.
+    pub errors: Vec<String>,
 }
 
 /// The keys of every liveliness token matching `selector`, sorted.
@@ -35,14 +46,14 @@ pub async fn liveliness_keys(
     Ok(liveliness_read(session, selector, timeout).await?.keys)
 }
 
-/// [`liveliness_keys`], saying whether the GET completed before `timeout`.
-/// A GET that runs to its timeout is read as possibly incomplete (§8.1).
+/// [`liveliness_keys`], saying whether the GET completed before `timeout`,
+/// with its error replies. A GET that runs to its timeout, or gets any
+/// error reply, is read as possibly incomplete (§8.1).
 pub async fn liveliness_read(
     session: &zenoh::Session,
     selector: &str,
     timeout: Duration,
 ) -> Result<PresenceRead> {
-    let started = std::time::Instant::now();
     let rx = session
         .liveliness()
         .get(selector)
@@ -51,17 +62,27 @@ pub async fn liveliness_read(
         .await
         .map_err(zenoh)?;
     let mut keys = Vec::new();
+    let mut errors = Vec::new();
     while let Ok(reply) = rx.recv_async().await {
-        if let Ok(sample) = reply.result() {
-            keys.push(sample.key_expr().as_str().to_owned());
+        match reply.result() {
+            Ok(sample) => keys.push(sample.key_expr().as_str().to_owned()),
+            Err(e) => errors.push(format!(
+                "{}: {}",
+                e.encoding(),
+                String::from_utf8_lossy(&e.payload().to_bytes())
+            )),
         }
     }
     keys.sort();
     keys.dedup();
-    // The flume sender drops when the query finalizes, and the timeout
-    // finalizes it too: only the elapsed time tells the two apart.
-    let complete = started.elapsed() + Duration::from_millis(10) < timeout;
-    Ok(PresenceRead { keys, complete })
+    // The flume sender drops when the query finalizes, at the routers' final
+    // reply or at the timeout; zenoh sends an error reply at the timeout.
+    let complete = errors.is_empty();
+    Ok(PresenceRead {
+        keys,
+        complete,
+        errors,
+    })
 }
 
 /// The zk2 tokens matching `selector`, parsed (§1.1). Keys that are not

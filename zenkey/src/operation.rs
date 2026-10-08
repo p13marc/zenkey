@@ -23,9 +23,17 @@
 //!   instances may serve, at one execution per router per call, which is why
 //!   the contract requires `idempotent` (E018).
 //! - **O3:** a value reply goes on the operation's own concrete key, and a
-//!   failure is a `reply_err` carrying the envelope, encoded as §5.2 says.
+//!   failure is a `reply_err` carrying the envelope, encoded as §5.2 says;
+//!   a refusal that does not fit its envelope goes out as `internal`.
 //!   The active instance answers `unavailable`, with its cause, for every
-//!   optional operation it does not expose; a standby declares nothing.
+//!   optional operation it does not expose; a standby declares nothing, and
+//!   a replica nothing on an exclusive operation (§5.1, "Beside replicas").
+//! - **Over a template** (§5.1, 0.7): a fan-out to a server declared over
+//!   the whole template replies on the key of the member it answers for,
+//!   named by the key when it binds every parameter, else by the handler
+//!   ([`Call::member`], [`crate::CallInfo::member`]); one that names none
+//!   is answered `internal`. A concrete key that names no member is
+//!   `invalid_request`.
 //! - **O7:** the call metadata (`actor`, `request_id`) is read from the
 //!   request's attachment. It is claimed, never authenticated.
 //!
@@ -33,17 +41,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
+use zenkey_model::authoring::{Encoding as WireEncoding, Kind, Serving};
 use zenkey_model::contract::{Body, Contract, Fanout, Operation, Replies, Resource};
 use zenkey_model::descriptor::Cause;
-use zenkey_model::envelope;
+use zenkey_model::envelope::{self, Detail, Envelope};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::schema::TypeId;
-use zenkey_model::template::{Bindings, Segment};
+use zenkey_model::slug::chunk_unslug;
+use zenkey_model::template::{Bindings, Segment, Template};
 use zenoh::Wait;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::{KeyExpr, OwnedKeyExpr};
@@ -106,18 +115,56 @@ fn envelope_zenoh_encoding(e: &str) -> Encoding {
     }
 }
 
-/// The envelope's bytes and `Encoding` for `op`. A detail of the wrong form
-/// for the encoding (a value in a protobuf envelope, bytes in a JSON one) is
-/// the handler's bug, and goes out as `internal`.
+/// The envelope as `op`'s envelope carries it (§5.2), or `None` for a
+/// detail that does not fit, which is never sent:
+/// - any detail on an operation that declares no `error` type;
+/// - a raw `error` type's detail that is not its bytes: bytes go as base64
+///   text, and a value only when it is that text;
+/// - bytes in a JSON or CBOR envelope, or a value in a protobuf one, which
+///   [`envelope::encode`] refuses.
+fn fit(op: &Operation, env: &Envelope) -> Option<Envelope> {
+    let detail = match (&env.detail, &op.error) {
+        (None, _) => None,
+        (Some(_), None) => return None,
+        (Some(Detail::Bytes(b)), Some(TypeId::Raw { .. })) => Some(Detail::raw(b)),
+        (Some(d), Some(TypeId::Raw { .. })) => Some(d.clone()).filter(|d| d.raw_bytes().is_some()),
+        (Some(d), Some(_)) => Some(d.clone()),
+    };
+    if env.detail.is_some() && detail.is_none() {
+        return None;
+    }
+    Some(Envelope {
+        detail,
+        ..env.clone()
+    })
+}
+
+/// The envelope's bytes and `Encoding` for `op` (§5.2).
+///
+/// A refusal the reference cannot send as given goes out as `internal`
+/// instead, never as a malformed envelope (§5.2, 0.7, F-65):
+/// - a detail that does not fit ([`fit`]): on an operation with no `error`
+///   type, bytes in a JSON or CBOR envelope other than a raw type's, a value
+///   in a protobuf one;
+/// - an envelope a tool's decoder would refuse (§5.2, "Decoding"): an
+///   unknown code, `unavailable` without a valid cause or a cause on
+///   another code, a detail on a code but `app`. Only an envelope relayed
+///   with `From<Envelope>` can be one.
 pub(crate) fn encode_envelope(op: &Operation, e: &OpError) -> (Vec<u8>, Encoding) {
     let enc = envelope_encoding(op);
-    let bytes = envelope::encode(e.envelope(), enc).unwrap_or_else(|| {
+    let sent = fit(op, e.envelope())
+        .and_then(|env| envelope::encode(&env, enc))
+        .filter(|bytes| envelope::decode(enc, bytes).is_ok());
+    let bytes = sent.unwrap_or_else(|| {
         tracing::warn!(
             code = e.envelope().code,
             encoding = enc,
-            "an app detail does not fit the operation's envelope encoding (spec §5.2)"
+            "a refusal does not fit the operation's envelope; sent as internal (spec §5.2)"
         );
-        let fallback = OpError::internal("the app detail does not fit the envelope's encoding");
+        let fallback = OpError::internal(format!(
+            "the {} refusal does not fit this operation's envelope (§5.2)",
+            e.envelope().code
+        ));
         envelope::encode(fallback.envelope(), enc).expect("an envelope without a detail encodes")
     });
     (bytes, envelope_zenoh_encoding(enc))
@@ -169,6 +216,55 @@ pub(crate) fn values_of(iface: &IfaceId, r: &Resource, key: &str) -> Option<(Add
     }
 }
 
+/// What a key expression's resource chunks bind of `template` (§5.1, "Over
+/// a template"): each parameter at a concrete chunk, unslugged, and none at
+/// a wildcard. Past a `**` chunk, positions are not fixed, and nothing more
+/// is bound. `Err` when a concrete parameter chunk is not a canonical slug
+/// (§1.4): the key names no member, and is malformed.
+pub(crate) fn bound_by(
+    template: &Template,
+    chunks: &[&str],
+) -> std::result::Result<Bindings, String> {
+    let unslug = |c: &str| {
+        chunk_unslug(c).ok_or_else(|| format!("chunk {c:?} is not a canonical slug (§1.4)"))
+    };
+    let mut out = Bindings::new();
+    for (i, seg) in template.segments().iter().enumerate() {
+        let Some(&c) = chunks.get(i) else { break };
+        if c == "**" {
+            break;
+        }
+        match seg {
+            Segment::Literal(_) => {}
+            Segment::Param(n) => {
+                if !c.contains('*') {
+                    out.insert(n.clone(), vec![unslug(c)?]);
+                }
+            }
+            Segment::Rest(n) => {
+                let rest = &chunks[i..];
+                if rest.iter().all(|c| !c.contains('*')) {
+                    let values = rest
+                        .iter()
+                        .map(|c| unslug(c))
+                        .collect::<std::result::Result<_, _>>()?;
+                    out.insert(n.clone(), values);
+                }
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The member a call answers for (O3): its concrete key, and its template
+/// values, unslugged.
+#[derive(Debug, Clone)]
+struct Member {
+    key: KeyExpr<'static>,
+    values: Bindings,
+}
+
 /// One served operation: what the runtime needs to answer its calls.
 #[derive(Debug)]
 struct OpSpec {
@@ -188,6 +284,48 @@ impl OpSpec {
             name: resource_name(r),
             resource: r.clone(),
             op: operation(iface, r)?,
+        })
+    }
+
+    /// The concrete key of this server's member with `values`.
+    fn member_key(&self, values: &Bindings) -> Result<KeyExpr<'static>> {
+        let chunks = self
+            .resource
+            .template
+            .build(values)
+            .map_err(|e| Error::Contract(format!("{} {:?}: {e}", self.iface, self.name)))?;
+        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        let key = zenkey_model::grammar::data_key(&self.addr, &self.iface, KindToken::Op, &refs)?;
+        Ok(KeyExpr::from(key.into_keyexpr()))
+    }
+
+    /// What a call's key expression binds of the template ([`bound_by`]).
+    /// Its resource chunks follow `zk2/<system>/<service>/<iface>/@op`; a
+    /// `**` among those five leaves them unplaced, and binds nothing.
+    fn bound(&self, ke: &KeyExpr<'_>) -> std::result::Result<Bindings, String> {
+        let chunks: Vec<&str> = ke.as_str().split('/').collect();
+        match chunks.split_at_checked(5) {
+            Some((head, tail)) if !head.contains(&"**") => bound_by(&self.resource.template, tail),
+            _ => Ok(Bindings::new()),
+        }
+    }
+
+    /// The member a fan-out names by its key alone: when the key binds every
+    /// parameter, this server's member with those values, if the call
+    /// selected it (§5.1, "Over a template").
+    fn named_by_key(&self, bound: &Bindings, ke: &KeyExpr<'_>) -> Option<Member> {
+        if !self
+            .resource
+            .template
+            .params()
+            .all(|(n, _)| bound.contains_key(n))
+        {
+            return None;
+        }
+        let key = self.member_key(bound).ok()?;
+        ke.intersects(&key).then(|| Member {
+            key,
+            values: bound.clone(),
         })
     }
 
@@ -267,21 +405,51 @@ pub(crate) struct Ops {
     fallbacks: Vec<Queryable<()>>,
 }
 
+/// Whether an operation resource is `serving = "replicated"` (§6).
+pub(crate) fn is_replicated(r: &Resource) -> bool {
+    matches!(&r.body, Body::Operation(op) if op.serving == Serving::Replicated)
+}
+
+/// Whether every resource `s` exposes now is a replicated operation: a
+/// replica, beside which another instance may serve the exclusive ones
+/// (§5.1, "Beside replicas").
+fn replica_only(s: &ImplState, held: &BTreeSet<String>) -> bool {
+    s.imp
+        .contract()
+        .resources
+        .iter()
+        .filter(|r| s.exposed.contains(&resource_name(r)) && missing_capability(r, held).is_none())
+        .all(is_replicated)
+}
+
 impl Ops {
     /// At start, after §8.2 step 2: for every interface this instance is
     /// active on (it exposes at least one resource of it), a `complete`
     /// queryable over each optional operation it does not expose, answering
     /// `unavailable` with the cause. A standby is active on nothing, so it
     /// declares none and intercepts no call (O3, §6).
+    ///
+    /// **Beside replicas** (§5.1, 0.7, O-10): an instance whose exposed
+    /// resources of an interface are all replicated operations declares none
+    /// on the interface's exclusive operations. The instance serving one may
+    /// be another, and a concrete call reaches whichever `complete`
+    /// queryable is nearest (O1), so an `unavailable` there would intercept
+    /// it. It still answers `unavailable` on a replicated operation it does
+    /// not expose, which replicas should all expose.
     pub(crate) async fn start(b: &ServiceBuilder) -> Result<Self> {
         let availability = Arc::clone(b.availability());
         let held = &b.config().capabilities;
         availability.refresh(b.impls(), held);
         let mut fallbacks = Vec::new();
         for s in b.impls().iter().filter(|s| exposes_any(s, held)) {
+            let replica = replica_only(s, held);
             for r in &s.imp.contract().resources {
                 let name = resource_name(r);
-                if r.kind != Kind::Operation || !r.optional || s.exposed.contains(&name) {
+                if r.kind != Kind::Operation
+                    || !r.optional
+                    || s.exposed.contains(&name)
+                    || (replica && !is_replicated(r))
+                {
                     continue;
                 }
                 let spec = Arc::new(OpSpec::new(&b.config().address, s.imp.iface(), r)?);
@@ -361,34 +529,36 @@ enum Reply {
 
 /// One call, as its handler receives it.
 ///
-/// Clones share the call. The query completes (O6's completion) when the
-/// handler's future has resolved and the last clone has dropped, so a
-/// handler replies before it returns.
+/// Clones share the call: what was sent, and the member it answers for. The
+/// query completes (O6's completion) when the handler's future has resolved
+/// and the last clone has dropped, so a handler replies before it returns.
+///
+/// **The member** (O3, §5.1 "Over a template", 0.7): a reply goes on the
+/// key of the member the call answers for. It is known at once for a
+/// concrete call, for a server declared on one member, and for a fan-out
+/// whose key binds every parameter; otherwise the handler names it
+/// ([`Call::member`]) from what the key binds ([`Call::bound`]). A call
+/// answers for one member.
 #[derive(Clone)]
 pub struct Call {
     query: Query,
     spec: Arc<OpSpec>,
-    reply_key: Option<KeyExpr<'static>>,
-    values: Option<Bindings>,
+    bound: Bindings,
+    member: Arc<OnceLock<Member>>,
     metadata: Option<CallMetadata>,
     sent: Arc<Mutex<Sent>>,
 }
 
 impl Call {
-    fn new(
-        query: Query,
-        spec: Arc<OpSpec>,
-        reply_key: Option<KeyExpr<'static>>,
-        values: Option<Bindings>,
-    ) -> Self {
+    fn new(query: Query, spec: Arc<OpSpec>, bound: Bindings, member: Option<Member>) -> Self {
         let metadata = query
             .attachment()
             .and_then(|a| CallMetadata::from_bytes(&a.to_bytes()));
         Self {
             query,
             spec,
-            reply_key,
-            values,
+            bound,
+            member: Arc::new(member.map(OnceLock::from).unwrap_or_default()),
             metadata,
             sent: Arc::default(),
         }
@@ -413,11 +583,21 @@ impl Call {
         !self.query.key_expr().is_wild()
     }
 
-    /// The template's values, unslugged: those of the concrete key called,
-    /// or of the member this server was declared on.
+    /// The template's values, unslugged, of the member this call answers
+    /// for: the concrete key called, the member this server was declared
+    /// on, or the member named by the key or the handler. `None` for a
+    /// fan-out over a template until a member is named.
     #[must_use]
     pub fn values(&self) -> Option<&Bindings> {
-        self.values.as_ref()
+        self.member.get().map(|m| &m.values)
+    }
+
+    /// What the key called binds (§5.1, "Over a template"): each parameter
+    /// at a concrete chunk, unslugged, and none at a wildcard. Every
+    /// parameter, for a concrete call.
+    #[must_use]
+    pub fn bound(&self) -> &Bindings {
+        &self.bound
     }
 
     /// The call metadata the caller claims (O7), if its attachment is that
@@ -452,29 +632,34 @@ impl Call {
             .map_err(|e| OpError::invalid_request(format!("the request does not decode: {e}")))
     }
 
-    /// Names the member a fan-out call over a template answers for: its
-    /// replies go on that member's concrete key (O3). Only a fan-out call
-    /// to a server declared over the whole template needs it.
-    pub fn member(&mut self, values: &Bindings) -> Result<()> {
-        let chunks = self.spec.resource.template.build(values).map_err(|e| {
-            Error::Contract(format!("{} {:?}: {e}", self.spec.iface, self.spec.name))
-        })?;
-        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
-        let key = zenkey_model::grammar::data_key(
-            &self.spec.addr,
-            &self.spec.iface,
-            KindToken::Op,
-            &refs,
-        )?;
-        let ke = KeyExpr::from(key.into_keyexpr());
-        if !self.query.key_expr().intersects(&ke) {
+    /// Names the member this call answers for (§5.1, "Over a template";
+    /// O-1, C-2): its replies go on that member's key, which the call's key
+    /// expression must select. Every clone sees it, so a typed handler
+    /// names it through its [`crate::CallInfo`] and the runtime replies on
+    /// it. Only a fan-out to a server declared over the whole template, on
+    /// a key that leaves a parameter unbound, needs it.
+    ///
+    /// A call answers for one member: naming another once one is known is
+    /// refused, and naming the same one again is not.
+    pub fn member(&self, values: &Bindings) -> Result<()> {
+        let key = self.spec.member_key(values)?;
+        if !self.query.key_expr().intersects(&key) {
             return Err(Error::Contract(format!(
-                "{ke} is not a member this call selected"
+                "{key} is not a member this call selected"
             )));
         }
-        self.reply_key = Some(ke);
-        self.values = Some(values.clone());
-        Ok(())
+        let named = self.member.get_or_init(|| Member {
+            key: key.clone(),
+            values: values.clone(),
+        });
+        if named.key == key {
+            Ok(())
+        } else {
+            Err(Error::Contract(format!(
+                "this call answers for {} already: one member per call (§5.1)",
+                named.key
+            )))
+        }
     }
 
     fn claim(&self, what: Reply) -> Result<()> {
@@ -500,9 +685,10 @@ impl Call {
     }
 
     fn reply_key(&self) -> Result<KeyExpr<'static>> {
-        self.reply_key.clone().ok_or_else(|| {
+        self.member.get().map(|m| m.key.clone()).ok_or_else(|| {
             Error::Contract(format!(
-                "a fan-out call over {:?}'s template: name the member first (Call::member)",
+                "a fan-out call over {:?}'s template names no member: name one first \
+                 (Call::member, CallInfo::member; §5.1)",
                 self.spec.name
             ))
         })
@@ -510,11 +696,7 @@ impl Call {
 
     fn encoding_of(&self, ty: &TypeId) -> Encoding {
         let none = Bindings::new();
-        wire_encoding(
-            ty,
-            self.spec.op.encoding,
-            self.values.as_ref().unwrap_or(&none),
-        )
+        wire_encoding(ty, self.spec.op.encoding, self.values().unwrap_or(&none))
     }
 
     /// A value reply, already encoded as the `response` type, on the
@@ -640,27 +822,49 @@ where
                 spec.refuse_now(&q, &e);
                 return;
             }
-            let (reply_key, values) = if q.key_expr().is_wild() {
-                let values = declared
-                    .as_ref()
-                    .and_then(|k| values_of(&spec.iface, &spec.resource, k.as_str()))
-                    .map(|(_, v)| v);
-                (declared.clone(), values)
+            let not_a_member = |why: &str| {
+                OpError::invalid_request(format!(
+                    "{} names no member of {:?}: {why} (§5.1)",
+                    q.key_expr(),
+                    spec.name
+                ))
+            };
+            let (bound, member) = if q.key_expr().is_wild() {
+                // A fan-out (O2): what the key binds, and the member it
+                // answers for, when it is known before the handler runs.
+                let bound = match spec.bound(q.key_expr()) {
+                    Ok(b) => b,
+                    Err(why) => {
+                        spec.refuse_now(&q, &not_a_member(&why));
+                        return;
+                    }
+                };
+                let member = match &declared {
+                    Some(k) => {
+                        values_of(&spec.iface, &spec.resource, k.as_str()).map(|(_, v)| Member {
+                            key: k.clone(),
+                            values: v,
+                        })
+                    }
+                    None => spec.named_by_key(&bound, q.key_expr()),
+                };
+                (bound, member)
             } else {
                 match values_of(&spec.iface, &spec.resource, q.key_expr().as_str()) {
-                    Some((_, v)) => (Some(q.key_expr().clone()), Some(v)),
+                    Some((_, v)) => (
+                        v.clone(),
+                        Some(Member {
+                            key: q.key_expr().clone(),
+                            values: v,
+                        }),
+                    ),
                     None => {
-                        let e = OpError::invalid_request(format!(
-                            "{} is not a member key of {:?}: a chunk is not a canonical slug",
-                            q.key_expr(),
-                            spec.name
-                        ));
-                        spec.refuse_now(&q, &e);
+                        spec.refuse_now(&q, &not_a_member("a chunk is not a canonical slug"));
                         return;
                     }
                 }
             };
-            let call = Call::new(q, Arc::clone(&spec), reply_key, values);
+            let call = Call::new(q, Arc::clone(&spec), bound, member);
             let h = Arc::clone(&handler);
             rt.spawn(async move {
                 let outcome = h(call.clone()).await;
@@ -849,7 +1053,8 @@ impl Service {
 
     /// The `unavailable` queryables this instance declared at start (O3):
     /// one per optional operation of an active interface that it does not
-    /// serve.
+    /// serve, an exclusive one excepted where it is a replica (§5.1,
+    /// "Beside replicas").
     #[must_use]
     pub fn unavailable_queryables(&self) -> &[Queryable<()>] {
         self.ops().fallbacks()
@@ -873,29 +1078,121 @@ impl Service {
 
 #[cfg(test)]
 mod tests {
-    use super::{OpError, envelope_encoding};
-    use zenkey_model::envelope;
+    use super::{OpError, bound_by, envelope_encoding};
+    use crate::codec::Raw;
+    use serde_json::json;
+    use zenkey_model::envelope::{self, Detail, Envelope};
+    use zenkey_model::template::{Bindings, Template};
 
+    /// An operation `op` of raw request and response, with `error` if given.
+    fn op(error: Option<&str>) -> zenkey_model::contract::Operation {
+        let toml = format!(
+            "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n\
+             [schemas]\njsonschema = [\"t.json\"]\n\
+             [resources.op]\nkind = \"operation\"\n\
+             request = {{ raw = \"text/plain\" }}\nresponse = {{ raw = \"text/plain\" }}\n{}",
+            error.map(|e| format!("error = {e}\n")).unwrap_or_default()
+        );
+        let dir = std::env::temp_dir().join(format!("zk2-op-envelope-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("t.json"),
+            r#"{"$defs": {"E": {"type": "object", "properties": {"k": {"type": "string"}}}}}"#,
+        )
+        .unwrap();
+        let l = zenkey_model::contract::load_str(&toml, &dir, None);
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        super::operation(&c.iface, &c.resources[0]).unwrap()
+    }
+
+    /// What goes on the wire for `e`, decoded.
+    fn sent(op: &zenkey_model::contract::Operation, e: &OpError) -> Envelope {
+        let (bytes, enc) = super::encode_envelope(op, e);
+        envelope::decode(&enc.to_string(), &bytes).unwrap()
+    }
+
+    /// Spec §5.2 (0.7, F-65): `app` for any operation; no detail without an
+    /// `error` type; a raw type's detail as base64 text in JSON; a detail
+    /// that does not fit goes out as `internal`, never malformed.
     #[test]
     fn an_app_detail_that_does_not_fit_goes_out_as_internal() {
-        let op = |error: Option<&str>| {
-            let toml = format!(
-                "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\n\
-                 [resources.op]\nkind = \"operation\"\n\
-                 request = {{ raw = \"text/plain\" }}\nresponse = {{ raw = \"text/plain\" }}\n{}",
-                error.map(|e| format!("error = {e}\n")).unwrap_or_default()
+        let none = op(None);
+        assert_eq!(envelope_encoding(&none), envelope::JSON);
+        let bare = sent(&none, &OpError::app_without_detail("x"));
+        assert_eq!((bare.code.as_str(), bare.detail), ("app", None));
+        for detail in [
+            OpError::app_bytes("x", vec![1]),
+            OpError::app("x", &json!({})),
+        ] {
+            assert_eq!(
+                sent(&none, &detail).code,
+                "internal",
+                "no error type, no detail"
             );
-            let l = zenkey_model::contract::load_str(&toml, std::path::Path::new("."), None);
-            let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
-            super::operation(&c.iface, &c.resources[0]).unwrap()
-        };
-        let raw = op(None);
+        }
+
+        let raw = op(Some("{ raw = \"image/jpeg\" }"));
         assert_eq!(envelope_encoding(&raw), envelope::JSON);
-        let (bytes, enc) = super::encode_envelope(&raw, &OpError::app_bytes("x", vec![1]));
-        assert_eq!(enc.to_string(), envelope::JSON);
+        let jpeg = vec![0xff, 0xd8, 0xff, 0xe0];
+        for e in [
+            OpError::app_bytes("camera fault", jpeg.clone()),
+            OpError::app_as::<Raw>("camera fault", &jpeg),
+        ] {
+            let got = sent(&raw, &e);
+            assert_eq!(got.code, "app");
+            assert_eq!(got.detail, Some(Detail::Value(json!("/9j/4A=="))));
+            assert_eq!(got.detail.unwrap().raw_bytes(), Some(jpeg.clone()));
+        }
         assert_eq!(
-            envelope::decode(envelope::JSON, &bytes).unwrap().code,
+            sent(&raw, &OpError::app("x", &json!("not base64!"))).code,
             "internal"
         );
+        assert_eq!(sent(&raw, &OpError::app_without_detail("x")).detail, None);
+
+        let json_error = op(Some("\"json:E\""));
+        assert_eq!(
+            sent(&json_error, &OpError::app_bytes("x", vec![1])).code,
+            "internal"
+        );
+        let ok = sent(&json_error, &OpError::app("x", &json!({"k": "v"})));
+        assert_eq!(ok.detail, Some(Detail::Value(json!({"k": "v"}))));
+
+        // A relayed envelope a decoder would refuse is not sent as given.
+        let relayed = OpError::from(Envelope {
+            code: "busy".into(),
+            message: "x".into(),
+            cause: None,
+            detail: Some(Detail::Value(json!(1))),
+        });
+        assert_eq!(sent(&json_error, &relayed).code, "internal");
+    }
+
+    /// Spec §5.1 "Over a template" (0.7): a key binds each parameter at a
+    /// concrete chunk, unslugged, and none at a wildcard.
+    #[test]
+    fn what_a_key_binds_of_a_template() {
+        let t = Template::parse("ns/{ns}/interfaces/{if}/reset").unwrap();
+        let b = |pairs: &[(&str, &str)]| -> Bindings {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), vec![(*v).to_owned()]))
+                .collect()
+        };
+        let bound = |k: &str| bound_by(&t, &k.split('/').collect::<Vec<_>>());
+        assert_eq!(bound("ns/lab/interfaces/*/reset"), Ok(b(&[("ns", "lab")])));
+        assert_eq!(
+            bound("ns/lab/interfaces/x-foo_x401/reset"),
+            Ok(b(&[("ns", "lab"), ("if", "foo@1")]))
+        );
+        assert_eq!(bound("ns/*/interfaces/eth$*/reset"), Ok(Bindings::new()));
+        assert_eq!(bound("ns/lab/**"), Ok(b(&[("ns", "lab")])));
+        assert!(bound("ns/LAB/interfaces/*/reset").is_err(), "not a slug");
+        let rest = Template::parse("files/{path...}").unwrap();
+        let bound = |k: &str| bound_by(&rest, &k.split('/').collect::<Vec<_>>());
+        assert_eq!(
+            bound("files/a/b"),
+            Ok([("path".to_owned(), vec!["a".to_owned(), "b".to_owned()])].into())
+        );
+        assert_eq!(bound("files/a/*"), Ok(Bindings::new()));
     }
 }
