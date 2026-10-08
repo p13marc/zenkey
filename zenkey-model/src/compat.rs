@@ -950,7 +950,13 @@ impl<'a> JsonCx<'a> {
     /// `$ref` (other than `$defs`) are added to its target, the outermost
     /// taking the place of the target's own, so a change beside a `$ref` is
     /// compared like any other.
-    fn deref(&self, s: &Value, doc: &'a Value, old: bool) -> (Value, &'a Value) {
+    ///
+    /// `None` when a `$ref` resolves to nothing: its file part names no
+    /// artifact of the revision, or its pointer no member. A conforming
+    /// builder never writes such a bundle (E032, and E024 for a taken id,
+    /// spec §9.4), so it is unreadable, as a descriptor set that does not
+    /// decode is: never resolved in the referencing document instead.
+    fn deref(&self, s: &Value, doc: &'a Value, old: bool) -> Option<(Value, &'a Value)> {
         let mut cur = s.clone();
         let mut doc = doc;
         let mut beside: Vec<Map<String, Value>> = Vec::new();
@@ -973,11 +979,9 @@ impl<'a> JsonCx<'a> {
                 let base = file.rsplit('/').next().unwrap_or(file);
                 let stem = base.strip_suffix(".json").unwrap_or(base);
                 let docs = if old { &self.old_docs } else { &self.new_docs };
-                if let Some(d) = docs.get(stem) {
-                    doc = d;
-                }
+                doc = docs.get(stem)?;
             }
-            cur = doc.pointer(ptr).cloned().unwrap_or(Value::Null);
+            cur = doc.pointer(ptr)?.clone();
         }
         if !beside.is_empty() && cur != Value::Bool(false) {
             let mut merged = match cur {
@@ -989,7 +993,7 @@ impl<'a> JsonCx<'a> {
             }
             cur = Value::Object(merged);
         }
-        (cur, doc)
+        Some((cur, doc))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1010,8 +1014,17 @@ impl<'a> JsonCx<'a> {
         if !seen.insert(key) {
             return;
         }
-        let (o, doc_o) = self.deref(so, doc_o, true);
-        let (n, doc_n) = self.deref(sn, doc_n, false);
+        let (Some((o, doc_o)), Some((n, doc_n))) =
+            (self.deref(so, doc_o, true), self.deref(sn, doc_n, false))
+        else {
+            v.push(
+                Class::Review,
+                "schema_unreadable",
+                at,
+                "a `$ref` resolves to nothing in its revision",
+            );
+            return;
+        };
         let (o, n) = (&o, &n);
         // A boolean schema (`true` accepts anything, `false` nothing) is not
         // compared keyword by keyword: any change to or from one is review.
@@ -1312,6 +1325,33 @@ mod tests {
         assert_eq!(class(&t(json!(["a"])), &t(json!([]))), "breaking");
         assert_eq!(class(&t(json!([])), &t(json!(["a"]))), "breaking");
         assert_eq!(class(&t(json!(["a"])), &t(json!(["a"]))), "compatible");
+    }
+
+    /// Spec §9.8 (0.6, F-62): a `$ref` that resolves to nothing in its
+    /// revision, which only a non-conforming builder writes, is unreadable
+    /// (review), never resolved in the referencing document instead.
+    #[test]
+    fn a_ref_that_resolves_to_nothing_is_unreadable() {
+        let dir = std::env::temp_dir().join(format!("zk2-compat-dangling-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = doc(&json!({"type": "object", "properties": {"n": {"$ref": "#/$defs/U"}}}));
+        let old = rev(&dir, &ok);
+        std::fs::remove_dir_all(&dir).unwrap();
+        for dangling in ["u.json#/$defs/U", "#/$defs/Gone"] {
+            let mut new = old.clone();
+            for s in new.schemas.values_mut() {
+                if let Schema::Json(v) = s {
+                    v["$defs"]["T"]["properties"]["n"]["$ref"] = json!(dangling);
+                }
+            }
+            let v = compare(&old, &new);
+            assert_eq!(v.class().as_str(), "review", "{dangling}");
+            assert!(
+                v.findings.iter().all(|f| f.rule == "schema_unreadable"),
+                "{dangling}: {:?}",
+                v.findings
+            );
+        }
     }
 
     #[test]

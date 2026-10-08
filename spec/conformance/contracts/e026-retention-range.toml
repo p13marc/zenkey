@@ -1,0 +1,19 @@
+# A retention's seconds are an unsigned 64-bit integer (§2.6, E026): above
+# 2^64-1 is E026, whether the count alone overflows (`a`: 2^64 s) or its
+# product with the unit does (`b`: 30500568904944 w). One E026 per field.
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[resources.a]
+kind = "event"
+type = { raw = "text/plain" }
+rate = "low"
+retention = "18446744073709551616s"
+
+[resources.b]
+kind = "event"
+type = { raw = "text/plain" }
+rate = "low"
+retention = "30500568904944w"

@@ -209,6 +209,16 @@
    "type": "json:Status",
    "warnings": []
   },
+  "payload/jsonschema/oneof-keyword-added": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
+  "payload/jsonschema/oneof-keyword-removed": {
+   "class": "review",
+   "type": "json:Status",
+   "warnings": []
+  },
   "payload/jsonschema/oneof-property-named-title": {
    "class": "review",
    "type": "json:Status",

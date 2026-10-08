@@ -26,6 +26,19 @@ owner's operation the moment its interface token appears.
 4. An owner is started with a required role its configuration binds to
    nothing (core §3.2).
 
+**Watching a refusal (steps 3 and 4).** A refusal shows only as a token
+that never appears, and silence is not a verdict (core O5), so the watch
+needs a router that outlives the owner and a control:
+- the owner and the tool are clients of R1, which stays up whatever the
+  owner does; never a router the owner's own process runs, which is gone
+  when the owner refuses;
+- the tool subscribes to the liveliness selector
+  `zk2/<system>/<service>/@zk/**` through R1 before the owner is launched,
+  and watches until the owner exits or the wait of core §8.1 ends;
+- **the control:** the same owner, with the resource exposed or the role
+  bound, launched the same way, shows its instance token to that
+  subscriber within the wait.
+
 **Expected.**
 1. One reply, with `Encoding` `application/json`: a descriptor that
    validates against `descriptor.schema.json`. Its `profiles` is the union
@@ -34,13 +47,18 @@ owner's operation the moment its interface token appears.
 2. A new descriptor is put on the instance key. The gated resource's
    absence is implied by the missing capability, so it is not listed in
    `unavailable`. A GET returns the new descriptor.
-3. The owner does not start: no instance token appears.
-4. The owner does not start: no instance token appears.
+3. The owner does not start. The tool's subscriber receives no token of
+   the service while it watches, and a liveliness GET of the same selector
+   through R1 afterwards returns none, where the control showed one.
+4. As 3.
 
 *Measured on the reference owner, from zenoh-python 1.10.1 (#609): one
 reply, `application/json`, no timestamp and no attachment; the
 `walkthrough/thruster.v1` owner, whose required role `cmd` was unbound,
-refused to start and declared no token.*
+refused to start and declared no token. That owner was its own router, so
+the client completed no presence GET before it exited: the check rested on
+silence, which is why steps 3 and 4 now watch through R1 (#609, F-61). The
+reference's own test of step 3 watches through a separate router.*
 
 ## §3 Epochs and re-minting (§1.5, §8.1)
 
