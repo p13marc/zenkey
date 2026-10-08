@@ -2,94 +2,116 @@
 
 zk2py was written from `spec/` alone: `core.md`, the two JSON schemas,
 `core/`, the fixtures and the scenarios, plus `examples/zk2/` as extra
-inputs. It never read the Rust implementation or `docs/zk2/`. Each entry
-below is a place where that was not enough, or where the spec said two
-things.
+inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
+the Rust owner example only as a black box. Each entry below is a place
+where that was not enough, or where the spec said two things.
 
-**Three rounds.**
-- **F-01 to F-39** were found against `core.md` 0.2.
-- After amendments 0.3 (the classifier's rule set) and 0.4 (TOML 1.0
-  enforced), each of those entries carries a status line where the
-  amendment touches it.
-- **F-40 to F-45** are new, found against 0.4.
-- **F-46 to F-55** come from the live half's first slice (presence,
-  descriptors, contract retrieval, against the Rust owner example). They
-  are in their own section at the end, with their own table.
+**Four rounds.**
+- F-01 to F-39 were found against `core.md` 0.2.
+- F-40 to F-45 were found against 0.4.
+- F-46 to F-55 come from the live half's first slice.
+- **Amendment 0.5 resolves all of F-01 to F-55.** Each carries a "Status at
+  0.5" line saying how; earlier status lines are kept as history.
+- **F-56 to F-63 are new**, found against 0.5. Five follow up text that 0.5
+  added. One, F-62, is a contradiction between two 0.5 rules, shown by a
+  contract that lints clean and builds a bundle whose `$ref` resolves to
+  nothing.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
   value decided it, or zk2py guessed.
 - **ambiguity:** the text allows two readings. A fixture or a guess decided.
 - **contradiction:** the prose, read literally, and a fixture disagree, or
-  two parts of the spec do. Against a fixture, the fixture won, because §9
-  says so: "Where it and a fixture disagree, the fixture is right and this
-  text has a bug."
+  two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts of the static entries at 0.4:** 45 entries. The live section adds 10
-more (7 gap, 3 ambiguity), for 55 in all.
-- **By severity:** 18 gap, 23 ambiguity, 4 contradiction, 0 blocker.
-- **By status:**
-  - 4 resolved: F-29, F-30, F-34, F-36;
-  - 5 partly resolved: F-16, F-18, F-31, F-32, F-35;
-  - 30 still open from the first round;
-  - 6 new: F-40 to F-45.
+**Counts at 0.5:** 63 entries.
+- F-01 to F-55: all **resolved by 0.5**; none left unresolved.
+  - In 13 of them, 0.5 decided against zk2py's earlier guess: F-08, F-09,
+    F-10, F-20, F-23, F-25, F-26, F-27, F-32, F-33, F-35, F-39 and F-43,
+    the changelog's list. zk2py now follows the stated rule.
+  - In 3 more, zk2py's mechanism changed though no class did:
+    - F-13: a later file with a taken stem is no longer loaded;
+    - F-38: a failing set member's codes stand;
+    - F-40: resources pair by kind and template.
+- F-56 to F-63: **new**, 6 ambiguity, 1 gap, 1 contradiction.
 
-Code comments cite these as `SPEC-FINDINGS F-nn`.
+Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
+by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.4 | Location | In one line |
+| Id | Severity | Status at 0.5 | Location | In one line |
 |---|---|---|---|---|
-| F-01 | ambiguity | open | §1.2 ULID | No first-character bound: is `8zzz…` (beyond 128 bits) a ULID chunk? |
-| F-02 | ambiguity | open | §1.1, keys.json | Without a contract, is a plain chunk that is neither a literal nor a canonical slug (`x-eth0`) a valid resource chunk? |
-| F-03 | ambiguity | open | §2.2 | Does a `uint` parameter only match canonical decimal chunks? |
-| F-04 | gap | open | §3.3, descriptors/ | D000–D004, D008 and D010 are defined nowhere in the prose. |
-| F-05 | gap | open | descriptors/ | The checker's cascades and scope appear only in fixtures. |
-| F-06 | ambiguity | open | §3.3, R3 | Descriptor checks the prose implies but no fixture pins. |
-| F-07 | contradiction | open | §3.3 example | The example holds `imu` yet says covariance is absent for "no IMU". |
-| F-08 | ambiguity | open | §5.2 | Encoding strings and type errors in the envelope decoder. |
-| F-09 | ambiguity | open | §7.3, E037 | Is a refused applicator's content a "schema position"? |
-| F-10 | ambiguity | open | §9.4, E032 | What "a `$ref` with a scheme (`:`)" covers; fragments that are not pointers. |
-| F-11 | gap | open | §9.4, §9.6 | How a reader of a bundle resolves a cross-file `$ref` (bundles carry no paths). |
-| F-12 | gap | open | §9.4, E029 | Is a JSON Schema file with a duplicate member "not JSON"? |
-| F-13 | ambiguity | open | §9.2 E024 | How many E024 for duplicate stems; a qualified reference to an ambiguous stem. |
-| F-14 | gap | open | §9.4 | Which source files the well-known types compile from. |
-| F-15 | ambiguity | open | §9.4 | Artifact names and roots, nested messages, enums as types, `json_name`. |
-| F-16 | ambiguity | partly resolved by 0.4 | §9.1 | TOML 1.0's 64-bit integer limit: E000 or E028? (The 1.1 half is settled.) |
-| F-17 | ambiguity | open | contract.schema.json | Integer bounds exist only as `format`, which JSON Schema treats as an annotation. |
-| F-18 | ambiguity | partly resolved by 0.4 | §9.1, E020 | Which of TOML's four date/time types count as "a datetime". |
-| F-19 | gap | open | §9.1, §9.5 | Floats: `nan`/`inf`; `1e16` passes the lints but fails bundle verification; `1.0` ≡ `1`. |
-| F-20 | ambiguity | open | §9.2 E020 | One E020 per key or per condition; requirement annotations. |
-| F-21 | gap | open | §10, App. D, W105 | W105 for a profile with no interim vocabulary. |
-| F-22 | ambiguity | open | §9.2 E018, E033 | Written or resolved values (with `[defaults.operation]`). |
-| F-23 | ambiguity | open | §9.2 | Small lint edges: retention leading zeros, `gate = []`, `history = false` on an event, W103 beside E023. |
-| F-24 | gap | open | §9.6 step 9 | The base64 variant. |
-| F-25 | gap | open | §9.6 steps 7, 9, 10 | Entry shapes the verification steps leave open. |
-| F-26 | gap | open | §9.6 extras | No source for extra documents; the value's shape; whether `"extras": {}` is always written. |
-| F-27 | ambiguity | open | §9.7 | History check: one problem or all per file, check order, odd entries. |
-| F-28 | ambiguity | open | §9.7 retention | "Identical" is not a classifier class; identity is defined only for protobuf; the default `json_name` rule. |
-| F-29 | ambiguity | **resolved by 0.3** | §9.8 | "In both directions": swapped old/new would contradict `explicit-true-to-false`. |
-| F-30 | gap | **resolved by 0.3**, contradictorily (F-40) | §9.8 | How resources of two revisions are paired. |
-| F-31 | gap | partly resolved by 0.3 | §9.8 table | The contract-metadata table is not exhaustive. |
-| F-32 | gap | partly resolved by 0.3 | §9.8 JSON Schema | The JSON Schema rules are not exhaustive. |
-| F-33 | ambiguity | open | §9.8 JSON Schema | `oneOf`/`anyOf` branch identity, and the asymmetry between them. |
-| F-34 | contradiction | **resolved by 0.3** | §9.8, renumber-field | A renumber "is a deletion" without a reserved number, yet the fixture reports no warning. |
-| F-35 | gap | partly resolved by 0.3 | §9.8 protobuf | The protobuf rules are not exhaustive. |
-| F-36 | gap | **resolved by 0.3** | compat/, App. E | The compat input layout is described only by the files themselves. |
-| F-37 | gap | open | conformance/README.md, fixture descriptions | Meanings are deferred to Rust symbols and design documents. |
-| F-38 | gap | open | §9.2, sets/ | A set member that does not load; E035 against duplicate declarations. |
-| F-39 | ambiguity | open | §2.2, §9.2 E021/E022 | "After the first" relies on document order, which TOML does not define. |
-| F-40 | contradiction | **new** | §9.8 "Resources" | "Matched by kind token and template" contradicts `explicit_cleared` and `compat/contract/explicit-true-to-false`. |
-| F-41 | ambiguity | **new** | §9.1 (0.4) | "A reader MAY accept later TOML", yet 1.1-only syntax "is E000"; is the list of constructs closed? |
-| F-42 | contradiction | **new** | CHANGELOG 0.3, compat/expect.json | Stale statements: "70 cases, 11 of them new" (23 are); "until it exists, the runner checks that every input loads". |
-| F-43 | ambiguity | **new** | §9.8 protobuf `presence_changed` | What "explicit presence" covers; overlap with `oneof_changed`. |
-| F-44 | ambiguity | **new** | compat/README.md | Where the wrapping contract sits (it decides `same_revision`), and when a case is `invalid`. |
-| F-45 | gap | **new** | §9.7, examples/zk2/.history | How a contract finds its history directory; §9.7 names `contracts/.history`, the examples use one root for many directories. |
+| F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
+| F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
+| F-03 | ambiguity | resolved by 0.5 | §2.2 | Do `uint` parameters only match canonical decimal? |
+| F-04 | gap | resolved by 0.5 | §3.3 | D000–D004, D008, D010 undefined in prose. |
+| F-05 | gap | resolved by 0.5 | descriptors/ | Cascades and scope only in fixtures. |
+| F-06 | ambiguity | resolved by 0.5 | §3.3, R3 | Implied descriptor checks no fixture pinned. |
+| F-07 | contradiction | resolved by 0.5 | §3.3 example | Holds `imu`, yet "no IMU". |
+| F-08 | ambiguity | resolved by 0.5 | §5.2 | Envelope encodings and type errors. |
+| F-09 | ambiguity | resolved by 0.5 | §7.3, E037 | Refused keywords' content. |
+| F-10 | ambiguity | resolved by 0.5 | §9.4, E032 | `$ref` scheme and fragments. |
+| F-11 | gap | resolved by 0.5 | §9.4, §9.6 | Cross-file `$ref` in a bundle. |
+| F-12 | gap | resolved by 0.5 | §9.4, E029 | Duplicate member in a schema file. |
+| F-13 | ambiguity | resolved by 0.5 | E024 | Counting duplicate stems. |
+| F-14 | gap | resolved by 0.5 | §9.4 | Well-known type sources. |
+| F-15 | ambiguity | resolved by 0.5 | §9.4 | Names, roots, nested messages, enums, `json_name`. |
+| F-16 | ambiguity | resolved by 0.5 | §9.1 | TOML's 64-bit integer limit. |
+| F-17 | ambiguity | resolved by 0.5 | contract.schema.json | Bounds only in `format`. |
+| F-18 | ambiguity | resolved by 0.5 | §9.1, E020 | Which TOML date/time kinds count. |
+| F-19 | gap | resolved by 0.5 | §9.1, §9.5 | Floats: `nan`/`inf`, `1e16`, `1.0` ≡ `1`. |
+| F-20 | ambiguity | resolved by 0.5 | E020 | Counting; requirement annotations. |
+| F-21 | gap | resolved by 0.5 | §10, W105 | A profile without a vocabulary. |
+| F-22 | ambiguity | resolved by 0.5 | E018, E033 | Written or resolved values. |
+| F-23 | ambiguity | resolved by 0.5 | §9.2 | Small lint edges. |
+| F-24 | gap | resolved by 0.5 | §9.6 | The base64 variant. |
+| F-25 | gap | resolved by 0.5 | §9.6 | Entry shapes. |
+| F-26 | gap | resolved by 0.5 | §9.6 extras | Source of extras; value shape; empty `extras`. |
+| F-27 | ambiguity | resolved by 0.5 | §9.7 | History check order. |
+| F-28 | ambiguity | resolved by 0.5 | §9.7 | Retention identity. |
+| F-29 | ambiguity | resolved by 0.5 | §9.8 | "Both directions". |
+| F-30 | gap | resolved by 0.5 | §9.8 | Pairing resources (see F-40). |
+| F-31 | gap | resolved by 0.5 | §9.8 | The contract table's coverage. |
+| F-32 | gap | resolved by 0.5 | §9.8 | The JSON Schema rules' coverage. |
+| F-33 | ambiguity | resolved by 0.5 | §9.8 | `oneOf`/`anyOf` branch identity. |
+| F-34 | contradiction | resolved by 0.5 | §9.8 | A renumber "is a deletion" yet no warning. |
+| F-35 | gap | resolved by 0.5 | §9.8 | The protobuf rules' coverage. |
+| F-36 | gap | resolved by 0.5 | compat/ | The compat input layout. |
+| F-37 | gap | resolved by 0.5 | fixture documents | Meanings deferred to Rust symbols. |
+| F-38 | gap | resolved by 0.5 | §9.2, sets/ | A failing member; E035 against duplicates. |
+| F-39 | ambiguity | resolved by 0.5 | E021/E022 | "The first" without key order. |
+| F-40 | contradiction | resolved by 0.5 | §9.8 | "Matched by kind token" against `explicit_cleared`. |
+| F-41 | ambiguity | resolved by 0.5 | §9.1 | "MAY accept later TOML" against E000. |
+| F-42 | contradiction | resolved by 0.5 | CHANGELOG, compat/ | Stale counts and descriptions. |
+| F-43 | ambiguity | resolved by 0.5 | §9.8 | Explicit presence. |
+| F-44 | ambiguity | resolved by 0.5 | compat/README.md | Wrapper location; `invalid`. |
+| F-45 | gap | resolved by 0.5 | §9.7 | Where a contract's history lives. |
+| F-46 | gap | resolved by 0.5 | §3.3 | The descriptor GET's parameters. |
+| F-47 | gap (measured) | resolved by 0.5 | §8.1 | The handler rule binds only the GET. |
+| F-48 | gap | resolved by 0.5 | §8.4 | The bundle reply's encoding. |
+| F-49 | gap | resolved by 0.5 | §8.1, §3.3, §8.4 | No timeouts. |
+| F-50 | gap (measured) | resolved by 0.5 | §8.4 | Consolidation `None`. |
+| F-51 | ambiguity | resolved by 0.5 | §8.4 | "Nearest holder" for a client. |
+| F-52 | gap | resolved by 0.5 | §3.2 | An unbound required role. |
+| F-53 | ambiguity | resolved by 0.5 | §3.3 | `profiles`. |
+| F-54 | gap | resolved by 0.5 | §8.1 | When a member exists. |
+| F-55 | ambiguity | resolved by 0.5 | §3.2 R3 | An unbound optional role. |
+| F-56 | ambiguity | **new** | §2.6, E026 (0.5) | "The seconds MUST fit 64 bits": signed or unsigned? |
+| F-57 | ambiguity | **new** | §3.3 D008, D010 (0.5) | "Once for the repeat": once per repeated value, or once per descriptor? |
+| F-58 | ambiguity | **new** | §5.2 CBOR (0.5) | "An integer outside 64 bits": i64, u64, or their union? |
+| F-59 | ambiguity | **new** | §8.1 timeouts (0.5) | "Waits for presence after an owner starts … 1 s": from which instant? |
+| F-60 | ambiguity | **new** | §9.8 `oneof_branch_added` (0.5) | "More branches than the earlier one's" when one side has no `oneOf`. |
+| F-61 | gap | **new** | §3.2, presence.md §2 step 4 (0.5) | "No instance token appears" cannot be observed when the refusing owner is its own router. |
+| F-62 | contradiction | **new** | §9.6 against §9.4 (0.5) | One id for identical files, under the *last* name, breaks a bundle `$ref` to the first file's stem. |
+| F-63 | ambiguity | **new** | descriptor.schema.json, §3.3, §9.1 (0.5) | `uint64` is bounded for contracts but not for descriptors' `cardinality`. |
 
 ---
 
 ## §1 Identity and grammar
 
 ### F-01 · ambiguity · §1.2, ULID chunks
+
+**Status at 0.5: resolved by 0.5.** §1.2 now says the check is lexical and the first character has no bound (`8zzz…` is a ULID chunk); zk2py's guess stands.
 
 > "A ULID chunk (events, §2.6) is 26 characters of Crockford's base32 in
 > lowercase: digits, and lowercase letters except `i`, `l`, `o`, `u`."
@@ -101,6 +123,8 @@ has no such case.
 the 26 characters (`lexical.ULID`).
 
 ### F-02 · ambiguity · §1.1 (position 6+), `keys.json`
+
+**Status at 0.5: resolved by 0.5.** §1.1 now says a key is parsed lexically, so `x-eth0` is a resource chunk; zk2py's guess stands.
 
 > "6+ | resource chunks | Built from the resource's template (§2.2)."
 
@@ -116,6 +140,8 @@ So no template could ever produce it.
 
 ### F-03 · ambiguity · §2.2, `uint` parameters in resolution
 
+**Status at 0.5: resolved by 0.5.** §2.2 now says parameter types play no part in matching, and a tie leaves the first listed template; zk2py's guess stands.
+
 > "A `uint` value is written in decimal without leading zeros, then slugged
 > like any value."
 
@@ -129,6 +155,8 @@ Resolution mentions only decoding. Does `{n}` typed `uint` match the chunk
 ## §3.3 The descriptor
 
 ### F-04 · gap · §3.3 and `conformance/descriptors/`: most D codes have no definition
+
+**Status at 0.5: resolved by 0.5.** §3.3 now has "The checks": a D000–D010 table with severity (D006 alone a warning) and counting.
 
 > "a checker MUST report exactly the `D…` codes that
 > `conformance/descriptors/expect.json` lists for each document, checked
@@ -155,6 +183,8 @@ This is where the urge to read the Rust checker was strongest.
 
 ### F-05 · gap · `descriptors/`: cascades and scope stated only by fixtures
 
+**Status at 0.5: resolved by 0.5.** §3.3 "Cascades and scope" states all five cascades; zk2py now also drops an invalid `iface` from `declared_by` (cascade 2).
+
 Several rules about how the descriptor checks interact exist only as
 expected values:
 - **`d003-fingerprint`** expects `["D003"]` for `"contract": "sha256:FEA2"`. A
@@ -175,6 +205,8 @@ expected values:
 **Resolved:** from the fixtures.
 
 ### F-06 · ambiguity · §3.3 and R3: checks the prose implies but no fixture pins
+
+**Status at 0.5: resolved by 0.5.** §3.3 lists what is deliberately not checked; a lowered bound of 0 is D007, a profile twice is D010. Counting a repeat leaves F-57.
 
 These are left unimplemented, except the two duplicate rules at the end,
 which are guesses:
@@ -197,6 +229,8 @@ which are guesses:
 
 ### F-07 · contradiction (informative text) · §3.3, the descriptor example
 
+**Status at 0.5: resolved by 0.5.** The example now holds `imu` and lists covariance with cause `config`.
+
 The example has `"capabilities": ["imu", "gnss"]`. It also has
 `"unavailable": [{"resource": "state/covariance", "cause": "capability",
 "reason": "no IMU"}]`.
@@ -211,6 +245,8 @@ rules finds it inconsistent.
 ## §5.2 The error envelope
 
 ### F-08 · ambiguity · §5.2, encodings and type errors
+
+**Status at 0.5: resolved by 0.5.** §5.2 lists the decoding edges. zk2py's guess was overturned: a CBOR byte string in a detail is base64 text, not `bytes_hex`. "An integer outside 64 bits" leaves F-58.
 
 > "The reply's `Encoding` MUST say which: `application/json` or
 > `application/cbor`; or `application/protobuf` with the schema suffix
@@ -241,6 +277,8 @@ The spec leaves these open:
 
 ### F-09 · ambiguity · §7.3, E037 inside refused keywords
 
+**Status at 0.5: resolved by 0.5.** §7.3 defines schema positions once. zk2py's guess was overturned: a refused keyword's content is not walked, and `definitions` is refused without being walked.
+
 > "Refused: every other keyword in a schema position (`pattern`,
 > `patternProperties`, `allOf`, `not`, `if`/`then`/`else`, …)"
 
@@ -258,6 +296,8 @@ walk `definitions`.
 
 ### F-10 · ambiguity · §9.4, E032 and "a scheme"
 
+**Status at 0.5: resolved by 0.5.** §9.4: a scheme is a `:` in the file part; the fragment is a JSON Pointer used as written. zk2py's guess was overturned: no percent-decoding.
+
 > "A `$ref` with a scheme (`:`) is refused. Its pointer MUST resolve."
 
 Open points:
@@ -271,6 +311,8 @@ Open points:
 Pointer fragments only, percent-decoded (`schemas.SchemaSet.resolve_ref`).
 
 ### F-11 · gap · §9.4 and §9.6, cross-file `$ref` once bundled
+
+**Status at 0.5: resolved by 0.5.** §9.4: in a bundle, a file part names the artifact whose `name` is the stem of its last path segment. But see F-62: §9.6's duplicate-id rule breaks the premise.
 
 **Status at 0.4: open.** 0.3 adds "`$ref`s are followed, across the revision's artifacts" to §9.8, which confirms that a bundle's `$ref`s must be followed, but still not how a path maps to an artifact that has only a stem.
 
@@ -291,6 +333,8 @@ component (`compat.JsonWorld`). Stems are unique per contract (E024).
 
 ### F-12 · gap · §9.4 and E029, duplicate members in a JSON Schema file
 
+**Status at 0.5: resolved by 0.5.** §9.4/E029: a duplicate member makes the file not JSON; zk2py's guess stands.
+
 > E029: "a schema file missing, unreadable, not JSON, or not compiling"
 
 The artifact id is "the document's JCS bytes", which a document with
@@ -300,6 +344,8 @@ member".)
 **Resolved:** a guess. A duplicate member is E029.
 
 ### F-13 · ambiguity · §9.2 E024, counting
+
+**Status at 0.5: resolved by 0.5.** E024 falls once per later file with a taken stem, and that file is not loaded, so `json:stem#Name` looks in the first. zk2py now skips loading it.
 
 > "E024 | a `json:` name defined by several listed files, or two listed
 > JSON Schema files with one stem | per reference or file"
@@ -313,6 +359,8 @@ stem.
 ## §9.4 Protobuf artifacts
 
 ### F-14 · gap · §9.4, the well-known types' source files
+
+**Status at 0.5: resolved by 0.5.** §9.4 names protoc 3.21.12's `include/` sources for the well-known types.
 
 > "The well-known types are always available, each compiled on demand as
 > its own artifact named `google/protobuf/<file>.proto`"
@@ -333,6 +381,8 @@ relies on the compiler's built-in include path. The spec does not say so.
 directory, with protoc pinned (`protoc.compile_well_known`).
 
 ### F-15 · ambiguity · §9.4, names, roots, nested messages, enums, `json_name`
+
+**Status at 0.5: resolved by 0.5.** §9.4: the first import root names a file, E029 under none; a nested message is a message, an enum is E023; listed files shadow the well-known types; every field carries `json_name`.
 
 > "Import roots are `proto_include`, relative to the contract. … Its
 > `name` is the file's path relative to its import root."
@@ -360,6 +410,8 @@ every id). The rest are guesses.
 
 ### F-16 · ambiguity · §9.1, the TOML integer range
 
+**Status at 0.5: resolved by 0.5.** §9.1 "Integers": outside the 64-bit signed range is E000; zk2py's guess stands.
+
 **Status at 0.4: partly resolved by 0.4.** TOML 1.1-only syntax is now E000 (§9.1, five `e000-toml11-*` fixtures), which settles the 1.1 half. The 64-bit integer limit inside TOML 1.0 is still unaddressed.
 
 TOML 1.0 says: "If an integer cannot be represented losslessly [in 64
@@ -375,6 +427,8 @@ a 1.0 reader"). The 64-bit limit is a second case, inside TOML 1.0.
 
 ### F-17 · ambiguity · `contract.schema.json` and `descriptor.schema.json`, integer bounds
 
+**Status at 0.5: resolved by 0.5.** `contract.schema.json` carries `maximum` on its `uint32` fields, and §9.1 makes `format` a bound for contracts. The descriptor schema's `uint64` leaves F-63.
+
 `major`, `minor`, `deprecated.since` and `history.depth` are
 `{"type": "integer", "format": "uint32", "minimum": 0}`. JSON Schema
 2020-12 treats `format` as an annotation, so a standard validator accepts
@@ -383,6 +437,8 @@ a 1.0 reader"). The 64-bit limit is a second case, inside TOML 1.0.
 giving E000 and D000. A `maximum` in the schema would remove the doubt.
 
 ### F-18 · ambiguity · §9.1 and E020, "a datetime"
+
+**Status at 0.5: resolved by 0.5.** §9.1: all four TOML date/time kinds, at any depth.
 
 **Status at 0.4: partly resolved by 0.4.** The 0.4 changelog says a time without seconds "E020 would have refused … anyway, as an annotation datetime", so a local time counts. That is said in the changelog, not in §9.1, and nothing names a local date.
 
@@ -393,6 +449,8 @@ and local time. `e020-datetime` uses an offset date-time.
 **Resolved:** a guess. All four count, at any depth of the value.
 
 ### F-19 · gap · §9.1 and §9.5, floats and the canonical restrictions
+
+**Status at 0.5: resolved by 0.5.** §9.5 defines the canonical domain: `nan`/`inf` and integral floats JCS writes as integers beyond ±(2^53−1) are E028, one per value; `1.0` and `1` fingerprint alike.
 
 > §9.1: "Floats are allowed."
 
@@ -419,6 +477,8 @@ E028; zk2py stops at 1e21, where ECMAScript switches to exponent form.
 
 ### F-20 · ambiguity · E020, counting
 
+**Status at 0.5: resolved by 0.5.** E020 counts a key's value and its name apart (one key can give two), and requirement annotations are checked. zk2py's guess (one per key) was overturned.
+
 > "per key and table; once for `[defaults]`, whatever it reaches"
 
 When a key is malformed *and* its value holds a datetime, is that one E020
@@ -430,6 +490,8 @@ checked like any other table.
 
 ### F-21 · gap · §10 point 2, Appendix D, W105 without a vocabulary
 
+**Status at 0.5: resolved by 0.5.** §10: a profile with no interim table raises no W105; zk2py's guess stands.
+
 > "Until a profile publishes its vocabulary, the interim tables of
 > Appendix D apply, and a key outside them is a warning."
 
@@ -438,6 +500,8 @@ A contract may `use` a profile that has no interim table, such as
 **Resolved:** a guess. None.
 
 ### F-22 · ambiguity · E018 and E033, written or resolved
+
+**Status at 0.5: resolved by 0.5.** §9.3: lints read resolved values; zk2py's guess stands.
 
 > "E018 | `serving = "replicated"` without `idempotent = true`"
 
@@ -449,6 +513,8 @@ A contract may `use` a profile that has no interim table, such as
 **Resolved:** a guess. zk2py judges the resolved values (§9.3).
 
 ### F-23 · ambiguity · §9.2, small lint edges
+
+**Status at 0.5: resolved by 0.5.** Retention may have leading zeros, a rate may not; `gate = []` is no gate (zk2py's E016 guess overturned); `history = false` on an event is E019; W103 waits for resolved types (cascade 6). "Fit 64 bits" leaves F-56.
 
 None of these is covered by a fixture:
 - **Leading zeros in `retention`.** E026: "`burst(<n>/h)` (n ≥ 1, decimal,
@@ -468,6 +534,8 @@ None of these is covered by a fixture:
 
 ### F-24 · gap · §9.6 step 9, the base64 variant
 
+**Status at 0.5: resolved by 0.5.** §9.6: RFC 4648 §4, padded, strict; zk2py's guess stands.
+
 > "it has a `data` member, base64 text for protobuf"
 
 The prose does not say which alphabet, whether padding is required, or
@@ -477,6 +545,8 @@ whether decoding is strict.
 The verifier is strict, so unpadded or URL-safe text is `shape`.
 
 ### F-25 · gap · §9.6 steps 7, 9 and 10, entry shapes
+
+**Status at 0.5: resolved by 0.5.** Step 9: a non-object entry or one without `kind` is `schema_kind` (zk2py's `shape` guess overturned). Entry members besides `kind`/`data` are `shape`. An extra's `media_type` must be a string and is informative. One id listed twice is one artifact.
 
 The verification steps leave several shapes open:
 - **A schema entry that is not an object.** zk2py: `shape`.
@@ -495,6 +565,8 @@ The verification steps leave several shapes open:
 **Resolved:** guesses, as listed.
 
 ### F-26 · gap · §9.6, extras
+
+**Status at 0.5: resolved by 0.5.** By deferral: where a builder finds extra documents is `views.v1`'s; meanwhile a core builder carries no extras and such a bundle fails step 11. A `views.document` value is one id string (zk2py's list guess overturned), and a bundle always writes all three members.
 
 > "Extras are exactly the documents that the contract's `views.document`
 > annotations reference. … The reference builder does not carry extras
@@ -518,6 +590,8 @@ written, from the fixture.
 ## §9.7 History and retention
 
 ### F-27 · ambiguity · §9.7, the history check
+
+**Status at 0.5: resolved by 0.5.** §9.7 gives the check's order. `interface` and `jcs` are both reported (zk2py's one-per-file guess overturned); `jcs` compares against all three members written.
 
 > "The history check MUST verify: every bundle (§9.6); its fingerprint
 > against its file name; its interface against its directory; that it is
@@ -545,6 +619,8 @@ Each fixture has exactly one problem, so the order is untested.
 
 ### F-28 · ambiguity · §9.7, retention identity
 
+**Status at 0.5: resolved by 0.5.** §9.7 defines retention identity apart from the classes, with protoc's default `json_name`; zk2py implements it (`compat.identical`).
+
 > "A rebuild that the classifier judges identical to the newest published
 > revision keeps that revision's bundle … For protobuf, identity compares
 > the `FileDescriptorSet`s with source info dropped and every default
@@ -570,6 +646,8 @@ Identity for JSON Schema and raw types is not exercised.
 
 ### F-29 · ambiguity (fixture decided) · §9.8, "in both directions"
 
+**Status at 0.5: resolved by 0.5.** §9.8 now says a direction is a role, never a swap.
+
 **Status at 0.4: resolved by 0.3.** The tables now list both transitions of a member with different classes (`explicit_set` breaking against `explicit_cleared` review; `idempotent_cleared` against `idempotent_set`; `fanout`, `replies` and `reliability` each way). A rule is therefore a directed transition, and "both directions" can only mean the reader and writer roles. The phrase itself is unchanged.
 
 > "a candidate against every revision in the history, in both directions.
@@ -590,6 +668,8 @@ only earlier → candidate.
 
 ### F-30 · gap (fixture decided) · §9.8, pairing resources across revisions
 
+**Status at 0.5: resolved by 0.5.** §9.8: resources pair by kind and template (see F-40).
+
 **Status at 0.4: resolved by 0.3, but contradictorily.** §9.8 now says resources are "matched by kind token and template", which contradicts its own explicit rows and the fixture: see F-40.
 
 The spec never says how two revisions' resources are paired.
@@ -601,6 +681,8 @@ The spec never says how two revisions' resources are paired.
 within a contract because it is the table key.
 
 ### F-31 · gap · §9.8, the contract table is not exhaustive
+
+**Status at 0.5: resolved by 0.5.** §9.8: only artifacts a type reaches are compared; an unreferenced one changing is compatible.
 
 **Status at 0.4: partly resolved by 0.3.** The six tables now class every canonical member, in both directions. zk2py follows them, which changed twelve of its guesses (the list is in the README and `zk2py/compat.py`'s docstring). One remainder: a listed artifact that no type references can change with no rule firing (zk2py: compatible, because nothing reads it).
 
@@ -639,6 +721,8 @@ exceptions:
 
 ### F-32 · gap (partly fixture decided) · §9.8, the JSON Schema rules are not exhaustive
 
+**Status at 0.5: resolved by 0.5.** §9.8: `$ref` siblings are merged into the target and compared (zk2py's review guess overturned); a boolean schema change is review; a `required` name without a property is breaking.
+
 **Status at 0.4: partly resolved by 0.3.** §9.8 now states `type_changed` for any type set change, `required_removed`, `const_changed`, the `additionalProperties`/`items` toggles (compatible) and schema gains (review), and enum reordering (compatible). Still unlisted: a `$ref` beside other keywords, a boolean schema in a property position, and a `required` name with no property.
 
 The rules list "integer ↔ number" as the only type change.
@@ -664,6 +748,8 @@ rest are guesses:
 
 ### F-33 · ambiguity · §9.8, `oneOf` versus `anyOf`
 
+**Status at 0.5: resolved by 0.5.** §9.8: `oneOf`/`anyOf`/`prefixItems` compare as written, in order, so a reordering is review (zk2py's multiset guess overturned); "a branch added" is more branches; the asymmetry is deliberate. An absent `oneOf` leaves F-60.
+
 > "Breaking: … a `oneOf` branch added." "Review: any other change inside
 > `oneOf`, `anyOf` or `prefixItems`."
 
@@ -679,6 +765,8 @@ multiset is a strict subset of the new one. `prefixItems` compares in
 order.
 
 ### F-34 · contradiction · §9.8 against `compat/payload/protobuf/renumber-field`
+
+**Status at 0.5: resolved by 0.5.** The renumber bullet no longer calls a renumber a deletion.
 
 **Status at 0.4: resolved by 0.3.** §9.8 now says "Fields are matched by number. A field missing by number but present by name is renumbered": the same field is the same name, and a renumbered field is not a missing one, so it raises no warning. The bullet still calls a renumber "a deletion plus an addition", which is what made the old reading possible.
 
@@ -697,6 +785,8 @@ the same name and type, or something else.
 is breaking, and its deletion raises no warning.
 
 ### F-35 · gap · §9.8, the protobuf rules are not exhaustive
+
+**Status at 0.5: resolved by 0.5.** §9.8: structure from the named type only (nested types no field reaches are not compared); oneofs by name; enums by number, closed by the candidate's syntax alone; proto2 defaults (zk2py's review guess overturned), options and reserved names not compared; warnings deduplicated.
 
 **Status at 0.4: partly resolved by 0.3.** §9.8 now states presence (`presence_changed`), map cardinality, `reserved_reused`, proto2 `required` added/removed/toggled, and that "nested and referenced" messages are compared "each pair once". Still open: proto2 defaults, options such as `packed`, an enum's openness when the two revisions' syntaxes differ, a field moved *between* oneofs, nested types added or removed, reserved *names* reused, and how warnings accumulate over a history.
 
@@ -726,6 +816,8 @@ None of these is covered:
 
 ### F-36 · gap · `compat/` and Appendix E, the input layout
 
+**Status at 0.5: resolved by 0.5.** Resolved by 0.3; nothing more.
+
 **Status at 0.4: resolved by 0.3.** `compat/README.md` now gives the case layout, the one-resource wrapper and the meaning of each `expect.json` member (but see F-44 on the wrapper's location).
 
 Appendix E says only "`compat/`: the class, warnings and `same_revision`".
@@ -743,6 +835,8 @@ The rest is learned from the files:
 ## Fixtures and documents
 
 ### F-37 · gap · `conformance/README.md` and fixture descriptions: meanings deferred to Rust and design documents
+
+**Status at 0.5: resolved by 0.5.** Fixture documents cite spec sections; only a provenance line naming `zenkey-model` remains, which defines nothing.
 
 The spec claims to stand without the reference implementation. Its fixture
 documents point at it, and at design documents, for meanings:
@@ -764,6 +858,8 @@ invitation to cross the information barrier.
 
 ### F-38 · gap · §9.2 and `sets/`, set loading
 
+**Status at 0.5: resolved by 0.5.** §9.2: a set check runs only when every member loads, in file-name order; E035 against the first declaration. zk2py's "refuse the set" guess was overturned: a failing member's own codes stand.
+
 > "E035 and E036 are set checks: each file is loaded on its own first."
 
 Only `sets/expect.json` adds "and must load". The spec does not say what a
@@ -774,6 +870,8 @@ contracts declaring the same interface.
 check. E035 uses the first declaration in file-name order.
 
 ### F-39 · ambiguity · §9.2 E021 and E022, "after the first"
+
+**Status at 0.5: resolved by 0.5.** §9.2 "Order": template order, not document order (zk2py's guess overturned); E021 does not take a resource out of W101.
 
 > E021: "once per template after the first of its shape"; E022: "once per
 > `epoch` template after the first"
@@ -789,6 +887,8 @@ readers preserve it.
 ## New at 0.4 (after amendments 0.3 and 0.4)
 
 ### F-40 · contradiction · §9.8 "Resources" against `compat/contract/explicit-true-to-false`
+
+**Status at 0.5: resolved by 0.5.** §9.8 pairs by kind (not kind token) and template; a kind change is `resource_removed`.
 
 > "**Resources,** matched by kind token and template:" … "`explicit` false
 > → true | breaking for ambient consumers | `explicit_set`" … "`explicit`
@@ -809,6 +909,8 @@ inside the pair. This replaces F-30, whose silence 0.3 filled with this
 sentence.
 
 ### F-41 · ambiguity · §9.1 (0.4): "MAY accept later TOML" against "is E000"
+
+**Status at 0.5: resolved by 0.5.** §9.1: the list is closed, and a reader "MAY be a parser of later TOML, provided it reports these as E000".
 
 > "A reader MAY accept later TOML, but a contract MUST NOT need it, so
 > syntax that only TOML 1.1 has is **E000**:" (five constructs follow)
@@ -836,6 +938,8 @@ five constructs at load, and refuses to run if any parses
 
 ### F-42 · contradiction (documentary) · CHANGELOG 0.3 and `compat/expect.json`'s description
 
+**Status at 0.5: resolved by 0.5.** Corrected: CHANGELOG 0.3 now reads 23 new, and `compat/expect.json`'s description no longer says inputs are only loaded.
+
 Two statements are stale:
 - **CHANGELOG 0.3:** "`compat/` is evaluated. 70 cases, 11 of them new."
   Against 0.2's 47 cases, 23 are new:
@@ -850,6 +954,8 @@ Two statements are stale:
 **Resolved:** nothing to implement. Reported here.
 
 ### F-43 · ambiguity · §9.8 protobuf, `presence_changed`
+
+**Status at 0.5: resolved by 0.5.** §9.8: presence is protobuf's definition, and a oneof move reports `oneof_changed` alone (zk2py's two-rule guess overturned).
 
 > "explicit presence toggled, such as proto3 `optional`
 > (`presence_changed`): a reader stops telling a default from an absent
@@ -876,6 +982,8 @@ classifier reports differ.
 
 ### F-44 · ambiguity · `compat/README.md`: the wrapper's location, and `invalid`
 
+**Status at 0.5: resolved by 0.5.** `compat/README.md`: the wrapper sits beside its artifact; only a candidate can be `invalid`.
+
 > "`payload/protobuf/<case>/` | `old/m.proto`, `new/m.proto` | Each wrapped
 > in a one-resource contract (below) … with `<kind>` `protobuf` or
 > `jsonschema` and `<artifact>` the case's file"
@@ -901,6 +1009,8 @@ to load makes it `invalid`.
 
 ### F-45 · gap · §9.7 and `examples/zk2/.history`: where a contract's history lives
 
+**Status at 0.5: resolved by 0.5.** §9.7: a configured history root, a contract's history found by interface id; `examples/zk2/README.md` states the examples' requirement.
+
 > "A contract's CI keeps every published bundle at
 > `contracts/.history/<iface>/<hex>.bundle.json`"
 
@@ -923,6 +1033,9 @@ for every example. All 24 are:
 
 ## The live half, first slice (against 0.4; #609, #610)
 
+All ten are resolved by 0.5; their status is in the summary table at the
+top, and on each entry.
+
 These come from `zk2py.live` and `zk2py.live_interop`, which run the Rust
 owner example as a black box over zenoh-python 1.10.1. The setup: loopback,
 the owner as the router, and zk2py as a client of it. The rules read are
@@ -944,6 +1057,8 @@ entries rest on measurements, which are given.
 
 ### F-46 · gap · §3.3, the descriptor GET
 
+**Status at 0.5: resolved by 0.5.** §3.3 "The GET": one reply, `application/json`, no timestamp, no attachment, consolidation `None`; the target is the caller's.
+
 > "Every instance serves a **descriptor**: a JSON document answered on GET
 > at its instance key, and put on every change."
 
@@ -961,6 +1076,8 @@ timestamp and no attachment.
 - it treats `application/json` as an expectation the spec does not state.
 
 ### F-47 · gap (measured) · §8.1 "Reading presence" and `presence.md` §4
+
+**Status at 0.5: resolved by 0.5.** §8.1: every liveliness subscriber on the session MUST be callback-driven or drained; a GET that ended at its timeout SHOULD be read as possibly incomplete; presence.md §4 now states zenoh-python's measurement.
 
 > "A caller or tool's liveliness GET on a session that holds a liveliness
 > subscriber MUST use a callback or an unbounded handler. With zenoh's
@@ -1011,6 +1128,8 @@ about 0.15 s while a subscriber is held.
 
 ### F-48 · gap · §8.4 and §9.6, the bundle reply's encoding
 
+**Status at 0.5: resolved by 0.5.** §8.4: one reply, `application/json`, and a caller MUST NOT depend on the encoding.
+
 §9.6 defines the bundle *bytes* (JCS). §8.4 defines how to retrieve and
 verify them. Neither says what `Encoding` a holder sets on its reply. The
 owner sets `application/json`.
@@ -1018,6 +1137,8 @@ owner sets `application/json`.
 intends ("the hash is the check"). zk2py records the encoding in its report.
 
 ### F-49 · gap · timeouts: §8.1, §3.3 and §8.4
+
+**Status at 0.5: resolved by 0.5.** §8.1: timeouts are the caller's; a conformance run uses 1 s. The starting instant leaves F-59.
 
 The spec sets no timeout for any of these:
 - a liveliness GET;
@@ -1033,6 +1154,8 @@ S6 speaks of "the GET's timeout" as if it were given.
 - 30 s to wait for presence, polled every 0.2 s.
 
 ### F-50 · gap (measured) · §8.4 step 2 and consolidation
+
+**Status at 0.5: resolved by 0.5.** §8.4: consolidation `None` is a MUST on both attempts, with the measurement.
 
 > "Verify each reply **as it arrives** (§9.6), and accept the first valid
 > one, without waiting for the GET to complete."
@@ -1063,6 +1186,8 @@ and for the descriptor GET. §8.4 should say so.
 
 ### F-51 · ambiguity · §8.4 step 1 and `retrieval.md` §1, "nearest holder"
 
+**Status at 0.5: resolved by 0.5.** §8.4 step 1: a holder on the caller's own session answers too; assume nothing about the count.
+
 > "GET with target `BestMatching`. That reaches the nearest holder on each
 > router the query visits."
 
@@ -1082,6 +1207,8 @@ that arrives, and accepts the first valid one. The runner's
 corrupt-nearest-holder check passes either way.
 
 ### F-52 · gap · §3.1, §3.2 R1, §8.2: an unbound required role
+
+**Status at 0.5: resolved by 0.5.** §3.2: an owner whose configuration binds a required role to nothing MUST NOT start. Observing that from outside leaves F-61.
 
 The owner example refused to start on `examples/zk2/walkthrough/thruster.v1.toml`.
 It exited with status 1 and declared no instance token, saying:
@@ -1105,6 +1232,8 @@ an unbound required role does.
 
 ### F-53 · ambiguity · §3.3 and §10 point 4, the descriptor's `profiles`
 
+**Status at 0.5: resolved by 0.5.** §3.3: `profiles` is the union of the contracts' `uses`, sorted and deduplicated; not checked by the checker.
+
 > descriptor.schema.json: "The profiles this instance follows, as
 > `<name>.v<major>`."
 
@@ -1116,6 +1245,8 @@ those `uses`.
 
 ### F-54 · gap · §8.1 member tokens: when does a member exist?
 
+**Status at 0.5: resolved by 0.5.** §8.1: a member exists from the owner's first declaration of it; no member, no member token.
+
 > "The owner MUST hold one member token per member, and cycle it whenever
 > that member's continuity breaks."
 
@@ -1126,6 +1257,8 @@ which publishes no data, held no member token for either.
 **Resolved:** zk2py reports the member-token count. It asserts nothing.
 
 ### F-55 · ambiguity · §3.2 R3, an unconfigured optional role
+
+**Status at 0.5: resolved by 0.5.** §3.2/§3.3: an unbound optional role is listed with `"bindings": []` and `"params": {}`.
 
 > "**Owner:** the descriptor (§3.3) MUST list every requirement with its
 > bindings and parameter bindings as configured."
@@ -1140,3 +1273,149 @@ the data-flow graph (R3's "read from descriptors") would lose an edge the
 contract declares.
 **Resolved:** a guess. zk2py's runner requires every contract-declared role
 to be listed. The owner passes.
+
+## New at 0.5 (against amendment 0.5)
+
+Found while making zk2py follow 0.5: `just py-conformance` passes 485 of
+485, and `just py-live` 60 of 60. Five entries follow up text that 0.5
+added. F-62 is a contradiction between two 0.5 rules, and was reproduced.
+No fixture pins any of these.
+
+### F-56 · ambiguity · §2.6 and E026 (0.5): "the seconds MUST fit 64 bits"
+
+> "In a retention, `<n>` is decimal digits, leading zeros allowed, and at
+> least 1 … The seconds MUST fit 64 bits (E026) and, like every canonical
+> integer, ±(2^53−1) (E028)."
+
+The spec does not say whether 64 bits means signed or unsigned. A retention
+of `9223372036854775808s` (2^63) fits an unsigned 64-bit integer but not a
+signed one, so it is either E028 alone or E026 and nothing else (E026 stops
+the canonical form). Elsewhere 0.5 bounds integers both ways: TOML's are
+signed (§9.1), and a descriptor's `minor` goes to 2^64−1 (§3.3).
+**Resolved:** a guess. zk2py uses unsigned: E026 above 2^64−1, then E028
+from the canonical form.
+
+### F-57 · ambiguity · §3.3's D008 and D010 (0.5): "once for the repeat"
+
+> D008 "a capability is not `[a-z0-9][a-z0-9_.-]*`; or one is listed twice
+> | per capability; once for the repeat"; D010 likewise for profiles.
+
+Two readings, and the fixtures (`d008-twice`, `d010-twice`) have a single
+repeated value, so they cannot tell them apart:
+- once per repeated *value*: `["a", "a", "b", "b"]` gives two;
+- once for the descriptor, however many values repeat.
+
+Also open: a malformed value listed twice. Is that two D008 for the
+malformed occurrences plus one for the repeat?
+**Resolved:** a guess. zk2py counts once per repeated value, plus once per
+malformed occurrence (`descriptor._repeats`).
+
+### F-58 · ambiguity · §5.2, CBOR (0.5): "an integer outside 64 bits"
+
+> "A map key that is not text, an integer outside 64 bits, or a float that
+> is not finite is `decode`."
+
+CBOR's major type 0 reaches 2^64−1, and major type 1 reaches −2^64. "Outside
+64 bits" could mean outside `i64`, outside `u64`, or outside both. 2^63 and
+−2^63−1 fall differently under each reading. No case in `errors/cases.json`
+has such an integer.
+**Resolved:** a guess. zk2py refuses only what neither `i64` nor `u64`
+holds, that is, below −2^63.
+
+### F-59 · ambiguity · §8.1 (0.5): when "after an owner starts" begins
+
+> "how long a tool waits for presence after an owner starts, are the
+> caller's choices. The scenarios, and so a conformance run, use 1 s unless
+> they say otherwise."
+
+A tool cannot observe "starts". The second could be counted from at least
+four instants:
+- the process launch;
+- the owner's router accepting connections;
+- the tool's session connecting;
+- the owner's last start-up step (§8.2).
+
+The figure is tight enough that the choice matters: process start-up alone
+can take a good part of a second.
+**Resolved:** a guess. zk2py counts the 1 s from its client session's
+connection to the owner's router. The owner example's presence appeared
+within it in every run (2 and 4 tokens, in about 1 ms).
+
+### F-60 · ambiguity · §9.8 `oneof_branch_added` (0.5): a side with no `oneOf`
+
+> "a `oneOf` branch added (`oneof_branch_added`): the candidate's `oneOf`
+> has more branches than the earlier one's, whatever they hold."
+
+The rule is open when the earlier revision has no `oneOf` at that position.
+Adding a `oneOf` keyword could be:
+- `oneof_branch_added`, reading the absent `oneOf` as zero branches; or
+- `undecided_changed`, "any other change inside" it.
+
+`oneof-add-branch` has a `oneOf` on both sides.
+**Resolved:** a guess. zk2py reads an absent `oneOf` as zero branches, so
+adding one is breaking. Removing one is review.
+
+### F-61 · gap · §3.2 and `presence.md` §2 step 4 (0.5): observing a refusal
+
+> §3.2: "An owner whose configuration binds a required role to nothing MUST
+> NOT start, as one missing a required resource does not (§8.2 step 2): no
+> instance token appears."
+
+The live runner starts the owner on `walkthrough/thruster.v1`. The owner
+example is its own router: it prints `listening`, finds the unbound role,
+and exits with status 1. zk2py's client completed no presence GET before
+the router was gone. So "no instance token appears" was judged on silence,
+which O5 says is never a verdict, plus the missing `ready` line and the
+exit.
+
+The spec gives no observable for a refusal when the refusing participant
+is also the only router. A scenario could run the owner as a client of a
+separate router, where a watcher sees no token.
+**Resolved:** the runner's check is named for what it observes ("no
+instance token while it ran, no `ready` line"), and reports how many
+presence GETs it completed: 0.
+
+### F-62 · contradiction · §9.6 against §9.4 (0.5): one id for identical files
+
+> §9.6: "Two listed JSON Schema files with identical bytes have one id, so
+> the canonical form lists it once, under the `name` of the last of them in
+> `[schemas]` order."
+
+> §9.4: "In a bundle, which keeps no paths, the file part names the
+> artifact whose `name` is the stem of its last path segment. Stems are
+> unique per contract, so this is the file the path named."
+
+The two rules meet in one contract, which zk2py reproduced:
+- `[schemas] jsonschema = ["a.json", "b.json", "c.json"]`, with `a.json`
+  and `b.json` byte-identical;
+- `c.json` holding `{"$ref": "a.json#/$defs/X"}`.
+
+In the source tree the `$ref` resolves by path, so the contract lints clean
+(no code). The canonical form lists the shared id once, as `b`. In its
+bundle, the file part `a.json` names stem `a`, which no artifact has: the
+`$ref` resolves to nothing. §9.8 follows `$ref`s "by stem as in a bundle",
+so the classifier cannot see what `c.json` refers to. "So this is the file
+the path named" is false here.
+**Resolved:** a guess. zk2py follows both rules as written, and so
+reproduces the dangling `$ref`: building that contract and reading its
+bundle back gives the stems `b` and `c` only. Either rule could yield, for
+example:
+- list a shared id under every name;
+- refuse identical listed files (an E024-like code);
+- resolve a bundle file part by *any* name the id was listed under.
+
+### F-63 · ambiguity · `descriptor.schema.json`, §3.3 and §9.1 (0.5): the `uint64` bound
+
+> §9.1: "The schema's `format` is a bound here, not an annotation: `uint32`
+> is 0 to 2^32−1, and `uint64` is 0 to 2^63−1, TOML's own bound."
+
+That sentence is scoped to the authoring format ("here").
+`descriptor.schema.json` uses `"format": "uint64"`, with no `maximum`, for
+`minor` and for every `cardinality` value. §3.3 gives `minor` "0 to
+2^64−1". It bounds `cardinality` only by the contract's value (D007). So
+whether a descriptor whose `cardinality` value is 2^64 is D000 (outside
+`uint64`) or D007 (above the contract's bound) depends on whether `format`
+is a bound for descriptors too.
+**Resolved:** a guess. zk2py's shape checker bounds `uint64` to 0..2^64−1
+in both schemas, so such a value is D000. For contracts this changes
+nothing, since TOML cannot write a larger integer.

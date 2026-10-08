@@ -13,7 +13,7 @@ needs more is noticed rather than silently ignored.
 ``format`` is asserted for the integer formats the schemas use (``uint32``,
 ``uint64``): JSON Schema 2020-12 treats ``format`` as an annotation, but
 core.md §9.1 bounds ``major`` to 0..2^32−1, and nothing else in the schema
-does. See SPEC-FINDINGS F-17.
+does. §9.1 (0.5): "The schema's format is a bound here, not an annotation".
 """
 
 from __future__ import annotations
@@ -117,6 +117,10 @@ class Checker:
             elif kw == "minimum":
                 if _json_type(value) in ("integer", "number") and value < arg:
                     errs.append(f"{path or '/'}: below {arg}")
+            elif kw == "maximum":
+                # 0.5 (F-17): the schema now carries maximum on its uint32 fields.
+                if _json_type(value) in ("integer", "number") and value > arg:
+                    errs.append(f"{path or '/'}: above {arg}")
             elif kw == "format":
                 bound = _FORMATS.get(arg)
                 if bound is None:

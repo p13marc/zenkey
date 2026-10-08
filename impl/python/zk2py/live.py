@@ -6,22 +6,22 @@ owns keys. The static half supplies the checks: :mod:`zk2py.keys` parses
 token keys, :mod:`zk2py.descriptor` checks a descriptor, :mod:`zk2py.bundle`
 verifies a bundle.
 
-**Reading presence (§8.1).** "A caller or tool's liveliness GET on a session
-that holds a liveliness subscriber MUST use a callback or an unbounded
-handler." zenoh-python has no unbounded channel: its default handler and
-``FifoChannel`` are bounded FIFOs, and ``RingChannel`` drops. So every
-liveliness GET here passes a ``zenoh.handlers.Callback`` (stable API, the
-default ``indirect`` mode) whose callback only appends to a Python list,
-and whose drop function marks completion.
-
-Measured on 1.10.1 with 2,000 tokens, that is necessary but not sufficient
-(SPEC-FINDINGS F-47). A session whose *liveliness subscriber* uses a bounded
-handler that nobody drains starves its own GET: a callback GET then returns
-257 of 2,002 tokens, and ends only at its timeout. So:
-- :func:`list_presence` reports ``complete=False`` when the GET ended at its
-  timeout rather than at the routers' final reply;
-- any liveliness subscriber zk2py declares uses a ``Callback`` too;
+**Reading presence (§8.1, as amended by 0.5).** "A caller or tool's
+liveliness GET on a session that holds a liveliness subscriber MUST use a
+callback or an unbounded handler", and "every liveliness subscriber on that
+session MUST be callback-driven, or drained as its samples arrive".
+zenoh-python has no unbounded channel: its default handler and
+``FifoChannel`` are bounded, and ``RingChannel`` drops. So:
+- every liveliness GET here passes a ``zenoh.handlers.Callback`` (stable
+  API, the default ``indirect`` mode), whose callback only appends to a
+  Python list and whose drop function marks completion;
+- any liveliness subscriber zk2py declares is a ``Callback`` too;
+- "a liveliness GET that ended at its timeout, rather than at the routers'
+  final reply" is reported as possibly incomplete (``complete=False``);
 - presence is polled with GETs, never inferred from silence (§3.2 R7, O5).
+
+**Timeouts are the caller's (§8.1).** The defaults here are the 1 s that
+"the scenarios, and so a conformance run, use".
 """
 
 from __future__ import annotations
@@ -37,10 +37,10 @@ import zenoh
 
 from . import bundle, keys
 
-#: Liveliness GET timeout. The spec sets none (SPEC-FINDINGS F-49).
-PRESENCE_TIMEOUT_S = 5.0
-#: GET timeout for a descriptor or a bundle, per attempt. None set by the spec.
-GET_TIMEOUT_S = 5.0
+#: Liveliness GET timeout: the caller's choice, 1 s in a conformance run (§8.1).
+PRESENCE_TIMEOUT_S = 1.0
+#: GET timeout for a descriptor or a bundle attempt: likewise (§3.3, §8.4).
+GET_TIMEOUT_S = 1.0
 _DONE = object()
 
 
@@ -120,6 +120,8 @@ class Answer:
     key: str | None
     encoding: str
     payload: bytes
+    has_timestamp: bool = False
+    has_attachment: bool = False
 
 
 def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
@@ -127,10 +129,10 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
     """Yield each reply *as it arrives* (an unbounded queue fed by a
     callback), until the GET completes.
 
-    Consolidation is ``None``: with zenoh's default (``Auto``, which is
-    ``Latest`` on a concrete key) replies are held until the query completes
-    (§4.1), which §8.4 step 2 forbids ("Verify each reply as it arrives …
-    without waiting for the GET to complete"). SPEC-FINDINGS F-50.
+    Consolidation is ``None``, which §8.4 (0.5) makes a MUST on both
+    retrieval attempts, and §3.3 sets for the descriptor GET: zenoh's
+    default holds every reply until the query finalizes, and a slow corrupt
+    reply can displace the valid one.
     """
     q: queue.Queue = queue.Queue()
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
@@ -144,7 +146,8 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
             return
         if item.ok is not None:
             s = item.ok
-            yield Answer(True, str(s.key_expr), str(s.encoding), s.payload.to_bytes())
+            yield Answer(True, str(s.key_expr), str(s.encoding), s.payload.to_bytes(),
+                         s.timestamp is not None, s.attachment is not None)
         else:
             e = item.err
             yield Answer(False, None, str(e.encoding), e.payload.to_bytes())
@@ -154,8 +157,11 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
 
 def get_descriptor(session: zenoh.Session, instance_key: str,
                    timeout: float = GET_TIMEOUT_S) -> list[Answer]:
-    """GET an instance's descriptor (§3.3: "a JSON document answered on GET at
-    its instance key"). Every reply is returned; the caller judges them.
+    """GET an instance's descriptor (§3.3 "The GET", 0.5): one complete
+    queryable answers "with one reply … Encoding application/json, no
+    attachment and no timestamp"; a caller "GETs with consolidation None …
+    takes the first reply". The target is the caller's (CHANGELOG 0.5);
+    zk2py uses BestMatching. Every reply is returned; the caller judges them.
 
     §3.2 R6: a reply whose key is not concrete is discarded here.
     """

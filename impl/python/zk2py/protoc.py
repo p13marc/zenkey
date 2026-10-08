@@ -89,7 +89,8 @@ def compile_file(name: str, roots: list[Path]) -> bytes:
 
 def compile_well_known(file: str) -> bytes:
     """A well-known type's artifact, ``google/protobuf/<file>``, from the
-    compiler's own include directory (SPEC-FINDINGS F-14)."""
+    compiler's own include directory: §9.4 (0.5) names protoc 3.21.12's
+    include/ sources."""
     return compile_file(f"google/protobuf/{file}", [])
 
 

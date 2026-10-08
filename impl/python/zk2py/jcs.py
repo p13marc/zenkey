@@ -92,13 +92,12 @@ def is_json_integer(value: Any) -> bool:
 
 def restriction_violations(value: Any) -> tuple[int, int]:
     """Count §9.5's restriction violations in a JSON value: strings (keys
-    included) outside printable ASCII 0x20–0x7E (E027), and integers outside
-    ±(2^53−1) (E028).
+    included) outside printable ASCII 0x20–0x7E (E027), and numbers outside
+    the canonical domain (E028): integers outside ±(2^53−1), non-finite
+    floats, and floats JCS writes as such an integer.
 
-    A float whose JCS form is an integer literal beyond the bound (``1e16``
-    serializes as ``10000000000000000``) is counted as an integer too: once
-    serialized, every reader parses it as one, and a bundle verifier would
-    refuse it with ``restrictions``. See SPEC-FINDINGS F-19.
+    ``1e16`` serializes as ``10000000000000000``, outside; ``1e21`` as
+    ``1e+21``, a float, inside (§9.5, resolving SPEC-FINDINGS F-19).
     """
     ascii_bad = 0
     int_bad = 0
@@ -115,9 +114,13 @@ def restriction_violations(value: Any) -> tuple[int, int]:
         elif isinstance(v, int):
             int_bad += abs(v) > INT_MAX
         elif isinstance(v, float):
-            if v.is_integer() and abs(v) > INT_MAX and abs(v) < 1e21:
-                # ECMAScript renders integral doubles below 1e21 as integer
-                # literals; at or above 1e21 they become exponent forms.
+            # §9.5 (0.5), the canonical domain: "a float that is finite and,
+            # when JCS writes it as an integer, within the same range. JCS
+            # writes a float as an integer when it is integral and its
+            # magnitude is below 10^21."
+            if v != v or v in (float("inf"), float("-inf")):
+                int_bad += 1
+            elif v.is_integer() and abs(v) > INT_MAX and abs(v) < 1e21:
                 int_bad += 1
         elif isinstance(v, dict):
             for k, x in v.items():
