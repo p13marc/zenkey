@@ -30,8 +30,10 @@ refusals of presence.md §2, state.md §1, presence.md §1, presence.md §6 (a
 read refused by access control, and one stalled past its timeout),
 operations.md §1 (target and consolidation shown by behaviour),
 operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
-and access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
-generated grants). ``--only`` picks some of them.
+access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
+generated grants), and ``hostid.v1`` 0.2 with core R1's ``self.system``
+providers (0.20) across both implementations. ``--only`` picks some of
+them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -112,15 +114,21 @@ class Report:
 class Owner:
     """The owner example as a child process, read line by line."""
 
-    def __init__(self, exe: Path, service: str, contracts: list[Path], connect: str | None = None):
+    def __init__(self, exe: Path, service: str, contracts: list[Path], connect: str | None = None,
+                 hostid_root: str | None = None, hostid_ephemeral: bool = False):
         """``connect``: run it as a client of that router (its documented
         ``--connect <endpoint>``; it then prints ``connected …`` rather than
-        ``listening …``)."""
+        ``listening …``). ``service`` may be ``@hostid.v1/<service>``, a
+        minted system (hostid.v1 §2.3), with ``hostid_root`` its
+        ``--hostid-root <dir>`` and ``hostid_ephemeral`` its
+        ``--hostid-ephemeral`` (its usage, read by running it)."""
         if not exe.is_file():
             raise CannotRun(f"{exe} not found: build it with "
                             "`cargo build -q -p zenkey --example owner`")
-        self.proc = subprocess.Popen([str(exe), *(["--connect", connect] if connect else []), service,
-                                      *map(str, contracts)],
+        self.proc = subprocess.Popen([str(exe), *(["--connect", connect] if connect else []),
+                                      *(["--hostid-root", hostid_root] if hostid_root else []),
+                                      *(["--hostid-ephemeral"] if hostid_ephemeral else []),
+                                      service, *map(str, contracts)],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
         self.lines: queue.Queue[str] = queue.Queue()
@@ -1891,6 +1899,314 @@ def run_python_016(report: Report) -> None:
         r1.close()
 
 
+ORDER = "impl/python/interop/zk2py_order.v1.toml"
+SYSINFO = "impl/python/interop/zk2py_sysinfo.v1.toml"
+TRACKER = "impl/python/interop/zk2py_tracker.v1.toml"
+#: Core §3.3 (0.20): zk2py_order.v1's uses and hostid.v1, "sorted as §9.5
+#: sorts a contract's uses: by name as a string, then by major as a number".
+#: A bytewise sort would give a.b.v1, a.v1, hostid.v1, views.v10, views.v2.
+ORDER_PROFILES = ["a.v1", "a.b.v1", "hostid.v1", "views.v2", "views.v10"]
+
+
+def _presence(session, selector: str, instances: int, alive: int):
+    """Presence within the conformance wait (§8.1), at least the counts
+    asked for."""
+    from . import live
+
+    deadline = time.monotonic() + PRESENCE_WAIT_S
+    pres = live.list_presence(session, selector)
+    while time.monotonic() < deadline and not (len(pres.instances) >= instances and len(pres.alive) >= alive):
+        time.sleep(0.05)
+        pres = live.list_presence(session, selector)
+    return pres
+
+
+def _doc(session, instance_key: str) -> tuple[dict[str, Any], bytes]:
+    from . import live
+
+    d = live.get_descriptor(session, instance_key)
+    if len(d) == 1 and d[0].ok:
+        return json.loads(d[0].payload), d[0].payload
+    return {}, b""
+
+
+def run_python_hostid(report: Report, exe: Path) -> None:
+    """hostid.v1 (profile text 0.2) and core R1 (0.20) across the two
+    implementations, through a router R1 of the runner's:
+    - the owner example minted (``@hostid.v1/echo`` over a temporary root
+      holding M1), seen by zk2py: the system h-bbd1aa1db10b, the descriptor
+      listing ``hostid.v1`` and ``meta.host``, its ``profiles`` in §3.3's
+      order, no machine id on the bus (§2.11), and §2.12's question;
+    - a zk2py consumer minted over the same root, so on the same system
+      (bindings.md §5 the other way round): it binds ``self.system/echo``
+      and ``self.system/*``, its descriptor lists them resolved (R3), and
+      it reads the Rust owner's state and calls its operation through them;
+    - over a root with no machine id, the shared file (§2.5) created by one
+      implementation and read by the other, both ways: one system. The two
+      at one minted address are §2.12's finding, and ``no`` once one
+      leaves;
+    - bindings.md §5 itself, with zk2py's detectors and trackers."""
+    import re
+    import shutil
+    import tempfile
+
+    from . import hostid, live
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+    from .hostid_scenarios import M1, SYSTEM, make_root, temps
+    from .owner import Owner as PyOwner, resolve_providers
+
+    base_dir = tempfile.mkdtemp(prefix="zk2py-hostid-")
+    r1, ep, _ = _r1()
+    rusts: list[Owner] = []
+    owners: list[Any] = []
+    tool = live.open_client(ep)
+    want = SYSTEM[M1]
+    SHARED_PATH = hostid.SHARED
+    echo, needs, order = (load_contract(REPO / p) for p in (ECHO, NEEDS, ORDER))
+    try:
+        # -- the owner example minted, seen by zk2py ---------------------
+        run = "hostid.v1 0.2: the owner example minted over a root holding M1"
+        root = make_root(base_dir, {"etc/machine-id": M1 + "\n"})
+        rust = Owner(exe, "@hostid.v1/echo", [REPO / ECHO, REPO / ORDER], connect=ep, hostid_root=root)
+        rusts.append(rust)
+        ready = rust.wait_for("ready ", 120)
+        if not report.check(run, f"it starts, and its instance key names the minted system {want} (§2.2, §2.7)",
+                            ready is not None and ready.startswith(f"zk2/{want}/echo/@zk/instance/"),
+                            f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
+            return
+        pres = _presence(tool, f"zk2/{want}/echo/@zk/**", 1, 2)
+        report.check(run, "presence through R1 at the minted address: one instance token, two interface tokens",
+                     len(pres.instances) == 1 and len(pres.alive) == 2 and pres.complete, pres.reading)
+        rdoc, rraw = _doc(tool, ready)
+        report.check(run, "its descriptor has no D code against its two contracts",
+                     bool(rdoc) and check_descriptor(rraw, [echo, order]) == [], f"{len(rraw)} bytes")
+        meta = rdoc.get("meta") or {}
+        report.check(run, "its descriptor names the minted service and lists hostid.v1, with meta.host and "
+                          "meta.zid (§2.8, §2.13)",
+                     rdoc.get("service") == f"{want}/echo" and "hostid.v1" in (rdoc.get("profiles") or [])
+                     and isinstance(meta.get("host"), str) and bool(meta.get("host")) and bool(meta.get("zid")),
+                     f"service {rdoc.get('service')}, profiles {rdoc.get('profiles')}, meta {meta}")
+        report.check(run, "its profiles: zk2py_order.v1's uses and hostid.v1, in §3.3's order (0.20)",
+                     rdoc.get("profiles") == ORDER_PROFILES, str(rdoc.get("profiles")))
+        uuid = f"{M1[:8]}-{M1[8:12]}-{M1[12:16]}-{M1[16:20]}-{M1[20:]}"
+        report.check(run, "no machine id on the bus (§2.11): M1 is in its descriptor in no spelling",
+                     bool(rraw) and not any(s in rraw.lower() for s in (M1.encode(), uuid.encode())),
+                     f"{len(rraw)} bytes read")
+        answer, why, reads = live.hostid_collision(tool, f"{want}/echo")
+        firsts = [first for _, rows in reads for _, _, first in rows]
+        report.check(run, "§2.12 on its address: §5's first question is yes for it (its contracts' uses, "
+                          "retrieved by fingerprint, do not list hostid.v1), and the answer is no",
+                     answer == "no" and firsts == ["yes", "yes"], f"{answer}: {why}; first {firsts}")
+
+        # -- a zk2py consumer on the same system --------------------------
+        run = "core R1 0.20: a zk2py consumer minted over the same root, bound to self.system"
+        consumer = PyOwner("@hostid.v1", "needs", [needs, order], connect=ep, hostid=hostid.Runtime(root),
+                           bindings={"upstream": ["self.system/echo"], "peer": ["self.system/*"]},
+                           capabilities={"cal"})
+        consumer.start()
+        owners.append(consumer)
+        report.check(run, "a minted Rust owner and a minted zk2py owner over one root holding one machine id "
+                          f"agree on the system: {want}",
+                     consumer.system == want and ready.split("/")[1] == want,
+                     f"zk2py {consumer.system}, Rust {ready.split('/')[1]}")
+        _presence(tool, f"zk2/{want}/needs/@zk/**", 1, 2)
+        cdoc, craw = _doc(tool, consumer.instance_key)
+        report.check(run, "its descriptor has no D code against its two contracts",
+                     bool(cdoc) and check_descriptor(craw, [needs, order]) == [], f"{len(craw)} bytes")
+        bound = {r.get("role"): r.get("bindings") for r in cdoc.get("requires") or []}
+        report.check(run, "its descriptor lists the self.system providers resolved (R3, 0.20)",
+                     bound == {"upstream": [f"{want}/echo"], "peer": [f"{want}/*"]}, str(bound))
+        report.check(run, "its profiles: the same five, in §3.3's order (0.20)",
+                     cdoc.get("profiles") == ORDER_PROFILES, str(cdoc.get("profiles")))
+        chost = (cdoc.get("meta") or {}).get("host")
+        report.check(run, "both state the host they share as meta.host, for display (§2.13)",
+                     chost is not None and chost == meta.get("host"),
+                     f"zk2py {chost!r}, Rust {meta.get('host')!r}")
+        peer = consumer.role_keys("peer", "zk2py_echo.v1", "state/health")
+        st = live.get_state(consumer.session, peer[0])
+        who = [live.attribute_stamp(r.stamp_id, rdoc) for r in st.replies]
+        report.check(run, f"through peer's resolved binding {want}/*, a state GET (S4) answers the Rust owner's "
+                          "value alone, attributed to it by meta.zid",
+                     [(r.key, r.payload) for r in st.replies]
+                     == [(f"zk2/{want}/echo/zk2py_echo.v1/state/health", b"ok")] and who == ["owner"],
+                     f"{peer} → {[(r.key, r.payload) for r in st.replies]} {who}")
+        up = consumer.role_keys("upstream", "zk2py_echo.v1", "@op/echo")
+        res = live.call(consumer.session, up[0], b"ping")
+        report.check(run, f"through upstream's resolved binding {want}/echo, the Rust owner's @op/echo answers "
+                          "(O1, O3)",
+                     [(r.kind, r.key, r.payload) for r in res.replies]
+                     == [("value", f"zk2/{want}/echo/zk2py_echo.v1/@op/echo", b"ping")],
+                     f"{up} → {[(r.kind, r.key, r.payload) for r in res.replies]}")
+        consumer.close()
+        owners.remove(consumer)
+        rust.close()
+        rusts.remove(rust)
+
+        # -- the shared file, created by one and read by the other ---------
+        def start(kind: str, root: str) -> tuple[Any, str | None]:
+            if kind == "Rust":
+                o = Owner(exe, "@hostid.v1/echo", [REPO / ECHO], connect=ep, hostid_root=root)
+                rusts.append(o)
+                line = o.wait_for("ready ", 120)
+                return o, line.split("/")[1] if line else None
+            o = PyOwner("@hostid.v1", "echo", [echo], connect=ep, hostid=hostid.Runtime(root))
+            o.start()
+            owners.append(o)
+            return o, o.system
+
+        def stop(o: Any) -> None:
+            o.close()
+            (rusts if isinstance(o, Owner) else owners).remove(o)
+
+        for first, second in (("Rust", "zk2py"), ("zk2py", "Rust")):
+            run = f"hostid.v1 0.2 §2.5: the shared file created by {first}, read by {second}"
+            root = make_root(base_dir, {})
+            a, sa = start(first, root)
+            shared = os.path.join(root, "var", "lib", "zk2", "hostid")
+            try:
+                with open(shared, "rb") as f:
+                    content = f.read()
+                mode: int | None = os.stat(shared).st_mode & 0o7777
+            except OSError as e:
+                content, mode = repr(e).encode(), None
+            report.check(run, f"{first} creates var/lib/zk2/hostid: 32 lowercase hex digits and a newline, mode "
+                              "0644, no temporary file left (§2.5)",
+                         re.fullmatch(rb"[0-9a-f]{32}\n", content) is not None and mode == 0o644
+                         and not temps(root),
+                         f"{content!r}, mode {oct(mode) if mode is not None else None}, temporaries {temps(root)}")
+            b, sb = start(second, root)
+            derived = hostid.derive(content)
+            report.check(run, f"{second} reads it: one system, the file's derivation (§2.2)",
+                         sa is not None and sa == sb == derived, f"{first} {sa}, {second} {sb}, derived {derived}")
+            _presence(tool, f"zk2/{sa}/echo/@zk/**", 2, 2)
+            answer, why, _ = live.hostid_collision(tool, f"{sa}/echo")
+            report.check(run, "both at one minted address: §2.12's finding, its cause undecided",
+                         answer == "finding", f"{answer}: {why}")
+            stop(b)
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and \
+                    len(live.list_presence(tool, f"zk2/{sa}/echo/@zk/instance/*").instances) > 1:
+                time.sleep(0.1)
+            answer, why, _ = live.hostid_collision(tool, f"{sa}/echo")
+            report.check(run, f"{second} gone: the answer is no", answer == "no", f"{answer}: {why}")
+            stop(a)
+
+        # -- fail closed, and the ephemeral rung (§2.6, scenarios §3, §4) ---
+        run = "hostid.v1 0.2 §2.6: the owner example over a root where no input gives an id and none can be created"
+        root = make_root(base_dir, {}, dirs=("var/lib/zk2",))
+        zk2dir = os.path.join(root, "var", "lib", "zk2")
+        os.chmod(zk2dir, 0o555)
+        try:
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and live.list_presence(tool, "zk2/*/echo/@zk/instance/*").instances:
+                time.sleep(0.1)
+            o = Owner(exe, "@hostid.v1/echo", [REPO / ECHO], connect=ep, hostid_root=root)
+            rusts.append(o)
+            line = o.wait_for("ready ", 30)
+            try:
+                code = o.proc.wait(timeout=30) if line is None else None
+            except subprocess.TimeoutExpired:
+                code = None
+            stop(o)
+            err = " ".join(o.stderr)
+            after = live.list_presence(tool, "zk2/*/echo/@zk/instance/*")
+            report.check(run, "it does not start: it exits non-zero, its error names the three paths, and R1 shows "
+                              "no instance token (§2.6, §8.2)",
+                         line is None and code not in (0, None) and not after.instances and after.complete
+                         and all(p in err for p in ("/etc/machine-id", "/var/lib/dbus/machine-id", SHARED_PATH)),
+                         f"ready {line!r}, exit {code}, tokens {len(after.instances)}; stderr {err[-300:]!r}")
+            o = Owner(exe, "@hostid.v1/echo", [REPO / ECHO], connect=ep, hostid_root=root, hostid_ephemeral=True)
+            rusts.append(o)
+            line = o.wait_for("ready ", 120)
+            system = line.split("/")[1] if line else None
+            report.check(run, "with --hostid-ephemeral it starts, on a system of the minted shape, and writes no "
+                              "file (§2.6, scenarios §4 step 1)",
+                         system is not None and hostid.is_minted_shape(system) and not os.listdir(zk2dir),
+                         f"system {system}, var/lib/zk2 {os.listdir(zk2dir)}; stderr {o.stderr[-2:]}")
+            # scenarios §4 expected 1: "Each start logs that the system is
+            # ephemeral, and names the three paths with their outcomes." A
+            # black box shows its output streams alone.
+            said = [x for x in o.stderr + o.seen if "ephemeral" in x]
+            report.known_deviation(run, "its start says the system is ephemeral, naming the three paths (§2.6, "
+                                        "scenarios §4 expected 1), on stdout or stderr",
+                                   bool(said) and all(p in said[0] for p in ("/etc/machine-id",
+                                                                             "/var/lib/dbus/machine-id",
+                                                                             SHARED_PATH)),
+                                   f"stdout {o.seen}, stderr {o.stderr}",
+                                   "SPEC-FINDINGS F-99: the text does not say where the log goes, and the "
+                                   "example shows none, RUST_LOG set or not")
+            stop(o)
+        finally:
+            os.chmod(zk2dir, 0o755)
+
+        # -- bindings.md §5, zk2py's own ----------------------------------
+        run = "bindings.md §5 (0.20): zk2py's detectors and trackers through R1"
+        sysinfo, tracker = load_contract(REPO / SYSINFO), load_contract(REPO / TRACKER)
+        dets = []
+        for system, svc in (("vehicle-01", "det0"), ("vehicle-01", "det1"), ("vehicle-02", "det0")):
+            d = PyOwner(system, svc, [sysinfo], connect=ep)
+            d.start()
+            owners.append(d)
+            dets.append(d)
+        got: dict[str, list[str]] = {"one": [], "all": []}
+        wild: dict[str, list[str]] = {"one": [], "all": []}
+        trackers = {}
+        for name, provider in (("one", "self.system/det0"), ("all", "self.system/*")):
+            tr = PyOwner("vehicle-01", name, [tracker], connect=ep, bindings={"sources": [provider]})
+            tr.start()
+            owners.append(tr)
+            trackers[name] = tr
+            tr.subscribe_role("sources", "zk2py_sysinfo.v1", "stream/cpu",
+                              lambda key, payload, name=name: got[name].append(key),
+                              discarded=wild[name].append)
+        time.sleep(1.0)
+        for d in dets:
+            for i in range(3):
+                d.publish(f"{d.prefix(sysinfo)}/stream/cpu", str(i).encode())
+        # bindings.md §4 alongside: a put on a wildcard key, which reaches
+        # both trackers with that key, and which each discards (R6).
+        tool.put("zk2/vehicle-01/*/zk2py_sysinfo.v1/stream/cpu", b"wild")
+        time.sleep(1.0)
+
+        def froms(keys: list[str]) -> dict[str, int]:
+            out: dict[str, int] = {}
+            for k in keys:
+                src = "/".join(k.split("/")[1:3])
+                out[src] = out.get(src, 0) + 1
+            return out
+
+        report.check(run, "expected 1: vehicle-01/one receives from vehicle-01/det0 alone, and vehicle-01/all "
+                          "from vehicle-01/det0 and vehicle-01/det1; neither from vehicle-02/det0, and the "
+                          "wildcard put reaches each with its wildcard key and is discarded (R6)",
+                     froms(got["one"]) == {"vehicle-01/det0": 3}
+                     and froms(got["all"]) == {"vehicle-01/det0": 3, "vehicle-01/det1": 3}
+                     and len(wild["one"]) == len(wild["all"]) == 1,
+                     f"one {froms(got['one'])}, all {froms(got['all'])}; discarded {wild}")
+        listed = {}
+        for name, tr in trackers.items():
+            tdoc, _ = _doc(tool, tr.instance_key)
+            listed[name] = [r.get("bindings") for r in tdoc.get("requires") or []]
+        report.check(run, "expected 2: a tool reads the trackers' descriptors listing the bindings resolved: "
+                          "[\"vehicle-01/det0\"] and [\"vehicle-01/*\"]",
+                     listed == {"one": [["vehicle-01/det0"]], "all": [["vehicle-01/*"]]}, str(listed))
+        try:
+            resolve_providers(["self.system/det0"], None)
+            refused = "resolved"
+        except ValueError as e:
+            refused = f"refused: {e}"
+        report.check(run, "expected 3: a tool binding a consumer of its own to self.system/det0 is refused: a "
+                          "tool has no system of its own", refused.startswith("refused"), refused)
+    finally:
+        for o in rusts:
+            o.close()
+        for o in owners:
+            o.close()
+        tool.close()
+        r1.close()
+        shutil.rmtree(base_dir, ignore_errors=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -1907,7 +2223,7 @@ def main(argv: list[str] | None = None) -> int:
         "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
         "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
-        "0.16": run_python_016,
+        "0.16": run_python_016, "hostid": lambda r: run_python_hostid(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),

@@ -2,15 +2,17 @@
 temporary roots: ``python -m zk2py.hostid_scenarios [--only 1 …]``.
 
 - **The root** is :class:`zk2py.hostid.Runtime`'s seam, a directory standing
-  in for ``/`` (scenarios.md, "A root"). Nothing under the real ``/etc`` or
-  ``/var/lib`` is read or written.
+  in for ``/`` (scenarios.md, "A root"). Paths resolve in it as a chroot
+  would (§2.4, 0.2). Nothing under the real ``/etc`` or ``/var/lib`` is
+  read or written.
 - **Cases a runner cannot cause as root** need no privilege here:
   - the runner is no root, so ``chmod`` makes a file unreadable and a
     directory unwritable;
   - ``link(2)`` refused is the runtime's ``link`` seam.
 - **The bus**, where a section expects observations on it, is an in-process
   zenoh-python router R1 with zk2py's own owners and tool as its clients.
-  There is no Rust owner and no ``just py-live``.
+  There is no Rust owner here: the owner example mints in ``just py-live``'s
+  run ``hostid``.
 - **A process** is one :class:`zk2py.hostid.Runtime`:
   - §2's racers are separate OS processes;
   - §5's restart is a new runtime;
@@ -37,9 +39,12 @@ from pathlib import Path
 from typing import Any
 
 from . import hostid
+from .contract import load_contract
 
 REPO = Path(__file__).resolve().parents[3]
 SYSINFO = REPO / "impl" / "python" / "interop" / "zk2py_sysinfo.v1.toml"
+SYSINFO_X = REPO / "impl" / "python" / "interop" / "zk2py_sysinfo_x.v1.toml"
+TRACKER = REPO / "impl" / "python" / "interop" / "zk2py_tracker.v1.toml"
 #: scenarios.md, "Machine ids".
 M1, M2, M3 = ("b642b4217b34b1e8d3bd915fc65c4452", "0123456789abcdef0123456789abcdef",
               "ffffffffffffffffffffffffffffffff")
@@ -63,9 +68,10 @@ class Report:
 # -- roots -------------------------------------------------------------------------
 
 def make_root(base: str, files: dict[str, str] | None = None, *, var_lib: bool = True,
-              dirs: tuple[str, ...] = ()) -> str:
+              dirs: tuple[str, ...] = (), links: dict[str, str] | None = None) -> str:
     """A fresh root: ``var/lib`` exists unless told otherwise, each file of
-    ``files`` holds its content."""
+    ``files`` holds its content, and each of ``links`` is a symbolic link to
+    its target, as written (an absolute one included)."""
     root = tempfile.mkdtemp(prefix="root-", dir=base)
     if var_lib:
         os.makedirs(os.path.join(root, "var", "lib"))
@@ -76,6 +82,10 @@ def make_root(base: str, files: dict[str, str] | None = None, *, var_lib: bool =
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
+    for rel, target in (links or {}).items():
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.symlink(target, path)
     return root
 
 
@@ -111,8 +121,10 @@ def chmod_back(root: str) -> None:
     """Make a root removable again after a section made parts unreadable."""
     for d, subdirs, files in os.walk(root):
         for name in subdirs + files:
+            path = os.path.join(d, name)
             try:
-                os.chmod(os.path.join(d, name), 0o755, follow_symlinks=False)
+                if not os.path.islink(path):  # a link's own mode is not settable on Linux
+                    os.chmod(path, 0o755)
             except OSError:
                 pass
 
@@ -204,10 +216,14 @@ def section1(report: Report, base: str) -> None:
             ("3", {ETC: "", SHARED: M3 + "\n"}, "@hostid.v1/sysinfo"),
             ("4", {ETC: "0" * 32 + "\n", DBUS: "not-a-machine-id\n"}, "@hostid.v1/sysinfo"),
             ("5", {ETC: M1 + "\n", DBUS: M2 + "\n"}, "h-bbd1aa1db10b/sysinfo"),
+            ("6", {SHARED: M3 + "\n"}, "@hostid.v1/sysinfo"),
+            ("7", {ETC: "uninitialized\n", "srv/machine-id": M2 + "\n"}, "@hostid.v1/sysinfo"),
         ]
+        #: 0.2's steps 6 and 7: var/lib/dbus/machine-id as an absolute link.
+        links = {"6": {DBUS: "/etc/machine-id"}, "7": {DBUS: "/srv/machine-id"}}
         secrets = [M1, M2, M3]
         for step, files, address in steps:
-            root = make_root(base, files)
+            root = make_root(base, files, links=links.get(step))
             before = read_shared(root)
             runtime = hostid.Runtime(root)
             o = bus.owner(address, runtime)
@@ -241,6 +257,16 @@ def section1(report: Report, base: str) -> None:
                                       "is its derivation", ok,
                                  f"shared {shared!r}, mode {oct(mode) if mode is not None else None}, temps "
                                  f"{temps(root)}, system {o.system}")
+                elif step == "6":
+                    dbus = next((x for x in runtime.minted.outcomes if x.path == "/var/lib/dbus/machine-id"), None)
+                    report.check(sec, "step 6 (0.2): var/lib/dbus/machine-id links to the absolute /etc/machine-id, "
+                                      "absent in the root: both machine-id files are absent, and the system is M3's, "
+                                      "whatever the host running the scenario holds",
+                                 o.system == SYSTEM[M3] and dbus is not None and dbus.outcome == "absent" and listed,
+                                 f"system {o.system}; {[str(x) for x in runtime.minted.outcomes]}")
+                elif step == "7":
+                    report.check(sec, "step 7 (0.2): the link to the absolute /srv/machine-id resolves in the root: "
+                                      "M2's system", o.system == SYSTEM[M2] and listed, f"system {o.system}")
                 else:
                     report.check(sec, "step 5 (control): the literal h-bbd1aa1db10b/sysinfo is literal: hostid.v1 "
                                       "not listed, and no input read",
@@ -488,6 +514,24 @@ def section4(report: Report, base: str) -> None:
                 refused.append(outcomes(e)[-1][1])
         report.check(sec, "step 5: on the roots of §3 steps 2 and 3, ephemeral or not, the service does not start",
                      refused == ["refused", "unreadable"], str(refused))
+        # Step 6 (0.2): link(2) fails with EEXIST, and the final file is
+        # absent when read: a racer's file removed in between, through the
+        # runtime's seam.
+        def raced(src: str, dst: str) -> None:
+            raise FileExistsError(17, "File exists", dst)
+
+        r6 = make_root(base, {}, dirs=("var/lib/zk2",))
+        try:
+            hostid.Runtime(r6, link=raced).configure({"address": "@hostid.v1/sysinfo",
+                                                      "hostid": {"ephemeral": True}})
+            step6 = None
+        except hostid.HostidError as e:
+            step6 = e
+        report.check(sec, "step 6 (0.2): EEXIST, then the shared file absent when read: the service does not "
+                          "start, even ephemeral; the error names /var/lib/zk2/hostid as absent; no temporary file "
+                          "remains",
+                     step6 is not None and outcomes(step6)[-1] == ("/var/lib/zk2/hostid", "absent")
+                     and not temps(r6), f"{step6}; temps {temps(r6)}")
     finally:
         for r in roots:
             chmod_back(r)
@@ -534,12 +578,18 @@ def section5(report: Report, base: str) -> None:
         # Step 2.
         Path(r, ETC).write_text(M2 + "\n")
         s3, _ = remint(s2, rt)
-        logger = bus.owner("@hostid.v1/logger", rt)
+        logger = bus.owner("@hostid.v1/logger", rt, contracts=[load_contract(TRACKER)],
+                           bindings={"sources": ["self.system/sysinfo"]})
         logger.start()
         owners.append(logger)
+        bus.wait_instance(logger)
+        ldoc = bus.descriptor(logger) or {}
+        lbind = [r.get("bindings") for r in ldoc.get("requires", [])]
         report.check(sec, "step 2: with etc/machine-id now M2, the re-mint and a second service, logger, keep "
-                          "h-bbd1aa1db10b: the process minted once",
-                     s3.system == logger.system == SYSTEM[M1], f"sysinfo {s3.system}, logger {logger.system}")
+                          "h-bbd1aa1db10b: the process minted once; logger's descriptor lists its binding "
+                          "self.system/sysinfo resolved (core R1, 0.20)",
+                     s3.system == logger.system == SYSTEM[M1] and lbind == [[f"{SYSTEM[M1]}/sysinfo"]],
+                     f"sysinfo {s3.system}, logger {logger.system}, bindings {lbind}")
         # Step 3: restart.
         for o in owners:
             o.close()
@@ -593,6 +643,31 @@ def section5(report: Report, base: str) -> None:
         report.check(sec, "step 5: a process whose only service is literal starts on a root whose "
                           "etc/machine-id cannot be read: it reads no input", up and not rt.reads,
                      f"started {up}, reads {rt.reads}")
+        # Step 6 (0.2): on the root of §3 step 1, a fails; the host is fixed;
+        # b starts; c, with ephemeral, is a configuration error.
+        r6 = make_root(base, {}, dirs=("var/lib/zk2",))
+        os.chmod(os.path.join(r6, "var", "lib", "zk2"), 0o555)
+        roots.append(r6)
+        rt = hostid.Runtime(r6)
+        got = []
+        for name, eph in (("a", None), ("b", None), ("c", True)):
+            if name == "b":
+                Path(r6, ETC).parent.mkdir(parents=True, exist_ok=True)
+                Path(r6, ETC).write_text(M1 + "\n")
+            o = bus.owner(f"@hostid.v1/{name}", rt, hostid_ephemeral=eph)
+            try:
+                o.start()
+                owners.append(o)
+                got.append((name, "started", o.system))
+            except hostid.HostidError:
+                got.append((name, "failed closed", None))
+            except hostid.ConfigError:
+                got.append((name, "configuration error", None))
+        report.check(sec, "step 6 (0.2): a does not start; the host fixed, b starts with h-bbd1aa1db10b (a failure "
+                          "mints nothing, the inputs are read again); c, with ephemeral, is a configuration error, "
+                          "a having fixed the setting although it did not start",
+                     got == [("a", "failed closed", None), ("b", "started", SYSTEM[M1]),
+                             ("c", "configuration error", None)], str(got))
     finally:
         for o in owners:
             o.close()
@@ -610,9 +685,9 @@ def section6(report: Report, base: str) -> None:
     bus = Bus()
     owners: list[Any] = []
     try:
-        def host(mid: str, name: str, **kw):
+        def host(mid: str, name: str, contracts=None, **kw):
             rt = hostid.Runtime(make_root(base, {ETC: mid + "\n"}))
-            o = bus.owner("@hostid.v1/sysinfo", rt, contracts=[], meta_host=name, **kw)
+            o = bus.owner("@hostid.v1/sysinfo", rt, contracts=contracts or [], meta_host=name, **kw)
             o.start()
             owners.append(o)
             bus.wait_instance(o)
@@ -626,7 +701,7 @@ def section6(report: Report, base: str) -> None:
 
         a, b = host(M1, "host-a"), host(M1, "host-b")
         answer, why, reads = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
-        hosts = sorted({(d or {}).get("meta", {}).get("host") for _, docs in reads for _, d in docs} - {None})
+        hosts = sorted({(d or {}).get("meta", {}).get("host") for _, rows in reads for _, d, _ in rows} - {None})
         report.check(sec, "step 1: two hosts from one image with M1: two instances of h-bbd1aa1db10b/sysinfo with "
                           "different meta.zid in both reads: the finding, its cause undecided, naming none",
                      a.system == b.system == SYSTEM[M1] and answer == "finding" and "undecided" in why,
@@ -644,6 +719,17 @@ def section6(report: Report, base: str) -> None:
         answer, why, _ = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
         report.check(sec, "step 3: B states no meta.zid: the address is undecided: unobservable, never clean",
                      answer == "unobservable", f"{answer}: {why}")
+        stop_all()
+        # Step 5 (0.2): as step 1, each service also an owner of a contract
+        # that lists hostid.v1 in uses, held in its tokenless set.
+        x = [load_contract(SYSINFO_X)]
+        host(M1, "host-a", contracts=x, tokenless={"zk2py_sysinfo_x.v1"})
+        host(M1, "host-b", contracts=x, tokenless={"zk2py_sysinfo_x.v1"})
+        answer, why, reads = live.hostid_collision(bus.tool, f"{SYSTEM[M1]}/sysinfo", grace_s=2.0)
+        firsts = sorted({first for _, rows in reads for _, _, first in rows})
+        report.check(sec, "step 5 (0.2): both list hostid.v1, but a contract each implements does too: neither is "
+                          "counted, and the address is unobservable, never clean and never the finding",
+                     answer == "unobservable" and firsts == ["unobservable"], f"{answer}: {why}; first {firsts}")
         stop_all()
         rt = hostid.Runtime(make_root(base, {ETC: M1 + "\n"}))
         logger = bus.owner("h-504c6767c349/logger", rt, contracts=[])

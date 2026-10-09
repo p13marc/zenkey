@@ -89,17 +89,19 @@ hostid         42 passed     0 failed
 total         565 passed     0 failed
 ```
 
-The figures are against `core.md` 0.19 and `hostid.v1` 0.1. Five releases
-added descriptor fixtures:
+The figures are against `core.md` 0.20 and `hostid.v1` 0.2, which added
+no fixture. Five earlier releases added descriptor fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
 - 0.17, `d011-tokenless-archive` and `ok-archive`;
 - 0.18, `d011-bad-fingerprint`;
 - 0.19, `ok-derivation-profile`.
 
-- Amendments 0.5 to 0.18 resolved F-01 to F-93. F-94 to F-97 are open,
-  all against `hostid.v1` 0.1.
-- They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
+- Amendments 0.5 to 0.18 resolved F-01 to F-93, and `hostid.v1` 0.2
+  resolved F-94 to F-97. F-98 (core 0.20) and F-99 (`hostid.v1` 0.2) are
+  open.
+- They decided 13, 3, 1 and 2 of zk2py's guesses the other way, and
+  `hostid.v1` 0.2 two more (F-96, F-97).
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 - 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
@@ -167,7 +169,8 @@ owner's `ready` line. It checks:
 Since 0.5, the runner also checks what §3.2, §3.3, §8.1 and §8.4 now
 state:
 - the descriptor reply carries no timestamp and no attachment;
-- `profiles` is the union of the contracts' `uses`;
+- `profiles` is the union of the contracts' `uses` (with `hostid.v1` for
+  a minted system, 0.19), in §9.5's order (0.20);
 - unbound roles are listed with `bindings: []` and `params: {}`;
 - no member token while the owner publishes nothing;
 - each holder answers one `application/json` reply;
@@ -390,8 +393,10 @@ ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
   (simulated by `live.READ_REPLIER = False`), every admin answer is
   unverified, and S4 and S1 are unobservable, never clean.
 
-**Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
-a rule the owner example does not meet yet.
+**Known deviations:** one, since `hostid.v1` 0.2. With
+`--hostid-ephemeral`, the owner example says nothing on stdout or stderr
+about its ephemeral system, where scenarios §4 expects each start to log it
+(F-99). The XFAIL/XPASS mechanism reports it without failing the run.
 
 The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
 whose state zk2py GETs and whose operations it calls. It also adds two
@@ -401,7 +406,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 235 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 262 passed, 0 failed, 1 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
@@ -427,7 +432,7 @@ owner example`. Exit codes are as for the static runner. `--only <run>`
 
 The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
 
-## hostid.v1 (profile text 0.1, core 0.19)
+## hostid.v1 (profile text 0.2, core 0.20)
 
 ```bash
 just py-hostid
@@ -441,22 +446,35 @@ in as described below.
   an injectable root, so that nothing touches `/etc`:
   - the input ladder of §2.4: absent, refused, unreadable, and a 4,096-byte
     bound;
+  - paths resolved under the root as a chroot would (0.2): an absolute
+    link target starts at the root, and `..` stops there;
   - the shared file of §2.5: an exclusive temporary file, `fchmod` 0644,
     `fsync`, `link(2)`, a directory `fsync`, and the temporary file always
     unlinked;
   - `HostidError`, naming every path with its outcome;
-  - the ephemeral opt-in;
-  - minting once per run;
+  - the ephemeral opt-in, logged at every start of a service whose system
+    is ephemeral. A racer's file absent after `EEXIST` fails closed, even
+    ephemeral (0.2);
+  - minting once per run. The first service that asks fixes the setting,
+    whether or not it starts, and a failure mints nothing (0.2);
   - §2.3's `address = "@hostid.v1/<service>"` with its configuration errors.
 
   Its seams are `link` and `random_bytes`.
 - **The owner:** given `hostid=Runtime(...)` and the system `@hostid.v1`,
   it mints before its session opens. Its descriptor then lists `hostid.v1`
   and states `meta.host`.
-- **The tool:** `hostid.minted_by_listing` answers §5's first question, and
-  `live.hostid_collision` §2.12's finding.
+- **The tool:** `hostid.minted_by_listing` answers §5's first question.
+  `live.hostid_collision` answers §2.12's question, counting only the
+  instances whose first answer is yes (0.2). It reads their contracts' `uses`
+  by the fingerprints their descriptors name.
+- **`self.system` providers (core R1, 0.20):** the owner resolves them at
+  start, from the same system as its address (`owner.resolve_providers`),
+  and lists them resolved. A tool refuses one. `role_keys` and
+  `subscribe_role` read through the resolved bindings, discarding a sample
+  on a wildcard key (R6).
 - **`python -m zk2py.hostid_scenarios`** runs scenarios.md §1 to §6 in
-  temporary roots, 29 of 29.
+  temporary roots, 34 of 34, with 0.2's new steps §1.6, §1.7, §4.6, §5.6
+  and §6.5. §5 step 2's `logger` binds `self.system/sysinfo`.
   - §2's racers are 16 processes.
   - §3's root-only cases come from `chmod`, since the runner is no root, and
     from the `link` seam.
@@ -464,6 +482,19 @@ in as described below.
     router, with no Rust owner.
   - §5's re-mint is a new owner in the same process, since zk2py's owner
     has no re-mint.
+- **Across the two implementations** (`just py-live`, `--only hostid`):
+  - the owner example minted over a root holding M1 is `h-bbd1aa1db10b`.
+    Its descriptor lists `hostid.v1`, `meta.host` and `meta.zid`, with its
+    `profiles` in §9.5's order, and M1 in no spelling;
+  - a zk2py consumer minted over the same root has the same system. It
+    binds `self.system/echo` and `self.system/*`, lists them resolved,
+    reads the Rust owner's state and calls its operation through them;
+  - the shared file is created by one implementation and read by the
+    other, both ways, with one system. Both at one minted address are
+    §2.12's finding, and `no` once one leaves;
+  - the owner example fails closed on an unwritable root, naming the three
+    paths, and with `--hostid-ephemeral` starts and writes nothing;
+  - bindings.md §5, with zk2py's detectors and trackers.
 
 ## What it does not cover
 
@@ -556,7 +587,8 @@ impl/python/
     acl_interop.py    §11       the access-control run (`--only acl`)
     hostid.py         hostid.v1 the derivation, the shape, the runtime over a root
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
-  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo;
+  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
+                      sysinfo_x, tracker, order;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

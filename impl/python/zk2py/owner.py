@@ -63,7 +63,41 @@ import zenoh
 
 from . import bundle, envelope, templates
 from .contract import Contract
+from .lexical import parse_interface_id
 from .slug import slug
+
+#: Core R1 (0.20): "a provider whose system position is self.system".
+SELF_SYSTEM = "self.system"
+
+
+def resolve_providers(providers: list[str], own_system: str | None) -> list[str]:
+    """Core §3.2 R1 (0.20): "A runtime MUST resolve a provider whose system
+    position is self.system into the service's own system, once, when the
+    service starts … self.system/<service> becomes <system>/<service>, and
+    self.system/* becomes <system>/*." Only the system position is a
+    keyword. A tool, which has no system of its own (``own_system`` None),
+    "MUST refuse a self.system provider" (ValueError)."""
+    out = []
+    for p in providers:
+        system, sep, rest = p.partition("/")
+        if system == SELF_SYSTEM and sep:
+            if own_system is None:
+                raise ValueError(f"{p}: a tool has no system of its own (core R1, 0.20)")
+            out.append(f"{own_system}/{rest}")
+        else:
+            out.append(p)
+    return out
+
+
+def profile_order(profiles: set[str]) -> list[str]:
+    """Core §3.3 (0.20): `profiles` "sorted as §9.5 sorts a contract's uses:
+    by name as a string, then by major as a number". So views.v2 comes
+    before views.v10, and a.v1 before a.b.v1."""
+    def key(p: str):
+        pid = parse_interface_id(p)
+        return (0, pid.name, pid.major, "") if pid is not None else (1, "", 0, p)
+
+    return sorted(profiles, key=key)
 
 #: core.md §2.4 / Appendix D names → zenoh's QoS enums.
 _CONGESTION = {"block": "BLOCK", "drop": "DROP"}
@@ -267,6 +301,8 @@ class Owner:
         self.system, self.service, self.contracts = system, service, contracts
         self.connect = connect
         self.bindings = bindings or {}
+        #: the bindings with their self.system providers resolved, at start
+        self.resolved_bindings: dict[str, list[str]] = dict(self.bindings)
         self.capabilities = set(capabilities or ())
         self.unavailable = dict(unavailable or {})
         self.withhold = set(withhold or ())
@@ -382,8 +418,15 @@ class Owner:
         resolved = self.hostid.configure(config)
         self.system, self.minted = resolved.system, resolved.minted
 
+    def resolve_bindings(self) -> None:
+        """Core R1 (0.20): self.system providers are resolved once, at start,
+        "at the same time, from the same system" as the address (§8.2)."""
+        self.resolved_bindings = {role: resolve_providers(list(provs), self.system)
+                                  for role, provs in self.bindings.items()}
+
     def start(self) -> None:
         self.resolve_system()  # hostid.v1 §2.7: before the session, and before step 1
+        self.resolve_bindings()  # core R1 (0.20): from the same system
         plan = self._plan()  # step 2 first: a refusal declares nothing
         conf = zenoh.Config()
         if self.connect:
@@ -501,13 +544,14 @@ class Owner:
             # contract's [requires]".
             "requires": [{
                 "role": role, "interface": req["interface"], "declared_by": c.interface,
-                "bindings": list(self.bindings.get(role, [])), "params": {},
+                # R3 (0.20): "a self.system provider resolved".
+                "bindings": list(self.resolved_bindings.get(role, [])), "params": {},
                 **({"optional": True} if req["optional"] else {}),
             } for c in self.contracts for role, req in c.canonical["requires"].items()],
             # Core §3.3 (0.19): "the union of two sets": the contracts' uses,
             # and the derivation-only profiles the instance follows.
-            "profiles": sorted({u for c in self.contracts for u in c.canonical["uses"]}
-                               | ({"hostid.v1"} if self.minted else set())),
+            "profiles": profile_order({u for c in self.contracts for u in c.canonical["uses"]}
+                                      | ({"hostid.v1"} if self.minted else set())),
             "meta": {**({"zid": str(self.session.zid())} if self.state_zid else {}),
                      **({"host": self.meta_host} if self.meta_host is not None
                         else {"host": socket.gethostname()} if self.minted else {})},
@@ -531,6 +575,35 @@ class Owner:
         self._publishers[key].delete(timestamp=stamp)
         self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
         return stamp
+
+    def publish(self, key: str, payload: bytes) -> None:
+        """Put a stream sample on its declared publisher, with the
+        resource's Encoding (§7.2)."""
+        self._publishers[key].put(payload, encoding=self._encodings[key])
+
+    # -- the consumer's side (§3.2) ---------------------------------------
+
+    def role_keys(self, role: str, iface: str, rid: str) -> list[str]:
+        """The key expression of ``rid`` (``<kind token>/<template>``) at
+        each provider ``role`` is bound to, through the bindings as resolved
+        at start (R1, 0.20): ``<system>/*`` stays a wildcard over services."""
+        return [f"zk2/{p}/{iface}/{rid}" for p in self.resolved_bindings.get(role, [])]
+
+    def subscribe_role(self, role: str, iface: str, rid: str, sink: Any, discarded: Any = None) -> None:
+        """Subscribe through a role's resolved bindings, handing ``sink``
+        each sample's (key, payload). A sample whose key expression is not
+        concrete is discarded (R6), and its key handed to ``discarded``."""
+        assert self.session is not None
+
+        def received(sample: zenoh.Sample) -> None:
+            key = str(sample.key_expr)
+            if "*" not in key:
+                sink(key, sample.payload.to_bytes())
+            elif discarded is not None:
+                discarded(key)
+
+        for k in self.role_keys(role, iface, rid):
+            self._entities.append(self.session.declare_subscriber(k, zenoh.handlers.Callback(received)))
 
     # -- handlers ---------------------------------------------------------
 

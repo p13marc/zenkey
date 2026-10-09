@@ -1,0 +1,19 @@
+# zk2py's consumer of zk2py_sysinfo.v1, for core R1's self.system providers
+# (0.20): bindings.md §5's trackers, and hostid.v1 scenarios.md §5 step 2's
+# logger. Its role `sources` is bound by configuration, as
+# `self.system/<service>` or `self.system/*`. It must load with no finding at
+# all.
+[interface]
+name    = "zk2py_tracker"
+major   = 1
+minor   = 0
+summary = "zk2py's consumer of zk2py_sysinfo.v1's stream"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[requires.sources]
+interface   = "zk2py_sysinfo.v1"
+resources   = ["cpu"]
+cardinality = "many"

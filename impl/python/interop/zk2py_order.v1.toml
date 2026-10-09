@@ -1,0 +1,18 @@
+# zk2py's contract for the order of a descriptor's `profiles` (core §3.3,
+# 0.20): "sorted as §9.5 sorts a contract's uses: by name as a string, then
+# by major as a number". Its `uses` are chosen so that a bytewise sort of
+# the whole ids differs twice: it puts views.v10 before views.v2, and
+# a.b.v1 before a.v1. An owner whose system is minted adds hostid.v1, which
+# sorts between them. None of these is a profile the spec defines: the core
+# does not know which profiles exist, and no lint refuses an unknown id
+# (§10). It must load with no finding at all.
+[interface]
+name    = "zk2py_order"
+major   = 1
+minor   = 0
+summary = "zk2py's contract for the order of a descriptor's profiles"
+uses    = ["views.v10", "views.v2", "a.b.v1", "a.v1"]
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }

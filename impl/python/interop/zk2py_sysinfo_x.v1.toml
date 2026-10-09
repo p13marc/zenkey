@@ -1,0 +1,14 @@
+# hostid.v1 scenarios.md §6 step 5 (0.2): "an interface of plain streams
+# whose contract lists hostid.v1 in uses". hostid.v1 §2.8 says a contract
+# SHOULD NOT; this one does on purpose, so that a tool cannot read minting
+# from the descriptor's listing (§5).
+[interface]
+name    = "zk2py_sysinfo_x"
+major   = 1
+minor   = 0
+summary = "a contract that lists hostid.v1 in uses, for hostid.v1's scenarios"
+uses    = ["hostid.v1"]
+
+[resources.cpu]
+kind = "stream"
+type = { raw = "text/plain" }
