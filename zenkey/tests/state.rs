@@ -787,3 +787,25 @@ async fn state_and_events_carry_their_attachments() {
         Some(b"by-alice".to_vec())
     );
 }
+
+/// Core §4.4 (0.16): an archive is never tokenless, because consumers and
+/// tools find it by its interface token (S6); one configured so is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_archive_is_never_tokenless() {
+    let (_r1, ep) = router(None).await;
+    let s = client(&ep).await;
+    let refused = Archive::start(
+        &s,
+        ArchiveConfig {
+            service: config("vehicle-01/archive").tokenless("archive.v1".parse().unwrap()),
+            records: vec![recorded(ORIGIN)],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await;
+    let Err(e) = refused else {
+        panic!("a tokenless archive starts")
+    };
+    assert!(e.to_string().contains("never tokenless"), "{e}");
+}

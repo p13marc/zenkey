@@ -450,6 +450,15 @@ impl Archive {
                     .map_err(zenoh)?,
             );
         }
+        // §4.4 (0.16): an archive holds its interface token, because
+        // consumers and tools find it by that token (S6).
+        if config.service.tokenless.contains(&iface()) {
+            return Err(Error::Contract(
+                "archive.v1 is never tokenless: consumers and tools find an archive by its \
+                 interface token (§4.4)"
+                    .to_owned(),
+            ));
+        }
         let mut b = ServiceBuilder::new(session, config.service);
         b.implement(Implementation::new(contract()))?;
         let i = Arc::clone(&inner);

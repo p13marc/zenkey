@@ -3,6 +3,44 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.16 — 2026-10-09: what the tools' last verbs could not decide (#708)
+
+FK1 built zenctl's `why`, `check conform`, `storage gen` and `admin graph`
+for zk2 (#702–#705, PR #709). It found seven places where the spec left a
+tool guessing. The reference's behaviour becomes the rule, with two small
+reference changes. Each rule has a test.
+
+**Changed: rules stated.**
+- **Retention is not a storage's to enforce (§2.6, Appendix B).** zenoh
+  1.10.1's storage manager garbage-collects tombstones, not values, so a
+  union storage never prunes an occurrence by its retention. The retention
+  is the bound a consumer applies on replay. `storage gen` warns
+  `retention_not_enforced`.
+- **An archive is never tokenless (§4.4).** Consumers and tools find
+  archives by their `archive.v1` token for last-known reads (S6), so a
+  tokenless archive would be invisible. The reference runtime now refuses
+  to start one; there is a test.
+- **O3 judged from outside (§5.1).** A tool counts a silence against "every
+  call is answered" only under grants that let it call, because an
+  access-control refusal is silent too. It says so beside the finding.
+  `check conform` already did.
+- **A tool's S1 check (§4.2).** A tool that reads the admin space compares
+  the owner's `meta.zid` with the verified routers' zids, by value. When
+  they match, the owner is its own router, and S1 is unobservable for it.
+  The reference doctor's `state-stamp-foreign` now does this; there is a
+  unit test.
+- **Appendix B** records that §4.2's admin-space verification rests on the
+  unstable `Reply::replier_id`. A release that removed it would leave every
+  admin answer unverified, and the checks unobservable, never clean.
+
+**Deliberately not changed.**
+- **`meta.zid` stays a SHOULD (§3.3).** Both implementations write it. An
+  owner without it is reported unattributable everywhere a tool needs it,
+  which the tools already say, and never wrongly judged.
+- **No union-storage grant is generated (§11.1).** 0.14 states the grant,
+  and 0.15's input has no storages yet. The generator waits for a
+  deployment that runs one off-router.
+
 ## 0.15 — 2026-10-09: what §11 needs to be built from (#695)
 
 The Python implementation built §11's access control from the spec alone

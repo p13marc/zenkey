@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.15** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.16** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -9,8 +9,8 @@ implementing 0.7 found, a refused presence read first, in 0.9 the
 order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
 a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
 who may answer the admin space, in 0.13 how a far router is verified, and
-in 0.14 what access control measured, and in 0.15 what §11 needs to be built
-from).
+in 0.14 what access control measured, in 0.15 what §11 needs to be built
+from, and in 0.16 what the tools' last verbs could not decide).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -370,6 +370,11 @@ subtree.
     MUST also be within ±(2^53−1) (E028), so 2^63 s is E028 alone.
     `[F: contracts/ok-retention-leading-zero, e026-retention-range, e028-retention]`
 - **Storage.** A deployment MAY run a union storage on `zk2/*/*/*/events/**`.
+  A union storage prunes nothing by retention (0.16). zenoh 1.10.1's
+  storage manager garbage-collects tombstones only (Appendix B), so an
+  occurrence outlives its retention unless a backend, or the operator,
+  prunes it. The retention is the bound a consumer applies on replay
+  (below).
   An event key is never an owner's state (§4.4).
 - **Replay.** A consumer replays with a wildcard GET bounded by the
   retention. Enforcing the bound needs a time-series backend, or a filter on
@@ -674,6 +679,10 @@ timestamping enabled, which keeps the stamp a put carries unless it is
 future-dated (§4.1), and checks the check against a control: a put without
 a timestamp, through the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
+- **A tool's S1 check** (0.16). A tool that reads the admin space (§11.1,
+  the admin read) compares the owner's `meta.zid` with the verified
+  routers' zids, by value. When they match, the owner is its own router, and
+  the tool reports S1 unobservable for it, never clean.
 
 ### 4.3 Clocks (S7)
 
@@ -794,6 +803,10 @@ section is what the core requires of it.
     key that alignment never confirms. The archive MAY drop such a key after
     a deployment-set horizon, and MUST keep serving it as unconfirmed until
     then.
+- **Found by its token** (0.16). An archive MUST hold its `archive.v1`
+  interface token: it is never in the tokenless set (§8.1). Consumers and
+  tools find archives by that token for last-known reads (S6), and a
+  tokenless one would be invisible to them.
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
   (`desired.v1`) uses both.
@@ -852,7 +865,10 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
 
 **Answering.**
 - **Every call is answered (O3).** A call that reaches an owner's
-  queryable gets a value or an envelope. A handler that ends without
+  queryable gets a value or an envelope. A tool judging O3 from outside,
+  as a conformance suite does, holds a silence as a finding only under
+  grants that let it call: an access-control refusal is silent too (O5,
+  §11.3). It says so beside the finding (0.16). A handler that ends without
   replying is answered `internal`, so a live server's own bug is never
   silence (O5). With `replies = "many"`, a declared `summary` is owed too:
   a handler that ends without it is answered `internal`, after any values
@@ -2465,7 +2481,12 @@ Appendix B. These are the ones the rules above cite:
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
 - A reply error carries a payload and an encoding, and no key expression.
   `Reply::replier_id` is behind the `unstable` feature. It names the session
-  that sent the reply, whatever key the reply is on.
+  that sent the reply, whatever key the reply is on. §4.2's admin-space
+  verification rests on it: a zenoh release that removed or changed it
+  would leave every admin answer unverified, and the checks that read the
+  admin space unobservable, never clean.
+- The storage manager garbage-collects tombstones, not values: an event
+  occurrence a union storage holds is never pruned by its retention.
 - A router's admin document (`@/<zid>/router`) lists its sessions, each
   with the peer's zid and `whatami`: `router`, `peer` or `client`.
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
