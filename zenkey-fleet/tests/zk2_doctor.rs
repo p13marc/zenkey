@@ -38,7 +38,16 @@ const GRACE: Duration = Duration::from_millis(600);
 /// A router on an ephemeral port, its admin space on or off (zenoh's
 /// default is off: the deployment an explorer most often meets).
 async fn router(admin: bool) -> (zenoh::Session, String) {
+    router_to(admin, None).await
+}
+
+/// [`router`], linked to `upstream` when given.
+async fn router_to(admin: bool, upstream: Option<&str>) -> (zenoh::Session, String) {
     let mut c = zenoh::Config::default();
+    if let Some(up) = upstream {
+        c.insert_json5("connect/endpoints", &format!("[\"{up}\"]"))
+            .expect("config");
+    }
     for (k, v) in [
         ("scouting/multicast/enabled", "false"),
         ("scouting/gossip/enabled", "false"),
@@ -911,4 +920,53 @@ async fn an_admin_answer_a_router_did_not_send_is_never_trusted() {
             assert!(clean(&r, CheckId::AdminUnreachable).contains("1 router(s)"));
         }
     }
+}
+
+/// Core §4.2 (0.13, F-81): a far router is verified through a verified
+/// router's document, which lists it as a `router` session. With R2 linked
+/// to R1 and a client tool on R1, both routers' answers count, and S4 is
+/// clean over both; a client answering `@/<its own zid>/router` under its
+/// own replier id is listed by R1 as a `client`, and is never trusted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_far_router_is_verified_through_the_router_that_lists_it() {
+    let (r1, ep) = router(true).await;
+    let (r2, _) = router_to(true, Some(&ep)).await;
+    let (owners, tool) = (client(&ep).await, client(&ep).await);
+    let _services = tcgui(&owners).await;
+    settled(&tool, &TCGUI).await;
+    let asked = spec(&[CheckId::StorageOnState, CheckId::AdminUnreachable]);
+    eventually("both routers answer", || async {
+        zenkey_fleet::admin_get(&tool, "@/*/router", T)
+            .await
+            .is_ok_and(|e| e.len() == 2)
+    })
+    .await;
+    let r = doctor(&bus(&tool, &tool, ""), &asked).await;
+    assert!(
+        clean(&r, CheckId::AdminUnreachable).contains("2 router(s)"),
+        "{r:#?}"
+    );
+    assert!(clean(&r, CheckId::StorageOnState).contains("on 2 router(s)"));
+
+    let spoofer = client(&ep).await;
+    let sz = spoofer.zid().to_string();
+    let _doc = admin_doc(
+        &spoofer,
+        &format!("@/{sz}/router"),
+        json!({"plugins": null}),
+    )
+    .await;
+    eventually("the spoofer answers too", || async {
+        zenkey_fleet::admin_get(&tool, "@/*/router", T)
+            .await
+            .is_ok_and(|e| e.len() == 3)
+    })
+    .await;
+    let r = doctor(&bus(&tool, &tool, ""), &asked).await;
+    let why = unseen(&r, CheckId::StorageOnState);
+    assert!(
+        why.contains(&sz) && why.contains("no verified router lists it as a router"),
+        "{why}"
+    );
+    drop((r1, r2));
 }
