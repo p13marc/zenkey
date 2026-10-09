@@ -1,0 +1,18 @@
+# #698: a state and an event resource that each declare an attachment, so
+# the runtime's state and event writers can be shown to carry one (§2.3).
+[interface]
+name = "notes"
+major = 1
+minor = 0
+
+[resources.last]
+kind = "state"
+type = { raw = "text/plain" }
+attachment = { raw = "text/plain" }
+
+[resources.posted]
+kind = "event"
+type = { raw = "text/plain" }
+attachment = { raw = "text/plain" }
+rate = "burst(100/h)"
+retention = "1h"

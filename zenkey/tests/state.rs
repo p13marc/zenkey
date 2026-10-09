@@ -713,3 +713,77 @@ async fn s9_an_archives_backend_refuses_an_outdated_put() {
         .unwrap();
     assert!(l.value.is_none(), "a tombstone, never the older value");
 }
+
+/// #698 (§2.3, S2): a state value and an event occurrence carry the
+/// attachment their contract declares. The subscriber receives it with the
+/// sample, and the owner's GET answers carry it with the value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn state_and_events_carry_their_attachments() {
+    let (_r1, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let notes: IfaceId = "notes.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("h1/notes"));
+    b.implement(imp("notes.v1")).unwrap();
+    let none = Bindings::new();
+    let last = b
+        .declare_state_writer(&notes, "state/last", &none)
+        .await
+        .unwrap();
+    let posted = b.event_writer(&notes, "events/posted", &none).unwrap();
+    let _svc = b.start().await.unwrap();
+
+    // Each sample's payload, and its attachment if any.
+    type Seen = Vec<(String, Option<Vec<u8>>)>;
+    let seen: Arc<Mutex<Seen>> = Arc::default();
+    let s = Arc::clone(&seen);
+    let _sub = tool
+        .declare_subscriber("zk2/h1/notes/notes.v1/**")
+        .callback(move |sample: Sample| {
+            s.lock().unwrap().push((
+                String::from_utf8_lossy(&sample.payload().to_bytes()).into_owned(),
+                sample.attachment().map(|a| a.to_bytes().into_owned()),
+            ));
+        })
+        .await
+        .unwrap();
+    let probe = owner
+        .declare_publisher("zk2/h1/notes/notes.v1/state/last")
+        .await
+        .unwrap();
+    eventually("the tool's subscriber is matched", || async {
+        probe.matching_status().await.unwrap().matching()
+    })
+    .await;
+    drop(probe);
+
+    last.put_with("hello", Some("by-alice")).await.unwrap();
+    posted.put_with("posted", Some("by-bob")).await.unwrap();
+    eventually("both samples arrive", || async {
+        seen.lock().unwrap().len() == 2
+    })
+    .await;
+    let got = seen.lock().unwrap().clone();
+    assert!(
+        got.contains(&("hello".to_owned(), Some(b"by-alice".to_vec()))),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("posted".to_owned(), Some(b"by-bob".to_vec()))),
+        "{got:?}"
+    );
+
+    // S2: the owner's GET answers the value with its attachment.
+    let rx = tool
+        .get("zk2/h1/notes/notes.v1/state/last")
+        .target(zenoh::query::QueryTarget::All)
+        .with(flume::unbounded::<zenoh::query::Reply>())
+        .await
+        .unwrap();
+    let reply = rx.recv_async().await.expect("an answer");
+    let sample = reply.result().expect("a value");
+    assert_eq!(&*sample.payload().to_bytes(), b"hello");
+    assert_eq!(
+        sample.attachment().map(|a| a.to_bytes().into_owned()),
+        Some(b"by-alice".to_vec())
+    );
+}

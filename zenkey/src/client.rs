@@ -113,8 +113,48 @@ pub type Replier = crate::call::Replier<Answer, Answer>;
 /// Every reply to a many-reply or fan-out call, attributed (O6).
 pub type Replies = crate::call::Replies<Answer, Answer>;
 
+/// What one reply was, as [`Replies::push`] filed it (#698).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplyKind {
+    /// A value, attributed to the replier its key names (O3).
+    Value,
+    /// A summary (O6).
+    Summary,
+    /// An envelope: a refusal, which carries no key (O3).
+    Refusal,
+    /// An error reply that is not a well-formed envelope.
+    Malformed,
+    /// The transport's own error reply, such as a timeout.
+    Transport,
+    /// A value on a key that is not concrete (R6), or not a member of the
+    /// operation called.
+    Discarded,
+}
+
+/// One reply as [`Fleet::call_timed`] saw it arrive (#698).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Arrival {
+    /// The key a value or summary came on; `None` for an error reply,
+    /// which carries none.
+    pub key: Option<String>,
+    /// How long after the queries went out it arrived, on this session's
+    /// clock.
+    pub after: Duration,
+    pub kind: ReplyKind,
+}
+
 impl crate::call::Replies<Answer, Answer> {
-    pub(crate) fn push(&mut self, reply: Reply, iface: &IfaceId, r: &Resource) {
+    /// An empty collection for a call to `op`, for a tool that runs its own
+    /// query and files each reply with [`Replies::push`] (#698).
+    #[must_use]
+    pub fn for_operation(op: &Operation) -> Self {
+        Self::new(op)
+    }
+
+    /// Files one reply to a call of `r`, an operation of `iface`: a value
+    /// or summary under the replier its key names (O3, O6), an envelope as
+    /// a refusal, anything else apart. Returns what it was.
+    pub fn push(&mut self, reply: Reply, iface: &IfaceId, r: &Resource) -> ReplyKind {
         match reply.into_result() {
             Ok(sample) => {
                 let key = sample.key_expr().as_str().to_owned();
@@ -123,7 +163,7 @@ impl crate::call::Replies<Answer, Answer> {
                     .flatten()
                 else {
                     self.discarded += 1;
-                    return;
+                    return ReplyKind::Discarded;
                 };
                 let summary = sample
                     .attachment()
@@ -147,14 +187,25 @@ impl crate::call::Replies<Answer, Answer> {
                 };
                 if summary {
                     self.repliers[i].summaries.push(answer);
+                    ReplyKind::Summary
                 } else {
                     self.repliers[i].values.push(answer);
+                    ReplyKind::Value
                 }
             }
             Err(e) => match classify(&e) {
-                ErrorReply::Envelope(env) => self.refusals.push(env),
-                ErrorReply::Malformed(m) => self.malformed.push(m),
-                ErrorReply::Transport(t) => self.transport.push(t),
+                ErrorReply::Envelope(env) => {
+                    self.refusals.push(env);
+                    ReplyKind::Refusal
+                }
+                ErrorReply::Malformed(m) => {
+                    self.malformed.push(m);
+                    ReplyKind::Malformed
+                }
+                ErrorReply::Transport(t) => {
+                    self.transport.push(t);
+                    ReplyKind::Transport
+                }
             },
         }
     }
@@ -716,11 +767,25 @@ impl Fleet {
         values: &Bindings,
         request: impl Into<ZBytes>,
     ) -> Result<Replies> {
+        Ok(self.call_timed(resource, values, request).await?.0)
+    }
+
+    /// [`Fleet::call`], with when each reply arrived (#698): a bench's
+    /// per-reply latency, attributed by key (O3), with refusals, malformed
+    /// and transport replies timed apart. The replies are drained as they
+    /// arrive, query by query.
+    pub async fn call_timed(
+        &self,
+        resource: &str,
+        values: &Bindings,
+        request: impl Into<ZBytes>,
+    ) -> Result<(Replies, Vec<Arrival>)> {
         let (r, op) = self.op(resource)?;
         let values = bind(&self.params, &r, values)?;
         let encoding = wire_encoding(&op.request, op.encoding, &values);
         let request: ZBytes = request.into();
         // Every query goes out before any is drained, so they run together.
+        let started = std::time::Instant::now();
         let mut receivers = Vec::new();
         for ke in self.selectors_of(&r, &values)? {
             receivers.push(
@@ -738,13 +803,31 @@ impl Fleet {
                     .map_err(zenoh)?,
             );
         }
-        let mut out = Replies::new(&op);
-        for rx in receivers {
-            while let Ok(reply) = rx.recv_async().await {
-                out.push(reply, &self.contract.iface, &r);
-            }
+        // Each query's replies are drained by a task of its own and stamped
+        // on arrival, so one slow replier does not delay another's time.
+        let (tx, rx) = flume::unbounded::<(Reply, Duration)>();
+        for q in receivers {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                while let Ok(reply) = q.recv_async().await {
+                    if tx.send((reply, started.elapsed())).is_err() {
+                        break;
+                    }
+                }
+            });
         }
-        Ok(out)
+        drop(tx);
+        let mut out = Replies::new(&op);
+        let mut arrivals = Vec::new();
+        while let Ok((reply, after)) = rx.recv_async().await {
+            let key = reply
+                .result()
+                .ok()
+                .map(|s| s.key_expr().as_str().to_owned());
+            let kind = out.push(reply, &self.contract.iface, &r);
+            arrivals.push(Arrival { key, after, kind });
+        }
+        Ok((out, arrivals))
     }
 
     /// [`Fleet::call`] with a request of a JSON Schema type.
