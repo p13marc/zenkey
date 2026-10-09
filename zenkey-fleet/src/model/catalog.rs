@@ -23,7 +23,7 @@
 //! - **[`Catalog`]**, the index over an [`Observed`], and the views zenctl
 //!   prints: [`Catalog::services`] (`service list`), [`Catalog::iface`]
 //!   (`iface show`) and [`Catalog::graph`] (`graph`, through the runtime's
-//!   own [`zk2::presence::edges`], so the tool draws the graph the runtime
+//!   own [`zenkey::presence::edges`], so the tool draws the graph the runtime
 //!   computes).
 //!
 //! Nothing here judges. A token whose fingerprint prefix disagrees with its
@@ -125,12 +125,12 @@ pub enum DescriptorRead {
     Failed(String),
 }
 
-impl From<zk2::presence::Found> for DescriptorRead {
-    fn from(found: zk2::presence::Found) -> DescriptorRead {
+impl From<zenkey::presence::Found> for DescriptorRead {
+    fn from(found: zenkey::presence::Found) -> DescriptorRead {
         match found {
-            zk2::presence::Found::Descriptor(d, _) => DescriptorRead::Served(d),
-            zk2::presence::Found::Invalid(why) => DescriptorRead::Invalid(why),
-            zk2::presence::Found::Nothing => DescriptorRead::Silent,
+            zenkey::presence::Found::Descriptor(d, _) => DescriptorRead::Served(d),
+            zenkey::presence::Found::Invalid(why) => DescriptorRead::Invalid(why),
+            zenkey::presence::Found::Nothing => DescriptorRead::Silent,
         }
     }
 }
@@ -179,8 +179,8 @@ impl DescriptorRead {
 /// The bundle is kept beside the contract because decoding a sample needs
 /// it (`zenkey_model::decode` reads the schema artifacts it carries), and
 /// the contract is shared because a consumer or a client built for a tool
-/// takes an `Arc<Contract>` ([`zk2::consumer::Consumer::for_tool`],
-/// [`zk2::Client::new`]).
+/// takes an `Arc<Contract>` ([`zenkey::consumer::Consumer::for_tool`],
+/// [`zenkey::Client::new`]).
 #[derive(Debug, Clone)]
 pub struct Revision {
     fingerprint: Fingerprint,
@@ -288,7 +288,7 @@ impl Revision {
             .resources
             .iter()
             .filter(eligible)
-            .filter(|r| zk2::implementation::resource_name(r) == want)
+            .filter(|r| zenkey::implementation::resource_name(r) == want)
             .collect();
         let by_template: Vec<&Resource> = c
             .resources
@@ -313,7 +313,7 @@ impl Revision {
                     .resources
                     .iter()
                     .filter(eligible)
-                    .map(zk2::implementation::resource_name)
+                    .map(zenkey::implementation::resource_name)
                     .collect();
                 Err(if names.is_empty() {
                     format!("{} declares no {what}", c.iface)
@@ -328,7 +328,7 @@ impl Revision {
             (_, several) => {
                 let names: Vec<String> = several
                     .iter()
-                    .map(|r| zk2::implementation::resource_name(r))
+                    .map(|r| zenkey::implementation::resource_name(r))
                     .collect();
                 Err(format!(
                     "{want:?} is the template of more than one resource of {}: {} — \
@@ -388,7 +388,7 @@ impl Revision {
             resource: selected
                 .first()
                 .filter(|_| resource.is_some())
-                .map(|r| zk2::implementation::resource_name(r)),
+                .map(|r| zenkey::implementation::resource_name(r)),
             members,
             artifacts,
         })
@@ -397,7 +397,7 @@ impl Revision {
 
 /// Every member of a resource that names a type, in the spec's order.
 fn members_of(r: &Resource) -> Vec<SchemaMember> {
-    let resource = zk2::implementation::resource_name(r);
+    let resource = zenkey::implementation::resource_name(r);
     let named: Vec<(&str, Option<&TypeId>)> = match &r.body {
         Body::Data(d) => vec![
             ("type", Some(&d.type_)),
@@ -584,7 +584,7 @@ fn resource_view(r: &Resource) -> ResourceView {
         },
     };
     ResourceView {
-        name: zk2::implementation::resource_name(r),
+        name: zenkey::implementation::resource_name(r),
         kind: r.kind,
         token: r.token.as_str().to_owned(),
         template: r.template.as_str().to_owned(),
@@ -904,7 +904,7 @@ pub struct Catalog {
     /// Member tokens, by service: `(iface, member, epoch)`. A member's epoch
     /// is not an instance id, so they belong to the service.
     members: BTreeMap<Addr, BTreeSet<(IfaceId, String, InstanceId)>>,
-    /// Every token, for [`zk2::presence::edges`].
+    /// Every token, for [`zenkey::presence::edges`].
     tokens: Vec<ZkKey>,
 }
 
@@ -1326,9 +1326,9 @@ impl Catalog {
 
     /// The edges of the data-flow graph (R3), exactly as the runtime
     /// computes them from these descriptors and tokens.
-    pub fn edges(&self) -> Vec<zk2::presence::Edge> {
+    pub fn edges(&self) -> Vec<zenkey::presence::Edge> {
         let descriptors: Vec<Descriptor> = self.descriptors().cloned().collect();
-        zk2::presence::edges(&descriptors, &self.tokens)
+        zenkey::presence::edges(&descriptors, &self.tokens)
     }
 
     /// `graph`: every service as a node, and every binding that matches a
@@ -1514,10 +1514,10 @@ fn exposure(c: &Contract, entry: &InterfaceEntry, held: &[String]) -> Vec<String
                     g.strip_prefix("capability:")
                         .is_some_and(|cap| !held.iter().any(|h| h == cap))
                 });
-            let name = zk2::implementation::resource_name(r);
+            let name = zenkey::implementation::resource_name(r);
             !gated_off && !entry.unavailable.iter().any(|u| u.resource == name)
         })
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect()
 }
 

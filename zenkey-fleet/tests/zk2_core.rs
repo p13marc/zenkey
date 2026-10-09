@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 mod util;
 use util::zk2::{T, client, config, eventually, example, iface, router};
 
+use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::bus::contracts::BundleStore;
 use zenkey_fleet::bus::presence::{Scope, observe, service_listing};
 use zenkey_fleet::model::catalog::{Catalog, ContractState, Contracts};
@@ -20,12 +21,11 @@ use zenkey_fleet::model::render::{Member, render, render_with};
 use zenkey_fleet::report::{Asked, ContractAnswer, ContractSource, DescriptorAnswer, Rendered};
 use zenkey_model::grammar::ZkKey;
 use zenkey_model::template::Bindings;
-use zk2::{Implementation, Service, ServiceBuilder};
 
 /// Brings up `address` implementing every contract in `paths`, every
 /// resource exposed (an operation exposed is answered `unavailable` until
 /// served, O3; a resource gated on a capability not held stays absent).
-async fn bring_up(session: &zenoh::Session, cfg: zk2::ServiceConfig, paths: &[&str]) -> Service {
+async fn bring_up(session: &zenoh::Session, cfg: zenkey::ServiceConfig, paths: &[&str]) -> Service {
     let mut b = ServiceBuilder::new(session, cfg);
     for path in paths {
         let c = example(path);
@@ -33,7 +33,7 @@ async fn bring_up(session: &zenoh::Session, cfg: zk2::ServiceConfig, paths: &[&s
         let names: Vec<String> = c
             .resources
             .iter()
-            .map(zk2::implementation::resource_name)
+            .map(zenkey::implementation::resource_name)
             .collect();
         b.implement(Implementation::new(c)).expect("implement");
         for n in names {
@@ -238,14 +238,14 @@ async fn the_graph_equals_the_runtimes_edges() {
     assert!(graph.complete && graph.undescribed.is_empty());
 
     // The runtime's own reading, independently of the catalog.
-    let tokens = zk2::presence::tokens(&tool, "zk2/*/*/@zk/**", T)
+    let tokens = zenkey::presence::tokens(&tool, "zk2/*/*/@zk/**", T)
         .await
         .expect("tokens");
     let mut descriptors = Vec::new();
     for k in &tokens {
         if let ZkKey::Instance { addr, instance } = k {
             descriptors.push(
-                zk2::presence::descriptor(&tool, addr, instance, T)
+                zenkey::presence::descriptor(&tool, addr, instance, T)
                     .await
                     .expect("descriptor GET")
                     .into_descriptor()
@@ -253,10 +253,11 @@ async fn the_graph_equals_the_runtimes_edges() {
             );
         }
     }
-    let runtime: BTreeSet<(String, String, String)> = zk2::presence::edges(&descriptors, &tokens)
-        .into_iter()
-        .map(|e| (e.consumer, e.role, e.provider))
-        .collect();
+    let runtime: BTreeSet<(String, String, String)> =
+        zenkey::presence::edges(&descriptors, &tokens)
+            .into_iter()
+            .map(|e| (e.consumer, e.role, e.provider))
+            .collect();
     let drawn: BTreeSet<(String, String, String)> = graph
         .edges
         .iter()
@@ -343,7 +344,7 @@ async fn an_interface_is_shown_with_its_contract_retrieved() {
     let names: BTreeSet<String> = example("tcgui/tc.netif.v1")
         .resources
         .iter()
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect();
     for p in &netif.providers {
         let Asked::Asked(exposes) = &p.exposes else {
@@ -538,7 +539,7 @@ async fn each_kind_decodes_or_renders_honestly() {
     let names: Vec<String> = c
         .resources
         .iter()
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect();
     b.implement(Implementation::new(c)).expect("netif");
     let bandwidth = b
@@ -560,7 +561,7 @@ async fn each_kind_decodes_or_renders_honestly() {
     let names: Vec<String> = c
         .resources
         .iter()
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect();
     b.implement(Implementation::new(c)).expect("parallax");
     let video = b

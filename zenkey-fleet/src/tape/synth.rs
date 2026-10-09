@@ -175,9 +175,9 @@ impl Synth {
         })?;
         match ty {
             TypeId::JsonSchema { .. } => {
-                use zk2::codec::Codec as _;
+                use zenkey::codec::Codec as _;
                 let value = self.json(bundle, canonical, tick)?;
-                let bytes = zk2::codec::Json::<Value>::encode(&value, encoding)?;
+                let bytes = zenkey::codec::Json::<Value>::encode(&value, encoding)?;
                 Ok(Synthesized {
                     bytes,
                     value: Some(value),
@@ -187,7 +187,7 @@ impl Synth {
                 let msg = self.protobuf(bundle, canonical, tick)?;
                 let value = serde_json::to_value(&msg).ok();
                 Ok(Synthesized {
-                    bytes: zk2::prost::Message::encode_to_vec(&msg),
+                    bytes: zenkey::prost::Message::encode_to_vec(&msg),
                     value,
                 })
             }
@@ -330,7 +330,7 @@ impl Synth {
             ProtoKind::Uint64 | ProtoKind::Fixed64 => V::U64(int() as u64),
             ProtoKind::Bool => V::Bool(true),
             ProtoKind::String => V::String(format!("{name}{}", tick % 10)),
-            ProtoKind::Bytes => V::Bytes(zk2::prost::bytes::Bytes::from(
+            ProtoKind::Bytes => V::Bytes(zenkey::prost::bytes::Bytes::from(
                 format!("{name}{}", tick % 10).into_bytes(),
             )),
             // The second value when there is one: the first is the default,

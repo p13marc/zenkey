@@ -101,7 +101,6 @@ impl MockResponder {
     /// and the responder's log — half the point of this type — never records
     /// the ask at all (RFC 13 §3 O6).
     ///
-    /// The split is [`crate::bus::producer::Responder`]'s, right next door.
     /// Hand what this returns to [`answer`](Self::answer): a query in the
     /// caller's hand can still be answered after a cancelled poll, and one
     /// never received was never taken.

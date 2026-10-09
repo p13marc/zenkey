@@ -1,39 +1,42 @@
 # zenctl
 
-A bus explorer for the keyspace-v2 convention — `busctl` / `d-feet` / `ros2` for
-any conformant Zenoh fleet.
+A bus explorer for zk2 deployments — `busctl` / `d-feet` / `ros2` for any
+Zenoh service that keeps the zk2 core (`spec/core.md`) — and a raw explorer of
+any Zenoh bus besides.
 
-RFC 08 §6 specifies this tool into existence. Every producer MUST serve
-`@rpc/<producer>/introspect`, returning the registry slice it was *compiled
-against*; the point of that requirement is that "generic explorer tooling — the
-`busctl`/`d-feet` equivalent — **needs no compiled-in registry**". `zenctl` is
-that tooling: nothing application-specific is compiled in.
+Nothing application-specific is compiled in. A zk2 service holds presence
+tokens and serves a **descriptor** naming the contract revision of each
+interface it provides (spec §3.3, §8.1); the revision travels as a **bundle**,
+retrieved from its holders by fingerprint (§8.4) or read offline from
+`--contracts`. That is all `zenctl` needs to decode a sample as its declared
+type, call an operation through its request type, or judge a deployment
+against the core.
 
 ```bash
 zenctl service list --namespace acme -c tcp/127.0.0.1:7447
 ```
 
-**`main` is the zk2 line** (epic #585): the inspection nouns — `service`,
-`iface`, `schema`, `namespace`, and the `graph` and `compat` verbs — read
-zk2's presence, descriptors and contract bundles, through a session opened
+**`main` is the zk2 line** (epic #585): every verb reads zk2's presence,
+descriptors and contract bundles, the resolved ones through a session opened
 **in** the deployment's namespace (`--namespace`, with `--base` as its alias).
-The rest of the tree is still v1's, ported verb by verb until FJ9; the `v1`
-branch carries the v1 tool whole. See [zk2 inspection](#zk2-inspection).
+v1 left `main` at FJ9 (#612); the `v1` branch carries the v1 tool whole. See
+[zk2 inspection](#zk2-inspection).
 
 **For an operator**, in order: [Install](#install) ·
 [Production quickstart](#production-quickstart) ·
 [Session posture](#session-posture) · [Exit codes](#exit-codes) ·
 [Monitoring recipes](#monitoring-recipes) · [Write guards](#write-guards) ·
 [Every command](#every-command). The rest of this page is the reasoning behind
-the surface: what `--format` promises, where registry knowledge comes from, and
+the surface: what `--format` promises, where contract knowledge comes from, and
 what the tool will not do.
 
-`--base` (or `ZENCTL_BASE`) names the deployment base — the first chunk(s) of
-every key on the wire. Applications set it as their session namespace and never
-spell it; `zenctl` runs un-namespaced on purpose (RFC 09 §5), so it has to be
-told about a *named* base. Left unset, it defaults to the **empty base** — the
-base-less bus-root deployment whose keys start at `v1/`, the RFC v1.6 default —
-so against a default-configured fleet `zenctl` works with no `--base` at all.
+`--namespace` (alias `--base`, env `ZENCTL_BASE`) names the deployment
+namespace — the first chunk(s) of every key on the wire. Services set it as
+their session namespace and never spell it. A resolved verb opens its session
+in it; a raw verb runs in no namespace on purpose (RFC 09 §5) and uses it only
+to resolve what it sees. Left unset, it is the **empty** namespace — the
+bus-root deployment, whose keys start at `zk2/` — so against a
+default-configured deployment `zenctl` works with no `--namespace` at all.
 Don't know the namespace? `zenctl namespace list` finds the ones zk2 services
 use.
 
@@ -53,18 +56,19 @@ other platform builds from source — and building from source is the install
 everywhere else:
 
 ```bash
-cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --tag 0.12.0 --locked
+cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --branch main --locked
 ```
 
-**The v1 line.** This zenctl reads the v1 convention, which is frozen at RFC
-v1.50 and maintained on the `v1` branch as 0.14.x patch releases. To build
-the newest v1 patches from source, track the branch rather than a tag:
+**The v1 line.** The zenctl that reads the v1 convention — frozen at RFC
+v1.50 — is maintained on the `v1` branch as 0.14.x patch releases, and every
+release so far is that line's. To build the newest v1 patches from source,
+track the branch rather than a tag:
 
 ```bash
 cargo install --git https://git.marcpardo.eu/marcpardo/zenkey zenctl --branch v1 --locked
 ```
 
-`main` is the zk2 line (`docs/zk2/`).
+This page is `main`'s zenctl: the zk2 line (`docs/zk2/`).
 
 `--locked` builds against the release's own `Cargo.lock`, the dependency set
 that release was tested with; leave it out and cargo resolves fresh versions.
@@ -138,7 +142,7 @@ zenctl context create prod --base prod --zenoh-config /etc/zenctl/prod.json5 --s
 zenctl context show --format json | jq -r .base      # → prod
 ```
 
-A context holds `--base`, `-c`/`-l` endpoints, `--registry` dirs, `--timeout`,
+A context holds `--base` (the namespace), `-c`/`-l` endpoints, `--timeout`,
 `--scouting` and `--zenoh-config`; `zenctl context list|select|rm|edit` manage
 the file (`~/.config/zenkey-explorer/config.toml`, shared with zengui). Every
 value resolves flag > environment (`ZENCTL_BASE`, `ZENCTL_CONTEXT`,
@@ -167,8 +171,9 @@ What the session every verb opens is, and is not (RFC 09 §5):
   session.
 * **No silent empty bus.** A router that does not answer fails the session,
   and an endpoint that does not parse (`-c 127.0.0.1:7447`, no `tcp/`) is
-  refused by name: both exit **2** for every verb, `pub` included. A verb
-  holding `--registry` dirs still answers from them, and says so.
+  refused by name: both exit **2** for every verb, `pub` included. A
+  question `--contracts` answers alone (`schema show`, `iface show
+  <iface>@<fp>`, `compat`, `check schema`) opens no session at all.
 * **Un-namespaced** for the raw verbs (`get <selector>`, `echo`, `pub`, the
   admin space…), so they see the wire as it is — including traffic from
   outside the deployment, which is how a leak is spotted. zk2's resolved verbs
@@ -184,10 +189,10 @@ One contract for the whole tool, written once in
 | code | means | for example |
 |---|---|---|
 | **0** | asked, and the answer is clean | values came back; the assertion held; the act completed; a listing that found nothing is still an answer |
-| **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; `why` established a cause; an act (`pub`, `replay`, `gen`, `blob fetch`, `registry migrate`) failed |
+| **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `why`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -219,14 +224,8 @@ zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod
 zenctl check expect host-a/tc tc.netif.v1 --namespace prod --for 10 --present   # presence alone
 zenctl check probe host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --namespace prod  # as a consumer reads it
 
-# A producer against its own registry, as a JUnit report CI can read.
-zenctl check conform --producer sysinfo --registry /srv/registry --junit conform.xml
-
-# Prometheus: a scrape target (loopback by default; another address needs --i-know)…
-zenctl export --bind 127.0.0.1:9184 --validate --doctor-every 300
-# …or one fold for the node_exporter textfile collector.
-zenctl export --once --prom --for 10 > /var/lib/node_exporter/zenkey.prom.$$ \
-  && mv /var/lib/node_exporter/zenkey.prom.$$ /var/lib/node_exporter/zenkey.prom
+# One payload against a revision's type: 0 conforms, 1 does not, 2 not checked.
+zenctl check schema tc.netif.v1 'bandwidth/{ns}/{iface}' --from @sample.json --contracts .history
 
 # Conditions, as ndjson transitions (ok / firing / unobservable); --count bounds a run.
 zenctl watchdog --namespace prod --rule 'silent-for prod/zk2/host-a/tc/tc.netif.v1/stream/** 120' \
@@ -234,8 +233,8 @@ zenctl watchdog --namespace prod --rule 'silent-for prod/zk2/host-a/tc/tc.netif.
                 --rule 'instance-gone host-a/tc' --rule dropped --count 12
 zenctl doctor --transitions --every 60                 # check-id changes, not states
 
-# Why is this key silent? Each rung established, not established, or not asked.
-zenctl why 'prod/v1/h-3fa9c2d41b7e/state/sysinfo/health' --for 10
+# Where does resolution stop for a key? Each sample's rung, named.
+zenctl echo 'prod/zk2/host-a/tc/**' --namespace prod --format ndjson --count 5 | jq -c .identity
 ```
 
 `watchdog` and `doctor --transitions` print **changes**: the first evaluation
@@ -257,14 +256,13 @@ reach further than one concrete thing:
 | `pub` | a wildcard key (a blast radius, not a publication) | not overridable — name the key |
 | `pub` | a key a zk2 service owns (`…/zk2/<system>/<service>/…`): only the owner writes it (P3) | not overridable — act through `call` |
 | `pub --from ndjson`, `replay` | a put row on a wildcard key (refused and counted, exit 1) | not overridable |
+| `pub --from ndjson`, `replay` | a delete row: a tombstone on a key no contract describes is the operator's act (refused and counted, exit 1) | `--i-know` |
 | `pub --from ndjson` | a row on a key a zk2 service owns (refused and counted, exit 1) | not overridable |
 | `call` | a fan-out (a `*` in the address, or a template parameter not given) to an operation that does not declare `fanout = "allowed"` (spec §5.1 O2) | not overridable — call one address with every parameter |
 | `replay` | a zk2 service's own key replayed where it runs: as recorded, or into the namespace it was recorded in (refused and counted, exit 1) | `--namespace` of your own; or `--i-know` |
-| `config set` | a windowed (`--confirm`) change with no read-back, from a script | `--yes` |
 | `replay` | a capture whose base differs from the target's, or empty onto empty | `--force-base` (always `--dry-run` first) |
 | `gen`, `serve` | an address whose instance token is already present: a mock owner beside it would be a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6) | `--i-know` |
 | `gen`, `serve` | a contract's required role left unbound (R1: the runtime would not start the service) | `--bind ROLE=SYSTEM/SERVICE` |
-| `export` | a non-loopback `--bind` | `--i-know` |
 | `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
 | `record --on`, `watchdog` | a rule that judges v1 rather than zk2 (`origin-down` is `instance-gone` now; `alert-firing` waits for the alert profile, #613) | not overridable |
 | `call`, `bench call` | a JSON Schema request its type refuses: every violation named, nothing sent (spec §7.3, #671) | not overridable — send what the type declares |
@@ -328,79 +326,67 @@ key, so two namespaces compare as they are).
 **Act — write to the bus.**
 `zenctl call <address> <iface> <operation> [request]` (a zk2 operation,
 through its contract; a `*` or a parameter left out fans it out) · `zenctl pub
-<key> <body>` (a key no zk2 service owns, through a declared publisher,
-encoded against the served schema; `--from ndjson` reads `echo`'s rows back)
-· `zenctl config
-get|set|confirm|cancel|extend|persist` (a producer's live configuration, typed
-against its served schema, with confirmed changes driven to their end) ·
-`zenctl gen <address> [iface…] --contracts <dir>` (a mock owner: a real zk2
+<key> <body>` (a key no zk2 service owns, through a declared publisher, the
+bytes as typed on the QoS axes you name; `--from ndjson` reads `echo`'s rows
+back) · `zenctl gen <address> [iface…] --contracts <dir>` (a mock owner: a real zk2
 service at the address you name, publishing every stream, state and event
 member through the runtime's writers and answering every operation, its
 descriptor marked synthetic) · `zenctl serve <address> <iface> <operation>
-[reply]` (a mock owner of one operation, every call logged) · `zenctl blob locate|fetch` (bulk content: who holds it,
-and a verified fetch from one origin; `zenctl blob list` reads only the
-registry).
+[reply]` (a mock owner of one operation, every call logged).
 
 **Judge — exit-coded.**
 `zenctl check expect <address> <iface> [resource]` (an expectation over a
 window: samples, rates, values against their type, the declared QoS,
-presence) · `zenctl check cutover` (the old key family silent while the new
-one speaks) · `zenctl check probe <address> <iface> <resource>` (a resource
+presence) · `zenctl check probe <address> <iface> <resource>` (a resource
 read the way a consumer reads it: did a value arrive, and if not, who was up
-and silent) ·
-`zenctl check retired` (which `[[deprecated]]` subjects are actually gone) ·
-`zenctl check conform` (a producer's registry as a conformance suite) ·
-`zenctl check schema <iface> <resource> --from …` (one payload against a
-type of a revision) · `zenctl doctor` (a
-zk2 deployment against the core, one verdict per check) · `zenctl why <key>`
-(why it is silent)
-· `zenctl watchdog --rule …` (conditions, as transitions) · `zenctl export`
-(the bus and its contract as Prometheus metrics, the observer's own blind spots
-included).
+and silent) · `zenctl check schema <iface> <resource> --from …` (one payload
+against a type of a revision) · `zenctl doctor` (a zk2 deployment against the
+core, one verdict per check) · `zenctl watchdog --rule …` (conditions, as
+transitions).
 
 **Router configuration — generated, then checked.**
-`zenctl storage list` (configured storages, and which declared state they
-cover) · `zenctl storage gen --deployment storages.toml --json5` (the
-`plugins.storage_manager` block, lifespans derived from the registry's
-`ttl_s`; `--check` compares a live router) · `zenctl acl gen --enrollment
+`zenctl storage list` (the storages the routers' admin space reports) ·
+`zenctl storage gen --deployment storages.toml --json5` (the
+`plugins.storage_manager` block, each storage's selector under the namespace,
+`strip_prefix` derived; `--check` compares a live router) · `zenctl acl gen --enrollment
 enroll.toml --contracts <dir> --json5` (zk2's `access_control` block,
 compiled from the contracts and the enrollment's principals, bindings and
 calls; `--check` compares a router's config file).
 
 **The tool itself.**
 `zenctl context …` (named connection contexts, above) · `zenctl cache
-show|refresh|clear` (the slice cache behind completion) · `zenctl completions
+show|refresh|clear` (the name cache behind completion) · `zenctl completions
 <shell>` · `zenctl bench call` (an operation's reply latency, per replier key).
 
 > **The command tree moved (#307).** `topic echo` → `echo`, `topic pub` →
-> `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
-> retired`/`schema check` → `check …`, `blob probe` → `blob locate`; every
-> observation window is `--for <SECS>`; `why` exits 1 on a finding, and a
-> refused input exits 2 everywhere. No aliases, no shims — the old spellings
-> are gone. FJ4 (#612) moved v1's registry nouns the same way — `topic`,
-> `node`, `base`, `interface` and `registry` → zk2's `service`, `iface`,
-> `schema`, `namespace`, `graph` and `compat`; FJ5 replaced `service call`
-> with zk2's `call`, added `get state` and `watch`, and dropped `retire`; FJ6
-> re-cut `doctor` for zk2, its registry diff now `check conform`'s; FJ8b
-> re-cut the observers and the checks (`echo`, `rate`, `field`, `timeline`,
-> `snapshot`, `check expect|schema|probe`, `watchdog`) over zk2 keys.
+> `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`probe`/`schema check` →
+> `check …`; every observation window is `--for <SECS>`, and a refused input
+> exits 2 everywhere. No aliases, no shims — the old spellings are gone. FJ4
+> (#612) moved v1's registry nouns the same way — `topic`, `node`, `base`,
+> `interface` and `registry` → zk2's `service`, `iface`, `schema`,
+> `namespace`, `graph` and `compat`; FJ5 replaced `service call` with zk2's
+> `call`, added `get state` and `watch`, and dropped `retire`; FJ6 re-cut
+> `doctor` for zk2; FJ8b re-cut the observers and the checks (`echo`, `rate`,
+> `field`, `timeline`, `snapshot`, `check expect|schema|probe`, `watchdog`)
+> over zk2 keys; FJ9 removed what was left of v1 — `why`, `check
+> cutover|retired|conform`, `config`, `blob`, `export` and `--registry`.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
-## Two registry sources, kept visibly apart
+## Two contract sources, kept visibly apart
 
-| | Answers from | Works when the fleet is down | Tells you |
+| | Answers from | Works when the deployment is down | Tells you |
 |---|---|---|---|
-| **`--registry <dir>`** | local registry files — `*.toml`, or `*.kdl` (RFC 08 §5.1) | yes | what *should* exist (declared) |
-| **the bus** (default) | each producer's served introspect slice | no | what *does* exist (served) |
+| **`--contracts <path>`** | authoring files (`*.toml`), a directory of them, or a `.history` root | yes | what a revision *declares* |
+| **the bus** (default) | the revision each descriptor names, its bundle retrieved from its holders by fingerprint (spec §8.4) | no | what *is* served |
 
-The gap between those two is where drift lives, and `check conform
---registry` is the command that reports it. These are the v1 verbs' sources;
-zk2's are below.
+A revision held in `--contracts` is never retrieved, and a question it
+answers alone opens no session. Where two providers serve revisions that
+disagree, `doctor`'s `contract-drift` says so; `compat` classifies any two.
 
 ## zk2 inspection
 
-The zk2 nouns (#612, FJ4) read no registry slice at all. A zk2 service holds
+The zk2 nouns (#612, FJ4) read zk2's own sources. A zk2 service holds
 an **instance token** and one **interface token** per interface it provides
 (spec §8.1), and serves a **descriptor** (§3.3) naming each interface's full
 contract fingerprint, its tokenless set and its roles' bindings; a contract
@@ -422,7 +408,7 @@ zenctl graph --namespace acme --dot | dot -Tsvg > graph.svg     # the binding gr
 zenctl compat tc.netif.v1 tc.netif.v1.toml --namespace acme     # 0 compatible, 1 review or breaking, 2 no verdict
 ```
 
-Three honesty rules carry over from v1 and have a place in every report:
+Three honesty rules have a place in every report:
 a presence read that ran to its timeout says it is **possibly incomplete** (a
 service missing from it may still be up); a token and a descriptor are **two
 sources** and stay side by side, so "tokenless" (configured) and "no token"
@@ -451,8 +437,10 @@ zenctl replay bus.zrec --namespace replay                           # stand in f
 
 **`get` has two forms, and they cannot be confused.** `zenctl get
 <SELECTOR>` is **raw**: any key expression, on a session in no namespace, so
-the selector is the wire key exactly (`acme/zk2/host-a/tc/…`, `v1/…`,
-`@/**`), on any bus. `zenctl get state <ADDRESS> <IFACE> <STATE>` is
+the selector is the wire key exactly (`acme/zk2/host-a/tc/…`, `plant/…`,
+`@/**`), on any bus, and each reply is resolved as `echo` resolves a sample:
+a zk2 key decoded as its declared type, a foreign one rendered structurally.
+`zenctl get state <ADDRESS> <IFACE> <STATE>` is
 **resolved**: a subcommand — the raw form's flags do not reach it — that
 reads one zk2 state resource of one owner through its contract, in the
 deployment's namespace. The first asks the wire what it holds; the second
@@ -493,26 +481,22 @@ zenctl namespace list -c tcp/127.0.0.1:7447  # discover zk2 namespaces (needs no
 zenctl service list --namespace acme    # zk2 services: instances, tokens, descriptors
 zenctl graph --namespace acme           # the binding graph (--dot for Graphviz)
 zenctl echo --namespace acme            # subscribe + decode (defaults to <ns>/zk2/**)
-zenctl storage list --base acme --watch --every 5  # poll+diff; +/- marks
+zenctl storage list --watch --every 5   # poll+diff; +/- marks
 zenctl rate --namespace acme --per-key  # rates by zk2 resource, then per key; --bytes for bandwidth
 zenctl call '*/tc' tc.netif.v1 diagnostics --namespace acme   # a zk2 fan-out (fanout = "allowed" only)
 zenctl get state host-a/tc tc.netif.v1 namespaces --namespace acme   # a zk2 owner's current state
 zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace acme   # zk2 samples, decoded
-zenctl get 'acme/v1/*/state/**'         # fan-in GET on any selector, replies attributed
+zenctl get 'acme/zk2/*/*/*/state/**' --namespace acme   # fan-in GET on any selector, replies attributed and decoded
 zenctl get '@/**'                       # …including the zenoh admin space (was: admin get)
 zenctl pub k '{"v":1}' --attachment meta        # attachments ship and render (#117)
 zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
-zenctl serve 'demo/mock/**' '{"ok":1}'  # mock queryable; logs every ask (who queries this key?)
-zenctl key intersects 'v1/**' 'v1/h-1/@rpc/p/x'  # keyexpr algebra, no session; cites D2/D4 on a convention-shaped no
+zenctl serve host-a/tc tc.netif.v1 diagnostics @reply.json --contracts tc.netif.v1.toml   # a mock owner of one operation; logs every call
+zenctl key intersects 'zk2/**' 'zk2/host-a/cam/video.v1/@stream/frames'  # keyexpr algebra, no session; cites D2/D4 on a no
 zenctl echo --format ndjson > f         # …and back: zenctl pub --from ndjson < f (one row shape, both directions)
-zenctl record --base acme -o bus.zrec --for 10  # capture: same row shape + header + pacing + in-file drop ledger
+zenctl record --namespace acme -o bus.zrec --for 10  # capture: same row shape + header + pacing + in-file drop ledger
 zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
-zenctl storage list --base acme         # declared state subjects vs storage coverage
-zenctl blob list --base acme            # who declares which @blob tier (registry only)
-zenctl blob locate 01jqz3demo0001       # who *holds* it, and at which content root
-zenctl blob fetch 01jqz3demo0001 --origin h-3fa9 --root <hex> -o bundle.bin
 zenctl doctor --namespace acme          # thirteen checks; 1 on a finding, 2 if one could not be judged
 zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
@@ -540,10 +524,10 @@ Both machine formats carry the same values, differently packaged:
   kind of row it is:
 
 ```console
-$ zenctl storage list --base acme --format ndjson
+$ zenctl storage list --format ndjson
 {"report":"storage-list","notes":[…]}
-{"row":"storage","name":"main","zid":"…"}
-{"row":"coverage","producer":"sysinfo","path":"health","coverage":"covered"}
+{"row":"storage","name":"events","zid":"…"}
+{"row":"storage","name":"timeseries","zid":"…"}
 ```
 
 `jq -c 'select(.row)'` takes the rows, `select(.report)` the envelope. The
@@ -565,10 +549,11 @@ out", which is not a document — and the empty stdout is what lets `zenctl echo
 --format ndjson | zenctl pub --from ndjson` compose. Everything it says goes
 to stderr.
 
-**`--as` and `--dot` are neither, because they are somebody else's schema.**
-`--format` selects among zenctl's own three renderings of a report; `registry
-export --as toml|jsonschema|asyncapi` and `admin graph --dot` emit a foreign
-document, and their stability is whatever the format's own specification says.
+**`--dot` and `--json5` are neither, because they are somebody else's schema.**
+`--format` selects among zenctl's own three renderings of a report; `graph
+--dot`, `admin graph --dot`, `storage gen --json5` and `acl gen --json5` emit a
+foreign document, and their stability is whatever the format's own
+specification says.
 The two are mutually exclusive: typing both is a usage error naming both flags,
 rather than a `--format` that is accepted and then ignored. An exported
 `ZENCTL_FORMAT` is a preference, not a request, and does not conflict with
@@ -582,37 +567,12 @@ envelopes rendered as errors, and exit codes scripts can branch on (0 values,
 the one verb where multicast is on by default — it only listens, and an empty
 result names the boundary it heard.
 
-`pub` **encodes** a JSON body against the producer's served schema, and
-those encoded bytes are what goes on the wire, labelled with the declared
-`Encoding` (zk2's `call` encodes through the contract instead, above). Publishing to a subject that declares `application/protobuf`
-therefore puts protobuf on the bus, not the JSON you typed; `echo`
-decodes it back through the same descriptor set.
-
-A body the schema cannot encode is refused before it touches the bus.
-
-The three `blob` commands cost three very different things, and the surface
-says which is which. `list` reads registry slices and touches no data plane:
-it answers "who *declares* a tier", which is a capability claim and never
-possession. `locate` fans two tiny GETs (`have`, `manifest`) across origins —
-RFC 07 §2.5's sanctioned form — and reports every holder with its own concrete
-key. `fetch` moves bytes from exactly one of them, at **data-low** priority
-(§2.6), verifying each reply against the content root **before disk** (§2.1).
-
-`--origin` is required and takes one concrete origin; `RemoteOrigin::parse`
-rejects `*`, so a wildcard-origin bulk fetch has no spelling here. A tier-1
-fetch also requires `--root <hex>` or an explicit `--allow-unpinned`: §2.1 says
-a reference must carry the identity of the bytes it names, and an operator
-typing an id by hand has no reference — so trust-on-first-use is a decision
-made out loud, and the report says which one you made.
-
-Two holders answering one id at two different roots is a **finding**, not a
-tie-break. `locate` prints both and refuses to choose; the root you pin is what
-the fetch will accept.
-`--no-validate` drops the refusal (the body ships as typed, with a note);
-`--raw` skips the schema lookup entirely and sends the bytes verbatim. A
-producer serving no schema validates nothing — silence is not a verdict about
-the type, and the tool says which of the three cases happened rather than
-letting them look alike.
+`pub` sends the bytes you give, as typed, labelled with the `--encoding` you
+name (none by default) and on the QoS axes you name (`--qos
+priority/congestion/reliability[+express]`, zenoh's `data/drop/reliable` by
+default; the choice is printed either way). It writes only keys no zk2
+service owns: a zk2 resource is its owner's to write (P3), and a tool acts on
+it through `call`, which encodes the request through the contract.
 
 `pub` also prints a matching note ("a subscriber currently matches …")
 — a routing fact about *this* publisher, never a fleet verdict.
@@ -621,10 +581,10 @@ letting them look alike.
 protocol (spec §8.1), zero payload bytes: the token *key* is the record, and
 the descriptor is one GET per instance.
 
-`echo` walks wire key → subject → payload type → value with nothing
-compiled in: the registry slices bind one payload type per subject (P5), and
-the value renders generically (JSON, CBOR→JSON diagnostic, text, or hex —
-tagged with the declared type name).
+`echo` walks wire key → zk2 address and resource → the revision its
+descriptor names → the contract's declared type → value, with nothing
+compiled in. Where the ladder stops, the rung is named, and the value renders
+structurally (JSON, CBOR→JSON diagnostic, text, or hex).
 
 `schema show <iface>` prints a contract revision's schema artifacts from its
 bundle (spec §9.5), verified against the revision's fingerprint: a JSON
@@ -636,13 +596,14 @@ Schema as carried, a protobuf descriptor set as its messages and enums.
 source <(zenctl completions bash)      # zsh, fish, elvish, powershell too
 ```
 
-The script is **dynamic**: it calls back into `zenctl`, so producer, type,
-procedure and key candidates come from the cached registry of the active
-context. Completion never opens a session — a `<TAB>` cannot hang on a fleet
-that is down — and with no cache it degrades to the static command tree.
+The script is **dynamic**: it calls back into `zenctl`, so service address,
+interface and namespace candidates come from the name cache of the active
+context. Completion never opens a session — a `<TAB>` cannot hang on a
+deployment that is down — and with no cache it degrades to the static command
+tree.
 
-Any command that loads slices fills the cache; `zenctl cache show|refresh|clear`
-makes it visible, current, or gone. The names are from the last sighting, not
+Any presence read (and `namespace list`) fills the cache; `zenctl cache
+show|refresh|clear` makes it visible, current, or gone. The names are from the last sighting, not
 a live inventory. `--static` emits the old self-contained script.
 
 ## `bench call` — how fast, and *which replier* is slow
@@ -719,8 +680,8 @@ left to read 2: not asked neither passes nor fails. `--check` asks one alone,
 and `--transitions` re-runs and prints only what changed.
 
 The v1 doctor — `introspect` fanned across the fleet and diffed against the
-`--registry` TOMLs (RFC 08 §6) — is `check conform`'s now, producer by
-producer.
+`--registry` TOMLs (RFC 08 §6) — left `main` with `check conform` at FJ9; the
+`v1` branch keeps both.
 
 ## `acl gen` — access control from the contracts
 
@@ -759,14 +720,15 @@ dropped: exit 1. Regenerate on every contract revision (§11.2).
 ## Things it will not do, on purpose
 
 - **Silence is never a verdict.** RFC 05 §3.1: an empty reply set conflates an
-  offline host, a mistyped origin, and a procedure that is not served. `service
-  call` says so rather than guessing; presence (`service list`) is what
+  offline host, a mistyped address, and an operation that is not served.
+  `call` says so rather than guessing; presence (`service list`) is what
   attributes it.
 - **Errors are never dressed up as success.** RFC 05 §3: a value reply always
   means success, a failure always rides `reply_err`. An error reply goes to
   stderr with its `error/...` name.
-- **No namespace.** RFC 09 §5: debug tools run *without* the session namespace
-  and spell full keys — "the honest view of what is on the wire".
+- **No namespace on a raw verb.** RFC 09 §5: a raw observer runs *without* the
+  session namespace and spells full keys — "the honest view of what is on the
+  wire". The resolved verbs open theirs in the deployment's, and say so.
 - **No scouting, and not a peer**, unless you ask — see
   [Session posture](#session-posture). A scouting explorer joins whatever mesh
   it can find, which is how a throwaway session ends up talking to a
@@ -776,8 +738,8 @@ dropped: exit 1. Regenerate on every contract revision (§11.2).
   about their contents. But a zk2 contract's bundle **carries** its shapes
   (spec §9.5), so `zenctl schema show <iface>` prints carried data rather
   than sending you to the application's source. (This bullet used to say the
-  opposite; it predated RFC 08 §7's served `describe`, which v1's
-  `check schema` still reads.) A raw type renders as its media type — the
+  opposite, before contracts carried their shapes.) A raw type renders as its
+  media type — the
   contract says its bytes are not a tool's to read.
 
 ## Fan-in discipline
@@ -791,9 +753,10 @@ requirements fail *silently* when forgotten:
 - **consolidation = None** — default consolidation keeps one reply per reply key;
 - **attribution by the reply's own concrete key**, never by the key we asked on.
 
-Note `*` in the origin position can never match a verbatim service origin
-(design property D4), so `@catalog` is always asked for by name. That is the
-grammar working, not an exception to it.
+Note `**` never crosses an `@`-chunk (design properties D2/D4), so a raw
+selector like `<ns>/zk2/**` cannot see the `@zk`, `@stream` or `@op` subtrees:
+name the chunk to ask for one. That is the grammar working, not an exception
+to it.
 
 ## License
 

@@ -3,7 +3,7 @@
 //!
 //! The graph is read from descriptors and interface tokens only, never
 //! inferred from traffic (R3): an edge is a binding that matches a provider
-//! present now, which is what [`zk2::presence::edges`] computes and what the
+//! present now, which is what [`zenkey::presence::edges`] computes and what the
 //! `edges` below are. A role whose bindings match nothing has no edge, and
 //! stays visible on its node — whether that is a finding is `doctor`'s
 //! question (binding-unsatisfied, FJ6), not this document's.

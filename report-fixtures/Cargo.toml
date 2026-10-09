@@ -4,7 +4,7 @@
 # render tests pin how those same values are *drawn*. One set of constructors
 # so a field added to a report breaks one place, and both corpora then re-run
 # against the same thing — which is the only way the two stay in agreement
-# about what a `TopicList` is.
+# about what a report is.
 [package]
 name = "zenkey-report-fixtures"
 publish = false
@@ -14,29 +14,11 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-# `default-features = false`, deliberately, and this is not tidiness.
-#
-# `.forgejo/workflows/ci.yml` runs `cargo bench -p zenkey-fleet
-# --no-default-features --no-run`, and **benches build dev-dependencies**. A
-# fixtures crate that requested any zenkey-fleet feature would feature-unify
-# into that build and silently defeat the #204 gate: `[[bench]]
-# required-features = ["decode"]` exists precisely so that build *skips* the
-# bench, and that skip path is the thing being exercised. Nothing here needs a
-# feature — `report.rs` has no `cfg(feature)` gates and `Coverage` lives in the
-# ungated `admin` module — so nothing here asks for one. Do not `cargo add`
-# your way out of this comment.
-# Not `workspace = true`: the workspace entry cannot be told to drop its
-# default features, and dropping them is the whole point of the paragraph
-# above.
-zenkey-fleet = { path = "../zenkey-fleet", default-features = false }
+# Not `workspace = true`: the workspace entry pins the crates.io 0.18.0 that
+# zengui and zenwatch build against (#614); these fixtures are the in-tree
+# engine's.
+zenkey-fleet = { path = "../zenkey-fleet" }
 serde_json = { workspace = true }
-# The two-deployment snapshot pairs (#220) carry per-origin `host_id`s in
-# their health documents; a payload built per origin has to be encoded, and
-# a hand-rolled encoder would be a second base64. Not a feature request.
-base64 = { workspace = true }
-# `HostId::parse` for the explicit pairs, and nothing that needs the zenoh
-# stack — same discipline as the line above: no default features.
-zenkey = { version = "=0.11.1", default-features = false }
 # The ACL plan's contract (#612, FJ7), loaded from its authoring text so the
 # plan is the planner's own. The model crate is session-free: it requests no
 # feature of zenkey-fleet and pulls no zenoh session.

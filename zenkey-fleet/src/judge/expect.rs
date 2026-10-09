@@ -353,7 +353,7 @@ pub async fn run_expect(
         address: target.address.clone(),
         iface: revision.iface().to_string(),
         fingerprint: revision.fingerprint().to_string(),
-        resource: resource.map(zk2::implementation::resource_name),
+        resource: resource.map(zenkey::implementation::resource_name),
         selectors,
         window_s,
         ended_early,

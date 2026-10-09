@@ -349,7 +349,7 @@ pub fn lens_unread_note(reason: &str) -> crate::render::Note {
 /// The default wire selector of a raw observer: the deployment's zk2 data,
 /// `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (O5).
 pub fn default_selector(namespace: &str) -> String {
-    zenkey::grammar::with_base(namespace, "zk2/**")
+    zenkey_fleet::with_namespace(namespace, "zk2/**")
 }
 
 /// A typed wire selector through the raw seam, with the hint for a
@@ -359,13 +359,13 @@ pub fn wire_selector(typed: Option<&str>, namespace: &str) -> Result<String> {
         return Ok(default_selector(namespace));
     };
     let s = super::raw_selector(s)?;
-    if !namespace.is_empty() && zenkey::grammar::strip_base(namespace, s).is_none() {
+    if !namespace.is_empty() && zenkey_fleet::strip_namespace(namespace, s).is_none() {
         let first = s.split(['/', '?']).next().unwrap_or_default();
         if first == "zk2" {
             eprintln!(
                 "hint: {s:?} does not sit under namespace {namespace:?} — selectors are wire \
                  keys; did you mean {:?}?",
-                zenkey::grammar::with_base(namespace, s)
+                zenkey_fleet::with_namespace(namespace, s)
             );
         }
     }

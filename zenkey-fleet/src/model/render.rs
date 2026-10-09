@@ -153,7 +153,7 @@ pub fn render_with(
         return fallback(Unresolved::NoResource { fingerprint });
     };
     let r = candidates[i];
-    let resource = zk2::implementation::resource_name(r);
+    let resource = zenkey::implementation::resource_name(r);
     let Some(ty) = decode::type_of(
         revision.bundle(),
         kind.as_str(),
@@ -198,7 +198,7 @@ pub fn render_resource(
     bytes: &[u8],
 ) -> PayloadRendering {
     let fingerprint = revision.fingerprint().to_string();
-    let resource = zk2::implementation::resource_name(r);
+    let resource = zenkey::implementation::resource_name(r);
     let Some(ty) = decode::type_of(
         revision.bundle(),
         r.token.as_str(),
@@ -275,7 +275,7 @@ pub fn render_detail(
         },
         (None, detail) => {
             let why = Unresolved::NoMember {
-                resource: zk2::implementation::resource_name(r),
+                resource: zenkey::implementation::resource_name(r),
                 member: Member::Error.as_str().to_owned(),
             };
             match detail {

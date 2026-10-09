@@ -10,48 +10,48 @@ like the human one.
 A plain yes, both ways round:
 
 ```console
-$ zenctl key includes --format table 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
-yes — v1/** includes every key v1/h-3fa9c2d41b7e/state/sysinfo/health names
+$ zenctl key includes --format table 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/state/namespaces'
+yes — prod/zk2/** includes every key prod/zk2/host-a/tc/tc.netif.v1/state/namespaces names
 
-$ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/state/sysinfo/health'
-{"a":"v1/**","answer":true,"b":"v1/h-3fa9c2d41b7e/state/sysinfo/health","op":"includes","report":"key-relation"}
+$ zenctl key includes --format ndjson 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/state/namespaces'
+{"a":"prod/zk2/**","answer":true,"b":"prod/zk2/host-a/tc/tc.netif.v1/state/namespaces","op":"includes","report":"key-relation"}
 
 ```
 
 A "no" the convention explains rather than merely reports: `**` never crosses an
-`@`-chunk (RFC 03 §4 D2). That is the rule that puts the verbatim planes out of
-reach of a firehose scope — and the reason the roster has to name `@catalog`
-itself. The note rides in both formats, because a script deserves the reason
-too.
+`@`-chunk (RFC 03 §4 D2). That is the rule that puts zk2's verbatim chunks —
+`@stream`, `@state`, `@op`, `@zk`, `@adv` — out of reach of a firehose scope,
+and the reason a raw observer names one to see it. The note rides in both
+formats, because a script deserves the reason too.
 
 ```console
-$ zenctl key includes --format table 'v1/**' 'v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect'
+$ zenctl key includes --format table 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics'
 ? 1
-no — v1/** does not include all of v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect
+no — prod/zk2/** does not include all of prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics
 note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.
 
-$ zenctl key includes --format ndjson 'v1/**' 'v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect'
+$ zenctl key includes --format ndjson 'prod/zk2/**' 'prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics'
 ? 1
-{"a":"v1/**","answer":false,"b":"v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
+{"a":"prod/zk2/**","answer":false,"b":"prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics","note":"note: `**` never crosses an `@`-chunk (zenoh verbatim semantics; RFC 03 §4 D2) — this 'no' is the convention's doing, not a typo. Name the `@`-chunk explicitly to reach past it.","op":"includes","report":"key-relation"}
 
 ```
 
 `intersects` is the weaker question, and answers it separately:
 
 ```console
-$ zenctl key intersects --format table 'v1/*/state/**' 'v1/**/health'
-yes — v1/*/state/** and v1/**/health can name a common key
+$ zenctl key intersects --format table 'prod/zk2/*/*/*/state/**' 'prod/zk2/**/namespaces'
+yes — prod/zk2/*/*/*/state/** and prod/zk2/**/namespaces can name a common key
 
 ```
 
 Canonicalisation, both answers:
 
 ```console
-$ zenctl key canon --format table 'v1/**/a/**'
-v1/**/a/** is already canonical
+$ zenctl key canon --format table 'zk2/**/a/**'
+zk2/**/a/** is already canonical
 
-$ zenctl key canon --format table 'v1/**/**/a'
-v1/**/a
+$ zenctl key canon --format table 'zk2/**/**/a'
+zk2/**/a
 
 ```
 
@@ -71,11 +71,11 @@ it settled on this half — because clap owns 2 for user input and cannot be
 argued with, so everything else joined it.
 
 ```console
-$ zenctl key includes --format table 'v1/**a' 'v1/a'
+$ zenctl key includes --format table 'zk2/**a' 'zk2/a'
 ? 2
-the first expression does not parse: Invalid Key Expr `v1/**a`: `*` may only be preceded by `/` or `$`
+the first expression does not parse: Invalid Key Expr `zk2/**a`: `*` may only be preceded by `/` or `$`
 
-$ zenctl key includes 'v1/**'
+$ zenctl key includes 'zk2/**'
 ? 2
 error: the following required arguments were not provided:
   <B>

@@ -11,15 +11,13 @@
 //!
 //! ## Where it lives, and who includes it
 //!
-//! One file, two crates. `zenkey-fleet/tests/config_lifecycle.rs` includes it
-//! by `#[path]` for the engine-level lifecycle test, and `zenctl/tests/live.rs`
-//! includes the *same file* by a `#[path]` that reaches across the workspace
-//! for the binary-level cases. Both test crates already depend on everything
-//! it names (`zenkey` with `serde`, `zenkey_fleet`, `zenoh`, `tokio`,
-//! `serde_json`), so sharing costs one attribute; a copy in each would be two
-//! servers free to disagree about the wire, which is the one thing a double
-//! must not do. A published `testkit` module was the other option, and it
-//! would have put a fake producer in a crate's public API.
+//! zengui alone, since #612's FJ9 deleted `config` from `main`'s zenctl and
+//! the v1 engine: its `spray` example and its app tests include this file by
+//! `#[path]`, and build it against the v1 engine they pin from crates.io
+//! (`zenkey-fleet =0.18.0`, `zenkey =0.11.1`) until #614 re-targets zengui.
+//! Nothing in this crate compiles it any more; it stays here so zengui's
+//! paths do not move, and leaves with zengui's port. The `v1` branch keeps
+//! the engine's lifecycle test and zenctl's live cases that drove it.
 //!
 //! ## What it does
 //!

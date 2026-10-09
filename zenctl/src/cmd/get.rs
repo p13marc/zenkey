@@ -8,18 +8,24 @@
 //!
 //! A plain fan-in GET: target `All`, consolidation `None`, every reply
 //! attributed by its own key (RFC 05 §2.1), error envelopes rendered as
-//! errors (RFC 05 §3) — through `zenkey_fleet::fleet_get`, never the
-//! JSON-lossy admin browse. Payloads ride the same rendering ladder as
-//! `echo`: served-schema decode → structural → text → hex.
+//! errors — through `zenkey_fleet::fleet_get`, never the JSON-lossy admin
+//! browse. Each reply is resolved through the same lens `echo` reads a
+//! sample through (#612, FJ9): the deployment in `--namespace`, its
+//! presence read, the contract each descriptor names. A zk2 key's payload
+//! is decoded as its declared type and a JSON Schema value checked against
+//! it; where the ladder stops, the rung is named; a foreign key renders
+//! structurally. v1's served-schema ladder left with the v1 registry.
 
 use anyhow::Result;
 use zenkey_model::authoring::Kind;
 
 use super::sample::{
-    self, SampleLine, attachment_display, attachment_json, format_sample, hex, type_tag,
+    Line, Payload, SampleLine, attachment_display, attachment_json, format_sample, hex,
 };
-use crate::Bus;
-use zenkey_fleet::{Answer, FleetAnswer};
+use crate::bus::Deployment;
+use crate::cmd::zk2;
+use zenkey_fleet::report::Conformance;
+use zenkey_fleet::{Answer, FleetAnswer, Lens};
 
 /// The reply discipline as an exit code: 0 = value replies only, 1 = at
 /// least one error envelope, 2 = silence (which is still not a verdict —
@@ -38,8 +44,8 @@ fn exit_code(answers: &[FleetAnswer]) -> i32 {
 }
 
 pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
+    let dep = Deployment::resolve(&cli.ns)?;
+    let contracts = zk2::load_contracts(&cli.contracts)?;
     let crate::cli::GetArgs {
         selector,
         body,
@@ -48,195 +54,142 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         fmt,
         no_decode,
         cmd: _,
-        bus: _,
+        contracts: _,
+        ns: _,
     } = cli;
     // Clap requires it whenever `state` is not given.
     let selector = selector.ok_or_else(|| crate::exit::unaskable!("a selector is required"))?;
-    let (selector, body, fmt) = (selector.as_str(), body.as_ref(), fmt.as_deref());
-    // The raw seam: `$*` never reaches the session (RFC 03 §2).
-    let selector = super::raw_selector(selector)?;
-    // `v1/…` under a non-empty base answers nothing; say so once (#512).
-    super::hint_off_base(selector, args);
-    let base = args.base().to_string();
-    // Slices enrich: they name each key's payload type, and without them the
-    // decode ladder falls to its structural rung — which is exactly what
-    // `--raw` asks for on purpose. A registry that will not answer must not
-    // cost the user the samples themselves (#210). `None` stays `None` into
-    // the ladder, so a row's verdict reads `no registry loaded` rather than
-    // claiming `no schema served` about types nobody looked up
-    // (RFC 09 §5.1 O4; #246).
-    let slices = if raw {
+    let namespace = dep.namespace().to_owned();
+    // The raw seam (`$*` never reaches the session, RFC 03 §2), and the
+    // one-line hint for a base-relative `zk2/…` typed under a namespace.
+    let selector = zk2::wire_selector(Some(&selector), &namespace)?;
+    let payload = body.as_ref().map(crate::input::Source::read).transpose()?;
+
+    // The lens before the GET: presence and the revisions it names, read in
+    // the namespace — unless nothing is to be decoded, which asks nothing
+    // of it.
+    let store = zk2::store(&dep, &contracts);
+    let structural_only = raw || no_decode;
+    let catalog = if structural_only {
         None
     } else {
-        args.slices_optional().await?
+        let ns_session = dep.session().await?;
+        zk2::read_lens(&dep, &ns_session, &store).await
     };
-    let store = zenkey_fleet::SchemaStore::new(&base, args.timeout());
-    let session = args.session().await?;
+    let lens = Lens::new(&namespace, catalog.as_ref(), &store).offline(&contracts);
 
-    // Optional query body, riding the same encode ladder as `pub`:
-    // when the selector's key part refines to a registered subject the
-    // served schema encodes it; otherwise it ships as typed, with the note.
-    let payload = match body {
-        None => None,
-        Some(b) => {
-            let typed = b.read()?;
-            let key_part = selector.split('?').next().unwrap_or(selector);
-            let prepared = zenkey_fleet::prepare_publish(
-                &args.fleet(&session),
-                &store,
-                slices.as_ref(),
-                key_part,
-                zenkey_fleet::PrepareSpec {
-                    declared_encoding: None,
-                    body: &typed,
-                    mode: super::publish::mode(raw, false),
-                },
-            )
-            .await?;
-            if let Some(note) = &prepared.note {
-                eprintln!("note: {note}");
-            }
-            if let zenkey_fleet::BodySource::Encoded { type_name } = &prepared.source {
-                eprintln!(
-                    "encoded {} bytes as {type_name} → {}",
-                    prepared.bytes.len(),
-                    prepared.encoding.as_deref().unwrap_or("(no encoding set)")
-                );
-            }
-            Some(prepared.bytes)
-        }
-    };
-
-    let fleet = args.fleet(&session);
+    // The GET itself, on a session in no namespace: the wire key as typed.
+    let session = dep.link().session().await?;
     // Named, because the reply bound's *cost* rides on the options that state
     // it (#339): a GET that read only some of the replies must say so, or the
     // rendering claims a fan-in it did not have (RFC 13 §3 O6).
-    let opts = zenkey_fleet::GetOpts::new(args.timeout()).payload(payload);
-    let answers = zenkey_fleet::fleet_get(&fleet, selector, &opts).await?;
+    let opts = zenkey_fleet::GetOpts::new(dep.timeout()).payload(payload);
+    let answers = zenkey_fleet::fleet_get(&session, &selector, &opts).await?;
     let elided = opts.elided();
 
-    let secs = args.timeout().as_secs_f64();
+    let secs = dep.timeout().as_secs_f64();
     // A fan-in GET *looks* like a stream and is not: it waits for the window,
     // then has every answer in hand. So it is a document, and the one place
-    // that decides which format to print it in is `emit` (#198). The decode
-    // that builds a row is async, which is why the rows are built here beside
-    // the session and rendered there.
-    if crate::render::Mode::of(args.format()).machine() {
-        let mut rows = Vec::with_capacity(answers.len());
-        for a in &answers {
-            rows.push(row(a, &fleet, &store, slices.as_ref(), raw, no_decode).await);
-        }
+    // that decides which format to print it in is `emit` (#198).
+    if crate::render::Mode::of(dep.format()).machine() {
+        let rows = answers
+            .iter()
+            .map(|a| row(a, &lens, raw, structural_only))
+            .collect();
         let report = crate::render::GetReport {
-            selector: selector.to_string(),
+            selector: selector.clone(),
             timeout_s: secs,
             elided,
             answers: rows,
         };
-        crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+        crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     } else {
-        {
-            let mut n = 0usize;
-            for a in &answers {
-                match &a.answer {
-                    Answer::Error { name, message } => {
-                        println!("{}: ✗ {name} — {message}", a.origin);
-                    }
-                    Answer::Value(payload) => {
-                        n += 1;
-                        let bytes = payload.to_bytes();
-                        let encoding = a.encoding.as_deref();
-                        if raw {
-                            println!("{}\n  [{}] {}", a.key, a.origin, hex(&bytes));
-                            if let Some(att) = &a.attachment {
-                                println!("  attachment: {}", hex(&att.to_bytes()));
-                            }
-                            continue;
-                        }
-                        let d = sample::decode(
-                            &fleet,
-                            &store,
-                            slices.as_ref(),
-                            &a.key,
-                            encoding,
-                            &bytes,
-                            no_decode,
-                        )
-                        .await;
-                        let type_name = d.type_name;
-                        if hex_payload {
-                            // The tag names the type; bytes at the user's
-                            // request are not a failed decode — no `?`.
-                            let tag = type_tag(type_name.as_deref(), true);
-                            println!("{}\n  [{}] {tag} {}", a.key, a.origin, hex(&bytes));
-                            if let Some(att) = &a.attachment {
-                                println!("  attachment: {}", hex(&att.to_bytes()));
-                            }
-                            continue;
-                        }
-                        let v = sample::value_of(&d.rendering);
-                        let stamp = a.timestamp.map(|t| t.to_string());
-                        if let Some(fmt) = fmt {
-                            println!(
-                                "{}",
-                                format_sample(
-                                    fmt,
-                                    &SampleLine {
-                                        n,
-                                        wire_key: &a.key,
-                                        base: &base,
-                                        type_name: type_name.as_deref(),
-                                        encoding: encoding.unwrap_or(""),
-                                        payload_len: bytes.len(),
-                                        // A reply is not a subscribe-path
-                                        // sample: no QoS axes and no
-                                        // SourceInfo, and an empty field is
-                                        // honest (#120). The HLC is the one
-                                        // thing a reply may carry — only when
-                                        // the responder stamped it (#215).
-                                        timestamp: stamp.as_deref(),
-                                        value: &v.text,
-                                        attachment: a
-                                            .attachment
-                                            .as_ref()
-                                            .map(attachment_display)
-                                            .as_deref(),
-                                        qos: None,
-                                        source: None,
-                                        zk2: None,
-                                    },
-                                )
-                            );
-                        } else {
-                            let tag = type_tag(type_name.as_deref(), v.typed);
-                            println!("{}\n  [{}] {tag} {}", a.key, a.origin, v.text);
-                            if let Some(att) = &a.attachment {
-                                println!("  attachment: {}", attachment_display(att));
-                            }
-                            for note in v.notes {
-                                eprintln!("  note: {note}");
-                            }
-                        }
-                    }
+        let mut n = 0usize;
+        for a in &answers {
+            let payload = match &a.answer {
+                Answer::Error { name, message } => {
+                    // An error reply has no sample, so no key to name.
+                    println!("✗ {name} — {message}");
+                    continue;
                 }
+                Answer::Value(payload) => payload,
+            };
+            n += 1;
+            let bytes = payload.to_bytes().into_owned();
+            if raw {
+                println!("{}\n  {}", a.key, hex(&bytes));
+                if let Some(att) = &a.attachment {
+                    println!("  attachment: {}", hex(&att.to_bytes()));
+                }
+                continue;
             }
-            match answers.len() {
-                0 => println!(
-                    "no replies within {secs}s. Silence is not a verdict (RFC 05 §3.1): \
-                     nothing may hold the selector, its holders may be down, or the \
-                     timeout too short — `zenctl admin graph` says who is attached."
-                ),
-                len => eprintln!(
-                    "{len} repl{} within {secs}s — an observation, not totality \
-                     (RFC 05 §2.1)",
-                    if len == 1 { "y" } else { "ies" }
-                ),
+            let line = line_of(a, bytes, &lens, structural_only);
+            if hex_payload {
+                println!("{}\n  {} {}", a.key, line.tag(), hex(&line.bytes));
+                if let Some(att) = &a.attachment {
+                    println!("  attachment: {}", hex(&att.to_bytes()));
+                }
+                continue;
             }
-            if elided > 0 {
-                eprintln!(
-                    "{elided} further repl(y|ies) arrived and were not read — the \
-                     reply bound bit, so the above is a sample of the answers"
+            if let Some(fmt) = fmt.as_deref() {
+                let value = line.value_text();
+                let declared = line.declared();
+                let stamp = a.timestamp.map(|t| t.to_string());
+                let attachment = line
+                    .attachment
+                    .as_ref()
+                    .map(crate::render::payload_text)
+                    .or_else(|| {
+                        a.attachment
+                            .as_ref()
+                            .map(|t| attachment_display(&t.to_bytes()))
+                    });
+                println!(
+                    "{}",
+                    format_sample(
+                        fmt,
+                        &SampleLine {
+                            n,
+                            wire_key: &a.key,
+                            relative: zenkey_fleet::strip_namespace(&namespace, &a.key),
+                            identity: &line.identity,
+                            type_name: declared.as_deref(),
+                            encoding: a.encoding.as_deref().unwrap_or(""),
+                            payload_len: line.bytes.len(),
+                            // A reply is not a subscribe-path sample: no QoS
+                            // axes and no SourceInfo, and an empty field is
+                            // honest (#120). The HLC is the one thing a reply
+                            // may carry — only when the responder stamped it
+                            // (#215).
+                            timestamp: stamp.as_deref(),
+                            value: &value,
+                            attachment: attachment.as_deref(),
+                            qos: None,
+                            source: None,
+                        },
+                    )
                 );
+                continue;
             }
+            print(a, &line);
+        }
+        match answers.len() {
+            0 => println!(
+                "no replies within {secs}s. Silence is not a verdict (RFC 05 §3.1): \
+                 nothing may hold the selector, its holders may be down, or the \
+                 timeout too short — `zenctl admin graph` says who is attached."
+            ),
+            len => eprintln!(
+                "{len} repl{} within {secs}s — an observation, not totality \
+                 (RFC 05 §2.1)",
+                if len == 1 { "y" } else { "ies" }
+            ),
+        }
+        if elided > 0 {
+            eprintln!(
+                "{elided} further repl(y|ies) arrived and were not read — the \
+                 reply bound bit, so the above is a sample of the answers"
+            );
         }
     }
     // Exit-code discipline shared with `call`: 1 = an error reply, 2 = zero
@@ -248,26 +201,55 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     Ok(())
 }
 
+/// One reply through the lens: a response on an `@op` key, its resource's
+/// type otherwise.
+fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bool) -> Line {
+    let member = Line::member_of(&lens.identity(&a.key));
+    let attachment = a.attachment.as_ref().map(|t| t.to_bytes());
+    Line::of(
+        Payload {
+            key: &a.key,
+            encoding: a.encoding.as_deref().filter(|e| !e.is_empty()),
+            bytes,
+            attachment: attachment.as_deref(),
+            delete: false,
+        },
+        member,
+        lens,
+        structural_only,
+    )
+}
+
+/// The table form: the reply's key, then the rendering with the rung it
+/// stopped at, and what failed against the declared type on stderr.
+fn print(a: &FleetAnswer, line: &Line) {
+    let Some((rendering, conformance)) = &line.checked else {
+        return;
+    };
+    println!("{}\n  {}", a.key, crate::render::payload_text(rendering));
+    if let Some(att) = &line.attachment {
+        println!("  attachment: {}", crate::render::payload_text(att));
+    } else if let Some(att) = &a.attachment {
+        println!("  attachment: {}", attachment_display(&att.to_bytes()));
+    }
+    if let Conformance::Invalid { violations } = conformance {
+        for v in violations {
+            eprintln!("  invalid: {v}");
+        }
+    }
+}
+
 /// One reply as a JSON row — the ndjson line and the json array element.
-async fn row(
-    a: &FleetAnswer,
-    fleet: &zenkey_fleet::Fleet<'_>,
-    store: &zenkey_fleet::SchemaStore,
-    slices: Option<&zenkey_fleet::SliceSet>,
-    raw: bool,
-    no_decode: bool,
-) -> serde_json::Value {
+fn row(a: &FleetAnswer, lens: &Lens<'_>, raw: bool, structural_only: bool) -> serde_json::Value {
     match &a.answer {
         Answer::Error { name, message } => serde_json::json!({
-            "origin": a.origin,
             "error": { "name": name, "message": message },
         }),
         Answer::Value(payload) => {
-            let bytes = payload.to_bytes();
+            let bytes = payload.to_bytes().into_owned();
             if raw {
                 let mut obj = serde_json::json!({
                     "key": a.key,
-                    "origin": a.origin,
                     "encoding": a.encoding,
                     "hex": hex(&bytes),
                 });
@@ -277,58 +259,24 @@ async fn row(
                 }
                 return obj;
             }
-            let d = sample::decode(
-                fleet,
-                store,
-                slices,
-                &a.key,
-                a.encoding.as_deref(),
-                &bytes,
-                no_decode,
-            )
-            .await;
-            value_row(a, &d)
+            value_row(a, &line_of(a, bytes, lens, structural_only))
         }
     }
 }
 
-/// The decoded half of `row`, pure so the verdict terms are testable: which
-/// fields exist is the report's honesty contract, not a rendering detail.
-fn value_row(a: &FleetAnswer, d: &sample::Decoded) -> serde_json::Value {
-    let v = sample::value_of(&d.rendering);
-    let mut obj = serde_json::json!({
-        "key": a.key,
-        "origin": a.origin,
-        "type": d.type_name,
-        "typed": v.typed,
-        "encoding": a.encoding,
-        "value": serde_json::from_str::<serde_json::Value>(&v.text)
-            .unwrap_or(serde_json::Value::String(v.text)),
-    });
-    // Present only when the wire carried one (#117).
-    if let Some(att) = &a.attachment {
-        obj["attachment"] = attachment_json(att);
-        obj["attachment_bytes"] = att.len().into();
+/// The decoded half of `row`, pure so the verdict terms are testable: the
+/// row dialect `echo --format ndjson` writes (so `pub --from ndjson` reads
+/// it back), with the reply's HLC when the responder stamped one.
+fn value_row(a: &FleetAnswer, line: &Line) -> serde_json::Value {
+    let mut row = zenkey_fleet::SampleRow::of_key(&a.key);
+    row.encoding = a.encoding.clone().filter(|e| !e.is_empty());
+    row.timestamp = a.timestamp.map(|t| t.to_string());
+    let attachment = a.attachment.as_ref().map(|t| t.to_bytes());
+    line.fill(&mut row, attachment.as_deref());
+    if let (None, Some(att)) = (&row.attachment, attachment.as_deref()) {
+        row.attachment = Some(attachment_json(att));
     }
-    // #159's rule, applied to this verb too (#246): present only when the
-    // pipeline was asked (`--no-decode` never asks) — and then always, so
-    // "valid" and "not checked" cannot be confused by their shared absence
-    // (RFC 09 §5.1 O4). The same terms as `echo`'s ndjson row — one
-    // decode ladder, two verbs, both honest about it.
-    if let Some(verdict) = &d.verdict {
-        obj["verdict"] = match verdict {
-            zenkey_fleet::Verdict::Valid => "valid".into(),
-            zenkey_fleet::Verdict::Invalid(errors) => {
-                obj["violations"] = serde_json::json!(errors);
-                "invalid".into()
-            }
-            zenkey_fleet::Verdict::NotValidated(r) => format!("not-validated: {r}").into(),
-        };
-        if let Some(e) = &d.decode_error {
-            obj["decode_error"] = serde_json::Value::String(e.clone());
-        }
-    }
-    obj
+    serde_json::to_value(&row).expect("a sample row serializes")
 }
 
 /// `get state <address> <iface>[@fp] <state> [--last-known <archive>]`:
@@ -371,10 +319,9 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn value(origin: &str) -> FleetAnswer {
+    fn value(key: &str) -> FleetAnswer {
         FleetAnswer {
-            origin: origin.into(),
-            key: format!("v1/{origin}/state/x/y"),
+            key: key.into(),
             encoding: None,
             attachment: None,
             timestamp: None,
@@ -382,9 +329,8 @@ mod tests {
         }
     }
 
-    fn error(origin: &str) -> FleetAnswer {
+    fn error() -> FleetAnswer {
         FleetAnswer {
-            origin: origin.into(),
             key: String::new(),
             encoding: None,
             attachment: None,
@@ -397,78 +343,58 @@ mod tests {
     }
 
     /// 0 = values only, 1 = any error envelope, 2 = silence — the same
-    /// discipline as `CallReport::exit_code`, on raw answers.
+    /// discipline as `call`'s, on raw answers.
     #[test]
     fn get_exit_codes_follow_the_reply_discipline() {
         assert_eq!(exit_code(&[]), 2);
         assert_eq!(exit_code(&[value("a"), value("b")]), 0);
-        assert_eq!(exit_code(&[value("a"), error("b")]), 1);
+        assert_eq!(exit_code(&[value("a"), error()]), 1);
     }
 
-    fn decoded(
-        verdict: Option<zenkey_fleet::Verdict>,
-        decode_error: Option<String>,
-    ) -> sample::Decoded {
-        sample::Decoded {
-            type_name: None,
-            rendering: zenkey_fleet::Rendering::Structural(zenkey_fleet::structural(b"1")),
-            verdict,
-            decode_error,
-        }
-    }
-
-    /// #246: the row carries the verdict on #159's terms — absent when the
-    /// pipeline was never asked (`--no-decode`), always present when it was,
-    /// so "valid" and "not checked" cannot be confused by a shared absence
-    /// (RFC 09 §5.1 O4).
+    /// A reply row is the row dialect: its key, the identity the lens made
+    /// of it, and the conformance verdict — a key no contract reaches
+    /// renders structurally and says why, never refused, and `--no-decode`
+    /// says it did not ask (#246's terms, kept: the verdict is present
+    /// whenever a row carries a value).
     #[test]
-    fn a_get_row_carries_the_verdict_only_when_asked() {
-        let a = value("acme");
+    fn a_get_row_carries_the_identity_and_the_verdict() {
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
 
-        let not_asked = value_row(&a, &decoded(None, None));
-        assert!(not_asked.get("verdict").is_none());
-        assert!(not_asked.get("violations").is_none());
-        assert!(not_asked.get("decode_error").is_none());
-
-        let valid = value_row(&a, &decoded(Some(zenkey_fleet::Verdict::Valid), None));
-        assert_eq!(valid["verdict"], "valid");
-        assert!(valid.get("violations").is_none());
-
-        let invalid = value_row(
-            &a,
-            &decoded(
-                Some(zenkey_fleet::Verdict::Invalid(vec!["f: not a u64".into()])),
-                Some("boom".into()),
-            ),
+        let foreign = value("plant/line-1/temp");
+        let r = row(&foreign, &lens, false, false);
+        assert_eq!(r["key"], "plant/line-1/temp");
+        assert_eq!(r["identity"]["is"], "not_in_namespace");
+        assert_eq!(r["value"], 1);
+        assert!(
+            r["verdict"].as_str().unwrap().starts_with("not-checked"),
+            "{r}"
         );
-        assert_eq!(invalid["verdict"], "invalid");
-        assert_eq!(invalid["violations"], serde_json::json!(["f: not a u64"]));
-        assert_eq!(invalid["decode_error"], "boom");
-    }
+        assert!(r.get("origin").is_none(), "v1's origin left at FJ9");
 
-    /// #246: the two silences carry distinct wire spellings. `no-schema` is
-    /// "the registry was consulted and names no schema for this"; a run with
-    /// no registry loaded never looked, and its rows must say that instead of
-    /// making a claim about the types (RFC 09 §5.1 O4). Same terms as
-    /// `echo`'s ndjson row — one decode ladder, two verbs.
-    #[test]
-    fn the_two_not_validated_silences_stay_apart_on_the_wire() {
-        use zenkey::schema::validate::NotValidated;
-        let a = value("acme");
-        let spelled = |reason: NotValidated| {
-            value_row(
-                &a,
-                &decoded(Some(zenkey_fleet::Verdict::NotValidated(reason)), None),
-            )["verdict"]
-                .clone()
-        };
-        assert_eq!(
-            spelled(NotValidated::NoSchema),
-            "not-validated: no schema served for this type"
+        let zk2 = value("prod/zk2/host-a/tc/tc.netif.v1/state/namespaces");
+        let r = row(&zk2, &lens, false, false);
+        assert_eq!(r["identity"]["is"], "resource");
+        assert_eq!(r["identity"]["address"], "host-a/tc");
+
+        let skipped = row(&zk2, &lens, false, true);
+        assert!(
+            skipped["verdict"]
+                .as_str()
+                .unwrap()
+                .contains("decode not asked")
+                || skipped["verdict"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("not-checked"),
+            "{skipped}"
         );
-        assert_eq!(
-            spelled(NotValidated::NoRegistry),
-            "not-validated: no registry loaded, so no type was looked up"
-        );
+
+        let raw = row(&zk2, &lens, true, true);
+        assert_eq!(raw["hex"], "31");
+        assert!(raw.get("identity").is_none(), "--raw resolves nothing");
+
+        let err = row(&error(), &lens, false, false);
+        assert_eq!(err["error"]["name"], "error/unavailable");
     }
 }

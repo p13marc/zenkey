@@ -52,20 +52,7 @@ impl Render for StoragePlan {
     }
 
     fn table(&self, t: &mut Table) {
-        let registry = match self.registry.as_option() {
-            Some(r) => match (&r.max_ttl_s, &r.ttl_source) {
-                (Some(ttl), Some(src)) => format!(
-                    "registry: {} slice(s), longest state ttl_s {ttl} ({src})",
-                    r.slices
-                ),
-                _ => format!("registry: {} slice(s), no state subject declared", r.slices),
-            },
-            None => "registry: not asked".to_string(),
-        };
-        t.line(format!(
-            "storage plan for base {:?}  ({registry})",
-            self.base
-        ));
+        t.line(format!("storage plan for namespace {:?}", self.base));
         if !self.volumes.is_empty() {
             t.blank().line("volumes:");
             let mut g = Grid::unheaded(4);
@@ -111,12 +98,8 @@ impl Render for StoragePlan {
                     Cell::text(format!("{} ({})", s.volume, s.history.as_str())),
                     Cell::text(flags.join(", ")),
                 ]);
-                let covers = match s.covers.as_option() {
-                    Some(n) => format!("  ·  covers {n} declared subject(s)"),
-                    None => String::new(),
-                };
                 g.detail([
-                    format!("    strip {}{covers}", s.strip_prefix),
+                    format!("    strip {}", s.strip_prefix),
                     format!(
                         "    gc lifespan {} s (period {} s): {}",
                         s.garbage_collection.lifespan_s,
@@ -134,17 +117,6 @@ impl Render for StoragePlan {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
-        if self.registry.is_not_asked() {
-            notes.push(
-                Note::coverage(
-                    "no registry was asked, so no lifespan below was checked against a \
-                     ttl_s and no selector against a declared subject: every lifespan is \
-                     RFC 09 §2.3's default, unverified — pass --registry <dir> or reach \
-                     the fleet to derive them",
-                )
-                .cite("RFC 09 §5.1 O4"),
-            );
-        }
         notes.extend(refusal_notes(self));
         notes.push(Note::summary(format!(
             "{} storage(s) on {} volume(s) planned, {} refused",
@@ -168,7 +140,7 @@ fn kind_word(k: CheckKind) -> &'static str {
         CheckKind::KeyExprDiffers => "key_expr differs",
         CheckKind::StripPrefixDiffers => "strip_prefix differs",
         CheckKind::VolumeDiffers => "volume differs",
-        CheckKind::LifespanBelowMinimum => "gc.lifespan below the minimum",
+        CheckKind::LifespanBelowMinimum => "gc.lifespan below the plan's",
     }
 }
 
@@ -195,7 +167,7 @@ impl Render for StorageCheck {
             Judgement::Unobservable { reason } => format!("no verdict — {reason}"),
         };
         t.line(format!(
-            "storage check for base {:?}: {} planned, {} observed row(s) — {verdict}",
+            "storage check for namespace {:?}: {} planned, {} observed row(s) — {verdict}",
             self.base, self.planned, self.observed
         ));
         if !self.findings.is_empty() {

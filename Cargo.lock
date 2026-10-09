@@ -8629,7 +8629,6 @@ dependencies = [
  "toml 1.1.4+spec-1.1.0",
  "tracing-subscriber",
  "trycmd",
- "zenkey 0.11.1",
  "zenkey 0.20.0",
  "zenkey-explorer-config",
  "zenkey-fleet 0.20.0",
@@ -8799,13 +8798,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sipper",
- "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tracing",
- "zblob",
- "zenkey 0.11.1",
  "zenkey 0.20.0",
  "zenkey-model",
  "zenkey-report-fixtures",
@@ -8838,9 +8834,7 @@ dependencies = [
 name = "zenkey-report-fixtures"
 version = "0.11.1"
 dependencies = [
- "base64 0.23.1",
  "serde_json",
- "zenkey 0.11.1",
  "zenkey-fleet 0.20.0",
  "zenkey-model",
 ]

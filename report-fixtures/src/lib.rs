@@ -19,48 +19,40 @@
 //! this crate cannot see; their fixtures live beside their tests.
 
 use zenkey_fleet::report::*;
-use zenkey_fleet::{
-    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport,
-};
+use zenkey_fleet::{RecordReport, ReplayReport, StorageInfo, TimelineReport};
 
 pub const ORIGIN: &str = "h-3fa9c2d41b7e";
 
-/// A storage list carrying all three coverage verdicts, and a storage whose
-/// admin document omitted its strip prefix.
+/// A storage list: one storage whose admin document omitted its strip
+/// prefix, and one that states every field.
 pub fn storage_list() -> StorageList {
     StorageList {
-        storages: vec![StorageInfo {
-            name: "main".into(),
-            zid: "aabbccdd".into(),
-            key_expr: Some("acme/v1/**/state/**".into()),
-            strip_prefix: None,
-            volume: Some("memory".into()),
-            // The untrimmed admin document. A fixture carries a realistic one
-            // rather than `null`, because it is what a layout change would
-            // arrive as.
-            raw: serde_json::json!({
-                "key_expr": "acme/v1/**/state/**",
-                "volume": {"id": "memory"},
-            }),
-        }],
-        coverage: vec![
-            CoverageRow {
-                producer: "sysinfo".into(),
-                path: "health".into(),
-                ttl_s: Some(120),
-                coverage: Coverage::Covered("main@aabbccdd".into()),
+        storages: vec![
+            StorageInfo {
+                name: "events".into(),
+                zid: "aabbccdd".into(),
+                key_expr: Some("acme/zk2/*/*/*/events/**".into()),
+                strip_prefix: None,
+                volume: Some("memory".into()),
+                // The untrimmed admin document. A fixture carries a realistic
+                // one rather than `null`, because it is what a layout change
+                // would arrive as.
+                raw: serde_json::json!({
+                    "key_expr": "acme/zk2/*/*/*/events/**",
+                    "volume": {"id": "memory"},
+                }),
             },
-            CoverageRow {
-                producer: "logs".into(),
-                path: "state/{unit}".into(),
-                ttl_s: None,
-                coverage: Coverage::Partial("main@aabbccdd".into()),
-            },
-            CoverageRow {
-                producer: "parallax".into(),
-                path: "stream/{id}".into(),
-                ttl_s: Some(30),
-                coverage: Coverage::Uncovered,
+            StorageInfo {
+                name: "plant".into(),
+                zid: "aabbccdd".into(),
+                key_expr: Some("acme/plant/**".into()),
+                strip_prefix: Some("acme/plant".into()),
+                volume: Some("fs".into()),
+                raw: serde_json::json!({
+                    "key_expr": "acme/plant/**",
+                    "strip_prefix": "acme/plant",
+                    "volume": {"id": "fs"},
+                }),
             },
         ],
     }
@@ -327,272 +319,6 @@ pub fn bench_report() -> BenchReport {
     }
 }
 
-/// One producer agreeing, one disagreeing, and one the bus serves that the
-/// checkout does not have — the `served x · local —` case.
-///
-/// Plus the case #399 exists for: `catalog` agrees with the checkout *and*
-/// two hosts serve it at different versions, so the row that reads "agree"
-/// is computed from one of them. A fixture where the two disagreements are
-/// on the same producer is the one that proves the renderer keeps them
-/// apart — the fleet against the checkout, and the fleet against itself.
-pub fn registry_diff() -> RegistryDiff {
-    RegistryDiff {
-        producers: vec![
-            ProducerDiff {
-                producer: "catalog".into(),
-                served_version: Some("1.1".into()),
-                local_version: Some("1.1".into()),
-                findings: vec![],
-            },
-            ProducerDiff {
-                producer: "sysinfo".into(),
-                served_version: Some("1.1".into()),
-                local_version: Some("1.0".into()),
-                findings: vec![
-                    "served declares telemetry disk/{mount}/inodes; local does not".into(),
-                ],
-            },
-            ProducerDiff {
-                producer: "parallax".into(),
-                served_version: Some("1.3".into()),
-                local_version: None,
-                findings: vec!["no local slice for this producer".into()],
-            },
-        ],
-        collapsed: Asked::Asked(vec![CollapsedProducer {
-            producer: "catalog".into(),
-            origins: vec!["h-3fa9c2d41b7e".into(), "h-8b1e07af22c9".into()],
-            versions: vec!["1.1".into(), "1.0".into()],
-            agreed: false,
-        }]),
-    }
-}
-
-/// The same diff, from a served side that never came off the bus — so the
-/// collapse question was never put. The pair with [`registry_diff`] is what
-/// pins that "not asked" and "asked, and nothing collapsed" render and
-/// serialize differently (RFC 13 §3 O4).
-pub fn registry_diff_not_asked() -> RegistryDiff {
-    RegistryDiff {
-        collapsed: Asked::NotAsked,
-        ..registry_diff()
-    }
-}
-
-/// A declared tier whose roster was asked and answered nothing, beside one
-/// nobody asked about — the two `—`s that mean different things.
-pub fn blob_list() -> BlobList {
-    BlobList {
-        source: BlobListSource::RegistryDirs,
-        slices_considered: 11,
-        slices_without_blob: 9,
-        tiers: vec![
-            BlobTierRow {
-                producer: "logs".into(),
-                registry_version: "2.0".into(),
-                tier: "store".into(),
-                known_tier: true,
-                endpoints: vec!["have".into(), "chunk".into()],
-                algo: Some("blake3".into()),
-                reference: None,
-                encoding: None,
-                since: Some("1.1".into()),
-                description: None,
-                origins: Asked::Asked(vec![]),
-            },
-            BlobTierRow {
-                producer: "parallax".into(),
-                registry_version: "1.3".into(),
-                tier: "artifact".into(),
-                known_tier: true,
-                endpoints: vec!["manifest".into()],
-                algo: Some("blake3".into()),
-                reference: Some("ArtifactRef".into()),
-                encoding: Some("application/octet-stream".into()),
-                since: None,
-                description: Some("build artifacts".into()),
-                origins: Asked::NotAsked,
-            },
-        ],
-    }
-}
-
-/// Two holders at **two different content roots** — a finding, not a
-/// tie-break: the id is a name and the root is what disambiguates it
-/// (RFC 07 §2.1).
-pub fn blob_probe() -> BlobProbeReport {
-    BlobProbeReport {
-        target: "artifact/01jqz3demo0001".into(),
-        tier: "artifact".into(),
-        asked: vec![
-            "v1/*/@blob/artifact/01jqz3demo0001/manifest".into(),
-            "v1/*/@blob/artifact/01jqz3demo0001/have".into(),
-        ],
-        not_probed: None,
-        answered: 2,
-        roots: vec!["60e03a78c0e0".into(), "97ac2e30aa77".into()],
-        declared_by: vec!["parallax".into()],
-        // R7: the count behind `declared_by` — same numbers as blob_list().
-        slices_considered: 11,
-        holders: vec![
-            BlobHolder {
-                origin: ORIGIN.into(),
-                key: format!("v1/{ORIGIN}/@blob/artifact/01jqz3demo0001/manifest"),
-                availability: Some(BlobAvailability {
-                    chunk_count: 8,
-                    have: 8,
-                    complete: true,
-                }),
-                manifest: Some(BlobManifest {
-                    id: "01jqz3demo0001".into(),
-                    filename: Some("bundle.bin".into()),
-                    total_len: 65536,
-                    chunk_size: 8192,
-                    chunk_count: 8,
-                    root: "60e03a78c0e0c5be5f18".into(),
-                    created_ms: 0,
-                }),
-                note: None,
-                unreadable: None,
-                error: None,
-            },
-            BlobHolder {
-                origin: "h-bbbbbbbbbbbb".into(),
-                key: "v1/h-bbbbbbbbbbbb/@blob/artifact/01jqz3demo0001/have".into(),
-                availability: Some(BlobAvailability {
-                    chunk_count: 8,
-                    have: 3,
-                    complete: false,
-                }),
-                manifest: None,
-                note: Some("every chunk but no index".into()),
-                unreadable: None,
-                error: None,
-            },
-        ],
-    }
-}
-
-/// A probe that was never issued — the O4 case, which must never read as
-/// "nobody holds it".
-pub fn blob_probe_unissued() -> BlobProbeReport {
-    BlobProbeReport {
-        target: "tree/deadbeef".into(),
-        tier: "tree".into(),
-        asked: vec![],
-        not_probed: Some("the reference client does not speak this store algorithm".into()),
-        answered: 0,
-        roots: vec![],
-        declared_by: vec!["parallax".into()],
-        slices_considered: 11,
-        holders: vec![],
-    }
-}
-
-pub fn blob_tree() -> BlobTreeIndexReport {
-    BlobTreeIndexReport {
-        origin: ORIGIN.into(),
-        key: format!("v1/{ORIGIN}/@blob/tree/deadbeef/index"),
-        root: "deadbeefcafe".into(),
-        entries: 12,
-        files: 9,
-        total_size: 1_048_576,
-        chunks: 40,
-        elapsed_ms: 31,
-        priority: "data_low/block/reliable".into(),
-    }
-}
-
-/// A fetch with no pinned root and a replier whose bytes did not verify — the
-/// transfer succeeded, which is the point of verifying before disk, but a
-/// replier served bytes that did not verify.
-pub fn blob_fetch() -> BlobFetchReport {
-    BlobFetchReport {
-        origin: ORIGIN.into(),
-        key: format!("v1/{ORIGIN}/@blob/artifact/01jqz3demo0001/chunk"),
-        dest: "bundle.bin".into(),
-        bytes: 65536,
-        chunks: 8,
-        chunks_resumed: 2,
-        rejected: 1,
-        retries: 1,
-        elapsed_ms: 412,
-        root: "60e03a78c0e0c5be5f18".into(),
-        root_pinned: false,
-        priority: "data_low/block/reliable".into(),
-    }
-}
-
-/// One origin that answered, one that returned an RFC 05 §3 error envelope,
-/// and a reply carrying an attachment — the clause `check probe` used to drop.
-pub fn call_report() -> CallReport {
-    CallReport {
-        key: "v1/*/@rpc/sysinfo/processes".to_string(),
-        timeout_s: 5.0,
-        answers: vec![
-            CallAnswer {
-                origin: ORIGIN.into(),
-                outcome: CallOutcome::Ok {
-                    value: Some(serde_json::json!({"count": 214})),
-                    text: None,
-                },
-                attachment: Some(serde_json::json!({"trace": "abc123"})),
-                attachment_bytes: Some(18),
-            },
-            CallAnswer {
-                origin: "h-bbbbbbbbbbbb".into(),
-                outcome: CallOutcome::Err(CallError {
-                    name: "unsupported".into(),
-                    message: "this build serves no `processes`".into(),
-                }),
-                attachment: None,
-                attachment_bytes: None,
-            },
-        ],
-    }
-}
-
-/// Two bounded replies that stopped early (RFC 05 §3.2, #424): one that
-/// offers a cursor to continue from, with the advisory fields present, and
-/// one that offers `next_cursor: null` — the contract violation the RFC
-/// says an observer MAY report.
-pub fn call_report_partial_page() -> CallReport {
-    CallReport {
-        key: "v1/*/@rpc/historian/events/search".to_string(),
-        timeout_s: 5.0,
-        answers: vec![
-            CallAnswer {
-                origin: ORIGIN.into(),
-                outcome: CallOutcome::Ok {
-                    value: Some(serde_json::json!({
-                        "items": [{"id": "e-41"}],
-                        "next_cursor": "e-41",
-                        "partial": true,
-                        "scanned": 4096,
-                        "covers_from": "2026-09-06T10:00:00Z"
-                    })),
-                    text: None,
-                },
-                attachment: None,
-                attachment_bytes: None,
-            },
-            CallAnswer {
-                origin: "h-bbbbbbbbbbbb".into(),
-                outcome: CallOutcome::Ok {
-                    value: Some(serde_json::json!({
-                        "items": [],
-                        "next_cursor": null,
-                        "partial": true
-                    })),
-                    text: None,
-                },
-                attachment: None,
-                attachment_bytes: None,
-            },
-        ],
-    }
-}
-
 /// A probe that heard nothing from a provider presence shows up (#612,
 /// FJ8b): attributable silence, the finding.
 pub fn probe_report() -> ProbeReport {
@@ -627,82 +353,6 @@ pub fn probe_report() -> ProbeReport {
     }
 }
 
-/// The old plane still speaking: a migration you can assert the absence of is
-/// a migration you can finish (RFC 09 §6).
-pub fn cutover_report() -> CutoverReport {
-    CutoverReport {
-        old_root: "acme/legacy".into(),
-        new_prefix: "acme/v1/".into(),
-        window_s: 30.0,
-        old_samples: 12,
-        old_keys_seen: 2,
-        old_examples: vec![
-            "acme/legacy/sysinfo/health".into(),
-            "acme/legacy/sysinfo/disk".into(),
-        ],
-        new_samples: 480,
-        leak_samples: 3,
-        leaked_keys_seen: 1,
-        leak_examples: vec!["acme/scratch/tmp".into()],
-        dropped: 5,
-        verdict: CutoverVerdict::OldStillSpeaks,
-    }
-}
-
-/// The burn-down with all three entry states (issue #226): a retired subject
-/// still served (the RFC 08 §6.1 lie), one finished, and one whose
-/// replacement was silent — `Unproven`, not a pass.
-pub fn retired_report() -> RetiredReport {
-    let entries = vec![
-        RetiredEntry {
-            producer: "logs".into(),
-            path: "logs/errors_total".into(),
-            since: Some("2.0".into()),
-            replaced_by: Some("logs/journald/errors_total".into()),
-            selector: "v1/*/*/logs/logs/errors_total".into(),
-            wire_samples: Asked::Asked(3),
-            still_declared: Some(true),
-            subscribers: Some(1),
-            replacement_samples: Asked::Asked(480),
-            verdict: CutoverVerdict::OldStillSpeaks,
-        },
-        RetiredEntry {
-            producer: "logs".into(),
-            path: "logs/by_unit/{unit}/burn_rate".into(),
-            since: Some("2.0".into()),
-            replaced_by: Some("logs/journald/burn_rate".into()),
-            selector: "v1/*/*/logs/logs/by_unit/*/burn_rate".into(),
-            wire_samples: Asked::Asked(0),
-            still_declared: Some(false),
-            subscribers: Some(0),
-            replacement_samples: Asked::Asked(120),
-            verdict: CutoverVerdict::Pass,
-        },
-        RetiredEntry {
-            producer: "logs".into(),
-            path: "logs/units_in_failure".into(),
-            since: Some("2.0".into()),
-            replaced_by: Some("logs/journald/units_in_failure".into()),
-            selector: "v1/*/*/logs/logs/units_in_failure".into(),
-            wire_samples: Asked::Asked(0),
-            still_declared: Some(false),
-            subscribers: Some(0),
-            replacement_samples: Asked::Asked(0),
-            verdict: CutoverVerdict::Unproven,
-        },
-    ];
-    RetiredReport {
-        registries: vec!["../zensight/zensight-common/registry".into()],
-        entries,
-        window_s: Asked::Asked(30.0),
-        plane_samples: Asked::Asked(960),
-        dropped: Asked::Asked(5),
-        introspect_answered: 2,
-        admin_entities: Some(14),
-        verdict: CutoverVerdict::OldStillSpeaks,
-    }
-}
-
 /// A window that could not carry its claim: `Impaired` is the absence of a
 /// verdict, not a milder failure (O6).
 pub fn expect_report() -> ExpectReport {
@@ -729,71 +379,6 @@ pub fn expect_report() -> ExpectReport {
         violations_total: 9,
         unmet: vec!["17 sample(s) were dropped while behind".into()],
         verdict: ExpectVerdict::Impaired,
-    }
-}
-
-/// A `check conform` run (#222) with one assertion of every kind: met, met
-/// and exempt, not met, and unknowable with its reason — over a window that
-/// dropped, so the lower-bound caveat has something to say.
-pub fn conform_report() -> ConformReport {
-    let assertions = vec![
-        Assertion {
-            id: "procedure/introspect".into(),
-            subject: "@rpc/introspect".into(),
-            state: AssertionState::Met,
-            evidence: format!("{ORIGIN}: a value reply"),
-            citation: Some("RFC 08 §6".into()),
-            exempt: None,
-        },
-        Assertion {
-            id: "procedure/dns".into(),
-            subject: "@rpc/dns".into(),
-            state: AssertionState::Met,
-            evidence: format!("{ORIGIN}: error/gated — conditional, and said so"),
-            citation: Some("RFC 08 §6.1".into()),
-            exempt: Some("when: config:collect.dns".into()),
-        },
-        Assertion {
-            id: "qos-observed-mismatch/health".into(),
-            subject: "state/health".into(),
-            state: AssertionState::NotMet,
-            evidence: format!(
-                "v1/{ORIGIN}/state/sysinfo/health: 4 of 4 sample(s) did not ride the \
-                 declared transition"
-            ),
-            citation: Some("RFC 04 §3".into()),
-            exempt: None,
-        },
-        Assertion {
-            id: "observed/disk/{mount}/used".into(),
-            subject: "telemetry/disk/{mount}/used".into(),
-            state: AssertionState::Unknowable {
-                reason: "a window proves presence, never absence".into(),
-            },
-            evidence: "not seen in 10s".into(),
-            citation: Some("RFC 13 §3".into()),
-            exempt: None,
-        },
-    ];
-    let summary = ConformSummary::of(&assertions);
-    ConformReport {
-        producer: "sysinfo".into(),
-        slice_source: ConformSource::Dirs,
-        origins_asked: vec![ORIGIN.into()],
-        verdict: ConformVerdict::of(&summary),
-        summary,
-        assertions,
-        observation: Some(ObservationSummary {
-            window_s: 10.0,
-            scopes: vec!["v1/*/state/**".into()],
-            samples: 40,
-            keys_seen: 2,
-            dropped: 3,
-            synthetic_marked: 40,
-            facts_evicted: 0,
-        }),
-        deep: false,
-        not_asked: vec!["stale-state/*, budget: not asked without --deep".into()],
     }
 }
 
@@ -1007,120 +592,8 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
     }
 }
 
-pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
-    vec![
-        zenkey_fleet::OriginAttachment {
-            origin: ORIGIN.into(),
-            session_zid: Some("eeff0011".into()),
-            reporter_zid: "aabbccdd".into(),
-            token_key: format!("v1/{ORIGIN}/state/sysinfo/alive"),
-        },
-        zenkey_fleet::OriginAttachment {
-            origin: "h-bbbbbbbbbbbb".into(),
-            session_zid: None,
-            reporter_zid: "aabbccdd".into(),
-            token_key: "v1/h-bbbbbbbbbbbb/state/logs/alive".into(),
-        },
-    ]
-}
-
-/// The `why` ladder (#214), in its most instructive posture: a producer that
-/// is declared and alive but has never published the subject. All three
-/// answer states appear — established rungs with evidence, the
-/// `publisher-declared` rung carrying the lazy-declaration wording that must
-/// never read as a bug (RFC 08 §6.1), and `NotAsked` rungs that say why they
-/// were not asked (RFC 09 §5.1 O4) — under the `Healthy` verdict (exit 1).
-pub fn why_report() -> zenkey_fleet::WhyReport {
-    use zenkey_fleet::report::{Rung, RungAnswer, RungId};
-    // The question is the id's own now (#347), so this fixture no longer
-    // restates it — and can no longer restate it *wrongly*.
-    let rung = |id: RungId, answer, evidence: &[&str]| Rung {
-        id,
-        question: id.question(),
-        answer,
-        evidence: evidence.iter().map(|e| (*e).to_string()).collect(),
-    };
-    zenkey_fleet::WhyReport {
-        key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/root/used"),
-        base: String::new(),
-        rungs: vec![
-            rung(
-                RungId::ScopeReach,
-                RungAnswer::Established,
-                &["the `v1/**` explorer scope intersects this key"],
-            ),
-            rung(
-                RungId::KeyParse,
-                RungAnswer::Established,
-                &[
-                    "origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, \
-                     subject disk/root/used",
-                ],
-            ),
-            rung(
-                RungId::RegistryDeclared,
-                RungAnswer::Established,
-                &["declared as disk/{mount}/used (TelemetryPoint)"],
-            ),
-            rung(
-                RungId::OriginAlive,
-                RungAnswer::Established,
-                &["h-3fa9c2d41b7e is on the roster with producer(s): sysinfo"],
-            ),
-            rung(
-                RungId::PublisherDeclared,
-                RungAnswer::NotEstablished {
-                    reason: "declared, alive, never published — publishers declare \
-                             lazily (RFC 08 §6.1): no publisher declaration exists \
-                             until the first publication, so this is not evidence \
-                             of a bug"
-                        .into(),
-                },
-                &[],
-            ),
-            rung(
-                RungId::StorageCoverage,
-                RungAnswer::Established,
-                &[
-                    "storage latest@aabbccdd (v1/*/telemetry/**) captures every key \
-                   this expression names",
-                ],
-            ),
-            rung(
-                RungId::StoredValue,
-                RungAnswer::NotEstablished {
-                    reason: "none of get, @adv cache returned a value — which is \
-                             silence, not proof no value exists (RFC 05 §3.1)"
-                        .into(),
-                },
-                &[],
-            ),
-            rung(
-                RungId::SampleFreshness,
-                RungAnswer::NotAsked,
-                &["no sample in hand to age — the stored-value rung found none"],
-            ),
-            rung(
-                RungId::AdminAnswered,
-                RungAnswer::Established,
-                &["1 admin root document(s) answered @/*/*"],
-            ),
-            rung(
-                RungId::WireHeard,
-                RungAnswer::NotAsked,
-                &["not listened — the data plane costs one deliberate action \
-                     (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch \
-                     the wire"],
-            ),
-        ],
-        verdict: zenkey_fleet::WhyVerdict::Healthy,
-        impairments: vec![],
-        listened_s: None,
-    }
-}
-
-/// The RFC 09 §2 sketch as a plan (#393): two volumes, three storages, the
-/// documented `catalog`/`pdns_history` overlap, a refused `complete`, and one
+/// A zk2 deployment's storages as a plan (#393): two volumes, three
+/// storages, an overlap warned on both sides, a refused `complete`, and one
 /// storage refused outright.
 pub fn storage_plan() -> StoragePlan {
     use std::collections::BTreeMap;
@@ -1135,13 +608,15 @@ pub fn storage_plan() -> StoragePlan {
         text: text.into(),
         cite: cite.into(),
     };
+    let default_gc = || GarbageCollection {
+        period_s: 30,
+        lifespan_s: 86_400,
+        derivation:
+            "zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from"
+                .into(),
+    };
     StoragePlan {
         base: "acme".into(),
-        registry: Asked::Asked(RegistryFacts {
-            slices: 3,
-            max_ttl_s: Some(900),
-            ttl_source: Some("sysinfo/alert/{alert_key}".into()),
-        }),
         volumes: vec![
             PlannedVolume {
                 id: "fs".into(),
@@ -1162,40 +637,9 @@ pub fn storage_plan() -> StoragePlan {
         ],
         storages: vec![
             PlannedStorage {
-                name: "catalog".into(),
-                class: Some(StorageClass::Catalog),
-                key_expr: "acme/v1/@catalog/state/**".into(),
-                strip_prefix: "acme/v1/@catalog/state".into(),
-                volume: "fs".into(),
-                history: HistoryMode::Latest,
-                replication: None,
-                complete: false,
-                garbage_collection: GarbageCollection {
-                    period_s: 30,
-                    lifespan_s: 172_800,
-                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
-                },
-                retention: None,
-                params: params(&[("dir", "catalog")]),
-                covers: Asked::Asked(3),
-                warnings: vec![
-                    warn(
-                        WarningKind::CompleteRefused,
-                        "complete = true refused: it is not the fully covering latest storage (class state) — emitted as false",
-                        "RFC 09 §2.2",
-                    ),
-                    warn(
-                        WarningKind::Overlap,
-                        "overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both",
-                        "RFC 09 §2",
-                    ),
-                ],
-            },
-            PlannedStorage {
-                name: "latest".into(),
-                class: Some(StorageClass::State),
-                key_expr: "acme/v1/*/state/**".into(),
-                strip_prefix: "acme/v1".into(),
+                name: "events".into(),
+                key_expr: "acme/zk2/*/*/*/events/**".into(),
+                strip_prefix: "acme/zk2".into(),
                 volume: "fs".into(),
                 history: HistoryMode::Latest,
                 replication: Some(
@@ -1208,33 +652,54 @@ pub fn storage_plan() -> StoragePlan {
                     .collect(),
                 ),
                 complete: true,
-                garbage_collection: GarbageCollection {
-                    period_s: 30,
-                    lifespan_s: 1800,
-                    derivation: "max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s".into(),
-                },
+                garbage_collection: default_gc(),
                 retention: None,
-                params: params(&[("dir", "latest")]),
-                covers: Asked::Asked(12),
-                warnings: vec![],
+                params: params(&[("dir", "events")]),
+                warnings: vec![warn(
+                    WarningKind::Overlap,
+                    "overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both",
+                    "RFC 09 §2",
+                )],
             },
             PlannedStorage {
-                name: "pdns_history".into(),
-                class: Some(StorageClass::CatalogPdns),
-                key_expr: "acme/v1/@catalog/state/pdns/**".into(),
-                strip_prefix: "acme/v1/@catalog/state/pdns".into(),
-                volume: "influxdb".into(),
-                history: HistoryMode::All,
+                name: "links".into(),
+                key_expr: "acme/zk2/*/*/*/events/link/**".into(),
+                strip_prefix: "acme/zk2".into(),
+                volume: "fs".into(),
+                history: HistoryMode::Latest,
                 replication: None,
                 complete: false,
                 garbage_collection: GarbageCollection {
                     period_s: 30,
-                    lifespan_s: 172_800,
-                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
+                    lifespan_s: 3600,
+                    derivation: "declared gc_lifespan_s 3600".into(),
                 },
                 retention: None,
-                params: params(&[("db", "pdns")]),
-                covers: Asked::Asked(1),
+                params: params(&[("dir", "links")]),
+                warnings: vec![
+                    warn(
+                        WarningKind::CompleteRefused,
+                        "complete = true refused: it is not replicated — emitted as false",
+                        "RFC 09 §2.2",
+                    ),
+                    warn(
+                        WarningKind::Overlap,
+                        "overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both",
+                        "RFC 09 §2",
+                    ),
+                ],
+            },
+            PlannedStorage {
+                name: "timeseries".into(),
+                key_expr: "acme/zk2/*/*/*/stream/**".into(),
+                strip_prefix: "acme/zk2".into(),
+                volume: "influxdb".into(),
+                history: HistoryMode::All,
+                replication: None,
+                complete: false,
+                garbage_collection: default_gc(),
+                retention: None,
+                params: params(&[("db", "streams")]),
                 warnings: vec![warn(
                     WarningKind::RetentionIsTheDatabases,
                     "retention is the database's policy, not zenoh config",
@@ -1243,11 +708,11 @@ pub fn storage_plan() -> StoragePlan {
             },
         ],
         refusals: vec![Refusal {
-            storage: Some("events".into()),
+            storage: Some("plant".into()),
             volume: None,
-            key_expr: Some("acme/v1/*/events/**".into()),
-            reason: "the registry declares no subject under \"acme/v1/*/events/**\" — empty coverage is a finding, not a plan".into(),
-            cite: "RFC 13 §3".into(),
+            key_expr: Some("acme/plant/**".into()),
+            reason: "names volume \"rocks\", which [volumes] does not declare".into(),
+            cite: "RFC 09 §2".into(),
         }],
     }
 }
@@ -1273,36 +738,35 @@ pub fn storage_check() -> StorageCheck {
         findings: vec![
             finding(
                 CheckKind::StripPrefixDiffers,
-                "latest",
+                "events",
                 Some("aabbccdd"),
-                Some("acme/v1"),
+                Some("acme/zk2"),
                 Some("acme"),
             ),
             finding(
                 CheckKind::LifespanBelowMinimum,
-                "latest",
+                "events",
                 Some("aabbccdd"),
-                Some("1800"),
+                Some("86400"),
                 Some("600"),
             ),
             finding(
                 CheckKind::Missing,
-                "pdns_history",
+                "timeseries",
                 None,
-                Some("acme/v1/@catalog/state/pdns/**"),
+                Some("acme/zk2/*/*/*/stream/**"),
                 None,
             ),
             finding(
                 CheckKind::Extra,
-                "blobs",
+                "state",
                 Some("aabbccdd"),
                 None,
-                Some("acme/v1/*/@blob/**"),
+                Some("acme/zk2/*/*/*/state/**"),
             ),
         ],
         unjudged: vec![
-            "catalog@aabbccdd: the admin document does not carry garbage_collection.lifespan"
-                .into(),
+            "links@aabbccdd: the admin document does not carry garbage_collection.lifespan".into(),
         ],
         judgement: Judgement::Established,
     }
@@ -1323,17 +787,16 @@ pub fn storage_check_unobservable() -> StorageCheck {
     }
 }
 
-/// One key, taken by the latest storage.
+/// One key, taken by the events storage.
 pub fn storage_explain() -> StorageExplain {
     StorageExplain {
-        key: "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health".into(),
+        key: "acme/zk2/host-a/tc/tc.netif.v1/events/reset/01k0".into(),
         base: "acme".into(),
         takers: vec![Taker {
-            storage: "latest".into(),
-            key_expr: "acme/v1/*/state/**".into(),
-            class: Some(StorageClass::State),
+            storage: "events".into(),
+            key_expr: "acme/zk2/*/*/*/events/**".into(),
             relation: TakerRelation::Includes,
-            why: "class state under base \"acme\": acme/v1/*/state/** includes every key it names; stored under strip_prefix \"acme/v1\" on volume fs (latest)".into(),
+            why: "its selector under namespace \"acme\": acme/zk2/*/*/*/events/** includes every key it names; stored under strip_prefix \"acme/zk2\" on volume fs (latest)".into(),
         }],
         refused_takers: vec![],
         none_reason: None,
@@ -1343,13 +806,12 @@ pub fn storage_explain() -> StorageExplain {
 /// A key nothing takes, because a refused storage would have.
 pub fn storage_explain_none() -> StorageExplain {
     StorageExplain {
-        key: "acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J".into(),
+        key: "acme/plant/line-1/temp".into(),
         base: "acme".into(),
         takers: vec![],
-        refused_takers: vec!["events".into()],
+        refused_takers: vec!["plant".into()],
         none_reason: Some(
-            "no planned storage's selector includes it; refused storage(s) events would have"
-                .into(),
+            "no planned storage's selector includes it; refused storage(s) plant would have".into(),
         ),
     }
 }
@@ -1922,131 +1384,4 @@ pub fn snapshot_staging() -> Snapshot {
 /// [`snapshot`] against itself: identical on every facet.
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
-}
-
-/// One exporter fold with every honesty pole exercised at once: a live
-/// series, a `{var}` series whose origin went down (no value, labels kept), a
-/// field series the observer evicted, a `state` series past its declared
-/// ttl; every O6 population non-zero; every payload population non-zero; two
-/// suppression reasons; a doctor that ran and found something.
-pub fn export_snapshot() -> ExportSnapshot {
-    use std::collections::BTreeMap;
-    ExportSnapshot {
-        scopes: vec!["acme/v1/*/**".into()],
-        excluded: zenkey_fleet::WILDCARD_EXCLUDES
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect(),
-        registry: Asked::Asked(RegistryInfo { producers: 2 }),
-        max_series: 10_000,
-        started_at_unix_s: 1_700_000_000,
-        taken_at_unix_s: 1_700_000_120,
-        series: vec![
-            SeriesRow {
-                name: "zenkey_subject_sysinfo_cpu_usage_percent".into(),
-                key: format!("acme/v1/{ORIGIN}/telemetry/sysinfo/cpu/usage"),
-                origin: ORIGIN.into(),
-                producer: "sysinfo".into(),
-                class: "telemetry".into(),
-                subject: "cpu/usage".into(),
-                labels: BTreeMap::new(),
-                field: None,
-                kind: Some("gauge".into()),
-                unit: Some("percent".into()),
-                value: Some(12.5),
-                last_seen_unix_s: 1_700_000_119,
-                state: SeriesState::Live,
-                samples: 240,
-                drop_exposed: 2,
-            },
-            SeriesRow {
-                name: "zenkey_subject_sysinfo_disk_used_bytes".into(),
-                key: "acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used".into(),
-                origin: "h-0000deadbeef".into(),
-                producer: "sysinfo".into(),
-                class: "telemetry".into(),
-                subject: "disk/{mount}/used".into(),
-                labels: [("mount".to_string(), "var-log".to_string())]
-                    .into_iter()
-                    .collect(),
-                field: None,
-                kind: None,
-                unit: Some("bytes".into()),
-                value: None,
-                last_seen_unix_s: 1_700_000_040,
-                state: SeriesState::OriginDown,
-                samples: 80,
-                drop_exposed: 0,
-            },
-            SeriesRow {
-                name: "zenkey_subject_netlink_iface_rx_bytes_total".into(),
-                key: format!("acme/v1/{ORIGIN}/telemetry/netlink/iface/eth0/rx_bytes"),
-                origin: ORIGIN.into(),
-                producer: "netlink".into(),
-                class: "telemetry".into(),
-                subject: "iface/{iface}/rx_bytes".into(),
-                labels: [("iface".to_string(), "eth0".to_string())]
-                    .into_iter()
-                    .collect(),
-                field: Some("rx".into()),
-                kind: Some("counter".into()),
-                unit: Some("bytes".into()),
-                value: None,
-                last_seen_unix_s: 1_700_000_100,
-                state: SeriesState::Evicted,
-                samples: 5,
-                drop_exposed: 0,
-            },
-            SeriesRow {
-                name: "zenkey_subject_sysinfo_health".into(),
-                key: format!("acme/v1/{ORIGIN}/state/sysinfo/health"),
-                origin: ORIGIN.into(),
-                producer: "sysinfo".into(),
-                class: "state".into(),
-                subject: "health".into(),
-                labels: BTreeMap::new(),
-                field: Some("uptime_s".into()),
-                kind: None,
-                unit: None,
-                value: Some(4242.0),
-                last_seen_unix_s: 1_700_000_060,
-                state: SeriesState::Quiet,
-                samples: 4,
-                drop_exposed: 0,
-            },
-        ],
-        observer: ObserverCounters {
-            dropped: 3,
-            evicted_keys: 5,
-            evicted_bytes: 7,
-            expired: 11,
-            unwatched: 13,
-            coalesced: 17,
-            unstamped: 19,
-        },
-        contract: ContractCounters {
-            qos_judged: 320,
-            qos_mismatch: 2,
-            qos_mismatch_by_subject: vec![QosMismatchRow {
-                producer: "sysinfo".into(),
-                subject: "cpu/usage".into(),
-                n: 2,
-            }],
-            payload_valid: 200,
-            payload_invalid: 1,
-            payload_not_validated: 128,
-        },
-        suppressed: [("cardinality".to_string(), 4u64), ("fields".to_string(), 1)]
-            .into_iter()
-            .collect(),
-        unregistered_keys: 3,
-        doctor: Asked::Asked(DoctorSummary {
-            ran_at_unix_s: 1_700_000_090,
-            findings: vec![DoctorFindingRef {
-                check: CheckId::SplitBrain,
-                severity: DoctorSeverity::Error,
-                subject: "host-a/tc tc.netif.v1".into(),
-            }],
-        }),
-    }
 }

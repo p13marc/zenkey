@@ -43,12 +43,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use zenkey::archive::{Archive, ArchiveConfig, Recorded};
+use zenkey::model::contract::{Contract, load_path};
+use zenkey::model::grammar::IfaceId;
+use zenkey::model::template::Bindings;
+use zenkey::{Call, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
 use zenoh::qos::Priority;
-use zk2::archive::{Archive, ArchiveConfig, Recorded};
-use zk2::model::contract::{Contract, load_path};
-use zk2::model::grammar::IfaceId;
-use zk2::model::template::Bindings;
-use zk2::{Call, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
 
 /// The net a case waits under before calling a hang a hang.
 const SETTLE: Duration = Duration::from_secs(20);
@@ -133,7 +133,7 @@ async fn bring_up(session: &zenoh::Session, cfg: ServiceConfig, paths: &[&str]) 
         let names: Vec<String> = c
             .resources
             .iter()
-            .map(zk2::implementation::resource_name)
+            .map(zenkey::implementation::resource_name)
             .collect();
         b.implement(Implementation::new(c)).expect("implement");
         for n in names {
@@ -613,7 +613,7 @@ async fn iface_show_names_providers_consumers_and_the_retrieved_contract() {
     let names: BTreeSet<String> = contract("tcgui/tc.netif.v1")
         .resources
         .iter()
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect();
     for p in rows("provider") {
         let exposes: BTreeSet<String> = p["exposes"]
@@ -983,7 +983,7 @@ async fn tc_instance(bus: &mut Bus, address: &str, how: Tc) -> Arc<Seen> {
     let names: Vec<String> = scenario_contract("tc.v1")
         .resources
         .iter()
-        .map(zk2::implementation::resource_name)
+        .map(zenkey::implementation::resource_name)
         .collect();
     for n in names {
         let _ = b.expose(&tc, &n);
@@ -1004,7 +1004,7 @@ async fn netif_owner(bus: &Bus) -> Service {
     b.implement(Implementation::new(contract("tcgui/tc.netif.v1")))
         .expect("implement");
     for r in &contract("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
     }
     b.serve_state(&netif).expect("serve state");
     b.start().await.expect("start")
@@ -1508,7 +1508,7 @@ async fn get_state_reads_the_owner_then_an_archive_and_never_confuses_them() {
     assert_eq!(doc["archive"], "ground/archive");
     assert_eq!(
         doc["selectors"],
-        json!([zk2::archive::archive_key(
+        json!([zenkey::archive::archive_key(
             &"ground/archive".parse().expect("an address"),
             origin
         )])

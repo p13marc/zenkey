@@ -1,9 +1,9 @@
 The verdict verbs' pre-run discipline: exit 2 is "the question could not be
-asked", and a failure **before** the question — a session that will not open, a
-context that resolves to nothing, a ledger with no registry to walk — must land
-there, never on 1. Their 1 is a *verdict*: `check cutover`'s 1 says "the old
-family still speaks", and reaching it through main's anyhow edge on a dead
-router told CI exactly that about a bus nobody listened to.
+asked", and a failure **before** the question — a session that will not open,
+a context that resolves to nothing — must land there, never on 1. Their 1 is a
+*verdict*: `check probe`'s 1 says "nothing usable arrived while the provider
+was up", and reaching it through main's anyhow edge on a dead router would tell
+CI exactly that about a bus nobody listened to.
 
 `exit::asked` is the seam, and `zenctl/src/exit.rs` §"Where each code comes
 from" is the whole doctrine in one place.
@@ -13,13 +13,13 @@ The fixture is the same dead client-mode bus as `session-transport-fallback`:
 and without retry.
 
 ```console
-$ zenctl check cutover --old-root 'old/**' --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl check probe host-a/tc tc.netif.v1 namespaces --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open the Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
-check cutover: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+check probe: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -37,42 +37,16 @@ check expect: the question could not be asked — exit 2, the reserved non-verdi
 
 ```
 
-`check conform` loads its suite before it calls anything, and with no
-`--registry` the suite *is* what the bus serves — so a dead bus is a suite
-that could not be loaded: the reserved 2, never the 1 of "violates".
-
-```console
-$ zenctl check conform --producer sysinfo --zenoh-config tests/cmd/fixtures/dead-bus.json5
-? 2
-Error: failed to open the Zenoh session
-
-Caused by:
-    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
-check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
-
-```
-
 A context that names nothing is a 2 everywhere now (`session-config-error`
-pins the listing half), and here it is a 2 for a second, older reason as well:
-`why`'s 1 is the claim "a cause was established", and a config file that does
-not contain the name you gave establishes nothing.
+pins the listing half), and on a verdict verb for a second, older reason as
+well: `doctor`'s 1 is the claim "a finding was established", and a config file
+that does not contain the name you gave establishes nothing.
 
 ```console
-$ zenctl why 'v1/h-3fa9c2d41b7e/state/sysinfo/health' --context no-such-context
+$ zenctl doctor --context no-such-context
 ? 2
 Error: context "no-such-context" not found in [..]config.toml — `zenctl context list`
-why: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
-
-```
-
-`check retired` walks a ledger; no `--registry` means there is no ledger to
-walk — unproven, not "still speaks" and not a pass.
-
-```console
-$ zenctl check retired
-? 2
-Error: check retired walks the [[deprecated]] ledger of local registry files — pass --registry <dir> (or set one on the active context)
-check retired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+doctor: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -100,16 +74,6 @@ check schema: not checked: image/jpeg is a raw type: it declares no structure to
 check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
-
-## `why`'s polarity flipped (#307)
-
-`why` used to exit **0** when it found a cause and **1** when the fleet was
-healthy — which pages you for a healthy fleet and stays quiet when something
-is wrong. Under the one contract, 1 is the *finding*, and a cause is exactly
-that. Nothing in `cmd/why.rs` spells the flip: `WhyVerdict::to_judgement`
-carries it (RFC 13's convention — the judged claim is the finding) and
-`zenkey_fleet::judgement_exit_code` projects it, so the two frontends cannot
-drift apart on what a `why` verdict means.
 
 ## An unreachable bus is not a healthy fleet (#510, #511)
 

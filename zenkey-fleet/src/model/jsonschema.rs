@@ -1,6 +1,6 @@
 //! The bit of JSON Schema this crate has to walk itself (#384).
 //!
-//! Two consumers read a served schema document structurally rather than
+//! Two consumers read a contract's JSON Schema document structurally rather than
 //! handing it to the validator: [`crate::judge::field`]'s declared-path
 //! surface, and [`crate::tape::synth`]'s instance synthesizer. Both hit the
 //! same two shapes, because both are handed whatever `schemars` emits —
@@ -9,8 +9,8 @@
 //! named type goes).
 //!
 //! Neither walker is a JSON Schema implementation and neither should become
-//! one — validation is `zenkey::schema::validate`'s job, against the real
-//! `jsonschema` crate. What lives here is only the pointer resolution both
+//! one — validation belongs to a real JSON Schema implementation. What
+//! lives here is only the pointer resolution both
 //! walkers need, kept in one place so they cannot disagree about what a
 //! `$ref` means.
 
@@ -24,9 +24,9 @@ pub const COMBINATORS: [&str; 3] = ["oneOf", "anyOf", "allOf"];
 /// Resolve a same-document JSON Pointer `$ref` (RFC 6901) against the root.
 ///
 /// Only same-document pointers resolve — `#`, `#/$defs/X`, `#/definitions/X`.
-/// An external `$ref` names a document the walker was never handed: the
-/// served schema is one payload (RFC 08 §7), and inventing a fetch for it
-/// would put a network call inside a pure walk.
+/// An external `$ref` names a document the walker was never handed: a
+/// bundle carries its schemas whole (spec §9.5), and inventing a fetch for
+/// one would put a network call inside a pure walk.
 ///
 /// `None` means **could not follow**, which every caller must render as
 /// "unjudgeable" rather than "absent" — a `$ref` that does not resolve says

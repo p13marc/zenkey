@@ -1,17 +1,18 @@
-//! Dynamic shell completion from the slice cache (issue #54).
+//! Dynamic shell completion from the name cache (issue #54).
 //!
-//! §6.1 decided this ("clap_complete static + dynamic — subject/producer/type
-//! names from the cache") and the static half shipped; the dynamic half never
-//! did, because the *cache was never written*. `SliceSet::write_cache` and
-//! `read_cache` had existed, unused, since the engine extraction.
+//! §6.1 decided this ("clap_complete static + dynamic — names from the
+//! cache"). Since #612 the names are zk2's: the service addresses and
+//! interfaces a presence read last saw, per namespace, and the namespaces
+//! `namespace list` last saw. v1's slice cache — producer, subject and type
+//! names from the registry — left with the v1 registry (FJ9).
 //!
 //! Three properties this must have, in descending order of how badly getting
 //! them wrong would hurt:
 //!
 //! 1. **Never touch the bus.** A `<TAB>` press must not open a session, and
-//!    certainly must not fan out an `introspect` sweep — a completion that
-//!    queries a fleet is a completion that hangs when the fleet is down.
-//!    Everything here reads files.
+//!    certainly must not read presence — a completion that queries a bus is
+//!    a completion that hangs when the bus is down. Everything here reads
+//!    files.
 //! 2. **Never fail.** A missing, stale or unreadable cache yields *no*
 //!    candidates, which degrades to clap's static completion. A panic in a
 //!    completion hook is a broken shell.
@@ -22,7 +23,6 @@
 
 use anyhow::{Result, anyhow};
 use clap_complete::CompletionCandidate;
-use zenkey_fleet::SliceSet;
 
 /// The environment variable the generated script sets when it calls back.
 const COMPLETE_VAR: &str = "ZENCTL_COMPLETE";
@@ -45,7 +45,7 @@ pub fn maybe_serve() {
 ///
 /// Lived in the match arm until #209. The two forms are not alternatives so
 /// much as a fallback: the dynamic completer asks the running binary (and so
-/// can offer live keys, producers and types), the static one is a shell script
+/// can offer cached services, interfaces and namespaces), the static one is a shell script
 /// that knows only the tree — which is what a machine without this binary on
 /// its `PATH` at completion time can use.
 pub fn emit(shell: clap_complete::Shell, static_only: bool) -> Result<()> {
@@ -86,9 +86,9 @@ pub fn registration(shell: clap_complete::Shell) -> Result<()> {
 ///
 /// The cache is keyed by context name, so a completion that ignores `--context`
 /// reads a *different* directory from the one the same command line wrote
-/// (issue #197): `zenctl --context lab topic list` fills `…/cache/lab/slices`,
-/// and completing `zenctl --context lab topic <TAB>` used to read
-/// `…/cache/<current>/slices` — often empty, with no way for the user to tell.
+/// (issue #197): `zenctl --context lab service list` fills the `lab` cache,
+/// and completing `zenctl --context lab service show <TAB>` used to read the
+/// current context's — often empty, with no way for the user to tell.
 ///
 /// The value has to come from here because the completion engine does not
 /// offer it: `ValueCandidates::candidates(&self)` takes no arguments. What it
@@ -123,61 +123,11 @@ fn context_in(args: impl IntoIterator<Item = String>) -> Option<String> {
     None
 }
 
-/// The cached slices for the context this invocation would use.
-///
-/// Deliberately infallible: completion has no error channel that a user would
-/// want to read mid-keystroke.
-fn cached() -> SliceSet {
-    let name = zenkey_explorer_config::active_name(context_on_line().as_deref());
-    SliceSet::read_cache(&zenkey_explorer_config::cache_dir(name.as_deref()))
-}
-
 fn candidates(values: impl IntoIterator<Item = String>) -> Vec<CompletionCandidate> {
     let mut values: Vec<String> = values.into_iter().collect();
     values.sort();
     values.dedup();
     values.into_iter().map(CompletionCandidate::new).collect()
-}
-
-/// Producer (and service) names.
-pub fn producers() -> Vec<CompletionCandidate> {
-    producers_in(&cached())
-}
-
-fn producers_in(set: &SliceSet) -> Vec<CompletionCandidate> {
-    candidates(set.slices().iter().map(|s| s.name.clone()))
-}
-
-/// The three classes — a closed vocabulary (RFC 04 §1), so this one is exact
-/// rather than cached.
-pub fn classes() -> Vec<CompletionCandidate> {
-    // Read off the enum, like the QoS profiles below — a fourth hand-written
-    // copy of a three-token closed set was one too many (#351).
-    candidates(zenkey::Class::ALL.iter().map(|c| c.chunk().to_string()))
-}
-
-/// The five QoS profiles — likewise closed (RFC 04 §3), read off the enum so
-/// it cannot drift.
-pub fn qos_profiles() -> Vec<CompletionCandidate> {
-    candidates(
-        zenkey::qos::QosProfile::ALL
-            .into_iter()
-            .map(|p| p.name().to_string()),
-    )
-}
-
-/// The `@blob` tier tokens — a closed vocabulary (RFC 07 §2), so this needs no
-/// cache and cannot go stale.
-pub fn blob_tiers() -> Vec<CompletionCandidate> {
-    candidates(
-        [
-            zenkey::BlobTier::Artifact,
-            zenkey::BlobTier::Tree,
-            zenkey::BlobTier::Store,
-        ]
-        .into_iter()
-        .map(|t| t.chunk().to_string()),
-    )
 }
 
 /// Named contexts from the config file.
@@ -192,29 +142,35 @@ pub fn contexts() -> Vec<CompletionCandidate> {
 //
 // zk2 has no registry to cache: what a completion can offer is what a
 // presence read last saw — service addresses and interfaces, per namespace
-// — and which namespaces `namespace list` last saw. One small JSON file
-// beside the slices, under the same three rules: never the bus, never a
-// failure, never a claim. `cache clear` removes it with the slices.
+// — and which namespaces `namespace list` last saw. One small JSON file in
+// the context's cache directory, under the same three rules: never the bus,
+// never a failure, never a claim. `cache clear` removes it.
 
-/// The file, inside the context's cache directory. `SliceSet::read_cache`
-/// reads only `*.toml`/`*.kdl` there, so it never mistakes this for a slice.
+/// The file, inside the context's cache directory — the directory zengui's
+/// v1 slice cache shares (#614), whose `*.toml`/`*.kdl` reader never
+/// mistakes this for a slice.
 const ZK2_NAMES: &str = "zk2-names.json";
 
 /// What presence reads last saw, per namespace.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct Zk2Names {
+pub(crate) struct Zk2Names {
     #[serde(default)]
-    namespaces: std::collections::BTreeSet<String>,
+    pub(crate) namespaces: std::collections::BTreeSet<String>,
     #[serde(default)]
-    seen: std::collections::BTreeMap<String, Zk2Seen>,
+    pub(crate) seen: std::collections::BTreeMap<String, Zk2Seen>,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-struct Zk2Seen {
+pub(crate) struct Zk2Seen {
     #[serde(default)]
-    services: std::collections::BTreeSet<String>,
+    pub(crate) services: std::collections::BTreeSet<String>,
     #[serde(default)]
-    ifaces: std::collections::BTreeSet<String>,
+    pub(crate) ifaces: std::collections::BTreeSet<String>,
+}
+
+/// What the cache holds for `context`, for `zenctl cache show`.
+pub(crate) fn cached_names(context: Option<&str>) -> Zk2Names {
+    read_names(&zk2_path(context))
 }
 
 fn zk2_path(context: Option<&str>) -> std::path::PathBuf {
@@ -229,8 +185,8 @@ fn read_names(path: &std::path::Path) -> Zk2Names {
         .unwrap_or_default()
 }
 
-/// Best-effort, like the slice cache: a cache that cannot be written must
-/// not fail the command the user ran, so nothing here returns an error.
+/// Best-effort: a cache that cannot be written must not fail the command the
+/// user ran, so nothing here returns an error.
 fn write_names(path: &std::path::Path, names: &Zk2Names) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -382,112 +338,73 @@ pub fn check_ids() -> Vec<CompletionCandidate> {
     )
 }
 
-/// Keys, completed from the *declared* keyspace: `v1/<origin>/<class>/…`.
+/// Wire keys, completed from the services a presence read last saw in the
+/// line's namespace: `<ns>/zk2/<system>/<service>/**`, one per address.
 ///
-/// Subject patterns reach the user through here rather than on their own: a
-/// bare `disk/{mount}/used` is not something any argument takes, and offering
-/// it as if it were would be a small lie. The `{var}` chunks are kept verbatim
-/// so it is visible that a *shape* is being completed, not a key.
-///
-/// The origin position completes as `*` plus nothing else — the cache holds
-/// registries, not a roster, and inventing origin ids from a slice would be
-/// exactly the kind of guess RFC 09 §5.1 O3 forbids.
+/// A *shape* is completed, not a key — the `**` stays for the user to
+/// narrow — and nothing beyond the cached addresses is guessed at (the
+/// tooling guide's O3).
 pub fn keys() -> Vec<CompletionCandidate> {
-    keys_in(&cached())
+    let context = context_on_line();
+    let names = read_names(&zk2_path(context.as_deref()));
+    let ns = namespace_on_line(context.as_deref());
+    keys_in(&names, &ns)
 }
 
-fn keys_in(set: &SliceSet) -> Vec<CompletionCandidate> {
-    let mut out: Vec<String> = Vec::new();
-    for slice in set.slices() {
-        // A service origin is verbatim and known; a host origin is not ours
-        // to guess, so it stays a wildcard the user replaces.
-        let origin = slice
-            .service_origin
-            .as_ref()
-            .map(zenkey::Declared::token)
-            .unwrap_or("*");
-        for d in &slice.subjects {
-            out.push(match &slice.service_origin {
-                Some(_) => format!("v1/{origin}/{}/{}", d.class.token(), d.path),
-                None => {
-                    format!("v1/{origin}/{}/{}/{}", d.class.token(), slice.name, d.path)
-                }
-            });
-        }
-    }
-    candidates(out)
+fn keys_in(names: &Zk2Names, namespace: &str) -> Vec<CompletionCandidate> {
+    candidates(
+        names
+            .seen
+            .get(namespace)
+            .map(|s| {
+                s.services
+                    .iter()
+                    .map(|a| zenkey_fleet::with_namespace(namespace, format!("zk2/{a}/**")))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The closed vocabularies are the enums, not copies of them.
-    #[test]
-    fn closed_vocabularies_come_from_their_types() {
-        let qos: Vec<String> = qos_profiles()
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(qos.len(), zenkey::qos::QosProfile::ALL.len());
-        assert!(qos.contains(&"sampled".to_string()));
-
-        let classes: Vec<String> = classes()
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(classes, ["events", "state", "telemetry"]);
-
-        let tiers: Vec<String> = blob_tiers()
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(tiers, ["artifact", "store", "tree"]);
-    }
-
     /// No cache, no candidates — and above all, no panic and no bus. This is
     /// the "degrades to static" half of #54's acceptance.
-    ///
-    /// Tested against an absent *directory* rather than by setting the config
-    /// env var: that var is process-global, and a completion test that moved
-    /// it would silently redirect whatever else was running in the same test
-    /// binary.
     #[test]
     fn an_absent_cache_yields_nothing_rather_than_failing() {
-        let empty = SliceSet::read_cache(std::path::Path::new("/nonexistent-zenctl-completion"));
-        assert!(producers_in(&empty).is_empty());
-        assert!(keys_in(&empty).is_empty());
-        // …while the closed vocabularies still answer: they were never cached.
-        assert!(!classes().is_empty());
+        let empty = read_names(std::path::Path::new(
+            "/nonexistent-zenctl-completion/x.json",
+        ));
+        assert!(keys_in(&empty, "prod").is_empty());
+        assert!(empty.namespaces.is_empty());
     }
 
-    /// And with a cache, the candidates are the cached names — including the
-    /// key shapes, whose origin position stays a wildcard rather than a guess
-    /// (RFC 09 §5.1 O3).
+    /// With a cache, a key shape per cached address, under the namespace —
+    /// the `**` left for the user, nothing guessed beyond the address.
     #[test]
-    fn a_cached_registry_supplies_names_and_key_shapes() {
-        let dir =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-        let set = SliceSet::from_dirs(&[dir]).expect("fixture registry");
-        let names: Vec<String> = producers_in(&set)
+    fn cached_addresses_supply_key_shapes() {
+        let mut names = Zk2Names::default();
+        let seen = names.seen.entry("prod".into()).or_default();
+        seen.services.insert("host-a/tc".into());
+        seen.services.insert("ws-01/gui".into());
+        names
+            .seen
+            .entry(String::new())
+            .or_default()
+            .services
+            .insert("root/svc".into());
+        let keys: Vec<String> = keys_in(&names, "prod")
             .iter()
             .map(|c| c.get_value().to_string_lossy().to_string())
             .collect();
-        assert!(names.contains(&"sysinfo".to_string()), "{names:?}");
-        assert!(names.contains(&"catalog".to_string()), "the service too");
-
-        let keys: Vec<String> = keys_in(&set)
+        assert_eq!(keys, ["prod/zk2/host-a/tc/**", "prod/zk2/ws-01/gui/**"]);
+        let root: Vec<String> = keys_in(&names, "")
             .iter()
             .map(|c| c.get_value().to_string_lossy().to_string())
             .collect();
-        assert!(
-            keys.iter().any(|k| k.starts_with("v1/*/state/sysinfo/")),
-            "a host producer's origin stays `*`: {keys:?}"
-        );
-        assert!(
-            keys.iter().any(|k| k.starts_with("v1/@catalog/state/")),
-            "a service origin is verbatim and known: {keys:?}"
-        );
+        assert_eq!(root, ["zk2/root/svc/**"], "the bus root prefixes nothing");
     }
 
     /// The cache is keyed by context, so the completion must read the key the
@@ -503,21 +420,28 @@ mod tests {
 
         // Both spellings, wherever they sit on the line.
         assert_eq!(
-            context_in(line(&["zenctl", "--context", "lab", "topic", ""])),
+            context_in(line(&["zenctl", "--context", "lab", "service", ""])),
             Some("lab".into())
         );
         assert_eq!(
-            context_in(line(&["zenctl", "--context=lab", "topic", ""])),
+            context_in(line(&["zenctl", "--context=lab", "service", ""])),
             Some("lab".into())
         );
         assert_eq!(
-            context_in(line(&["zenctl", "topic", "list", "--context", "prod", ""])),
+            context_in(line(&[
+                "zenctl",
+                "service",
+                "list",
+                "--context",
+                "prod",
+                ""
+            ])),
             Some("prod".into())
         );
 
         // No context named: the ambient one (env, then the `current` pointer)
         // still applies, which is what `active_name(None)` resolves.
-        assert_eq!(context_in(line(&["zenctl", "topic", ""])), None);
+        assert_eq!(context_in(line(&["zenctl", "service", ""])), None);
         // `--context <TAB>`: nothing named yet. Keying the cache on "" would
         // read a directory nothing ever writes.
         assert_eq!(context_in(line(&["zenctl", "--context", ""])), None);
@@ -529,7 +453,7 @@ mod tests {
                 "notmine".to_string(),
                 "--".to_string(),
                 "zenctl".to_string(),
-                "topic".to_string(),
+                "service".to_string(),
                 String::new(),
             ]),
             None

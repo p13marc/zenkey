@@ -1,9 +1,14 @@
 //! The resolved bus arguments — one context read, once, fallible (#209).
 //!
-//! [`crate::cli::BusArgs`] is what clap parses: flags, verbatim. [`Bus`] is
-//! what a command actually runs against, with every ladder in
-//! [`crate::resolve`] already climbed. The conversion is the tool's **single
-//! impure edge**: it reads `~/.config`, once, at a moment the caller chose.
+//! [`crate::cli::SessionArgs`] and [`crate::cli::NamespaceArgs`] are what
+//! clap parses: flags, verbatim. [`Link`] and [`Deployment`] are what a
+//! command actually runs against, with every ladder in [`crate::resolve`]
+//! already climbed. The conversion is the tool's **single impure edge**: it
+//! reads `~/.config`, once, at a moment the caller chose.
+//!
+//! v1's `Bus` — a deployment base, `--registry` dirs, and the slice ladder
+//! that loaded a registry from them or from the live bus — left with the v1
+//! registry (#612, FJ9).
 //!
 //! ## Why not memoise instead
 //!
@@ -33,291 +38,19 @@
 //! one statement of that, and `crate::context::active` is where this
 //! particular refusal is tagged.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use zenkey::RegistrySlice;
+
 use zenkey_explorer_config::StoredContext;
 
-use crate::cli::{BusArgs, NamespaceArgs, OutputArgs, SessionArgs};
+use crate::cli::{NamespaceArgs, OutputArgs, SessionArgs};
 use crate::resolve;
-
-/// Everything a command needs from the bus flags, resolved.
-#[derive(Clone)]
-pub(crate) struct Bus {
-    base: String,
-    /// The `--context` **name** as given, which is not the resolved context:
-    /// the completion cache is keyed by it, and `zenctl cache` has to key it
-    /// the same way (#197).
-    context: Option<String>,
-    registry: Vec<PathBuf>,
-    transport: resolve::Transport,
-    timeout: Duration,
-    out: OutputArgs,
-}
-
-impl Bus {
-    /// Resolve against the user's config file. The impure edge.
-    pub(crate) fn resolve(args: &BusArgs) -> Result<Bus> {
-        let stored = crate::context::active(args.context.as_deref())?;
-        Ok(Bus::resolve_with(args, stored.as_ref()))
-    }
-
-    /// The same, against a caller-supplied context — pure, and the reason a
-    /// test never has to touch the developer's real `~/.config`.
-    ///
-    /// Modelled on `zengui/src/config.rs`'s `settings_with()`, which split for
-    /// the same reason and got there first.
-    pub(crate) fn resolve_with(args: &BusArgs, stored: Option<&StoredContext>) -> Bus {
-        Bus {
-            base: resolve::base(args.base.as_deref(), stored).to_string(),
-            context: args.context.clone(),
-            registry: resolve::registry_dirs(&args.registry, stored),
-            transport: resolve::transport(
-                args.zenoh_config.as_deref(),
-                &args.connect,
-                &args.listen,
-                args.scouting,
-                stored,
-            ),
-            timeout: resolve::timeout(args.timeout, stored),
-            out: args.out,
-        }
-    }
-
-    /// The chosen format.
-    pub(crate) fn format(&self) -> crate::render::Format {
-        self.out.format
-    }
-
-    /// The chosen colour policy.
-    pub(crate) fn color(&self) -> crate::render::ColorChoice {
-        self.out.color
-    }
-
-    /// The deployment base — empty means the bus root, which is a deployment.
-    pub(crate) fn base(&self) -> &str {
-        &self.base
-    }
-
-    /// The `--context` name this invocation was given, if any.
-    pub(crate) fn context_name(&self) -> Option<&str> {
-        self.context.as_deref()
-    }
-
-    pub(crate) fn timeout(&self) -> Duration {
-        self.timeout
-    }
-
-    pub(crate) fn registry_dirs(&self) -> Vec<PathBuf> {
-        self.registry.clone()
-    }
-
-    /// Compose a base-relative key into the full wire key this un-namespaced
-    /// tool must actually use.
-    pub(crate) fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
-        Ok(zenkey::grammar::with_base(self.base(), relative))
-    }
-
-    /// This invocation's resolved base, bound to a session — the bundle every
-    /// bus-facing engine call takes (#218).
-    ///
-    /// Borrowed from both: a command opens its session once and this is what
-    /// it hands each engine call, so the base a command ran against is read
-    /// off the `Bus` exactly once.
-    pub(crate) fn fleet<'a>(&'a self, session: &'a zenoh::Session) -> zenkey_fleet::Fleet<'a> {
-        zenkey_fleet::Fleet::new(session, self.base())
-    }
-
-    pub(crate) async fn session(&self) -> Result<zenoh::Session> {
-        self.session_reporting().await.map_err(open_error)
-    }
-
-    /// A session **in** `namespace` over this bus's connection: the one
-    /// act that writes as a deployment's own participant, `replay
-    /// --namespace` (#612, FJ5; spike S13). The explorer's view stays
-    /// un-namespaced everywhere else.
-    pub(crate) async fn session_in(&self, namespace: &str) -> Result<zenoh::Session> {
-        let t = &self.transport;
-        zenkey_fleet::open_in_namespace(
-            namespace,
-            t.file.as_deref(),
-            &t.connect,
-            &t.listen,
-            t.scouting,
-        )
-        .await
-        .map_err(open_error)
-    }
-
-    /// The same, saying which half failed — so a caller holding `--registry`
-    /// dirs can tell "the transport would not come up" (answerable from disk)
-    /// from "the config file you named does not parse" (yours to fix, #196).
-    pub(crate) async fn session_reporting(
-        &self,
-    ) -> Result<zenoh::Session, zenkey_fleet::OpenFailure> {
-        let t = &self.transport;
-        zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting).await
-    }
-
-    /// Slices when they are available, `None` when they are not — for the
-    /// verbs that slices only **enrich** (#210).
-    ///
-    /// Two wrappers, both load-bearing.
-    ///
-    /// `Option`, not an empty set, because the engine already distinguishes
-    /// them and builds sentences on the difference: `bench.rs` says *"no
-    /// registry loaded, so X's idempotence is unknown"* for `None` and *"the
-    /// loaded registry does not declare X"* for an empty one, and only one of
-    /// those is ever true. `facts.rs` states it as engine policy.
-    ///
-    /// `Result`, not a bare `Option`, because there are two failure *sources*
-    /// and [`SliceFailure`] is what keeps them apart. A fleet that will not
-    /// answer is a degradation; a source **the user named** — `--registry
-    /// /typo`, a `--zenoh-config` that does not parse — is their error, and
-    /// swallowing it would turn `echo --registry /typo` from a refusal
-    /// into a silent structural echo.
-    pub(crate) async fn slices_optional(&self) -> Result<Option<zenkey_fleet::SliceSet>> {
-        match self.load_slices().await {
-            Ok(set) => Ok(Some(set)),
-            Err(SliceFailure::Named(e)) => {
-                Err(crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e)))
-            }
-            Err(SliceFailure::Unopened(e) | SliceFailure::Unreachable(e)) => {
-                // The chain, not just `Display`: the engine's `Display` says
-                // *what* failed and the source says *why* (#348), so a bare
-                // format would announce "open session" and stop.
-                //
-                // `one_line`, not `errors::render`: this is a *note's* reason,
-                // rendered inside one parenthesised clause, and `render` is
-                // the top-level termination shape — three lines with
-                // `Error:`/`Caused by:` labels landing mid-sentence.
-                crate::degrade::announce(&zenkey_fleet::one_line(&e));
-                Ok(None)
-            }
-        }
-    }
-
-    /// Registry slices from whichever source the flags select: local
-    /// `--registry` dirs when given (offline), otherwise the live bus
-    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
-    /// so every renderer is source-agnostic.
-    pub(crate) async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        Ok(self.slice_set().await?.slices().to_vec())
-    }
-
-    /// The same, as the fleet engine's indexed set (echo's decode path).
-    ///
-    /// For the verbs slices *determine*: every failure is a failure, whichever
-    /// source it came from.
-    pub(crate) async fn slice_set(&self) -> Result<zenkey_fleet::SliceSet> {
-        self.load_slices().await.map_err(SliceFailure::into_error)
-    }
-
-    /// The load, with the two failure sources still distinguishable.
-    async fn load_slices(&self) -> Result<zenkey_fleet::SliceSet, SliceFailure> {
-        let base = self.base();
-        let dirs = match resolve::slice_source(self.registry_dirs()) {
-            resolve::SliceSource::Bus => {
-                let session = match self.session_reporting().await {
-                    Ok(s) => s,
-                    // A config file the user named: theirs to fix, and
-                    // answering anyway would hide it (#196).
-                    Err(zenkey_fleet::OpenFailure::Config(e)) => {
-                        return Err(SliceFailure::Named(e));
-                    }
-                    Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                        return Err(SliceFailure::Unopened(e));
-                    }
-                };
-                let set = zenkey_fleet::SliceSet::from_bus(&self.fleet(&session), self.timeout())
-                    .await
-                    .map_err(SliceFailure::Unreachable)?;
-                if set.slices().is_empty() {
-                    eprintln!("{}", resolve::notes::no_slices(base).to_line());
-                }
-                announce_collapsed(&set);
-                self.cache(&set);
-                return Ok(set);
-            }
-            resolve::SliceSource::Union(dirs) => dirs,
-        };
-        // The README promises this works when the fleet is down. It used to
-        // mostly hold by accident — a peer session opens against an
-        // unreachable endpoint, so the union fell back to the dirs — and
-        // failed on a transport that would not come up at all, a taken
-        // listener port, say (#196). Since the session is a client (#501) an
-        // unreachable router *is* a transport that will not come up, so this
-        // arm is the one that answers whenever the fleet is down.
-        let session = match self.session_reporting().await {
-            Ok(s) => s,
-            Err(zenkey_fleet::OpenFailure::Config(e)) => return Err(SliceFailure::Named(e)),
-            Err(zenkey_fleet::OpenFailure::Transport(e)) => {
-                let set = zenkey_fleet::SliceSet::from_dirs(&dirs).map_err(SliceFailure::Named)?;
-                eprintln!(
-                    "{}",
-                    resolve::notes::registry_only(&e.to_string(), &dirs).to_line()
-                );
-                self.cache(&set);
-                return Ok(set);
-            }
-        };
-        // §6.1's decision, delivered by issue #43: --registry and the bus stop
-        // being exclusive. Union: served wins per producer, dirs fill the
-        // gaps, disagreement is reported — never silently overwritten.
-        let out = zenkey_fleet::SliceSet::from_union(&self.fleet(&session), &dirs, self.timeout())
-            .await
-            // The dirs are half of this, and a directory the user named that
-            // will not read is not the bus being quiet.
-            .map_err(SliceFailure::Named)?;
-        for d in &out.disagreements {
-            eprintln!(
-                "{}",
-                resolve::notes::disagreement(
-                    &d.producer,
-                    &d.bus_version.to_string(),
-                    &d.dirs_version.to_string(),
-                    d.shape_differs,
-                )
-                .to_line()
-            );
-        }
-        announce_collapsed(&out.set);
-        self.cache(&out.set);
-        Ok(out.set)
-    }
-
-    /// Persist the slice set for shell completion (issue #54).
-    ///
-    /// Best-effort by design: a cache that cannot be written must not fail the
-    /// command the user actually ran, and an unwritable cache dir is a
-    /// completion that stays static — not an outage. An *empty* set is never
-    /// written, because overwriting a good cache with a sweep that found
-    /// nothing would turn one bad moment on the bus into a permanently blank
-    /// completion.
-    pub(crate) fn cache(&self, set: &zenkey_fleet::SliceSet) {
-        if set.slices().is_empty() {
-            return;
-        }
-        // Through the accessor, not the field: the reader
-        // (`completion::cached`) and `zenctl cache` both resolve the name the
-        // same way, and three spellings of one rule is how they drifted
-        // (#197).
-        let dir = zenkey_explorer_config::cache_dir(
-            zenkey_explorer_config::active_name(self.context_name()).as_deref(),
-        );
-        // Nothing is logged on failure: this runs on every command, and a
-        // warning about a cache the user did not ask for would be noise on
-        // the output they did.
-        let _ = set.write_cache(&dir);
-    }
-}
 
 /// A zk2 verb's connection, resolved (#612, FJ4): `SessionArgs` with every
 /// ladder climbed, and no deployment in it.
 ///
-/// The same single impure edge as [`Bus`]: the context file is read once,
+/// The single impure edge: the context file is read once,
 /// when this is built. `namespace list` runs on one of these alone,
 /// because it looks across namespaces; a resolved verb runs on a
 /// [`Deployment`], which carries one.
@@ -392,6 +125,22 @@ impl Link {
             .await
             .map_err(open_error)
     }
+
+    /// A session **in** `namespace` over this connection: the one act that
+    /// writes as a deployment's own participant, `replay --namespace`
+    /// (#612, FJ5; spike S13).
+    pub(crate) async fn session_in(&self, namespace: &str) -> Result<zenoh::Session> {
+        let t = &self.transport;
+        zenkey_fleet::open_in_namespace(
+            namespace,
+            t.file.as_deref(),
+            &t.connect,
+            &t.listen,
+            t.scouting,
+        )
+        .await
+        .map_err(open_error)
+    }
 }
 
 /// A zk2 resolved verb's bus (#612, FJ4): the deployment's namespace and the
@@ -464,53 +213,10 @@ impl Deployment {
     }
 }
 
-/// Why slices could not be loaded — and *whose* problem it is (#210).
-///
-/// The distinction is the whole reason `slices_optional` returns a `Result`
-/// rather than a bare `Option`. It is the same fork `zenkey_fleet::OpenFailure`
-/// draws for sessions (#196), one level out: an unreachable fleet leaves a
-/// question the caller may still answer without it; a source the user *named*
-/// must not be answered past.
-enum SliceFailure {
-    /// A `--registry` dir, or a `--zenoh-config` file, that the user named and
-    /// that did not work. Never degraded past — a silent structural echo in
-    /// place of a refusal is how a typo becomes a wrong answer.
-    Named(zenkey_fleet::Error),
-    /// The session never opened (#503). A verb slices only enrich may
-    /// continue, exactly as for [`Unreachable`](Self::Unreachable); a verb
-    /// they determine exits 2, because nothing was asked.
-    Unopened(zenkey_fleet::Error),
-    /// The session opened and the bus did not answer. A verb slices only
-    /// enrich may continue.
-    Unreachable(zenkey_fleet::Error),
-}
-
-impl SliceFailure {
-    /// The two halves also part on their **exit code** (#307): a source the
-    /// user named that did not work is a refused input — exit 2, clap's code
-    /// — while a bus that would not answer is an ordinary failure, exit 1.
-    /// The fork already existed; this is the one line that spends it.
-    fn into_error(self) -> anyhow::Error {
-        match self {
-            // Promoted, not merely forwarded: the *engine* may well have
-            // classified a missing `--registry` dir as `Io`, which is a fair
-            // reading on its own. Here the extra fact is that the user named
-            // it, and a source they named that did not work is a refused
-            // input whatever went wrong behind it.
-            SliceFailure::Named(e) => {
-                crate::exit::unaskable!("{}", zenkey_fleet::one_line(&e))
-            }
-            SliceFailure::Unopened(e) => anyhow::Error::new(crate::exit::NoSession(e)),
-            SliceFailure::Unreachable(e) => e.into(),
-        }
-    }
-}
-
 /// An [`OpenFailure`](zenkey_fleet::OpenFailure), as an error with an exit
 /// code attached.
 ///
-/// The same fork as [`SliceFailure`], on the session side (#196): a
-/// `--zenoh-config` this tool refuses — one that sets a session namespace,
+/// A `--zenoh-config` this tool refuses — one that sets a session namespace,
 /// say, which an explorer must not have (RFC 09 §5) — or an endpoint that is
 /// not one (#503) is *your input*, so it is refused and exits 2. A transport
 /// that would not come up is the world being unavailable — and since the
@@ -529,74 +235,9 @@ fn open_error(f: zenkey_fleet::OpenFailure) -> anyhow::Error {
     }
 }
 
-/// Say which producers the fleet does not agree with itself about (#399).
-///
-/// The set kept one origin's answer per producer, so every slice-derived
-/// answer under it — a refine, a `topic info`, a `diff` — is derived from a
-/// pick. That was silent for a library consumer until #385 and for a `zenctl`
-/// user until now.
-///
-/// Silent when the set never asked (files, or bare slices): a set with no
-/// origins to collapse has learned nothing about whether the fleet agrees,
-/// and saying so on every offline invocation would be noise, not honesty.
-/// The verbs that *render* the question — `registry diff` — carry the
-/// not-asked case in their own notes, where a machine consumer can read it.
-fn announce_collapsed(set: &zenkey_fleet::SliceSet) {
-    for c in set.collapsed().as_option().copied().unwrap_or(&[]) {
-        if !c.agreed {
-            eprintln!(
-                "{}",
-                resolve::notes::collapsed(&c.producer, &c.origins, &c.versions).to_line()
-            );
-        }
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-
-    /// `BusArgs` as clap would hand it over with nothing but `--base` given.
-    pub(crate) fn args(base: Option<&str>) -> BusArgs {
-        BusArgs {
-            base: base.map(str::to_string),
-            context: None,
-            registry: vec![],
-            connect: vec![],
-            listen: vec![],
-            scouting: false,
-            timeout: None,
-            zenoh_config: None,
-            out: OutputArgs {
-                format: crate::render::Format::Table,
-                color: crate::render::ColorChoice::Never,
-            },
-        }
-    }
-
-    /// A `Bus` a test can build with no config file, no bus and no `exit`.
-    ///
-    /// This is the whole point of the split: before it, the crate's only unit
-    /// test of a bus accessor passed *because it pinned `base` and so never
-    /// let the ladder reach its second rung*. `resolve_with(_, None)` is that
-    /// second rung, made reachable and empty.
-    pub(crate) fn bus_of(base: Option<&str>) -> Bus {
-        Bus::resolve_with(&args(base), None)
-    }
-
-    #[test]
-    fn a_bus_with_no_context_falls_all_the_way_to_the_defaults() {
-        let b = bus_of(None);
-        assert_eq!(
-            b.base(),
-            "",
-            "no flag and no context: the base-less deployment, not a failure"
-        );
-        assert_eq!(b.timeout(), Duration::from_secs(resolve::DEFAULT_TIMEOUT_S));
-        assert!(b.registry_dirs().is_empty());
-        assert_eq!(b.context_name(), None);
-        assert_eq!(bus_of(Some("zs")).base(), "zs");
-    }
 
     /// FJ4: a resolved verb's namespace climbs the base's ladder — the flag
     /// (which `--base` and `ZENCTL_BASE` both feed), then the context's
@@ -640,9 +281,24 @@ pub(crate) mod tests {
     /// two spellings drifted apart.
     #[test]
     fn the_context_name_outlives_the_context() {
-        let mut a = args(None);
-        a.context = Some("lab".into());
-        let b = Bus::resolve_with(&a, None);
-        assert_eq!(b.context_name(), Some("lab"));
+        let args = SessionArgs {
+            context: Some("lab".into()),
+            connect: vec![],
+            listen: vec![],
+            scouting: false,
+            timeout: None,
+            zenoh_config: None,
+            out: OutputArgs {
+                format: crate::render::Format::Table,
+                color: crate::render::ColorChoice::Never,
+            },
+        };
+        let link = Link::resolve_with(&args, None);
+        assert_eq!(link.context_name(), Some("lab"));
+        assert_eq!(
+            link.timeout(),
+            Duration::from_secs(resolve::DEFAULT_TIMEOUT_S),
+            "no flag and no context: the default, not a failure"
+        );
     }
 }

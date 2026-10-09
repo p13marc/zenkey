@@ -48,7 +48,7 @@ async fn a_responders_queries_stream_and_stay_answerable() {
     // Settle: loop the GET until the queryable is routable, the house shape.
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             key,
             &zenkey_fleet::GetOpts::new(std::time::Duration::from_millis(500)),
         )
@@ -77,7 +77,7 @@ async fn matching_changes_stream_as_bools() {
     let (a, b) = peer_pair().await;
     let key = "v1/h-cccccccccccc/state/demo/health";
     let publication =
-        zenkey_fleet::declare_publication(&a, key, zenkey::qos::QosProfile::Transition, None)
+        zenkey_fleet::declare_publication(&a, key, zenkey_fleet::WireQos::DEFAULT, None)
             .await
             .expect("declare");
     let events = publication.matching_events().await.expect("events");
@@ -174,7 +174,7 @@ async fn the_monitors_stream_reports_lag_as_data_and_counts_it() {
     let monitor = monitor.watching([key]).await.expect("watch");
 
     let publication =
-        zenkey_fleet::declare_publication(&a, key, zenkey::qos::QosProfile::Transition, None)
+        zenkey_fleet::declare_publication(&a, key, zenkey_fleet::WireQos::DEFAULT, None)
             .await
             .expect("declare");
     let matching = publication.matching_events().await.expect("events");

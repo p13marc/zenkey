@@ -1,7 +1,7 @@
 //! Report types this crate owns.
 //!
 //! `zenkey_fleet::report` is the contract shared with zengui and pinned by
-//! `report_contract.rs`. These are not that: the slice cache is *this tool's
+//! `report_contract.rs`. These are not that: the name cache is *this tool's
 //! own disk footprint*, no second frontend renders it, and putting it in the
 //! shared surface would freeze a shape nobody else reads. The governing rule
 //! catches the difference — a report belongs to the engine iff it is the
@@ -12,13 +12,14 @@ use serde::Serialize;
 
 use crate::render::{Cell, Grid, Note, Render, Row, Table, envelope_of};
 
-/// One producer's slice, as the completion cache holds it.
+/// One namespace's names, as the completion cache holds them: what the
+/// last presence read there saw.
 #[derive(Debug, Clone, Serialize)]
-pub struct CachedSlice {
-    pub producer: String,
-    pub registry_version: String,
-    pub subjects: usize,
-    pub procedures: usize,
+pub struct CachedNamespace {
+    /// The namespace; empty for the bus root.
+    pub namespace: String,
+    pub services: usize,
+    pub ifaces: usize,
 }
 
 /// What `zenctl cache show` found on disk.
@@ -27,7 +28,14 @@ pub struct CacheReport {
     /// The directory itself — the point of the command is that a tool which
     /// leaves files on a user's disk can be asked where they are (#54).
     pub dir: String,
-    pub slices: Vec<CachedSlice>,
+    /// The namespaces `namespace list` last saw.
+    pub listed: Vec<String>,
+    /// What each namespace's last presence read saw.
+    pub seen: Vec<CachedNamespace>,
+}
+
+fn namespace_label(ns: &str) -> &str {
+    if ns.is_empty() { "(empty)" } else { ns }
 }
 
 impl Render for CacheReport {
@@ -36,43 +44,48 @@ impl Render for CacheReport {
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut e = serde_json::Map::new();
         e.insert("dir".into(), self.dir.clone().into());
-        e.insert("slices".into(), self.slices.len().into());
+        e.insert("listed".into(), self.listed.clone().into());
+        e.insert("namespaces".into(), self.seen.len().into());
         e
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
-        for s in &self.slices {
-            out(Row::of("slice", s));
+        for s in &self.seen {
+            out(Row::of("namespace", s));
         }
     }
 
     fn table(&self, t: &mut Table) {
         t.line(&self.dir);
-        let mut g = Grid::unheaded(3).max(0, 16);
-        for s in &self.slices {
+        let mut g = Grid::unheaded(2).max(0, 24);
+        for s in &self.seen {
             g.row([
-                Cell::text(format!("  {}", s.producer)),
-                Cell::text(format!("registry {}", s.registry_version)),
+                Cell::text(format!("  {}", namespace_label(&s.namespace))),
                 Cell::text(format!(
-                    "{} subject(s), {} procedure(s)",
-                    s.subjects, s.procedures
+                    "{} service(s), {} interface(s)",
+                    s.services, s.ifaces
                 )),
             ]);
         }
         t.grid(g);
+        if !self.listed.is_empty() {
+            let names: Vec<&str> = self.listed.iter().map(|n| namespace_label(n)).collect();
+            t.line(format!("namespaces listed: {}", names.join(", ")));
+        }
     }
 
     fn notes(&self) -> Vec<Note> {
-        if self.slices.is_empty() {
+        if self.seen.is_empty() && self.listed.is_empty() {
             return vec![Note::coverage(
-                "empty — completion falls back to the static command tree. Any command \
-                 that loads slices fills it (or `zenctl cache refresh`)",
+                "empty — completion falls back to the static command tree. Any presence \
+                 read fills it (`service list`, `iface list`, `zenctl cache refresh`), and \
+                 `namespace list` adds the namespaces",
             )];
         }
         vec![Note::coverage(format!(
-            "{} producer(s), from the last sighting — suggestions, not an inventory. \
+            "{} namespace(s), from the last sighting — suggestions, not an inventory. \
              Nothing reads this except shell completion, and no command answers from it",
-            self.slices.len()
+            self.seen.len()
         ))]
     }
 }
@@ -241,9 +254,8 @@ impl Render for GetReport {
         let mut notes = Vec::new();
         if self.answers.is_empty() {
             notes.push(Note::silence(format!(
-                "no replies to {} within {}s. Nobody is registered for it, nobody \
-                 who is was up, or the timeout was short — and the three are \
-                 different",
+                "no replies to {} within {}s. Nothing may hold it, its holders may \
+                 be down, or the timeout was short — and the three are different",
                 self.selector, self.timeout_s
             )));
         }
@@ -434,10 +446,10 @@ pub struct CacheAction {
     /// `refreshed` or `cleared`.
     pub action: &'static str,
     pub dir: String,
-    /// Producers cached, for `refresh`. Absent for `clear`, which counts
-    /// nothing — not zero (RFC 09 §5.1 O4).
+    /// Services the presence read saw, for `refresh`. Absent for `clear`,
+    /// which counts nothing — not zero (RFC 09 §5.1 O4).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub slices: Option<usize>,
+    pub services: Option<usize>,
     /// Whether there was anything there. `clear` on an absent directory is
     /// the desired end state, not a failure.
     pub existed: bool,
@@ -458,8 +470,8 @@ impl Render for CacheAction {
     fn table(&self, _t: &mut Table) {}
 
     fn notes(&self) -> Vec<Note> {
-        vec![Note::summary(match (self.action, self.slices) {
-            ("refreshed", Some(n)) => format!("cached {n} producer(s) to {}", self.dir),
+        vec![Note::summary(match (self.action, self.services) {
+            ("refreshed", Some(n)) => format!("cached {n} service(s) to {}", self.dir),
             (_, _) if self.existed => format!("removed {}", self.dir),
             _ => format!("{} does not exist — nothing to clear", self.dir),
         })]

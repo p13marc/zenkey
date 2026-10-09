@@ -26,12 +26,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use zenkey::OpError;
 use zenkey_model::authoring::{Kind, ParamType};
 use zenkey_model::contract::{Body, Rate, Replies, Resource};
 use zenkey_model::grammar::{Addr, IfaceId, data_key};
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::Session;
-use zk2::OpError;
 
 use crate::model::catalog::Revision;
 use crate::model::render::Member;
@@ -153,13 +153,13 @@ fn pattern_of(addr: &Addr, iface: &IfaceId, r: &Resource) -> String {
 
 /// Whether a `--member` names `r`.
 fn names(arg: &MemberArg, r: &Resource) -> bool {
-    arg.resource == zk2::implementation::resource_name(r) || arg.resource == r.template.as_str()
+    arg.resource == zenkey::implementation::resource_name(r) || arg.resource == r.template.as_str()
 }
 
 /// The members `--member` gives `r`, refused when they do not fit its
 /// template; `None` when no `--member` names it.
 fn given_members(r: &Resource, args: &[MemberArg]) -> Result<Option<Vec<Bindings>>> {
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let mut out: Option<Vec<Bindings>> = None;
     let params: Vec<(&str, bool)> = r.template.params().collect();
     for arg in args.iter().filter(|a| names(a, r)) {
@@ -320,7 +320,7 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
     for rev in &spec.revisions {
         let iface = rev.iface();
         for r in &rev.contract().resources {
-            let name = zk2::implementation::resource_name(r);
+            let name = zenkey::implementation::resource_name(r);
             // A `--member` for an operation is refused here.
             let given = given_members(r, &spec.members)?;
             let d = match &r.body {
@@ -384,7 +384,8 @@ pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
                     resource: name.clone(),
                     kind: r.kind,
                     key,
-                    encoding: zk2::writer::wire_encoding(&d.type_, d.encoding, &values).to_string(),
+                    encoding: zenkey::writer::wire_encoding(&d.type_, d.encoding, &values)
+                        .to_string(),
                     values,
                     members: source,
                     declared: declared(rev, r, Member::Type),
@@ -440,13 +441,13 @@ fn operation_entry(
     }
     GenPlanEntry {
         iface: rev.iface().to_string(),
-        resource: zk2::implementation::resource_name(r),
+        resource: zenkey::implementation::resource_name(r),
         kind: Kind::Operation,
         key: pattern_of(&spec.address, rev.iface(), r),
         values: BTreeMap::new(),
         members: MemberSource::Fixed,
         declared: declared(rev, r, Member::Response),
-        encoding: zk2::writer::wire_encoding(&op.response, op.encoding, &Bindings::new())
+        encoding: zenkey::writer::wire_encoding(&op.response, op.encoding, &Bindings::new())
             .to_string(),
         qos: None,
         rate_hz: None,
@@ -465,7 +466,7 @@ fn lookup<'a>(spec: &'a GenSpec, e: &GenPlanEntry) -> Result<(&'a Arc<Revision>,
             rev.contract()
                 .resources
                 .iter()
-                .find(|r| zk2::implementation::resource_name(r) == e.resource)
+                .find(|r| zenkey::implementation::resource_name(r) == e.resource)
                 .map(|r| (rev, r))
         })
         .ok_or_else(|| {
@@ -478,9 +479,9 @@ fn lookup<'a>(spec: &'a GenSpec, e: &GenPlanEntry) -> Result<(&'a Arc<Revision>,
 
 /// One data entry's writer.
 enum Out {
-    Stream(zk2::writer::Writer),
-    State(zk2::state::StateWriter),
-    Event(zk2::writer::EventWriter),
+    Stream(zenkey::writer::Writer),
+    State(zenkey::state::StateWriter),
+    Event(zenkey::writer::EventWriter),
 }
 
 /// What one entry's task did.
@@ -548,7 +549,7 @@ pub async fn run_gen(
             .iter()
             .flat_map(|r| r.contract().resources.iter()),
     );
-    let mut b = zk2::ServiceBuilder::new(
+    let mut b = zenkey::ServiceBuilder::new(
         session,
         config(
             &spec.address,

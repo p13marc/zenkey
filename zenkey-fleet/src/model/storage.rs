@@ -1,20 +1,23 @@
-//! The storage planner (RFC 09 §2, #393): a deployment file plus the registry
-//! in, the router's `storage_manager` block out — with every derived number
-//! shown, every caveat cited, and every refusal named.
+//! The storage planner (RFC 09 §2, #393): a deployment file in, the router's
+//! `storage_manager` block out — with every derived number shown, every
+//! caveat cited, and every refusal named.
 //!
-//! RFC 09 §2 specifies the class-driven storages, each with a selector, a
-//! literal `strip_prefix`, a volume from the §2.1 capability table, and a
-//! `garbage_collection.lifespan` that must be ≥ the longest `ttl_s` in the
-//! registry (§2.3, the tombstone-visibility row of RFC 04 §1.2). The registry
-//! knows that number; until now nobody computed it, and the two things a
-//! human types wrong here — a `strip_prefix` that is not a literal prefix of
-//! its selector, and a lifespan chosen by feel — produce a router that starts
-//! happily and stores nothing, or resurrects a retired key from a slow
-//! replica.
+//! Each storage names its selector, relative to the deployment namespace; a
+//! literal `strip_prefix` is derived from it and a volume's capability pair
+//! comes from the §2.1 table. The two things a human types wrong here — a
+//! `strip_prefix` that is not a literal prefix of its selector, and a
+//! history mode the backend does not offer — produce a router that starts
+//! happily and stores nothing, or refuses to start at all.
+//!
+//! **What left at FJ9** (#612): v1's class table (`state`, `telemetry`,
+//! `events`, `catalog`, `catalog-pdns`, each a v1 key family) and the
+//! lifespan v1 derived from the registry's longest `ttl_s`. A zk2 contract
+//! declares no tombstone lifetime to derive one from, so a lifespan is the
+//! file's, or zenoh's default, and says which. A storage on an owner's
+//! state keys is what spec §4.2 S4 forbids; the doctor's
+//! `storage-on-state` judges a running one.
 //!
 //! Pure, like everything in [`crate::model`]: values in hand, no session.
-//! [`plan_storages`] takes an *optional* registry and says what it could not
-//! verify without one rather than inventing a number (RFC 13 §3 O4);
 //! [`check_storages`] compares a plan against storages somebody else read
 //! off the admin space; [`explain`] answers "which storage takes this key"
 //! over the plan alone. [`to_json5`] is the one rendering of the plan that
@@ -24,12 +27,10 @@ use std::collections::BTreeMap;
 
 use zenoh::key_expr::keyexpr;
 
-use crate::model::registry::SliceSet;
 use crate::report::{
-    Asked, CheckFinding, CheckKind, Deployment, GarbageCollection, HistoryMode, Judgement,
-    Persistence, PlanWarning, PlannedStorage, PlannedVolume, Refusal, RegistryFacts, Replication,
-    StorageCheck, StorageClass, StorageExplain, StorageInfo, StoragePlan, Taker, TakerRelation,
-    WarningKind,
+    CheckFinding, CheckKind, Deployment, GarbageCollection, HistoryMode, Judgement, Persistence,
+    PlanWarning, PlannedStorage, PlannedVolume, Refusal, Replication, StorageCheck, StorageExplain,
+    StorageInfo, StoragePlan, Taker, TakerRelation, WarningKind,
 };
 
 /// Zenoh's own default `garbage_collection.lifespan`, seconds (RFC 09 §2.3:
@@ -37,8 +38,6 @@ use crate::report::{
 pub const DEFAULT_LIFESPAN_S: i64 = 86_400;
 /// Zenoh's own default `garbage_collection.period`, seconds.
 pub const DEFAULT_GC_PERIOD_S: u64 = 30;
-/// The default margin over the longest covered `ttl_s`.
-pub const DEFAULT_GC_MARGIN: f64 = 2.0;
 
 /// The admin selector `--check` reads storages from — the same one
 /// [`crate::storages`] sweeps, restated here so the report can cite it.
@@ -73,9 +72,9 @@ fn default_replication() -> BTreeMap<String, serde_json::Value> {
 }
 
 /// The literal leftmost run of a key expression — the one `strip_prefix`
-/// Zenoh accepts (string prefix, no wildcards). `zensight/v1/*/state/**`
-/// → `zensight/v1`; `zensight/v1/@catalog/state/pdns/**` →
-/// `zensight/v1/@catalog/state/pdns`. Empty when the expression opens on a
+/// Zenoh accepts (string prefix, no wildcards). `fleet-a/zk2/*/*/*/events/**`
+/// → `fleet-a/zk2`; `fleet-a/zk2/host-a/tc/@stream/**` →
+/// `fleet-a/zk2/host-a/tc/@stream`. Empty when the expression opens on a
 /// wildcard.
 pub fn literal_prefix(key_expr: &str) -> String {
     key_expr
@@ -83,55 +82,6 @@ pub fn literal_prefix(key_expr: &str) -> String {
         .take_while(|c| !c.contains('*') && !c.contains('$'))
         .collect::<Vec<_>>()
         .join("/")
-}
-
-/// One declared subject, as a wire family under the base.
-struct Family {
-    producer: String,
-    path: String,
-    is_state: bool,
-    ttl_s: Option<i64>,
-    selector: String,
-}
-
-/// Every declared subject of every class as the selector it occupies on the
-/// wire — the same composition `state_coverage` uses, all classes.
-fn families(slices: &SliceSet, base: &str) -> Vec<Family> {
-    let mut out = Vec::new();
-    for slice in slices.slices() {
-        for subject in &slice.subjects {
-            let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
-                continue;
-            };
-            let class = subject.class.token();
-            let selector = match &slice.service_origin {
-                Some(origin) => zenkey::grammar::with_base(
-                    base,
-                    format!("v1/{origin}/{class}/{}", pattern.selector_tail()),
-                ),
-                None => zenkey::grammar::with_base(
-                    base,
-                    format!("v1/*/{class}/{}/{}", slice.name, pattern.selector_tail()),
-                ),
-            };
-            out.push(Family {
-                producer: slice.name.clone(),
-                path: subject.path.clone(),
-                is_state: subject.class.is(&zenkey::Class::State),
-                ttl_s: subject.ttl_s,
-                selector,
-            });
-        }
-    }
-    out
-}
-
-/// The longest `ttl_s` among state families, and which one carries it —
-/// the alphabetically first of a tie, so the derivation is stable.
-fn longest_ttl<'f>(fams: impl Iterator<Item = &'f Family>) -> Option<(i64, String)> {
-    fams.filter(|f| f.is_state)
-        .filter_map(|f| f.ttl_s.map(|t| (t, format!("{}/{}", f.producer, f.path))))
-        .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)))
 }
 
 fn warn(kind: WarningKind, cite: &str, text: impl Into<String>) -> PlanWarning {
@@ -159,32 +109,13 @@ fn refuse_storage(
 
 /// Plan the storages of a deployment (#393).
 ///
-/// `slices` is the registry when one was asked — `None` degrades every
-/// lifespan to RFC 09 §2.3's default and says so in the derivation, and
-/// skips the coverage refusal (no registry is not an empty registry, RFC 13
-/// §3 O4). `fallback_base` is the observer's resolved base, used when the
+/// `fallback_base` is the observer's resolved namespace, used when the
 /// deployment file names none.
-pub fn plan_storages(
-    slices: Option<&SliceSet>,
-    fallback_base: &str,
-    deployment: &Deployment,
-) -> StoragePlan {
+pub fn plan_storages(fallback_base: &str, deployment: &Deployment) -> StoragePlan {
     let base = deployment
         .base
         .clone()
         .unwrap_or_else(|| fallback_base.to_string());
-    let fams: Option<Vec<Family>> = slices.map(|s| families(s, &base));
-    let registry = match (slices, &fams) {
-        (Some(s), Some(f)) => {
-            let longest = longest_ttl(f.iter());
-            Asked::Asked(RegistryFacts {
-                slices: s.slices().len(),
-                max_ttl_s: longest.as_ref().map(|l| l.0),
-                ttl_source: longest.map(|l| l.1),
-            })
-        }
-        _ => Asked::NotAsked,
-    };
 
     let mut refusals = Vec::new();
 
@@ -277,31 +208,9 @@ pub fn plan_storages(
     // ── Storages. ──
     let mut storages: Vec<PlannedStorage> = Vec::new();
     for (name, spec) in &deployment.storages {
-        // The selector: one of class and override, never both, never neither.
-        let (class, key_expr) = match (spec.class, spec.selector.as_deref()) {
-            (Some(c), None) => (Some(c), zenkey::grammar::with_base(&base, c.selector())),
-            (None, Some(sel)) => (None, zenkey::grammar::with_base(&base, sel)),
-            (Some(_), Some(_)) => {
-                refusals.push(refuse_storage(
-                    name,
-                    None,
-                    "RFC 04 §4",
-                    "declares both class and selector — the class derives the selector, so \
-                     name one or the other",
-                ));
-                continue;
-            }
-            (None, None) => {
-                refusals.push(refuse_storage(
-                    name,
-                    None,
-                    "RFC 04 §4",
-                    "declares neither class nor selector — nothing says what it stores",
-                ));
-                continue;
-            }
-        };
-        let Ok(ke) = keyexpr::new(key_expr.as_str()) else {
+        // The selector, joined to the namespace.
+        let key_expr = crate::model::namespace::join(&base, &spec.selector);
+        if keyexpr::new(key_expr.as_str()).is_err() {
             refusals.push(refuse_storage(
                 name,
                 Some(key_expr.clone()),
@@ -309,7 +218,7 @@ pub fn plan_storages(
                 format!("{key_expr:?} is not a valid key expression"),
             ));
             continue;
-        };
+        }
 
         // The volume, and its mode — the fact every §2.2 decision reads.
         let Some(volume) = volumes.iter().find(|v| v.id == spec.volume) else {
@@ -369,88 +278,23 @@ pub fn plan_storages(
             ));
         }
 
-        // Coverage: what the registry declares under this selector.
-        let covered: Option<Vec<&Family>> = fams.as_ref().map(|f| {
-            f.iter()
-                .filter(|fam| keyexpr::new(fam.selector.as_str()).is_ok_and(|fk| ke.intersects(fk)))
-                .collect()
-        });
-        if let Some(c) = &covered
-            && c.is_empty()
-        {
-            let reason = format!(
-                "the registry declares no subject under {key_expr:?} — empty coverage is \
-                 a finding, not a plan (a storage that captures nothing is either a \
-                 typo or a registry gap; either way it is not this deployment's)"
-            );
-            refusals.push(refuse_storage(name, Some(key_expr), "RFC 13 §3", reason));
-            continue;
-        }
-
-        // The tombstone lifetime, derived (RFC 09 §2.3).
-        let margin = spec.gc_margin.unwrap_or(DEFAULT_GC_MARGIN);
-        let longest = covered
-            .as_ref()
-            .and_then(|c| longest_ttl(c.iter().copied()));
-        let (lifespan_s, derivation) = match (spec.gc_lifespan_s, &covered, &longest) {
-            (Some(explicit), _, Some((ttl, src))) => {
-                if explicit < *ttl {
-                    warnings.push(warn(
-                        WarningKind::LifespanBelowTtl,
-                        "RFC 09 §2.3",
-                        format!(
-                            "gc_lifespan_s {explicit} is below the longest covered ttl_s \
-                             {ttl} ({src}): a delete must stay observable ≥ ttl_s (RFC 04 \
-                             §1.2), else a slow replica may resurrect a retired key"
-                        ),
-                    ));
-                }
-                (
-                    explicit,
-                    format!(
-                        "declared gc_lifespan_s {explicit} (longest covered ttl_s {ttl}, {src})"
-                    ),
-                )
-            }
-            (Some(explicit), Some(_), None) => (
-                explicit,
-                format!("declared gc_lifespan_s {explicit} (no state subject under this selector)"),
-            ),
-            (Some(explicit), None, _) => (
-                explicit,
-                format!("declared gc_lifespan_s {explicit} (no registry: unverified)"),
-            ),
-            (None, Some(_), Some((ttl, src))) => {
-                let lifespan = (*ttl as f64 * margin).ceil() as i64;
-                (
-                    lifespan,
-                    format!("max ttl_s {ttl} ({src}) × {margin:?} = {lifespan} s"),
-                )
-            }
-            (None, Some(_), None) => (
+        // The tombstone lifetime (RFC 09 §2.3): the file's, or zenoh's own.
+        let (lifespan_s, derivation) = match spec.gc_lifespan_s {
+            Some(explicit) => (explicit, format!("declared gc_lifespan_s {explicit}")),
+            None => (
                 DEFAULT_LIFESPAN_S,
                 format!(
-                    "no state subject under this selector: RFC 09 §2.3 default \
-                     {DEFAULT_LIFESPAN_S} s"
+                    "zenoh's default {DEFAULT_LIFESPAN_S} s — no contract declares a tombstone \
+                     lifetime to derive one from"
                 ),
-            ),
-            (None, None, _) => (
-                DEFAULT_LIFESPAN_S,
-                format!("no registry: RFC 09 §2.3 default {DEFAULT_LIFESPAN_S} s, unverified"),
             ),
         };
 
         // `complete: true` — right in exactly one place (RFC 09 §2.2).
         let mut complete = spec.complete;
-        if complete
-            && !(replication.is_some()
-                && history == HistoryMode::Latest
-                && class == Some(StorageClass::State))
-        {
+        if complete && !(replication.is_some() && history == HistoryMode::Latest) {
             complete = false;
-            let why = if class != Some(StorageClass::State) {
-                "it is not the fully covering latest storage (class state)"
-            } else if history != HistoryMode::Latest {
+            let why = if history != HistoryMode::Latest {
                 "its volume is not latest-mode"
             } else {
                 "it is not replicated"
@@ -460,8 +304,8 @@ pub fn plan_storages(
                 "RFC 09 §2.2",
                 format!(
                     "complete = true refused: {why} — complete is right only on a \
-                     replicated, fully covering latest storage, where it lets the router \
-                     answer any state GET from the nearest replica; emitted as false"
+                     replicated latest-mode storage, where it lets the router answer a GET \
+                     from the nearest replica; emitted as false"
                 ),
             ));
         }
@@ -493,18 +337,11 @@ pub fn plan_storages(
                 )),
                 _ => {}
             },
-            "memory" if class.is_some_and(StorageClass::seeds) => warnings.push(warn(
-                WarningKind::VolatileSeed,
-                "RFC 09 §2.1",
-                "a volatile volume under a seed-bearing class: gone on router restart, \
-                 so late joiners lose their seed until state refreshes",
-            )),
             _ => {}
         }
 
         storages.push(PlannedStorage {
             name: name.clone(),
-            class,
             strip_prefix: literal_prefix(&key_expr),
             key_expr,
             volume: volume.id.clone(),
@@ -518,15 +355,11 @@ pub fn plan_storages(
             },
             retention: spec.retention.clone(),
             params: spec.params.clone(),
-            covers: match &covered {
-                Some(c) => Asked::Asked(c.len()),
-                None => Asked::NotAsked,
-            },
             warnings,
         });
     }
 
-    // ── Overlaps (RFC 09 §2's documented one is catalog vs pdns_history). ──
+    // ── Overlaps (RFC 09 §2). ──
     let mut overlaps: Vec<(usize, usize)> = Vec::new();
     for i in 0..storages.len() {
         for j in (i + 1)..storages.len() {
@@ -556,7 +389,6 @@ pub fn plan_storages(
 
     StoragePlan {
         base,
-        registry,
         volumes,
         storages,
         refusals,
@@ -626,28 +458,7 @@ pub fn to_json5(plan: &StoragePlan) -> String {
         out,
         "// zenohd storage_manager block — generated by `zenctl storage gen` (RFC 09 §2)."
     );
-    let _ = write!(out, "// base {:?}; ", plan.base);
-    match plan.registry.as_option() {
-        Some(r) => {
-            let _ = write!(out, "registry: {} slice(s)", r.slices);
-            match (&r.max_ttl_s, &r.ttl_source) {
-                (Some(t), Some(src)) => {
-                    let _ = write!(out, ", longest state ttl_s {t} ({src})");
-                }
-                _ => {
-                    let _ = write!(out, ", no state subject declared");
-                }
-            }
-            let _ = writeln!(out, ".");
-        }
-        None => {
-            let _ = writeln!(
-                out,
-                "registry: not asked — every lifespan below is RFC 09 §2.3's default \
-                 {DEFAULT_LIFESPAN_S} s, unverified against any ttl_s."
-            );
-        }
-    }
+    let _ = writeln!(out, "// namespace {:?}.", plan.base);
     let _ = writeln!(
         out,
         "// Merge under the router config's `plugins`; every non-memory volume needs its \
@@ -698,15 +509,7 @@ pub fn to_json5(plan: &StoragePlan) -> String {
         let _ = writeln!(out, "      // REFUSED {what}: {} ({})", r.reason, r.cite);
     }
     for s in &plan.storages {
-        let what = match s.class {
-            Some(c) => format!("class {}", c.as_str()),
-            None => "selector override".to_string(),
-        };
-        let covers = match s.covers.as_option() {
-            Some(n) => format!("; {n} declared subject(s) under it"),
-            None => String::new(),
-        };
-        let _ = writeln!(out, "      // {}: {what}{covers}", s.name);
+        let _ = writeln!(out, "      // {}", s.name);
         for w in &s.warnings {
             let _ = writeln!(out, "      // ! {}: {} ({})", w.kind_str(), w.text, w.cite);
         }
@@ -736,7 +539,7 @@ pub fn to_json5(plan: &StoragePlan) -> String {
         if s.complete {
             let _ = writeln!(
                 out,
-                "        complete: true,  // replicated, fully covering latest storage (RFC 09 §2.2)"
+                "        complete: true,  // replicated latest-mode storage (RFC 09 §2.2)"
             );
         }
         if let Some(ret) = &s.retention {
@@ -787,8 +590,7 @@ fn observed_lifespan(raw: &serde_json::Value) -> Option<f64> {
         .or_else(|| lifespan.get("secs").and_then(serde_json::Value::as_f64))
 }
 
-/// Compare a plan against the storages a router admits to running (#393) —
-/// the configuration half of `storage list`'s coverage question.
+/// Compare a plan against the storages a router admits to running (#393).
 ///
 /// `observed` is what [`crate::storages`] read off the admin space. Empty is
 /// **unobservable**, not clean: a peer-only mesh, a router without the
@@ -935,10 +737,7 @@ pub fn explain(plan: &StoragePlan, key: &str) -> StorageExplain {
         } else {
             continue;
         };
-        let basis = match s.class {
-            Some(c) => format!("class {} under base {:?}", c.as_str(), plan.base),
-            None => format!("a selector override under base {:?}", plan.base),
-        };
+        let basis = format!("its selector under namespace {:?}", plan.base);
         let why = match relation {
             TakerRelation::Includes => format!(
                 "{basis}: {} includes every key {key} names; stored under strip_prefix {:?} on volume {} ({})",
@@ -955,7 +754,6 @@ pub fn explain(plan: &StoragePlan, key: &str) -> StorageExplain {
         takers.push(Taker {
             storage: s.name.clone(),
             key_expr: s.key_expr.clone(),
-            class: s.class,
             relation,
             why,
         });
@@ -968,14 +766,15 @@ pub fn explain(plan: &StoragePlan, key: &str) -> StorageExplain {
         }
     }
     let none_reason = takers.is_empty().then(|| {
-        let at_origin = zenkey::grammar::strip_base(&plan.base, key)
-            .and_then(|rel| rel.split('/').nth(1).map(|c| c.starts_with('@')))
-            .unwrap_or(false);
+        let verbatim = crate::model::namespace::strip(&plan.base, key)
+            .unwrap_or(key)
+            .split('/')
+            .any(|c| c.starts_with('@'));
         let mut reason = String::from("no planned storage's selector includes it");
-        if at_origin {
+        if verbatim {
             reason.push_str(
-                " — its origin is an @-chunk, and `*` never matches one: a service's state \
-                 needs its own explicit storage (RFC 03 §4 D4)",
+                " — it holds a verbatim chunk (`@…`), and `*`/`**` never match one: a \
+                 storage must name it",
             );
         }
         if !refused_takers.is_empty() {
@@ -1000,12 +799,6 @@ mod tests {
     use super::*;
     use crate::report::{StorageSpec, VolumeSpec};
 
-    fn fixture_registry() -> SliceSet {
-        let dir =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-        SliceSet::from_dirs(&[dir]).expect("the fixture registry reads")
-    }
-
     fn volume(plugin: &str, history: Option<HistoryMode>) -> VolumeSpec {
         VolumeSpec {
             plugin: plugin.into(),
@@ -1014,38 +807,41 @@ mod tests {
         }
     }
 
-    fn storage(class: StorageClass, volume: &str) -> StorageSpec {
+    fn storage(selector: &str, volume: &str) -> StorageSpec {
         StorageSpec {
-            class: Some(class),
+            selector: selector.into(),
             volume: volume.into(),
             ..Default::default()
         }
     }
 
-    /// The RFC 09 §2 sketch, as a deployment.
+    /// A zk2 deployment's storages, by selector.
     fn reference() -> Deployment {
         let mut d = Deployment {
-            base: Some("zensight".into()),
+            base: Some("fleet-a".into()),
             ..Default::default()
         };
         d.volumes.insert("fs".into(), volume("fs", None));
         d.volumes
             .insert("influxdb".into(), volume("influxdb", None));
-        d.storages.insert("latest".into(), {
-            let mut s = storage(StorageClass::State, "fs");
+        d.storages.insert("events".into(), {
+            let mut s = storage("zk2/*/*/*/events/**", "fs");
             s.replication = Replication::Enabled(true);
             s.complete = true;
             s
         });
         d.storages.insert(
             "timeseries".into(),
-            storage(StorageClass::Telemetry, "influxdb"),
+            storage("zk2/*/*/*/stream/**", "influxdb"),
         );
-        d.storages
-            .insert("catalog".into(), storage(StorageClass::Catalog, "fs"));
+        d.storages.insert("links".into(), {
+            let mut s = storage("zk2/*/*/*/events/link/**", "fs");
+            s.gc_lifespan_s = Some(3600);
+            s
+        });
         d.storages.insert(
-            "pdns_history".into(),
-            storage(StorageClass::CatalogPdns, "influxdb"),
+            "frames".into(),
+            storage("zk2/*/*/*/@stream/frames/**", "influxdb"),
         );
         d
     }
@@ -1059,58 +855,49 @@ mod tests {
 
     #[test]
     fn the_literal_prefix_stops_at_the_first_wildcard() {
-        assert_eq!(literal_prefix("zensight/v1/*/state/**"), "zensight/v1");
+        assert_eq!(literal_prefix("fleet-a/zk2/*/*/*/events/**"), "fleet-a/zk2");
         assert_eq!(
-            literal_prefix("zensight/v1/@catalog/state/pdns/**"),
-            "zensight/v1/@catalog/state/pdns"
+            literal_prefix("fleet-a/zk2/host-a/tc/@stream/**"),
+            "fleet-a/zk2/host-a/tc/@stream"
         );
-        assert_eq!(literal_prefix("v1/*/state/**"), "v1");
+        assert_eq!(literal_prefix("zk2/*/*/*/events/**"), "zk2");
         assert_eq!(literal_prefix("**"), "");
         assert_eq!(literal_prefix("a/b$*/c"), "a");
     }
 
-    /// The headline: lifespans come from the registry, per storage, with the
-    /// computation shown — and `strip_prefix` is derived.
+    /// The headline: the selector joined to the namespace, `strip_prefix`
+    /// derived, and a lifespan that says where it came from.
     #[test]
-    fn lifespans_are_derived_from_the_registry_and_shown() {
-        let plan = plan_storages(Some(&fixture_registry()), "", &reference());
+    fn selectors_are_joined_and_lifespans_say_where_they_came_from() {
+        let plan = plan_storages("", &reference());
         assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
-        let facts = plan.registry.as_option().expect("asked");
-        assert_eq!(facts.max_ttl_s, Some(31_536_000));
-        assert_eq!(facts.ttl_source.as_deref(), Some("catalog/alias/{old_id}"));
 
-        let latest = by_name(&plan, "latest");
-        assert_eq!(latest.key_expr, "zensight/v1/*/state/**");
-        assert_eq!(latest.strip_prefix, "zensight/v1");
-        assert_eq!(latest.garbage_collection.lifespan_s, 1800);
-        assert_eq!(
-            latest.garbage_collection.derivation,
-            // Several subjects tie at 900; the alphabetically first names it.
-            "max ttl_s 900 (gnmi/artifact/{kind}) × 2.0 = 1800 s"
-        );
-        assert!(latest.complete, "replicated, latest-mode, class state");
-        assert!(latest.replication.is_some());
-
-        let catalog = by_name(&plan, "catalog");
-        assert_eq!(catalog.strip_prefix, "zensight/v1/@catalog/state");
-        assert_eq!(catalog.garbage_collection.lifespan_s, 63_072_000);
-
-        let pdns = by_name(&plan, "pdns_history");
-        assert_eq!(pdns.strip_prefix, "zensight/v1/@catalog/state/pdns");
-        assert_eq!(pdns.garbage_collection.lifespan_s, 172_800);
+        let events = by_name(&plan, "events");
+        assert_eq!(events.key_expr, "fleet-a/zk2/*/*/*/events/**");
+        assert_eq!(events.strip_prefix, "fleet-a/zk2");
+        assert_eq!(events.garbage_collection.lifespan_s, DEFAULT_LIFESPAN_S);
         assert!(
-            pdns.garbage_collection
+            events
+                .garbage_collection
                 .derivation
-                .contains("catalog/pdns/{ip_slug}")
+                .contains("no contract declares a tombstone lifetime"),
+            "{}",
+            events.garbage_collection.derivation
         );
+        assert!(events.complete, "replicated, latest-mode");
+        assert!(events.replication.is_some());
+
+        let links = by_name(&plan, "links");
+        assert_eq!(links.garbage_collection.lifespan_s, 3600);
+        assert_eq!(
+            links.garbage_collection.derivation,
+            "declared gc_lifespan_s 3600"
+        );
+
+        let frames = by_name(&plan, "frames");
+        assert_eq!(frames.strip_prefix, "fleet-a/zk2");
 
         let ts = by_name(&plan, "timeseries");
-        assert_eq!(ts.garbage_collection.lifespan_s, DEFAULT_LIFESPAN_S);
-        assert!(
-            ts.garbage_collection
-                .derivation
-                .contains("no state subject")
-        );
         assert!(
             ts.warnings
                 .iter()
@@ -1118,11 +905,11 @@ mod tests {
         );
     }
 
-    /// The documented overlap, warned on both sides; and `*` versus
-    /// `@catalog` is *not* one.
+    /// Two selectors that intersect are an overlap, warned on both sides; a
+    /// verbatim chunk is not reached by a `*` and makes none.
     #[test]
-    fn catalog_and_pdns_history_overlap_and_state_does_not() {
-        let plan = plan_storages(Some(&fixture_registry()), "", &reference());
+    fn intersecting_selectors_overlap_and_a_verbatim_chunk_does_not() {
+        let plan = plan_storages("", &reference());
         let overlaps = |name: &str| -> Vec<String> {
             by_name(&plan, name)
                 .warnings
@@ -1131,9 +918,13 @@ mod tests {
                 .map(|w| w.text.clone())
                 .collect()
         };
-        assert!(overlaps("catalog")[0].contains("overlaps pdns_history"));
-        assert!(overlaps("pdns_history")[0].contains("overlaps catalog"));
-        assert!(overlaps("latest").is_empty(), "`*` never matches @catalog");
+        assert!(overlaps("events")[0].contains("overlaps links"));
+        assert!(overlaps("links")[0].contains("overlaps events"));
+        assert!(
+            overlaps("timeseries").is_empty(),
+            "`*` never matches @stream: {:?}",
+            overlaps("timeseries")
+        );
     }
 
     /// RFC 09 §2.2: replication on an all-mode volume is a startup refusal,
@@ -1142,7 +933,7 @@ mod tests {
     fn replication_on_an_all_mode_volume_is_refused() {
         let mut d = reference();
         d.storages.get_mut("timeseries").unwrap().replication = Replication::Enabled(true);
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
+        let plan = plan_storages("", &d);
         assert!(plan.storages.iter().all(|s| s.name != "timeseries"));
         let r = plan
             .refusals
@@ -1150,49 +941,56 @@ mod tests {
             .find(|r| r.storage.as_deref() == Some("timeseries"))
             .expect("refused");
         assert_eq!(r.cite, "RFC 09 §2.2");
-        assert_eq!(r.key_expr.as_deref(), Some("zensight/v1/*/telemetry/**"));
+        assert_eq!(r.key_expr.as_deref(), Some("fleet-a/zk2/*/*/*/stream/**"));
     }
 
-    /// `complete = true` anywhere but the one right place is emitted as
+    /// `complete = true` off a replicated latest-mode storage is emitted as
     /// `false` and said so.
     #[test]
-    fn complete_is_refused_off_the_replicated_latest_storage() {
+    fn complete_is_refused_off_a_replicated_latest_storage() {
         let mut d = reference();
-        d.storages.get_mut("catalog").unwrap().complete = true;
-        d.storages.get_mut("latest").unwrap().replication = Replication::Enabled(false);
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
-        for name in ["catalog", "latest"] {
+        d.storages.get_mut("links").unwrap().complete = true;
+        d.storages.get_mut("timeseries").unwrap().complete = true;
+        let plan = plan_storages("", &d);
+        for (name, why) in [
+            ("links", "it is not replicated"),
+            ("timeseries", "its volume is not latest-mode"),
+        ] {
             let s = by_name(&plan, name);
             assert!(!s.complete);
             assert!(
                 s.warnings
                     .iter()
-                    .any(|w| w.kind == WarningKind::CompleteRefused && w.cite == "RFC 09 §2.2"),
+                    .any(|w| w.kind == WarningKind::CompleteRefused
+                        && w.cite == "RFC 09 §2.2"
+                        && w.text.contains(why)),
                 "{name}: {:?}",
                 s.warnings
             );
         }
     }
 
-    /// The other refusals: an undeclared volume, a class the registry has no
-    /// subject for, a redb volume without a mode.
+    /// The other refusals: an undeclared volume, a bad key expression, a
+    /// redb volume without a mode.
     #[test]
-    fn undeclared_volumes_and_empty_coverage_are_refused() {
+    fn undeclared_volumes_and_bad_selectors_are_refused() {
         let mut d = reference();
-        d.storages
-            .insert("events".into(), storage(StorageClass::Events, "influxdb"));
-        d.storages
-            .insert("stray".into(), storage(StorageClass::State, "nope"));
+        d.storages.insert("stray".into(), storage("zk2/**", "nope"));
+        d.storages.insert("typo".into(), storage("zk2//x", "fs"));
         d.volumes.insert("redb".into(), volume("redb", None));
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
+        let plan = plan_storages("", &d);
         let refused = |name: &str| {
             plan.refusals
                 .iter()
                 .find(|r| r.storage.as_deref() == Some(name) || r.volume.as_deref() == Some(name))
                 .unwrap_or_else(|| panic!("{name} refused: {:?}", plan.refusals))
         };
-        assert!(refused("events").reason.contains("declares no subject"));
         assert!(refused("stray").reason.contains("does not declare"));
+        assert!(
+            refused("typo")
+                .reason
+                .contains("not a valid key expression")
+        );
         assert!(refused("redb").reason.contains("per volume"));
         assert_eq!(plan.storages.len(), 4);
     }
@@ -1210,14 +1008,14 @@ mod tests {
             .insert("redb".into(), volume("redb", Some(HistoryMode::Latest)));
         d.storages.insert(
             "timeseries".into(),
-            storage(StorageClass::Telemetry, "redb-history"),
+            storage("zk2/*/*/*/stream/**", "redb-history"),
         );
-        d.storages.insert("catalog".into(), {
-            let mut s = storage(StorageClass::Catalog, "redb");
+        d.storages.insert("links".into(), {
+            let mut s = storage("zk2/*/*/*/events/link/**", "redb");
             s.retention = Some(serde_json::json!({"max_age_s": 60}));
             s
         });
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
+        let plan = plan_storages("", &d);
         assert!(
             by_name(&plan, "timeseries")
                 .warnings
@@ -1225,7 +1023,7 @@ mod tests {
                 .any(|w| w.kind == WarningKind::RetentionRequired)
         );
         assert!(
-            by_name(&plan, "catalog")
+            by_name(&plan, "links")
                 .warnings
                 .iter()
                 .any(|w| w.kind == WarningKind::RetentionPointless)
@@ -1234,7 +1032,7 @@ mod tests {
         // its storages with it.
         d.volumes
             .insert("fs".into(), volume("fs", Some(HistoryMode::All)));
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
+        let plan = plan_storages("", &d);
         assert!(
             plan.refusals
                 .iter()
@@ -1243,59 +1041,43 @@ mod tests {
         assert!(
             plan.refusals
                 .iter()
-                .any(|r| r.storage.as_deref() == Some("latest") && r.reason.contains("refused"))
+                .any(|r| r.storage.as_deref() == Some("events") && r.reason.contains("refused"))
         );
     }
 
-    /// No registry: the default lifespan, said to be unverified, and no
-    /// coverage refusal — not asked is not empty (RFC 13 §3 O4).
+    /// The namespace falls back to the observer's when the file names none;
+    /// the bus root prefixes nothing.
     #[test]
-    fn without_a_registry_the_plan_degrades_and_says_so() {
-        let mut d = reference();
-        d.storages
-            .insert("events".into(), storage(StorageClass::Events, "influxdb"));
-        let plan = plan_storages(None, "", &d);
-        assert!(plan.registry.is_not_asked());
-        assert!(plan.refusals.is_empty());
-        let latest = by_name(&plan, "latest");
-        assert_eq!(latest.garbage_collection.lifespan_s, DEFAULT_LIFESPAN_S);
-        assert_eq!(
-            latest.garbage_collection.derivation,
-            "no registry: RFC 09 §2.3 default 86400 s, unverified"
-        );
-        assert!(latest.covers.is_not_asked());
-        assert!(to_json5(&plan).contains("registry: not asked"));
-    }
-
-    /// The base falls back to the observer's when the file names none; an
-    /// empty base composes to the bus-root deployment.
-    #[test]
-    fn the_base_falls_back_and_the_empty_base_is_the_identity() {
+    fn the_namespace_falls_back_and_the_bus_root_is_the_identity() {
         let mut d = reference();
         d.base = None;
-        let plan = plan_storages(None, "", &d);
-        assert_eq!(by_name(&plan, "latest").key_expr, "v1/*/state/**");
-        assert_eq!(by_name(&plan, "latest").strip_prefix, "v1");
-        let plan = plan_storages(None, "acme", &d);
-        assert_eq!(by_name(&plan, "latest").key_expr, "acme/v1/*/state/**");
+        let plan = plan_storages("", &d);
+        assert_eq!(by_name(&plan, "events").key_expr, "zk2/*/*/*/events/**");
+        assert_eq!(by_name(&plan, "events").strip_prefix, "zk2");
+        let plan = plan_storages("acme", &d);
+        assert_eq!(
+            by_name(&plan, "events").key_expr,
+            "acme/zk2/*/*/*/events/**"
+        );
     }
 
-    /// The JSON5 is the RFC 09 §2 sketch's shape, with the numbers filled in
-    /// and the caveats beside the storage they concern.
+    /// The JSON5 is RFC 09 §2's shape, with the numbers filled in and the
+    /// caveats beside the storage they concern.
     #[test]
     fn the_json5_carries_the_block_and_its_comments() {
-        let plan = plan_storages(Some(&fixture_registry()), "", &reference());
+        let plan = plan_storages("", &reference());
         let doc = to_json5(&plan);
+        assert!(doc.contains("// namespace \"fleet-a\"."));
         assert!(doc.contains("plugins: {\n  storage_manager: {\n    volumes: {"));
         assert!(doc.contains("      fs: {},  // durable · latest (RFC 09 §2.1)"));
-        assert!(doc.contains("        key_expr: \"zensight/v1/*/state/**\","));
-        assert!(doc.contains("        strip_prefix: \"zensight/v1\","));
-        assert!(
-            doc.contains("garbage_collection: { period: 30, lifespan: 1800 },  // max ttl_s 900")
-        );
+        assert!(doc.contains("        key_expr: \"fleet-a/zk2/*/*/*/events/**\","));
+        assert!(doc.contains("        strip_prefix: \"fleet-a/zk2\","));
+        assert!(doc.contains(
+            "garbage_collection: { period: 30, lifespan: 3600 },  // declared gc_lifespan_s 3600"
+        ));
         assert!(doc.contains("replication: { hot: 6, interval: 10.0, propagation_delay: 250, sub_intervals: 5, warm: 30 }"));
         assert!(doc.contains("        complete: true,"));
-        assert!(doc.contains("      // ! overlap: overlaps pdns_history"));
+        assert!(doc.contains("      // ! overlap: overlaps links"));
         assert!(doc.contains("      // ! retention_is_the_databases:"));
         assert!(
             !doc.contains("redb"),
@@ -1306,11 +1088,10 @@ mod tests {
         assert_eq!(json5_key("fs"), "fs");
         let refused = {
             let mut d = reference();
-            d.storages
-                .insert("events".into(), storage(StorageClass::Events, "influxdb"));
-            to_json5(&plan_storages(Some(&fixture_registry()), "", &d))
+            d.storages.get_mut("timeseries").unwrap().replication = Replication::Enabled(true);
+            to_json5(&plan_storages("", &d))
         };
-        assert!(refused.contains("      // REFUSED storage events:"));
+        assert!(refused.contains("      // REFUSED storage timeseries:"));
     }
 
     fn observed(
@@ -1338,7 +1119,7 @@ mod tests {
     /// two non-verdicts (empty admin space; a field the layout omits).
     #[test]
     fn the_check_diffs_the_plan_against_what_runs() {
-        let plan = plan_storages(Some(&fixture_registry()), "", &reference());
+        let plan = plan_storages("", &reference());
 
         let empty = check_storages(&plan, &[]);
         assert!(empty.judgement.is_unobservable());
@@ -1346,32 +1127,32 @@ mod tests {
 
         let clean = vec![
             observed(
-                "latest",
-                "zensight/v1/*/state/**",
-                "zensight/v1",
+                "events",
+                "fleet-a/zk2/*/*/*/events/**",
+                "fleet-a/zk2",
                 "fs",
-                Some(1800),
+                Some(86400),
             ),
             observed(
                 "timeseries",
-                "zensight/v1/*/telemetry/**",
-                "zensight/v1",
+                "fleet-a/zk2/*/*/*/stream/**",
+                "fleet-a/zk2",
                 "influxdb",
                 Some(86400),
             ),
             observed(
-                "catalog",
-                "zensight/v1/@catalog/state/**",
-                "zensight/v1/@catalog/state",
+                "links",
+                "fleet-a/zk2/*/*/*/events/link/**",
+                "fleet-a/zk2",
                 "fs",
-                Some(63_072_000),
+                Some(3600),
             ),
             observed(
-                "pdns_history",
-                "zensight/v1/@catalog/state/pdns/**",
-                "zensight/v1/@catalog/state/pdns",
+                "frames",
+                "fleet-a/zk2/*/*/*/@stream/frames/**",
+                "fleet-a/zk2",
                 "influxdb",
-                Some(172_800),
+                Some(86400),
             ),
         ];
         let c = check_storages(&plan, &clean);
@@ -1382,30 +1163,36 @@ mod tests {
         let drifted = vec![
             // Too short a lifespan, and the wrong prefix.
             observed(
-                "latest",
-                "zensight/v1/*/state/**",
-                "zensight",
+                "events",
+                "fleet-a/zk2/*/*/*/events/**",
+                "fleet-a",
                 "fs",
                 Some(600),
             ),
             // Wrong selector, wrong volume.
             observed(
                 "timeseries",
-                "zensight/v1/**/telemetry/**",
-                "zensight/v1",
+                "fleet-a/zk2/**",
+                "fleet-a/zk2",
                 "memory",
                 Some(86400),
             ),
             // Layout omits the gc block.
             observed(
-                "catalog",
-                "zensight/v1/@catalog/state/**",
-                "zensight/v1/@catalog/state",
+                "links",
+                "fleet-a/zk2/*/*/*/events/link/**",
+                "fleet-a/zk2",
                 "fs",
                 None,
             ),
             // Not planned at all.
-            observed("blobs", "zensight/v1/*/@blob/**", "zensight/v1", "fs", None),
+            observed(
+                "state",
+                "fleet-a/zk2/*/*/*/state/**",
+                "fleet-a/zk2",
+                "fs",
+                None,
+            ),
         ];
         let c = check_storages(&plan, &drifted);
         let kinds: Vec<(CheckKind, &str)> = c
@@ -1416,17 +1203,17 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                (CheckKind::StripPrefixDiffers, "latest"),
-                (CheckKind::LifespanBelowMinimum, "latest"),
-                (CheckKind::Missing, "pdns_history"),
+                (CheckKind::StripPrefixDiffers, "events"),
+                (CheckKind::LifespanBelowMinimum, "events"),
+                (CheckKind::Missing, "frames"),
                 (CheckKind::KeyExprDiffers, "timeseries"),
                 (CheckKind::VolumeDiffers, "timeseries"),
-                (CheckKind::Extra, "blobs"),
+                (CheckKind::Extra, "state"),
             ]
         );
         assert_eq!(
             c.unjudged,
-            ["catalog@aabbccdd: the admin document does not carry garbage_collection.lifespan"]
+            ["links@aabbccdd: the admin document does not carry garbage_collection.lifespan"]
         );
         assert_eq!(crate::judgement_exit_code(&c.judgement), 1);
 
@@ -1439,47 +1226,50 @@ mod tests {
         );
     }
 
-    /// `--explain`: the taker and its reason; the @-origin key nobody takes;
+    /// `--explain`: the taker and its reason; the verbatim key nobody takes;
     /// the key a refused storage would have taken.
     #[test]
     fn explain_names_the_taker_or_the_reason_there_is_none() {
         let mut d = reference();
-        d.storages.remove("catalog");
-        d.storages
-            .insert("events".into(), storage(StorageClass::Events, "influxdb"));
-        let plan = plan_storages(Some(&fixture_registry()), "", &d);
+        d.storages.remove("frames");
+        d.storages.remove("links");
+        d.storages.get_mut("timeseries").unwrap().replication = Replication::Enabled(true);
+        let plan = plan_storages("", &d);
 
-        let e = explain(&plan, "zensight/v1/h-3fa9c2d41b7e/state/sysinfo/health");
+        let e = explain(&plan, "fleet-a/zk2/host-a/tc/tc.netif.v1/events/link/01k0");
         assert_eq!(e.takers.len(), 1);
-        assert_eq!(e.takers[0].storage, "latest");
+        assert_eq!(e.takers[0].storage, "events");
         assert_eq!(e.takers[0].relation, TakerRelation::Includes);
         assert!(
             e.takers[0]
                 .why
-                .contains("class state under base \"zensight\"")
+                .contains("its selector under namespace \"fleet-a\""),
+            "{}",
+            e.takers[0].why
         );
         assert!(e.none_reason.is_none());
 
-        let e = explain(&plan, "zensight/v1/@catalog/state/entity/x");
+        let e = explain(&plan, "fleet-a/zk2/host-a/tc/tc.netif.v1/@stream/frames");
         assert!(e.takers.is_empty());
-        assert!(e.none_reason.as_deref().unwrap().contains("RFC 03 §4 D4"));
-
-        let e = explain(
-            &plan,
-            "zensight/v1/h-3fa9c2d41b7e/events/netring/capture/01J",
+        assert!(
+            e.none_reason.as_deref().unwrap().contains("verbatim chunk"),
+            "{:?}",
+            e.none_reason
         );
+
+        let e = explain(&plan, "fleet-a/zk2/host-a/tc/tc.netif.v1/stream/bandwidth");
         assert!(e.takers.is_empty());
-        assert_eq!(e.refused_takers, ["events"]);
+        assert_eq!(e.refused_takers, ["timeseries"]);
         assert!(
             e.none_reason
                 .as_deref()
                 .unwrap()
-                .contains("refused storage(s) events would have")
+                .contains("refused storage(s) timeseries would have")
         );
 
-        let e = explain(&plan, "zensight/v1/*/state/**");
+        let e = explain(&plan, "fleet-a/zk2/*/*/*/events/**");
         assert_eq!(e.takers[0].relation, TakerRelation::Includes);
-        let e = explain(&plan, "zensight/v1/**");
+        let e = explain(&plan, "fleet-a/zk2/**");
         assert!(
             e.takers
                 .iter()

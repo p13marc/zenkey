@@ -7,40 +7,36 @@
 //!
 //! Two axes, because the engine has two cadences:
 //!
-//! - **per sample** — `stats/record_*`, `decode/structural_*`, `monitor/ingest`.
-//!   A 100 kHz bus runs these 100 000 times a second.
-//! - **per tick** — `tree/build_*`, `skeleton/*`, `monitor/tick_*`. These run
+//! - **per sample** — `stats/record_*`, `decode/structural_*`, `lens/*`,
+//!   `monitor/ingest`. A 100 kHz bus runs these 100 000 times a second.
+//! - **per tick** — `tree/build_*`, `monitor/tick_*`. These run
 //!   four times a second and scale with the *key population*, not the sample
 //!   rate; that separation is the whole of the "a hot bus cannot melt a render
 //!   loop" claim (`zenkey-fleet/src/tree.rs`), and #45 soaks it.
 //!
 //! Everything here is session-free. The fan-in path (`fleet_get`,
 //! `collect_answers`) is deliberately absent: a `zenoh::query::Reply` cannot be
-//! synthesised, so benching it would mean benching a mock. `fanin/origin_of`
-//! covers the one pure fragment.
+//! synthesised, so benching it would mean benching a mock. v1's `skeleton/*`,
+//! `facts/*`, `registry/*` and `fanin/origin_attribution_*` left with the v1
+//! registry (#612, FJ9); `lens/*` is the per-sample resolution that replaced
+//! them.
 //!
-//! **`tree/build_50k` and `skeleton/merge_10k` are release-only in practice** —
+//! **`tree/build_50k` is release-only in practice** —
 //! tens of milliseconds an iteration, so a debug run takes minutes. Run the
 //! whole file with `cargo bench -p zenkey-fleet`, or a group with
 //! `cargo bench -p zenkey-fleet -- stats/`.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
+use zenkey_fleet::KeyTreeSnapshot;
 use zenkey_fleet::model::stats::StatsTable;
-use zenkey_fleet::{KeyFacts, KeyTreeSnapshot, SliceSet};
 
-/// The canonical fixture origin, shared with `zenkey/benches/keys.rs`, the
-/// pane tests and `spray`.
-const HOST: &str = "h-3fa9c2d41b7e";
-
-/// The key shape `spray --keys N` generates: 100 keys per group, so the tree
-/// has realistic fan-out rather than one flat level.
+/// A zk2 key shape with 100 keys per group, so the tree has realistic
+/// fan-out rather than one flat level.
 fn synth_key(i: usize) -> String {
-    format!("v1/{HOST}/telemetry/synth/g{}/k{i}", i / 100)
+    format!("prod/zk2/host-a/synth/synth.v1/stream/g{}/k{i}", i / 100)
 }
 
 /// A stats table of `n` distinct synthetic keys, one sample each.
@@ -51,12 +47,6 @@ fn table_of(n: usize) -> StatsTable {
         stats.record(&synth_key(i), 64, None, now, None, None);
     }
     stats
-}
-
-/// The fixture registry — the same corpus the pane tests and codegen use.
-fn slices() -> SliceSet {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
-    SliceSet::from_dirs(&[dir]).expect("fixture registry")
 }
 
 // ── per sample ───────────────────────────────────────────────────────────
@@ -128,17 +118,19 @@ fn bench_stats(c: &mut Criterion) {
     // one inside `iter` would put table construction in the number, and a
     // bench whose id says `retire_unwatched` must measure that.
     c.bench_function("stats/retire_unwatched_1k", |b| {
-        let kept = vec!["v1/*/state/**".to_string()];
+        let kept = vec!["prod/zk2/*/*/*/state/**".to_string()];
         b.iter_batched(
             || table_of(1_000),
-            |mut stats| stats.retire_unwatched(black_box("v1/*/telemetry/**"), black_box(&kept)),
+            |mut stats| {
+                stats.retire_unwatched(black_box("prod/zk2/*/*/*/stream/**"), black_box(&kept))
+            },
             criterion::BatchSize::SmallInput,
         )
     });
 }
 
 fn bench_decode(c: &mut Criterion) {
-    use zenkey_fleet::model::decode::{structural, structural_value};
+    use zenkey_fleet::{structural, structural_value};
 
     let json = br#"{"value":42.0,"unit":"percent","inodes":1188}"#;
     let mut cbor = Vec::new();
@@ -186,86 +178,26 @@ fn bench_tree(c: &mut Criterion) {
     }
 }
 
-fn bench_skeleton(c: &mut Criterion) {
-    let slices = slices();
-    let roster: BTreeMap<String, Vec<String>> = (0..100)
-        .map(|i| (format!("h-{i:012x}"), vec!["sysinfo".to_string()]))
-        .collect();
+// ── the lens ─────────────────────────────────────────────────────────────
 
-    c.bench_function("skeleton/build_fixture", |b| {
-        b.iter(|| zenkey_fleet::Skeleton::build(black_box(""), &slices, &roster, None))
-    });
+fn bench_lens(c: &mut Criterion) {
+    use zenkey_fleet::{ContractSet, Lens};
 
-    let skel = zenkey_fleet::Skeleton::build("", &slices, &roster, None);
-    let observed = KeyTreeSnapshot::build(&table_of(10_000));
-    let watched = vec!["v1/**".to_string()];
-    c.bench_function("skeleton/merge_10k", |b| {
-        b.iter(|| {
-            zenkey_fleet::model::skeleton::merge(
-                black_box(&skel),
-                black_box(&observed),
-                black_box(&watched),
-            )
-        })
+    // The rungs a raw observer's key stops at before any presence read: the
+    // cheap refusals every sample of a busy foreign bus pays.
+    let contracts = ContractSet::new();
+    let lens = Lens::new("prod", None, &contracts);
+    let zk2 = "prod/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    let foreign = "plant/line-1/temp";
+    let elsewhere = "staging/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    c.bench_function("lens/resolve_zk2_unread", |b| {
+        b.iter(|| lens.resolve(black_box(zk2)))
     });
-}
-
-// ── projection and refinement ────────────────────────────────────────────
-
-fn bench_facts(c: &mut Criterion) {
-    let slices = slices();
-    let registered = format!("v1/{HOST}/telemetry/sysinfo/disk/var-log/used");
-    let unregistered = format!("v1/{HOST}/telemetry/sysinfo/no/such/thing");
-    let foreign = "demo/example/foo";
-    let elsewhere = format!("otherbase/v1/{HOST}/state/sysinfo/health");
-
-    c.bench_function("facts/project_v1", |b| {
-        b.iter(|| KeyFacts::project(black_box(""), black_box(&registered)))
+    c.bench_function("lens/resolve_not_zk2", |b| {
+        b.iter(|| lens.resolve(black_box(foreign)))
     });
-    c.bench_function("facts/project_unparsed", |b| {
-        b.iter(|| KeyFacts::project(black_box(""), black_box(foreign)))
-    });
-    c.bench_function("facts/project_not_under_base", |b| {
-        b.iter(|| KeyFacts::project(black_box("zensight"), black_box(&elsewhere)))
-    });
-    c.bench_function("facts/resolve_registered", |b| {
-        b.iter(|| {
-            let mut f = KeyFacts::project("", black_box(&registered));
-            f.resolve(black_box(&slices));
-            f
-        })
-    });
-    c.bench_function("facts/resolve_unregistered", |b| {
-        b.iter(|| {
-            let mut f = KeyFacts::project("", black_box(&unregistered));
-            f.resolve(black_box(&slices));
-            f
-        })
-    });
-    c.bench_function("facts/describe_key", |b| {
-        b.iter(|| zenkey_fleet::describe_key(black_box(""), black_box(&registered), Some(&slices)))
-    });
-}
-
-fn bench_registry(c: &mut Criterion) {
-    let slices = slices();
-    c.bench_function("registry/refine_hit", |b| {
-        b.iter(|| {
-            slices.refine(
-                black_box("sysinfo"),
-                black_box("telemetry"),
-                black_box(&["disk", "var-log", "used"]),
-            )
-        })
-    });
-    c.bench_function("registry/refine_miss", |b| {
-        b.iter(|| {
-            slices.refine(
-                black_box("sysinfo"),
-                black_box("telemetry"),
-                black_box(&["no", "such", "thing"]),
-            )
-        })
+    c.bench_function("lens/resolve_not_in_namespace", |b| {
+        b.iter(|| lens.resolve(black_box(elsewhere)))
     });
 }
 
@@ -313,30 +245,12 @@ fn bench_monitor(c: &mut Criterion) {
     c.bench_function("monitor/tick_10k", |b| b.iter(|| black_box(&loaded).tick()));
 }
 
-fn bench_fanin(c: &mut Criterion) {
-    // The one pure fragment of the fan-in path: attributing a reply key to the
-    // origin that answered. Everything else in `fleet_get` needs a session.
-    let keys: Vec<String> = (0..256)
-        .map(|i| format!("v1/h-{i:012x}/@rpc/sysinfo/introspect"))
-        .collect();
-    c.bench_function("fanin/origin_attribution_256", |b| {
-        b.iter(|| {
-            for k in &keys {
-                black_box(zenkey::grammar::parse_full(black_box(""), black_box(k)));
-            }
-        })
-    });
-}
-
 criterion_group!(
     benches,
     bench_stats,
     bench_decode,
     bench_tree,
-    bench_skeleton,
-    bench_facts,
-    bench_registry,
-    bench_monitor,
-    bench_fanin
+    bench_lens,
+    bench_monitor
 );
 criterion_main!(benches);

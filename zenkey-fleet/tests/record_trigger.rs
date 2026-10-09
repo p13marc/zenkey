@@ -86,11 +86,11 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
 
     // The owner: `namespaces` held (one put before start, nothing in the
     // window), `interfaces/default/eth0` spoken below.
-    let mut b = zk2::ServiceBuilder::new(&owners, config("host-a/tc"));
-    b.implement(zk2::Implementation::new(example("tcgui/tc.netif.v1")))
+    let mut b = zenkey::ServiceBuilder::new(&owners, config("host-a/tc"));
+    b.implement(zenkey::Implementation::new(example("tcgui/tc.netif.v1")))
         .expect("implement");
     for r in &example("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
     }
     let held = b
         .declare_state_writer(&netif, "state/namespaces", &Bindings::new())
@@ -337,11 +337,11 @@ async fn an_invalid_payload_fires_a_capture_through_the_lens() {
     let (_router, ep) = router(None).await;
     let (owners, recorder_session) = (client(&ep).await, client(&ep).await);
     let netif = iface("tc.netif.v1");
-    let mut b = zk2::ServiceBuilder::new(&owners, config("host-a/tc"));
-    b.implement(zk2::Implementation::new(example("tcgui/tc.netif.v1")))
+    let mut b = zenkey::ServiceBuilder::new(&owners, config("host-a/tc"));
+    b.implement(zenkey::Implementation::new(example("tcgui/tc.netif.v1")))
         .expect("implement");
     for r in &example("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
     }
     let member: Bindings = [
         ("ns".to_owned(), vec!["default".to_owned()]),

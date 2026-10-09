@@ -7,7 +7,7 @@ deployment is read through a session in its namespace, `--namespace` (alias
 `--base`); the routers' admin space and the presence domain through one in no
 namespace, because neither belongs to a deployment. v1's registry checks — the
 slice diff, describe coverage, schema drift by registry, the listen phase —
-are not the doctor's any more; `check conform` still projects them.
+left with v1's `check conform` at FJ9; the `v1` branch keeps them.
 
 The exit is the report's own judgement under `--fail-on`: 0 every check asked
 is clean, 1 a finding at or above the floor (warning by default — an info

@@ -1983,8 +1983,9 @@ fn a_recording_is_a_status_not_an_alarm() {
     );
 }
 
-/// The RFC 05 §5.1 test double — the same file zenkey-fleet's lifecycle
-/// test and zenctl's live suite serve, so the three clients meet one server.
+/// The RFC 05 §5.1 test double. zengui is its only includer since #612's
+/// FJ9 took `config` out of zenctl and the in-tree engine; the file's own
+/// header says why it still lives under zenkey-fleet.
 #[path = "../../zenkey-fleet/tests/util/config_server.rs"]
 mod config_server;
 

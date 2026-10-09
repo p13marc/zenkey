@@ -1,17 +1,18 @@
-Declared state families against storage coverage (RFC 04 §3.5), and the
-router block that makes the coverage happen (`storage gen`, #393).
+The storages the routers' admin space reports, and the router block that
+makes them (`storage gen`, #393). v1's coverage join — declared state
+families against the storages — left with the v1 registry (#612, FJ9).
 
 ```console
 $ zenctl storage --help
 Storages: what the mesh persists, and the router config behind it.
 
-What the mesh persists, joined against declared state — and the router block that makes it persist (RFC 09 §2).
+What the routers' admin space says the mesh persists — and the router block that makes it persist (RFC 09 §2).
 
 Usage: zenctl storage <COMMAND>
 
 Commands:
-  list  List configured storages and which declared state they cover
-  gen   Generate the router's storage config from the registry and a deployment file
+  list  List the storages the routers' admin space reports
+  gen   Generate the router's storage config from a deployment file
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -19,9 +20,9 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl storage list --help
-List configured storages and which declared state they cover.
+List the storages the routers' admin space reports.
 
-Each declared state family is judged covered, partial or uncovered (RFC 04 §4, issue #14).
+Each storage with its key expression, strip prefix and volume, as the admin space states them; a field the layout omits is absent, not agreeing. An admin space that answers nothing is a fact about reachability, never an empty mesh. v1's coverage column (declared state families against the storages) left with the v1 registry; a storage on an owner's state keys is the doctor's `storage-on-state`.
 
 Usage: zenctl storage list [OPTIONS]
 
@@ -34,41 +35,27 @@ Options:
           
           [default: 2]
 
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
-          
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
-          
-          [env: ZENCTL_BASE=]
-
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
-
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
 
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 
@@ -102,31 +89,25 @@ and this file is the smaller thing a deployment actually has to write.
 
 ```console
 $ zenctl storage gen --help
-Generate the router's storage config from the registry and a deployment file
+Generate the router's storage config from a deployment file
 
-Plan the router's storages from the registry and a small deployment
-file, and emit the `plugins.storage_manager` block with
-`garbage_collection.lifespan` DERIVED (RFC 09 §2, #393).
+Plan the router's storages from a small deployment file, and emit the
+`plugins.storage_manager` block (RFC 09 §2, #393).
 
-RFC 09 §2 specifies class-driven storages, each with a selector, a
-literal `strip_prefix` and a `garbage_collection.lifespan` that must be
-≥ the longest `ttl_s` in the registry (§2.3) — and the registry knows
-that number. The deployment file names only what the registry cannot:
-the base, the volumes (RFC 09 §2.1's capability pair is per volume —
-one volume per history mode from the same plugin) and, per storage,
-its class and volume. Everything else is derived: the selector from
-the class (`@catalog` explicit, because `*` never matches it), the
-`strip_prefix` as the literal leftmost run, and the lifespan as
-ceil(max covered ttl_s × gc_margin), with the computation shown.
+Each storage names its selector, relative to the deployment namespace;
+the `strip_prefix` is derived as the selector's literal leftmost run,
+and a volume's capability pair comes from RFC 09 §2.1's table (per
+volume — one volume per history mode from the same plugin). A
+`garbage_collection.lifespan` is the file's, or zenoh's 24 h default,
+and says which: a zk2 contract declares no tombstone lifetime to
+derive one from.
 
 The plan refuses what the router would refuse — replication on an
-all-mode volume (§2.2), a volume nobody declared, a class the registry
-declares nothing under — and warns where a caveat applies: overlapping
-selectors (§2), `complete = true` off the replicated latest storage
+all-mode volume (§2.2), a volume nobody declared, a selector that is
+not a key expression — and warns where a caveat applies: overlapping
+selectors (§2), `complete = true` off a replicated latest-mode storage
 (§2.2), retention that is the database's and not zenoh's (§2.3),
-redb's mandatory retention in all mode (§2.1), a seed on a volatile
-volume (§2.1). Without a registry the lifespans fall back to the
-default and say so; they are not invented.
+redb's mandatory retention in all mode (§2.1).
 
 Four ways out. The plan report (`--format` as everywhere); `--json5`,
 the zenohd block with every derivation and warning as a comment beside
@@ -137,24 +118,22 @@ alone is an act: exit 0, or 2 when every storage was refused.
 
 The deployment file, in full:
 
-  base = "zensight"              # optional; default = --base / context / ""
+  base = "fleet-a"               # the namespace; default = --namespace / context / ""
 
   [volumes.fs]                   # id; `backend` is emitted when it differs
   plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
   # history = "latest"           # fixed by the plugin; per volume for redb
   dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
 
-  [storages.latest]
-  class = "state"                # state | telemetry | events | catalog | catalog-pdns
-  # selector = "v1/*/state/sysinfo/**"   # instead of class: a base-relative override
+  [storages.events]
+  selector = "zk2/*/*/*/events/**"   # relative to the namespace
   volume = "fs"
   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
   complete = true                # honoured only where §2.2 allows it
-  params = { dir = "latest" }    # merged into `volume: { id: "fs", … }`
+  params = { dir = "events" }    # merged into `volume: { id: "fs", … }`
   # retention = { … }            # the backend's own block (redb), verbatim
   # gc_period_s = 30             # garbage_collection.period
-  # gc_margin = 2.0              # lifespan = ceil(max ttl_s × margin)
-  # gc_lifespan_s = 86400        # an explicit lifespan; warned about when below max ttl_s
+  # gc_lifespan_s = 86400        # garbage_collection.lifespan; default zenoh's 24 h
 
 Usage: zenctl storage gen [OPTIONS] --deployment <FILE>
 
@@ -168,46 +147,40 @@ Options:
           A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference.
 
       --check
-          Compare the plan against the storages a live router runs (the admin space): missing, extra, a differing key_expr / strip_prefix / volume, a gc.lifespan below the computed minimum. Exit 0 = as planned, 1 = a difference, 2 = no verdict (the admin space answered nothing, or the question could not be put)
+          Compare the plan against the storages a live router runs (the admin space): missing, extra, a differing key_expr / strip_prefix / volume, a gc.lifespan below the plan's. Exit 0 = as planned, 1 = a difference, 2 = no verdict (the admin space answered nothing, or the question could not be put)
 
       --explain <KEY>
           Which planned storage(s) would take this key, and why — pure over the plan, exit 0
 
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
           
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
           
           [env: ZENCTL_BASE=]
+          [alias: --base]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 

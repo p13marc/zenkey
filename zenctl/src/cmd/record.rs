@@ -94,7 +94,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
 /// capture's namespace.
 fn selectors_of(typed: &[String], namespace: &str) -> Result<Vec<String>> {
     if typed.is_empty() {
-        return Ok(vec![zenkey::grammar::with_base(namespace, "zk2/**")]);
+        return Ok(vec![zenkey_fleet::with_namespace(namespace, "zk2/**")]);
     }
     let mut out = Vec::new();
     for s in typed {
@@ -111,7 +111,7 @@ fn selectors_of(typed: &[String], namespace: &str) -> Result<Vec<String>> {
 /// namespace, or `None`: `zk2/**` under `--namespace prod` watches a
 /// keyspace this deployment does not publish on.
 fn off_namespace_hint(sel: &str, namespace: &str) -> Option<String> {
-    if namespace.is_empty() || zenkey::grammar::strip_base(namespace, sel).is_some() {
+    if namespace.is_empty() || zenkey_fleet::strip_namespace(namespace, sel).is_some() {
         return None;
     }
     let first = sel.split(['/', '?']).next().unwrap_or_default();
@@ -120,7 +120,7 @@ fn off_namespace_hint(sel: &str, namespace: &str) -> Option<String> {
             "hint: {sel:?} does not sit under namespace {namespace:?} — selectors are wire \
              keys; did you mean {:?}? `replay --namespace` moves only rows under the \
              capture's namespace",
-            zenkey::grammar::with_base(namespace, sel)
+            zenkey_fleet::with_namespace(namespace, sel)
         )
     })
 }

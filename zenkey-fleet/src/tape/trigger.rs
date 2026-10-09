@@ -149,7 +149,7 @@ const FIRE_BUFFER: usize = 4096;
 /// watch, not silence. A selector outside `namespace` is another
 /// deployment's and yields `None` too.
 pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
-    let rel = zenkey::grammar::strip_base(namespace, selector)?;
+    let rel = crate::model::namespace::strip(namespace, selector)?;
     let chunks: Vec<&str> = rel.split('/').collect();
     let named = |c: &str| c != "**" && !c.starts_with('@');
     let projected: Vec<String> = match chunks.as_slice() {
@@ -183,7 +183,10 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
         }
         _ => return None,
     };
-    Some(zenkey::grammar::with_base(namespace, projected.join("/")))
+    Some(crate::model::namespace::join(
+        namespace,
+        projected.join("/"),
+    ))
 }
 
 /// The owners' current state under `selector` (S4): target `All`,

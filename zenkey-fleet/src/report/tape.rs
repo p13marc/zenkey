@@ -210,18 +210,8 @@ pub struct ReplayReport {
 /// carries no pacing offset, and neither is lying about the other.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct SampleRow {
-    /// Full wire key, as received — explorers run un-namespaced (RFC 09 §5).
+    /// Full wire key, as received — a raw observer runs in no namespace.
     pub key: String,
-    /// The convention-parsed origin chunk, when the key parses at all.
-    ///
-    /// Absent means the key did not parse under the observer's base, which
-    /// is a fact about the key and not a claim about the fleet (O1/O3).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin: Option<String>,
-    /// The parsed subject tail, joined — absent on the same terms as
-    /// [`SampleRow::origin`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
     /// The key as zk2 resolution left it (#612, FJ8b; the tooling guide's
     /// O2): its address and resource, or the rung it stopped at — outside
     /// the namespace, not a zk2 key, no provider, no contract. Written by
@@ -233,7 +223,7 @@ pub struct SampleRow {
     /// stream has no epoch to be relative to, so it omits this.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub t: Option<u64>,
-    /// The registry-declared type name, when a decode was asked for and
+    /// The declared type, when a decode was asked for and a contract
     /// resolved one. `--no-decode` never asks, so it omits this rather than
     /// nulling it (O4).
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -242,34 +232,21 @@ pub struct SampleRow {
     /// structural rendering. Absent when nothing was decoded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub typed: Option<bool>,
-    /// The sample's declared encoding, verbatim (RFC 08 §7: sample beats
-    /// registry beats sniff).
+    /// The sample's declared encoding, verbatim.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
     /// The sample's HLC, when one rode it. Whose clock it is depends on who
     /// stamped it (RFC 09 §5.1 O7); this field says only that it exists.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
-    /// The RFC 04 §3 QoS profile **name**, and only when the wire's actual
-    /// axes match one.
-    ///
-    /// This is the field [`parse_row`](crate::tape::ingest::parse_row) resolves through
-    /// `zenkey::qos::QosProfile::from_name`, so it must never carry
-    /// anything else — axes matching no profile are not approximated, they
-    /// ride [`SampleRow::qos_axes`] instead. Writing the axes here is
-    /// exactly the bug in #235.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qos: Option<String>,
     /// The wire's actual QoS axes as one token,
     /// `priority/congestion/reliability[+express]` (#120).
     ///
-    /// A fact worth carrying and *not* a profile name: a fleet is free to
-    /// publish axes no profile declares, and the declared-vs-observed
-    /// comparison is the point. A `.zrec` row carries it since version 3
+    /// The declared-vs-observed comparison is the point: a zk2 owner's QoS
+    /// is per resource (§2.4). A `.zrec` row carries it since version 3
     /// (#612, FJ8a), and [`parse_row`](crate::tape::ingest::parse_row)
-    /// reads it back: a replay or a pipe publishes with exactly these axes,
-    /// which win over [`SampleRow::qos`] (a zk2 owner's QoS is per
-    /// resource, §2.4, and no v1 profile spells most of it).
+    /// reads it back: a replay or a pipe publishes with exactly these axes.
+    /// v1's profile name beside it, `qos`, left at FJ9.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qos_axes: Option<String>,
     /// A tombstone: authoritative retirement, never an empty put
@@ -308,9 +285,9 @@ pub struct SampleRow {
     /// True attachment size, whatever the rendering above shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachment_bytes: Option<usize>,
-    /// The RFC 08 §7 validation verdict, present only when the pipeline
-    /// was asked — and then always, so "valid" and "not checked" cannot be
-    /// confused by a shared absence (#159).
+    /// The conformance verdict against the declared type (§7.3), present
+    /// only when the pipeline was asked — and then always, so "valid" and
+    /// "not checked" cannot be confused by a shared absence (#159).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<String>,
     /// The failed constraints, when the verdict is `invalid`.
@@ -478,26 +455,5 @@ mod qos_axes_tests {
             qos_axes_token(P::Background, Cc::Drop, R::BestEffort, true),
             "background/drop/best_effort+express"
         );
-    }
-
-    /// Every declared profile renders a token, and the five are distinct —
-    /// which is what makes declared-vs-observed a comparison at all (#120).
-    #[test]
-    fn every_qos_profile_has_a_distinct_axes_token() {
-        let tokens: Vec<String> = zenkey::QosProfile::ALL
-            .iter()
-            .map(|p| {
-                qos_axes_token(
-                    p.priority(),
-                    p.congestion_control(),
-                    p.reliability(),
-                    p.express(),
-                )
-            })
-            .collect();
-        let mut unique = tokens.clone();
-        unique.sort();
-        unique.dedup();
-        assert_eq!(unique.len(), tokens.len(), "{tokens:?}");
     }
 }

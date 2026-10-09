@@ -37,10 +37,9 @@ pub const OBSERVE_LIMIT: usize = 64 * 1024;
 /// what lets a caller diff two payloads field-by-field when it can, and say so
 /// honestly — a byte comparison — when it cannot.
 ///
-/// Deliberately sync and schema-free: this runs on render paths, where the
-/// async v1 `decode_sample` (which may GET a `describe` on a miss) must never
-/// sit, and where a zk2 rendering ([`crate::model::render`]) falls back to it
-/// when no contract is in hand.
+/// Deliberately sync and schema-free: this runs on render paths, where no
+/// fetch may sit, and where a zk2 rendering ([`crate::model::render`]) falls
+/// back to it when no contract is in hand.
 pub fn structural_value(bytes: &[u8]) -> Option<serde_json::Value> {
     let looks_json = bytes.first().is_some_and(|b| {
         matches!(

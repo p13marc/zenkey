@@ -20,14 +20,9 @@ name = "zenctl"
 path = "src/main.rs"
 
 [dependencies]
-zenkey = { workspace = true, features = ["serde"] }
-# The codec matrix is enabled in the *binary*, not the library (issues #97,
-# #98): the dynamic protobuf decoder existed since v1.5 and was compiled out
-# of every shipped explorer, so a protobuf subject rendered as a hex sniff and
-# could not be published to at all. `cdr` joins it for DDS / ROS 2 traffic.
-# `blob` is the same posture for the @blob transport (#58): the library stays
-# free of the hashing stack, and the explorer that has to fetch bytes pays.
-zenkey-fleet = { path = "../zenkey-fleet", features = ["blob", "decode-protobuf", "decode-cdr", "validate-json"] }
+# The engine, by path while it is ported (#612). No v1 `zenkey` since FJ9:
+# what zenctl needs of the runtime it reaches through the engine.
+zenkey-fleet = { path = "../zenkey-fleet" }
 zenkey-explorer-config = { workspace = true }
 # zk2's session-free half (#612, FJ4): the key grammar, the contract
 # authoring format, bundles and the compatibility classifier `compat` runs —
@@ -64,9 +59,8 @@ anstream = { workspace = true }
 # about what a report is (#201).
 zenkey-report-fixtures = { workspace = true }
 # The zk2 runtime, to bring services up in `tests/live_zk2.rs` with its own
-# `ServiceBuilder` (#612, FJ4). Aliased as the fleet aliases it: both
-# packages are called `zenkey`, and the v1 one is this crate's `zenkey`.
-zk2 = { package = "zenkey", path = "../zenkey" }
+# `ServiceBuilder` (#612, FJ4).
+zenkey = { path = "../zenkey" }
 
 [target.'cfg(unix)'.dependencies]
 # Crate-local rather than workspace-declared, and the only such dep here: the

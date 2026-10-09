@@ -32,8 +32,9 @@
 //! ([`crate::bus::write::declare_publication`], P7 — no ad-hoc puts), gets the
 //! *replaying* session's HLC (re-stamped deliberately: a preserved foreign
 //! HLC silently loses every RFC 04 §3.2 reconciliation), and a recorded
-//! delete passes the same class-conscious retire gate as a live one
-//! ([`crate::bus::write::check_retire`], RFC 04 §1.2 v1.12). The etiquette the
+//! delete passes the same retire gate as a live one
+//! ([`crate::bus::write::check_retire`]: the operator's act, priced with
+//! `--i-know`). The etiquette the
 //! CLI enforces on top — dry-run first, header-base refusal without an
 //! explicit override — is RFC 09 §5.2's.
 
@@ -44,12 +45,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::{Error, Result};
-use zenkey::qos::QosProfile;
 use zenoh::Session;
 use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{EventStream, FleetEvent, SampleView, StreamItem};
-use crate::model::registry::SliceSet;
 use crate::report::{ReplayReport, SampleRow, Transition, ZrecHeader};
 use crate::tape::ingest::{IngestRow, parse_row};
 
@@ -819,34 +818,28 @@ pub enum ReplayTarget<'a> {
     /// The zero-puts guarantee is structural — there is nothing to put on.
     DryRun,
     /// Real puts through declared publishers on this session.
-    Bus {
-        session: &'a Session,
-        /// Registry slices for the retire gate's `ttl_s` awareness; `None`
-        /// classifies from the grammar alone.
-        slices: Option<&'a SliceSet>,
-    },
+    Bus { session: &'a Session },
 }
 
 /// What one replay is.
 ///
-/// `default_qos` is a [`QosProfile`] and not a profile *name*: the closed
-/// enum is RFC 04 §3's vocabulary, and a caller that hands over a string has
-/// only deferred the moment it is checked — this used to surface a bad
-/// `--qos` as a per-row "malformed" event partway through a replay, rather
-/// than as a refusal before anything published. A name recorded *in the
-/// capture* is still a string, because a file can carry anything; that check
-/// stays where it belongs, per row.
+/// `default_qos` is typed axes and not a token: a caller that hands over a
+/// string has only deferred the moment it is checked, and a bad `--qos`
+/// would surface as a per-row "malformed" event partway through a replay
+/// rather than as a refusal before anything published.
 pub struct ReplaySpec<'a> {
     pub target: ReplayTarget<'a>,
     /// Pacing scale: 2.0 replays twice as fast as captured.
     pub speed: f64,
     /// The operator's acknowledgement of a write that is not this replay's
-    /// to make: a recorded delete that falls off the state class (RFC 04
-    /// §1.2, v1.12), or a zk2 service's own key published where that
-    /// service runs (P3, spec §6; see [`replay`]).
+    /// to make: a recorded delete ([`crate::check_retire`]), or a zk2
+    /// service's own key published where that service runs (P3, spec §6;
+    /// see [`replay`]).
     pub i_know: bool,
-    /// The profile a row that recorded none is published under.
-    pub default_qos: QosProfile,
+    /// The axes a row that recorded none (no `qos_axes`: a version-1 or 2
+    /// capture, whose v1 profile names this build does not read) is
+    /// published with.
+    pub default_qos: crate::bus::write::WireQos,
     /// Publish the version-2 preamble rows too (`--seed-state`). Off, they
     /// are skipped and counted, with the reason stated per row: re-stamped
     /// state-at-capture-start republishes a snapshot over the live fleet
@@ -978,7 +971,7 @@ fn place(
             _ => Ok((key.to_owned(), key.to_owned())),
         },
         Some(ns) => {
-            let Some(rel) = zenkey::grammar::strip_base(base, key) else {
+            let Some(rel) = crate::model::namespace::strip(base, key) else {
                 return Err(format!(
                     "does not sit under the capture's base {base:?}, so it cannot be moved \
                      into namespace {ns:?}"
@@ -1009,10 +1002,9 @@ fn place(
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
 /// a dry run lists instantly, because a preview that takes the capture's
 /// duration is a preview nobody runs. Delete rows pass
-/// [`crate::bus::write::check_retire`] under the **header's** base — the keys
-/// were captured under it, and classifying them under anything else would
-/// re-derive what O3 says must not be re-derived; `i_know` is the operator
-/// saying the off-state cleanup is meant.
+/// [`crate::bus::write::check_retire`]: a tombstone on a key no contract
+/// describes is the operator's act, and `i_know` is the operator saying the
+/// cleanup is meant.
 ///
 /// **A zk2 service's own keys** (P3, spec §6, the tooling guide's §5): a
 /// replayer stands in for the owners it recorded only in a namespace of its
@@ -1114,15 +1106,11 @@ pub async fn replay(
                 continue;
             }
         };
-        let slices = match &target {
-            ReplayTarget::Bus { slices, .. } => *slices,
-            ReplayTarget::DryRun => None,
-        };
         // A put row on a wildcard is refused like a wildcard delete (#504):
         // a refused row, counted — not the fatal declare error it would
         // otherwise surface as halfway through the replay.
         let gate = if row.delete {
-            crate::bus::write::check_retire(&base, &row.key, slices, i_know).map(|_| ())
+            crate::bus::write::check_retire(&row.key, i_know)
         } else {
             crate::bus::write::check_concrete(&row.key, crate::bus::write::WriteAct::Put)
         };
@@ -1162,7 +1150,7 @@ pub async fn replay(
                 }
                 count_put(&mut report, row.delete);
             }
-            ReplayTarget::Bus { session, .. } => {
+            ReplayTarget::Bus { session } => {
                 // Original pacing, scaled — the observer's arrival clock is
                 // the only clock a capture has for "when" (RFC 09 §5.2).
                 if let (Some(prev), Some(t)) = (prev_t, t_us)
@@ -1177,29 +1165,12 @@ pub async fn replay(
                 let publication = match publications.entry(publish_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
-                        // The axes a version-3 row recorded win: they are
-                        // the QoS the owner published with (§2.4). A row
-                        // that recorded a profile name is judged against the
-                        // closed vocabulary — a name the capture carries can
-                        // be anything. A row that recorded neither falls to
-                        // the spec's profile, which is already typed and so
-                        // cannot fail here.
-                        let qos = match (&row.qos_axes, &row.qos) {
-                            (Some(axes), _) => *axes,
-                            (None, None) => crate::bus::write::WireQos::of_profile(default_qos),
-                            (None, Some(name)) => match zenkey::qos::QosProfile::from_name(name) {
-                                Some(qos) => crate::bus::write::WireQos::of_profile(qos),
-                                None => {
-                                    let reason = format!("unknown QoS profile {name:?}");
-                                    on_event(ReplayEvent::Malformed {
-                                        reason: reason.clone(),
-                                    });
-                                    record_err(&mut report, reason, false);
-                                    continue;
-                                }
-                            },
-                        };
-                        let publication = match crate::bus::write::declare_publication_with(
+                        // The axes a version-3 row recorded: the QoS the
+                        // owner published with (§2.4). A row that recorded
+                        // none falls to the spec's, which is already typed
+                        // and so cannot fail here.
+                        let qos = row.qos_axes.unwrap_or(default_qos);
+                        let publication = match crate::bus::write::declare_publication(
                             session,
                             &publish_key,
                             qos,
@@ -1350,8 +1321,8 @@ mod tests {
             panic!("a row")
         };
         assert_eq!(
-            (row.qos.as_deref(), row.qos_axes),
-            (Some("refreshed"), None)
+            row.qos_axes, None,
+            "a version-2 row's v1 profile name is no axes: it publishes with the default"
         );
         assert_eq!(excluded_by(&[]), VERBATIM.map(String::from).to_vec());
     }
@@ -1397,7 +1368,6 @@ mod tests {
                 true
             )
         );
-        assert_eq!(row.qos, None, "no v1 profile has these axes");
     }
 
     /// A version-1 file — no `preamble`, no `pre_roll`, plain rows and drop
@@ -1594,7 +1564,7 @@ mod tests {
             target: ReplayTarget::DryRun,
             speed: 1.0,
             i_know: false,
-            default_qos: QosProfile::Refreshed,
+            default_qos: crate::bus::write::WireQos::DEFAULT,
             seed_state,
             namespace: None,
         };
@@ -1740,7 +1710,7 @@ mod tests {
                 target: ReplayTarget::DryRun,
                 speed: 1.0,
                 i_know: false,
-                default_qos: QosProfile::Refreshed,
+                default_qos: crate::bus::write::WireQos::DEFAULT,
                 seed_state: false,
                 namespace: None,
             },
@@ -1752,43 +1722,50 @@ mod tests {
         .unwrap();
         assert!(report.dry_run);
         assert_eq!(report.published, 1);
-        assert_eq!(report.tombstones, 1); // state-shaped: licensed without force
+        assert_eq!(
+            (report.tombstones, report.refused),
+            (0, 1),
+            "a recorded delete is the operator's to send (#612, FJ9)"
+        );
         assert_eq!(report.capture_dropped, 3);
         assert_eq!(report.malformed, 0);
         assert_eq!(would.len(), 3, "{would:?}");
     }
 
-    /// A recorded delete off the state class keeps its price on replay
-    /// (RFC 04 §1.2 v1.12): refused without `i_know`, counted.
+    /// A recorded delete keeps its price on replay: refused without
+    /// `i_know`, counted, and named; with it, it goes out.
     #[tokio::test]
     async fn replayed_tombstones_pass_the_retire_gate() {
         let body = format!(
             "{}\n{}\n",
             serde_json::to_string(&header()).unwrap(),
-            r#"{"key":"v1/h-0123456789ab/telemetry/p/temp","t":0,"delete":true}"#,
+            r#"{"key":"plant/line-1/temp","t":0,"delete":true}"#,
         );
-        let mut reader = source_of(&body).await;
-        let report = replay(
-            &mut reader,
-            ReplaySpec {
-                target: ReplayTarget::DryRun,
-                speed: 1.0,
-                i_know: false,
-                default_qos: QosProfile::Refreshed,
-                seed_state: false,
-                namespace: None,
-            },
-            |_| {},
-        )
-        .await
-        .unwrap();
-        assert_eq!(report.refused, 1);
-        assert_eq!(report.tombstones, 0);
-        assert!(
-            report.first_errors[0].contains("telemetry"),
-            "{:?}",
-            report.first_errors
-        );
+        for (i_know, refused, tombstones) in [(false, 1, 0), (true, 0, 1)] {
+            let mut reader = source_of(&body).await;
+            let report = replay(
+                &mut reader,
+                ReplaySpec {
+                    target: ReplayTarget::DryRun,
+                    speed: 1.0,
+                    i_know,
+                    default_qos: crate::bus::write::WireQos::DEFAULT,
+                    seed_state: false,
+                    namespace: None,
+                },
+                |_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!((report.refused, report.tombstones), (refused, tombstones));
+            if !i_know {
+                assert!(
+                    report.first_errors[0].contains("--i-know"),
+                    "{:?}",
+                    report.first_errors
+                );
+            }
+        }
     }
 
     /// Speed is a positive finite scale, stated rather than clamped.
@@ -1803,7 +1780,7 @@ mod tests {
                     target: ReplayTarget::DryRun,
                     speed: bad,
                     i_know: false,
-                    default_qos: QosProfile::Refreshed,
+                    default_qos: crate::bus::write::WireQos::DEFAULT,
                     seed_state: false,
                     namespace: None,
                 },
@@ -1848,13 +1825,10 @@ mod tests {
         let err = replay(
             &mut reader,
             ReplaySpec {
-                target: ReplayTarget::Bus {
-                    session: &session,
-                    slices: None,
-                },
+                target: ReplayTarget::Bus { session: &session },
                 speed: 1000.0,
                 i_know: false,
-                default_qos: QosProfile::Transition,
+                default_qos: crate::bus::write::WireQos::DEFAULT,
                 seed_state: false,
                 namespace: None,
             },

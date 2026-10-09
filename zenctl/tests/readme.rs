@@ -54,8 +54,11 @@ fn the_readme_names_every_top_level_verb() {
         "zenctl/README.md never names {missing:?} — an operator reading it would \
          not know the verb exists"
     );
+    // 34 since FJ9 (#612) removed `config`, `blob`, `export`, `why` and
+    // `check cutover|retired|conform`; the floor catches a walk that stopped
+    // short, not a tree that shrank on purpose.
     assert!(
-        wanted.len() >= 40,
+        wanted.len() >= 30,
         "the walk found only {} verbs",
         wanted.len()
     );

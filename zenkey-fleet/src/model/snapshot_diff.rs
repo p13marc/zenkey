@@ -69,7 +69,7 @@ pub fn diff_snapshots(a: &Snapshot, b: &Snapshot, opts: DiffOpts) -> SnapshotDif
 /// A row's key relative to its file's namespace, or its wire key when it
 /// does not sit under it.
 fn zk2_key<'r>(base: &str, row: &'r SnapshotRow) -> &'r str {
-    zenkey::grammar::strip_base(base, &row.key).unwrap_or(&row.key)
+    crate::model::namespace::strip(base, &row.key).unwrap_or(&row.key)
 }
 
 /// Every key on either side, in `a`'s key order then `b`'s additions, with
@@ -213,7 +213,7 @@ mod tests {
     fn header(base: &str) -> ZsnapHeader {
         ZsnapHeader {
             zsnap: 2,
-            selectors: vec![zenkey::grammar::with_base(base, "zk2/*/*/*/state/**")],
+            selectors: vec![crate::model::namespace::join(base, "zk2/*/*/*/state/**")],
             base: base.into(),
             collected_at: "2026-10-09T00:00:00Z".into(),
             collection_span_s: 0.5,

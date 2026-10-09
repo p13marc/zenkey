@@ -30,7 +30,7 @@ fn render<R: Render>(r: &R, format: Format, color: ColorChoice) -> String {
 #[test]
 fn stripping_every_escape_leaves_the_plain_rendering_byte_for_byte() {
     let doctor = fx::doctor_report();
-    let conform = fx::conform_report();
+    let expect = fx::expect_report();
     for (name, coloured, plain) in [
         (
             "doctor",
@@ -38,9 +38,9 @@ fn stripping_every_escape_leaves_the_plain_rendering_byte_for_byte() {
             render(&doctor, Format::Table, ColorChoice::Never),
         ),
         (
-            "conform",
-            render(&conform, Format::Table, ColorChoice::Always),
-            render(&conform, Format::Table, ColorChoice::Never),
+            "expect",
+            render(&expect, Format::Table, ColorChoice::Always),
+            render(&expect, Format::Table, ColorChoice::Never),
         ),
     ] {
         assert_ne!(coloured, plain, "{name}: nothing was coloured at all");
@@ -59,8 +59,8 @@ fn stripping_every_escape_leaves_the_plain_rendering_byte_for_byte() {
 /// visible characters.
 #[test]
 fn colour_does_not_shift_a_column() {
-    let coloured = render(&fx::conform_report(), Format::Table, ColorChoice::Always);
-    let plain = render(&fx::conform_report(), Format::Table, ColorChoice::Never);
+    let coloured = render(&fx::doctor_report(), Format::Table, ColorChoice::Always);
+    let plain = render(&fx::doctor_report(), Format::Table, ColorChoice::Never);
     let widths = |s: &str| -> Vec<usize> {
         anstream::adapter::strip_str(s)
             .to_string()

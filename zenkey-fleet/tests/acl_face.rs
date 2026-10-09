@@ -185,7 +185,7 @@ async fn across(plan: &AclPlan, attach: FaceAttach) -> Across {
 
     // The control, on the vehicle side: the near router holds the token.
     eventually("the vehicle router holds navigation's token", || async {
-        zk2::presence::liveliness_read(&near, "zk2/vehicle-01/navigation/@zk/**", T)
+        zenkey::presence::liveliness_read(&near, "zk2/vehicle-01/navigation/@zk/**", T)
             .await
             .unwrap()
             .keys
@@ -198,7 +198,7 @@ async fn across(plan: &AclPlan, attach: FaceAttach) -> Across {
     while status == 0 && tokio::time::Instant::now() < deadline {
         status = values(&ground, STATUS).await;
     }
-    let read = zk2::presence::liveliness_read(&ground, "zk2/vehicle-01/navigation/@zk/**", T)
+    let read = zenkey::presence::liveliness_read(&ground, "zk2/vehicle-01/navigation/@zk/**", T)
         .await
         .unwrap();
     assert!(read.complete, "a refused read is complete (§8.1): {read:?}");

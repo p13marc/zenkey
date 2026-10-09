@@ -17,17 +17,12 @@
 pub mod acl;
 pub mod admin;
 pub mod bench;
-pub mod blob;
 pub mod cache;
 pub mod call;
 pub mod compat;
-pub mod config;
-pub mod conform;
-pub mod cutover;
 pub mod doctor;
 pub mod echo;
 pub mod expect;
-pub mod export;
 pub mod field;
 pub mod generate;
 pub mod get;
@@ -40,7 +35,6 @@ pub mod publish;
 pub mod rate;
 pub mod record;
 pub mod replay;
-pub mod retired;
 pub mod sample;
 pub mod schema;
 pub mod scout;
@@ -52,13 +46,10 @@ pub mod subscribe;
 pub mod timeline;
 pub mod watch;
 pub mod watchdog;
-pub mod why;
 pub mod zk2;
 
 use anyhow::Result;
 
-use crate::Bus;
-use crate::cli::SelectorArgs;
 use crate::exit::unaskable;
 
 /// The raw-selector seam: every selector (or key) a user types, rather than
@@ -80,96 +71,6 @@ pub fn raw_selector(sel: &str) -> Result<&str> {
         ));
     }
     Ok(sel)
-}
-
-/// The hint for a base-relative selector typed under a non-empty base, or
-/// `None` when there is nothing to say (#512).
-///
-/// Wire verbs take **wire keys**: an explorer runs un-namespaced and `--base`
-/// is for discovery (RFC 09 §5), so `v1/**` under `--base prod` is a
-/// subscription to a keyspace nobody publishes on — silence, with no error to
-/// say why. Not rewritten: the wire is what you typed, and this only says so.
-///
-/// Only a selector whose first chunk is the grammar's root `v1` is the
-/// mistake. The rest that do not start with the base are deliberate and stay
-/// quiet: `@/…` (the admin space, under no base), a leading wildcard (`**/v1/…`
-/// spans every base, which is how a leak is found), and another deployment's
-/// own wire keys (`staging/v1/…`) — those *are* wire keys, which is the thing
-/// the hint would ask for.
-pub fn off_base_hint(sel: &str, base: &str) -> Option<String> {
-    if base.is_empty() || zenkey::grammar::strip_base(base, sel).is_some() {
-        return None;
-    }
-    let first = sel.split(['/', '?']).next().unwrap_or_default();
-    (first == "v1").then(|| {
-        let wire = zenkey::grammar::with_base(base, sel);
-        format!(
-            "hint: {sel:?} does not sit under base {base:?} — selectors are wire \
-             keys (RFC 09 §5); did you mean {wire:?}?"
-        )
-    })
-}
-
-/// [`off_base_hint`] onto stderr — never stdout, which `--format json|ndjson`
-/// keeps for the document. One line, and the run carries on.
-pub fn hint_off_base(sel: &str, args: &Bus) {
-    if let Some(hint) = off_base_hint(sel, args.base()) {
-        eprintln!("{hint}");
-    }
-}
-
-/// Where a wire watcher looks: the typed selector, or the composed positions,
-/// or the base's whole `v1` subtree (#307).
-///
-/// The one resolution of [`SelectorArgs`], so that `echo`, `rate`, `record`,
-/// `field`, `check expect` and `why` cannot disagree about what "no selector"
-/// means. Clap has already refused the both-at-once shape. A typed selector
-/// that reads base-relative under a non-empty base gets the one-line
-/// [`off_base_hint`] (#512); composed ones are under the base by
-/// construction.
-pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
-    let selector = selector_unhinted(sel, args)?;
-    if sel.selector.is_some() {
-        hint_off_base(&selector, args);
-    }
-    Ok(selector)
-}
-
-/// [`selector_of`] without the hint — for `why`, whose `key-parse` rung
-/// already says the same thing as a finding, with its citation.
-pub fn selector_unhinted(sel: &SelectorArgs, args: &Bus) -> Result<String> {
-    match sel.selector.as_deref() {
-        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
-        // composed ones cannot spell it.
-        Some(s) => Ok(raw_selector(s)?.to_string()),
-        None => compose_selector(
-            args,
-            sel.origin.as_deref(),
-            sel.class,
-            sel.producer.as_deref(),
-        ),
-    }
-}
-
-/// Compose a server-side selector from origin/class/producer positions
-/// (RFC 03: positions, not filters — never client-filter what the grammar
-/// can say). `None` positions wildcard.
-pub fn compose_selector(
-    args: &Bus,
-    origin: Option<&str>,
-    class: Option<zenkey::Class>,
-    producer: Option<&str>,
-) -> Result<String> {
-    // No validation here: `--class` is a `zenkey::Class` and clap rejected
-    // anything else at the edge, with the vocabulary in the message (#351).
-    let origin = origin.unwrap_or("*");
-    let class = class.map_or("*", zenkey::Class::chunk);
-    let rel = match producer {
-        Some(p) => format!("v1/{origin}/{class}/{p}/**"),
-        None if class == "*" => format!("v1/{origin}/**"),
-        None => format!("v1/{origin}/{class}/**"),
-    };
-    args.wire(rel)
 }
 
 /// How an output file is opened — decided before any session opens (#514).
@@ -245,83 +146,4 @@ pub fn positive_secs(flag: &str, secs: f64) -> Result<std::time::Duration> {
         ));
     }
     Ok(std::time::Duration::from_secs_f64(secs))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_base_relative_selector_under_a_base_is_hinted_and_nothing_else_is() {
-        let hint = off_base_hint("v1/**", "prod").expect("the mistake is hinted");
-        assert!(
-            hint.contains(r#""v1/**" does not sit under base "prod""#),
-            "{hint}"
-        );
-        assert!(hint.contains(r#"did you mean "prod/v1/**"?"#), "{hint}");
-        assert!(off_base_hint("v1/*/state/sysinfo/health", "site/prod").is_some());
-        // A GET's parameters ride along into the suggestion.
-        assert!(
-            off_base_hint("v1/**?_time=[now(-1h)..]", "prod")
-                .unwrap()
-                .contains(r#""prod/v1/**?_time=[now(-1h)..]""#)
-        );
-        // Quiet: the wire-key form, the empty base, the admin space, a
-        // leading wildcard, another deployment's wire keys, a bare `v1x`.
-        for (sel, base) in [
-            ("prod/v1/**", "prod"),
-            ("v1/**", ""),
-            ("@/**", "prod"),
-            ("**/v1/**", "prod"),
-            ("*/v1/*/state/**", "prod"),
-            ("staging/v1/**", "prod"),
-            ("v1x/**", "prod"),
-            ("prod/@catalog/**", "prod"),
-        ] {
-            assert_eq!(off_base_hint(sel, base), None, "{sel} under {base:?}");
-        }
-    }
-
-    #[test]
-    fn compose_selector_places_positions() {
-        // No config file: `bus_of` resolves against an absent context, so
-        // this test no longer passes merely by pinning `base` and never
-        // letting the ladder reach its second rung (#209).
-        let args = crate::bus::tests::bus_of(Some("zs"));
-        assert_eq!(
-            compose_selector(&args, None, None, None).unwrap(),
-            "zs/v1/*/**"
-        );
-        assert_eq!(
-            compose_selector(
-                &args,
-                Some("h-3fa9c2d41b7e"),
-                Some(zenkey::Class::State),
-                None
-            )
-            .unwrap(),
-            "zs/v1/h-3fa9c2d41b7e/state/**"
-        );
-        assert_eq!(
-            compose_selector(&args, None, None, Some("tc")).unwrap(),
-            "zs/v1/*/*/tc/**"
-        );
-        // The rejection moved to the edge: `--class` is a `zenkey::Class`,
-        // so an unknown one never reaches this function — clap refuses it,
-        // naming the vocabulary once rather than in three places (#351).
-        let bad = "alerts".parse::<zenkey::Class>().unwrap_err().to_string();
-        assert!(bad.contains("telemetry, state, events"), "{bad}");
-        assert!(bad.contains("RFC 04 §1"), "{bad}");
-
-        // The empty base composes bare `v1/…` selectors (observer identity).
-        let args = crate::bus::tests::bus_of(Some(""));
-        assert_eq!(
-            compose_selector(&args, None, None, None).unwrap(),
-            "v1/*/**"
-        );
-        assert_eq!(
-            compose_selector(&args, None, Some(zenkey::Class::State), None).unwrap(),
-            "v1/*/state/**"
-        );
-    }
 }

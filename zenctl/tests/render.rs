@@ -51,30 +51,26 @@ fn ndjson<R: Render>(r: &R) -> String {
     to_string(r, Format::Ndjson, W).expect("render").0
 }
 
-/// Two row kinds on one stream, told apart by a tag rather than by guessing at
-/// fields — the defect this family had before the seam.
+/// One row kind on the stream, tagged like every family's, and the field an
+/// admin document omitted drawn as `—`, never as an agreeing value.
 #[test]
-fn a_storage_lists_two_row_kinds_are_tagged() {
+fn a_storage_list_tags_its_rows() {
     let out = ndjson(&fx::storage_list());
     let kinds: Vec<String> = out
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
         .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
         .collect();
-    assert_eq!(kinds, ["storage", "coverage", "coverage", "coverage"]);
+    assert_eq!(kinds, ["storage", "storage"]);
     assert_data_eq!(
         table(&fx::storage_list()),
         str![[r#"
 configured storages:
 
-  main  @aabbccdd  acme/v1/**/state/**
+  events  @aabbccdd  acme/zk2/*/*/*/events/**
     strip —  ·  volume memory
-
-declared state families vs storage coverage:
-
-  ✓ sysinfo   health        covered by main@aabbccdd
-  ~ logs      state/{unit}  PARTIAL via main@aabbccdd
-  · parallax  stream/{id}   uncovered
+  plant   @aabbccdd  acme/plant/**
+    strip acme/plant  ·  volume fs
 
 "#]]
     );
@@ -188,93 +184,6 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     );
 }
 
-/// The `why` ladder (#214): one line per rung, the three answer states drawn
-/// as three marks — `✓` established, `✗`/`·` not-established (a cause / a
-/// mere fact), `?` NOT ASKED — reasons and evidence indented, verdict word
-/// last. The fixture is the acceptance posture: declared, alive, never
-/// published, under the `Healthy` verdict.
-#[test]
-fn a_why_ladder_draws_one_rung_per_line_with_its_three_states() {
-    assert_data_eq!(
-        table(&fx::why_report()),
-        str![[r#"
-✓  scope-reach         does a `**` explorer scope reach this key?
-      the `v1/**` explorer scope intersects this key
-✓  key-parse           does it parse as a v1 key under the base?
-      origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, subject disk/root/used
-✓  registry-declared   does a loaded registry slice declare it?
-      declared as disk/{mount}/used (TelemetryPoint)
-✓  origin-alive        is the origin on the liveliness roster?
-      h-3fa9c2d41b7e is on the roster with producer(s): sysinfo
-·  publisher-declared  did any session declare a matching publisher?
-      ↳ declared, alive, never published — publishers declare lazily (RFC 08 §6.1): no publisher declaration exists until the first publication, so this is not evidence of a bug
-✓  storage-coverage    is a storage configured to capture it?
-      storage latest@aabbccdd (v1/*/telemetry/**) captures every key this expression names
-·  stored-value        does a stored value answer a bounded GET?
-      ↳ none of get, @adv cache returned a value — which is silence, not proof no value exists (RFC 05 §3.1)
-?  sample-freshness    is the last known sample within its declared ttl?
-      no sample in hand to age — the stored-value rung found none
-✓  admin-answered      is the admin space answering at all?
-      1 admin root document(s) answered @/*/*
-?  wire-heard          did the key speak during a listen window?
-      not listened — the data plane costs one deliberate action (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch the wire
-NO CAUSE ESTABLISHED
-
-"#]]
-    );
-}
-
-/// The `why` notes carry the honesty sentences into every format: the
-/// RFC 05 §3.1 framing, the exit-code meaning, and the next step for the one
-/// rung that was not asked.
-#[test]
-fn a_why_ladders_notes_state_the_non_verdict_and_the_exit() {
-    let stderr = notes(&fx::why_report());
-    assert!(stderr.contains("silence is never a verdict"), "{stderr}");
-    assert!(stderr.contains("exit 1"), "{stderr}");
-    assert!(stderr.contains("--for"), "{stderr}");
-}
-
-/// The `why` ndjson: the envelope leads with the verdict and the cause ids
-/// (so a script need not re-derive the exit-0 policy), then one tagged row
-/// per rung — `not_asked` rows carrying no `reason`.
-#[test]
-fn a_why_ladders_ndjson_leads_with_the_verdict_then_tags_every_rung() {
-    let out = ndjson(&fx::why_report());
-    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["report"], "why");
-    assert_eq!(envelope["verdict"], "healthy");
-    assert_eq!(envelope["causes"], serde_json::json!([]));
-    assert!(
-        !envelope.as_object().unwrap().contains_key("rungs"),
-        "rungs are rows, not an envelope field"
-    );
-    let rows: Vec<serde_json::Value> = out
-        .lines()
-        .skip(1)
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(rows.len(), 10, "one row per rung");
-    let lazy = rows
-        .iter()
-        .find(|r| r["id"] == "publisher-declared")
-        .unwrap();
-    assert_eq!(lazy["answer"], "not_established");
-    assert!(
-        lazy["reason"]
-            .as_str()
-            .unwrap()
-            .contains("publishers declare lazily"),
-        "{lazy}"
-    );
-    let unasked = rows.iter().find(|r| r["id"] == "wire-heard").unwrap();
-    assert_eq!(unasked["answer"], "not_asked");
-    assert!(
-        unasked.get("reason").is_none(),
-        "not asked has no negative answer to spell (O4)"
-    );
-}
-
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -284,7 +193,6 @@ fn no_family_emits_trailing_whitespace() {
     let renderings = [
         table(&fx::storage_list()),
         table(&fx::doctor_report()),
-        table(&fx::why_report()),
         table(&catalog.services()),
         table(&catalog.service(&"host-a/tc".parse().expect("an address"))),
         table(&catalog.ifaces()),
@@ -357,152 +265,6 @@ host-c/tc holds the interface's token and sent no value in 98 call(s): refused o
     assert_eq!(lines[0]["silent"], 1);
     assert_eq!(lines[0]["refusals"]["count"], 2);
     assert_eq!(lines[1]["row"], "replier");
-}
-
-/// Three `origins` outcomes, three sentences: answered-and-empty, not asked,
-/// and a real list.
-#[test]
-fn a_blob_list_tells_three_kinds_of_empty_apart() {
-    assert_data_eq!(
-        table(&fx::blob_list()),
-        str![[r#"
-declared @blob tiers:
-
-  logs      store     v2.0
-      endpoints  have, chunk
-      algo       blake3
-      origins    — (no liveliness token answered; silence is not a verdict — RFC 05 §3.1)
-  parallax  artifact  v1.3
-      endpoints  manifest
-      algo       blake3
-      reference  ArtifactRef  (carries the content root — RFC 07 §2.1)
-      encoding   application/octet-stream
-      origins    — (roster not asked)
-      build artifacts
-
-"#]]
-    );
-}
-
-#[test]
-fn a_blob_probe_reports_two_roots_as_a_finding() {
-    assert_data_eq!(
-        table(&fx::blob_probe()),
-        str![[r#"
-target  artifact/01jqz3demo0001  (tier artifact)
-
-asked:
-  v1/*/@blob/artifact/01jqz3demo0001/manifest
-  v1/*/@blob/artifact/01jqz3demo0001/have
-
-holders:
-
-  h-3fa9c2d41b7e  8/8 chunks · 65536 bytes · root 60e03a78c0e0…
-      v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/manifest
-  h-bbbbbbbbbbbb  3/8 chunks · no manifest reply
-      note: every chunk but no index
-      v1/h-bbbbbbbbbbbb/@blob/artifact/01jqz3demo0001/have
-
-"#]]
-    );
-    assert!(notes(&fx::blob_probe()).contains("distinct content roots"));
-    // A probe that was never issued must never read as "nobody holds it".
-    assert_data_eq!(
-        table(&fx::blob_probe_unissued()),
-        str![[r#"
-target  tree/deadbeef  (tier tree)
-
-"#]]
-    );
-    assert!(notes(&fx::blob_probe_unissued()).contains("not probed"));
-
-    // R7: a silent probe over zero registry slices names the third silence —
-    // "nobody declares this tier" was never established either.
-    let silent_no_registry = zenkey_fleet::report::BlobProbeReport {
-        holders: vec![],
-        answered: 0,
-        roots: vec![],
-        declared_by: vec![],
-        slices_considered: 0,
-        ..fx::blob_probe()
-    };
-    let n = notes(&silent_no_registry);
-    assert!(n.contains("no registry loaded"), "{n}");
-    // …while a silent probe with slices read keeps the two-silence wording:
-    // an empty declared_by over a real sweep IS "nobody declares it".
-    let silent_swept = zenkey_fleet::report::BlobProbeReport {
-        declared_by: vec![],
-        slices_considered: 11,
-        ..silent_no_registry
-    };
-    let n = notes(&silent_swept);
-    assert!(!n.contains("no registry loaded"), "{n}");
-    assert!(n.contains("no replies"), "{n}");
-}
-
-#[test]
-fn a_blob_tree_and_a_blob_fetch_are_one_ndjson_line_each() {
-    for out in [ndjson(&fx::blob_tree()), ndjson(&fx::blob_fetch())] {
-        assert_eq!(out.lines().count(), 1, "not a document:\n{out}");
-    }
-    assert_data_eq!(
-        table(&fx::blob_tree()),
-        str![[r#"
-tree/deadbeefcafe
-  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/tree/deadbeef/index)
-  index     12 entries, 9 file(s)
-  content   1048576 bytes in 40 distinct chunk(s)
-  priority  data_low/block/reliable
-  root      deadbeefcafe
-
-"#]]
-    );
-    assert_data_eq!(
-        table(&fx::blob_fetch()),
-        str![[r#"
-bundle.bin
-  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/chunk)
-  bytes     65536 in 8 chunk(s), 2 resumed
-  priority  data_low/block/reliable
-  root      trust-on-first-use — this origin chose the content
-  retries                                                                        1
-
-"#]]
-    );
-    assert!(notes(&fx::blob_fetch()).contains("failed verification before disk"));
-}
-
-/// One reply, one error envelope, and the attachment clause (#237).
-#[test]
-fn a_call_renders_a_reply_and_an_error_envelope() {
-    let call = table(&fx::call_report());
-    assert_data_eq!(
-        call.clone(),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "count": 214
-}
-  attachment (18 B): {"trace":"abc123"}
-h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
-
-"#]]
-    );
-    assert!(call.contains("attachment (18 B)"), "the clause probe lost");
-
-    // R5: a silent call's note names the wait, and the document states it —
-    // it used to say "the timeout too short" about a timeout the report
-    // never carried (O5).
-    let silent = zenkey_fleet::report::CallReport {
-        answers: vec![],
-        ..fx::call_report()
-    };
-    let n = notes(&silent);
-    assert!(n.contains("within 5s"), "{n}");
-    let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
-    // `5.0`: the seconds unification (#218) — see the budget window above.
-    assert_eq!(envelope["timeout_s"], 5.0);
 }
 
 /// `check probe` over zk2 (#612, FJ8b): a consumer-shaped read of one
@@ -605,99 +367,6 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
     }
 }
 
-/// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
-/// line — a caller MUST NOT read a short page as the end — and `partial:
-/// true` with `next_cursor: null` is the contract violation the RFC says an
-/// observer MAY report. A caveat, never an exit code: `call` is an act, and
-/// both replies arrived.
-#[test]
-fn a_partial_page_says_stopped_early_and_a_null_cursor_is_a_caveat() {
-    let report = fx::call_report_partial_page();
-    let t = table(&report);
-    assert!(
-        t.contains(
-            "stopped early (partial=true, next_cursor=e-41, scanned=4096, \
-             covers_from=2026-09-06T10:00:00Z) — RFC 05 §3.2"
-        ),
-        "{t}"
-    );
-    assert!(
-        t.contains("stopped early (partial=true, next_cursor=null) — RFC 05 §3.2"),
-        "the optional fields are omitted when the wire omitted them:\n{t}"
-    );
-    assert_eq!(t.matches("stopped early").count(), 2, "{t}");
-
-    let n = notes(&report);
-    assert!(
-        n.contains(
-            "h-bbbbbbbbbbbb: partial=true with next_cursor=null — the reply says it \
-             stopped early and offers no way to continue (a contract violation) \
-             (RFC 05 §3.2)"
-        ),
-        "{n}"
-    );
-    assert!(
-        !n.contains("h-3fa9c2d41b7e: partial=true"),
-        "a cursor is a way on — no caveat for the first answer:\n{n}"
-    );
-    assert_eq!(report.exit_code(), 0, "a call is an act, not a judgement");
-}
-
-#[test]
-fn a_cutover_puts_the_verdict_word_beside_its_evidence() {
-    assert_data_eq!(
-        table(&fx::cutover_report()),
-        str![[r#"
-old root acme/legacy: 12 sample(s) on 2 key(s) over 30s
-  ✗  acme/legacy/sysinfo/health
-  ✗  acme/legacy/sysinfo/disk
-new plane acme/v1/**: 480 sample(s)
-leaks (outside acme/v1/ and not the old root): 3 sample(s) on 1 key(s)
-  !  acme/scratch/tmp
-FAIL
-
-"#]]
-    );
-    assert!(notes(&fx::cutover_report()).contains("still speaks"));
-}
-
-/// The burn-down (#226): each ledger entry carries its four facts, each fact
-/// honest about whether it was even asked, and the verdict word closes the
-/// table exactly as `check cutover`'s does — same vocabulary, same exit
-/// discipline.
-#[test]
-fn a_retired_report_puts_four_facts_beside_each_ledger_entry() {
-    assert_data_eq!(
-        table(&fx::retired_report()),
-        str![[r#"
-✗  logs: logs/errors_total              wire 3 sample(s) · STILL SERVED · 1 subscriber(s) · → logs/journald/errors_total: 480 sample(s)
-✓  logs: logs/by_unit/{unit}/burn_rate  wire silent · not served · 0 subscriber(s) · → logs/journald/burn_rate: 120 sample(s)
-?  logs: logs/units_in_failure          wire silent · not served · 0 subscriber(s) · → logs/journald/units_in_failure: 0 sample(s)
-FAIL
-
-"#]]
-    );
-    let notes = notes(&fx::retired_report());
-    assert!(
-        notes.contains("one checkout's slice"),
-        "the report must state which registries it read: {notes}"
-    );
-    // The envelope leads the ndjson, with the coverage claim intact and the
-    // entries reduced to a count (the rows carry them).
-    let first = ndjson(&fx::retired_report())
-        .lines()
-        .next()
-        .unwrap()
-        .to_string();
-    let envelope: serde_json::Value = serde_json::from_str(&first).unwrap();
-    assert_eq!(envelope["report"], "registry-retired");
-    assert_eq!(envelope["entries"], 3);
-    assert_eq!(
-        envelope["registries"][0],
-        "../zensight/zensight-common/registry"
-    );
-}
-
 /// The field window (#223): per-path stats beside their findings, the path
 /// table's bound stated in every format. Over zk2 (#612, FJ8b) a path is
 /// declared by the contract's type or not, and field-stuck is *not asked*
@@ -777,44 +446,6 @@ IMPAIRED — the observation cannot carry the claim:
 "#]]
     );
     assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
-}
-
-/// The conformance suite (#222): the state word leads every row, an
-/// exemption is named beside its evidence, unknowable carries its reason —
-/// and the verdict closes the table. The notes carry what was not asked,
-/// and the drop, in every format.
-#[test]
-fn a_conform_report_keeps_three_states_and_names_the_exemption() {
-    assert_data_eq!(
-        table(&fx::conform_report()),
-        str![[r#"
-✓ met         procedure/introspect          h-3fa9c2d41b7e: a value reply  [RFC 08 §6]
-✓ exempt      procedure/dns                 when: config:collect.dns — h-3fa9c2d41b7e: error/gated — conditional, and said so  [RFC 08 §6.1]
-✗ not met     qos-observed-mismatch/health  v1/h-3fa9c2d41b7e/state/sysinfo/health: 4 of 4 sample(s) did not ride the declared transition  [RFC 04 §3]
-? unknowable  observed/disk/{mount}/used    a window proves presence, never absence — not seen in 10s  [RFC 13 §3]
-VIOLATES
-
-"#]]
-    );
-    let notes = notes(&fx::conform_report());
-    assert!(notes.contains("not asked: stale-state"), "{notes}");
-    assert!(notes.contains("3 sample(s) dropped"), "{notes}");
-    assert!(notes.contains("synthetic marker"), "{notes}");
-    let lines: Vec<serde_json::Value> = ndjson(&fx::conform_report())
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(lines[0]["report"], "conform");
-    assert_eq!(lines[0]["verdict"], "violates");
-    assert!(lines[0].get("assertions").is_none(), "rows are rows");
-    let states: Vec<&str> = lines[1..]
-        .iter()
-        .map(|l| {
-            assert_eq!(l["row"], "assertion");
-            l["state"].as_str().unwrap()
-        })
-        .collect();
-    assert_eq!(states, ["met", "met", "not_met", "unknowable"]);
 }
 
 /// The fleet timeline (#216), arrival axis: lanes per zk2 resource of one
@@ -1150,17 +781,12 @@ aabbccdd  1.9.0  tcp/10.0.0.1:7447
     );
 }
 
-/// Three row kinds on one stream, told apart by a tag rather than by probing
-/// for fields — and an origin whose sources named no single session is
-/// *reported*, not attached.
+/// Two row kinds on one stream, told apart by a tag rather than by probing
+/// for fields. v1's origin attachments (`--origins`) left at FJ9 (#612).
 #[test]
-fn an_admin_graph_tags_its_three_row_kinds() {
+fn an_admin_graph_tags_its_row_kinds() {
     let report = fx::topology();
-    let attachments = fx::attachments();
-    let view = zenctl::render::TopologyView {
-        report: &report,
-        attachments: &attachments,
-    };
+    let view = zenctl::render::TopologyView { report: &report };
     let kinds: Vec<String> = ndjson(&view)
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
@@ -1168,16 +794,14 @@ fn an_admin_graph_tags_its_three_row_kinds() {
         .collect();
     assert_eq!(
         kinds,
-        ["node", "node", "edge", "attachment", "attachment"],
-        "nodes, edges and attachments used to be one untagged stream"
+        ["node", "node", "edge"],
+        "nodes and edges used to be one untagged stream"
     );
     assert_data_eq!(
         table(&view),
         str![[r#"
 aabbccdd  router  1.9.0  tcp/10.0.0.1:7447
 eeff0011  peer    —      (heard of, not queryable)
-  h-3fa9c2d41b7e  ⚓ session eeff0011  (token v1/h-3fa9c2d41b7e/state/sysinfo/alive)
-  h-bbbbbbbbbbbb  reported by aabbccdd — sources named no single session; shown as reported, not attached
   aabbccdd —— eeff0011  [tcp]
 
 "#]]
@@ -1361,178 +985,6 @@ frontend  query  zk2/*/tc/tc.netif.v1/state/**
 // cannot see a `KeyRelation`, and it must not enable the `decode` feature
 // `GenReport` lives behind (#204).
 
-/// A read-back as a modem serves it: two groups of different classes, a
-/// write-only parameter, a value the producer has not read yet, one that
-/// differs from its startup file, and a change pending on the reach group.
-/// Built here: `zenkey-report-fixtures` pins `zenkey-fleet`'s report
-/// shapes, and this document is `zenkey::config`'s (RFC 05 §5.1).
-fn config_report() -> zenctl::render::ConfigReport {
-    use zenkey::config::{
-        ConfigGroup, ConfigSchema, ConfigView, ParamClass, ParamKind, ParamSpec, ParamValue,
-        PendingChange, ValueSource,
-    };
-    let dbm = ParamKind::Integer {
-        min: Some(0),
-        max: Some(30),
-        unit: Some("dBm".into()),
-    };
-    let schema = ConfigSchema::new()
-        .with(
-            ConfigGroup::new("radio", ParamClass::Reach, "the carrier")
-                .with(ParamSpec::new(
-                    "frequency_khz",
-                    ParamKind::Integer {
-                        min: Some(863_000),
-                        max: Some(870_000),
-                        unit: Some("kHz".into()),
-                    },
-                    "centre frequency",
-                ))
-                .with(ParamSpec::new("tx_power", dbm, "transmit power")),
-        )
-        .with(
-            ConfigGroup::new("access", ParamClass::Hot, "who may join")
-                .with(ParamSpec::new(
-                    "open",
-                    ParamKind::Bool,
-                    "accept unknown peers",
-                ))
-                .with(ParamSpec::new("psk", ParamKind::Text, "the shared key").sensitive()),
-        );
-    let mut view = ConfigView::of("rf0", &schema);
-    view.revision = 7;
-    view.pending = Some(PendingChange::new("chg-01j9", ["radio"]).until("2026-09-27T10:15:00Z"));
-    let radio = &mut view.groups[0];
-    radio.parameters[0].value = Some(ParamValue::Integer(868_100));
-    radio.parameters[0].source = Some(ValueSource::Runtime);
-    radio.parameters[0].startup = Some(ParamValue::Integer(868_300));
-    radio.parameters[1].value = Some(ParamValue::Integer(14));
-    radio.parameters[1].source = Some(ValueSource::File);
-    let access = &mut view.groups[1];
-    access.parameters[1].source = Some(ValueSource::File);
-    zenctl::render::ConfigReport {
-        key: "acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0".into(),
-        timeout_s: 5.0,
-        documents: vec![zenctl::render::ConfigDocument {
-            origin: "h-3fa9c2d41b7e".into(),
-            view,
-        }],
-        other: vec![],
-    }
-}
-
-#[test]
-fn a_config_read_back_draws_the_schema_beside_every_value() {
-    assert_data_eq!(
-        table(&config_report()),
-        str![[r#"
-h-3fa9c2d41b7e  rf0  revision 7  pending chg-01j9 on radio until 2026-09-27T10:15:00Z
-parameter      value                    source   kind                         description
-
-radio  (reach) the carrier
-frequency_khz  868100 (startup 868300)  runtime  integer 863000..=870000 kHz  centre frequency
-tx_power       14                       file     integer 0..=30 dBm           transmit power
-
-access  (hot) who may join
-open           —                        —        bool                         accept unknown peers
-psk            (write-only)             file     text                         the shared key
-
-"#]]
-    );
-    assert_data_eq!(
-        ndjson(&config_report()),
-        str![[r#"
-{"documents":1,"key":"acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0","other":0,"report":"config","timeout_s":5.0}
-{"class":"reach","description":"centre frequency","group":"radio","kind":"integer","max":870000,"min":863000,"name":"frequency_khz","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"runtime","startup":868300,"unit":"kHz","value":868100}
-{"class":"reach","description":"transmit power","group":"radio","kind":"integer","max":30,"min":0,"name":"tx_power","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"file","unit":"dBm","value":14}
-{"class":"hot","description":"accept unknown peers","group":"access","kind":"bool","name":"open","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter"}
-{"class":"hot","description":"the shared key","group":"access","kind":"text","name":"psk","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","sensitive":true,"source":"file"}
-{"deadline":"2026-09-27T10:15:00Z","groups":["radio"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"pending","token":"chg-01j9"}
-
-"#]]
-    );
-}
-
-/// RFC v1.50: the change `persist` takes with no token is named on the
-/// document's head line and as a `last_change` row.
-#[test]
-fn a_config_read_back_names_its_last_change() {
-    let mut r = config_report();
-    let view = &mut r.documents[0].view;
-    view.pending = None;
-    view.last_change = Some(zenkey::config::LastChange::new("chg-01j8", ["access"]));
-    let table = table(&r);
-    assert_eq!(
-        table.lines().next(),
-        Some("h-3fa9c2d41b7e  rf0  revision 7  last change chg-01j8 on access"),
-        "{table}"
-    );
-    let rows = ndjson(&r);
-    assert!(
-        rows.lines().any(|l| l
-            == r#"{"groups":["access"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"last_change","token":"chg-01j8"}"#),
-        "{rows}"
-    );
-}
-
-/// The reply that is not a document is kept and drawn as a reply, and the
-/// caveat says so in every format; an empty report says silence.
-#[test]
-fn a_config_report_keeps_a_reply_that_is_not_a_document() {
-    use zenkey_fleet::report::{CallAnswer, CallError, CallOutcome};
-    let mut r = config_report();
-    r.documents.clear();
-    r.other.push(CallAnswer {
-        origin: "h-3fa9c2d41b7e".into(),
-        outcome: CallOutcome::Ok {
-            value: Some(
-                serde_json::json!({"token": "chg-01j9", "apply_at": "2026-09-27T10:14:30Z"}),
-            ),
-            text: None,
-        },
-        attachment: None,
-        attachment_bytes: None,
-    });
-    r.other.push(CallAnswer {
-        origin: "h-5c1d2e3f4a5b".into(),
-        outcome: CallOutcome::Err(CallError {
-            name: "error/busy".into(),
-            message: "a change is pending on this resource (token chg-0ff1)".into(),
-        }),
-        attachment: None,
-        attachment_bytes: None,
-    });
-    assert_data_eq!(
-        table(&r),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "apply_at": "2026-09-27T10:14:30Z",
-  "token": "chg-01j9"
-}
-h-5c1d2e3f4a5b: ✗ error/busy — a change is pending on this resource (token chg-0ff1)
-
-"#]]
-    );
-    assert_data_eq!(
-        notes(&r),
-        str![[r#"
-2 repl(y|ies) not shaped as a read-back document, shown as sent (RFC 05 §5.1)
-
-"#]]
-    );
-    let silent = zenctl::render::ConfigReport {
-        documents: vec![],
-        other: vec![],
-        ..config_report()
-    };
-    assert!(
-        notes(&silent).contains("no replies to"),
-        "{}",
-        notes(&silent)
-    );
-}
-
 #[test]
 fn a_key_relation_carries_its_convention_note_once() {
     let no = zenctl::render::KeyRelation {
@@ -1646,28 +1098,39 @@ fn a_schema_check_names_its_verdict_and_omits_what_it_lacks() {
 fn a_cache_report_names_its_directory_in_both_formats() {
     let full = zenctl::render::CacheReport {
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: vec![zenctl::render::CachedSlice {
-            producer: "sysinfo".into(),
-            registry_version: "1.0".into(),
-            subjects: 41,
-            procedures: 3,
-        }],
+        listed: vec![String::new(), "prod".into()],
+        seen: vec![
+            zenctl::render::CachedNamespace {
+                namespace: String::new(),
+                services: 1,
+                ifaces: 1,
+            },
+            zenctl::render::CachedNamespace {
+                namespace: "prod".into(),
+                services: 3,
+                ifaces: 2,
+            },
+        ],
     };
     assert_data_eq!(
         table(&full),
         str![[r#"
 /home/u/.cache/zenkey-explorer/lab/slices
-  sysinfo  registry 1.0  41 subject(s), 3 procedure(s)
+  (empty)  1 service(s), 1 interface(s)
+  prod     3 service(s), 2 interface(s)
+namespaces listed: (empty), prod
 
 "#]]
     );
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&full).lines().next().unwrap()).unwrap();
     assert_eq!(doc["dir"], "/home/u/.cache/zenkey-explorer/lab/slices");
+    assert_eq!(doc["namespaces"], 2);
 
     let empty = zenctl::render::CacheReport {
         dir: "/home/u/.cache/zenkey-explorer/default/slices".into(),
-        slices: vec![],
+        listed: vec![],
+        seen: vec![],
     };
     assert!(notes(&empty).contains("falls back to the static command tree"));
 }
@@ -1677,17 +1140,17 @@ fn a_cache_report_names_its_directory_in_both_formats() {
 #[test]
 fn a_get_with_no_replies_names_the_three_silences() {
     let silent = zenctl::render::GetReport {
-        selector: "acme/v1/**/state/**".into(),
+        selector: "acme/zk2/**".into(),
         timeout_s: 5.0,
         elided: 0,
         answers: vec![],
     };
     let n = notes(&silent);
-    assert!(n.contains("Nobody is registered for it"), "{n}");
+    assert!(n.contains("Nothing may hold it"), "{n}");
     assert!(n.contains("the three are different"), "{n}");
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
-    assert_eq!(doc["selector"], "acme/v1/**/state/**");
+    assert_eq!(doc["selector"], "acme/zk2/**");
     // `5.0`: the seconds unification (#218) — see the budget window above.
     assert_eq!(doc["timeout_s"], 5.0);
 }
@@ -1811,23 +1274,14 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "admin-graph",
         "admin-routers",
         "bench",
-        "blob-fetch",
-        "blob-list",
-        "blob-probe",
-        "blob-tree",
         "cache",
         "cache-action",
-        "call",
         "compat",
-        "config",
-        "conform",
         "context",
         "context-action",
         "context-list",
-        "cutover",
         "doctor",
         "expect",
-        "export",
         "field",
         "gen",
         "gen-plan",
@@ -1842,7 +1296,6 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "probe",
         "rate",
         "record",
-        "registry-retired",
         "replay",
         "schema-check",
         "schema-show",
@@ -1857,7 +1310,6 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-list",
         "storage-plan",
         "timeline",
-        "why",
     ];
 
     fn families(dir: &std::path::Path, out: &mut Vec<String>) {
@@ -1915,8 +1367,6 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::expect_report());
     assert_eq!(s.asked, ["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*"]);
     assert_eq!(s.window_s, Some(5.0));
-    let s = scoped(&fx::cutover_report());
-    assert_eq!(s.asked.len(), 2, "both halves of the claim: {:?}", s.asked);
     let s = scoped(&fx::field_report());
     assert_eq!(s.window_s, Some(30.0));
     let s = scoped(&zenctl::render::RateView {
@@ -1937,16 +1387,6 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
     assert_eq!(s.window_s, Some(1.25));
 
-    // The exporter's scope is its selector, over the span it has been
-    // watching (taken_at - started_at).
-    let s = scoped(&fx::export_snapshot());
-    assert_eq!(s.asked, ["acme/v1/*/**"]);
-    assert_eq!(s.window_s, Some(120.0));
-    // The conformance suite's scope is every origin it called, plus its
-    // listen window's selectors.
-    let s = scoped(&fx::conform_report());
-    assert_eq!(s.asked, ["h-3fa9c2d41b7e/@rpc/sysinfo", "v1/*/state/**"]);
-    assert_eq!(s.window_s, Some(10.0));
     // The doctor's scope is what it read: presence in the namespace, the
     // admin space in none.
     let s = scoped(&fx::doctor_report());
@@ -1956,14 +1396,8 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::storage_check());
     assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
     assert_eq!(s.window_s, None);
-    // The burn-down: one asked selector per ledger entry.
-    let s = scoped(&fx::retired_report());
-    assert_eq!(s.asked.len(), 3);
-    assert_eq!(s.window_s, Some(30.0));
 
     // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
-    let s = scoped(&fx::call_report());
-    assert_eq!(s.window_s, Some(5.0));
     // A probe subscribes like a consumer, and reads presence only to
     // attribute a silence: both are what it asked.
     let s = scoped(&fx::probe_report());
@@ -1976,29 +1410,20 @@ fn every_observing_family_states_its_scope() {
     );
     assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&zenctl::render::GetReport {
-        selector: "acme/v1/**/state/**".into(),
+        selector: "acme/zk2/*/*/*/state/**".into(),
         timeout_s: 5.0,
         elided: 0,
         answers: vec![],
     });
-    assert_eq!(s.asked, ["acme/v1/**/state/**"]);
+    assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
     scoped(&fx::bench_report());
-    scoped(&fx::why_report());
-    // A config read is a GET: its key, over its wait.
-    let s = scoped(&config_report());
-    assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0"]);
-    assert_eq!(s.window_s, Some(5.0));
 
     // Sweeps: asked is the claim; a one-shot sweep has no window.
     scoped(&fx::scout_report());
     let s = scoped(&fx::router_list());
     assert_eq!(s.window_s, None);
     let report = fx::topology();
-    let attachments = fx::attachments();
-    scoped(&zenctl::render::TopologyView {
-        report: &report,
-        attachments: &attachments,
-    });
+    scoped(&zenctl::render::TopologyView { report: &report });
     // zk2's acts and reads (#612, FJ5): the keys a call or a state GET
     // went out on, over its reply wait.
     let s = scoped(&actfx::value());
@@ -2021,12 +1446,6 @@ fn every_observing_family_states_its_scope() {
     scoped(&zk2fx::catalog().graph());
     let s = scoped(&zk2fx::namespace_listing());
     assert_eq!(s.asked, ["**/zk2/*/*/@zk/instance/*"]);
-    let s = scoped(&fx::blob_probe());
-    assert_eq!(
-        s.asked.len(),
-        2,
-        "probe wide: both selectors state themselves"
-    );
 
     // And the deliberate negatives: replay *publishes*; it observes nothing,
     // so a scope claim would be an invented observation — and a snapshot
@@ -2156,14 +1575,14 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
     let removed = zenctl::render::CacheAction {
         action: "cleared",
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: None,
+        services: None,
         existed: true,
     };
     assert!(notes(&removed).starts_with("removed /home/u"));
     let absent = zenctl::render::CacheAction {
         action: "cleared",
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: None,
+        services: None,
         existed: false,
     };
     assert!(notes(&absent).contains("does not exist — nothing to clear"));
@@ -2171,7 +1590,7 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
         serde_json::from_str(ndjson(&absent).lines().next().unwrap()).unwrap();
     assert_eq!(doc["existed"], false);
     assert!(
-        doc.get("slices").is_none(),
+        doc.get("services").is_none(),
         "clear counts nothing — absent, not zero (RFC 09 §5.1 O4)"
     );
 }
@@ -2179,43 +1598,47 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
 // ── The storage-plan families (#393) ──────────────────────────────────────
 
 /// The plan as a table: one row per volume and storage, the derivation and
-/// every warning as detail lines, the refusal and the registry claim as notes
-/// — and, on the wire, the same facts under `row` tags.
+/// every warning as detail lines, the refusal as a note — and, on the wire,
+/// the same facts under `row` tags.
 #[test]
 fn a_storage_plan_shows_its_derivations_and_names_its_refusals() {
     assert_data_eq!(
         table(&fx::storage_plan()),
         str![[r#"
-storage plan for base "acme"  (registry: 3 slice(s), longest state ttl_s 900 (sysinfo/alert/{alert_key}))
+storage plan for namespace "acme"
 
 volumes:
   fs        fs        durable · latest
   influxdb  influxdb  durable · all     url="http://localhost:8086"
 
 storages:
-  catalog       acme/v1/@catalog/state/**       fs (latest)
-    strip acme/v1/@catalog/state  ·  covers 3 declared subject(s)
-    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
-    ! complete_refused: complete = true refused: it is not the fully covering latest storage (class state) — emitted as false (RFC 09 §2.2)
-    ! overlap: overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both (RFC 09 §2)
-  latest        acme/v1/*/state/**              fs (latest)     replicated, complete
-    strip acme/v1  ·  covers 12 declared subject(s)
-    gc lifespan 1800 s (period 30 s): max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s
-  pdns_history  acme/v1/@catalog/state/pdns/**  influxdb (all)
-    strip acme/v1/@catalog/state/pdns  ·  covers 1 declared subject(s)
-    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
+  events      acme/zk2/*/*/*/events/**       fs (latest)     replicated, complete
+    strip acme/zk2
+    gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
+    ! overlap: overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both (RFC 09 §2)
+  links       acme/zk2/*/*/*/events/link/**  fs (latest)
+    strip acme/zk2
+    gc lifespan 3600 s (period 30 s): declared gc_lifespan_s 3600
+    ! complete_refused: complete = true refused: it is not replicated — emitted as false (RFC 09 §2.2)
+    ! overlap: overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both (RFC 09 §2)
+  timeseries  acme/zk2/*/*/*/stream/**       influxdb (all)
+    strip acme/zk2
+    gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
     ! retention_is_the_databases: retention is the database's policy, not zenoh config (RFC 09 §2.3)
 
 "#]]
     );
     let notes = notes(&fx::storage_plan());
-    assert!(notes.contains("refused storage events:"), "{notes}");
+    assert!(notes.contains("refused storage plant:"), "{notes}");
     assert!(notes.contains("3 storage(s) on 2 volume(s) planned, 1 refused"));
     let out = ndjson(&fx::storage_plan());
     let mut lines = out.lines();
     let envelope: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
     assert_eq!(envelope["report"], "storage-plan");
-    assert_eq!(envelope["registry"]["max_ttl_s"], 900);
+    assert!(
+        envelope.get("registry").is_none(),
+        "v1's registry claim left at FJ9"
+    );
     assert!(
         envelope.get("storages").is_none(),
         "rows do not ride the envelope"
@@ -2236,23 +1659,6 @@ storages:
     );
 }
 
-/// Without a registry the plan says so in every format — the O4 sentence is
-/// a coverage note, so it rides the json document too.
-#[test]
-fn a_storage_plan_without_a_registry_says_what_it_could_not_verify() {
-    let plan = zenkey_fleet::report::StoragePlan {
-        registry: zenkey_fleet::report::Asked::NotAsked,
-        ..fx::storage_plan()
-    };
-    assert!(table(&plan).contains("(registry: not asked)"));
-    let notes = notes(&plan);
-    assert!(notes.contains("no registry was asked"), "{notes}");
-    let out = ndjson(&plan);
-    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert!(envelope.get("registry").is_none(), "not asked is absence");
-    assert!(envelope["notes"].to_string().contains("RFC 09 §5.1 O4"));
-}
-
 /// The check: one line per finding, the unjudged comparison as a coverage
 /// note, and the empty admin sweep as a non-verdict rather than a pass.
 #[test]
@@ -2260,11 +1666,11 @@ fn a_storage_check_draws_each_finding_and_keeps_unjudged_apart() {
     assert_data_eq!(
         table(&fx::storage_check()),
         str![[r#"
-storage check for base "acme": 3 planned, 3 observed row(s) — 4 finding(s)
-  ✗ latest@aabbccdd  strip_prefix differs           planned acme/v1, observed acme
-  ✗ latest@aabbccdd  gc.lifespan below the minimum  planned 1800, observed 600
-  ✗ pdns_history     missing                        planned acme/v1/@catalog/state/pdns/**
-  ✗ blobs@aabbccdd   extra                          observed acme/v1/*/@blob/**
+storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s)
+  ✗ events@aabbccdd  strip_prefix differs          planned acme/zk2, observed acme
+  ✗ events@aabbccdd  gc.lifespan below the plan's  planned 86400, observed 600
+  ✗ timeseries       missing                       planned acme/zk2/*/*/*/stream/**
+  ✗ state@aabbccdd   extra                         observed acme/zk2/*/*/*/state/**
 
 "#]]
     );
@@ -2277,7 +1683,7 @@ storage check for base "acme": 3 planned, 3 observed row(s) — 4 finding(s)
     assert_data_eq!(
         table(&fx::storage_check_unobservable()),
         str![[r#"
-storage check for base "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
+storage check for namespace "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
 
 "#]]
     );
@@ -2290,114 +1696,29 @@ fn a_storage_explain_names_the_taker_or_the_reason() {
     assert_data_eq!(
         table(&fx::storage_explain()),
         str![[r#"
-acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
-  → latest  acme/v1/*/state/**  includes it
-      class state under base "acme": acme/v1/*/state/** includes every key it names; stored under strip_prefix "acme/v1" on volume fs (latest)
+acme/zk2/host-a/tc/tc.netif.v1/events/reset/01k0
+  → events  acme/zk2/*/*/*/events/**  includes it
+      its selector under namespace "acme": acme/zk2/*/*/*/events/** includes every key it names; stored under strip_prefix "acme/zk2" on volume fs (latest)
 
 "#]]
     );
     assert_data_eq!(
         table(&fx::storage_explain_none()),
         str![[r#"
-acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
-  none: no planned storage's selector includes it; refused storage(s) events would have
+acme/plant/line-1/temp
+  none: no planned storage's selector includes it; refused storage(s) plant would have
 
 "#]]
     );
     let out = ndjson(&fx::storage_explain_none());
     let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["refused_takers"], serde_json::json!(["events"]));
+    assert_eq!(envelope["refused_takers"], serde_json::json!(["plant"]));
     assert_eq!(out.lines().count(), 1, "no takers, no rows");
 }
 
 // ── The consumers join (#224) ─────────────────────────────────────────────
 
 // ── The metrics surface (#228) ───────────────────────────────────────────────
-
-/// `export --once`: series grouped by producer, an empty value cell where
-/// the state says the series stopped, and the state beside every row.
-#[test]
-fn an_export_snapshot_groups_series_by_producer_and_blanks_a_stopped_value() {
-    assert_data_eq!(
-        table(&fx::export_snapshot()),
-        str![[r#"
-series                                       labels                                        value  state        last seen   samples
-
-sysinfo  (telemetry)
-zenkey_subject_sysinfo_cpu_usage_percent     origin=h-3fa9c2d41b7e                        12.500  live         1700000119      240
-zenkey_subject_sysinfo_disk_used_bytes       origin=h-0000deadbeef mount=var-log                  origin_down  1700000040       80
-
-netlink  (telemetry)
-zenkey_subject_netlink_iface_rx_bytes_total  origin=h-3fa9c2d41b7e iface=eth0 field=rx            evicted      1700000100        5
-
-sysinfo  (state)
-zenkey_subject_sysinfo_health                origin=h-3fa9c2d41b7e field=uptime_s       4242.000  quiet        1700000060        4
-
-"#]]
-    );
-}
-
-/// The ndjson leads with the envelope — scopes, exclusions, the observer's
-/// counters as separate fields — then one tagged row per series.
-#[test]
-fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
-    assert_data_eq!(
-        ndjson(&fx::export_snapshot()),
-        str![[r#"
-{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"split-brain","severity":"error","subject":"host-a/tc tc.netif.v1"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
-{"class":"telemetry","drop_exposed":2,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage","kind":"gauge","last_seen_unix_s":1700000119,"name":"zenkey_subject_sysinfo_cpu_usage_percent","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":240,"state":"live","subject":"cpu/usage","unit":"percent","value":12.5}
-{"class":"telemetry","key":"acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used","labels":{"mount":"var-log"},"last_seen_unix_s":1700000040,"name":"zenkey_subject_sysinfo_disk_used_bytes","origin":"h-0000deadbeef","producer":"sysinfo","row":"series","samples":80,"state":"origin_down","subject":"disk/{mount}/used","unit":"bytes"}
-{"class":"telemetry","field":"rx","key":"acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes","kind":"counter","labels":{"iface":"eth0"},"last_seen_unix_s":1700000100,"name":"zenkey_subject_netlink_iface_rx_bytes_total","origin":"h-3fa9c2d41b7e","producer":"netlink","row":"series","samples":5,"state":"evicted","subject":"iface/{iface}/rx_bytes","unit":"bytes"}
-{"class":"state","field":"uptime_s","key":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","last_seen_unix_s":1700000060,"name":"zenkey_subject_sysinfo_health","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":4,"state":"quiet","subject":"health","value":4242.0}
-
-"#]]
-    );
-}
-
-/// The honesty floor for the surface, asserted rather than snapshotted:
-/// every O6 population is its own bound note, never a sum; the three
-/// payload populations stay three; the unasked poles are coverage notes.
-#[test]
-fn an_export_snapshot_states_every_bound_by_kind_and_never_sums_them() {
-    let n = notes(&fx::export_snapshot());
-    for expected in [
-        "3 sample(s) dropped while behind",
-        "5 key(s) retired at the stats-table bound",
-        "7 retained sample(s) dropped at the byte budget",
-        "11 retained sample(s) aged out",
-        "13 key(s) retired because their watch was released",
-        "17 sample(s) coalesced between scrapes",
-        "4 sample(s) refused a series past the declared `cardinality` budget",
-        "1 field(s) refused a series past the per-subject field cap",
-    ] {
-        assert!(n.contains(expected), "missing `{expected}` in:\n{n}");
-    }
-    assert!(
-        !n.contains(" 23 ") && !n.contains(" 36 ") && !n.contains(" 56 "),
-        "no sum of the kinds:\n{n}"
-    );
-    assert!(
-        n.contains("128 sample(s) not validated") && n.contains("200 valid and 1 invalid"),
-        "{n}"
-    );
-    assert!(n.contains("2 series stopped"), "{n}");
-    assert!(
-        n.contains("@rpc, @media, @blob, @adv, service origins are excluded"),
-        "{n}"
-    );
-
-    // The unasked poles, on a snapshot that asked for nothing.
-    let mut bare = fx::export_snapshot();
-    bare.doctor = zenkey_fleet::report::Asked::NotAsked;
-    bare.registry = zenkey_fleet::report::Asked::NotAsked;
-    bare.contract.payload_valid = 0;
-    bare.contract.payload_invalid = 0;
-    let n = notes(&bare);
-    assert!(n.contains("doctor not asked"), "{n}");
-    assert!(n.contains("no registry loaded"), "{n}");
-    assert!(n.contains("payload verdicts not asked"), "{n}");
-    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
-}
 
 // ── zk2 (#612, FJ4) ────────────────────────────────────────────────────────
 //

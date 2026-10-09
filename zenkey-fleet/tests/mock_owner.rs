@@ -196,10 +196,10 @@ async fn serve_answers_logs_and_leaves_no_operation_silent() {
     let d = descriptor(&tool, "host-a/tc").await;
     assert_eq!(d.instance, served.instance());
 
-    let client = zk2::Client::new(&tool, netif.shared_contract(), &["host-a/tc"])
+    let client = zenkey::Client::new(&tool, netif.shared_contract(), &["host-a/tc"])
         .unwrap()
         .with_timeout(Duration::from_secs(5))
-        .with_metadata(zk2::CallMetadata::new("ops", "req-1"));
+        .with_metadata(zenkey::CallMetadata::new("ops", "req-1"));
     let outcome = client
         .call_value(
             &addr("host-a/tc"),
@@ -286,7 +286,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
         ),
         (
             "h3",
-            MockAnswer::Refuse(zk2::OpError::busy("a scan is running")),
+            MockAnswer::Refuse(zenkey::OpError::busy("a scan is running")),
         ),
     ] {
         mocks.push(

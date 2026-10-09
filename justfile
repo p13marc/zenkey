@@ -130,10 +130,9 @@ ci:
     # One report, three renderings, and exactly one place that decides which
     # (#198).
     ./scripts/check-render-seam.sh
-    # The dispatch dispatches, and one door out of a missing registry
-    # (#209, #210).
+    # The dispatch dispatches (#209). #210's one door out of a missing
+    # registry left with the v1 registry (#612, FJ9).
     ./scripts/check-dispatch.sh
-    ./scripts/check-degradation.sh
     # The update thread does not touch the disk (#255): a handler that needs
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh
@@ -158,7 +157,7 @@ ci:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
 # The criterion baselines behind docs/bench-baseline.md. Slow: tree/build_50k
-# and skeleton/merge_10k are tens of milliseconds an iteration.
+# is tens of milliseconds an iteration.
 bench:
     cargo bench --workspace
 
@@ -210,14 +209,11 @@ fmt:
 clean-run:
     rm -rf {{rundir}}
 
-# `--all-features` cannot see a feature that silently depends on another one.
-# Each published axis of zenkey-fleet, on its own (#204).
+# `--all-features` cannot see a build without one (#204). zenkey-fleet has had
+# no feature axes since FJ9 (#612); the axis left is zenkey's `zenoh`, without
+# which the runtime is the session-free half a contract crate builds on.
 features:
-    cargo check -p zenkey-fleet --no-default-features --locked
-    for f in blob decode decode-protobuf decode-cdr validate-json; do \
-        cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
-    done
-    cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+    cargo check -p zenkey@0.20.0 --no-default-features --locked
     ./scripts/check-model-zenoh-free.sh
 
 # Builds target/py-venv with the standard library only (no ensurepip

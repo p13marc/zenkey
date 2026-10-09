@@ -207,8 +207,11 @@ fn the_corpus_names_every_leaf_verb() {
          have caught the runs of spaces in #195.",
         missing.len()
     );
+    // 46 since FJ9 (#612) removed what was left of v1 (`config`, `blob`,
+    // `export`, `why`, `check cutover|retired|conform`); the floor catches a
+    // walk that stopped short, not a tree that shrank on purpose.
     assert!(
-        found.len() >= 50,
+        found.len() >= 40,
         "the walk found only {} leaves — it stopped short somewhere",
         found.len()
     );
@@ -297,10 +300,11 @@ fn the_command_lists_speak_to_an_operator() {
         bad.join("\n")
     );
     // 75 since FJ4 (#612) retired v1's `topic`, `node`, `base`, `interface`
-    // and `registry` for zk2's smaller tree; the floor catches a walk that
-    // stopped short, not a tree that shrank on purpose.
+    // and `registry` for zk2's smaller tree, and 60 since FJ9 removed the
+    // rest of v1; the floor catches a walk that stopped short, not a tree
+    // that shrank on purpose.
     assert!(
-        seen >= 70,
+        seen >= 55,
         "the walk saw only {seen} commands — it stopped short"
     );
 }

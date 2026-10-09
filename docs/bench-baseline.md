@@ -100,6 +100,11 @@ rule.
 | monitor/tick_10k | 13.9 ms ~ | |
 | fanin/origin_attribution_256 | 64.1 µs | 256 reply keys |
 
+**Since FJ9 (#612)** the `skeleton/*`, `facts/*`, `registry/*` and
+`fanin/origin_attribution_*` benches are gone with the v1 machinery they
+measured, and `lens/resolve_*` measures zk2's resolution path in their place;
+the rows above are kept as they were measured, and a new baseline is owed.
+
 **Rows marked `~` are not trustworthy as a comparison point.** They varied by
 more than 2× across repeated runs of *identical code* on this workstation
 (`skeleton/merge_10k` read 19.5 ms and 74.8 ms; `stats/totals_10k` 16 µs and

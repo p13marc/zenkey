@@ -5,7 +5,7 @@
 //! exactly its declared rate, payload validating perfectly, whose
 //! `temperature_c` has not moved in four hours because the sensor died. This
 //! module makes a *field* — a dotted path inside a decoded structural value
-//! ([`crate::model::decode::structural_value`]) — a first-class observed thing:
+//! ([`crate::model::structural::structural_value`]) — a first-class observed thing:
 //! bounded per-path statistics over a window (presence, type stability,
 //! last-change, change count, numeric min/max/last, small-domain distinct
 //! values) yielding three finding kinds:
@@ -32,13 +32,9 @@
 //!
 //! The path table is **bounded and reports what it dropped** (O6) — never a
 //! silent truncation. The judges are pure functions over the observation,
-//! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
-//! (#221): testable without a bus. Surfaces: `zenctl field <selector>
-//! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::report::V1CheckId`], and the Inspector's Fields section (#223,
-//! `zengui/src/view/fields.rs`) — the field table with per-field sparklines
-//! through `series.rs`/`spark.rs`, each stating that its window is the
-//! history ring's and not the observation's (#400).
+//! the house pattern of [`crate::judge::condition`] (#227): testable without
+//! a bus. Surfaces: `zenctl field <selector> [--for S]`, and — on the v1
+//! engine zengui still pins (#614) — the Inspector's Fields section (#223).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
@@ -97,8 +93,8 @@ const SCHEMA_DEPTH_CAP: usize = 32;
 /// How many subschema nodes one document's walk may visit. The depth cap
 /// alone does not bound the *work*: a combinator tree fans out
 /// multiplicatively, so N nested two-armed `oneOf`s are 2^N walks at a depth
-/// of N. This is the bound that actually holds, and a served schema is a
-/// stranger's document — the walk runs on whatever a producer replies with.
+/// of N. This is the bound that actually holds, and a contract's schema is a
+/// stranger's document — the walk runs on whatever a bundle carries.
 ///
 /// Deliberately not an O6-reported bound like the path table's: this one
 /// bounds a *fetched artifact* walked once per (producer, type) and cached,
@@ -250,7 +246,7 @@ impl FieldObservation {
     }
 
     /// Feed one sample. `doc` is the structural value when the payload
-    /// carried one ([`crate::model::decode::structural_value`]); `None` counts the
+    /// carried one ([`crate::model::structural::structural_value`]); `None` counts the
     /// sample as undocumented rather than pretending its fields were absent.
     pub fn observe_unread(&mut self, key: &str) {
         self.keys.entry(key.to_string()).or_default().unread += 1;

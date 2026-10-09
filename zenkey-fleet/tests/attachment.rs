@@ -1,7 +1,7 @@
 //! Attachments are a wire fact and the engine carries them (#117): on the
-//! subscribe path (`SampleView`), the fan-in path (`FleetAnswer`), and the
-//! fetch ladder (`FetchedValue`) — refcounted like the payload, `None` when
-//! the wire carried none (absence is a fact too, never a default).
+//! subscribe path (`SampleView`) and the fan-in path (`FleetAnswer`) —
+//! refcounted like the payload, `None` when the wire carried none (absence
+//! is a fact too, never a default).
 //!
 //! Event-driven: the matching badge proves routability before publishing.
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
@@ -9,13 +9,21 @@
 
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::declare_publication;
 
 mod util;
 use util::peer_pair;
 
-const KEY: &str = "v1/h-eeeeeeeeeeee/state/demo/health";
+const KEY: &str = "demo/plant/line-1/health";
+
+/// Axes no default spells, so the view can only have read them off the wire.
+const DECLARED: WireQos = WireQos {
+    priority: zenoh::qos::Priority::DataHigh,
+    congestion: zenoh::qos::CongestionControl::Block,
+    reliability: zenoh::qos::Reliability::Reliable,
+    express: false,
+};
 
 /// The Monitor delivers the attachment beside the payload — and a sample
 /// without one delivers `None`, not an empty buffer.
@@ -29,7 +37,7 @@ async fn a_watched_sample_carries_its_attachment() {
     let mut events = monitor.events();
     monitor.watch(KEY).await.expect("watch");
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, DECLARED, None)
         .await
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
@@ -61,16 +69,9 @@ async fn a_watched_sample_carries_its_attachment() {
     }
     let first = views[0].attachment.as_ref().expect("first carried one");
     assert_eq!(first.to_bytes().as_ref(), b"meta");
-    // #120: the wire's actual QoS axes ride the view and match the profile
-    // the publication declared.
-    assert!(
-        views[0].qos_matches(QosProfile::Transition),
-        "declared transition, observed {:?}/{:?}/{:?}/express={}",
-        views[0].priority,
-        views[0].congestion_control,
-        views[0].reliability,
-        views[0].express
-    );
+    // #120: the wire's actual QoS axes ride the view, as the publication
+    // declared them.
+    assert_eq!(views[0].wire_qos(), DECLARED);
     assert!(
         views[1].attachment.is_none(),
         "no attachment on the wire is None, not an empty buffer"
@@ -101,7 +102,7 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
     // Settle: loop the GET until the queryable answers (wait-routable).
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             KEY,
             &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
         )
@@ -113,51 +114,4 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
     };
     let att = answers[0].attachment.as_ref().expect("attachment carried");
     assert_eq!(att.to_bytes().as_ref(), b"who-answered");
-}
-
-/// The fetch ladder's window rung carries the attachment too — what the
-/// zengui detail pane renders.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_fetched_value_carries_the_attachment() {
-    let (a, b) = peer_pair().await;
-
-    let publication = declare_publication(&a, KEY, QosProfile::Sampled, None)
-        .await
-        .expect("declare");
-    let matching = publication.matching_events().await.expect("events");
-
-    let fetch = tokio::spawn(async move {
-        zenkey_fleet::fetch_value(
-            &b,
-            KEY,
-            zenkey_fleet::FetchSpec {
-                // No storage in this fixture: keep the GET rungs short so the
-                // window rung (the one under test) opens quickly.
-                get_timeout: Duration::from_millis(300),
-                window: Duration::from_secs(5),
-            },
-        )
-        .await
-    });
-
-    // The fetch's window subscriber raises the badge; then publish into it.
-    assert!(
-        tokio::time::timeout(util::SETTLE, matching.recv())
-            .await
-            .expect("matching within 5s")
-            .expect("listener alive")
-    );
-    publication
-        .send(b"{\"v\":1}".to_vec(), Some(b"tag".to_vec()))
-        .await
-        .expect("send");
-
-    let outcome = fetch.await.expect("join").expect("fetch");
-    match outcome {
-        zenkey_fleet::FetchOutcome::Value(v) => {
-            let att = v.attachment.expect("attachment carried");
-            assert_eq!(att.to_bytes().as_ref(), b"tag");
-        }
-        other => panic!("expected a value, got {other:?}"),
-    }
 }

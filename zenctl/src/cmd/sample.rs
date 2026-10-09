@@ -1,12 +1,193 @@
 //! Sample rendering shared by the streaming (`echo`) and fan-in
-//! (`get`) verbs (#114): the `--fmt` % vocabulary, the hex form, and the
-//! type tag. One vocabulary, wherever a payload is printed.
+//! (`get`) verbs (#114): one payload through the lens ([`Line`]), the
+//! `--fmt` % vocabulary, and the hex form. One vocabulary, wherever a
+//! payload is printed.
+//!
+//! Since #612's FJ9 both verbs resolve a key the same way — the lens
+//! (`zenkey_fleet::Lens`): the deployment's namespace, its presence read,
+//! the contract each descriptor names — and v1's decode ladder (a served
+//! schema per registered subject) is gone with the v1 registry.
 
-/// One decoded/rendered sample line for `--fmt`.
-///
-/// `attachment` is the already-rendered attachment text; `%a` expands to it,
-/// or to an empty field when the sample carried none (the line shape stays
-/// stable for cut/awk, like `%{path}`).
+use zenkey_fleet::model::render::Member;
+use zenkey_fleet::report::{
+    Conformance, KeyGroup, KeyIdentity, PayloadRendering, Rendered, SampleRow, Unresolved,
+};
+
+/// One payload through the lens, once, for whichever medium prints it —
+/// `echo`'s sample and `get`'s reply alike.
+pub struct Line {
+    pub identity: KeyIdentity,
+    pub bytes: Vec<u8>,
+    /// `None` on a deletion, which carries nothing to decode (#115).
+    pub checked: Option<(PayloadRendering, Conformance)>,
+    pub attachment: Option<PayloadRendering>,
+}
+
+/// What one payload is, for [`Line::of`].
+pub struct Payload<'a> {
+    /// The wire key, as it arrived.
+    pub key: &'a str,
+    /// The sample's `Encoding`, when it carried one.
+    pub encoding: Option<&'a str>,
+    pub bytes: Vec<u8>,
+    pub attachment: Option<&'a [u8]>,
+    /// A tombstone: no payload to decode.
+    pub delete: bool,
+}
+
+impl Line {
+    /// `member` is what the payload is of its resource: a sample's `Type`,
+    /// or an operation's `Response` when a GET's reply answered one.
+    /// `structural_only` (`--no-decode`, `--raw`) asks nothing of the lens
+    /// beyond the key's identity, and every payload says so.
+    pub fn of(
+        p: Payload<'_>,
+        member: Member,
+        lens: &zenkey_fleet::Lens<'_>,
+        structural_only: bool,
+    ) -> Line {
+        let Payload {
+            key,
+            encoding,
+            bytes,
+            attachment,
+            delete,
+        } = p;
+        if structural_only {
+            return Line {
+                identity: lens.identity(key),
+                checked: (!delete).then(|| {
+                    (
+                        PayloadRendering {
+                            key: key.to_owned(),
+                            size: bytes.len(),
+                            resource: None,
+                            rendered: Rendered::Structural {
+                                why: Unresolved::DecodeNotAsked,
+                                value: zenkey_fleet::structural_value(&bytes),
+                                text: zenkey_fleet::structural(&bytes),
+                            },
+                        },
+                        Conformance::NotChecked {
+                            reason: Unresolved::DecodeNotAsked.words(),
+                        },
+                    )
+                }),
+                attachment: None,
+                bytes,
+            };
+        }
+        if delete {
+            return Line {
+                identity: lens.identity(key),
+                checked: None,
+                attachment: None,
+                bytes,
+            };
+        }
+        let c = lens.check(key, member, encoding, &bytes);
+        let attachment = attachment.map(|a| lens.render(key, Member::Attachment, None, a));
+        Line {
+            identity: c.identity,
+            checked: Some((c.rendering, c.conformance)),
+            attachment,
+            bytes,
+        }
+    }
+
+    /// The member a payload on `key` is of: an operation's `Response` on an
+    /// `@op` key (a GET's reply answered a call), its `Type` otherwise.
+    pub fn member_of(identity: &KeyIdentity) -> Member {
+        match &identity.group {
+            KeyGroup::Resource { token, .. } if token == "@op" => Member::Response,
+            _ => Member::Type,
+        }
+    }
+
+    /// The declared type, when the ladder reached one.
+    pub fn declared(&self) -> Option<String> {
+        match &self.checked.as_ref()?.0.rendered {
+            Rendered::Value { declared, .. } | Rendered::Undecodable { declared, .. } => {
+                Some(declared.clone())
+            }
+            Rendered::Opaque { media_type } => Some(media_type.clone()),
+            Rendered::Structural { .. } => None,
+        }
+    }
+
+    /// The payload as a JSON value: decoded, or the structural document,
+    /// or its text.
+    pub fn value(&self) -> Option<serde_json::Value> {
+        let (r, _) = self.checked.as_ref()?;
+        Some(match &r.rendered {
+            Rendered::Value { value, .. } => value.clone(),
+            Rendered::Structural { value: Some(v), .. } => v.clone(),
+            Rendered::Structural { text, .. } => serde_json::Value::String(text.clone()),
+            Rendered::Opaque { media_type } => {
+                serde_json::Value::String(format!("<{media_type}, {} B>", r.size))
+            }
+            Rendered::Undecodable { .. } => {
+                serde_json::Value::String(zenkey_fleet::structural(&self.bytes))
+            }
+        })
+    }
+
+    /// The value as one line of text, for `--fmt`'s `%v`.
+    pub fn value_text(&self) -> String {
+        match self.value() {
+            Some(serde_json::Value::String(s)) => s,
+            Some(v) => v.to_string(),
+            None => String::new(),
+        }
+    }
+
+    /// The row-dialect fields this line holds: the key's identity, the
+    /// declared type, the value and its conformance, the attachment. What
+    /// only a subscription carries (QoS axes, SourceInfo, the tombstone
+    /// flag) is the caller's to add.
+    pub fn fill(&self, row: &mut SampleRow, attachment: Option<&[u8]>) {
+        row.identity = Some(self.identity.clone());
+        if let Some(a) = attachment {
+            row.attachment = Some(match self.attachment.as_ref().map(|r| &r.rendered) {
+                Some(Rendered::Value { value, .. }) => value.clone(),
+                _ => attachment_json(a),
+            });
+            row.attachment_bytes = Some(a.len());
+        }
+        let Some((rendering, conformance)) = &self.checked else {
+            // A tombstone: no value, no byte count — "0 bytes" would read
+            // as an empty put, which it is not.
+            return;
+        };
+        row.type_name = self.declared();
+        row.typed = Some(matches!(rendering.rendered, Rendered::Value { .. }));
+        row.payload_bytes = Some(self.bytes.len());
+        row.value = self.value();
+        row.verdict = Some(conformance.token());
+        match conformance {
+            Conformance::Invalid { violations } => row.violations = Some(violations.clone()),
+            Conformance::Undecodable { reason, .. } => row.decode_error = Some(reason.clone()),
+            Conformance::Valid | Conformance::NotChecked { .. } => {}
+        }
+    }
+
+    /// The type tag where no rendering is printed (`--hex`): the declared
+    /// type, or the rung the ladder stopped at.
+    pub fn tag(&self) -> String {
+        self.declared()
+            .map(|d| format!("<{d}>"))
+            .unwrap_or_else(|| format!("<{}>", identity_words(&self.identity)))
+    }
+}
+
+/// An identity in a few words, for a tag where no type was reached.
+pub fn identity_words(id: &KeyIdentity) -> String {
+    match &id.unresolved {
+        Some(why) => why.words(),
+        None => id.group.label(),
+    }
+}
+
 /// Everything one `--fmt` line can name (#354).
 ///
 /// Twelve positional parameters, seven of them `&str` or `Option<&str>`, is
@@ -16,11 +197,13 @@
 pub struct SampleLine<'a> {
     /// The line counter `%n` prints.
     pub n: usize,
-    /// The full wire key, base included.
+    /// The full wire key, namespace included.
     pub wire_key: &'a str,
-    /// The deployment base `wire_key` is parsed against.
-    pub base: &'a str,
-    /// The registry-declared payload type, when one is known.
+    /// The key relative to the stated namespace, `%K`; `None` outside it.
+    pub relative: Option<&'a str>,
+    /// What the lens made of the key: `%A`, `%i` and `%r` expand from it.
+    pub identity: &'a KeyIdentity,
+    /// The declared payload type, when the ladder reached one (`%t`).
     pub type_name: Option<&'a str>,
     pub encoding: &'a str,
     pub payload_len: usize,
@@ -28,30 +211,24 @@ pub struct SampleLine<'a> {
     pub timestamp: Option<&'a str>,
     /// The rendered payload.
     pub value: &'a str,
-    /// The already-rendered attachment text, or `None` when there was none.
+    /// The already-rendered attachment text, or `None` when there was none:
+    /// `%a` expands to an empty field then, so the line shape stays stable
+    /// for cut/awk, like `%{path}`.
     pub attachment: Option<&'a str>,
     /// The QoS axes — a subscribe-path fact; `None` on a reply (#120).
     pub qos: Option<&'a str>,
     pub source: Option<&'a str>,
-    /// The key as zk2 resolution left it (#612, FJ8b): `%A`, `%i`, `%r`
-    /// expand from it, and `%K` is its namespace-relative key. `None` on
-    /// `get`'s v1 ladder, where those fields are empty.
-    pub zk2: Option<Zk2Positions<'a>>,
 }
 
-/// What `--fmt` can name of a zk2 key (#612, FJ8b).
-#[derive(Debug, Clone, Copy)]
-pub struct Zk2Positions<'a> {
-    /// The key relative to the stated namespace; `None` outside it.
-    pub relative: Option<&'a str>,
-    pub identity: &'a zenkey_fleet::report::KeyIdentity,
-}
-
+/// One `--fmt` line. An unknown `%x` prints as typed — v1's `%o %c %p %s`
+/// among them since #612's FJ9 — and a field the key does not carry is an
+/// empty field.
 pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
     let SampleLine {
         n,
         wire_key,
-        base,
+        relative,
+        identity,
         type_name,
         encoding,
         payload_len,
@@ -60,10 +237,8 @@ pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
         attachment,
         qos,
         source,
-        zk2,
     } = *s;
-    let parsed = zenkey::grammar::parse_full(base, wire_key);
-    let group = zk2.map(|z| &z.identity.group);
+    let group = &identity.group;
     let mut out = String::with_capacity(fmt.len() + value.len());
     let mut chars = fmt.chars();
     while let Some(c) = chars.next() {
@@ -113,54 +288,26 @@ pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
                 }
             }
             Some('k') => out.push_str(wire_key),
-            Some('K') => match zk2 {
-                Some(z) => out.push_str(z.relative.unwrap_or(wire_key)),
-                None => {
-                    out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
-                }
-            },
+            Some('K') => out.push_str(relative.unwrap_or(wire_key)),
             Some('A') => {
-                if let Some(a) = group.and_then(|g| g.address()) {
+                if let Some(a) = group.address() {
                     out.push_str(a);
                 }
             }
             Some('i') => {
-                if let Some(zenkey_fleet::report::KeyGroup::Resource { iface, .. }) = group {
+                if let KeyGroup::Resource { iface, .. } = group {
                     out.push_str(iface);
                 }
             }
             Some('r') => {
-                if let Some(zenkey_fleet::report::KeyGroup::Resource {
+                if let KeyGroup::Resource {
                     resource: Some(r), ..
-                }) = group
+                } = group
                 {
                     out.push_str(r);
                 }
             }
-            Some('o') => {
-                if let Some(p) = &parsed {
-                    out.push_str(p.origin.chunk());
-                }
-            }
-            Some('c') => {
-                if let Some(p) = &parsed {
-                    out.push_str(match &p.class {
-                        zenkey::grammar::ClassOrPlane::Class(c) => c.chunk(),
-                        zenkey::grammar::ClassOrPlane::Plane(pl) => pl.chunk(),
-                    });
-                }
-            }
-            Some('p') => {
-                if let Some(name) = parsed.as_ref().and_then(|p| p.producer()) {
-                    out.push_str(name.name());
-                }
-            }
-            Some('s') => {
-                if let Some(p) = &parsed {
-                    out.push_str(&p.subject.join("/"));
-                }
-            }
-            Some('t') => out.push_str(type_name.unwrap_or("unregistered")),
+            Some('t') => out.push_str(type_name.unwrap_or("")),
             Some('v') => out.push_str(value),
             Some('e') => out.push_str(encoding),
             Some('l') => {
@@ -186,87 +333,6 @@ pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
     out
 }
 
-/// One sample, decoded — or deliberately not.
-///
-/// A named-field struct rather than a tuple because `get` and `echo`
-/// wanted different widths of the same thing and each grew its own: a 2-tuple
-/// here, a 4-tuple there, both spelling the identical ladder (#210). A caller
-/// that wants two of the four now says which two, instead of the return type
-/// deciding for it.
-pub struct Decoded {
-    /// The registered type name, when the key refined to one.
-    pub type_name: Option<String>,
-    /// What to show: typed fields, or the structural fallback.
-    pub rendering: zenkey_fleet::Rendering,
-    /// The #159 conformance verdict — `None` under `--no-decode`, which never
-    /// asked and so has nothing to report (RFC 09 §5.1 O4). Not
-    /// `Verdict::NotValidated`: "we did not look" is not a finding.
-    pub verdict: Option<zenkey_fleet::Verdict>,
-    /// The decode failure under a *present* schema, verbatim.
-    pub decode_error: Option<String>,
-}
-
-/// The decode ladder, or the honest skip.
-///
-/// `--no-decode` is not a failed decode: it renders structurally, and reports
-/// no verdict at all rather than an unfavourable one.
-///
-/// `slices: None` means no registry was loaded, and the verdict comes back
-/// `not-validated: no registry loaded…` rather than `no-schema`'s claim
-/// about the type — the two silences stay apart on the wire
-/// (RFC 09 §5.1 O4; #246).
-pub async fn decode(
-    fleet: &zenkey_fleet::Fleet<'_>,
-    store: &zenkey_fleet::SchemaStore,
-    slices: Option<&zenkey_fleet::SliceSet>,
-    key: &str,
-    encoding: Option<&str>,
-    bytes: &[u8],
-    no_decode: bool,
-) -> Decoded {
-    if no_decode {
-        return Decoded {
-            type_name: None,
-            rendering: zenkey_fleet::Rendering::Structural(zenkey_fleet::structural(bytes)),
-            verdict: None,
-            decode_error: None,
-        };
-    }
-    let d = zenkey_fleet::decode_sample(fleet, store, slices, key, encoding, bytes).await;
-    Decoded {
-        type_name: d.type_name,
-        rendering: d.rendering,
-        verdict: Some(d.verdict),
-        decode_error: d.decode_error,
-    }
-}
-
-/// A rendering, flattened for printing: the text, whether a schema produced
-/// it, and the decode's own notes.
-pub struct Value {
-    pub text: String,
-    /// A schema decoded it — the difference between `<T>` and `<T?>`.
-    pub typed: bool,
-    pub notes: Vec<String>,
-}
-
-/// The rendering as printable text. One spelling for `get` and `echo`,
-/// which had two identical ones (#210).
-pub fn value_of(rendering: &zenkey_fleet::Rendering) -> Value {
-    match rendering {
-        zenkey_fleet::Rendering::Typed(d) => Value {
-            text: serde_json::to_string(&d.value).unwrap_or_default(),
-            typed: true,
-            notes: d.notes.clone(),
-        },
-        zenkey_fleet::Rendering::Structural(text) => Value {
-            text: text.clone(),
-            typed: false,
-            notes: Vec::new(),
-        },
-    }
-}
-
 /// Space-separated lowercase hex — the byte-honest form.
 pub fn hex(bytes: &[u8]) -> String {
     bytes
@@ -277,14 +343,11 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 /// An attachment, rendered structurally (JSON → CBOR → text → hex) and
-/// tagged with its size. Deliberately **no schema decode**: the registry's
-/// vocabulary ends at the payload, so an attachment renders structurally or
-/// as hex, labeled, and that is where it stops (#117).
-pub fn attachment_display(att: &zenoh::bytes::ZBytes) -> String {
-    let bytes = att.to_bytes();
+/// tagged with its size: what a key no contract reaches gets (#117).
+pub fn attachment_display(bytes: &[u8]) -> String {
     format!(
         "{} ({} bytes)",
-        zenkey_fleet::structural(&bytes),
+        zenkey_fleet::structural(bytes),
         bytes.len()
     )
 }
@@ -292,10 +355,9 @@ pub fn attachment_display(att: &zenoh::bytes::ZBytes) -> String {
 /// The ndjson half: the attachment as a JSON value (parsed when it is JSON,
 /// a string otherwise). Callers add the key only when a wire attachment
 /// exists — present-only-when-present, never null-when-absent.
-pub fn attachment_json(att: &zenoh::bytes::ZBytes) -> serde_json::Value {
-    let bytes = att.to_bytes();
-    zenkey_fleet::structural_value(&bytes)
-        .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::structural(&bytes)))
+pub fn attachment_json(bytes: &[u8]) -> serde_json::Value {
+    zenkey_fleet::structural_value(bytes)
+        .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::structural(bytes)))
 }
 
 /// The wire's QoS axes as one stable token (#120) — the engine's spelling.
@@ -318,85 +380,88 @@ pub fn source_summary(source: &zenkey_fleet::SampleSource) -> String {
     format!("{}:{}#{}", source.zid, source.eid, source.sn)
 }
 
-/// The type tag: `<T>` schema-decoded, `<T?>` registered but rendered
-/// structurally, `<unregistered>` when no slice names the key.
-pub fn type_tag(type_name: Option<&str>, typed: bool) -> String {
-    match (type_name, typed) {
-        (Some(t), true) => format!("<{t}>"),
-        (Some(t), false) => format!("<{t}?>"),
-        (None, _) => "<unregistered>".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn format_sample_extracts_payload_fields() {
-        let line = format_sample(
-            "%{iface.name} up=%{iface.up} missing=[%{no.such}]",
-            &SampleLine {
-                n: 1,
-                wire_key: "k",
-                base: "",
-                type_name: None,
-                encoding: "application/json",
-                payload_len: 2,
-                timestamp: None,
-                value: r#"{"iface":{"name":"eth0","up":true}}"#,
-                attachment: None,
-                qos: None,
-                source: None,
-                zk2: None,
-            },
-        );
-        assert_eq!(line, "eth0 up=true missing=[]");
+    fn foreign() -> KeyIdentity {
+        KeyIdentity {
+            group: KeyGroup::NotZk2,
+            values: Default::default(),
+            unresolved: None,
+        }
+    }
+
+    fn line<'a>(fmt_value: &'a str, identity: &'a KeyIdentity) -> SampleLine<'a> {
+        SampleLine {
+            n: 1,
+            wire_key: "k",
+            relative: None,
+            identity,
+            type_name: None,
+            encoding: "e",
+            payload_len: 0,
+            timestamp: None,
+            value: fmt_value,
+            attachment: None,
+            qos: None,
+            source: None,
+        }
     }
 
     #[test]
+    fn format_sample_extracts_payload_fields() {
+        let id = foreign();
+        let l = SampleLine {
+            encoding: "application/json",
+            payload_len: 2,
+            ..line(r#"{"iface":{"name":"eth0","up":true}}"#, &id)
+        };
+        assert_eq!(
+            format_sample("%{iface.name} up=%{iface.up} missing=[%{no.such}]", &l),
+            "eth0 up=true missing=[]"
+        );
+    }
+
+    /// The zk2 positions expand from the key's identity, and v1's
+    /// `%o %c %p %s` print as typed since FJ9 (#612).
+    #[test]
     fn format_sample_expands_fields() {
-        let line = format_sample(
-            "%n %o %c/%p %s <%t> %v (%l B, %e)",
-            &SampleLine {
-                n: 3,
-                wire_key: "tcgui/v1/h-3fa9c2d41b7e/state/tc/iface/eth0/state",
-                base: "tcgui",
-                type_name: Some("NetworkInterface"),
-                encoding: "application/json",
-                payload_len: 12,
-                timestamp: None,
-                value: r#"{"up":true}"#,
-                attachment: None,
-                qos: None,
-                source: None,
-                zk2: None,
+        let id = KeyIdentity {
+            group: KeyGroup::Resource {
+                address: "host-a/tc".into(),
+                iface: "tc.netif.v1".into(),
+                token: "state".into(),
+                resource: Some("state/interfaces/{ns}/{iface}".into()),
             },
+            values: Default::default(),
+            unresolved: None,
+        };
+        let key = "prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+        let l = SampleLine {
+            n: 3,
+            wire_key: key,
+            relative: Some("zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"),
+            type_name: Some("json:NetworkInterface"),
+            encoding: "application/json",
+            payload_len: 12,
+            ..line(r#"{"up":true}"#, &id)
+        };
+        assert_eq!(
+            format_sample("%n %A %i %r <%t> %v (%l B, %e)", &l),
+            r#"3 host-a/tc tc.netif.v1 state/interfaces/{ns}/{iface} <json:NetworkInterface> {"up":true} (12 B, application/json)"#
         );
         assert_eq!(
-            line,
-            r#"3 h-3fa9c2d41b7e state/tc iface/eth0/state <NetworkInterface> {"up":true} (12 B, application/json)"#
+            format_sample("%%|%K\\t.", &l),
+            "%|zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0\t."
         );
-        // Escapes and literals.
+        assert_eq!(format_sample("%o%c%p%s", &l), "%o%c%p%s");
+        // A key no contract reached: the positions are empty fields, and
+        // `%K` outside the namespace is the wire key.
+        let id = foreign();
         assert_eq!(
-            format_sample(
-                "%%|%K\\t.",
-                &SampleLine {
-                    n: 1,
-                    wire_key: "b/v1/h-3fa9c2d41b7e/state/tc/x",
-                    base: "b",
-                    type_name: None,
-                    encoding: "e",
-                    payload_len: 0,
-                    timestamp: None,
-                    value: "v",
-                    attachment: None,
-                    qos: None,
-                    source: None,
-                    zk2: None,
-                },
-            ),
-            "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
+            format_sample("[%A][%i][%r][%t]|%K", &line("v", &id)),
+            "[][][][]|k"
         );
     }
 
@@ -404,38 +469,28 @@ mod tests {
     /// empty field when none did — the line shape stays stable (#117).
     #[test]
     fn the_attachment_field_is_empty_when_absent() {
-        let line = |att: Option<&str>| {
+        let id = foreign();
+        let with = |att: Option<&str>| {
             format_sample(
                 "%v|%a",
                 &SampleLine {
-                    n: 1,
-                    wire_key: "k",
-                    base: "",
-                    type_name: None,
-                    encoding: "e",
-                    payload_len: 0,
-                    timestamp: None,
-                    value: "v",
                     attachment: att,
-                    qos: None,
-                    source: None,
-                    zk2: None,
+                    ..line("v", &id)
                 },
             )
         };
-        assert_eq!(line(Some("meta (4 bytes)")), "v|meta (4 bytes)");
-        assert_eq!(line(None), "v|");
+        assert_eq!(with(Some("meta (4 bytes)")), "v|meta (4 bytes)");
+        assert_eq!(with(None), "v|");
     }
 
     /// The ndjson attachment value parses JSON and falls back to the
     /// structural string; the display form is size-tagged.
     #[test]
     fn attachments_render_structurally_and_stop_there() {
-        let json = zenoh::bytes::ZBytes::from(r#"{"who":"me"}"#);
-        assert_eq!(attachment_json(&json), serde_json::json!({"who": "me"}));
-        assert_eq!(attachment_display(&json), r#"{"who":"me"} (12 bytes)"#);
-        let text = zenoh::bytes::ZBytes::from("plain");
-        assert_eq!(attachment_json(&text), serde_json::json!("plain"));
+        let json = br#"{"who":"me"}"#;
+        assert_eq!(attachment_json(json), serde_json::json!({"who": "me"}));
+        assert_eq!(attachment_display(json), r#"{"who":"me"} (12 bytes)"#);
+        assert_eq!(attachment_json(b"plain"), serde_json::json!("plain"));
     }
 
     /// #120: the QoS token is stable and lowercase, never Debug output —
@@ -461,55 +516,30 @@ mod tests {
             ),
             "data/drop/best_effort"
         );
-        let line = format_sample(
-            "%q|%S",
-            &SampleLine {
-                n: 1,
-                wire_key: "k",
-                base: "",
-                type_name: None,
-                encoding: "e",
-                payload_len: 0,
-                timestamp: None,
-                value: "v",
-                attachment: None,
-                qos: Some("data/drop/reliable"),
-                source: None,
-                zk2: None,
+        let id = foreign();
+        let l = SampleLine {
+            qos: Some("data/drop/reliable"),
+            ..line("v", &id)
+        };
+        assert_eq!(format_sample("%q|%S", &l), "data/drop/reliable|");
+    }
+
+    /// A GET's reply on an `@op` key answered a call: its payload is the
+    /// operation's response, every other reply its resource's type.
+    #[test]
+    fn a_reply_on_an_op_key_is_a_response() {
+        let on = |token: &str| KeyIdentity {
+            group: KeyGroup::Resource {
+                address: "host-a/tc".into(),
+                iface: "tc.netif.v1".into(),
+                token: token.into(),
+                resource: None,
             },
-        );
-        assert_eq!(line, "data/drop/reliable|");
-    }
-
-    /// Both halves of the rendering fork, and the fact that only one of them
-    /// carries notes. `get` and `echo` spelled this match separately and
-    /// identically; only the *other* helper beside it had drifted (#210),
-    /// which is the argument for moving both rather than the one that broke.
-    #[test]
-    fn a_rendering_flattens_the_same_way_for_both_verbs() {
-        let typed = zenkey_fleet::Rendering::Typed(zenkey::schema::decode::DecodedPayload {
-            value: serde_json::json!({"status": "ok"}),
-            notes: vec!["a field the schema did not name".to_string()],
-            verdict: zenkey_fleet::Verdict::Valid,
-        });
-        let v = value_of(&typed);
-        assert_eq!(v.text, r#"{"status":"ok"}"#);
-        assert!(v.typed, "a schema produced it — the tag is <T>, not <T?>");
-        assert_eq!(v.notes.len(), 1, "decode notes are never silently dropped");
-
-        let structural = zenkey_fleet::Rendering::Structural("42".to_string());
-        let v = value_of(&structural);
-        assert_eq!(v.text, "42");
-        assert!(!v.typed);
-        assert!(v.notes.is_empty(), "no schema, so no schema's notes");
-    }
-
-    /// The three-rung ladder every payload print shares.
-    #[test]
-    fn the_type_tag_ladder_has_three_rungs() {
-        assert_eq!(type_tag(Some("T"), true), "<T>");
-        assert_eq!(type_tag(Some("T"), false), "<T?>");
-        assert_eq!(type_tag(None, true), "<unregistered>");
-        assert_eq!(type_tag(None, false), "<unregistered>");
+            values: Default::default(),
+            unresolved: None,
+        };
+        assert_eq!(Line::member_of(&on("@op")), Member::Response);
+        assert_eq!(Line::member_of(&on("state")), Member::Type);
+        assert_eq!(Line::member_of(&foreign()), Member::Type);
     }
 }

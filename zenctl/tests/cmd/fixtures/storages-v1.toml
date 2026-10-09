@@ -1,0 +1,10 @@
+# A v1 deployment file: a storage named by its class. The class table (each
+# a v1 key family) left at #612's FJ9, so the parser refuses the field.
+base = "zensight"
+
+[volumes.fs]
+plugin = "fs"
+
+[storages.latest]
+class = "state"
+volume = "fs"

@@ -8,12 +8,12 @@
 //! hardcoded schema. `routers` extracts the few fields every 1.x layout
 //! carries, and leaves the rest visible in `raw`.
 //!
-//! **Base-less by design.** Everything here but [`origin_attachments`] takes a
-//! bare `&Session`, not a [`crate::Fleet`]: `@/**` is the middleware's own
-//! space and sits outside every deployment namespace, so there is no base for
-//! these calls to run *against* — a `Fleet` would offer one they must ignore.
-//! [`origin_attachments`] is the exception because it joins admin tokens back
-//! onto convention keys, which only parse under a base.
+//! **Base-less by design.** Everything here takes a bare `&Session` in no
+//! namespace: `@/**` is the middleware's own space and sits outside every
+//! deployment namespace. v1's origin join (`origin_attachments`, v1's
+//! `alive` tokens attached to the sessions holding them) and its state
+//! coverage (declared v1 state families against the storages) left with the
+//! v1 grammar (#612, FJ9).
 
 use std::time::Duration;
 
@@ -22,8 +22,8 @@ use zenoh::Session;
 
 use crate::bus::query::GetOpts;
 use crate::report::{
-    Coverage, CoverageRow, DeclaredEntities, DeclaredEntity, EntityKind, MeshLink,
-    OriginAttachment, RouterInfo, StorageInfo, TopologyEdge, TopologyNode, TopologyReport,
+    DeclaredEntities, DeclaredEntity, EntityKind, MeshLink, RouterInfo, StorageInfo, TopologyEdge,
+    TopologyNode, TopologyReport,
 };
 
 /// One admin-space entry.
@@ -256,69 +256,6 @@ pub async fn storages(session: &Session, timeout: Duration) -> Result<Vec<Storag
     Ok(merge_storage_rows(rows))
 }
 
-/// Judge every declared **state** family against the configured storages
-/// (issue #14): the family's wire selector vs each storage's key expression,
-/// by key algebra (`includes` ⇒ covered, `intersects` ⇒ partial). Pure.
-pub fn state_coverage(
-    slices: &crate::model::registry::SliceSet,
-    base: &str,
-    storages: &[StorageInfo],
-) -> Vec<CoverageRow> {
-    use zenoh::key_expr::keyexpr;
-
-    let storage_kes: Vec<(&StorageInfo, &keyexpr)> = storages
-        .iter()
-        .filter_map(|s| {
-            let ke = s.key_expr.as_deref()?;
-            keyexpr::new(ke).ok().map(|ke| (s, ke))
-        })
-        .collect();
-    let mut rows = Vec::new();
-    for slice in slices.slices() {
-        for subject in &slice.subjects {
-            if !subject.class.is(&zenkey::Class::State) {
-                continue;
-            }
-            let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
-                continue;
-            };
-            // Composed via `with_base` so the empty base stays a valid
-            // keyexpr (`format!("{base}/…")` would grow a leading slash and
-            // silently drop every family below).
-            let selector = match &slice.service_origin {
-                Some(origin) => zenkey::grammar::with_base(
-                    base,
-                    format!("v1/{origin}/state/{}", pattern.selector_tail()),
-                ),
-                None => zenkey::grammar::with_base(
-                    base,
-                    format!("v1/*/state/{}/{}", slice.name, pattern.selector_tail()),
-                ),
-            };
-            let Ok(family) = keyexpr::new(selector.as_str()) else {
-                continue;
-            };
-            let mut coverage = Coverage::Uncovered;
-            for (info, ke) in &storage_kes {
-                if ke.includes(family) {
-                    coverage = Coverage::Covered(format!("{}@{}", info.name, info.zid));
-                    break;
-                }
-                if ke.intersects(family) && coverage == Coverage::Uncovered {
-                    coverage = Coverage::Partial(format!("{}@{}", info.name, info.zid));
-                }
-            }
-            rows.push(CoverageRow {
-                producer: slice.name.clone(),
-                path: subject.path.clone(),
-                ttl_s: subject.ttl_s,
-                coverage,
-            });
-        }
-    }
-    rows
-}
-
 impl EntityKind {
     /// Every kind the admin space declares, in sweep order.
     pub const ALL: [EntityKind; 5] = [
@@ -453,7 +390,7 @@ pub fn mesh_links(report: &TopologyReport) -> Vec<MeshLink> {
 
 /// Graphviz, self-contained: routers as boxes, peers/clients as ellipses,
 /// heard-of nodes dashed, our own session bold.
-pub fn render_dot(report: &TopologyReport, attachments: &[OriginAttachment]) -> String {
+pub fn render_dot(report: &TopologyReport) -> String {
     use std::fmt::Write as _;
     let mut out = String::from("graph zenoh_mesh {\n");
     for n in &report.nodes {
@@ -503,111 +440,7 @@ pub fn render_dot(report: &TopologyReport, attachments: &[OriginAttachment]) -> 
             }
         );
     }
-    // Origins as their own small nodes (#131): attached by a solid edge to
-    // the session the admin sources named, or by a dotted one to the mere
-    // reporter — the picture keeps the evidence distinction the join made.
-    for (i, a) in attachments.iter().enumerate() {
-        let id = format!("origin_{i}");
-        let _ = writeln!(
-            out,
-            "  \"{id}\" [shape=hexagon, label=\"{}\", fontsize=10];",
-            a.origin
-        );
-        match &a.session_zid {
-            Some(z) => {
-                let _ = writeln!(out, "  \"{id}\" -- \"{z}\";");
-            }
-            None => {
-                let _ = writeln!(
-                    out,
-                    "  \"{id}\" -- \"{}\" [style=dotted, label=\"reported\"];",
-                    a.reporter_zid
-                );
-            }
-        }
-    }
     out.push('}');
-    out
-}
-
-/// Collect every zid string under the zenoh 1.9 `Sources` shape
-/// (`{ routers: [...], peers: [...], clients: [...] }`) — tolerant of the
-/// layout varying by version: unknown shapes yield nothing, never an error.
-pub(crate) fn source_zids(sources: &serde_json::Value) -> Vec<String> {
-    let mut out = Vec::new();
-    for kind in ["routers", "peers", "clients"] {
-        if let Some(list) = sources.get(kind).and_then(|v| v.as_array()) {
-            out.extend(list.iter().filter_map(|z| z.as_str().map(str::to_string)));
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// Join the admin space's declared liveliness tokens against the keyspace:
-/// which origin hangs off which session (#131).
-///
-/// One `@/*/*/token/**` sweep; each token whose keyexpr parses under `base`
-/// as an `alive` leaf yields an attachment. The session zid is taken from
-/// the token's `sources` **only when they name exactly one** — several
-/// candidates or none degrade to reporter-only, stated rather than guessed.
-/// An empty result means the admin space served no tokens (or none parse
-/// under this base) — an observation, not an empty fleet (O4).
-pub async fn origin_attachments(
-    fleet: &crate::Fleet<'_>,
-    timeout: Duration,
-) -> Result<Vec<OriginAttachment>> {
-    let entries = admin_get(fleet.session(), "@/*/*/token/**", timeout).await?;
-    let tokens: Vec<DeclaredEntity> = entries
-        .iter()
-        .filter_map(|e| declared_from_admin_entry(&e.key, &e.value))
-        .collect();
-    Ok(attach_tokens(fleet.base(), &tokens))
-}
-
-/// The join itself, pure: every token-kind entity whose keyexpr parses
-/// under `base` as an `alive` leaf becomes an attachment (#224 split it out
-/// of [`origin_attachments`] so a sweep that already holds the declared
-/// entities need not ask the token selector twice).
-pub fn attach_tokens(base: &str, entities: &[DeclaredEntity]) -> Vec<OriginAttachment> {
-    let mut out: Vec<OriginAttachment> = Vec::new();
-
-    for decl in entities {
-        if decl.kind != EntityKind::Token {
-            continue;
-        }
-        let Some(parsed) = zenkey::grammar::parse_full(base, &decl.keyexpr) else {
-            continue;
-        };
-        // The framework liveliness shape: an `alive` leaf on the state
-        // class (RFC 04 §5). Anything else declared as a token is not an
-        // origin claim and is left alone.
-        if parsed.subject.last().copied() != Some("alive") {
-            continue;
-        }
-        let origin = parsed.origin.chunk().to_string();
-        let zids = source_zids(&decl.sources);
-        let session_zid = match zids.as_slice() {
-            [only] => Some(only.clone()),
-            _ => None,
-        };
-        let attachment = OriginAttachment {
-            origin,
-            session_zid,
-            reporter_zid: decl.node_zid.clone(),
-            token_key: decl.keyexpr.clone(),
-        };
-        // One origin can hold several sessions (one per producer process);
-        // dedup only exact repeats.
-        if !out.iter().any(|a| {
-            a.origin == attachment.origin
-                && a.session_zid == attachment.session_zid
-                && a.reporter_zid == attachment.reporter_zid
-        }) {
-            out.push(attachment);
-        }
-    }
     out
 }
 
@@ -861,79 +694,6 @@ mod tests {
         assert_eq!(merge_storage_rows(vec![config, other]).len(), 2);
     }
 
-    fn slices_with_state() -> crate::model::registry::SliceSet {
-        let toml = r#"
-            [registry]
-            version = "1.0"
-            app = "t"
-            convention = 1
-            [producer]
-            name = "tc"
-            [[subject]]
-            path = "health"
-            class = "state"
-            type = "Health"
-            ttl_s = 60
-            [[subject]]
-            path = "config/{iface}"
-            class = "state"
-            type = "Config"
-            ttl_s = 120
-            [[subject]]
-            path = "bandwidth"
-            class = "telemetry"
-            type = "Point"
-        "#;
-        crate::model::registry::SliceSet::from_toml_for_tests(toml)
-    }
-
-    fn storage(name: &str, key_expr: &str) -> StorageInfo {
-        StorageInfo {
-            zid: "z1".into(),
-            name: name.into(),
-            key_expr: Some(key_expr.into()),
-            strip_prefix: None,
-            volume: None,
-            raw: serde_json::Value::Null,
-        }
-    }
-
-    #[test]
-    fn coverage_judges_covered_partial_uncovered() {
-        let slices = slices_with_state();
-        // Full state storage: everything covered; telemetry not judged.
-        let rows = state_coverage(&slices, "zs", &[storage("latest", "zs/v1/*/state/**")]);
-        assert_eq!(rows.len(), 2);
-        assert!(
-            rows.iter()
-                .all(|r| matches!(r.coverage, Coverage::Covered(_)))
-        );
-
-        // A one-interface storage: config/{iface} is partial, health uncovered.
-        let rows = state_coverage(
-            &slices,
-            "zs",
-            &[storage("one", "zs/v1/*/state/tc/config/eth0")],
-        );
-        let health = rows.iter().find(|r| r.path == "health").unwrap();
-        assert_eq!(health.coverage, Coverage::Uncovered);
-        let config = rows.iter().find(|r| r.path == "config/{iface}").unwrap();
-        assert!(matches!(config.coverage, Coverage::Partial(_)));
-
-        // No storages at all.
-        let rows = state_coverage(&slices, "zs", &[]);
-        assert!(rows.iter().all(|r| r.coverage == Coverage::Uncovered));
-
-        // The empty base composes a valid selector (`v1/…`, no leading
-        // slash) instead of silently dropping every family.
-        let rows = state_coverage(&slices, "", &[storage("latest", "v1/*/state/**")]);
-        assert_eq!(rows.len(), 2);
-        assert!(
-            rows.iter()
-                .all(|r| matches!(r.coverage, Coverage::Covered(_)))
-        );
-    }
-
     /// The zenoh 1.9 admin key shape (`@/<zid>/<whatami>/<kind>/<keyexpr...>`)
     /// parses into a declared entity; foreign shapes are tolerated as None.
     #[test]
@@ -1029,40 +789,12 @@ mod tests {
     /// bold, edges labeled by protocol — pipeable to `dot -Tsvg` as-is.
     #[test]
     fn the_dot_form_marks_what_the_join_knows() {
-        let dot = render_dot(&report(), &[]);
+        let dot = render_dot(&report());
         assert!(dot.starts_with("graph zenoh_mesh {"), "{dot}");
         assert!(dot.contains("\"aaa\" [shape=box"), "{dot}");
         assert!(dot.contains("heard of"), "{dot}");
         assert!(dot.contains("style=\"dashed,bold\""), "{dot}");
         assert!(dot.contains("\"aaa\" -- \"bbb\" [label=\"tcp\"]"), "{dot}");
         assert!(dot.ends_with('}'), "{dot}");
-    }
-
-    /// The origin overlay (#131): a sources-named attachment is a solid
-    /// edge; a reporter-only one is dotted and says "reported" — the DOT
-    /// keeps the evidence distinction the join made.
-    #[test]
-    fn the_dot_form_keeps_the_attachment_evidence_distinction() {
-        let attachments = vec![
-            OriginAttachment {
-                origin: "h-cccccccccccc".into(),
-                session_zid: Some("bbb".into()),
-                reporter_zid: "aaa".into(),
-                token_key: "v1/h-cccccccccccc/state/demo/alive".into(),
-            },
-            OriginAttachment {
-                origin: "h-dddddddddddd".into(),
-                session_zid: None,
-                reporter_zid: "aaa".into(),
-                token_key: "v1/h-dddddddddddd/state/demo/alive".into(),
-            },
-        ];
-        let dot = render_dot(&report(), &attachments);
-        assert!(dot.contains("label=\"h-cccccccccccc\""), "{dot}");
-        assert!(dot.contains("\"origin_0\" -- \"bbb\";"), "{dot}");
-        assert!(
-            dot.contains("\"origin_1\" -- \"aaa\" [style=dotted, label=\"reported\"]"),
-            "{dot}"
-        );
     }
 }

@@ -12,7 +12,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::{
     RecordBounds, ReplayTarget, ZREC_VERSION, ZrecHeader, ZrecSink, ZrecSource,
     declare_publication, record, replay,
@@ -73,8 +73,17 @@ fn header(selector: &str) -> ZrecHeader {
     h
 }
 
-const KEY: &str = "v1/h-aaaaaaaaaaaa/state/demo/health";
-const SELECTOR: &str = "v1/h-aaaaaaaaaaaa/state/demo/**";
+const KEY: &str = "demo/plant/line-1/health";
+const SELECTOR: &str = "demo/plant/**";
+
+/// Axes no default spells, so a replay that publishes with them can only
+/// have read them off the capture.
+const RECORDED: WireQos = WireQos {
+    priority: zenoh::qos::Priority::DataHigh,
+    congestion: zenoh::qos::CongestionControl::Block,
+    reliability: zenoh::qos::Reliability::Reliable,
+    express: false,
+};
 
 /// Record real traffic — including a binary payload no JSON rendering can
 /// carry and a tombstone — replay it into a second, disconnected bus, and
@@ -91,10 +100,9 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     let mut events = monitor.events();
     monitor.watch(SELECTOR).await.expect("watch");
 
-    let publication =
-        declare_publication(&a, KEY, QosProfile::Transition, Some("application/json"))
-            .await
-            .expect("declare");
+    let publication = declare_publication(&a, KEY, RECORDED, Some("application/json"))
+        .await
+        .expect("declare");
     let matching = publication.matching_events().await.expect("matching");
     assert!(
         tokio::time::timeout(util::SETTLE, matching.recv())
@@ -144,7 +152,7 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     replay_monitor.watch(SELECTOR).await.expect("watch replay");
     // Routability gate for the replay session: a declared publisher on the
     // watched selector's key must see the subscriber before we replay.
-    let gate = declare_publication(&c, KEY, QosProfile::Transition, None)
+    let gate = declare_publication(&c, KEY, WireQos::DEFAULT, None)
         .await
         .expect("gate");
     let gate_matching = gate.matching_events().await.expect("gate matching");
@@ -162,14 +170,13 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     let report = replay(
         &mut reader,
         zenkey_fleet::ReplaySpec {
-            target: ReplayTarget::Bus {
-                session: &c,
-                slices: None,
-            },
+            target: ReplayTarget::Bus { session: &c },
             // scaled pacing: original gaps are µs-scale anyway
             speed: 1000.0,
-            i_know: false,
-            default_qos: zenkey::qos::QosProfile::Refreshed,
+            // The recorded tombstone: a delete on a key no contract
+            // describes is the operator's to send (#612, FJ9).
+            i_know: true,
+            default_qos: zenkey_fleet::WireQos::DEFAULT,
             seed_state: false,
             namespace: None,
         },
@@ -213,9 +220,10 @@ async fn a_capture_replays_onto_a_second_bus_intact() {
     // Replay re-stamped: the replaying session's HLC, not the capture's
     // (the capture sessions here stamp nothing — what matters is that the
     // wire fact is the *replay's*, whatever it is).
-    assert!(
-        views[0].qos_matches(QosProfile::Transition),
-        "the recorded profile name declared the replay publisher"
+    assert_eq!(
+        views[0].wire_qos(),
+        RECORDED,
+        "the recorded axes declared the replay publisher"
     );
 }
 
@@ -287,7 +295,7 @@ async fn a_lossy_capture_says_so_at_both_ends() {
             target: ReplayTarget::DryRun,
             speed: 1.0,
             i_know: false,
-            default_qos: zenkey::qos::QosProfile::Refreshed,
+            default_qos: zenkey_fleet::WireQos::DEFAULT,
             seed_state: false,
             namespace: None,
         },

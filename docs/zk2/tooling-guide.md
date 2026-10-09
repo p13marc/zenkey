@@ -217,7 +217,9 @@ P3 (core §6, §11.1): a key is written only by the service that owns it.
 - A tool acts on a service through its operations (`call`, core §5). It
   never writes the service's keys.
 - zenctl's `pub` refuses a zk2 data key, with exit 2, and still writes
-  foreign keys. v1's `retire` has no zk2 meaning, and is gone.
+  foreign keys, as the bytes it is given. A tombstone on a foreign key is
+  the operator's act (`--i-know`): no contract says whose it is to send.
+  v1's `retire` has no zk2 meaning, and is gone.
 - **The one exception** is a replayer standing in for the owners it
   recorded, in a namespace of its own (§5).
 - **A mock owner is not an exception**: it *is* an owner. zenctl's `gen` and
@@ -247,7 +249,8 @@ verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
 of the capture names, so the file cannot contain them whatever the bus
 carried (O5). Each row adds `qos_axes`, the sample's
 priority, congestion control, reliability and express as received, which a
-replay honours. Versions 1 and 2 still read.
+replay honours. Versions 1 and 2 still read; their rows' v1 QoS profile names
+do not (#612, FJ9), so such a row replays on the axes the operator gives.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a

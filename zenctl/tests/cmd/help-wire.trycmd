@@ -16,7 +16,7 @@ observation — the one place the word still earns its keep.
 $ zenctl get --help
 Query a raw selector, or read a zk2 state resource (`get state`).
 
-Two forms, never confused. `get <SELECTOR>` is RAW: any key expression, on a session in no namespace, so the selector is the wire key as it is (`prod/zk2/…`, `v1/…`, `@/**` for the zenoh admin space). The fleet discipline (RFC 05 §2.1): target All, consolidation None, every reply attributed by its own key; error envelopes render as errors, and payloads ride `echo`'s rendering ladder. `get state <ADDRESS> <IFACE> <STATE>` is RESOLVED: one zk2 state resource of one owner, read through its contract in the deployment's namespace — see `zenctl get state --help`. Exit codes, both forms: 0 values only, 1 an error reply, 2 silence.
+Two forms, never confused. `get <SELECTOR>` is RAW: any key expression, on a session in no namespace, so the selector is the wire key as it is (`prod/zk2/…`, `v1/…`, `@/**` for the zenoh admin space). The fleet discipline (RFC 05 §2.1): target All, consolidation None, every reply attributed by its own key; error envelopes render as errors, and each reply is resolved through the deployment in --namespace as `echo` resolves a sample: a zk2 key decoded as its declared type, a foreign one rendered structurally. `get state <ADDRESS> <IFACE> <STATE>` is RESOLVED: one zk2 state resource of one owner, read through its contract in the deployment's namespace — see `zenctl get state --help`. Exit codes, both forms: 0 values only, 1 an error reply, 2 silence.
 
 Usage: zenctl get [OPTIONS] <SELECTOR>
        zenctl get <COMMAND>
@@ -27,59 +27,58 @@ Commands:
 
 Arguments:
   <SELECTOR>
-          Any key expression, params included (`key?k=v`): a WIRE selector, on a session in no namespace. For a zk2 state resource through its contract, use `get state`
+          Any key expression, params included (`key?k=v`): a WIRE selector, on a session in no namespace (`prod/zk2/…`). Each reply is resolved through the deployment in --namespace, as `echo` resolves a sample. For a zk2 state resource through its contract, use `get state`
 
 Options:
       --body <TEXT|@FILE|->
-          Query body: inline text, `@file`, or `-` for stdin — rides the same encode ladder as `pub` when the selector's key part refines to a registered subject
+          Query body: inline text, `@file`, or `-` for stdin, sent as typed. Calling a zk2 operation through its contract is `zenctl call`
 
       --raw
-          Ship the body verbatim and print payloads as hex; no decode
+          Print payloads as hex; no decode
 
       --hex
-          Decode the type name, print the payload as hex
+          Resolve the declared type, print the payload as hex
 
       --fmt <TEMPLATE>
-          Per-reply line template — the `echo` % vocabulary (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}). %T renders `-` and %q/%S render empty here: a reply carries no arrival stamp, QoS axes or SourceInfo — those are subscription-side facts (#120)
+          Per-reply line template — the `echo` % vocabulary (%k %K %A %i %r %t %v %e %l %n %a %{a.b.c}). %T renders `-` and %q/%S render empty here: a reply carries no arrival stamp, QoS axes or SourceInfo — those are subscription-side facts (#120)
 
       --no-decode
-          Skip schema decode; render structurally
+          Skip contract resolution: no presence read, no bundle retrieved, every payload rendered structurally (and said to be)
 
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
           
           [env: ZENCTL_BASE=]
+          [alias: --base]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 
@@ -471,19 +470,19 @@ Arguments:
 
 Options:
       --from <FROM>
-          Read rows from stdin instead: `--from ndjson` accepts the exact row shape `echo --format ndjson` (and the zengui export) emits — key + value per row, optionally encoding/qos/delete/attachment. One shape, both directions; malformed rows are counted and reported, never silently skipped, and echo's tagged meta lines (`"row":"dropped"`/`"row":"seed"`) are skipped as stream metadata — counted as skipped, not malformed
+          Read rows from stdin instead: `--from ndjson` accepts the exact row shape `echo --format ndjson` emits — key + value per row, optionally encoding/qos_axes/delete/attachment. One shape, both directions; malformed rows are counted and reported, never silently skipped, and echo's tagged meta lines (`"row":"dropped"`/`"row":"seed"`) are skipped as stream metadata — counted as skipped, not malformed
 
           Possible values:
           - ndjson: The echo/export row shape, one JSON object per stdin line
 
       --i-know
-          With --from: delete rows on keys that are not state-shaped are refused (and counted) unless this is passed — RFC 04 §1.2 (v1.12) prices the off-state tombstone even in a pipe. A row on a wildcard key is refused either way
+          With --from: delete rows are refused (and counted) unless this is passed — a tombstone on a key no contract describes is the operator's act, even in a pipe. A row on a wildcard key, or on a key a zk2 service owns, is refused either way
 
-      --qos <QOS>
-          QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame. Defaults to the subject's declared profile when the key refines against a loaded registry, else `sampled` — either way the choice and its source are printed (#158)
+      --qos <AXES>
+          QoS axes, `priority/congestion/reliability[+express]` — the token `echo` prints as `qos_axes` (`data_high/block/reliable`). Default: zenoh's own, `data/drop/reliable`. With --from, a row's recorded `qos_axes` win over this. The choice is printed either way (#158)
 
       --encoding <ENCODING>
-          Wire encoding to declare (e.g. application/json). Defaults to the registry's declared encoding when the key refines, else none
+          Wire encoding to declare (e.g. application/json). None by default: the bytes go out as typed
 
       --times <N>
           Publish this many times
@@ -495,50 +494,30 @@ Options:
           
           [default: 1]
 
-      --no-validate
-          Do not refuse a body the served schema rejects — it ships as typed, with a note. (It is still encoded when it *does* encode.)
-
-      --raw
-          Send the bytes verbatim: no schema lookup, no encoding, no refusal. The escape hatch for a subject this tool cannot type
-
       --attachment <TEXT|@FILE|->
-          Attachment riding beside the payload: inline text, `@file`, or `-` for stdin. Never schema-encoded — the registry's vocabulary ends at the payload (#117)
-
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
-          
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
-          
-          [env: ZENCTL_BASE=]
+          Attachment riding beside the payload: inline text, `@file`, or `-` for stdin, sent verbatim (#117)
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 
@@ -875,7 +854,7 @@ Options:
           Replay even though the resolved base differs from the capture header's — or both are empty, which cannot tell two deployments apart
 
       --i-know
-          Write what is not this replay's to write: recorded deletes that fall off the state class (RFC 04 §1.2, v1.12), and a zk2 service's own keys where that service runs (P3, spec §6)
+          Write what is not this replay's to write: recorded deletes (a tombstone on a key no contract describes is the operator's act), and a zk2 service's own keys where that service runs (P3, spec §6)
 
       --namespace <NS>
           Publish into this deployment namespace, through a session opened in it: every key is moved from the capture's base into NS, so a replayer stands in for the owners it recorded in a namespace of its own (spike S13). Typed only, never read from the environment or a context. A zk2 service's own key replayed into the namespace it was recorded in — NS equal to the capture's base, or no --namespace at all — is refused unless --i-know (P3)
@@ -883,46 +862,37 @@ Options:
       --seed-state
           Publish a version-2 capture's preamble rows too — state at capture start, re-stamped now (RFC 13 §4.1). Off by default: re-stamped state wins last-writer-wins, so the preamble republishes a whole snapshot over the live fleet with no pacing between the rows (§4.2); the rows are skipped and counted instead
 
-      --qos <QOS>
-          QoS profile for rows that recorded none
+      --qos <AXES>
+          QoS axes for rows that recorded none (a version-1 or 2 capture): `priority/congestion/reliability[+express]`. A version-3 row publishes with the axes it rode with
           
-          [default: refreshed]
+          [default: data/drop/reliable]
 
       --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
-          
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
+          The deployment this bus carries, which the capture's base must match unless --force-base (without --namespace). Resolution: flag > env > active context > empty, the bus-root deployment
           
           [env: ZENCTL_BASE=]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 
@@ -1143,117 +1113,6 @@ Options:
           Field-level changes listed per key before the rest are counted
           
           [default: 20]
-
-      --format <FORMAT>
-          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
-          
-          [env: ZENCTL_FORMAT=]
-          [default: auto]
-          [possible values: auto, table, json, ndjson]
-
-      --color <COLOR>
-          Colour: auto (a terminal gets it, a pipe does not), always, never.
-          
-          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
-
-          Possible values:
-          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
-          - always
-          - never
-          
-          [default: auto]
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-$ zenctl export --help
-Serve the bus and its contract as Prometheus metrics.
-
-Key series named and united by the registry, and the observer's own blind spots as first-class series beside them (#228). `zenctl export --bind 127.0.0.1:9184`. Metrics ABOUT THE BUS AND THE CONTRACT, not a general exporter: a series exists only where the registry declares the subject (names and units from `unit`/`kind`, never sniffed from the leaf; every `{var}` a label; the declared `cardinality` bounds the population and what it refuses is counted). What every other exporter hides is exposed by name (RFC 13 §3): `zenkey_observer_dropped_total`, the four evicted populations (never summed), coalesced and unstamped samples; a series that stopped keeps its labels and state — evicted, origin_down, retired — and loses its value, so absence and silence are different bytes; payload verdicts are three populations, the third `not_validated`; the selectors watched and the planes `**` cannot reach ride `zenkey_scope_info`. Killing a producer turns its series `origin_down`; forcing drops moves the counter and marks the series fed meanwhile; scraping twice with no traffic is byte-identical. A foreground observer, explicitly launched, one process per invocation, sharing nothing, caching no discovery, serving nothing another zenctl reads — the permitted second kind (`docs/redesign-2026-07.md` §6.1). REFUSED up front: OTLP, histograms and summaries, push gateways and remote write — `/metrics` over plain HTTP is the whole surface.
-
-Usage: zenctl export [OPTIONS] [SELECTOR]
-
-Arguments:
-  [SELECTOR]
-          Full wire selector to watch — this session is un-namespaced (RFC 09 §5). Defaults to all v1 data under the base: `<base>/v1/**`, which `**` being unable to cross an `@`-chunk makes media-safe and blind to the verbatim planes (RFC 03 §4 D2)
-
-Options:
-      --origin <ORIGIN>
-          Only this origin (`h-…` or `@service`)
-
-      --class <CLASS>
-          Only this class: telemetry, state, or events
-
-      --producer <PRODUCER>
-          Only this producer
-
-      --bind <ADDR>
-          Address to serve `/metrics` on (`--listen` is the zenoh transport's). Loopback by default; a non-loopback address exposes the bus's shape to the network and needs --i-know
-          
-          [default: 127.0.0.1:9184]
-
-      --i-know
-          Bind a non-loopback --bind address. The refusal you are overriding names its reason
-
-      --validate
-          Validate payloads against their served schemas (RFC 08 §7), budgeted per key per second so the exporter never becomes a load test; the `valid`/`invalid` populations move only with this. Without it every sample is `not_validated`, and the surface says so
-
-      --doctor-every <SECS>
-          Run zk2's doctor every SECS, in the deployment's namespace (`--base`), and expose its findings as `zenkey_doctor_finding{check_id,severity}`. Off by default: a doctor run costs the control plane (RFC 13 §3, frugality). Without it `zenkey_doctor_info{state="not_asked"}` is the honest series
-
-      --max-series <N>
-          Bound on distinct series; overflow is counted under `zenkey_series_suppressed_total{reason="max_series"}`
-          
-          [default: 10000]
-
-      --once
-          Observe for --for seconds, fold once, print the snapshot as a report (`--format`) and exit — no listener. For a script that wants one scrape's worth of the surface as JSON
-
-      --for <SECS>
-          With --once: how long to observe before the one fold, seconds
-          
-          [default: 5]
-
-      --prom
-          With --once: print the Prometheus exposition text instead of a report — a foreign schema, so not with --format
-
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
-          
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
-          
-          [env: ZENCTL_BASE=]
-
-      --context <NAME>
-          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
-
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
-  -c, --connect <CONNECT>
-          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
-          
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
-
-  -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
-
-      --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
-
-      --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
-
-      --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
-          
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
-          
-          [env: ZENCTL_ZENOH_CONFIG=]
 
       --format <FORMAT>
           Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
@@ -1544,7 +1403,7 @@ Generate shell completions (bash, zsh, fish, elvish, powershell).
 
 e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
 
-The default script is **dynamic** (issue #54): it calls back into `zenctl` so producer, subject, type and procedure names come from the cached registry of the active context. The cache is written by any command that loads slices; completion never touches the bus, so a `<TAB>` cannot hang on a fleet that is down. `--static` emits the old self-contained script instead.
+The default script is **dynamic** (issue #54): it calls back into `zenctl` so service addresses, interfaces and namespaces come from what the last presence read and `namespace list` saw, cached per context. Completion never touches the bus, so a `<TAB>` cannot hang on a deployment that is down. `--static` emits the self-contained script instead.
 
 Usage: zenctl completions [OPTIONS] <SHELL>
 
@@ -1555,90 +1414,6 @@ Arguments:
 Options:
       --static
           Emit the self-contained script: no callbacks, no cached names
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-$ zenctl why --help
-Explain why a key is silent, one established fact at a time.
-
-The non-verdict, itemised (#214): a rung ladder over facts the engine already holds: scope reach, grammar, registry declaration, the liveliness roster, declared publishers, storage coverage, a stored value, freshness, admin reachability. Every rung answers established / not-established (with its reason) / NOT ASKED — "not asked" is never rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers declare lazily, on the first publication (RFC 08 §6.1). The default run costs the control plane only; `--for` adds the one data-plane rung. Exit 0 = nothing found and everything checked looks healthy; 1 = a cause was established — the finding; 2 = the observation was impaired.
-
-Usage: zenctl why [OPTIONS] [SELECTOR]
-
-Arguments:
-  [SELECTOR]
-          Full wire selector to watch — this session is un-namespaced (RFC 09 §5). Defaults to all v1 data under the base: `<base>/v1/**`, which `**` being unable to cross an `@`-chunk makes media-safe and blind to the verbatim planes (RFC 03 §4 D2)
-
-Options:
-      --origin <ORIGIN>
-          Only this origin (`h-…` or `@service`)
-
-      --class <CLASS>
-          Only this class: telemetry, state, or events
-
-      --producer <PRODUCER>
-          Only this producer
-
-      --for <SECS>
-          Listen passively for this many seconds — the one rung that costs the data plane (RFC 09 §5.1, the v1.18 frugality note). Without it the wire-heard rung reads "not asked", never "silent" (O4)
-
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
-          
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
-          
-          [env: ZENCTL_BASE=]
-
-      --context <NAME>
-          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
-
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
-  -c, --connect <CONNECT>
-          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
-          
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
-
-  -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
-
-      --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
-
-      --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
-
-      --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
-          
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
-          
-          [env: ZENCTL_ZENOH_CONFIG=]
-
-      --format <FORMAT>
-          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
-          
-          [env: ZENCTL_FORMAT=]
-          [default: auto]
-          [possible values: auto, table, json, ndjson]
-
-      --color <COLOR>
-          Colour: auto (a terminal gets it, a pipe does not), always, never.
-          
-          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
-
-          Possible values:
-          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
-          - always
-          - never
-          
-          [default: auto]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1732,11 +1507,6 @@ publish that actually failed on the bus exits with. Clap refuses it at 2, like
 every other usage error in this tool (#209), and since #307 like every other
 refusal of your input (`exit.rs`).
 
-(`--base <BASE>` rides these usage lines because the corpus sets `ZENCTL_BASE`
-and clap renders an env-backed flag as required in a *usage* line — the same
-quirk `tests/cli.rs` documents for `ZENCTL_FORMAT`. A user without the variable
-set does not see it, which is why the `--help` case above does not carry it.)
-
 Neither source:
 
 ```console
@@ -1745,7 +1515,7 @@ $ zenctl pub
 error: the following required arguments were not provided:
   <--from <FROM>|KEY>
 
-Usage: zenctl pub --base <BASE> <--from <FROM>|KEY> [BODY]
+Usage: zenctl pub <--from <FROM>|KEY> [BODY]
 
 For more information, try '--help'.
 
@@ -1755,12 +1525,12 @@ A key with no body — the shape the old `match` fell through to its catch-all
 arm for, and the one where naming the missing argument helps most:
 
 ```console
-$ zenctl pub v1/h-3fa9c2d41b7e/state/sysinfo/health
+$ zenctl pub plant/line-1/health
 ? 2
 error: the following required arguments were not provided:
   <BODY>
 
-Usage: zenctl pub --base <BASE> <--from <FROM>|KEY> <BODY>
+Usage: zenctl pub <--from <FROM>|KEY> <BODY>
 
 For more information, try '--help'.
 
@@ -1769,34 +1539,24 @@ For more information, try '--help'.
 Both sources:
 
 ```console
-$ zenctl pub --from ndjson v1/h-3fa9c2d41b7e/state/sysinfo/health '{}'
+$ zenctl pub --from ndjson plant/line-1/health '{}'
 ? 2
 error: the argument '--from <FROM>' cannot be used with '[KEY]'
 
-Usage: zenctl pub --base <BASE> <--from <FROM>|KEY> <BODY>
+Usage: zenctl pub <--from <FROM>|KEY> <BODY>
 
 For more information, try '--help'.
 
 ```
 
-## A selector and the positions that compose one are exclusive
+## A v1 position is no flag of a zk2 watcher
 
-`SelectorArgs` rides the v1 watchers that are left — `why` and `export`,
-which FJ9 retires with the registry — and the positional and the three
-positions refuse each other rather than one silently winning (#307). A flag
-that is accepted and then overridden is a flag that lied. The zk2 wire
+v1's composed selectors (`--origin`/`--class`/`--producer`) left with the
+last verbs that took them, `why` and `export`, at FJ9 (#612). The wire
 watchers (`echo`, `rate`, `field`, `record`, `timeline`) take a wire selector
-alone since FJ8b (#612): a v1 position has no zk2 meaning.
+alone since FJ8b: a v1 position has no zk2 meaning, and clap says so.
 
 ```console
-$ zenctl why 'v1/**' --producer sysinfo
-? 2
-error: the argument '[SELECTOR]' cannot be used with '--producer <PRODUCER>'
-
-Usage: zenctl why --base <BASE> <SELECTOR>
-
-For more information, try '--help'.
-
 $ zenctl echo 'zk2/**' --producer sysinfo
 ? 2
 error: unexpected argument '--producer' found

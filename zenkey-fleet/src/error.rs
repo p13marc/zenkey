@@ -220,21 +220,6 @@ impl Error {
     }
 }
 
-/// A served slice that does not parse is a *peer* saying something
-/// unreadable, never a local mistake — RFC 08 §6's introspect reply.
-impl From<zenkey::slice::SliceError> for Error {
-    fn from(e: zenkey::slice::SliceError) -> Error {
-        Error::malformed_from("registry slice", e)
-    }
-}
-
-/// A key this crate built or was handed does not parse.
-impl From<zenkey::KeyError> for Error {
-    fn from(e: zenkey::KeyError) -> Error {
-        Error::unaskable_from("key", e)
-    }
-}
-
 /// This error and every cause beneath it, joined by `: ` — one line.
 ///
 /// The counterpart to the rendering convention in the module doc: `Display`
@@ -331,16 +316,5 @@ mod tests {
         let refused = Error::unaskable_from("v1/$*/**", "`*` may only follow `/`");
         assert!(refused.source().is_none());
         assert_eq!(one_line(&refused), refused.to_string());
-    }
-
-    /// A slice that does not parse is the *peer* being unreadable — never the
-    /// caller's input, and never the fabric.
-    #[test]
-    fn a_bad_slice_is_malformed_not_unaskable() {
-        let e: Error = zenkey::parse_slice("this is not = = toml")
-            .unwrap_err()
-            .into();
-        assert!(matches!(e, Error::Malformed { .. }));
-        assert!(!e.is_unaskable());
     }
 }

@@ -158,12 +158,12 @@ impl Render for RouterList {
 /// The mesh as the admin space reports it (#198).
 ///
 /// A wrapper over the engine's `TopologyReport`, because the rendering needs
-/// two things the report does not carry: the origin→session attachments,
-/// which are a separate query, and the derived links. Both are already
-/// engine-computed; this only says how they are laid out.
+/// what the report does not carry: the derived links, already
+/// engine-computed; this only says how they are laid out. v1's
+/// origin→session attachments (`--origins`) left with the v1 grammar
+/// (#612, FJ9).
 pub struct TopologyView<'a> {
     pub report: &'a zenkey_fleet::TopologyReport,
-    pub attachments: &'a [zenkey_fleet::OriginAttachment],
 }
 
 impl serde::Serialize for TopologyView<'_> {
@@ -181,19 +181,16 @@ impl Render for TopologyView<'_> {
         envelope_without(self.report, &["nodes", "edges"])
     }
 
-    /// **Three row kinds on one stream.** They used to be concatenated with no
-    /// discriminator at all, so a consumer told a node from an edge from an
-    /// attachment by probing for fields — the same defect `storage list` had,
-    /// one command over.
+    /// **Two row kinds on one stream.** They used to be concatenated with no
+    /// discriminator at all, so a consumer told a node from an edge by
+    /// probing for fields — the same defect `storage list` had, one command
+    /// over.
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for n in &self.report.nodes {
             out(Row::of("node", n));
         }
         for e in &self.report.edges {
             out(Row::of("edge", e));
-        }
-        for a in self.attachments {
-            out(Row::of("attachment", a));
         }
     }
 
@@ -232,18 +229,6 @@ impl Render for TopologyView<'_> {
         t.grid(nodes);
 
         let mut rest = Grid::unheaded(1);
-        for a in self.attachments {
-            rest.row([Cell::text(match &a.session_zid {
-                Some(z) => format!("  {}  ⚓ session {z}  (token {})", a.origin, a.token_key),
-                // Reported, not attached: sources named no single session, and
-                // saying "attached" would invent one (O4).
-                None => format!(
-                    "  {}  reported by {} — sources named no single session; shown as \
-                     reported, not attached",
-                    a.origin, a.reporter_zid
-                ),
-            })]);
-        }
         for link in zenkey_fleet::mesh_links(self.report) {
             rest.row([Cell::text(format!(
                 "  {} —— {}{}{}",

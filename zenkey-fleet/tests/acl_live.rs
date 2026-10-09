@@ -497,7 +497,7 @@ async fn fan_in(bus: &Bus) -> usize {
         .next()
         .expect("tc.netif.v1")
         .shared_contract();
-    let consumer = zk2::consumer::Consumer::for_tool(
+    let consumer = zenkey::consumer::Consumer::for_tool(
         bus.of("frontend"),
         netif,
         &["*/tc"],
@@ -509,8 +509,8 @@ async fn fan_in(bus: &Bus) -> usize {
         .await
         .expect("a get")
     {
-        zk2::state::StateGet::Answered(v) => v.len(),
-        zk2::state::StateGet::Silent => 0,
+        zenkey::state::StateGet::Answered(v) => v.len(),
+        zenkey::state::StateGet::Silent => 0,
     }
 }
 
@@ -599,16 +599,17 @@ async fn under_deny_the_grants_are_exactly_what_is_allowed() {
     for c in ["teleop", "autopilot", "safety"] {
         let sel = format!("zk2/vehicle-01/{c}/@zk/**");
         eventually(&format!("the thruster reads {c}'s token"), || async {
-            let r = zk2::presence::liveliness_read(bus.of("thruster-l"), &sel, T)
+            let r = zenkey::presence::liveliness_read(bus.of("thruster-l"), &sel, T)
                 .await
                 .unwrap();
             r.complete && r.keys.len() == 1
         })
         .await;
     }
-    let refused = zk2::presence::liveliness_read(bus.of("frontend"), "zk2/vehicle-01/*/@zk/**", T)
-        .await
-        .unwrap();
+    let refused =
+        zenkey::presence::liveliness_read(bus.of("frontend"), "zk2/vehicle-01/*/@zk/**", T)
+            .await
+            .unwrap();
     assert!(refused.complete && refused.errors.is_empty(), "{refused:?}");
     assert!(refused.keys.is_empty(), "{refused:?}");
 
@@ -739,7 +740,7 @@ async fn under_deny_the_grants_are_exactly_what_is_allowed() {
 
     // 0.8: a principal with Call on h1's operation reads h1's instance and
     // interface tokens, complete.
-    let h1 = zk2::presence::liveliness_read(bus.of("frontend"), "zk2/h1/tc/@zk/**", T)
+    let h1 = zenkey::presence::liveliness_read(bus.of("frontend"), "zk2/h1/tc/@zk/**", T)
         .await
         .unwrap();
     assert!(h1.complete, "{h1:?}");
@@ -824,7 +825,7 @@ async fn without_its_presence_grant_a_read_is_complete_and_empty() {
     // The control: the router holds h1's tokens, and the frontend's calls
     // still go through.
     eventually("the router holds h1's tokens", || async {
-        zk2::presence::liveliness_read(&bus._router, "zk2/h1/tc/@zk/**", T)
+        zenkey::presence::liveliness_read(&bus._router, "zk2/h1/tc/@zk/**", T)
             .await
             .unwrap()
             .keys
@@ -845,7 +846,7 @@ async fn without_its_presence_grant_a_read_is_complete_and_empty() {
             == 1
     })
     .await;
-    let read = zk2::presence::liveliness_read(bus.of("frontend"), "zk2/h1/tc/@zk/**", T)
+    let read = zenkey::presence::liveliness_read(bus.of("frontend"), "zk2/h1/tc/@zk/**", T)
         .await
         .unwrap();
     assert!(
@@ -965,7 +966,7 @@ async fn under_allow_the_complement_is_denied_but_a_wildcard_is_in_no_deny() {
         );
     }
     eventually("the thruster reads its commanders' tokens", || async {
-        zk2::presence::liveliness_read(bus.of("thruster-l"), "zk2/vehicle-01/*/@zk/**", T)
+        zenkey::presence::liveliness_read(bus.of("thruster-l"), "zk2/vehicle-01/*/@zk/**", T)
             .await
             .unwrap()
             .keys
@@ -975,7 +976,7 @@ async fn under_allow_the_complement_is_denied_but_a_wildcard_is_in_no_deny() {
     .await;
     // The frontend's selector is wider than every deny, so the read crosses
     // the ingress check, and each token is denied on egress by its own key.
-    let read = zk2::presence::liveliness_read(bus.of("frontend"), "zk2/vehicle-01/*/@zk/**", T)
+    let read = zenkey::presence::liveliness_read(bus.of("frontend"), "zk2/vehicle-01/*/@zk/**", T)
         .await
         .unwrap();
     assert!(read.keys.is_empty(), "{read:?}");

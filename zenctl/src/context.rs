@@ -35,7 +35,6 @@ pub fn dispatch(cmd: crate::cli::ContextCmd) -> Result<()> {
             base,
             connect,
             listen,
-            registry,
             scouting,
             timeout,
             zenoh_config,
@@ -47,7 +46,9 @@ pub fn dispatch(cmd: crate::cli::ContextCmd) -> Result<()> {
                 base,
                 connect,
                 listen,
-                registry,
+                // v1's registry dirs, kept in the shared file for zengui's
+                // sake (#614): zenctl reads and writes none (#612, FJ9).
+                registry: Vec::new(),
                 // An unset flag means "leave it alone", here as everywhere
                 // else in this tool — so `false` is `None`, not `Some(false)`.
                 scouting: scouting.then_some(true),
@@ -105,7 +106,7 @@ pub fn edit(out: crate::cli::OutputArgs) -> Result<()> {
 /// On an existing name this **updates** — and says so — which means it must
 /// not clobber the fields the invocation did not mention. `create lab
 /// --connect tcp/…` used to replace the whole entry, so it silently dropped
-/// the base, registry dirs and timeout an earlier `create` had set (the CLI
+/// the base and timeout an earlier `create` had set (the CLI
 /// half of issue #194). An unset flag means "leave it alone" here exactly as
 /// it does everywhere else in this tool; clearing a field is `context edit`.
 pub fn create(
@@ -125,9 +126,6 @@ pub fn create(
         }
         if !flags.listen.is_empty() {
             c.listen = flags.listen;
-        }
-        if !flags.registry.is_empty() {
-            c.registry = flags.registry;
         }
         // `--scouting` is a presence flag, so it arrives as `Some(true)` or
         // nothing — it has never been able to store an explicit `false`.
@@ -298,7 +296,6 @@ mod tests {
         let full = StoredContext {
             base: Some("acme".into()),
             connect: vec!["tcp/127.0.0.1:7447".into()],
-            registry: vec!["/abs/registry".into()],
             timeout: Some(10),
             ..Default::default()
         };
@@ -319,11 +316,6 @@ mod tests {
             kept.connect,
             ["tcp/10.0.0.1:7447"],
             "the flag that was given wins"
-        );
-        assert_eq!(
-            kept.registry,
-            [std::path::PathBuf::from("/abs/registry")],
-            "a flag that was not given must not clear the field"
         );
         assert_eq!(kept.timeout, Some(10), "nor the timeout");
         assert_eq!(kept.base.as_deref(), Some("acme"), "nor the base");

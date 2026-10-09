@@ -127,14 +127,6 @@ iced_test = "0.14"
 ttf-parser = "0.25"
 async-stream = "0.3"
 
-# The RFC 07 reference client. `zenkey-fleet`'s optional `blob` feature is the
-# only thing that pulls it in: RFC 07 §2 names it the reference client and §2.1
-# makes per-reply verification-before-disk normative, so an explorer that
-# fetched blobs any other way would be a second implementation of one integrity
-# anchor. Not a zenkey dependency in either direction otherwise — zblob knows
-# nothing about this convention, and the keys are spelled on our side.
-zblob = "0.3"
-
 # The notifier's sinks (zenwatch, #388). `reqwest` carries the HTTP sinks
 # (ntfy, webhook) and `lettre` the SMTP one; both speak TLS through rustls.
 #
@@ -162,12 +154,13 @@ json5 = "1.0"
 serde_yaml = "0.9"
 
 # Internal
-# The strangler layout (#615). `main` is the zk2 line. The v1 tools
-# (zenkey-fleet, zenctl, zengui, zenwatch) build against the v1 libraries
-# pinned from crates.io until each one is ported. The v1 sources live on the
-# `v1` branch, which releases 0.14.x patches. zk2 re-creates these crate
-# names at 0.20.0; two `zenkey` packages coexist then, because 0.x minors
-# are semver-incompatible.
+# The strangler layout (#615). `main` is the zk2 line. The v1 tools still
+# on it (zengui, zenwatch) build against the v1 libraries pinned from
+# crates.io until #614 ports them; zenctl and the in-tree zenkey-fleet left
+# them at FJ9 (#612) and depend on the zk2 crates by path. The v1 sources
+# live on the `v1` branch, which releases 0.14.x patches. zk2 re-creates
+# these crate names at 0.20.0; two `zenkey` packages coexist then, because
+# 0.x minors are semver-incompatible.
 zenkey = { version = "=0.11.1" }
 zenkey-build = { version = "=0.11.1" }
 # zengui and zenwatch keep the v1 engine from crates.io (#612, FJ1), the same

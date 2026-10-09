@@ -4,9 +4,9 @@
 
 use anyhow::Result;
 
-use crate::Bus;
+use crate::bus::Link;
 
-pub async fn routers(args: &Bus) -> Result<()> {
+pub async fn routers(args: &Link) -> Result<()> {
     let session = args.session().await?;
     let routers = zenkey_fleet::routers(&session, args.timeout()).await?;
     // `[]` on its own cannot tell a peer-only mesh from an admin space that is
@@ -23,35 +23,19 @@ pub async fn routers(args: &Bus) -> Result<()> {
 /// `admin graph` — the mesh as the admin space answered it (#118), as a
 /// table, `--dot` Graphviz for piping (`| dot -Tsvg`), or json/ndjson.
 pub async fn graph(cli: crate::cli::AdminGraphArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
-    let crate::cli::AdminGraphArgs {
-        dot,
-        origins,
-        bus: _,
-    } = cli;
-    let session = args.session().await?;
-    let report = zenkey_fleet::topology(&session, args.timeout()).await?;
-    // The origin join is opt-in (#131): it costs one more admin sweep, and
-    // the lazy rule holds even for pictures.
-    let attachments = if origins {
-        zenkey_fleet::origin_attachments(&args.fleet(&session), args.timeout()).await?
-    } else {
-        Vec::new()
-    };
-    if dot {
-        println!("{}", zenkey_fleet::render_dot(&report, &attachments));
+    let link = Link::resolve(&cli.session)?;
+    let session = link.session().await?;
+    let report = zenkey_fleet::topology(&session, link.timeout()).await?;
+    if cli.dot {
+        println!("{}", zenkey_fleet::render_dot(&report));
         honesty(&report);
         return Ok(());
     }
     crate::render::emit_with(
         &mut std::io::stdout(),
-        &crate::render::TopologyView {
-            report: &report,
-            attachments: &attachments,
-        },
-        args.format(),
-        args.color(),
+        &crate::render::TopologyView { report: &report },
+        link.format(),
+        link.color(),
     )
 }
 

@@ -3,8 +3,7 @@
 //!
 //! Every judge in this crate names a handful of offenders and then says how
 //! many more there were: the doctor's per-check findings, `field`'s per-path
-//! ones, `expect`'s violations, `cutover`'s leaked keys, `budget`'s example
-//! expansions, `why`'s evidence lines. It was written out by hand at each
+//! ones, `expect`'s violations. It was written out by hand at each
 //! site, with a different cap and a slightly different closure, and the deep
 //! review found what that costs: the `qos-observed-mismatch` cap capped the
 //! *candidates* rather than the findings, so violators past the first twenty
@@ -32,11 +31,6 @@ pub(crate) struct Examples<T> {
     cap: usize,
 }
 
-// `budget` uses `new`/`push_with`/`into_vec`; the rest of the surface is
-// reached only by the `decode`-gated judges (`doctor`, `field`, `expect`).
-// With the feature off they are genuinely dead, which is a fact about the
-// build, not an omission — saying so beats gating six methods one by one.
-#[cfg_attr(not(feature = "decode"), allow(dead_code))]
 impl<T> Examples<T> {
     /// A collector holding at most `cap` examples.
     pub fn new(cap: usize) -> Self {
@@ -45,19 +39,6 @@ impl<T> Examples<T> {
             total: 0,
             cap,
         }
-    }
-
-    /// Take up to `cap` items from `iter`, counting the rest.
-    ///
-    /// The whole iterator is consumed — that is where `total` comes from — so
-    /// pass a cheap one. An item that costs an allocation to build belongs in
-    /// [`push_with`](Self::push_with), which does not build it past the cap.
-    pub fn collect(cap: usize, iter: impl IntoIterator<Item = T>) -> Self {
-        let mut ex = Examples::new(cap);
-        for item in iter {
-            ex.push(item);
-        }
-        ex
     }
 
     /// Offer one example: counted always, kept while there is room.
@@ -106,16 +87,6 @@ impl<T> Examples<T> {
     }
 }
 
-impl Examples<String> {
-    /// The kept lines, followed by the remainder line when the cap bit.
-    pub fn into_lines(self, tail: &str) -> Vec<String> {
-        let more = self.more(tail);
-        let mut lines = self.into_vec();
-        lines.extend(more);
-        lines
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,11 +112,14 @@ mod tests {
     /// Under the cap there is no remainder to name, and nothing is dropped.
     #[test]
     fn an_uncapped_run_says_nothing_extra() {
-        let ex = Examples::collect(20, (0..3).map(|i| format!("k{i}")));
+        let mut ex = Examples::new(20);
+        for i in 0..3 {
+            ex.push(format!("k{i}"));
+        }
         assert_eq!(ex.total(), 3);
         assert_eq!(ex.dropped(), 0);
         assert_eq!(ex.more("more"), None);
-        assert_eq!(ex.into_lines("more").len(), 3);
+        assert_eq!(ex.into_vec().len(), 3);
     }
 
     /// `push_with` accounts like `push` but does not build past the cap.
@@ -161,6 +135,6 @@ mod tests {
         }
         assert_eq!(built, 2, "only the kept were built");
         assert_eq!(ex.total(), 5, "all five were counted");
-        assert_eq!(ex.into_lines("more")[2], "… and 3 more");
+        assert_eq!(ex.more("more").as_deref(), Some("… and 3 more"));
     }
 }

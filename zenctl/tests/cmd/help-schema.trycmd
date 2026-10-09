@@ -13,7 +13,7 @@ contracts.
 $ zenctl schema --help
 Payload schemas, as a contract's bundle carries them.
 
-The schema artifacts of one revision (spec §7.1, §9.5): JSON Schema documents and protobuf descriptor sets, and which resource member names which type. Offline from `--contracts`, or retrieved from the bus. Validating a v1 payload against a served schema is `check schema`.
+The schema artifacts of one revision (spec §7.1, §9.5): JSON Schema documents and protobuf descriptor sets, and which resource member names which type. Offline from `--contracts`, or retrieved from the bus. Validating one payload against a revision's type is `check schema`.
 
 Usage: zenctl schema <COMMAND>
 

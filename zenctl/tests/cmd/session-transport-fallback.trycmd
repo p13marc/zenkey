@@ -1,64 +1,23 @@
-The `OpenFailure::Transport` half of #196: the bus's problem, and the command
-answers anyway.
+The `OpenFailure::Transport` half of #196: the bus's problem, and what a
+command does about it.
 
-#196's premise was half wrong — offline `--registry` already worked, because a
-peer session opens against an unreachable endpoint and the union simply fell
-back to the files. What it could not survive was a transport that would not
-come up at all, which failed a question the files could answer on their own.
-Only that second case degrades, and it says so on stderr rather than silently.
+Since #501 the explorer session is a **client**: a client whose router does
+not answer does not open. Zenoh's client defaults are `connect.timeout_ms: 0`
+and `connect.exit_on_failure: true`, so the failure is immediate and without
+retry; peer mode is `-1` / `false` — retry forever — which is how a case like
+this used to become a timeout, or an empty bus, instead of a test. The fixture
+still *states* `mode: "client"`, which since #502 is the one way a file's mode
+counts — so it pins that path as well.
 
-Since #501 the explorer session is a **client**, and the two cases are one: a
-client whose router does not answer does not open. Zenoh's client defaults are
-`connect.timeout_ms: 0` and `connect.exit_on_failure: true`, so the failure is
-immediate and without retry; peer mode is `-1` / `false` — retry forever — which
-is how a case like this used to become a timeout, or an empty bus, instead of a
-test. The fixture still *states* `mode: "client"`, which since #502 is the one
-way a file's mode counts — so it pins that path as well.
-
-`blob list` for one producer, a v1 verb whose whole answer is the registry: what
-is pinned is the degradation note and the fact that a full answer follows it.
-It used to be `topic info`, which FJ4 retired with the rest of v1's registry
-nouns (#612); the `--registry` union this pins goes with v1 at FJ9.
-
-```console
-$ zenctl blob list --producer netring --format table --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry
-no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
-That is what this checkout declares, not what the fleet serves — `zenctl check conform <producer> --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
-declared @blob tiers:
-
-  netring  artifact  v1.1
-      endpoints  manifest, slice, have, push, fanout
-      reference  BlobReference  (carries the content root — RFC 07 §2.1)
-      encoding   application/vnd.tcpdump.pcap
-      origins    — (roster not asked)
-      packet captures and debug bundles minted by @rpc/netring/artifact
-  netring  tree      v1.1
-      reference  BlobReference  (carries the content root — RFC 07 §2.1)
-      origins    — (roster not asked)
-      capture-bundle directory snapshots, keyed by their own root hash
-2 of 11 slice(s) declare a tier. A declaration is a capability, never possession — `zenctl blob locate <id>` asks who actually holds one
-
-```
-
-The same answer as ndjson, which is where the note's *placement* shows: it goes
-to stderr, so the document on stdout stays parseable — one line per object,
-the envelope first.
-
-```console
-$ zenctl blob list --producer netring --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry
-no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
-That is what this checkout declares, not what the fleet serves — `zenctl check conform <producer> --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
-{"notes":[{"text":"2 of 11 slice(s) declare a tier. A declaration is a capability, never possession — `zenctl blob locate <id>` asks who actually holds one"}],"report":"blob-list","slices_considered":11,"slices_without_blob":9}
-{"description":"packet captures and debug bundles minted by @rpc/netring/artifact","encoding":"application/vnd.tcpdump.pcap","endpoints":["manifest","slice","have","push","fanout"],"known_tier":true,"producer":"netring","reference":"BlobReference","registry_version":"1.1","row":"tier","since":"1.8","tier":"artifact"}
-{"description":"capture-bundle directory snapshots, keyed by their own root hash","known_tier":true,"producer":"netring","reference":"BlobReference","registry_version":"1.1","row":"tier","since":"1.8","tier":"tree"}
-2 of 11 slice(s) declare a tier. A declaration is a capability, never possession — `zenctl blob locate <id>` asks who actually holds one
-
-```
+v1's half of this file — `--registry` dirs answering when the transport would
+not come up — left with the v1 registry (#612, FJ9). A zk2 question that
+`--contracts` answers alone opens no session at all (`schema-show.trycmd`), so
+there is no failure to fall back from.
 
 ## A verb with nothing to fall back on (#503)
 
-Without `--registry` there is nothing on disk to answer from, and a session
-that never opened is not an empty bus. This used to print "no live producers"
+With nothing on disk to answer from, a session that never opened is not an
+empty bus. This used to print "no live producers"
 and exit 0 — the peer session opened onto nothing. It is the reserved 2 now,
 for every verb: nothing was asked, so there is no verdict and no finding. zk2's
 `service list` opens its session in the namespace, through the same failure.
@@ -78,7 +37,7 @@ router; nothing went out, and nothing was attempted either — an act's 1 says
 it was tried and failed, which is not what happened.
 
 ```console
-$ zenctl pub v1/h-3fa9c2d41b7e/state/sysinfo/health '{}' --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl pub plant/line-1/health '{}' --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open the Zenoh session
 

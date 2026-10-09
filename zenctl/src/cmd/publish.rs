@@ -1,6 +1,6 @@
 //! `zenctl pub` — publish through the write facade (issue #47): a declared
-//! publisher, never an ad-hoc put (P7); and since #97, a body that actually
-//! ships in the encoding the subject declares.
+//! publisher, never an ad-hoc put (P7), with the QoS axes and the encoding
+//! the operator states, or zenoh's defaults and none.
 //!
 //! Top-level since #307 — publishing is an act on the wire, not a verb of
 //! the `topic` noun, which is what the registry declares.
@@ -12,6 +12,14 @@
 //! flag that moves it, and still writes every foreign key. A tool acts on a
 //! service through its operations — `zenctl call`. v1's `retire` went with
 //! it: a tombstone has no zk2 meaning a tool may send.
+//!
+//! ## Bytes, as typed (#612, FJ9)
+//!
+//! A foreign key has no contract to type it, so `pub` writes the body as
+//! typed: no schema lookup, no encoding, no refusal, and the QoS the
+//! operator gives (`--qos AXES`) or zenoh's own default. v1's registry
+//! ladder — the declared profile, the served schema's encoding, `--raw` and
+//! `--no-validate` to opt out of it — left with the v1 registry.
 //!
 //! ## An empty stdout is the contract (#242)
 //!
@@ -30,34 +38,10 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use zenkey_fleet::{BodySource, PrepareMode};
+use zenkey_fleet::WireQos;
 
-use crate::Bus;
+use crate::bus::Link;
 use crate::input::Source;
-
-/// Which of the engine's three preparation modes the flags select. Shared
-/// with `get --body`, so both write paths read the same flags the same way.
-pub fn mode(raw: bool, no_validate: bool) -> PrepareMode {
-    match (raw, no_validate) {
-        (true, _) => PrepareMode::Raw,
-        (false, true) => PrepareMode::Lenient,
-        (false, false) => PrepareMode::Encode,
-    }
-}
-
-/// Parse an explicit `--qos` flag; the error names the closed vocabulary.
-///
-/// An [`Unaskable`](crate::exit::Unaskable) since #307: a profile name
-/// outside RFC 04 §3's five is this tool refusing your input, so it exits 2
-/// like every other refused input — not 1, which on a write means "the
-/// publish failed".
-pub(super) fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
-    zenkey::qos::QosProfile::from_name(name).ok_or_else(|| {
-        crate::exit::unaskable!(
-            "unknown QoS profile {name:?} — sampled|refreshed|transition|alert|frame (RFC 04 §3)"
-        )
-    })
-}
 
 /// `zenctl pub`'s two shapes, told apart once (#209).
 ///
@@ -65,25 +49,23 @@ pub(super) fn parse_qos(name: &str) -> Result<zenkey::qos::QosProfile> {
 /// exactly one of `--from`/`<KEY>`, and `<KEY>` requires `<BODY>`. What is
 /// left is the two real shapes.
 pub async fn dispatch(cli: crate::cli::PubArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
+    let link = Link::resolve(&cli.session)?;
     match (cli.from, cli.key, cli.body) {
         (Some(crate::cli::PubSource::Ndjson), _, _) => {
-            run_from_ndjson(cli.qos.as_deref(), cli.every, cli.i_know, &bus).await
+            run_from_ndjson(cli.qos, cli.every, cli.i_know, &link).await
         }
         (None, Some(key), Some(body)) => {
             run(
                 OneShot {
                     key: &key,
                     body: &body,
-                    qos: cli.qos.as_deref(),
+                    qos: cli.qos,
                     encoding: cli.encoding.as_deref(),
                     times: cli.times,
                     every: cli.every,
-                    no_validate: cli.no_validate,
-                    raw: cli.raw,
                     attachment: cli.attachment.as_ref(),
                 },
-                &bus,
+                &link,
             )
             .await
         }
@@ -93,62 +75,38 @@ pub async fn dispatch(cli: crate::cli::PubArgs) -> Result<()> {
     }
 }
 
-/// The subject's declared profile, when the key refines to one (#158).
-/// Returns the profile and the declared path for the source note.
-fn declared_qos(
-    base: &str,
-    key: &str,
-    slices: Option<&zenkey_fleet::SliceSet>,
-) -> Option<(zenkey::qos::QosProfile, String)> {
-    match zenkey_fleet::describe_key(base, key, slices)
-        .facts
-        .registration
-    {
-        zenkey_fleet::Registration::Registered(s) => s.declared_qos().map(|q| (q, s.path.clone())),
-        _ => None,
-    }
-}
-
-/// #158's resolution ladder: an explicit flag wins, the declared profile is
-/// the default, `sampled` is the stated last resort. The choice and its
-/// source are printed either way — a publisher that picked its own QoS
-/// silently would be the write-side O4 mistake.
-fn resolve_qos(
-    explicit: Option<zenkey::qos::QosProfile>,
-    base: &str,
-    key: &str,
-    slices: Option<&zenkey_fleet::SliceSet>,
-) -> zenkey::qos::QosProfile {
-    if let Some(q) = explicit {
-        return q;
-    }
-    match declared_qos(base, key, slices) {
-        Some((q, path)) => {
-            eprintln!("qos: {} (declared for {path})", q.name());
-            q
-        }
-        None => {
-            eprintln!("qos: sampled (default — no declared profile for this key)");
-            zenkey::qos::QosProfile::Sampled
-        }
-    }
-}
-
 /// One `pub <KEY> <BODY>`, named (#354): nine parameters of which four were
 /// adjacent `Option<&str>`/`&str`, and `dispatch` filled them positionally.
 struct OneShot<'a> {
     key: &'a str,
     body: &'a Source,
-    qos: Option<&'a str>,
+    qos: Option<WireQos>,
     encoding: Option<&'a str>,
     times: usize,
     every: f64,
-    no_validate: bool,
-    raw: bool,
     attachment: Option<&'a Source>,
 }
 
-async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
+/// The QoS a publication goes out with: the flag's, or zenoh's default —
+/// said either way, because a publisher that picked its own QoS silently
+/// would be the write-side O4 mistake (#158).
+fn resolve_qos(explicit: Option<WireQos>) -> WireQos {
+    match explicit {
+        Some(q) => {
+            eprintln!("qos: {}", q.token());
+            q
+        }
+        None => {
+            eprintln!(
+                "qos: {} (zenoh's default — no contract types a foreign key)",
+                WireQos::DEFAULT.token()
+            );
+            WireQos::DEFAULT
+        }
+    }
+}
+
+async fn run(p: OneShot<'_>, link: &Link) -> Result<()> {
     let OneShot {
         key,
         body,
@@ -156,8 +114,6 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
         encoding,
         times,
         every,
-        no_validate,
-        raw,
         attachment,
     } = p;
     // A wildcard key is a blast radius, not a publication (#504) — refused
@@ -165,56 +121,13 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
     // move P3: a zk2 service's own key is its owner's alone to write.
     zenkey_fleet::check_concrete(key, zenkey_fleet::WriteAct::Put)?;
     refuse_owned(key)?;
-    // A key is a wire key too: `v1/…` under a non-empty base publishes
-    // where none of the deployment listens (#512). Said, not rewritten.
-    super::hint_off_base(key, args);
-    // An explicit --qos fails fast, before the body or the bus.
-    let explicit_qos = qos.map(parse_qos).transpose()?;
-    let typed = body.read()?;
-    // The attachment ships verbatim (#117): never schema-encoded, the
-    // registry's vocabulary ends at the payload.
+    let bytes = body.read()?;
+    // The attachment ships verbatim (#117).
     let attachment: Option<Vec<u8>> = attachment.map(Source::read).transpose()?;
 
-    let session = args.session().await?;
-    // Registry awareness: when the key refines to a registered subject, the
-    // producer's served schema **encodes** the body — those bytes are what
-    // rides the wire, and the declared encoding labels them. A body the schema
-    // cannot encode is refused before it touches the bus. An unregistered key,
-    // an untyped subject, or a producer serving no describe publishes as
-    // typed, and the engine's note says which happened (--raw opts out
-    // entirely, --no-validate opts out of the refusal but not the labelling).
-    let slices = if raw {
-        None
-    } else {
-        args.slices_optional().await?
-    };
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let prepared = zenkey_fleet::prepare_publish(
-        &args.fleet(&session),
-        &store,
-        slices.as_ref(),
-        key,
-        zenkey_fleet::PrepareSpec {
-            declared_encoding: encoding,
-            body: &typed,
-            mode: mode(raw, no_validate),
-        },
-    )
-    .await?;
-    if let Some(note) = &prepared.note {
-        eprintln!("note: {note}");
-    }
-    if let BodySource::Encoded { type_name } = &prepared.source {
-        eprintln!(
-            "encoded {} bytes as {type_name} → {}",
-            prepared.bytes.len(),
-            prepared.encoding.as_deref().unwrap_or("(no encoding set)")
-        );
-    }
-    let qos = resolve_qos(explicit_qos, args.base(), key, slices.as_ref());
-
-    let publication =
-        zenkey_fleet::declare_publication(&session, key, qos, prepared.encoding.as_deref()).await?;
+    let session = link.session().await?;
+    let qos = resolve_qos(qos);
+    let publication = zenkey_fleet::declare_publication(&session, key, qos, encoding).await?;
     if let Some(note) = matching_note(&publication, key).await {
         eprintln!("{}", note.to_line());
     }
@@ -222,12 +135,10 @@ async fn run(p: OneShot<'_>, args: &Bus) -> Result<()> {
     // `--repeat` made 0 and 1 the same number, which is one spelling too many
     // — and the one people typed for "none" was the one that published.
     for n in 0..times {
-        publication
-            .send(prepared.bytes.clone(), attachment.clone())
-            .await?;
+        publication.send(bytes.clone(), attachment.clone()).await?;
         eprintln!(
             "published {key} ({} bytes) [{}/{times}]",
-            prepared.bytes.len(),
+            bytes.len(),
             n + 1
         );
         if n + 1 < times {
@@ -291,27 +202,23 @@ async fn matching_note(
 /// facade, never ad-hoc puts — and counts what it could not publish
 /// instead of silently skipping it.
 ///
-/// **Re-cut for zk2** (#612, FJ8a). A row whose key a zk2 service owns is
-/// refused exactly as `pub` refuses one (P3), and counted; a foreign row is
-/// written as before, with the QoS axes it recorded (`qos_axes`, ahead of a
-/// profile name), so `echo --format ndjson | pub --from ndjson` keeps a
-/// foreign key's QoS whatever profile it matches. The session opens on the
-/// first row there is to write: a pipe of refused rows asks nothing of the
-/// bus.
+/// **Re-cut for zk2** (#612, FJ8a, FJ9). A row whose key a zk2 service owns
+/// is refused exactly as `pub` refuses one (P3), and counted; a foreign row
+/// is written as bytes, with the QoS axes it recorded (`qos_axes`), so
+/// `echo --format ndjson | pub --from ndjson` keeps a foreign key's QoS. A
+/// row that recorded none goes out with `--qos`, or zenoh's default. The
+/// session opens on the first row there is to write: a pipe of refused rows
+/// asks nothing of the bus.
 pub async fn run_from_ndjson(
-    default_qos: Option<&str>,
+    default_qos: Option<WireQos>,
     every: f64,
     i_know: bool,
-    args: &Bus,
+    link: &Link,
 ) -> Result<()> {
     use std::io::BufRead as _;
 
-    // An explicit --qos fails fast; otherwise each key falls back to its
-    // declared profile, then sampled — the same ladder as `zenctl pub` (#158).
-    let explicit_qos = default_qos.map(parse_qos).transpose()?;
+    let default_qos = default_qos.unwrap_or(WireQos::DEFAULT);
     let mut session: Option<zenoh::Session> = None;
-    let mut slices: Option<Option<zenkey_fleet::SliceSet>> = None;
-    let base = args.base().to_string();
 
     let mut publications: std::collections::HashMap<String, zenkey_fleet::Publication> =
         std::collections::HashMap::new();
@@ -350,24 +257,18 @@ pub async fn run_from_ndjson(
                 continue;
             }
         };
-        // A delete row is a tombstone (RFC 04 §1.2): even in a pipe, the
-        // off-state operator act keeps its price (v1.12) — refused rows are
-        // counted, never silently dropped. A put row on a wildcard is the
-        // same blast radius as a wildcard delete (#504), and a zk2 service's
-        // own key is its owner's alone (P3); `--i-know` moves neither.
-        // The owner's key is refused before anything is asked of the bus.
+        // A delete row is a tombstone: even in a pipe, the operator act keeps
+        // its price — refused rows are counted, never silently dropped. A put
+        // row on a wildcard is the same blast radius as a wildcard delete
+        // (#504), and a zk2 service's own key is its owner's alone (P3);
+        // `--i-know` moves neither. Every refusal is decided before anything
+        // is asked of the bus.
         if let Some(why) = owned_refusal(&row.key) {
             record_err(line_no, format!("{}: {why}", row.key), &mut refused);
             continue;
         }
-        // The rest needs what the slices say (a retire's class, a key's
-        // declared profile): loaded once, when the first row needs them.
-        if slices.is_none() {
-            slices = Some(args.slices_optional().await?);
-        }
-        let slices = slices.as_ref().and_then(Option::as_ref);
         let refusal = if row.delete {
-            zenkey_fleet::check_retire(&base, &row.key, slices, i_know)
+            zenkey_fleet::check_retire(&row.key, i_know)
                 .err()
                 .map(|e| e.to_string())
         } else {
@@ -382,40 +283,15 @@ pub async fn run_from_ndjson(
         let publication = match publications.entry(row.key.clone()) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                // The row's axes > the row's profile > flag > declared >
-                // sampled. Only the row's own name can be malformed; the
-                // declared fallback resolves silently per key (a per-row
-                // note would drown the pipe's real output).
-                let qos = match (row.qos_axes, row.qos.as_deref()) {
-                    (Some(axes), _) => axes,
-                    (None, Some(name)) => match zenkey::qos::QosProfile::from_name(name) {
-                        Some(q) => zenkey_fleet::WireQos::of_profile(q),
-                        None => {
-                            record_err(
-                                line_no,
-                                format!("unknown QoS profile {name:?}"),
-                                &mut malformed,
-                            );
-                            continue;
-                        }
-                    },
-                    (None, None) => zenkey_fleet::WireQos::of_profile(
-                        explicit_qos
-                            .or_else(|| declared_qos(&base, &row.key, slices).map(|(q, _)| q))
-                            .unwrap_or(zenkey::qos::QosProfile::Sampled),
-                    ),
-                };
+                // The row's axes > the flag > zenoh's default.
+                let qos = row.qos_axes.unwrap_or(default_qos);
                 if session.is_none() {
-                    session = Some(args.session().await?);
+                    session = Some(link.session().await?);
                 }
                 let s = session.as_ref().expect("opened above");
-                let publication = zenkey_fleet::declare_publication_with(
-                    s,
-                    &row.key,
-                    qos,
-                    row.encoding.as_deref(),
-                )
-                .await?;
+                let publication =
+                    zenkey_fleet::declare_publication(s, &row.key, qos, row.encoding.as_deref())
+                        .await?;
                 e.insert(publication)
             }
         };
@@ -466,51 +342,14 @@ pub async fn run_from_ndjson(
 mod tests {
     use super::*;
 
-    /// `--raw` wins over everything: it is the escape hatch, not a preference.
+    /// A zk2 service's own key is refused by name, whatever namespace it
+    /// sits under; a foreign key is not.
     #[test]
-    fn flag_pairs_map_onto_the_three_modes() {
-        assert_eq!(mode(false, false), PrepareMode::Encode);
-        assert_eq!(mode(false, true), PrepareMode::Lenient);
-        assert_eq!(mode(true, false), PrepareMode::Raw);
-        assert_eq!(mode(true, true), PrepareMode::Raw);
-    }
-
-    /// #158: flag > declared > sampled, and each rung is reachable.
-    #[test]
-    fn qos_resolves_flag_then_declared_then_sampled() {
-        use zenkey::qos::QosProfile;
-        use zenkey::slice::{RegistrySlice, SubjectDecl};
-        let mut health = SubjectDecl::new("health", zenkey::Class::State);
-        health.type_name = "Health".into();
-        health.qos = Some(zenkey::QosProfile::Transition.into());
-        let mut slice = RegistrySlice::new("1.0", "test", "sysinfo");
-        slice.subjects = vec![health];
-        let slices = zenkey_fleet::SliceSet::from_slices(vec![slice]);
-        let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
-
-        // The declared profile is found, with its path for the note.
-        assert_eq!(
-            declared_qos("", key, Some(&slices)),
-            Some((QosProfile::Transition, "health".to_string()))
-        );
-        // An explicit flag wins over it.
-        assert_eq!(
-            resolve_qos(Some(QosProfile::Alert), "", key, Some(&slices)),
-            QosProfile::Alert
-        );
-        // No flag: the declared profile drives.
-        assert_eq!(
-            resolve_qos(None, "", key, Some(&slices)),
-            QosProfile::Transition
-        );
-        // Unregistered key, no flag: the stated last resort.
-        let unregistered = "v1/h-3fa9c2d41b7e/state/sysinfo/other";
-        assert_eq!(
-            resolve_qos(None, "", unregistered, Some(&slices)),
-            QosProfile::Sampled
-        );
-        // No registry at all: not asked is not "declared nothing" — but the
-        // publisher still needs a profile, and sampled is the stated one.
-        assert_eq!(resolve_qos(None, "", key, None), QosProfile::Sampled);
+    fn an_owned_key_is_refused_and_a_foreign_one_is_not() {
+        let why = owned_refusal("prod/zk2/host-a/tc/tc.netif.v1/state/namespaces")
+            .expect("an owner's key");
+        assert!(why.contains("host-a/tc"), "{why}");
+        assert!(why.contains("zenctl call"), "{why}");
+        assert_eq!(owned_refusal("plant/line-1/temp"), None);
     }
 }
