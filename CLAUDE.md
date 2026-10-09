@@ -140,6 +140,14 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   check is unobservable or the scope is empty. The watchdog's `doctor` rule,
   `record --on` and `export --doctor-every` run it too. v1's registry checks
   survive only as `check conform`'s projection (`judge::registry_checks`).
+  FJ7's `acl gen` compiles spec §11's grants offline from `--contracts` and
+  an enrollment (`examples/zk2/acl/`: principals by user or CN, never a
+  zid, running services, archives and tools with their bindings and calls)
+  in `zenkey_fleet::model::acl`; `--default-permission allow` compiles each
+  grant into denies of its complement, `--face constrained --attach
+  client|south-region` guards a constrained face (router to router is
+  refused). Its plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and
+  judged by a live router (`tests/acl_live.rs`, `tests/acl_face.rs`).
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,

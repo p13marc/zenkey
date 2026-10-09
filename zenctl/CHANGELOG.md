@@ -6,7 +6,29 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — `doctor` judges a zk2 deployment (#612, FJ6)
+## Unreleased (`main`, zk2) — `acl gen` compiles zk2's grants (#612, FJ7)
+
+`acl gen` is zk2's now: spec §11's three grant shapes (Own, Consume, Call),
+compiled from the contracts and an enrollment into a router's
+`access_control` block, under either posture, with a constrained face when
+asked. v1's planner (RFC 09 §3's role matrix over registry slices, and the
+RFC 09 §4 face over `exposure` markers) is gone from `main`; the `v1` branch
+keeps it.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| an enrollment of `[[principal]]` `cn`/`user` + `role` + `origin`/`machine_id`, `[fleet]` | `[[principal]]` `user`/`cn` + `services`/`archives`/`tools`; `[[service]]` (`address`, `implements`, `bindings`, `calls`), `[[archive]]` (`records`, `peers`), `[[tool]]` | a v1 enrollment does not load: exit 2 naming the unknown field. `examples/zk2/acl/` holds two |
+| `--registry <dir>` narrowing the planes and the write set | `--contracts <path>` (authoring files, a directory, a `.history` root), required for every binding and call | the plan names the revisions it was compiled from; regenerate on every revision (§11.2) |
+| `default_permission: deny` always (a face: allow) | `--default-permission deny\|allow` (alias `--posture`), default deny | under allow, every grant compiles into denies of its complement, and every principal is denied queryables in the admin space (#684) |
+| `--allow-zid-subjects` | — | a `zid` principal is refused, with §11.3's reason: exit 1 |
+| `--face constrained --link-protocol … --link-interface … --link-interval …` | `--face constrained --attach client\|south-region --far <principal> [--region <name>]` | the far principal's policy carries the `@zk` and `@stream` denies; a south region adds `gateway.south` and the declarations a far router needs; `--attach router` is refused (exit 2): its key strings cross |
+| rule rows with `purpose` | rule rows with `grant` (`own`, `fan_in`, `fan_in_reply`, `consume`, `history`, `presence`, `call`, `contracts`, `deny_write`, `deny_read`, `deny_receive`, `deny_admin_space`, `face_declarations`, `face_presence`, `face_stream`) and `holder` | every rule names the grant it instantiates and the fact it exists for (`cite`) |
+| subject rows with `role` | subject rows with `runs` | |
+| the plan's `base`, `registry`, `downsampling` | `namespace`, `contracts`, `face`, `gateway` | |
+| check findings `unknown_cn`; `interest_probe` | `unknown_identity` (a CN or a user), `gateway_differs`; no `interest_probe` | |
+| explain `via[].purpose` | `via[].grant` | |
+
+## `doctor` judges a zk2 deployment (#612, FJ6)
 
 `doctor` is zk2's now: thirteen checks of a deployment against the core, each
 a question whose finding is the *yes*, each answered in the judgement shape —
