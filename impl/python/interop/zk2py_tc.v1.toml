@@ -30,3 +30,16 @@ response    = { raw = "application/octet-stream" }
 params      = { if = "string" }
 cardinality = 8
 fanout      = "allowed"
+
+# An optional, gated operation, for §5.1's order of refusals (0.9): an
+# owner without the capability answers it `unavailable`, after O2 and
+# before a key that names no member.
+[resources."interfaces/{if}/calibrate"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { if = "string" }
+cardinality = 8
+fanout      = "forbidden"
+optional    = true
+gate        = "capability:cal"

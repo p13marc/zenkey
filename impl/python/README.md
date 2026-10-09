@@ -87,8 +87,8 @@ examples       97 passed     0 failed
 total         517 passed     0 failed
 ```
 
-The figures are against `core.md` 0.8.
-- Amendments 0.5 to 0.8 resolved F-01 to F-73.
+The figures are against `core.md` 0.9, which adds no fixture.
+- Amendments 0.5 to 0.9 resolved F-01 to F-76.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -242,15 +242,23 @@ Four more runs:
     under `Latest` it waits;
   - two instances on one router run 200 calls between them;
   - two instances across two routers run 200 each.
-- **operations.md §2** steps 1 to 5, and §3 step 3. Three `tc` hosts (one
-  queryable per member, one over the template, one refusing `busy`) and a
-  `many` scan, all zk2py owners.
+- **operations.md §2** steps 1 to 6, and §3 step 3. Three `tc` hosts (one
+  queryable per member, one over the template, one refusing `busy`) and
+  two `many` scans, all zk2py owners. The second scan's handler names no
+  member and sends nothing.
 
-**Known deviations.** The owner example declares no queryable over an
-operation template. Its templated operations are silent although its
-descriptor claims them, so the runner reports those two checks as XFAIL
-(SPEC-FINDINGS, "New at 0.8"). The 0.7 deviations, F-65 and F-68, are met
-since FH2, and are now plain checks.
+**Since 0.9.**
+- **The order of refusals (§5.1):** `fanout_forbidden`, then
+  `unavailable`, then a key that names no member. The owner's
+  `unavailable` queryable now checks O2 first. A check on `calibrate`, an
+  optional operation no host exposes, pins the whole order.
+- **presence.md §6 step 3** reads the instance tokens.
+- **The owner example** serves its templated operations since 0.9's fix,
+  so the 0.8 round's two XFAILs are plain checks. Behind R1 it also runs
+  operations.md §2 steps 1 and 4, and an unbound fan-out (`internal`).
+
+**Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
+a rule the owner example does not meet yet.
 
 The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
 whose state zk2py GETs and whose operations it calls. It also adds two
@@ -260,7 +268,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 163 passed, 0 failed, 2 known deviations of the Rust
+Result: `live interop: 170 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
