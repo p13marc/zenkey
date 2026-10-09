@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Ten rounds.**
+**Eleven rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -16,9 +16,10 @@ where that was not enough, or where the spec said two things.
 - F-74 to F-76 were found against 0.8.
 - Nothing new was found against 0.9 (see "At 0.9").
 - F-77 to F-79 were found against 0.10.
-- Amendments 0.5 to 0.11 resolved F-01 to F-79. Each entry carries a
+- F-80 was found against 0.11.
+- Amendments 0.5 to 0.12 resolved F-01 to F-80. Each entry carries a
   status line naming its amendment.
-- **F-80 is new**, found against 0.11 (see "New at 0.11" at the end).
+- **F-81 is new**, found against 0.12 (see "New at 0.12" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -28,7 +29,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.11:** 80 entries.
+**Counts at 0.12:** 81 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -57,12 +58,15 @@ where that was not enough, or where the spec said two things.
     (F-78), and the `plugins` reading as agreeing with the named storages
     selector for a router with no plugin (F-79).
   - F-78 was a bug in the reference's doctor, which compared zid text.
-- F-80: **new**, 1 gap.
+- F-80: resolved by 0.12, against zk2py's fix. Judging an answer by the
+  zid in its key was not enough: a spoofer answers on the real router's
+  own key. 0.12 judges by the reply's replier id.
+- F-81: **new**, 1 gap.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.11 | Location | In one line |
+| Id | Severity | Status at 0.12 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -143,7 +147,8 @@ by the spec section that now states the rule.
 | F-77 | gap | resolved by 0.11 | §3.3 `requires[].optional` (0.10) | A contract role's `optional` that does not repeat its contract, or an explicit `false`: neither checked nor listed as unchecked. |
 | F-78 | gap | resolved by 0.11 | §3.3 `meta.zid`, §4.2 "Observing S1" (0.10) | A zid has no spelling; zenoh writes one without leading zeros, so a textual comparison can call an owner's stamp foreign. |
 | F-79 | gap | resolved by 0.11 | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
-| F-80 | gap | **new** | §4.2 S4, "What the check reads" (0.11) | Any session can answer `@/*/router`: with the routers' admin space off, one record turns "unobservable" into "clean". |
+| F-80 | gap | resolved by 0.12 | §4.2 S4, "What the check reads" (0.11) | Any session can answer `@/*/router`: with the routers' admin space off, one record turns "unobservable" into "clean". |
+| F-81 | gap | **new** | §4.2 "Who answered" (0.12), Appendix B | Only a router the tool's session is connected to is verified, and a client connects to one: with two routers, a client tool's S4 is never clean. |
 
 ---
 
@@ -1943,6 +1948,8 @@ What changed in zk2py:
 
 ### F-80 · gap · §4.2 S4 (0.11): who answers `@/*/router`
 
+**Status at 0.12: resolved by 0.12, against zk2py's fix.** §4.2 "Who answered": an admin answer counts as a router's only when the reply's replier id is the zid its key names, and that zid is a router the session is connected to, or the session itself. Any other answer is unverified and never contributes to a clean verdict. A tool that cannot read the replier id holds every answer unverified. An operator MAY tell a tool to trust every answer. zk2py's 0.11 defence judged by the key's zid, which the reference showed a spoofer defeats by answering on the real router's own key. zk2py reproduced this: with R1's admin space off, a client's answer on `@/<R1>/router` is the only answer, and its replier id is the client's. zenoh-python 1.10.1 exposes `Reply.replier_id` (an `EntityGlobalId`, whose `zid` is the replying session's). Its stub marks it `@_unstable`, but the published wheel has it at run time. zk2py now verifies with it (`live.unverified_why`), and security.md §3 steps 1–2 pass.
+
 > "`@/*/router`, the routers that answer … A router that answers the first
 > selector and has nothing under the second runs no storage. When no router
 > answers the first, the check is unobservable."
@@ -1970,3 +1977,78 @@ unobservable, and the other ids are reported as unverified. Storages
 listed under an unverified id still count, since they can only make the
 verdict worse. A router further away is then unverified too, which costs a
 clean verdict, never a false one.
+
+## New at 0.12 (#609)
+
+Found while following 0.12. `just py-conformance` passes 519 of 519 (0.12
+adds no fixture). `just py-live` passes 197 of 197, with no known
+deviation.
+
+**Does zenoh-python 1.10.1 expose a reply's replier id? Yes.**
+- `zenoh.Reply` has `replier_id`, next to `ok`, `err` and `result`.
+- Its type stub declares `@property @_unstable def replier_id(self) ->
+  EntityGlobalId | None`, documented "the ID of the zenoh instance that
+  answered this reply".
+- `_unstable` is a marker in the stub only: the published abi3 wheel has
+  the attribute at run time.
+- `EntityGlobalId.zid` is the replying session's `ZenohId`, and `eid` its
+  entity: 1 for a router's own admin answer, 6 for a client's queryable.
+
+zk2py reads it (`live.replier_of`). A binding without it would yield None,
+and every admin answer would then be held unverified.
+
+What changed in zk2py:
+- **Who answered.** Every answer to S4's two selectors is verified by its
+  replier id: it must be the key's zid, and that zid a router of the
+  session, or the session itself (`live.unverified_why`).
+  - Unverified answers are unjudged: they never break S4, and never let
+    it be clean.
+  - Each is listed with its key, its replier, and why: no replier id; the
+    replier is not the key's zid; or not a router of this session.
+  - `check_s4(trust=True)` is the operator's alternative.
+  - The 0.11 defence, judging by the key's zid, is gone. On its own it
+    would have read security.md §3 step 1 as clean.
+- **security.md §3 steps 1 and 2**, as measured:
+  - **Admin space off.** A client `S` answers on `@/<R1>/router`, and its
+    answer is the only one. Its replier id is S's zid. It is unverified,
+    and the check is unobservable.
+  - **Admin space on, read-only.** R1 answers under its own replier id,
+    verified, and S's answer is still unverified. The check is
+    unobservable, not clean.
+  - **Step 3** waits for the grant generator, as the scenario says.
+- **The storage stand-in** is a client playing a storage manager, which is
+  the spoof. Untrusted, its answers are unverified, and even a storage on
+  `zk2/**` leaves the check unobservable. Trusted, as the reference's own
+  test now runs, `telemetry/**` is clean and `zk2/**` breaks S4.
+
+### F-81 · gap · §4.2 "Who answered" (0.12): a client tool verifies one router
+
+> "A tool counts an answer as a router's only when the reply's replier id
+> is the zid the key names, and that zid is a router its session is
+> connected to, or the session itself. Any other answer is unverified, and
+> an unverified answer never contributes to a clean verdict."
+
+> Appendix B: "A client connects to one endpoint at a time."
+
+A router further away answers honestly: its replier id is the zid its key
+names. But it is not a router the tool's session is connected to, so its
+answer is unverified, and the check can never be clean beside it. Measured
+on zenoh 1.10.1, with R2 linked to R1 and both admin spaces on, read-only:
+- **A client tool on R1.** It reads R1's answer, verified, and R2's,
+  carrying R2's own replier id but unverified ("not a router of this
+  session"). The check is unobservable.
+- **A peer tool connected to both routers.** `info.routers_zid()` lists
+  both, both answers are verified, and the check is clean. The peer
+  receives R2's record twice, by two paths, which zk2py counts once.
+
+So in any deployment with more than one router, a tool connected as a
+client, the usual shape, can never report S4 clean. It needs a peer
+session connected to every router, one session per router, or the
+operator's trust. The spec does not say which, nor whether a far router's
+self-consistent answer is meant to count. Requiring the connection may be
+deliberate, since a transport's peer id is what a session can vouch for.
+The cost is not stated.
+**Resolved:** zk2py follows the rule as written. It reports a far router's
+answer as unverified with its own reason ("not a router of this session"),
+distinct from a spoof ("replier is not the key's zid"). The runner shows
+that a peer tool connected to every router gets the clean verdict.
