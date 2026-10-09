@@ -50,19 +50,16 @@ pub async fn run(cli: crate::cli::CheckExpectArgs) -> Result<()> {
     let mut session = None;
     let revision = ASKING
         .ask(zk2::revision_at(&dep, &contracts, &spec_target, Some(&target), &mut session).await);
-    let r = match &resource {
-        Some(name) => Some(
-            ASKING.ask(
-                zenkey_fleet::resolve_resource(
-                    &revision,
-                    name,
-                    &[Kind::Stream, Kind::State, Kind::Event],
-                )
-                .map_err(anyhow::Error::from),
-            ),
-        ),
-        None => None,
-    };
+    let r = resource.as_ref().map(|name| {
+        ASKING.ask(
+            zenkey_fleet::resolve_resource(
+                &revision,
+                name,
+                &[Kind::Stream, Kind::State, Kind::Event],
+            )
+            .map_err(anyhow::Error::from),
+        )
+    });
     if let Some(r) = r {
         ASKING.ask(zenkey_fleet::check_values(r, &values).map_err(anyhow::Error::from));
     }

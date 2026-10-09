@@ -1056,7 +1056,6 @@ mod tests {
             KeyFieldContext {
                 type_name: Some("Health".into()),
                 declared: Some(declared),
-                ..KeyFieldContext::default()
             },
         )]
         .into();
