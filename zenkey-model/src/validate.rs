@@ -69,6 +69,37 @@ pub fn validate(bundle: &Bundle, ty: &Value, value: &Value) -> Result<(), Vec<Vi
     if out.is_empty() { Ok(()) } else { Err(out) }
 }
 
+/// Whether `value` satisfies `schema`, one schema position inside `doc`, a
+/// JSON Schema document of `bundle`: its `$ref`s resolve from `doc`, as
+/// [`resolve_ref`] says.
+///
+/// [`validate`] answers for a whole type; this answers for one position of
+/// it. A tool that builds a value asks it of each branch of a `oneOf`
+/// before it commits to one, because a value must match exactly one (#612,
+/// FJ8a's synthesis).
+#[must_use]
+pub fn satisfies<'b>(bundle: &'b Bundle, doc: &'b Value, schema: &Value, value: &Value) -> bool {
+    let docs = Docs::of(bundle);
+    let mut out = Vec::new();
+    Cx { docs: &docs }.check(schema, doc, value, "", &mut out, 0);
+    out.is_empty()
+}
+
+/// Resolves a `$ref` written in `doc`, one of `bundle`'s JSON Schema
+/// documents (§9.4): the file part names another of them by its stem (the
+/// last path segment, without `.json`), and an empty one names `doc`
+/// itself. Returns the schema it points at and the document holding it,
+/// from which that schema's own `$ref`s resolve.
+#[must_use]
+pub fn resolve_ref<'b>(
+    bundle: &'b Bundle,
+    doc: &'b Value,
+    r: &str,
+) -> Option<(&'b Value, &'b Value)> {
+    let docs = Docs::of(bundle);
+    Cx { docs: &docs }.resolve(r, doc)
+}
+
 /// The bundle's JSON Schema documents by artifact name, the stem a `$ref`'s
 /// file part names (§9.4).
 struct Docs<'b>(BTreeMap<&'b str, &'b Value>);
@@ -509,6 +540,26 @@ mod tests {
                 "{v}: {got:?}, want {want:?}"
             );
         }
+    }
+
+    /// One schema position at a time: each `oneOf` branch of `event` is
+    /// asked alone, and a `$ref` into another listed file resolves from the
+    /// document it is written in.
+    #[test]
+    fn one_position_is_asked_alone_and_refs_resolve_by_stem() {
+        let b = status();
+        let ty = crate::decode::type_of(&b, "state", "status", "type").unwrap();
+        let doc = &b.schemas[ty["schema"].as_str().unwrap()]["data"];
+        let (status, sdoc) = super::resolve_ref(&b, doc, "#/$defs/Status").expect("local");
+        let branches = status["properties"]["event"]["oneOf"].as_array().unwrap();
+        let up = json!({"up": true});
+        assert!(super::satisfies(&b, sdoc, &branches[0], &up));
+        assert!(!super::satisfies(&b, sdoc, &branches[1], &up));
+        let (link, ldoc) =
+            super::resolve_ref(&b, sdoc, "common.json#/$defs/Link").expect("by stem");
+        assert!(super::satisfies(&b, ldoc, link, &json!({"mbps": 1})));
+        assert!(!super::satisfies(&b, ldoc, link, &json!({})));
+        assert!(super::resolve_ref(&b, sdoc, "nowhere.json#/$defs/Link").is_none());
     }
 
     #[test]

@@ -1,157 +1,121 @@
-//! `bench rpc` (issue #52) — how fast does the fleet answer, and which
-//! origin is slow.
+//! `bench call` (#612, FJ8a): how fast a zk2 operation answers, and which
+//! replier is slow.
 //!
-//! Two design decisions worth stating, because both are refusals:
+//! **Latency is per reply.** Each reply is timed where it arrives, in the
+//! query's own callback, from the moment the call went out: a fan-out
+//! completes when its slowest replier has, and charging that to every
+//! replier would report the fastest one's latency as the worst one's. The
+//! calls go out as the runtime's do — one concrete key with `BestMatching`
+//! and `None` (O1), a fan-out with `All` and `None` (O2), the operation's
+//! recommended priority — on the keys the runtime builds; each value reply
+//! is attributed by the key it went on (O3), as `Fleet` attributes them.
 //!
-//! **Latency is per reply, not per call.** A fan-out GET finishes when the
-//! *slowest* origin answers, so attributing the call's duration to every
-//! responder would report the fastest node's latency as the worst one's. The
-//! measurement therefore rides
-//! [`RepeatingQuery::fetch_timed`](crate::bus::query::RepeatingQuery::fetch_timed),
-//! which stamps each reply where it is drained — inside the RFC 05 §2.1
-//! chokepoint, not around it.
+//! **The populations stay apart** (the tooling guide's O6): values per
+//! replier, envelopes as a refusal population of their own (unattributed:
+//! a `reply_err` carries no key, §5.1), malformed envelopes, the
+//! transport's own errors, calls that drew nothing at all (silence, never
+//! averaged in: O5), replies R6 discards, and calls that panicked here.
 //!
-//! **Benching writes is refused by default.** The registry declares
-//! `idempotent`, and a benchmark is by definition N repetitions: repeating a
-//! non-idempotent write into a live fleet is a different act from measuring
-//! it. The refusal is registry-driven, so it is only as good as the
-//! declaration — which is why a producer that declares *nothing* is also
-//! refused rather than assumed safe (O4: "not declared" is not "declared
-//! idempotent").
+//! **A benchmark repeats a call**, so an operation that is not `idempotent`
+//! is refused unless the caller means it (O4's reasoning: repeating a
+//! write is a different act from measuring it). A fan-out to an operation
+//! that forbids one was refused by the plan (O2), and nothing moves that.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use crate::{Error, Result};
+use zenkey_model::grammar::{KindToken, ZkKey, parse};
+use zenoh::Session;
+use zenoh::bytes::ZBytes;
+use zenoh::key_expr::OwnedKeyExpr;
+use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
 
-use crate::bus::query::{Answer, RepeatingQuery, declare_repeating};
-use crate::bus::write::CallTarget;
-use crate::model::registry::SliceSet;
-use crate::report::{BenchReport, OriginLatency};
+use crate::model::catalog::Revision;
+use crate::model::target::CallPlan;
+use crate::report::{
+    BenchPresence, BenchReport, CallMode, HolderTally, Latency, LatencyClock, RefusalTally,
+    ReplierLatency,
+};
+use crate::{Error, Result};
 
 /// What to measure.
 pub struct BenchSpec<'a> {
-    pub target: &'a CallTarget,
-    pub producer: &'a str,
-    pub procedure: &'a str,
-    /// Total calls to issue.
-    pub count: usize,
-    /// How many may be in flight at once. 1 = strictly sequential.
+    pub revision: &'a Revision,
+    pub plan: &'a CallPlan,
+    /// The request, encoded as the operation's `request` type.
+    pub request: Vec<u8>,
+    /// Calls to make.
+    pub calls: usize,
+    /// Calls in flight at once; 1 is strictly sequential.
     pub concurrency: usize,
+    /// How long each call waits for replies.
     pub timeout: Duration,
-    /// Proceed even when the registry does not declare the procedure
-    /// idempotent. The caller must have meant it.
+    /// Bench an operation that is not `idempotent`: the caller means a
+    /// repeated write.
     pub force: bool,
 }
 
-/// The procedures **this convention** defines, rather than an application:
-/// `introspect` (RFC 08 §6) and `describe` (RFC 08 §7). Both are reads that
-/// return a document, both are MUST/SHOULD for every producer, and neither is
-/// an application's to declare differently — so their idempotence is a fact
-/// about the convention, not something to look up in a registry that may not
-/// bother listing them.
-const FRAMEWORK_READS: [&str; 2] = ["introspect", "describe"];
+/// One reply, timed from the call's start.
+type Timed = (Duration, Reply);
 
-/// Refuse a benchmark that would repeat a non-idempotent call.
-///
-/// With no slices loaded the registry layer cannot judge — and unlike the
-/// fan-out guard, which has builder and ACL layers behind it, there is nothing
-/// behind this one. So it refuses rather than proceeding, and says how to
-/// override.
-fn check_idempotent(slices: Option<&SliceSet>, producer: &str, procedure: &str) -> Result<()> {
-    if FRAMEWORK_READS.contains(&procedure) {
-        return Ok(());
-    }
-    let Some(slices) = slices else {
-        return Err(Error::unaskable(
-            format!("{producer}/{procedure}"),
-            "no registry is loaded, so its idempotence is unknown — a benchmark \
-             repeats a call N times, and \"not asked\" is not \"safe to repeat\" \
-             (RFC 09 §5.1 O4). Load a registry, or pass --i-know.",
-        ));
-    };
-    let decl = slices
-        .get(producer)
-        .and_then(|s| s.procedures.iter().find(|p| p.path == procedure));
-    match decl {
-        Some(d) if d.idempotent == Some(true) => Ok(()),
-        Some(d) => Err(Error::unaskable(
-            format!("{producer}/{procedure}"),
-            format!(
-                "declares kind = {:?}, idempotent = {} — repeating it is a write \
-                 into a live fleet, not a measurement. Pass --i-know to mean it.",
-                d.kind,
-                match d.idempotent {
-                    Some(false) => "false",
-                    _ => "(undeclared)",
+/// What one call drew.
+#[derive(Debug, Default)]
+struct CallOutcome {
+    /// Value replies: `(address, key, latency)`.
+    values: Vec<(String, String, Duration)>,
+    /// Envelopes: `(code, latency)`.
+    refusals: Vec<(String, Duration)>,
+    malformed: u64,
+    transport: u64,
+    discarded: u64,
+}
+
+/// Sorts one call's replies into their populations: a value reply by the
+/// key it went on, when that key is concrete and a member of the operation
+/// called (O3, R6); an error reply by its `Encoding` (§5.2).
+fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOutcome {
+    let mut out = CallOutcome::default();
+    for (at, reply) in replies {
+        match reply.into_result() {
+            Ok(sample) => {
+                let key = sample.key_expr().as_str();
+                match member_of(revision, plan, key) {
+                    Some(addr) => out.values.push((addr, key.to_owned(), at)),
+                    None => out.discarded += 1,
                 }
-            ),
-        )),
-        None => Err(Error::unaskable(
-            format!("{producer}/{procedure}"),
-            "the loaded registry does not declare it, so nothing says it is safe \
-             to repeat. Pass --i-know to bench it anyway.",
-        )),
-    }
-}
-
-/// The four populations a benchmark keeps apart, and the one place a joined
-/// call is sorted into them.
-///
-/// Keeping them apart is the whole honesty claim of this report (RFC 13 §3 O6,
-/// RFC 05 §3.1): an error reply is the fleet refusing, silence is the fleet not
-/// answering, and a **panicked** call is this tool falling over — three
-/// different facts that a single "failed" counter would flatten into a lie.
-/// The fold lives here rather than inline so the fourth one can be tested
-/// against a real `JoinError` (#329), which is what the loop above cannot
-/// manufacture.
-#[derive(Debug, Default, PartialEq, Eq)]
-struct Tally {
-    completed: usize,
-    errors: usize,
-    silent: usize,
-    panicked: usize,
-}
-
-impl Tally {
-    /// Fold one joined call in, routing its per-reply latencies to their
-    /// origins.
-    fn record(
-        &mut self,
-        joined: std::result::Result<
-            Result<Vec<(crate::bus::query::FleetAnswer, Duration)>>,
-            tokio::task::JoinError,
-        >,
-        per_origin: &mut BTreeMap<String, Vec<Duration>>,
-    ) {
-        // A panicked call reached no ledger at all before #329: the
-        // `let Ok(result) = handle.await else { continue }` that stood here
-        // skipped `completed`, `errors` and `silent` in one line.
-        let Ok(result) = joined else {
-            self.panicked += 1;
-            return;
-        };
-        let Ok(answers) = result else {
-            self.errors += 1;
-            return;
-        };
-        self.completed += 1;
-        if answers.is_empty() {
-            // RFC 05 §3.1: zero replies is its own outcome, counted apart
-            // from an error so a benchmark cannot average silence away.
-            self.silent += 1;
-            return;
-        }
-        for (answer, at) in answers {
-            match answer.answer {
-                Answer::Value(_) => per_origin.entry(answer.origin).or_default().push(at),
-                Answer::Error { .. } => self.errors += 1,
             }
+            Err(e) => match zk2::client::classify(&e) {
+                zk2::client::ErrorReply::Envelope(env) => out.refusals.push((env.code, at)),
+                zk2::client::ErrorReply::Malformed(_) => out.malformed += 1,
+                zk2::client::ErrorReply::Transport(_) => out.transport += 1,
+            },
         }
+    }
+    out
+}
+
+/// The address a value reply's key names, when it is a concrete member key
+/// of the operation called.
+fn member_of(revision: &Revision, plan: &CallPlan, key: &str) -> Option<String> {
+    if key.contains('*') {
+        return None;
+    }
+    match parse(key).ok()? {
+        ZkKey::Data {
+            addr,
+            iface,
+            kind: KindToken::Op,
+            resource,
+        } if &iface == revision.iface() => {
+            let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+            plan.resource.template.matches(&refs)?;
+            Some(addr.to_string())
+        }
+        _ => None,
     }
 }
 
-/// Percentile by nearest-rank over a sorted slice. Reported in milliseconds.
+/// Percentile by nearest rank over a sorted slice, in milliseconds.
 fn percentile(sorted: &[Duration], p: f64) -> f64 {
     if sorted.is_empty() {
         return 0.0;
@@ -161,236 +125,310 @@ fn percentile(sorted: &[Duration], p: f64) -> f64 {
     sorted[idx].as_secs_f64() * 1000.0
 }
 
-/// Run the benchmark.
-pub async fn run_bench(
-    fleet: &crate::Fleet<'_>,
-    spec: BenchSpec<'_>,
-    slices: Option<&SliceSet>,
-) -> Result<BenchReport> {
-    if !spec.force {
-        check_idempotent(slices, spec.producer, spec.procedure)?;
+/// A distribution, or `None` for no sample.
+fn latency(mut samples: Vec<Duration>) -> Option<Latency> {
+    samples.sort_unstable();
+    let (first, last) = (*samples.first()?, *samples.last()?);
+    Some(Latency {
+        min_ms: first.as_secs_f64() * 1000.0,
+        p50_ms: percentile(&samples, 50.0),
+        p95_ms: percentile(&samples, 95.0),
+        p99_ms: percentile(&samples, 99.0),
+        max_ms: last.as_secs_f64() * 1000.0,
+    })
+}
+
+/// The key expressions a call goes out on, as the runtime builds them: the
+/// one concrete key (`Client::key`), or one selector per selected provider
+/// (`Fleet::selectors`).
+fn selectors(session: &Session, revision: &Revision, plan: &CallPlan) -> Result<Vec<OwnedKeyExpr>> {
+    let contract = revision.shared_contract();
+    let address = plan.target.address.as_str();
+    let refuse = |e: zk2::Error| Error::unaskable(address, e.to_string());
+    match &plan.target.concrete {
+        Some(addr) if !plan.is_fanout() => {
+            let client = zk2::Client::new(session, contract, &[address]).map_err(refuse)?;
+            Ok(vec![
+                client
+                    .key(addr, &plan.name, &plan.values)
+                    .map_err(refuse)?
+                    .into_keyexpr(),
+            ])
+        }
+        _ => zk2::Fleet::new(session, contract, &[address])
+            .and_then(|f| f.selectors(&plan.name, &plan.values))
+            .map_err(refuse),
     }
-    // A `*` bench is N fleet calls, so it answers to the fleet call's guard
-    // too (#505) — which this path, building its own querier, never asked:
-    // a write declared idempotent but not fan-out-able was benched across
-    // every origin. `force` covers what it covers on `call`, the
-    // undeclared; a declared forbidden fan-out stays refused.
-    crate::bus::write::check_fanout(
-        spec.target,
-        slices,
-        spec.producer,
-        spec.procedure,
-        spec.force,
-    )?;
-    if spec.count == 0 {
+}
+
+/// The selection's interface tokens, read once: who could have answered.
+async fn holders(
+    session: &Session,
+    revision: &Revision,
+    plan: &CallPlan,
+    timeout: Duration,
+) -> (BenchPresence, BTreeSet<String>) {
+    let address = plan.target.address.as_str();
+    let (system, service) = address.split_once('/').unwrap_or((address, "*"));
+    let selector = format!("zk2/{system}/{service}/@zk/alive/{}/**", revision.iface());
+    match crate::bus::presence::liveliness_read(session, &selector, timeout).await {
+        Ok(read) => {
+            let held: BTreeSet<String> = read
+                .keys
+                .iter()
+                .filter_map(|k| match parse(k) {
+                    Ok(ZkKey::Alive { addr, .. }) => Some(addr.to_string()),
+                    _ => None,
+                })
+                .collect();
+            (
+                BenchPresence {
+                    selector,
+                    complete: read.complete,
+                    error: None,
+                    holders: Vec::new(),
+                },
+                held,
+            )
+        }
+        Err(e) => (
+            BenchPresence {
+                selector,
+                complete: false,
+                error: Some(crate::one_line(&e)),
+                holders: Vec::new(),
+            },
+            BTreeSet::new(),
+        ),
+    }
+}
+
+/// How one call goes out: the query's settings, shared by every call.
+#[derive(Clone)]
+struct Query {
+    session: Session,
+    selectors: Vec<OwnedKeyExpr>,
+    target: QueryTarget,
+    encoding: zenoh::bytes::Encoding,
+    priority: zenoh::qos::Priority,
+    request: ZBytes,
+    timeout: Duration,
+}
+
+impl Query {
+    /// One call: every selector's query out first, then every reply,
+    /// timed in its callback as it arrives, until each query completes.
+    async fn call(&self) -> Result<Vec<Timed>> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Timed>();
+        let started = Instant::now();
+        for ke in &self.selectors {
+            let tx = tx.clone();
+            self.session
+                .get(ke.clone())
+                .payload(self.request.clone())
+                .encoding(self.encoding.clone())
+                .target(self.target)
+                .consolidation(ConsolidationMode::None)
+                .timeout(self.timeout)
+                .priority(self.priority)
+                .callback(move |reply| {
+                    let _ = tx.send((started.elapsed(), reply));
+                })
+                .await
+                .map_err(|e| Error::bus("bench call", ke.as_str(), e))?;
+        }
+        drop(tx);
+        let mut out = Vec::new();
+        while let Some(timed) = rx.recv().await {
+            out.push(timed);
+        }
+        Ok(out)
+    }
+}
+
+/// Refuses a bench that would repeat a write — an operation not declared
+/// `idempotent`, unless `force` (O4's reasoning) — or measure nothing,
+/// before anything is asked. [`run_bench`] asks it first; a caller asks it
+/// before it opens a session.
+pub fn check_bench(revision: &Revision, plan: &CallPlan, calls: usize, force: bool) -> Result<()> {
+    if !plan.operation.idempotent && !force {
+        return Err(Error::unaskable(
+            format!("{} {}", revision.iface(), plan.name),
+            "is not idempotent, and a benchmark calls it again and again: that is a \
+             repeated write into a live deployment, not a measurement (O4). Pass --i-know \
+             to mean it",
+        ));
+    }
+    if calls == 0 {
         return Err(Error::unaskable("--calls 0", "measures nothing"));
     }
+    Ok(())
+}
 
-    let segments: Vec<&str> = spec.procedure.split('/').collect();
-    let relative = match spec.target {
-        CallTarget::Host(id) => {
-            let origin = zenkey::origin::RemoteOrigin::from_host(id.clone());
-            zenkey::selector::rpc_at(&origin, spec.producer, &segments).to_string()
-        }
-        CallTarget::Fleet => zenkey::selector::fleet_rpc(spec.producer, &segments).to_string(),
-        CallTarget::Service(origin) => zenkey::selector::service_rpc(origin, &segments).to_string(),
+/// Runs the benchmark.
+pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchReport> {
+    let BenchSpec {
+        revision,
+        plan,
+        request,
+        calls,
+        concurrency,
+        timeout,
+        force,
+    } = spec;
+    check_bench(revision, plan, calls, force)?;
+    let keys = selectors(session, revision, plan)?;
+    let fanout = plan.is_fanout();
+    let query = Query {
+        session: session.clone(),
+        selectors: keys.clone(),
+        target: if fanout {
+            QueryTarget::All
+        } else {
+            QueryTarget::BestMatching
+        },
+        encoding: zk2::writer::wire_encoding(
+            &plan.operation.request,
+            plan.operation.encoding,
+            &plan.values,
+        ),
+        priority: zk2::qos::priority(plan.operation.priority),
+        request: ZBytes::from(request),
+        timeout,
     };
-    let key = fleet.wire(relative);
+    let (mut presence, held) = holders(session, revision, plan, timeout).await;
 
-    // One declared querier for the whole run (#37): re-declaring per call
-    // would measure zenoh's declaration path rather than the fleet's answers.
-    let querier = std::sync::Arc::new(
-        declare_repeating(fleet, &key, spec.timeout)
-            .await
-            .map_err(|e| Error::bus("declare querier", key.clone(), e))?,
-    );
-
-    let concurrency = spec.concurrency.max(1).min(spec.count);
+    let concurrency = concurrency.clamp(1, calls);
     let started = Instant::now();
-    let mut per_origin: BTreeMap<String, Vec<Duration>> = BTreeMap::new();
-    let mut tally = Tally::default();
-
+    let mut repliers: Vec<(String, String, Vec<Duration>)> = Vec::new();
+    let mut codes: BTreeMap<String, u64> = BTreeMap::new();
+    let mut refusal_times = Vec::new();
+    let mut without_value: BTreeMap<String, u64> = held.iter().map(|a| (a.clone(), 0)).collect();
+    let (mut completed, mut silent, mut panicked) = (0usize, 0u64, 0u64);
+    let (mut malformed, mut transport, mut discarded) = (0u64, 0u64, 0u64);
+    let mut fatal = None;
     let mut issued = 0usize;
-    while issued < spec.count {
-        let batch = concurrency.min(spec.count - issued);
-        let mut set = Vec::with_capacity(batch);
+    while issued < calls && fatal.is_none() {
+        let batch = concurrency.min(calls - issued);
+        let mut set = tokio::task::JoinSet::new();
         for _ in 0..batch {
-            let q: std::sync::Arc<RepeatingQuery> = querier.clone();
-            set.push(tokio::spawn(async move { q.fetch_timed().await }));
+            let q = query.clone();
+            set.spawn(async move { q.call().await });
         }
         issued += batch;
-        for handle in set {
-            tally.record(handle.await, &mut per_origin);
+        while let Some(joined) = set.join_next().await {
+            let replies = match joined {
+                Err(_) => {
+                    panicked += 1;
+                    continue;
+                }
+                Ok(Err(e)) => {
+                    fatal.get_or_insert(e);
+                    continue;
+                }
+                Ok(Ok(r)) => r,
+            };
+            completed += 1;
+            let o = classify(revision, plan, replies);
+            if o.values.is_empty() && o.refusals.is_empty() && o.malformed == 0 {
+                silent += 1;
+            }
+            let heard: BTreeSet<&str> = o.values.iter().map(|(a, _, _)| a.as_str()).collect();
+            for (addr, n) in &mut without_value {
+                if !heard.contains(addr.as_str()) {
+                    *n += 1;
+                }
+            }
+            for (addr, key, at) in o.values {
+                match repliers.iter_mut().find(|(_, k, _)| *k == key) {
+                    Some((_, _, v)) => v.push(at),
+                    None => repliers.push((addr, key, vec![at])),
+                }
+            }
+            for (code, at) in o.refusals {
+                *codes.entry(code).or_default() += 1;
+                refusal_times.push(at);
+            }
+            malformed += o.malformed;
+            transport += o.transport;
+            discarded += o.discarded;
         }
     }
-    let Tally {
-        completed,
-        errors,
-        silent,
-        panicked,
-    } = tally;
+    if let Some(e) = fatal {
+        return Err(e);
+    }
     let elapsed = started.elapsed();
-    std::sync::Arc::try_unwrap(querier)
-        .map_err(|_| Error::Internal("bench tasks outlived the run".into()))?
-        .undeclare()
-        .await?;
-
-    let origins = per_origin
+    presence.holders = without_value
         .into_iter()
-        .map(|(origin, mut samples)| {
-            samples.sort_unstable();
-            OriginLatency {
-                origin,
-                replies: samples.len(),
-                min_ms: samples[0].as_secs_f64() * 1000.0,
-                p50_ms: percentile(&samples, 50.0),
-                p95_ms: percentile(&samples, 95.0),
-                p99_ms: percentile(&samples, 99.0),
-                max_ms: samples[samples.len() - 1].as_secs_f64() * 1000.0,
-            }
+        .map(|(address, without_value)| HolderTally {
+            address,
+            without_value,
         })
         .collect();
-
     Ok(BenchReport {
-        key,
-        requested: spec.count,
+        address: plan.target.address.clone(),
+        iface: revision.iface().to_string(),
+        fingerprint: revision.fingerprint().to_string(),
+        operation: plan.name.clone(),
+        values: plan.values.clone(),
+        selectors: keys.iter().map(|k| k.as_str().to_owned()).collect(),
+        mode: if fanout {
+            CallMode::Fanout
+        } else {
+            CallMode::Concrete
+        },
+        requested: calls,
         completed,
         concurrency,
-        errors,
-        silent,
-        panicked,
+        timeout_s: timeout.as_secs_f64(),
         elapsed_s: elapsed.as_secs_f64(),
         calls_per_s: if elapsed.as_secs_f64() > 0.0 {
             completed as f64 / elapsed.as_secs_f64()
         } else {
             0.0
         },
-        origins,
+        clock: LatencyClock::RoundTrip,
+        repliers: repliers
+            .into_iter()
+            .filter_map(|(address, key, times)| {
+                let replies = times.len() as u64;
+                latency(times).map(|latency| ReplierLatency {
+                    address,
+                    key,
+                    replies,
+                    latency,
+                })
+            })
+            .collect(),
+        refusals: RefusalTally {
+            count: codes.values().sum(),
+            codes,
+            latency: latency(refusal_times),
+        },
+        malformed,
+        transport,
+        silent,
+        discarded,
+        panicked,
+        presence,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey::slice::{ProcedureDecl, RegistrySlice};
-
-    fn slices(kind: &str, idempotent: Option<bool>) -> SliceSet {
-        let mut trigger = ProcedureDecl::new("capture/trigger");
-        trigger.kind = Some(zenkey::Declared::parse(kind));
-        trigger.reply = Some("Ack".into());
-        trigger.idempotent = idempotent;
-        let mut slice = RegistrySlice::new("1.0", "t", "netring");
-        slice.procedures = vec![trigger];
-        SliceSet::from_slices(vec![slice])
-    }
-
-    /// The guard: only an explicit `idempotent = true` passes. "Undeclared"
-    /// and "not in the registry at all" both refuse — a benchmark repeats,
-    /// and O4 forbids reading an unasked question as a yes.
-    #[test]
-    fn only_a_declared_idempotent_procedure_benches_by_default() {
-        let ok = slices("read", Some(true));
-        assert!(check_idempotent(Some(&ok), "netring", "capture/trigger").is_ok());
-
-        for (kind, idem) in [("write", Some(false)), ("read", None)] {
-            let s = slices(kind, idem);
-            let err = check_idempotent(Some(&s), "netring", "capture/trigger")
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("--i-know"), "{err}");
-        }
-
-        // Unknown procedure, and no registry at all.
-        let s = slices("read", Some(true));
-        assert!(check_idempotent(Some(&s), "netring", "other").is_err());
-        let err = check_idempotent(None, "netring", "capture/trigger")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("O4"), "{err}");
-    }
-
-    /// The convention's own reads bench without a registry entry: RFC 08 §6
-    /// makes `introspect` a MUST for every producer and §7 makes `describe` a
-    /// SHOULD, so their idempotence is not an application's to declare — and
-    /// requiring a slice to restate it would refuse the one call the tool
-    /// already fans out on by design.
-    #[test]
-    fn the_conventions_own_reads_need_no_registry_permission() {
-        for p in ["introspect", "describe"] {
-            assert!(check_idempotent(None, "anything", p).is_ok(), "{p}");
-        }
-        // …and nothing else gets the exemption by resembling them.
-        assert!(check_idempotent(None, "anything", "introspect/all").is_err());
-    }
-
-    /// The four populations, each landing in exactly one ledger — and a
-    /// panicked task landing in the fourth rather than in none (#329). The
-    /// `JoinError` is a real one: nothing else produces the value the loop
-    /// used to throw away.
-    #[tokio::test]
-    async fn a_panicked_call_is_its_own_population_and_reaches_a_ledger() {
-        let mut per_origin: BTreeMap<String, Vec<Duration>> = BTreeMap::new();
-        let mut tally = Tally::default();
-
-        let join_error = tokio::spawn(async { panic!("a call fell over") })
-            .await
-            .expect_err("the task panicked");
-        tally.record(Err(join_error), &mut per_origin);
-        assert_eq!(
-            tally,
-            Tally {
-                completed: 0,
-                errors: 0,
-                silent: 0,
-                panicked: 1,
-            },
-            "the panic reaches its own ledger and no other"
-        );
-
-        // The three it must not be confused with.
-        tally.record(
-            Ok(Err(Error::bus("get", "", "the GET failed"))),
-            &mut per_origin,
-        );
-        tally.record(Ok(Ok(vec![])), &mut per_origin);
-        tally.record(
-            Ok(Ok(vec![(
-                crate::bus::query::FleetAnswer {
-                    origin: "h-3fa9c2d41b7e".into(),
-                    key: "v1/h-3fa9c2d41b7e/@rpc/netring/capture/trigger".into(),
-                    encoding: None,
-                    attachment: None,
-                    timestamp: None,
-                    answer: Answer::Value(zenoh::bytes::ZBytes::from(b"{}".to_vec())),
-                },
-                Duration::from_millis(3),
-            )])),
-            &mut per_origin,
-        );
-        assert_eq!(
-            tally,
-            Tally {
-                completed: 2,
-                errors: 1,
-                silent: 1,
-                panicked: 1,
-            }
-        );
-        assert_eq!(per_origin["h-3fa9c2d41b7e"], vec![Duration::from_millis(3)]);
-    }
 
     #[test]
     fn percentiles_are_nearest_rank_and_survive_one_sample() {
         let d = |ms: u64| Duration::from_millis(ms);
-        let one = [d(7)];
-        assert_eq!(percentile(&one, 50.0), 7.0);
-        assert_eq!(percentile(&one, 99.0), 7.0);
-
+        assert_eq!(percentile(&[d(7)], 50.0), 7.0);
+        assert_eq!(percentile(&[d(7)], 99.0), 7.0);
         let ten: Vec<Duration> = (1..=10).map(d).collect();
         assert_eq!(percentile(&ten, 50.0), 5.0);
         assert_eq!(percentile(&ten, 95.0), 10.0);
-        assert_eq!(percentile(&ten, 100.0), 10.0);
-        // Empty is 0, not a panic — a bench with no replies still reports.
         assert_eq!(percentile(&[], 50.0), 0.0);
+        assert_eq!(latency(Vec::new()), None, "no sample, no distribution");
+        let l = latency(vec![d(3), d(1), d(2)]).unwrap();
+        assert_eq!((l.min_ms, l.p50_ms, l.max_ms), (1.0, 2.0, 3.0));
     }
 }

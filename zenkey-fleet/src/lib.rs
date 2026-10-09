@@ -186,17 +186,18 @@ pub use model::decode::{
 /// consumer needs them in scope without taking a direct dependency on
 /// `sipper` — and so the version this engine speaks is the one it hands out.
 pub use sipper::{Sender, Sipper, Straw};
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::generate::{
-    GenPattern, GenSpec, MockProducer, build_plan, run_gen, serve_describe, synthetic_marker,
+// The mock owner (#612, FJ8a): `gen` and `serve` bring up a real zk2
+// service at the operator's address, and synthesize what it publishes and
+// answers from the contract.
+pub use tape::generate::{GenPattern, GenSpec, MemberArg, build_plan as gen_plan, run_gen};
+pub use tape::mock::{
+    AddressPresence, MockAnswer, ServeSpec, Served, address_presence, check_address,
+    marker as synthetic_marker, serve as serve_operation,
 };
+pub use tape::synth::{Synth, Synthesized, member_type, size_class};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::synth::Synth;
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection, zk2_rules};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
@@ -235,8 +236,8 @@ pub use bus::session::{
     open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WriteAct, call, check_concrete,
-    check_fanout, check_retire, declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WireQos, WriteAct, call,
+    check_concrete, check_fanout, check_retire, declare_publication, declare_publication_with,
 };
 pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -280,8 +281,8 @@ pub use model::catalog::{
 };
 pub use model::compat::compat;
 pub use model::render::{
-    Member, render as render_payload, render_detail, render_with as render_payload_with,
-    resolved_revision,
+    Member, render as render_payload, render_detail, render_resource,
+    render_with as render_payload_with, resolved_revision,
 };
 // zk2's acts and reads through a contract (#612, FJ5): planned and refused
 // without a session (`model::target`), then made through the runtime's
@@ -292,8 +293,8 @@ pub use bus::consume::{
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{
-    CallPlan, OwnedKey, Target as ResolvedTarget, check_values, encode_request, owned_key,
-    plan_call, resource as resolve_resource,
+    CallPlan, OwnedKey, Target as ResolvedTarget, check_values, encode_request, encode_response,
+    owned_key, plan_call, resource as resolve_resource,
 };
 pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
@@ -359,12 +360,13 @@ pub use report::{
     AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
     ConformReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity,
     DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind,
-    ExpectReport, ExportSnapshot, Fault, FieldReport, GenPlanEntry, GenReport, HelloView,
+    ExpectReport, ExportSnapshot, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView,
     ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink, OriginAttachment,
     RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
-    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport,
-    SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport,
-    TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, ServeSummary, ServedCall, Snapshot,
+    SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge,
+    TopologyNode, TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
+    ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -381,12 +383,12 @@ pub use report::{
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use report::WatchdogSummary;
 pub use report::{CondState, PreRollInfo, PreambleInfo, PreambleSemantics, Transition};
-pub use tape::bench::{BenchSpec, run_bench};
+pub use tape::bench::{BenchSpec, check_bench, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
     PREAMBLE_SKIP_REASON, RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, SinkCounts,
-    ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter, record,
-    replay,
+    VERBATIM, ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter,
+    excluded_by as zrec_excluded, record, replay,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]

@@ -247,41 +247,75 @@ pub fn field_report() -> FieldReport {
     }
 }
 
-/// Latency per origin, and three non-answers counted apart from it — averaging
-/// a non-answer into a latency figure is how a benchmark lies. The three are
-/// deliberately distinct: an error reply, a call nobody answered, and a call
-/// that panicked inside the tool (#329).
+/// A zk2 fan-out benched (#612, FJ8a): latency per replier key, and every
+/// non-answer counted apart from it, each count non-zero so none can hide
+/// in another — averaging a non-answer into a latency figure is how a
+/// benchmark lies. Refusals, malformed envelopes, the transport's errors,
+/// silent calls, R6's discards and a call that panicked inside the tool
+/// (#329) are seven populations; a holder that sent no value in every call
+/// is the attribution silence gets.
 pub fn bench_report() -> BenchReport {
+    let latency = |min_ms, p50_ms, p95_ms, p99_ms, max_ms| Latency {
+        min_ms,
+        p50_ms,
+        p95_ms,
+        p99_ms,
+        max_ms,
+    };
     BenchReport {
-        key: format!("v1/{ORIGIN}/@rpc/sysinfo/processes"),
+        address: "*/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: format!("sha256:{}", "4f".repeat(32)),
+        operation: "@op/diagnostics".into(),
+        values: std::collections::BTreeMap::new(),
+        selectors: vec!["zk2/*/tc/tc.netif.v1/@op/diagnostics".into()],
+        mode: CallMode::Fanout,
         requested: 100,
         completed: 98,
         concurrency: 8,
-        errors: 1,
-        silent: 1,
-        panicked: 1,
+        timeout_s: 2.0,
         elapsed_s: 2.5,
         calls_per_s: 39.2,
-        origins: vec![
-            OriginLatency {
-                origin: ORIGIN.into(),
+        clock: LatencyClock::RoundTrip,
+        repliers: vec![
+            ReplierLatency {
+                address: "host-a/tc".into(),
+                key: "zk2/host-a/tc/tc.netif.v1/@op/diagnostics".into(),
                 replies: 64,
-                min_ms: 0.8,
-                p50_ms: 1.9,
-                p95_ms: 12.4,
-                p99_ms: 40.1,
-                max_ms: 123.456,
+                latency: latency(0.8, 1.9, 12.4, 40.1, 123.456),
             },
-            OriginLatency {
-                origin: "h-bbbbbbbbbbbb".into(),
+            ReplierLatency {
+                address: "host-b/tc".into(),
+                key: "zk2/host-b/tc/tc.netif.v1/@op/diagnostics".into(),
                 replies: 34,
-                min_ms: 1.1,
-                p50_ms: 2.2,
-                p95_ms: 9.9,
-                p99_ms: 11.0,
-                max_ms: 12.5,
+                latency: latency(1.1, 2.2, 9.9, 11.0, 12.5),
             },
         ],
+        refusals: RefusalTally {
+            count: 2,
+            codes: [("busy".to_owned(), 2)].into(),
+            latency: Some(latency(0.4, 0.5, 0.6, 0.6, 0.6)),
+        },
+        malformed: 1,
+        transport: 3,
+        silent: 1,
+        discarded: 4,
+        panicked: 1,
+        presence: BenchPresence {
+            selector: "zk2/*/tc/@zk/alive/tc.netif.v1/**".into(),
+            complete: true,
+            error: None,
+            holders: vec![
+                HolderTally {
+                    address: "host-a/tc".into(),
+                    without_value: 34,
+                },
+                HolderTally {
+                    address: "host-c/tc".into(),
+                    without_value: 98,
+                },
+            ],
+        },
     }
 }
 
@@ -727,6 +761,7 @@ fn header() -> zenkey_fleet::ZrecHeader {
         selectors: vec!["acme/v1/**".into()],
         base: "acme".into(),
         captured_at: "2026-08-21T00:00:00Z".into(),
+        excluded: None,
         preamble: None,
         pre_roll: None,
     }

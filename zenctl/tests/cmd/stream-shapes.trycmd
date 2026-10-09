@@ -22,7 +22,7 @@ Usage: zenctl <COMMAND>
 
 For more information, try '--help'.
 
-$ zenctl serve k v --format json
+$ zenctl serve host-a/tc tc.netif.v1 diagnostics --format json
 ? 2
 error: `--format json` promises one document, and a stream has no single document to emit — use `--format ndjson` (one object per line).
 

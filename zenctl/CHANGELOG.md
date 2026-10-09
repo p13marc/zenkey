@@ -6,7 +6,38 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — `acl gen` compiles zk2's grants (#612, FJ7)
+## Unreleased (`main`, zk2) — writes and captures (#612, FJ8a)
+
+The verbs that put traffic on a bus or keep it are zk2's now. `gen` and
+`serve` are **mock owners**: real zk2 services at an address the operator
+names, brought up through the runtime's `ServiceBuilder` (descriptor, tokens,
+writers, spec §8.2's order), so a mock writes only what it owns (P3). `bench
+call` times an operation per reply; `.zrec` is version 3; `pub --from ndjson`
+and `record --on` keep their shape with the zk2 rules applied. v1's registry
+generator, the schema ladder, the fault injector, `serve`'s any-key mock and
+`bench rpc` are gone from `main`; the `v1` branch keeps them.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `gen --producer <p> [--subject s] [--var k=v] [--origin host]` | `gen <system>/<service> [iface[@fp]…] [--member resource=v/v,v/v] [--bind role=sys/svc]` | every stream, state and event resource of the named interfaces (all `--contracts` loads, if none) is published through the runtime's writers, with its contract's QoS and encoding, state stamped by the owner (S1), events on fresh ULID keys within their declared rate. A templated resource publishes the `--member` values, or two synthetic ones (`<param>-1`, `<param>-2`) the plan states; the template declaring `epoch` holds a member token per value (§8.1). Operations are answered with a synthesized reply |
+| `gen` against a host already publishing (`--origin`, `--i-know`) | an address whose instance token is present: exit **2** unless `--i-know` | a mock beside a real owner is a second writer of its keys and a split-brain on every exclusive resource (§6) |
+| payloads from the registry's schema (`--schema-set`, a served `describe`) | synthesized from the bundle, deterministic per (`--seed`, tick) | JSON Schema in spec §7.3's subset, every value checked by `zenkey_model::validate`; protobuf with every field filled (the first of each `oneof`); raw bytes of the media type's size class (video 16 KiB, image 4 KiB, audio 2 KiB, text 64 B, else 256 B) |
+| the `synthetic` sample attachment | `meta.synthetic` in the descriptor (`{"synthetic": true, "tool": "zenctl gen", "seed": 42}`) | informative (§3.3); a sample's attachment is the contract's to type (§2.3), so it carries no marker |
+| `gen --fault <kind>`, `--wide`, `--serve-describe`, `--schema-set` | — | the fault injector and the v1 ladder went with the registry |
+| `gen --rate`, `--pattern`, `--duration`, `--seed`, `--dry-run` | the same | `--rate` overrides streams and state (1 Hz and a re-put every 2 s by default); an event keeps within its declared rate whatever it says. `--dry-run` prints the plan (`gen-plan`) and, with `--contracts` holding every interface, opens no session |
+| `serve <keyexpr> <reply> [--encoding] [--raw] [--no-validate] [--complete] [--i-know]` | `serve <system>/<service> <iface>[@fp] <operation> [JSON\|@FILE\|-]` or `--refuse <code> [--message] [--cause]` | one operation through `ServiceBuilder::serve`: the reply encoded as the response type from JSON (as `call` encodes a request), or the chosen §5.2 envelope. Every call is logged (`call` rows: the key, the request decoded from the bundle, the call metadata, O7). The interface's other optional resources answer `unavailable` (config), its other required operations `internal` |
+| `serve --count`, `--for` | the same | a stop bound and a window |
+| `bench rpc <origin> <producer> [procedure] [--calls] [--concurrency] [--i-know]` | `bench call <system>/<service> <iface>[@fp] <operation> [JSON\|@FILE\|-] [--param] [--calls] [--concurrency] [--i-know]` | latency per reply on this tool's clock, attributed by the replier's key (O3); envelopes a population of their own by code; malformed, transport, silent and discarded counted and never averaged in (O5); each token holder tallied against the calls it sent no value in. A fan-out only to `fanout = "allowed"` (O2, not overridable). Exit 0 values only, 1 an envelope or malformed reply, 2 no value at all |
+| `record <selector>` (default `<base>/v1/**`) | `record [selector…] [--namespace NS]` (default `<ns>/zk2/**`) | several selectors; a hint when none lies in the stated namespace |
+| `.zrec` version 2 | version 3 | the header adds `excluded`, the verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) no selector names, so the file cannot hold them (O5); each row adds `qos_axes`, which `replay` publishes with. Versions 1 and 2 still read |
+| `record --on <rule>` | the same, judging zk2 | the state preamble is each owner's S4 GET (All + Latest, R6's discards dropped); `invalid-payload`, `qos-mismatch`, `origin-down` and `alert-firing` judge v1 and are refused (exit **2**); `doctor` is FJ6's |
+| `pub --from ndjson` rows with `"qos"` (a profile name) | `"qos_axes"` (`priority/congestion/reliability[+express]`) wins over `"qos"` | `echo --format ndjson \| pub --from ndjson` publishes a foreign row with the QoS it was seen with. A row whose key a zk2 service owns is refused and counted (P3), and a pipe of only such rows is refused without opening a session |
+
+Report families: `gen-plan` and `gen` (the plan and the run's totals), `serve`
+(`call` rows and a `summary`), and `bench` re-cut (`repliers`,
+`refusals`, `presence`, `clock: "round_trip"`).
+
+## `acl gen` compiles zk2's grants (#612, FJ7)
 
 `acl gen` is zk2's now: spec §11's three grant shapes (Own, Consume, Call),
 compiled from the contracts and an enrollment into a router's

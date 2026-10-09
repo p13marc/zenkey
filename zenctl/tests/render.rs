@@ -313,28 +313,50 @@ fn no_family_emits_trailing_whitespace() {
 // see a `KeyRelation`, and it must not enable the `decode` feature `GenReport`
 // lives behind (#204).
 
-/// The three non-answer populations stay apart, in both media. The panicked
-/// line and its note are new with #329: a `JoinError` used to skip `completed`,
-/// `errors` *and* `silent`, so a whole population vanished from a report whose
-/// every other counter exists to stop exactly that.
+/// Every non-answer population stays apart, in both media (#612, FJ8a): the
+/// latency rows are value replies by replier key, and refusals, malformed
+/// envelopes, transport errors, silent calls, R6's discards and panicked
+/// calls are counted beside them. The fixture has every count non-zero, so
+/// a renderer that summed two of them would show it.
 #[test]
 fn a_bench_report_right_aligns_its_numbers_and_counts_non_answers_apart() {
     assert_data_eq!(
         table(&fx::bench_report()),
         str![[r#"
-→ v1/h-3fa9c2d41b7e/@rpc/sysinfo/processes
+bench */tc tc.netif.v1@sha256:4f4f4f4f4f4f4f4f… @op/diagnostics  (fan-out, 2s per call)
 98 call(s), concurrency 8, 2.50s — 39.2 calls/s
   2 of 100 calls did not complete
-  1 of those panicked in this tool — measured nothing
 
-origin          replies  min ms  p50 ms  p95 ms  p99 ms  max ms
-h-3fa9c2d41b7e       64    0.80    1.90   12.40   40.10  123.46
-h-bbbbbbbbbbbb       34    1.10    2.20    9.90   11.00   12.50
+replier    replies  min ms  p50 ms  p95 ms  p99 ms  max ms
+host-a/tc       64    0.80    1.90   12.40   40.10  123.46
+host-b/tc       34    1.10    2.20    9.90   11.00   12.50
+refused 2 time(s), unattributed: busy ×2 (p50 0.50 ms)
+host-a/tc holds the interface's token and sent no value in 34 call(s): refused or silent, which a caller cannot tell apart
+host-c/tc holds the interface's token and sent no value in 98 call(s): refused or silent, which a caller cannot tell apart
 
 "#]]
     );
-    assert!(notes(&fx::bench_report()).contains("drew no reply"));
-    assert!(notes(&fx::bench_report()).contains("panicked inside this tool"));
+    let n = notes(&fx::bench_report());
+    for each in [
+        "2 refusal(s)",
+        "1 malformed envelope(s)",
+        "3 transport error(s)",
+        "1 silent call(s)",
+        "4 discarded value(s)",
+        "1 call(s) that panicked",
+    ] {
+        assert!(n.contains(each), "{each}: {n}");
+    }
+    assert!(n.contains("round trip"), "whose clock (O7): {n}");
+    let lines: Vec<serde_json::Value> = ndjson(&fx::bench_report())
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["report"], "bench");
+    assert!(lines[0].get("repliers").is_none(), "the repliers are rows");
+    assert_eq!(lines[0]["silent"], 1);
+    assert_eq!(lines[0]["refusals"]["count"], 2);
+    assert_eq!(lines[1]["row"], "replier");
 }
 
 /// Three `origins` outcomes, three sentences: answered-and-empty, not asked,
@@ -1252,9 +1274,9 @@ rules:
       zk2/*/tc/tc.netif.v1/state/**
   consume-out:ops/frontend   consume       egress   put, delete, reply
       zk2/*/tc/tc.netif.v1/state/**
-  presence-in:ops/frontend   presence      ingress  declare_liveliness_subscriber, liveliness_query
+  presence-in:ops/frontend   presence      ingress  declare_liveliness_subscriber, liveliness_query, query, declare_subscriber
       zk2/*/tc/@zk/**
-  presence-out:ops/frontend  presence      egress   liveliness_token
+  presence-out:ops/frontend  presence      egress   liveliness_token, reply, put
       zk2/*/tc/@zk/**
   call-in:ops/frontend       call          ingress  query
       zk2/*/tc/tc.netif.v1/@op/interfaces/*/set
@@ -1647,66 +1669,104 @@ fn a_get_with_no_replies_names_the_three_silences() {
     assert_eq!(doc["timeout_s"], 5.0);
 }
 
-/// Synthetic traffic is still publishing, so the plan is a dry run made
-/// visible before a byte moves — the `replay --dry-run` precedent
-/// (RFC 09 §5.3).
+/// A mock owner still publishes, so the plan is a dry run made visible
+/// before anything is brought up — the `replay --dry-run` precedent — and
+/// it says where the synthetic marker rides: the descriptor's `meta`, not a
+/// sample's attachment (#612, FJ8a).
 #[test]
-fn a_gen_plan_states_the_synthetic_marker_before_anything_is_published() {
-    let entries: Vec<zenkey_fleet::report::GenPlanEntry> = vec![];
-    let plan = zenctl::render::GenPlan {
-        origin: "h-3fa9c2d41b7e",
-        duration_s: 5.0,
-        entries: &entries,
-    };
-    let n = notes(&plan);
-    assert!(n.contains("synthetic"), "{n}");
-    assert!(n.contains("RFC 09 §5.3"), "{n}");
-
-    // A faulted plan states each fault it will inject, per key and in the
-    // notes — the tool says what it is about to do to the bus (#163).
-    let faulted = vec![zenkey_fleet::report::GenPlanEntry {
-        key: "v1/h-3fa9c2d41b7e/state/demo/health".into(),
-        class: "state".into(),
-        producer: "demo".into(),
-        type_name: "Health".into(),
-        qos: "transition".into(),
-        qos_source: "declared",
-        rate_hz: 1.0,
-        body_source: "schema-set",
-        encoding: Some("application/json".into()),
+fn a_gen_plan_states_every_key_and_where_the_marker_rides() {
+    use zenkey_fleet::report::{GenInterface, GenPlan, GenPlanEntry, MemberSource, QosView};
+    use zenkey_model::authoring::{Congestion, Kind, Priority, Reliability};
+    let stream = GenPlanEntry {
+        iface: "tc.netif.v1".into(),
+        resource: "stream/bandwidth/{ns}/{iface}".into(),
+        kind: Kind::Stream,
+        key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/ns-1/iface-1".into(),
+        values: [
+            ("iface".to_owned(), vec!["iface-1".to_owned()]),
+            ("ns".to_owned(), vec!["ns-1".to_owned()]),
+        ]
+        .into(),
+        members: MemberSource::Default,
+        declared: "json:BandwidthUpdate".into(),
+        encoding: "application/json".into(),
+        qos: Some(QosView {
+            reliability: Reliability::BestEffort,
+            congestion: Congestion::Drop,
+            priority: Priority::Data,
+            express: false,
+        }),
+        rate_hz: Some(1.0),
         events_cap: None,
-        note: None,
-        fault: Some(zenkey_fleet::report::Fault::Truncate),
-        fault_delta: Some("payload truncated to half its encoded bytes — a partial frame".into()),
-        schema: None,
-        unique_chunk: None,
-    }];
-    let faulted_plan = zenctl::render::GenPlan {
-        origin: "h-3fa9c2d41b7e",
-        duration_s: 5.0,
-        entries: &faulted,
+        member_token: false,
+        note: Some("synthetic members (name them with --member)".into()),
     };
-    let t = table(&faulted_plan);
-    assert!(t.contains("FAULT[truncate]"), "{t}");
-    assert!(t.contains("partial frame"), "{t}");
-    assert!(notes(&faulted_plan).contains("injecting fault(s): truncate"));
+    let op = GenPlanEntry {
+        resource: "@op/diagnostics".into(),
+        kind: Kind::Operation,
+        key: "zk2/host-a/tc/tc.netif.v1/@op/diagnostics".into(),
+        values: Default::default(),
+        members: MemberSource::Fixed,
+        declared: "json:DiagnosticsResponse".into(),
+        qos: None,
+        rate_hz: None,
+        note: Some("answers each call with one synthesized response".into()),
+        ..stream.clone()
+    };
+    let plan = GenPlan {
+        address: "host-a/tc".into(),
+        interfaces: vec![GenInterface {
+            iface: "tc.netif.v1".into(),
+            fingerprint: format!("sha256:{}", "4f".repeat(32)),
+        }],
+        duration_s: 10.0,
+        seed: 42,
+        marker: serde_json::json!({"synthetic": true, "tool": "zenctl gen", "seed": 42}),
+        entries: vec![stream, op],
+    };
+    assert_data_eq!(
+        table(&plan),
+        str![[r#"
+plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:4f4f4f4f4f4f4f4f…, for 10s (seed 42)
+  zk2/host-a/tc/tc.netif.v1/stream/bandwidth/ns-1/iface-1 [json:BandwidthUpdate, application/json] 1.00 Hz, qos data/drop/best_effort
+    ↳ synthetic members (name them with --member)
+  zk2/host-a/tc/tc.netif.v1/@op/diagnostics [json:DiagnosticsResponse, application/json] answers calls
+    ↳ answers each call with one synthesized response
+
+"#]]
+    );
+    let n = notes(&plan);
+    assert!(n.contains("meta carries the synthetic marker"), "{n}");
+    assert!(n.contains("<param>-1"), "{n}");
+    // The envelope counts the entries; the entries are the rows.
+    let lines: Vec<serde_json::Value> = ndjson(&plan)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines[0]["report"], "gen-plan");
+    assert_eq!(lines[0]["entries"], 2);
+    assert_eq!(lines[0]["marker"]["synthetic"], true);
+    assert_eq!(lines[1]["row"], "entry");
 
     let report = zenkey_fleet::report::GenReport {
+        address: "host-a/tc".into(),
+        instance: "0123456789abcdef".into(),
         duration_s: 5.0,
         entries: 12,
         sent: 240,
-        refused: 2,
-        first_errors: vec!["health: enum `status` has no synthesizable member".into()],
+        calls: 3,
+        failed: 2,
+        first_errors: vec!["zk2/host-a/tc/tc.netif.v1/state/namespaces: clock ahead".into()],
     };
     assert_data_eq!(
         table(&report),
         str![[r#"
-sent 240 sample(s) over 5.0s across 12 subject(s); 2 refused by schema
-  ✗  health: enum `status` has no synthesizable member
+host-a/tc as instance 0123456789abcdef: sent 240 sample(s) over 5.0s across 12 entr(y|ies), answered 3 call(s); 2 not sent
+  ✗  zk2/host-a/tc/tc.netif.v1/state/namespaces: clock ahead
 
 "#]]
     );
-    assert!(notes(&report).contains("counted, never silently"));
+    assert!(notes(&report).contains("counted, never skipped"));
 }
 
 /// Every `Render` impl is drawn somewhere in this file — the mechanical floor

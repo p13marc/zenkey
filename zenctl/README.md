@@ -258,11 +258,13 @@ reach further than one concrete thing:
 | `replay` | a zk2 service's own key replayed where it runs: as recorded, or into the namespace it was recorded in (refused and counted, exit 1) | `--namespace` of your own; or `--i-know` |
 | `config set` | a windowed (`--confirm`) change with no read-back, from a script | `--yes` |
 | `replay` | a capture whose base differs from the target's, or empty onto empty | `--force-base` (always `--dry-run` first) |
-| `serve` | a wildcard key expression; `--complete` | `--i-know` |
-| `gen` | `--origin <host>` (publishing as a real host); `--fault`; more than 10 subjects | `--i-know` (faults also need an endpoint or base typed on the line); `--wide` |
+| `gen`, `serve` | an address whose instance token is already present: a mock owner beside it would be a second writer of its keys (P3) and a split-brain on every exclusive resource (spec §6) | `--i-know` |
+| `gen`, `serve` | a contract's required role left unbound (R1: the runtime would not start the service) | `--bind ROLE=SYSTEM/SERVICE` |
 | `export` | a non-loopback `--bind` | `--i-know` |
 | `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
-| `bench rpc` | a procedure not declared `idempotent` | `--i-know` |
+| `record --on` | a rule that judges v1 rather than zk2 (`invalid-payload`, `qos-mismatch`, `origin-down`, `alert-firing`) | not overridable |
+| `bench call` | an operation not declared `idempotent` | `--i-know` |
+| `bench call` | a fan-out to an operation that does not declare `fanout = "allowed"` (O2) | not overridable |
 
 Each refusal names its reason and comes before a session opens wherever the
 command line alone decides it. [`CHANGELOG.md`](CHANGELOG.md) has the
@@ -301,10 +303,13 @@ the vanished field, the field the schema never declared) · `zenctl timeline
 a capture).
 
 **Capture — keep what happened.**
-`zenctl record -o bus.zrec --for 30` (a capture, drops recorded where they
-fell) · `zenctl record -o incident.zrec --on 'silent-for prod/v1/** 30' --pre
-30` (armed: written only when a rule fires, with the thirty seconds before it
-and a state preamble) · `zenctl replay bus.zrec --dry-run` (replay is
+`zenctl record -o bus.zrec --for 30` (a `.zrec` version 3 capture of the
+deployment's zk2 data, `<ns>/zk2/**`, rows keeping their wire keys, payloads
+and QoS axes, drops recorded where they fell, the header naming what the
+selectors exclude) · `zenctl record -o incident.zrec --on 'silent-for
+prod/zk2/** 30' --pre 30` (armed: written only when a rule fires, with the
+thirty seconds before it and the owners' state as a preamble) · `zenctl
+replay bus.zrec --dry-run` (replay is
 publishing: preview first; `--namespace replay` stands in for the recorded
 owners in a namespace of its own) · `zenctl snapshot -o fleet.zsnap` (the fleet's
 current values, collected over a span) and `zenctl snapshot diff a.zsnap
@@ -318,9 +323,11 @@ encoded against the served schema; `--from ndjson` reads `echo`'s rows back)
 · `zenctl config
 get|set|confirm|cancel|extend|persist` (a producer's live configuration, typed
 against its served schema, with confirmed changes driven to their end) ·
-`zenctl serve <keyexpr> <reply>` (a mock queryable that logs every ask) ·
-`zenctl gen --producer sysinfo` (registry-driven test traffic, every sample
-marked synthetic) · `zenctl blob locate|fetch` (bulk content: who holds it,
+`zenctl gen <address> [iface…] --contracts <dir>` (a mock owner: a real zk2
+service at the address you name, publishing every stream, state and event
+member through the runtime's writers and answering every operation, its
+descriptor marked synthetic) · `zenctl serve <address> <iface> <operation>
+[reply]` (a mock owner of one operation, every call logged) · `zenctl blob locate|fetch` (bulk content: who holds it,
 and a verified fetch from one origin; `zenctl blob list` reads only the
 registry).
 
@@ -349,7 +356,7 @@ calls; `--check` compares a router's config file).
 **The tool itself.**
 `zenctl context …` (named connection contexts, above) · `zenctl cache
 show|refresh|clear` (the slice cache behind completion) · `zenctl completions
-<shell>` · `zenctl bench rpc` (procedure latency, per origin).
+<shell>` · `zenctl bench call` (an operation's reply latency, per replier key).
 
 > **The command tree moved (#307).** `topic echo` → `echo`, `topic pub` →
 > `pub`, `topic hz`/`topic bw` → `rate`, `expect`/`cutover`/`probe`/`registry
@@ -622,23 +629,31 @@ Any command that loads slices fills the cache; `zenctl cache show|refresh|clear`
 makes it visible, current, or gone. The names are from the last sighting, not
 a live inventory. `--static` emits the old self-contained script.
 
-## `bench rpc` — how fast, and *which origin* is slow
+## `bench call` — how fast, and *which replier* is slow
 
 ```bash
-zenctl bench rpc '*' sysinfo --calls 200 --concurrency 8
+zenctl bench call '*/tc' tc.netif.v1 'ifaces/{iface}' --calls 200 --concurrency 8
 ```
 
-Latency is measured **per reply**, not per call: a fan-out GET finishes when
-the slowest origin answers, so charging that duration to every responder would
-report the fastest node's latency as the worst one's. Error replies and calls
-that drew *no* reply are counted separately from the distribution — averaging a
-non-answer into a latency figure is how a benchmark lies.
+The calls go out exactly as `call`'s do (#612, FJ8a): one address is
+`BestMatching`, a `*` or an unbound parameter is a fan-out (`All`, and only to
+an operation declaring `fanout = "allowed"`, O2). Latency is measured **per
+reply**, on this tool's clock, and attributed by the key the reply went on
+(O3), not per call: a fan-out finishes when the slowest replier answers, so
+charging that duration to every responder would report the fastest one's
+latency as the worst one's. Envelopes (O5) are a population of their own,
+counted by code with their own latency; malformed replies, transport errors
+and calls that drew *nothing* are counted and never averaged in — averaging a
+non-answer into a latency figure is how a benchmark lies. Each token holder of
+the selection is tallied against the calls it sent no value in, so a holder
+that never answers is named rather than left out of the table.
 
-Only procedures the registry declares `idempotent = true` bench by default; a
-benchmark repeats, and repeating a write into a live fleet is a different act
-from measuring it. `--i-know` overrides. The convention's own reads
-(`introspect`, `describe`) need no registry permission — RFC 08 §6/§7 define
-them, so their idempotence is not an application's to declare.
+Only an operation its contract declares `idempotent` benches by default; a
+benchmark repeats, and repeating a write into a live deployment is a different
+act from measuring it. `--i-know` overrides; a fan-out the operation forbids
+stays refused. Exit 0 is values only, 1 an envelope or a malformed reply among
+them, 2 no value at all. v1's `bench rpc` (an `@rpc` procedure, timed per
+origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 

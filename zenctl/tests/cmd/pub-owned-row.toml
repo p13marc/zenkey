@@ -1,0 +1,14 @@
+# `pub --from ndjson` refuses a row whose key a zk2 service owns exactly as
+# `pub` refuses the key (P3, spec §6; #612, FJ8a), counts it, and exits 1:
+# the pipe ran, and some rows were refused. Its session opens on the first
+# row there is to write, so a pipe of refused rows asks nothing of the bus:
+# the dead-bus fixture here is never reached. (A `.toml` case because the
+# rows ride stdin; `pub-owned-key.trycmd` has the one-shot form.)
+bin.name = "zenctl"
+args = ["pub", "--from", "ndjson", "--zenoh-config", "tests/cmd/fixtures/dead-bus.json5"]
+stdin = """
+{"key":"zk2/host-a/tc/tc.netif.v1/state/namespaces","value":[]}
+{"row":"dropped","dropped":3}
+{"key":"prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics","value":{}}
+"""
+status.code = 1

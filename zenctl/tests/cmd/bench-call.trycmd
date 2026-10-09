@@ -1,0 +1,36 @@
+`bench call` (#612, FJ8a) is planned and refused as `call` is, before a
+session opens, and refused once more when the operation is not declared
+`idempotent`: a benchmark repeats a call, and repeating a write is a
+different act from measuring it.
+
+A fan-out to an operation that forbids one is refused before anything is
+sent (spec §5.1 O2), and nothing moves that.
+
+```console
+$ zenctl bench call '*/tc' tc.netif.v1 'interfaces/{ns}/{iface}/set' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: tc.netif.v1 @op/interfaces/{ns}/{iface}/set: declares fanout = "forbidden", and this call is a fan-out: the address */tc has a `*`. Call one address with every parameter given (spec §5.1 O2); nothing was sent
+
+```
+
+A concrete call to a write is refused until `--i-know` says it is meant —
+here it then goes on to its session, the dead-bus fixture, whose 2 is the
+session's.
+
+```console
+$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"up": true}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: tc.netif.v1 @op/interfaces/{ns}/{iface}/set: is not idempotent, and a benchmark calls it again and again: that is a repeated write into a live deployment, not a measurement (O4). Pass --i-know to mean it
+
+$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"up": true}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+$ zenctl bench call host-a/tc tc.netif.v1 diagnostics --calls 0 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: --calls 0: measures nothing
+
+```

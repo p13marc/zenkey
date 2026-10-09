@@ -1,23 +1,25 @@
-//! A contract's QoS, as zenoh spells it (spec §2.4).
+//! A contract's QoS, as zenoh spells it (spec §2.4). Public since FJ8a
+//! (#612): a tool that sends its own queries, `zenctl bench call`, applies
+//! an operation's recommended priority the way the runtime's client does.
 
 use zenkey_model::authoring::{Congestion, Priority, Reliability};
 use zenoh::qos::{CongestionControl, Priority as ZPriority, Reliability as ZReliability};
 
-pub(crate) fn reliability(r: Reliability) -> ZReliability {
+pub fn reliability(r: Reliability) -> ZReliability {
     match r {
         Reliability::BestEffort => ZReliability::BestEffort,
         Reliability::Reliable => ZReliability::Reliable,
     }
 }
 
-pub(crate) fn congestion(c: Congestion) -> CongestionControl {
+pub fn congestion(c: Congestion) -> CongestionControl {
     match c {
         Congestion::Drop => CongestionControl::Drop,
         Congestion::Block => CongestionControl::Block,
     }
 }
 
-pub(crate) fn priority(p: Priority) -> ZPriority {
+pub fn priority(p: Priority) -> ZPriority {
     match p {
         Priority::RealTime => ZPriority::RealTime,
         Priority::InteractiveHigh => ZPriority::InteractiveHigh,

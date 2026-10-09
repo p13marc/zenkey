@@ -148,11 +148,22 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   client|south-region` guards a constrained face (router to router is
   refused). Its plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`) and
   judged by a live router (`tests/acl_live.rs`, `tests/acl_face.rs`).
+  FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
+  <operation>` are mock owners — real zk2 services through
+  `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused
+  at an address whose instance token is present unless `--i-know`, marked
+  synthetic in the descriptor's `meta`; `gen` synthesizes every member
+  deterministically per (seed, tick) (`tape::synth`: the §7.3 JSON Schema
+  subset, validated; protobuf with every field filled; raw bytes of the media
+  type's size class). `bench call` times each reply where it arrives and
+  attributes it by key, envelopes and silence counted apart. `.zrec` is
+  version 3 (header `excluded`, rows `qos_axes`; 1 and 2 still read), and
+  `record --on` refuses the rules that judge v1.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
   `config get|set|confirm|cancel|extend|persist`, `storage`, `acl`,
-  `blob list|locate|fetch`, `admin`, `key`, `bench rpc`); a **wire
+  `blob list|locate|fetch`, `admin`, `key`, `bench call`); a **wire
   verb** is an act or observation on live traffic and hangs off the root
   (`get` and `get state`, `call`, `watch`, `echo`, `pub`, `rate`, `field`,
   `record`, `replay`, `timeline`, `snapshot`, `graph`, `export`, `serve`,

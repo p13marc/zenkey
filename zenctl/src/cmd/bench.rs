@@ -1,87 +1,104 @@
-//! `zenctl bench rpc` (issue #52) — the engine's benchmark, driven.
+//! `zenctl bench call` (#612, FJ8a) — the engine's benchmark of a zk2
+//! operation, driven.
 //!
-//! The safe default target is `introspect`: RFC 08 §6 makes it a read that
-//! every producer serves, and the registry declares it idempotent, so the one
-//! call this tool can bench without asking permission is the one it already
-//! fans out on by design. Everything else has to pass the registry guard, or
-//! say `--i-know`.
+//! Planned and refused exactly as `call` is — an address that is not one,
+//! an operation the revision does not declare, a fan-out to an operation
+//! that forbids one (O2), a request that does not encode — and then
+//! refused once more if the operation is not `idempotent`, unless
+//! `--i-know`: a benchmark repeats a call, and repeating a write is a
+//! different act from measuring it (O4's reasoning). It replaced v1's
+//! `bench rpc`, which timed an `@rpc` procedure per origin.
 
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+use zenkey_fleet::{BenchSpec, ResolvedTarget};
+use zenkey_model::schema::TypeId;
 
-use crate::Bus;
+use crate::bus::Deployment;
+use crate::cmd::zk2;
+use crate::exit::unaskable;
 
 /// A ceiling on `--calls`, so a typo is a bounded mistake. Not a policy about
-/// how much load a fleet can take — the operator knows that and `--i-know`
-/// does not lift this; `--calls` explicitly can.
+/// how much load a deployment can take — the operator knows that, and
+/// `--calls` lifts it.
 const DEFAULT_COUNT: usize = 100;
 
-pub async fn rpc(cli: crate::cli::BenchRpcArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
-    // The note is this verb's own preamble, not the dispatcher's (#354).
-    eprintln!("{}", note(args.timeout()));
-    let crate::cli::BenchRpcArgs {
-        origin,
-        producer,
-        procedure,
+pub async fn call(cli: crate::cli::BenchCallArgs) -> Result<()> {
+    let dep = Deployment::resolve(&cli.ns)?;
+    let crate::cli::BenchCallArgs {
+        address,
+        target: spec,
+        operation,
+        request,
+        params,
         calls,
         concurrency,
         i_know,
-        bus: _,
+        contracts,
+        ns: _,
     } = cli;
-    let (origin, producer, procedure) = (origin.as_str(), producer.as_str(), procedure.as_str());
-    let target = zenkey_fleet::CallTarget::parse(origin)?;
-    super::producer_slot(&target, producer)?;
-    let slices = args.slices_optional().await?;
-    let session = args.session().await?;
-    let count = calls.unwrap_or(DEFAULT_COUNT);
+    let contracts = zk2::load_contracts(&contracts)?;
+    let target = ResolvedTarget::parse(&address)?;
+    let values = zk2::bindings(&params);
+    let request = request
+        .as_ref()
+        .map(|src| {
+            src.read()
+                .map_err(|e| unaskable!("the request could not be read: {e:#}"))
+        })
+        .transpose()?;
 
+    let mut session = None;
+    let revision = zk2::revision_at(&dep, &contracts, &spec, Some(&target), &mut session).await?;
+    let plan = zenkey_fleet::plan_call(&revision, target, &operation, values)?;
+    let input = request.unwrap_or_else(|| match plan.operation.request {
+        TypeId::Raw { .. } => Vec::new(),
+        _ => b"{}".to_vec(),
+    });
+    let encoded = zenkey_fleet::encode_request(&revision, &plan, &input)?;
+    let calls = calls.unwrap_or(DEFAULT_COUNT);
+    // Refused before anything is asked of the bus (and asked again by the
+    // engine): a repeated write, or a bench of nothing.
+    zenkey_fleet::check_bench(&revision, &plan, calls, i_know)?;
+    let session = match session {
+        Some(s) => s,
+        None => dep.session().await?,
+    };
+    // The caller's timeout, else the contract's recommendation, else the
+    // tool's default (spec §5.1, "The timeout"), as `call` waits.
+    let timeout = dep
+        .chosen_timeout()
+        .or(plan.operation.timeout_ms.map(Duration::from_millis))
+        .unwrap_or_else(|| dep.timeout());
+    // The note is this verb's own preamble, not the dispatcher's (#354).
+    eprintln!("{}", note(timeout));
     let report = zenkey_fleet::run_bench(
-        &args.fleet(&session),
-        zenkey_fleet::BenchSpec {
-            target: &target,
-            producer,
-            procedure,
-            count,
+        &session,
+        BenchSpec {
+            revision: &revision,
+            plan: &plan,
+            request: encoded,
+            calls,
             concurrency,
-            timeout: args.timeout(),
+            timeout,
             force: i_know,
         },
-        slices.as_ref(),
     )
-    .await
-    .map_err(|e| anyhow!("{e}"))?;
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
-    // A benchmark that reached nobody is not a benchmark. Exit 2 matches
-    // `call`'s "zero replies" code — silence keeps its own meaning
-    // (`crate::exit`).
-    if report.origins.is_empty() {
-        std::process::exit(crate::exit::NO_VERDICT);
+    .await?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    match report.exit_code() {
+        0 => Ok(()),
+        code => std::process::exit(code),
     }
-    // An error reply is a finding, and a benchmark that measured nothing but
-    // error envelopes used to exit **0** with a latency distribution over
-    // failures (#307). The numbers are still printed — they are what makes
-    // the finding legible — and the exit says what they are made of.
-    if report.errors > 0 {
-        eprintln!(
-            "bench: {} of {} completed call(s) came back as an error envelope \
-             (RFC 05 §3) — the latencies above are timings of failures",
-            report.errors, report.completed
-        );
-        std::process::exit(crate::exit::FINDING);
-    }
-    Ok(())
 }
 
-/// The default per-call timeout is the bus timeout; documented here because a
-/// benchmark whose timeout is shorter than the fleet's p99 measures the
-/// timeout instead.
+/// The per-call timeout, said up front: a benchmark whose timeout is
+/// shorter than the operation's p99 measures the timeout instead.
 pub fn note(timeout: Duration) -> String {
     format!(
-        "each call times out after {:.1}s — a p99 at or near that number is measuring the \
-         timeout, not the fleet",
+        "each call waits {:.1}s for its replies — a p99 at or near that number is measuring \
+         the timeout, not the operation",
         timeout.as_secs_f64()
     )
 }

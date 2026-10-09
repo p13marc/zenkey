@@ -1,33 +1,34 @@
-//! Trigger capture over a real bus (#218; RFC 13 §4.1 version 2): a rule
-//! fires, and one file carries the preamble, the pre-roll, the trigger
-//! record and the post-roll — in that order, with the kinds counted apart.
+//! Trigger capture over a real bus (#218; `.zrec` version 3 since #612,
+//! FJ8a): a rule fires, and one file carries the preamble, the pre-roll,
+//! the trigger record and the post-roll — in that order, with the kinds
+//! counted apart.
 //!
-//! The fixture: a `state` key that speaks at 2 Hz for a second and a half
-//! and then goes quiet, a second `state` key that is only ever *held* (a
-//! responder answers GETs for it; nothing publishes it inside the window),
-//! and a `silent-for` rule on the first. When the silence fires, the
-//! preamble under the default semantics holds exactly the held key — the
-//! one the ring cannot tell you about — and under `full` holds both.
-//! Ports are ephemeral (`util::peer_pair`).
+//! The fixture is a zk2 owner (`tc.netif.v1` at `host-a/tc`): one state
+//! member that speaks at 2 Hz for a second and a half and then goes quiet,
+//! a second state resource that is only ever *held* (put once before the
+//! window, answered by the owner's state queryable), and a `silent-for`
+//! rule on the first. When the silence fires, the preamble — the owner's
+//! own S4 answer — holds exactly the held key under the default semantics,
+//! the one the ring cannot tell you about, and both under `full`.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
 use zenkey_fleet::judge::condition::Condition;
-use zenkey_fleet::report::{CondState, PreambleSemantics};
-use zenkey_fleet::{
-    TriggerEvent, TriggerSpec, ZrecItem, ZrecReader, declare_publication, declare_responder,
-    record_on,
-};
+use zenkey_fleet::model::catalog::Revision;
+use zenkey_fleet::model::render::Member;
+use zenkey_fleet::report::{CondState, ContractSource, PreambleSemantics};
+use zenkey_fleet::{Synth, TriggerEvent, TriggerSpec, ZrecItem, ZrecReader, record_on};
+use zenkey_model::authoring::Kind;
+use zenkey_model::template::Bindings;
 
 mod util;
-use util::peer_pair;
+use util::zk2::{client, config, example, iface, router};
 
-const HEALTH: &str = "v1/h-aaaaaaaaaaaa/state/demo/health";
-const CONFIG: &str = "v1/h-aaaaaaaaaaaa/state/demo/config";
-const SELECTOR: &str = "v1/h-aaaaaaaaaaaa/state/demo/**";
+const HEALTH: &str = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+const CONFIG: &str = "zk2/host-a/tc/tc.netif.v1/state/namespaces";
+const SELECTOR: &str = "zk2/host-a/tc/tc.netif.v1/state/**";
 
 /// A byte sink the test can read back; the sink owns its writer on the
 /// blocking pool (#332), so the bytes are shared rather than handed back.
@@ -53,61 +54,74 @@ enum Line {
     Dropped(u64),
 }
 
+fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> TriggerSpec {
+    TriggerSpec {
+        selectors: vec![SELECTOR.into()],
+        pre: Duration::from_secs(2),
+        post: Duration::from_secs(1),
+        rules: vec![Condition::parse(rule).expect("rule")],
+        tick: Duration::from_millis(250),
+        timeout: Duration::from_secs(1),
+        doctor: None,
+        give_up: Some(give_up),
+        preamble: semantics,
+        max_samples: None,
+        max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
+    }
+}
+
 /// Run the fixture once under `semantics` and read the file back.
 async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, Vec<Line>) {
-    let (a, b) = peer_pair().await;
+    let (_router, ep) = router(None).await;
+    let (owners, recorder_session) = (client(&ep).await, client(&ep).await);
+    let rev = Revision::from_contract(example("tcgui/tc.netif.v1"), ContractSource::File);
+    let netif = iface("tc.netif.v1");
+    let synth = Synth::new(5);
+    let ns = rev.resource("namespaces", &[Kind::State]).unwrap().clone();
+    let ifc = rev
+        .resource("interfaces/{ns}/{iface}", &[Kind::State])
+        .unwrap()
+        .clone();
 
-    // The held keys: GETs on either are answered from `a`, which is what a
-    // storage or a state-serving producer does — nothing publishes `config`
-    // inside the window, so only the preamble can carry it.
-    let config = declare_responder(&a, CONFIG, br#"{"mode":"x"}"#.to_vec(), None, true)
+    // The owner: `namespaces` held (one put before start, nothing in the
+    // window), `interfaces/default/eth0` spoken below.
+    let mut b = zk2::ServiceBuilder::new(&owners, config("host-a/tc"));
+    b.implement(zk2::Implementation::new(example("tcgui/tc.netif.v1")))
+        .expect("implement");
+    for r in &example("tcgui/tc.netif.v1").resources {
+        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+    }
+    let held = b
+        .declare_state_writer(&netif, "state/namespaces", &Bindings::new())
         .await
-        .expect("config responder");
-    let health_held = declare_responder(&a, HEALTH, br#"{"ok":false}"#.to_vec(), None, true)
+        .expect("held");
+    held.put(synth.sample(&rev, &ns, Member::Type, 0).unwrap().bytes)
         .await
-        .expect("health responder");
-    let serving = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Some(q) = config.next() => { config.answer(q).await; }
-                Some(q) = health_held.next() => { health_held.answer(q).await; }
-                else => break,
-            }
-        }
-    });
-
-    let publication =
-        declare_publication(&a, HEALTH, QosProfile::Transition, Some("application/json"))
-            .await
-            .expect("declare");
-    let matching = publication.matching_events().await.expect("matching");
+        .expect("held value");
+    let member: Bindings = [
+        ("ns".to_owned(), vec!["default".to_owned()]),
+        ("iface".to_owned(), vec!["eth0".to_owned()]),
+    ]
+    .into();
+    let spoken = b
+        .declare_state_writer(&netif, "state/interfaces/{ns}/{iface}", &member)
+        .await
+        .expect("spoken");
+    let _service = b.start().await.expect("the owner");
 
     let (fired_tx, mut fired_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let buf = SharedBuf::default();
     let recorder = tokio::spawn({
-        let b = b.clone();
         let buf = buf.clone();
         async move {
-            let fleet = zenkey_fleet::Fleet::new(&b, "");
-            let store = zenkey_fleet::SchemaStore::new("", Duration::from_millis(300));
-            let spec = TriggerSpec {
-                selectors: vec![SELECTOR.into()],
-                pre: Duration::from_secs(2),
-                post: Duration::from_secs(1),
-                rules: vec![Condition::parse(&format!("silent-for {HEALTH} 0.7")).expect("rule")],
-                tick: Duration::from_millis(250),
-                timeout: Duration::from_secs(1),
-                doctor: None,
-                give_up: Some(Duration::from_secs(20)),
-                preamble: Some(semantics),
-                max_samples: None,
-                max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
-            };
             record_on(
-                &fleet,
-                None,
-                &store,
-                &spec,
+                &recorder_session,
+                "",
+                &spec(
+                    &format!("silent-for {HEALTH} 0.7"),
+                    Some(semantics),
+                    Duration::from_secs(20),
+                ),
                 || async move { Ok(buf) },
                 |ev| {
                     if let TriggerEvent::Fired(_) = ev {
@@ -119,18 +133,17 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
         }
     });
 
-    // The recorder's subscriber raises the badge; then 2 Hz for ~1.5 s.
-    assert!(
-        tokio::time::timeout(util::SETTLE, matching.recv())
+    // The recorder's subscriber matches; then 2 Hz for ~1.5 s.
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while !spoken.writer().matching().await.unwrap_or(false) {
+        assert!(tokio::time::Instant::now() < deadline, "never matched");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for i in 0..4u64 {
+        spoken
+            .put(synth.sample(&rev, &ifc, Member::Type, i).unwrap().bytes)
             .await
-            .expect("matching within the settle window")
-            .expect("listener alive")
-    );
-    for i in 0..4u8 {
-        publication
-            .send(format!(r#"{{"ok":true,"n":{i}}}"#).into_bytes(), None)
-            .await
-            .expect("send");
+            .expect("put");
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     // Quiet now. When the silence fires, speak once more: that sample is
@@ -138,22 +151,24 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
     tokio::time::timeout(util::SETTLE, fired_rx.recv())
         .await
         .expect("the rule fired within the settle window");
-    publication
-        .send(br#"{"ok":true,"post":true}"#.to_vec(), None)
+    spoken
+        .put(synth.sample(&rev, &ifc, Member::Type, 9).unwrap().bytes)
         .await
-        .expect("send post");
+        .expect("put post");
 
     let report = recorder.await.expect("join").expect("the capture ran");
-    serving.abort();
 
     let bytes = buf.0.lock().expect("buffer lock").clone();
     let mut reader = ZrecReader::new(bytes.as_slice()).expect("a .zrec header");
-    assert_eq!(reader.header().zrec, 2, "the file is version 2");
+    assert_eq!(reader.header().zrec, 3, "the file is version 3");
     let mut lines = Vec::new();
     while let Some(item) = reader.next() {
         lines.push(match item.expect("a well-formed line") {
             ZrecItem::Preamble { row, .. } => Line::Preamble(row.key),
-            ZrecItem::Sample { row, t_us, .. } => Line::Sample(row.key, t_us.expect("t")),
+            ZrecItem::Sample { row, t_us, .. } => {
+                assert!(row.qos_axes.is_some(), "version 3 rows carry their axes");
+                Line::Sample(row.key, t_us.expect("t"))
+            }
             ZrecItem::Trigger(t) => Line::Trigger(t.rule.clone(), t.to),
             ZrecItem::Dropped(n) => Line::Dropped(n),
         });
@@ -161,15 +176,25 @@ async fn capture(semantics: PreambleSemantics) -> (zenkey_fleet::RecordReport, V
     (report, lines)
 }
 
-/// The acceptance case: one file, in order — header (version 2, the
-/// preamble stated) → preamble row (the held key, `t: 0`) → pre-roll rows
-/// (the spoken key, ascending `t`, none marked preamble) → the trigger
-/// record (`silent-for`, to `firing`) → the post-roll row.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// The acceptance case: one file, in order — header (version 3, the
+/// preamble and what the selectors exclude stated) → preamble row (the
+/// held key, `t: 0`) → pre-roll rows (the spoken key, ascending `t`, none
+/// marked preamble) → the trigger record (`silent-for`, to `firing`) → the
+/// post-roll row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_condition_firing_writes_preamble_pre_trigger_and_post_in_one_file() {
     let (report, lines) = capture(PreambleSemantics::AbsentFromWindow).await;
 
     let header = &report.header;
+    assert_eq!(
+        header.excluded.as_deref(),
+        Some(
+            ["@stream", "@state", "@op", "@zk", "@adv"]
+                .map(String::from)
+                .as_slice()
+        ),
+        "a plain `state/**` capture names no verbatim chunk (O5)"
+    );
     let preamble = header
         .preamble
         .as_ref()
@@ -241,56 +266,43 @@ async fn a_condition_firing_writes_preamble_pre_trigger_and_post_in_one_file() {
 
 /// `full` semantics keep every fetched key — the spoken one too, though the
 /// ring already holds its story.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn full_semantics_keep_every_fetched_key() {
     let (report, lines) = capture(PreambleSemantics::Full).await;
     let preamble = report.header.preamble.as_ref().expect("preamble");
     assert_eq!(preamble.semantics, PreambleSemantics::Full);
     assert_eq!(preamble.count, 2, "{preamble:?}");
-    let keys: Vec<&str> = lines
+    let mut keys: Vec<&str> = lines
         .iter()
         .filter_map(|l| match l {
             Line::Preamble(k) => Some(k.as_str()),
             _ => None,
         })
         .collect();
-    assert_eq!(
-        keys,
-        vec![CONFIG, HEALTH],
-        "preamble rows come first, by key"
-    );
+    keys.sort_unstable();
+    assert_eq!(keys, vec![HEALTH, CONFIG]);
 }
 
 /// Nothing fires within `give_up`: no file, no trigger, and a report that
 /// says so rather than an empty capture — a rule not firing is not a
-/// finding.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// finding. A rule that judges v1 is refused before anything is declared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_rule_that_never_fires_leaves_no_file() {
-    let (_a, b) = peer_pair().await;
-    let fleet = zenkey_fleet::Fleet::new(&b, "");
-    let store = zenkey_fleet::SchemaStore::new("", Duration::from_millis(300));
-    let spec = TriggerSpec {
-        selectors: vec![SELECTOR.into()],
-        pre: Duration::from_secs(2),
-        post: Duration::from_secs(1),
-        // A silence claim over a span longer than the run can never be
-        // established: unobservable throughout, never firing.
-        rules: vec![Condition::parse(&format!("silent-for {HEALTH} 60")).expect("rule")],
-        tick: Duration::from_millis(200),
-        timeout: Duration::from_millis(300),
-        doctor: None,
-        give_up: Some(Duration::from_millis(900)),
-        preamble: Some(PreambleSemantics::AbsentFromWindow),
-        max_samples: None,
-        max_replies: zenkey_fleet::DEFAULT_MAX_REPLIES,
-    };
+    let (_router, ep) = router(None).await;
+    let session = client(&ep).await;
+    // A silence claim over a span longer than the run can never be
+    // established: unobservable throughout, never firing.
+    let never = spec(
+        &format!("silent-for {HEALTH} 60"),
+        Some(PreambleSemantics::AbsentFromWindow),
+        Duration::from_millis(900),
+    );
     let opened = Arc::new(Mutex::new(false));
     let mut gave_up = false;
     let report = record_on(
-        &fleet,
-        None,
-        &store,
-        &spec,
+        &session,
+        "",
+        &never,
         || async {
             *opened.lock().expect("lock") = true;
             Ok(SharedBuf::default())
@@ -308,4 +320,20 @@ async fn a_rule_that_never_fires_leaves_no_file() {
     assert!(report.out.is_none() && report.trigger.is_none());
     assert_eq!(report.samples, 0);
     assert_eq!(report.header.preamble, None);
+
+    let v1 = spec(
+        "origin-down h-aaaaaaaaaaaa",
+        None,
+        Duration::from_millis(100),
+    );
+    let e = record_on(
+        &session,
+        "",
+        &v1,
+        || async { Ok(SharedBuf::default()) },
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+    assert!(e.is_unaskable(), "{e}");
 }

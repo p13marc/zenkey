@@ -183,6 +183,52 @@ pub fn render_with(
     }
 }
 
+/// Renders a payload of `member` of `r`, a resource of `revision` already
+/// in hand, with the template `values` its key bound (#612, FJ8a). What a
+/// server knows of the call it serves: the key may be a fan-out's selector,
+/// which [`render_with`]'s resolution cannot read, and the resource is
+/// known without it.
+pub fn render_resource(
+    revision: &Revision,
+    r: &zenkey_model::contract::Resource,
+    key: &str,
+    member: Member,
+    values: zenkey_model::template::Bindings,
+    encoding: Option<&str>,
+    bytes: &[u8],
+) -> PayloadRendering {
+    let fingerprint = revision.fingerprint().to_string();
+    let resource = zk2::implementation::resource_name(r);
+    let Some(ty) = decode::type_of(
+        revision.bundle(),
+        r.token.as_str(),
+        r.template.as_str(),
+        member.as_str(),
+    ) else {
+        return structural_rendering(
+            key,
+            Unresolved::NoMember {
+                resource,
+                member: member.as_str().to_owned(),
+            },
+            bytes,
+        );
+    };
+    let encoding = encoding.filter(|e| *e != "zenoh/bytes");
+    PayloadRendering {
+        key: key.to_owned(),
+        size: bytes.len(),
+        resource: Some(ResolvedResource {
+            iface: revision.iface().to_string(),
+            fingerprint,
+            resource,
+            member: member.as_str().to_owned(),
+            values,
+        }),
+        rendered: rendered(ty, decode::decode(revision.bundle(), ty, encoding, bytes)),
+    }
+}
+
 /// The model's decode, as the report spells it.
 fn rendered(ty: &serde_json::Value, d: Decoded) -> Rendered {
     match d {

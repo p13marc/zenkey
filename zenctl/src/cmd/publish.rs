@@ -290,6 +290,14 @@ async fn matching_note(
 /// through a declared publisher — one per distinct key, reusing the write
 /// facade, never ad-hoc puts — and counts what it could not publish
 /// instead of silently skipping it.
+///
+/// **Re-cut for zk2** (#612, FJ8a). A row whose key a zk2 service owns is
+/// refused exactly as `pub` refuses one (P3), and counted; a foreign row is
+/// written as before, with the QoS axes it recorded (`qos_axes`, ahead of a
+/// profile name), so `echo --format ndjson | pub --from ndjson` keeps a
+/// foreign key's QoS whatever profile it matches. The session opens on the
+/// first row there is to write: a pipe of refused rows asks nothing of the
+/// bus.
 pub async fn run_from_ndjson(
     default_qos: Option<&str>,
     every: f64,
@@ -301,8 +309,8 @@ pub async fn run_from_ndjson(
     // An explicit --qos fails fast; otherwise each key falls back to its
     // declared profile, then sampled — the same ladder as `zenctl pub` (#158).
     let explicit_qos = default_qos.map(parse_qos).transpose()?;
-    let session = args.session().await?;
-    let slices = args.slices_optional().await?;
+    let mut session: Option<zenoh::Session> = None;
+    let mut slices: Option<Option<zenkey_fleet::SliceSet>> = None;
     let base = args.base().to_string();
 
     let mut publications: std::collections::HashMap<String, zenkey_fleet::Publication> =
@@ -347,10 +355,19 @@ pub async fn run_from_ndjson(
         // counted, never silently dropped. A put row on a wildcard is the
         // same blast radius as a wildcard delete (#504), and a zk2 service's
         // own key is its owner's alone (P3); `--i-know` moves neither.
-        let refusal = if let Some(why) = owned_refusal(&row.key) {
-            Some(format!("{}: {why}", row.key))
-        } else if row.delete {
-            zenkey_fleet::check_retire(&base, &row.key, slices.as_ref(), i_know)
+        // The owner's key is refused before anything is asked of the bus.
+        if let Some(why) = owned_refusal(&row.key) {
+            record_err(line_no, format!("{}: {why}", row.key), &mut refused);
+            continue;
+        }
+        // The rest needs what the slices say (a retire's class, a key's
+        // declared profile): loaded once, when the first row needs them.
+        if slices.is_none() {
+            slices = Some(args.slices_optional().await?);
+        }
+        let slices = slices.as_ref().and_then(Option::as_ref);
+        let refusal = if row.delete {
+            zenkey_fleet::check_retire(&base, &row.key, slices, i_know)
                 .err()
                 .map(|e| e.to_string())
         } else {
@@ -365,12 +382,14 @@ pub async fn run_from_ndjson(
         let publication = match publications.entry(row.key.clone()) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                // Row > flag > declared > sampled. Only the row's own name can
-                // be malformed; the declared fallback resolves silently per
-                // key (a per-row note would drown the pipe's real output).
-                let qos = match row.qos.as_deref() {
-                    Some(name) => match zenkey::qos::QosProfile::from_name(name) {
-                        Some(q) => q,
+                // The row's axes > the row's profile > flag > declared >
+                // sampled. Only the row's own name can be malformed; the
+                // declared fallback resolves silently per key (a per-row
+                // note would drown the pipe's real output).
+                let qos = match (row.qos_axes, row.qos.as_deref()) {
+                    (Some(axes), _) => axes,
+                    (None, Some(name)) => match zenkey::qos::QosProfile::from_name(name) {
+                        Some(q) => zenkey_fleet::WireQos::of_profile(q),
                         None => {
                             record_err(
                                 line_no,
@@ -380,12 +399,18 @@ pub async fn run_from_ndjson(
                             continue;
                         }
                     },
-                    None => explicit_qos
-                        .or_else(|| declared_qos(&base, &row.key, slices.as_ref()).map(|(q, _)| q))
-                        .unwrap_or(zenkey::qos::QosProfile::Sampled),
+                    (None, None) => zenkey_fleet::WireQos::of_profile(
+                        explicit_qos
+                            .or_else(|| declared_qos(&base, &row.key, slices).map(|(q, _)| q))
+                            .unwrap_or(zenkey::qos::QosProfile::Sampled),
+                    ),
                 };
-                let publication = zenkey_fleet::declare_publication(
-                    &session,
+                if session.is_none() {
+                    session = Some(args.session().await?);
+                }
+                let s = session.as_ref().expect("opened above");
+                let publication = zenkey_fleet::declare_publication_with(
+                    s,
                     &row.key,
                     qos,
                     row.encoding.as_deref(),

@@ -37,7 +37,7 @@ Commands:
   blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
-  bench        Measure the fleet
+  bench        Measure how a deployment answers its operations
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded
@@ -45,15 +45,15 @@ Commands:
   pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Per-field statistics over a window: stuck, vanished and new fields
-  record       Capture a selector's traffic to a .zrec file
+  record       Capture wire selectors' traffic to a .zrec file
   replay       Replay a .zrec capture onto the bus (this publishes)
   timeline     One merged ordering of a window's samples, a lane per origin
   snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics
-  serve        Stand up a mock queryable that answers one keyexpr and logs every ask
-  gen          Generate test traffic from the registry: a mock producer
+  serve        Serve one operation of an interface as a mock owner, and log each call
+  gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   doctor       Judge a zk2 deployment against the core: one verdict per check
@@ -106,7 +106,7 @@ Commands:
   blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
-  bench        Measure the fleet
+  bench        Measure how a deployment answers its operations
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded
@@ -114,15 +114,15 @@ Commands:
   pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
   field        Per-field statistics over a window: stuck, vanished and new fields
-  record       Capture a selector's traffic to a .zrec file
+  record       Capture wire selectors' traffic to a .zrec file
   replay       Replay a .zrec capture onto the bus (this publishes)
   timeline     One merged ordering of a window's samples, a lane per origin
   snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics
-  serve        Stand up a mock queryable that answers one keyexpr and logs every ask
-  gen          Generate test traffic from the registry: a mock producer
+  serve        Serve one operation of an interface as a mock owner, and log each call
+  gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   doctor       Judge a zk2 deployment against the core: one verdict per check

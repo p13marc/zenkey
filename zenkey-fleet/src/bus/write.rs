@@ -56,16 +56,64 @@ pub async fn declare_publication(
     qos: QosProfile,
     encoding: Option<&str>,
 ) -> Result<Publication> {
+    declare_publication_with(session, key, WireQos::of_profile(qos), encoding).await
+}
+
+/// A publication's QoS axes as zenoh takes them (#612, FJ8a): a v1
+/// profile's, or the axes a row recorded (`qos_axes`), which a replay and
+/// `pub --from ndjson` publish with exactly. A zk2 owner's QoS is per
+/// resource (spec §2.4), and v1's five profile names spell little of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WireQos {
+    pub priority: zenoh::qos::Priority,
+    pub congestion: zenoh::qos::CongestionControl,
+    pub reliability: zenoh::qos::Reliability,
+    pub express: bool,
+}
+
+impl WireQos {
+    /// A v1 profile's axes (RFC 04 §3).
+    pub fn of_profile(p: QosProfile) -> WireQos {
+        WireQos {
+            priority: p.priority(),
+            congestion: p.congestion_control(),
+            reliability: p.reliability(),
+            express: p.express(),
+        }
+    }
+
+    /// The axes a `qos_axes` token spells
+    /// ([`crate::report::qos_axes_token`]), or `None` for one it could not
+    /// have written.
+    pub fn parse(token: &str) -> Option<WireQos> {
+        let (priority, congestion, reliability, express) = crate::report::parse_qos_axes(token)?;
+        Some(WireQos {
+            priority,
+            congestion,
+            reliability,
+            express,
+        })
+    }
+}
+
+/// [`declare_publication`] with the axes given one by one: what a recorded
+/// row's `qos_axes` asks for (#612, FJ8a).
+pub async fn declare_publication_with(
+    session: &Session,
+    key: &str,
+    qos: WireQos,
+    encoding: Option<&str>,
+) -> Result<Publication> {
     // The only publish path refuses the blast radius itself (#504), so no
     // frontend can forget to: a caller that wants the refusal before a
     // session opens asks `check_concrete` first, as `zenctl pub` does.
     check_concrete(key, WriteAct::Put)?;
     let publisher = session
         .declare_publisher(key.to_string())
-        .reliability(qos.reliability())
-        .congestion_control(qos.congestion_control())
-        .priority(qos.priority())
-        .express(qos.express())
+        .reliability(qos.reliability)
+        .congestion_control(qos.congestion)
+        .priority(qos.priority)
+        .express(qos.express)
         .await
         .map_err(|e| Error::bus("declare publisher", key, e))?;
     Ok(Publication {
@@ -961,8 +1009,8 @@ mod tests {
     /// What `force` never moves: a declared — or defaulted — forbidden
     /// fan-out, and the convention's own writes. And what needs no force:
     /// a declared read, an allowed write, the convention's reads (with no
-    /// registry at all — `config get '*'` and `bench rpc '*'` of
-    /// introspect keep working), and a templated declaration the call fills.
+    /// registry at all — `config get '*'` of
+    /// introspect keeps working), and a templated declaration the call fills.
     #[test]
     fn force_moves_only_the_unknown() {
         for slices in [

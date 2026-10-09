@@ -65,14 +65,12 @@ impl Write for SlowBuf {
 }
 
 fn header(selector: &str) -> ZrecHeader {
-    ZrecHeader {
-        zrec: ZREC_VERSION,
-        selectors: vec![selector.to_string()],
-        base: String::new(),
+    let h = ZrecHeader {
         captured_at: "2026-08-12T00:00:00Z".to_string(),
-        preamble: None,
-        pre_roll: None,
-    }
+        ..ZrecHeader::capture(vec![selector.to_string()], "")
+    };
+    assert_eq!(h.zrec, ZREC_VERSION);
+    h
 }
 
 const KEY: &str = "v1/h-aaaaaaaaaaaa/state/demo/health";
