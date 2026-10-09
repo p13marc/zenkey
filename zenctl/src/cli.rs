@@ -965,12 +965,22 @@ pub(crate) enum AdminCmd {
         #[command(flatten)]
         session: SessionArgs,
     },
-    /// The mesh as the admin space answers it: nodes, edges, mentions.
+    /// The mesh as the admin space answers it, with each zk2 instance on it.
     ///
     /// #118: nodes, edges, and who only got mentioned. Their pictures are
     /// unlabeled circles; ours says which of admin space and liveliness backs
     /// each element. Nodes whose admin space is off render "heard of, not
     /// queryable" — never omitted.
+    ///
+    /// #705: every zk2 instance of the deployment (`--namespace`) is joined
+    /// onto the routers by the session zid its descriptor states (`meta.zid`,
+    /// spec §3.3), compared by value: it is attached to each router whose
+    /// session list names that zid. Only a verified router's list counts — its
+    /// own answer, outward from the routers this session is connected to
+    /// (§4.2, 0.12–0.13), as the doctor verifies them. An instance no verified
+    /// router lists is reported unattached, and one whose descriptor names no
+    /// zid unattributable — never omitted. The admin space is read in no
+    /// namespace, presence in the deployment's.
     Graph(AdminGraphArgs),
 }
 
@@ -2320,8 +2330,15 @@ pub(crate) struct AdminGraphArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long)]
     pub(crate) dot: bool,
+    /// Trust every answer from the routers' admin space. Without it, a
+    /// router's session list attaches an instance only when its answer is
+    /// verifiably the router's own, outward from the routers this session is
+    /// connected to (spec §4.2, 0.12–0.13). Pass it only when the
+    /// deployment's grants deny `@/**` queryables to every principal (§11.1).
+    #[arg(long)]
+    pub(crate) trust_admin_space: bool,
     #[command(flatten)]
-    pub(crate) session: SessionArgs,
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `acl gen` verb's flags — one struct the dispatcher hands over whole,

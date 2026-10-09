@@ -11,7 +11,7 @@ Usage: zenctl admin <COMMAND>
 
 Commands:
   routers  Enumerate routers/peers (zid, version, locators)
-  graph    The mesh as the admin space answers it: nodes, edges, mentions
+  graph    The mesh as the admin space answers it, with each zk2 instance on it
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -71,9 +71,11 @@ Options:
           Print help (see a summary with '-h')
 
 $ zenctl admin graph --help
-The mesh as the admin space answers it: nodes, edges, mentions.
+The mesh as the admin space answers it, with each zk2 instance on it.
 
 #118: nodes, edges, and who only got mentioned. Their pictures are unlabeled circles; ours says which of admin space and liveliness backs each element. Nodes whose admin space is off render "heard of, not queryable" — never omitted.
+
+#705: every zk2 instance of the deployment (`--namespace`) is joined onto the routers by the session zid its descriptor states (`meta.zid`, spec §3.3), compared by value: it is attached to each router whose session list names that zid. Only a verified router's list counts — its own answer, outward from the routers this session is connected to (§4.2, 0.12–0.13), as the doctor verifies them. An instance no verified router lists is reported unattached, and one whose descriptor names no zid unattributable — never omitted. The admin space is read in no namespace, presence in the deployment's.
 
 Usage: zenctl admin graph [OPTIONS]
 
@@ -82,6 +84,17 @@ Options:
           Emit Graphviz instead of the table (pipe to `dot -Tsvg`).
           
           A foreign schema, so `--format` has no say over it: passing both is a usage error, not a silent preference.
+
+      --trust-admin-space
+          Trust every answer from the routers' admin space. Without it, a router's session list attaches an instance only when its answer is verifiably the router's own, outward from the routers this session is connected to (spec §4.2, 0.12–0.13). Pass it only when the deployment's grants deny `@/**` queryables to every principal (§11.1)
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)

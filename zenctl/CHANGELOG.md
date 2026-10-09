@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — zk2's coverage completed (#585, FK1)
+
+Four follow-ups of #612 bring back, in zk2's terms, the questions FJ9 left
+unasked on `main`.
+
+| Before | Now | Notes |
+|---|---|---|
+| `admin graph` (session flags) | `admin graph [--namespace NS] [--trust-admin-space]` | #705: each zk2 instance of the deployment is joined onto the routers by its descriptor's `meta.zid`, compared by value, through verified routers' session lists only (spec §4.2, 0.12–0.13). New `instance` rows, tagged `attachment`: `attached` (with its routers), `unattached`, `unattributable`; `--dot` draws them. The envelope's `instances` says what the join read |
+
 ## Unreleased (`main`, zk2) — what was left of v1 (#612, FJ9)
 
 The last of v1 leaves `main`'s zenctl, and the binary no longer links v1's

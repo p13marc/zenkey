@@ -23,8 +23,9 @@
 //! stated clock ([`timeline`]), a fan-in's replies become snapshot rows
 //! ([`snapshot`]), two snapshots become one comparison by zk2 key
 //! ([`snapshot_diff`]), an enrollment and the contracts become a router's
-//! access control ([`acl`]), and a deployment file becomes its storages
-//! ([`storage`]).
+//! access control ([`acl`]), a deployment file becomes its storages
+//! ([`storage`]), and a presence read and the routers' verified session
+//! lists become each instance's attachment ([`attach`], #705).
 //!
 //! v1's half of this layer — the described key (`facts`), the registry
 //! slice set (`registry`), the skeleton tree, the schema-aware decode seam
@@ -46,6 +47,7 @@
 //! [`crate::judge`]'s.
 
 pub mod acl;
+pub mod attach;
 pub mod bounded;
 pub mod catalog;
 pub mod compat;

@@ -166,9 +166,9 @@ pub use tape::synth::{Synth, Synthesized, member_type, size_class};
 pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, declared_entities,
-    declared_entities_within, declared_entity_selectors, mesh_links, render_dot, routers, storages,
-    topology,
+    AdminEntry, RouterVerification, admin_doc_omits_loopback, admin_get, admin_get_within,
+    declared_entities, declared_entities_within, declared_entity_selectors, mesh_links, render_dot,
+    routers, storages, topology, topology_with_instances,
 };
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,

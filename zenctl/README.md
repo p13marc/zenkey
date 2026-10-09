@@ -497,6 +497,7 @@ zenctl record --namespace acme -o bus.zrec --for 10  # capture: same row shape +
 zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
+zenctl admin graph --namespace acme     # …with each zk2 instance on the router that lists its session, or unattached
 zenctl doctor --namespace acme          # thirteen checks; 1 on a finding, 2 if one could not be judged
 zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>

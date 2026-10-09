@@ -94,10 +94,23 @@ fn base_config() -> zenoh::Config {
 
 /// A router on an ephemeral loopback port, and the endpoint it bound.
 async fn router() -> (zenoh::Session, String) {
+    router_with(false, None).await
+}
+
+/// [`router`], its admin space on or off (zenoh's default is off), linked
+/// to the router at `upstream` when given (FK1: `admin graph`, `storage gen
+/// --check` beside a live router).
+async fn router_with(admin: bool, upstream: Option<&str>) -> (zenoh::Session, String) {
     let mut c = base_config();
     c.insert_json5("mode", "\"router\"").expect("config");
     c.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
         .expect("config");
+    c.insert_json5("adminspace/enabled", if admin { "true" } else { "false" })
+        .expect("config");
+    if let Some(up) = upstream {
+        c.insert_json5("connect/endpoints", &format!("[\"{up}\"]"))
+            .expect("config");
+    }
     let r = zenoh::open(c).await.expect("a router");
     let ep = r
         .info()
@@ -198,8 +211,17 @@ impl Bus {
     /// A router and an owners' session, in `namespace` when given, and no
     /// service yet: for a case that brings up its own (FJ5).
     async fn bare(namespace: Option<&str>) -> Bus {
+        Bus::on(router().await, namespace).await
+    }
+
+    /// [`Bus::bare`] on a router whose admin space is on (FK1).
+    async fn admin(namespace: Option<&str>) -> Bus {
+        Bus::on(router_with(true, None).await, namespace).await
+    }
+
+    /// The bus around a router already up.
+    async fn on((router, endpoint): (zenoh::Session, String), namespace: Option<&str>) -> Bus {
         static NTH: AtomicU64 = AtomicU64::new(0);
-        let (router, endpoint) = router().await;
         let owners = client(&endpoint, namespace).await;
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-zk2-home")
@@ -3524,4 +3546,115 @@ async fn a_base_relative_zk2_selector_is_hinted_on_stderr() {
             .any(|g| g["is"] == "resource" && g["address"] == "host-a/tc"),
         "the wire key under the namespace resolves: {run}"
     );
+}
+
+// ── FK1: why, check conform, storage gen, admin graph (#702–#705) ──────────
+
+/// The rows of a `--format json` document tagged `instance`, by address.
+fn instance_row<'a>(doc: &'a Value, address: &str) -> Option<&'a Value> {
+    rows_of(doc, "instance")
+        .into_iter()
+        .find(|r| r["address"] == address)
+}
+
+/// #705: `admin graph` joins each instance onto the router whose verified
+/// document lists its session (spec §3.3, §4.2). `host-a/tc` is a client of
+/// the router zenctl reads, whose admin space is on: attached, listed as a
+/// client, its zid the one its descriptor states. `host-b/tc` is a client
+/// of a second router, linked to the first, whose admin space is off: the
+/// first lists that router and not its clients, so `host-b/tc` is reported
+/// unattached — never omitted — and its router is only heard of.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn admin_graph_attaches_an_instance_to_its_router_and_reports_the_unattached() {
+    let mut bus = Bus::admin(Some("acme")).await;
+    let (far, far_endpoint) = router_with(false, Some(&bus.endpoint)).await;
+    let far_owners = client(&far_endpoint, Some("acme")).await;
+    let addr = |s: &str| s.parse().expect("an address");
+    let near = bring_up(
+        &bus.owners,
+        ServiceConfig::new(addr("host-a/tc")),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    let remote = bring_up(
+        &far_owners,
+        ServiceConfig::new(addr("host-b/tc")),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    bus.services.extend([near, remote]);
+    let far_zid = far.zid().to_string();
+    bus.keep((far, far_owners.clone()));
+
+    let args = [
+        "admin",
+        "graph",
+        "--namespace",
+        "acme",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 0
+                && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    ["host-a/tc", "host-b/tc"].iter().all(|a| {
+                        instance_row(&d, a).is_some_and(|i| i["attachment"] != "unattributable")
+                    })
+                })
+        })
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "admin-graph");
+    assert_eq!(doc["instances"]["namespace"], "acme", "{run}");
+    let router_zid = bus._router.zid().to_string();
+    assert_eq!(
+        doc["instances"]["verified"],
+        json!([router_zid]),
+        "the router zenctl is connected to, verified by its own answer: {run}"
+    );
+    let a = instance_row(&doc, "host-a/tc").expect("host-a/tc");
+    assert_eq!(a["attachment"], "attached", "{run}");
+    assert_eq!(a["zid"], bus.owners.zid().to_string(), "its meta.zid");
+    assert_eq!(a["routers"][0]["router"], router_zid);
+    assert_eq!(a["routers"][0]["listed_as"], "client");
+    let b = instance_row(&doc, "host-b/tc").expect("host-b/tc is never omitted");
+    assert_eq!(b["attachment"], "unattached", "{run}");
+    assert_eq!(b["zid"], far_owners.zid().to_string());
+    assert!(
+        b["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("no verified router")),
+        "{run}"
+    );
+    assert!(
+        rows_of(&doc, "node")
+            .iter()
+            .any(|n| n["zid"] == far_zid.as_str() && n["answered"] == false),
+        "the far router is heard of, not queryable: {run}"
+    );
+
+    // The picture carries the join too, and its notes ride stderr.
+    let run = bus
+        .zenctl(&[
+            "admin",
+            "graph",
+            "--namespace",
+            "acme",
+            "--timeout",
+            "2",
+            "--dot",
+        ])
+        .await;
+    exits(&run, 0);
+    assert!(
+        run.stdout
+            .contains(&format!("\"{router_zid}\" -- \"host-a/tc@")),
+        "{run}"
+    );
+    assert!(run.stdout.contains("(unattached)"), "{run}");
+    assert!(run.stderr.contains("1 attached, 1 unattached"), "{run}");
 }

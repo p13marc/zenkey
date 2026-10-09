@@ -589,6 +589,61 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
             region: None,
             links: vec!["tcp".into()],
         }],
+        instances: zenkey_fleet::report::Asked::NotAsked,
+    }
+}
+
+/// [`topology`] with zk2's instances joined onto it (#705): one attached
+/// to the verified router that lists its session, one no verified router
+/// lists (an unverified answer claims it), one whose descriptor names no
+/// zid — every attachment non-empty, so a renderer that merged two fails.
+pub fn topology_with_instances() -> zenkey_fleet::TopologyReport {
+    use zenkey_fleet::report::{AttachedTo, Attachment, InstanceAttachment, InstanceJoin};
+    zenkey_fleet::TopologyReport {
+        instances: zenkey_fleet::report::Asked::Asked(InstanceJoin {
+            namespace: "acme".into(),
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            verified: vec!["aabbccdd".into()],
+            unverified: vec![
+                "`@/99887766/router`, answered by 12345678: its replier is not the router its key \
+                 names"
+                    .into(),
+            ],
+            unobservable: None,
+            instances: vec![
+                InstanceAttachment {
+                    address: "host-a/tc".into(),
+                    instance: "3fa9c2d41b7e0012".into(),
+                    zid: Some("eeff0011".into()),
+                    attachment: Attachment::Attached {
+                        routers: vec![AttachedTo {
+                            router: "aabbccdd".into(),
+                            listed_as: "peer".into(),
+                        }],
+                    },
+                },
+                InstanceAttachment {
+                    address: "host-b/tc".into(),
+                    instance: "3fa9c2d41b7e0013".into(),
+                    zid: Some("c0ffee".into()),
+                    attachment: Attachment::Unattached {
+                        reason: "no verified router (aabbccdd) lists zid c0ffee among its \
+                                 sessions, compared by value"
+                            .into(),
+                    },
+                },
+                InstanceAttachment {
+                    address: "ws-01/tcgui-frontend".into(),
+                    instance: "3fa9c2d41b7e0014".into(),
+                    zid: None,
+                    attachment: Attachment::Unattributable {
+                        reason: "its descriptor names no session zid (`meta.zid`)".into(),
+                    },
+                },
+            ],
+        }),
+        ..topology()
     }
 }
 

@@ -201,6 +201,9 @@ fn no_family_emits_trailing_whitespace() {
         table(&zk2fx::schema_view()),
         table(&zk2fx::compat_report()),
         table(&zk2fx::namespace_listing()),
+        table(&zenctl::render::TopologyView {
+            report: &fx::topology_with_instances(),
+        }),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -806,6 +809,72 @@ eeff0011  peer    —      (heard of, not queryable)
 
 "#]]
     );
+}
+
+/// zk2's instances on the mesh (#705): each of the three attachments is
+/// spelled apart in every medium — a mark and a word in the table, an
+/// `attachment` tag on its row — a missing zid is `—`, never an empty
+/// one, and what the join read (namespace, verified routers, the answers
+/// that count for nothing) reaches a script as notes and an envelope.
+/// Every count in the fixture is non-zero, so a renderer that merged two
+/// attachments fails here (tooling guide §7).
+#[test]
+fn an_admin_graph_spells_each_instance_attachment_apart() {
+    let report = fx::topology_with_instances();
+    let view = zenctl::render::TopologyView { report: &report };
+    assert_data_eq!(
+        table(&view),
+        str![[r#"
+aabbccdd  router  1.9.0  tcp/10.0.0.1:7447
+eeff0011  peer    —      (heard of, not queryable)
+  aabbccdd —— eeff0011  [tcp]
+
+zk2 instances:
+host-a/tc@3fa9c2d41b7e0012             eeff0011  → aabbccdd (as peer)
+host-b/tc@3fa9c2d41b7e0013             c0ffee    ✗ unattached: no verified router (aabbccdd) lists zid c0ffee among its sessions, compared by value
+ws-01/tcgui-frontend@3fa9c2d41b7e0014  —         ? unattributable: its descriptor names no session zid (`meta.zid`)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&view)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "admin-graph");
+    assert_eq!(envelope["instances"]["namespace"], "acme");
+    assert_eq!(
+        envelope["instances"]["verified"],
+        serde_json::json!(["aabbccdd"])
+    );
+    assert!(
+        envelope["instances"].get("instances").is_none(),
+        "instances are rows, not an envelope field"
+    );
+    let attachments: Vec<&str> = lines
+        .iter()
+        .filter(|r| r["row"] == "instance")
+        .map(|r| r["attachment"].as_str().expect("a tag"))
+        .collect();
+    assert_eq!(attachments, ["attached", "unattached", "unattributable"]);
+    let unattributable = lines
+        .iter()
+        .find(|r| r["attachment"] == "unattributable")
+        .expect("one");
+    assert!(
+        unattributable.get("zid").is_none(),
+        "no zid is absence: {unattributable}"
+    );
+    let said = notes(&view);
+    assert!(
+        said.contains("3 zk2 instance(s) read in namespace \"acme\""),
+        "{said}"
+    );
+    assert!(
+        said.contains("1 attached, 1 unattached, 1 unattributable"),
+        "{said}"
+    );
+    assert!(said.contains("attach nothing"), "{said}");
 }
 
 /// The ACL plan draws its three lists as two tables (principals with what
@@ -1424,6 +1493,10 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, None);
     let report = fx::topology();
     scoped(&zenctl::render::TopologyView { report: &report });
+    // With the instance join (#705), the presence selector it read too.
+    let report = fx::topology_with_instances();
+    let s = scoped(&zenctl::render::TopologyView { report: &report });
+    assert_eq!(s.asked, ["@/*/router", "zk2/*/*/@zk/**"]);
     // zk2's acts and reads (#612, FJ5): the keys a call or a state GET
     // went out on, over its reply wait.
     let s = scoped(&actfx::value());
