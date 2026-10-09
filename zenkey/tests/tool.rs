@@ -14,7 +14,7 @@ use zenkey::model::grammar::{IfaceId, ZkKey};
 use zenkey::model::template::Bindings;
 use zenkey::presence;
 use zenkey::retrieval::{Retrieved, fetch_bundle};
-use zenkey::{Client, Implementation, Outcome, ServiceBuilder};
+use zenkey::{Client, Fleet, Implementation, Outcome, ServiceBuilder};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_tool_discovers_retrieves_subscribes_and_calls() {
@@ -121,4 +121,58 @@ async fn a_tool_discovers_retrieves_subscribes_and_calls() {
         .await
         .unwrap();
     assert!(quick.complete, "{quick:?}");
+
+    // A fleet's presence carries the reads' completeness too (#671).
+    let present = Fleet::new(&tool, imp.shared_contract(), &["lab/*"])
+        .unwrap()
+        .presence(T)
+        .await
+        .unwrap();
+    assert_eq!(present.providers, std::slice::from_ref(&addr));
+    assert!(present.complete && present.errors.is_empty(), "{present:?}");
+}
+
+/// A tool's subscription counts what it drops apart (#671; the tooling
+/// guide's O6): R6's discards (a wildcard key) and samples whose concrete
+/// key resolves to no member (`tracks/X` is not a canonical slug, §1.4).
+/// Neither is delivered; only `tracks/t1` is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_tool_subscription_counts_unresolved_samples_apart() {
+    let (_r1, ep) = router(None).await;
+    let (writer, tool) = (client(&ep).await, client(&ep).await);
+    let got: Arc<Mutex<Vec<String>>> = Arc::default();
+    let g = Arc::clone(&got);
+    let consumer = Consumer::for_tool(
+        &tool,
+        imp("nav.v2").shared_contract(),
+        &["p1/nav"],
+        &Default::default(),
+    )
+    .unwrap();
+    let sub = consumer
+        .subscribe("state/tracks/{track}", move |d: Delivery| {
+            g.lock().unwrap().push(d.sample.key_expr().to_string())
+        })
+        .await
+        .unwrap();
+    let probe = writer
+        .declare_publisher("zk2/p1/nav/nav.v2/state/tracks/t1")
+        .await
+        .unwrap();
+    eventually("the tool's subscriber is matched", || async {
+        probe.matching_status().await.unwrap().matching()
+    })
+    .await;
+    for key in [
+        "zk2/p1/nav/nav.v2/state/tracks/t1",
+        "zk2/p1/nav/nav.v2/state/tracks/X",
+        "zk2/p1/nav/nav.v2/state/tracks/*",
+    ] {
+        writer.put(key, "v").await.unwrap();
+    }
+    eventually("each sample is accounted for", || async {
+        sub.discarded() == 1 && sub.unresolved() == 1 && got.lock().unwrap().len() == 1
+    })
+    .await;
+    assert_eq!(*got.lock().unwrap(), ["zk2/p1/nav/nav.v2/state/tracks/t1"]);
 }
