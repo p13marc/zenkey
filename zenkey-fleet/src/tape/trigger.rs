@@ -34,21 +34,32 @@
 //! moving under all of it; the snapshot is taken the instant the rule
 //! fires, before the fetch, because the fetch takes as long as the fleet
 //! takes to answer.
+//!
+//! **zk2** (#612, FJ8a). The capture is a `.zrec` version 3 (the tooling
+//! guide's §5): the header's base is the namespace the operator stated,
+//! and it says what the watched selectors exclude (O5). The rules judge
+//! zk2 conditions ([`zk2_rules`]): the watchdog's vocabulary as FJ6 left it,
+//! less the rules that judge v1's registry, roster or alert plane. The
+//! preamble is the owners' own answer (S4: target `All`, consolidation
+//! `Latest`, R6's discard) on the plain-`state` projection of the watched
+//! selectors ([`state_projection`]), never a storage's.
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use zenoh::Session;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+use zenoh::sample::SampleKind;
+
 use crate::bus::monitor::{FleetEvent, SampleView, StreamItem};
 use crate::judge::condition::{Condition, RuleSet, SweepOutcome};
-use crate::model::decode::SchemaStore;
-use crate::model::registry::SliceSet;
 use crate::model::retain::RetentionBudget;
 use crate::report::{
     CondState, PreRollInfo, PreambleInfo, PreambleSemantics, RecordReport, Transition, ZrecHeader,
 };
-use crate::tape::record::{RecordBounds, ZREC_VERSION, ZrecSink, record};
+use crate::tape::record::{RecordBounds, ZrecSink, record};
 use crate::{Error, Result};
 
 /// What a trigger capture watches, judges, and keeps.
@@ -114,54 +125,121 @@ pub enum TriggerEvent<'a> {
 /// drop where the loss happened rather than growing without bound.
 const FIRE_BUFFER: usize = 4096;
 
-/// The state-class projection of a wire selector under `base`: the
-/// selector narrowed to `state` keys, or `None` when it reaches none.
+/// The state projection of a wire selector under `namespace` (#612, FJ8a):
+/// the selector narrowed to zk2's state keys (spec §1.1, §1.3), or `None`
+/// when it reaches none.
 ///
-/// `v1/<origin>/*/…` and `v1/<origin>/state/…` project onto the `state`
-/// class; `v1/<origin>/**` and `v1/**` widen to `…/state/**` (the class
-/// chunk is positional, RFC 03 §2, so a `**` that spans it is every class
-/// including `state`); a selector naming another class, or too short to
-/// reach a class, reaches no state and yields `None` — which the caller
-/// records under `failed`, because "no preamble for this watch" is a fact
-/// about the watch, not silence. A selector under another base is another
+/// Positions 1–5 of a zk2 key have fixed arity, so the kind sits at
+/// position 5: `zk2/**`, `zk2/<system>/**`, `zk2/<system>/<service>/**` and
+/// `zk2/<s>/<v>/<iface>/**` widen to `…/state/**` with each unnamed
+/// position `*` (a `**` that spans the kind spans plain `state`, and never
+/// `@state`, which no wildcard matches); a selector whose kind is `state`,
+/// `@state` or `*` keeps its tail, `*` becoming `state`. A selector naming
+/// another kind, a control key (`@zk`), one too short to reach a kind, or
+/// one with `**` before the kind yields `None` — which the caller records
+/// under `failed`, because "no preamble for this watch" is a fact about the
+/// watch, not silence. A selector outside `namespace` is another
 /// deployment's and yields `None` too.
-pub fn state_projection(base: &str, selector: &str) -> Option<String> {
-    use zenkey::grammar::{CLASS_STATE, VERSION_CHUNK};
-    let rel = zenkey::grammar::strip_base(base, selector)?;
+pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
+    let rel = zenkey::grammar::strip_base(namespace, selector)?;
     let chunks: Vec<&str> = rel.split('/').collect();
+    let named = |c: &str| c != "**" && !c.starts_with('@');
     let projected: Vec<String> = match chunks.as_slice() {
-        // `**` alone, or `v1/**`: every origin's every class.
-        ["**"] | [VERSION_CHUNK, "**"] => {
-            vec![
-                VERSION_CHUNK.into(),
-                "*".into(),
-                CLASS_STATE.into(),
-                "**".into(),
-            ]
+        ["**"] | ["zk2", "**"] => vec!["zk2", "*", "*", "*", "state", "**"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ["zk2", head @ .., "**"] if head.len() <= 3 && head.iter().all(|c| named(c)) => {
+            let mut v = vec!["zk2".to_owned()];
+            v.extend(head.iter().map(|c| (*c).to_owned()));
+            while v.len() < 4 {
+                v.push("*".to_owned());
+            }
+            v.extend(["state".to_owned(), "**".to_owned()]);
+            v
         }
-        [VERSION_CHUNK, origin, "**"] => {
-            vec![
-                VERSION_CHUNK.into(),
-                (*origin).into(),
-                CLASS_STATE.into(),
-                "**".into(),
-            ]
-        }
-        [VERSION_CHUNK, origin, class, rest @ ..] if *class == CLASS_STATE || *class == "*" => {
-            let mut v = vec![
-                VERSION_CHUNK.to_string(),
-                (*origin).into(),
-                CLASS_STATE.into(),
-            ];
-            v.extend(rest.iter().map(|c| (*c).to_string()));
+        ["zk2", system, service, iface, kind, rest @ ..]
+            if [system, service, iface].iter().all(|c| named(c))
+                && matches!(*kind, "state" | "@state" | "*") =>
+        {
+            let kind = if *kind == "*" { "state" } else { kind };
+            let mut v: Vec<String> = ["zk2", system, service, iface, kind]
+                .iter()
+                .map(|c| (*c).to_owned())
+                .collect();
+            v.extend(rest.iter().map(|c| (*c).to_owned()));
             if rest.is_empty() {
-                v.push("**".into());
+                v.push("**".to_owned());
             }
             v
         }
         _ => return None,
     };
-    Some(zenkey::grammar::with_base(base, projected.join("/")))
+    Some(zenkey::grammar::with_base(namespace, projected.join("/")))
+}
+
+/// Refuses the rules of the watchdog's vocabulary that judge v1 rather than
+/// zk2 (#612, FJ8a): `invalid-payload` and `qos-mismatch` judge against the
+/// v1 registry, `origin-down` reads the v1 roster's `alive` tokens, and
+/// `alert-firing` the v1 alert plane, which a zk2 deployment has none of
+/// until its profiles exist (#613). Their zk2 cut is the watchdog's (FJ8b).
+/// What stays: `rate-above`, `rate-below`, `silent-for` and `dropped`, which
+/// judge any wire selector, and `doctor`, zk2's own.
+pub fn zk2_rules(rules: &[Condition]) -> Result<()> {
+    for rule in rules {
+        let why = match rule {
+            Condition::InvalidPayload { .. } | Condition::QosMismatch { .. } => {
+                "judges against the v1 registry"
+            }
+            Condition::OriginDown { .. } => "reads the v1 roster's alive tokens",
+            Condition::AlertFiring { .. } => {
+                "reads the v1 alert plane; zk2's alerts are a profile still to come (#613)"
+            }
+            _ => continue,
+        };
+        return Err(Error::unaskable(
+            format!("--on '{rule}'"),
+            format!(
+                "{why}, not a zk2 deployment. A zk2 capture fires on rate-above, rate-below, \
+                 silent-for, dropped or doctor <CHECK-ID>"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The owners' current state under `selector` (S4): target `All`,
+/// consolidation `Latest`, each reply on a concrete key (R6). A deletion
+/// within an owner's window is not a value, and is left out. Returns the
+/// values and the error replies counted.
+async fn state_get(
+    session: &Session,
+    selector: &str,
+    timeout: Duration,
+    max_replies: usize,
+) -> Result<(Vec<SampleView>, u64)> {
+    let replies = session
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::Latest)
+        .timeout(timeout)
+        .await
+        .map_err(|e| Error::bus("state preamble", selector, e))?;
+    let (mut values, mut errors) = (Vec::new(), 0u64);
+    while let Ok(reply) = replies.recv_async().await {
+        match reply.into_result() {
+            Ok(s) if s.kind() == SampleKind::Put && !s.key_expr().is_wild() => {
+                if values.len() < max_replies {
+                    values.push(SampleView::of(&s));
+                } else {
+                    errors += 1;
+                }
+            }
+            Ok(_) => {}
+            Err(_) => errors += 1,
+        }
+    }
+    Ok((values, errors))
 }
 
 /// The watch set: every selector asked for, minus any that another one in
@@ -213,10 +291,15 @@ pub fn watch_cover<'s>(selectors: impl IntoIterator<Item = &'s String>) -> Vec<S
 /// Every await inside the drain is the watchdog's (#338): the sweep and the
 /// preamble fetch run *beside* the drain, never instead of it, so the drops
 /// in the file are the bus's and not this loop's own.
+///
+/// `session` is the capture's own, in no namespace (the selectors are wire
+/// keys, and rows keep them whole); `namespace` is the one the operator
+/// stated, which the header carries as its base (#612, FJ8a). A rule that
+/// judges v1 rather than zk2 is refused before anything is declared
+/// ([`zk2_rules`]).
 pub async fn record_on<W, F>(
-    fleet: &crate::Fleet<'_>,
-    slices: Option<&SliceSet>,
-    store: &SchemaStore,
+    session: &Session,
+    namespace: &str,
     spec: &TriggerSpec,
     open: impl FnOnce() -> F,
     mut on_event: impl FnMut(TriggerEvent<'_>),
@@ -225,33 +308,23 @@ where
     W: Write + Send + 'static,
     F: std::future::Future<Output = Result<W>>,
 {
-    let (session, base) = (fleet.session(), fleet.base());
     if spec.rules.is_empty() {
         return Err(Error::unaskable(
             "--on",
             "a trigger capture needs at least one rule to fire on",
         ));
     }
+    zk2_rules(&spec.rules)?;
 
     // Compiled before the monitor exists, so the `?` has nothing to tear
     // down (#336).
-    let mut rules = RuleSet::new(&spec.rules, base, slices)?;
+    let mut rules = RuleSet::new(&spec.rules, namespace, None)?;
     let watched = watch_cover(spec.selectors.iter().chain(rules.watched()));
-    let (wants_doctor, wants_roster, wants_decode, wants_alerts) = (
-        rules.wants_doctor(),
-        rules.wants_roster(),
-        rules.wants_decode(),
-        rules.wants_alerts(),
-    );
-    let alert_selectors = rules.alert_selectors();
+    let wants_doctor = rules.wants_doctor();
     // The doctor rules' doctor (#612, FJ6): only the checks they name, one
     // contract store for the capture.
     let doctor_spec = rules.doctor_spec(spec.timeout);
     let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
-    if wants_decode {
-        crate::model::decode::prewarm(fleet, store, slices).await;
-    }
-    let _sealed = store.seal();
 
     // The ring is budgeted to the pre-roll **before** anything is watched:
     // `set_budget` applies from the next push, and the first push must
@@ -276,8 +349,10 @@ where
     // ── armed: judge tick by tick, write nothing ──────────────────────────
     let fired: Option<Transition> = 'armed: loop {
         let deadline = rules.last_eval() + spec.tick;
+        // zk2's rules ask nothing per tick but the doctor: no roster, no
+        // alert plane, no decode (`zk2_rules`).
         let sweep = async {
-            let doctor = if wants_doctor {
+            if wants_doctor {
                 Some(
                     crate::judge::condition::tick_doctor(
                         spec.doctor.as_ref(),
@@ -288,41 +363,7 @@ where
                 )
             } else {
                 None
-            };
-            let roster = if wants_roster {
-                Some(
-                    crate::bus::roster::roster(fleet, spec.timeout)
-                        .await
-                        .map_err(|e| e.to_string()),
-                )
-            } else {
-                None
-            };
-            // The alert plane (#463): one bounded GET per distinct selector,
-            // the same ask the watchdog makes.
-            let alerts = if wants_alerts {
-                let mut asks = Vec::with_capacity(alert_selectors.len());
-                for selector in &alert_selectors {
-                    let outcome = crate::bus::query::fleet_get(
-                        fleet,
-                        selector,
-                        &crate::bus::query::GetOpts::new(spec.timeout),
-                    )
-                    .await
-                    .map_err(|e| e.to_string());
-                    asks.push(crate::judge::condition::AlertAsk {
-                        selector: selector.clone(),
-                        outcome,
-                    });
-                }
-                Some(asks)
-            } else {
-                None
-            };
-            if wants_decode {
-                crate::model::decode::prewarm(fleet, store, slices).await;
             }
-            (doctor, roster, alerts)
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
@@ -351,24 +392,9 @@ where
                 }
             };
             match item {
+                // No rule left asks for a verdict (`zk2_rules`).
                 Some(StreamItem::Event(FleetEvent::Sample(s))) => {
-                    let verdict = if rules.wants_verdict(&s) {
-                        Some(
-                            crate::model::decode::decode_sample(
-                                fleet,
-                                store,
-                                slices,
-                                &s.key,
-                                Some(&s.encoding),
-                                &s.payload.to_bytes(),
-                            )
-                            .await
-                            .verdict,
-                        )
-                    } else {
-                        None
-                    };
-                    rules.observe_sample(&s, &mut facts_cache, verdict.as_ref());
+                    rules.observe_sample(&s, &mut facts_cache, None);
                 }
                 Some(StreamItem::Dropped(n)) => rules.observe_drop(n),
                 Some(_) => {}
@@ -383,7 +409,7 @@ where
             // stream that is gone, and nothing was written.
             break 'armed None;
         }
-        let (doctor_outcome, roster_outcome, alert_asks) = match swept {
+        let doctor_outcome = match swept {
             Some(outcome) => outcome,
             None => sweep.await,
         };
@@ -396,10 +422,8 @@ where
                 doctor: doctor_outcome
                     .as_ref()
                     .map(|o| o.as_ref().map_err(String::as_str)),
-                roster: roster_outcome
-                    .as_ref()
-                    .map(|o| o.as_ref().map_err(String::as_str)),
-                alerts: alert_asks.as_deref(),
+                roster: None,
+                alerts: None,
             },
         );
         for t in transitions {
@@ -415,14 +439,7 @@ where
         let after = armed.elapsed();
         on_event(TriggerEvent::GaveUp { after });
         return Ok(RecordReport {
-            header: ZrecHeader {
-                zrec: ZREC_VERSION,
-                selectors: watched,
-                base: base.to_string(),
-                captured_at: crate::tape::record::rfc3339_now(),
-                preamble: None,
-                pre_roll: None,
-            },
+            header: ZrecHeader::capture(watched, namespace),
             out: None,
             samples: 0,
             dropped: 0,
@@ -489,30 +506,28 @@ where
         let mut selectors = Vec::new();
         let mut failed = Vec::new();
         for sel in &watched {
-            match state_projection(base, sel) {
+            match state_projection(namespace, sel) {
                 Some(p) if !selectors.contains(&p) => selectors.push(p),
                 Some(_) => {}
                 None => failed.push(sel.clone()),
             }
         }
-        let opts = crate::GetOpts::new(spec.timeout).max_replies(spec.max_replies);
-        let gets = futures_util::future::join_all(selectors.iter().map(|selector| {
-            let opts = &opts;
-            async move {
-                (
-                    selector.clone(),
-                    crate::bus::query::snapshot_get(session, selector, opts).await,
-                )
-            }
+        // The owners' answer (S4), never a storage's: one GET per projected
+        // selector, together.
+        let gets = futures_util::future::join_all(selectors.iter().map(|selector| async move {
+            (
+                selector.clone(),
+                state_get(session, selector, spec.timeout, spec.max_replies).await,
+            )
         }))
         .await;
-        let mut values = Vec::new();
+        let mut values: Vec<SampleView> = Vec::new();
         let mut errors = 0u64;
         for (selector, replies) in gets {
             match replies {
-                Ok(r) => {
-                    errors += r.errors;
-                    values.extend(r.values);
+                Ok((v, e)) => {
+                    errors += e;
+                    values.extend(v);
                 }
                 Err(e) => {
                     tracing::warn!(selector, error = %e, "preamble GET could not be issued");
@@ -520,19 +535,21 @@ where
                 }
             }
         }
-        let (kept, _superseded) = crate::model::snapshot::fold_latest(values);
         // What the ring cannot tell you, fetched at trigger time: a key the
         // ring holds already has its story in the pre-roll rows, and a
         // preamble that repeated it would put a newer value *before* the
-        // deltas that led to it.
+        // deltas that led to it. `Latest` kept one value per key; two
+        // overlapping selectors could still both hold one, kept once.
         let in_ring: BTreeSet<&str> = ring.iter().map(|v| v.key.as_str()).collect();
-        let rows: Vec<Arc<SampleView>> = kept
-            .into_values()
-            .filter(|(view, _)| match semantics {
+        let mut seen = BTreeSet::new();
+        let rows: Vec<Arc<SampleView>> = values
+            .into_iter()
+            .filter(|view| seen.insert(view.key.clone()))
+            .filter(|view| match semantics {
                 PreambleSemantics::AbsentFromWindow => !in_ring.contains(view.key.as_str()),
                 PreambleSemantics::Full => true,
             })
-            .map(|(view, _)| Arc::new(view))
+            .map(Arc::new)
             .collect();
         Some((
             PreambleInfo {
@@ -540,7 +557,7 @@ where
                 collected_over_s: started.elapsed().as_secs_f64(),
                 selectors,
                 semantics,
-                incomplete: errors + opts.elided(),
+                incomplete: errors,
                 failed,
             },
             rows,
@@ -563,12 +580,10 @@ where
 
     // ── the file ──────────────────────────────────────────────────────────
     let header = ZrecHeader {
-        zrec: ZREC_VERSION,
-        selectors: watched.clone(),
-        base: base.to_string(),
         captured_at,
         preamble: preamble_info.clone(),
         pre_roll: Some(pre_roll.clone()),
+        ..ZrecHeader::capture(watched.clone(), namespace)
     };
     // Opened only now: a run that never fires leaves nothing behind. The
     // open itself is the caller's (it names the path) and async, so a
@@ -668,40 +683,81 @@ mod tests {
         assert_eq!(watch_cover(&s(&["v1/x/**", "v1/x/**"])), s(&["v1/x/**"]));
     }
 
-    /// The projection narrows to `state` where the class is `state` or
-    /// wildcarded, widens a `**` that spans the class chunk, and says
-    /// "reaches no state" for another class or a selector too short to name
-    /// one — never a guess.
+    /// zk2's projection (FJ8a): a `**` before the kind widens to plain
+    /// `state` with every unnamed position `*`; a kind of `state`, `@state`
+    /// or `*` keeps its tail; another kind, a control key, a `**` among the
+    /// named positions or a selector too short to reach a kind reaches no
+    /// state — never a guess.
     #[test]
     fn the_state_projection_narrows_widens_or_declines() {
         let p = |s| state_projection("", s);
-        assert_eq!(p("v1/**").as_deref(), Some("v1/*/state/**"));
-        assert_eq!(p("**").as_deref(), Some("v1/*/state/**"));
+        assert_eq!(p("zk2/**").as_deref(), Some("zk2/*/*/*/state/**"));
+        assert_eq!(p("**").as_deref(), Some("zk2/*/*/*/state/**"));
         assert_eq!(
-            p("v1/h-aaaaaaaaaaaa/**").as_deref(),
-            Some("v1/h-aaaaaaaaaaaa/state/**")
+            p("zk2/host-a/**").as_deref(),
+            Some("zk2/host-a/*/*/state/**")
         );
         assert_eq!(
-            p("v1/h-aaaaaaaaaaaa/*/demo/**").as_deref(),
-            Some("v1/h-aaaaaaaaaaaa/state/demo/**")
+            p("zk2/host-a/tc/**").as_deref(),
+            Some("zk2/host-a/tc/*/state/**")
         );
         assert_eq!(
-            p("v1/h-aaaaaaaaaaaa/state/demo/health").as_deref(),
-            Some("v1/h-aaaaaaaaaaaa/state/demo/health")
+            p("zk2/*/tc/tc.netif.v1/**").as_deref(),
+            Some("zk2/*/tc/tc.netif.v1/state/**")
         );
         assert_eq!(
-            p("v1/h-aaaaaaaaaaaa/state").as_deref(),
-            Some("v1/h-aaaaaaaaaaaa/state/**")
+            p("zk2/host-a/tc/tc.netif.v1/*/interfaces/**").as_deref(),
+            Some("zk2/host-a/tc/tc.netif.v1/state/interfaces/**")
         );
-        assert_eq!(p("v1/h-aaaaaaaaaaaa/telemetry/demo/**"), None);
-        assert_eq!(p("v1/h-aaaaaaaaaaaa"), None);
-        assert_eq!(p("v1"), None);
-        // Under a base, the base rides back out — and another deployment's
-        // selector is not projected at all.
         assert_eq!(
-            state_projection("acme", "acme/v1/**").as_deref(),
-            Some("acme/v1/*/state/**")
+            p("zk2/host-a/tc/tc.netif.v1/state/namespaces").as_deref(),
+            Some("zk2/host-a/tc/tc.netif.v1/state/namespaces")
         );
-        assert_eq!(state_projection("acme", "other/v1/**"), None);
+        assert_eq!(
+            p("zk2/host-a/cam/camera.v1/@state").as_deref(),
+            Some("zk2/host-a/cam/camera.v1/@state/**")
+        );
+        assert_eq!(p("zk2/host-a/tc/tc.netif.v1/stream/**"), None);
+        assert_eq!(p("zk2/host-a/tc/tc.netif.v1/@op/diagnostics"), None);
+        assert_eq!(
+            p("zk2/host-a/tc/@zk/**"),
+            None,
+            "control keys hold no state"
+        );
+        assert_eq!(p("zk2/**/state/x"), None);
+        assert_eq!(p("zk2/host-a/tc"), None);
+        assert_eq!(p("v1/**"), None, "a v1 key is not zk2's");
+        // Under a namespace, the namespace rides back out — and another
+        // deployment's selector is not projected at all.
+        assert_eq!(
+            state_projection("prod", "prod/zk2/**").as_deref(),
+            Some("prod/zk2/*/*/*/state/**")
+        );
+        assert_eq!(state_projection("prod", "other/zk2/**"), None);
+    }
+
+    /// A rule that judges v1 is refused by name, with what a zk2 capture
+    /// fires on; the rest pass.
+    #[test]
+    fn only_zk2_conditions_arm_a_capture() {
+        let rule = |s: &str| Condition::parse(s).expect(s);
+        for ok in [
+            "rate-above zk2/** 10",
+            "silent-for zk2/** 5",
+            "dropped",
+            "doctor split-brain",
+        ] {
+            assert!(zk2_rules(&[rule(ok)]).is_ok(), "{ok}");
+        }
+        for v1 in [
+            "invalid-payload v1/**",
+            "qos-mismatch v1/**",
+            "origin-down h-aaaaaaaaaaaa",
+            "alert-firing v1/**",
+        ] {
+            let e = zk2_rules(&[rule("dropped"), rule(v1)]).unwrap_err();
+            assert!(e.is_unaskable(), "{v1}: {e}");
+            assert!(e.to_string().contains("silent-for"), "{e}");
+        }
     }
 }

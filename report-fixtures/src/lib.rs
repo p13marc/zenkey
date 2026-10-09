@@ -761,6 +761,7 @@ fn header() -> zenkey_fleet::ZrecHeader {
         selectors: vec!["acme/v1/**".into()],
         base: "acme".into(),
         captured_at: "2026-08-21T00:00:00Z".into(),
+        excluded: None,
         preamble: None,
         pre_roll: None,
     }

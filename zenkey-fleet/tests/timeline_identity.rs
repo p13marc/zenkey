@@ -68,6 +68,7 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
         selectors: vec!["acme/v1/**".into()],
         base: BASE.into(),
         captured_at: "2026-09-06T00:00:00Z".into(),
+        excluded: Some(zenkey_fleet::zrec_excluded(&["acme/v1/**".to_owned()])),
         preamble: None,
         pre_roll: None,
     };

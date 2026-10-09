@@ -25,6 +25,15 @@
 //! wire bytes — the `.zrec` dialect, RFC 09 §5.2), which wins over
 //! `"value"`: a `value` is a decoded *rendering* and does not round-trip a
 //! binary payload. Same for `"attachment_b64"` over `"attachment"`.
+//!
+//! **Re-cut for zk2** (#612, FJ8a). A row's QoS is its wire axes,
+//! `"qos_axes"` (`priority/congestion/reliability[+express]`), and they win
+//! over a v1 profile name in `"qos"`: a zk2 owner's QoS is per resource
+//! (§2.4), and v1's five names spell little of it. `echo` has written the
+//! axes since #120 and `.zrec` rows since version 3, so a pipe and a replay
+//! publish a foreign row with exactly the QoS it was seen with. A row whose
+//! key a zk2 service owns parses like any other: the writer refuses it
+//! (P3, spec §6), not the dialect.
 
 use crate::report::SampleRow;
 
@@ -93,6 +102,9 @@ pub struct IngestRow {
     pub encoding: Option<String>,
     /// The row's QoS profile name (RFC 04 §3), when it carries one.
     pub qos: Option<String>,
+    /// The row's wire QoS axes, when it carries them: they win over
+    /// [`IngestRow::qos`] (#612, FJ8a).
+    pub qos_axes: Option<crate::bus::write::WireQos>,
     /// A tombstone row (RFC 04 §1.2): publish a delete, not the payload.
     pub delete: bool,
     /// The row's attachment, when it carries one (#117), same value rules
@@ -159,7 +171,17 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
         Some(raw) => Some(raw),
         None => obj.get("attachment").map(value_bytes),
     };
+    let qos_axes = match obj.get("qos_axes") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(t)) => {
+            Some(crate::bus::write::WireQos::parse(t).ok_or_else(|| {
+                format!("\"qos_axes\" {t:?} is not priority/congestion/reliability[+express]")
+            })?)
+        }
+        Some(_) => return Err("\"qos_axes\" is not a string".into()),
+    };
     Ok(IngestRow {
+        qos_axes,
         key,
         payload,
         encoding: obj
@@ -347,6 +369,16 @@ mod tests {
         assert_eq!(back.payload, br#"{"status":"ok"}"#);
         assert_eq!(back.qos.as_deref(), Some("refreshed"));
         assert_eq!(back.encoding.as_deref(), Some("application/json"));
+        // The axes ride back too, and win over the profile name (FJ8a).
+        let axes = back.qos_axes.expect("the axes read back");
+        assert_eq!(
+            (axes.priority, axes.reliability, axes.express),
+            (
+                zenoh::qos::Priority::Data,
+                zenoh::qos::Reliability::Reliable,
+                false
+            )
+        );
 
         // The capture dialect: the lossless bytes, which win over any
         // rendering (RFC 09 §5.2).
@@ -403,6 +435,23 @@ mod tests {
         ));
         let err = parse_stream_line(r#"{"key":"k"}"#).unwrap_err();
         assert!(err.contains("value"), "{err}");
+    }
+
+    /// A zk2 row's QoS is its axes (FJ8a): one the writer could not have
+    /// spelled is a counted error naming the field, never a guessed profile.
+    #[test]
+    fn qos_axes_read_back_or_are_refused_by_name() {
+        let row =
+            parse_row(r#"{"key":"k","value":1,"qos_axes":"real_time/block/reliable+express"}"#)
+                .unwrap();
+        let axes = row.qos_axes.expect("axes");
+        assert_eq!(axes.priority, zenoh::qos::Priority::RealTime);
+        assert!(axes.express);
+        assert_eq!(row.qos, None, "no profile name was written");
+        let err = parse_row(r#"{"key":"k","value":1,"qos_axes":"fast"}"#).unwrap_err();
+        assert!(err.contains("qos_axes"), "{err}");
+        let err = parse_row(r#"{"key":"k","value":1,"qos_axes":3}"#).unwrap_err();
+        assert!(err.contains("not a string"), "{err}");
     }
 
     /// Attachments ride the same value rules (#117).

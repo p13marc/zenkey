@@ -12,8 +12,9 @@ use serde::{Deserialize, Serialize};
 
 /// The first line of a `.zrec` file: what was asked, under which base, and
 /// when (RFC 09 §5.1 O4 — a capture names its question). The `base` is the
-/// operator's *stated* deployment base at capture time; recorded keys are
-/// full wire keys and are never re-derived from it (O3).
+/// operator's *stated* deployment base at capture time — in zk2, the
+/// deployment's session namespace (the tooling guide's §5); recorded keys
+/// are full wire keys and are never re-derived from it (O3).
 ///
 /// `PartialEq` only, since v1.34: the version-2 blocks carry measured
 /// spans as `f64`.
@@ -26,12 +27,21 @@ pub struct ZrecHeader {
     /// planes by construction (O5) — the reader states that rather than
     /// letting the file claim "everything".
     pub selectors: Vec<String>,
-    /// The deployment base the operator resolved at capture time
-    /// (may be empty: the base-less bus-root deployment).
+    /// The deployment base the operator resolved at capture time — zk2's
+    /// namespace (may be empty: the bus-root deployment).
     pub base: String,
     /// Capture start, RFC 3339 wall clock — provenance, not a pacing clock
     /// (pacing rides each row's `t`).
     pub captured_at: String,
+    /// Version 3 (#612, FJ8a): zk2's verbatim chunks no watched selector
+    /// names — `@stream`, `@state`, `@op`, `@zk`, `@adv` — and so no sample
+    /// under one is in this file, whatever the bus carried there (the
+    /// tooling guide's O5: a wildcard scope states what it excludes). A
+    /// verbatim chunk is matched only by a selector that names it, so the
+    /// list is exact. Absent on a version-1 or -2 file, which did not
+    /// state it; empty when every one is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded: Option<Vec<String>>,
     /// Version 2 (RFC 13 §4.1, v1.34; #218): the state preamble this
     /// capture carries — the bounded fetch that produced the `preamble`
     /// rows and what it could not fetch. Absent on a version-1 file and on
@@ -249,7 +259,11 @@ pub struct SampleRow {
     ///
     /// A fact worth carrying and *not* a profile name: a fleet is free to
     /// publish axes no profile declares, and the declared-vs-observed
-    /// comparison is the point.
+    /// comparison is the point. A `.zrec` row carries it since version 3
+    /// (#612, FJ8a), and [`parse_row`](crate::tape::ingest::parse_row)
+    /// reads it back: a replay or a pipe publishes with exactly these axes,
+    /// which win over [`SampleRow::qos`] (a zk2 owner's QoS is per
+    /// resource, §2.4, and no v1 profile spells most of it).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub qos_axes: Option<String>,
     /// A tombstone: authoritative retirement, never an empty put
@@ -351,10 +365,91 @@ pub fn qos_axes_token(
     format!("{p}/{c}/{r}{}", if express { "+express" } else { "" })
 }
 
+/// The axes [`qos_axes_token`] spells, read back: `None` for a token it
+/// could not have written (#612, FJ8a). A `.zrec` row and a piped row carry
+/// their axes this way, and a replay or `pub --from ndjson` publishes with
+/// exactly them: a zk2 owner's QoS is per resource (§2.4), which v1's five
+/// profile names cannot spell.
+pub fn parse_qos_axes(
+    token: &str,
+) -> Option<(
+    zenoh::qos::Priority,
+    zenoh::qos::CongestionControl,
+    zenoh::qos::Reliability,
+    bool,
+)> {
+    use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+    let (axes, express) = match token.strip_suffix("+express") {
+        Some(a) => (a, true),
+        None => (token, false),
+    };
+    let mut parts = axes.split('/');
+    let p = match parts.next()? {
+        "real_time" => P::RealTime,
+        "interactive_high" => P::InteractiveHigh,
+        "interactive_low" => P::InteractiveLow,
+        "data_high" => P::DataHigh,
+        "data" => P::Data,
+        "data_low" => P::DataLow,
+        "background" => P::Background,
+        _ => return None,
+    };
+    let c = match parts.next()? {
+        "drop" => Cc::Drop,
+        "block" => Cc::Block,
+        _ => return None,
+    };
+    let r = match parts.next()? {
+        "best_effort" => R::BestEffort,
+        "reliable" => R::Reliable,
+        _ => return None,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((p, c, r, express))
+}
+
 #[cfg(test)]
 mod qos_axes_tests {
     use super::*;
     use zenoh::qos::{CongestionControl as Cc, Priority as P, Reliability as R};
+
+    /// Every token the writer spells reads back as its axes, and nothing
+    /// else does: the round trip `.zrec` replay and `pub --from ndjson` rest
+    /// on (#612, FJ8a).
+    #[test]
+    fn every_axes_token_reads_back() {
+        for p in [
+            P::RealTime,
+            P::InteractiveHigh,
+            P::InteractiveLow,
+            P::DataHigh,
+            P::Data,
+            P::DataLow,
+            P::Background,
+        ] {
+            for c in [Cc::Drop, Cc::Block] {
+                for r in [R::BestEffort, R::Reliable] {
+                    for x in [false, true] {
+                        let t = qos_axes_token(p, c, r, x);
+                        assert_eq!(parse_qos_axes(&t), Some((p, c, r, x)), "{t}");
+                    }
+                }
+            }
+        }
+        for bad in [
+            "",
+            "data",
+            "data/drop",
+            "data/drop/best_effort/x",
+            "Data/drop/reliable",
+            "data/other/reliable",
+            "data/drop/reliable+fast",
+        ] {
+            assert_eq!(parse_qos_axes(bad), None, "{bad}");
+        }
+    }
 
     /// The token is a round-trip contract, not a rendering: `.zrec` replay
     /// and `pub --from ndjson` read it back (RFC 09 §5.2). Pinned here rather

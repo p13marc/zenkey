@@ -58,15 +58,62 @@ use crate::tape::ingest::{IngestRow, parse_row};
 /// Version 2 (RFC 13 §4.1, v1.34; #218) adds the state preamble — rows
 /// marked `"preamble": true` at `t: 0` ahead of the first observed row —
 /// and the interleaved `{"trigger": …}` record. A version-1 file is a
-/// version-2 file with neither, which is why [`ZREC_READS`] names both.
-pub const ZREC_VERSION: u32 = 2;
+/// version-2 file with neither.
+///
+/// Version 3 (#612, FJ8a; the tooling guide's §5) is zk2's capture: the
+/// header's `base` is the namespace the operator stated, and it states what
+/// its selectors exclude (`excluded`: the verbatim chunks no selector
+/// names, O5); every row carries its wire QoS axes (`qos_axes`), which a
+/// replay publishes with exactly, because a zk2 owner's QoS is per resource
+/// (§2.4) and v1's profile names spell little of it. A version-2 file is a
+/// version-3 file with neither, which is why [`ZREC_READS`] names all
+/// three; a version-2 reader refuses version 3, by the rule it already had,
+/// rather than replaying its rows under the wrong QoS.
+pub const ZREC_VERSION: u32 = 3;
 
 /// The versions [`ZrecReader`] speaks: the current one and every earlier
 /// one whose lines it still reads verbatim. A version outside this list is
 /// refused, never guessed at (RFC 13 §4.1's unknown-version rule) — and
-/// the list is what lets a version-2 reader read version 1 while a
-/// version-1 reader refuses version 2, both by the rule they already had.
-pub const ZREC_READS: [u32; 2] = [1, 2];
+/// the list is what lets a version-3 reader read versions 1 and 2 while an
+/// older reader refuses version 3, both by the rule they already had.
+pub const ZREC_READS: [u32; 3] = [1, 2, 3];
+
+/// zk2's verbatim chunks (spec §1.3, and zenoh-ext's `@adv` sidecar of
+/// §2.5): `*` and `**` never match one, so a selector reaches keys under
+/// one only by naming it.
+pub const VERBATIM: [&str; 5] = ["@stream", "@state", "@op", "@zk", "@adv"];
+
+/// The verbatim chunks no selector of `selectors` names: what a capture of
+/// them cannot contain, whatever the bus carried (O5). Exact, because a
+/// verbatim chunk is matched only by a selector chunk equal to it.
+pub fn excluded_by(selectors: &[String]) -> Vec<String> {
+    VERBATIM
+        .iter()
+        .filter(|v| {
+            !selectors
+                .iter()
+                .any(|s| s.split(['/', '?']).any(|c| c == **v))
+        })
+        .map(|v| (*v).to_owned())
+        .collect()
+}
+
+impl ZrecHeader {
+    /// A version-3 header for a capture of `selectors` under the namespace
+    /// `base`, taken now: what it excludes stated (O5), no preamble and no
+    /// pre-roll yet.
+    pub fn capture(selectors: Vec<String>, base: &str) -> ZrecHeader {
+        ZrecHeader {
+            zrec: ZREC_VERSION,
+            excluded: Some(excluded_by(&selectors)),
+            selectors,
+            base: base.to_owned(),
+            captured_at: rfc3339_now(),
+            preamble: None,
+            pre_roll: None,
+        }
+    }
+}
 
 /// Why a replayer skips a preamble row unless told otherwise — one sentence,
 /// spelled once, carried on every [`ReplayEvent::PreambleSkipped`].
@@ -183,6 +230,14 @@ impl<W: Write> ZrecWriter<W> {
             ..SampleRow::default()
         }
         .with_wire(view);
+        // Version 3: the axes as they rode, which a replay publishes with
+        // (a zk2 owner's QoS is per resource, §2.4).
+        row.qos_axes = Some(crate::report::qos_axes_token(
+            view.priority,
+            view.congestion_control,
+            view.reliability,
+            view.express,
+        ));
         // A tombstone has no payload to store: `delete` is the whole fact
         // (RFC 04 §1.2), and an empty `bytes` would read as an empty put.
         if view.kind != SampleKind::Delete {
@@ -1122,15 +1177,18 @@ pub async fn replay(
                 let publication = match publications.entry(publish_key.clone()) {
                     std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
                     std::collections::hash_map::Entry::Vacant(e) => {
-                        // A row that recorded a profile name is judged
-                        // against the closed vocabulary — a name the capture
-                        // carries can be anything. A row that recorded none
-                        // falls to the spec's profile, which is already
-                        // typed and so cannot fail here.
-                        let qos = match &row.qos {
-                            None => default_qos,
-                            Some(name) => match zenkey::qos::QosProfile::from_name(name) {
-                                Some(qos) => qos,
+                        // The axes a version-3 row recorded win: they are
+                        // the QoS the owner published with (§2.4). A row
+                        // that recorded a profile name is judged against the
+                        // closed vocabulary — a name the capture carries can
+                        // be anything. A row that recorded neither falls to
+                        // the spec's profile, which is already typed and so
+                        // cannot fail here.
+                        let qos = match (&row.qos_axes, &row.qos) {
+                            (Some(axes), _) => *axes,
+                            (None, None) => crate::bus::write::WireQos::of_profile(default_qos),
+                            (None, Some(name)) => match zenkey::qos::QosProfile::from_name(name) {
+                                Some(qos) => crate::bus::write::WireQos::of_profile(qos),
                                 None => {
                                     let reason = format!("unknown QoS profile {name:?}");
                                     on_event(ReplayEvent::Malformed {
@@ -1141,7 +1199,7 @@ pub async fn replay(
                                 }
                             },
                         };
-                        let publication = match crate::bus::write::declare_publication(
+                        let publication = match crate::bus::write::declare_publication_with(
                             session,
                             &publish_key,
                             qos,
@@ -1203,6 +1261,7 @@ mod tests {
             selectors: vec!["v1/**".into()],
             base: String::new(),
             captured_at: "2026-08-12T00:00:00Z".into(),
+            excluded: Some(excluded_by(&["v1/**".into()])),
             preamble: None,
             pre_roll: None,
         }
@@ -1229,13 +1288,13 @@ mod tests {
         // The version after this one is refused, never guessed at (RFC 13
         // §4.1's unknown-version rule) — and the refusal says what this
         // reader does speak.
-        let future = r#"{"zrec":3,"selectors":[],"base":"","captured_at":"x"}"#;
+        let future = r#"{"zrec":4,"selectors":[],"base":"","captured_at":"x"}"#;
         let err = ZrecReader::new(future.as_bytes())
             .err()
             .unwrap()
             .to_string();
-        assert!(err.contains("version 3"), "{err}");
-        assert!(err.contains("speaks 2 and reads 1"), "{err}");
+        assert!(err.contains("version 4"), "{err}");
+        assert!(err.contains("speaks 3 and reads 1, 2"), "{err}");
 
         let not_zrec = r#"{"key":"v1/x","value":1}"#;
         let err = ZrecReader::new(not_zrec.as_bytes())
@@ -1243,6 +1302,102 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(err.contains("header"), "{err}");
+    }
+
+    /// The header in both versions (#612, FJ8a): a version-3 header states
+    /// what its selectors exclude, the namespace as its base, and writes
+    /// back as it reads; a version-2 one reads unchanged under the
+    /// version-3 reader, `excluded` absent rather than defaulted (O4: it did
+    /// not state it), and its rows without axes read as before.
+    #[test]
+    fn the_header_reads_in_both_versions() {
+        let zk2 = ZrecHeader::capture(
+            vec!["prod/zk2/**".into(), "prod/zk2/*/*/*/@stream/**".into()],
+            "prod",
+        );
+        assert_eq!(zk2.zrec, 3);
+        assert_eq!(zk2.base, "prod");
+        assert_eq!(
+            zk2.excluded.as_deref(),
+            Some(
+                ["@state", "@op", "@zk", "@adv"]
+                    .map(String::from)
+                    .as_slice()
+            ),
+            "`**` reaches no verbatim chunk; the second selector names @stream"
+        );
+        let mut sink = Vec::new();
+        let _ = ZrecWriter::new(&mut sink, &zk2).unwrap().finish().unwrap();
+        let line: serde_json::Value =
+            serde_json::from_slice(sink.split(|b| *b == b'\n').next().unwrap()).unwrap();
+        assert_eq!(line["zrec"], 3);
+        assert_eq!(
+            line["excluded"],
+            serde_json::json!(["@state", "@op", "@zk", "@adv"])
+        );
+        assert_eq!(ZrecReader::new(sink.as_slice()).unwrap().header(), &zk2);
+
+        let body = concat!(
+            r#"{"zrec":2,"selectors":["prod/zk2/**"],"base":"prod","captured_at":"2026-10-08T00:00:00Z"}"#,
+            "\n",
+            r#"{"key":"prod/zk2/h/s/i.v1/stream/x","t":0,"bytes":"AQ==","qos":"refreshed"}"#,
+            "\n",
+        );
+        let mut reader = ZrecReader::new(body.as_bytes()).unwrap();
+        assert_eq!(reader.header().zrec, 2);
+        assert_eq!(reader.header().excluded, None, "not stated, not defaulted");
+        let Some(Ok(ZrecItem::Sample { row, .. })) = reader.next() else {
+            panic!("a row")
+        };
+        assert_eq!(
+            (row.qos.as_deref(), row.qos_axes),
+            (Some("refreshed"), None)
+        );
+        assert_eq!(excluded_by(&[]), VERBATIM.map(String::from).to_vec());
+    }
+
+    /// A version-3 row carries the axes it rode with, and they read back.
+    #[test]
+    fn a_version_three_row_carries_its_axes() {
+        let view = crate::bus::monitor::SampleView {
+            key: "zk2/h/s/i.v1/stream/x".into(),
+            payload: zenoh::bytes::ZBytes::from(vec![1u8]),
+            encoding: "application/json".into(),
+            kind: SampleKind::Put,
+            timestamp: None,
+            stamped_by: None,
+            attachment: None,
+            priority: zenoh::qos::Priority::RealTime,
+            congestion_control: zenoh::qos::CongestionControl::Block,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express: true,
+            source: None,
+            received: Instant::now(),
+        };
+        let mut sink = Vec::new();
+        let mut w = ZrecWriter::new(&mut sink, &header()).unwrap();
+        w.write_sample(&view).unwrap();
+        let _ = w.finish().unwrap();
+        let mut reader = ZrecReader::new(sink.as_slice()).unwrap();
+        let Some(Ok(ZrecItem::Sample { row, .. })) = reader.next() else {
+            panic!("a row")
+        };
+        let axes = row.qos_axes.expect("version 3 rows carry their axes");
+        assert_eq!(
+            (
+                axes.priority,
+                axes.congestion,
+                axes.reliability,
+                axes.express
+            ),
+            (
+                zenoh::qos::Priority::RealTime,
+                zenoh::qos::CongestionControl::Block,
+                zenoh::qos::Reliability::Reliable,
+                true
+            )
+        );
+        assert_eq!(row.qos, None, "no v1 profile has these axes");
     }
 
     /// A version-1 file — no `preamble`, no `pre_roll`, plain rows and drop

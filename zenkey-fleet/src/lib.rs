@@ -197,7 +197,7 @@ pub use tape::mock::{
 pub use tape::synth::{Synth, Synthesized, member_type, size_class};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection, zk2_rules};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
@@ -236,8 +236,8 @@ pub use bus::session::{
     open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WriteAct, call, check_concrete,
-    check_fanout, check_retire, declare_publication,
+    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WireQos, WriteAct, call,
+    check_concrete, check_fanout, check_retire, declare_publication, declare_publication_with,
 };
 pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
@@ -387,8 +387,8 @@ pub use tape::bench::{BenchSpec, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
     PREAMBLE_SKIP_REASON, RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, SinkCounts,
-    ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter, record,
-    replay,
+    VERBATIM, ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter,
+    excluded_by as zrec_excluded, record, replay,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
