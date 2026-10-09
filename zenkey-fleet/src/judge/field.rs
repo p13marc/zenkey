@@ -93,8 +93,8 @@ const SCHEMA_DEPTH_CAP: usize = 32;
 /// How many subschema nodes one document's walk may visit. The depth cap
 /// alone does not bound the *work*: a combinator tree fans out
 /// multiplicatively, so N nested two-armed `oneOf`s are 2^N walks at a depth
-/// of N. This is the bound that actually holds, and a served schema is a
-/// stranger's document — the walk runs on whatever a producer replies with.
+/// of N. This is the bound that actually holds, and a contract's schema is a
+/// stranger's document — the walk runs on whatever a bundle carries.
 ///
 /// Deliberately not an O6-reported bound like the path table's: this one
 /// bounds a *fetched artifact* walked once per (producer, type) and cached,

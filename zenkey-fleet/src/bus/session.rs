@@ -216,9 +216,8 @@ async fn open_config(config: zenoh::Config, deadline: Duration) -> Result<Sessio
     if reaches_nothing(&config) {
         // zenoh refuses this too, as "No peer specified and multicast
         // scouting deactivated!" — a peer's word, from a client. Said here in
-        // the explorer's terms instead, and still the *transport* half: a
-        // caller holding `--registry` dirs answers from them, exactly as it
-        // does when the endpoint is there and dead.
+        // the explorer's terms instead, and still the *transport* half, as
+        // it is when the endpoint is there and dead.
         return Err(OpenFailure::Transport(Error::Bus {
             op: "failed to open",
             target: "the Zenoh session".into(),

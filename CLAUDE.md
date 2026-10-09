@@ -24,12 +24,19 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   the registry declares `[[blob]]` entries (v1.8) — an app-level `blob`
   module (deduped `Tier` enum across all declaring producers, typed key
   builders, the probe form).
-- `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0, crates.io): the
-  shared core of zenctl and zengui — `fleet_get` (the RFC 05 §2.1
-  chokepoint, moved verbatim from zenctl), `SliceSet`, the RFC 08 §7
-  schema-decode pipeline (`SchemaStore`/`decode_sample`), `Monitor` with
-  bounded broadcast + `Dropped(n)` honesty and ArcSwap key-tree snapshots.
-  **Five layers**, and `lib.rs`'s doc-map is the normative statement of
+- `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; 0.18.x on
+  crates.io is the v1 engine zengui and zenwatch pin, the in-tree 0.20.0 is
+  zk2's and `publish = false` until the port completes): the shared core of
+  the zk2 explorers, zenctl first — `fleet_get` (the RFC 05 §2.1 chokepoint,
+  moved verbatim from zenctl), presence and contract retrieval
+  (`bus::presence`, `bus::contracts`), the session-free **lens** a raw
+  observer resolves keys through (`model::lens`), contract-resolved
+  rendering (`model::render`, structural when no contract is in hand),
+  `Monitor` with bounded broadcast + `Dropped(n)` honesty and ArcSwap
+  key-tree snapshots. It depends on the zk2 runtime as plain `zenkey` (by
+  path) and has no feature axes: v1's registry slice sets, introspection,
+  roster, schema-decode seam and codec features, v1 judges and the
+  profile-backed features left at FJ9 (#612). **Five layers**, and `lib.rs`'s doc-map is the normative statement of
   them: `bus/` (everything holding a session → observations), `model/`
   (values in hand → meaning; nothing here takes a session, which is what
   lets a `.zrec` replay through the same projections as live traffic),
@@ -119,13 +126,19 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   replay locks are per-application and hold across every window.
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
-  stays on crates.io un-yanked): app-neutral. Being ported to zk2 (#612,
-  FJ1–FJ9): the zk2 verbs read contracts from the bundles the bus serves
-  (spec §8.4) or `--contracts <path>`, and open their session in the
-  deployment namespace — `--namespace` (alias `--base`) resolves flag > env
-  `ZENCTL_BASE` > the active named context (`zenctl context create …`) >
-  **empty**; raw verbs and `namespace list` stay un-namespaced. The v1 verbs
-  not yet ported still read `--registry <dir>` TOMLs. FJ5's acts and reads go
+  stays on crates.io un-yanked): app-neutral, and zk2's since FJ9 (#612),
+  when what was left of v1 went — `why`, `check cutover|retired|conform`,
+  `config`, `blob`, `export`, `--registry` and the slice cache — and the
+  binary stopped linking v1's `zenkey`. Verbs read contracts from the
+  bundles the bus serves (spec §8.4) or `--contracts <path>`; resolved verbs
+  open their session in the deployment namespace — `--namespace` (alias
+  `--base`) resolves flag > env `ZENCTL_BASE` > the active named context
+  (`zenctl context create …`) > **empty**; raw verbs (`get <selector>`,
+  `echo`, `pub`, `admin`, `storage list`, `namespace list`) stay
+  un-namespaced. Raw `get` resolves each reply through the lens, as `echo`
+  does; `pub` and `replay` write a foreign key as bytes, on recorded or
+  `--qos` axes (`priority/congestion/reliability[+express]`), a tombstone
+  always behind `--i-know`. FJ5's acts and reads go
   through the runtime's own client and consumer: `call` (one address
   `BestMatching`, a fan-out only to `fanout = "allowed"`, refused before
   anything is sent otherwise), `get state` (the owner's S4 GET, or
@@ -137,9 +150,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `Judgement` whose finding is the yes, read through a session in the
   namespace and one in none for the admin space and the presence domain;
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
-  check is unobservable or the scope is empty. The watchdog's `doctor` rule,
-  `record --on` and `export --doctor-every` run it too. v1's registry checks
-  survive only as `check conform`'s projection (`judge::registry_checks`).
+  check is unobservable or the scope is empty. The watchdog's `doctor` rule
+  and `record --on` run it too.
   FJ7's `acl gen` compiles spec §11's grants offline from `--contracts` and
   an enrollment (`examples/zk2/acl/`: principals by user or CN, never a
   zid, running services, archives and tools with their bindings and calls)
@@ -172,28 +184,26 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   aligns by zk2 key (no origin alignment). `check expect`, `check probe` and
   `check schema` take an address, an interface revision and a resource;
   `origin-down` is `instance-gone`, `alert-firing` and field-stuck are dark
-  until their profiles exist (#613).
+  until their profiles exist (#613). The zk2 `why` and `check conform` are
+  follow-ups.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
-  `config get|set|confirm|cancel|extend|persist`, `storage`, `acl`,
-  `blob list|locate|fetch`, `admin`, `key`, `bench call`); a **wire
-  verb** is an act or observation on live traffic and hangs off the root
-  (`get` and `get state`, `call`, `watch`, `echo`, `pub`, `rate`, `field`,
-  `record`, `replay`, `timeline`, `snapshot`, `graph`, `export`, `serve`,
-  `gen`, `scout`);
-  `compat` compares two contract revisions offline, exit-coded like a
-  judgement; a **judgement**
-  is exit-coded (`check
-  expect|cutover|retired|probe|conform|schema`, `doctor`, `why`, `watchdog`).
+  `storage list|gen`, `acl gen`, `admin routers|graph`, `key`, `bench
+  call`); a **wire verb** is an act or observation on live traffic and
+  hangs off the root (`get` and `get state`, `call`, `watch`, `echo`, `pub`,
+  `rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`,
+  `serve`, `gen`, `scout`); `compat` compares two contract revisions
+  offline, exit-coded like a judgement; a **judgement** is exit-coded
+  (`check expect|probe|schema`, `doctor`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
   `--count` is a stop bound (`--at-least` asserts, `--calls` sizes a bench,
   `--times` repeats a publish), `--from` names an input source, `--i-know` is
   one guard per verb. **Exit contract**, written once in `zenctl/src/exit.rs`
-  and cited by every verb: 0 asked-and-clean, 1 asked-and-a-finding (`why`
-  included — a cause is the finding), 2 no verdict — which covers clap's
+  and cited by every verb: 0 asked-and-clean, 1 asked-and-a-finding, 2 no
+  verdict — which covers clap's
   usage errors, everything else this tool refuses of your input
   (`exit::Unaskable`), silence under fan-out, and any pre-run failure of a
   verdict verb (`exit::asked`). Verdicts exit through
@@ -254,11 +264,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 
 **Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
 described above, and the `fixture-tests` crate, now live on the **`v1`
-branch**. On `main` the v1 tools build against `zenkey`/`zenkey-build`
-`=0.11.1` from crates.io (`[workspace.dependencies]`). Since FJ1 (#612)
-zengui and zenwatch also pin `zenkey-fleet =0.18.0` from crates.io, while
-the in-tree `zenkey-fleet` is 0.20.0 (`publish = false`), being ported to
-zk2 for zenctl, which depends on it by path. `fixture-tests/registry`
+branch**. On `main` the v1 tools still there — zengui and zenwatch — build
+against `zenkey`/`zenkey-build` `=0.11.1` from crates.io
+(`[workspace.dependencies]`), and since FJ1 (#612) pin `zenkey-fleet
+=0.18.0` from crates.io too, until #614 ports them. The in-tree
+`zenkey-fleet` 0.20.0 (`publish = false`) is zk2's, and zenctl depends on it
+by path; since FJ9 neither links v1's `zenkey` (`cargo tree -p zenctl -i
+zenkey@0.11.1` matches nothing). `fixture-tests/registry`
 (+ `registry-kdl/`) stays on `main` as test data that the tools' tests read.
 The `registry-conventions` skill describes the v1 registry format.
 
@@ -392,8 +404,8 @@ Zero warnings is a CI gate. (The fixture-tests codegen round-trip now runs on
 the `v1` branch; see the strangler note above.)
 
 ```bash
-cargo run -p zenctl -- node list --base zensight -c tcp/127.0.0.1:7447
-cargo run -p zenctl -- topic list --base zensight --registry ../zensight/zensight-common/registry
+cargo run -p zenctl -- service list --namespace zensight -c tcp/127.0.0.1:7447
+cargo run -p zenctl -- schema show zs.catalog.v1 --contracts examples/zk2/zensight   # no session
 ```
 
 Plain cargo is still the build system; the `justfile` only covers what needs
@@ -450,12 +462,14 @@ un-namespaced debug tools (`zenctl`) ever see full keys
   `common = "…"` framework set): the `registry-conventions` skill — read it
   before editing any `registry/*.toml` or touching zenkey-build's codegen.
 
-### zenctl: source-parameterized, app-neutral
+### zenctl: contract-parameterized, app-neutral
 
-Registry slices come from the live bus (`zenkey_fleet::fleet_registry`, RFC 08 §6) or
-`--registry <dir>` (offline TOMLs) — every renderer takes `&[RegistrySlice]`
-and is source-agnostic. Payloads render generically (JSON / CBOR→JSON
-diagnostic / text / hex, tagged with the slice-declared type). Bus discipline
+Contracts come from the bundles the bus serves (spec §8.4, retrieved by
+fingerprint from their holders) or `--contracts <path>` (authoring files, a
+directory, a `.history` root) — a revision held offline is never retrieved,
+and every renderer is source-agnostic. A payload renders as its declared type
+when a contract resolves one, else structurally (JSON / CBOR→JSON diagnostic
+/ text / hex), with the rung where resolution stopped named. Bus discipline
 (RFC 05, `zenkey-fleet/src/bus/query.rs`): every fleet GET goes through
 `zenkey_fleet::fleet_get`
 (target `All`, consolidation `None`, attribution by reply key). Silence is

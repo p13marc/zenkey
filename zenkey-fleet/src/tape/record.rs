@@ -32,8 +32,9 @@
 //! ([`crate::bus::write::declare_publication`], P7 — no ad-hoc puts), gets the
 //! *replaying* session's HLC (re-stamped deliberately: a preserved foreign
 //! HLC silently loses every RFC 04 §3.2 reconciliation), and a recorded
-//! delete passes the same class-conscious retire gate as a live one
-//! ([`crate::bus::write::check_retire`], RFC 04 §1.2 v1.12). The etiquette the
+//! delete passes the same retire gate as a live one
+//! ([`crate::bus::write::check_retire`]: the operator's act, priced with
+//! `--i-know`). The etiquette the
 //! CLI enforces on top — dry-run first, header-base refusal without an
 //! explicit override — is RFC 09 §5.2's.
 
@@ -1001,10 +1002,9 @@ fn place(
 /// Pacing follows each row's `t` divided by `speed` (must be positive);
 /// a dry run lists instantly, because a preview that takes the capture's
 /// duration is a preview nobody runs. Delete rows pass
-/// [`crate::bus::write::check_retire`] under the **header's** base — the keys
-/// were captured under it, and classifying them under anything else would
-/// re-derive what O3 says must not be re-derived; `i_know` is the operator
-/// saying the off-state cleanup is meant.
+/// [`crate::bus::write::check_retire`]: a tombstone on a key no contract
+/// describes is the operator's act, and `i_know` is the operator saying the
+/// cleanup is meant.
 ///
 /// **A zk2 service's own keys** (P3, spec §6, the tooling guide's §5): a
 /// replayer stands in for the owners it recorded only in a namespace of its

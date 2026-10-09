@@ -310,12 +310,12 @@ Options:
 
 ```
 
-## `check probe` and `blob locate` are opposite verbs
+## `check probe` does not fan out
 
-Both used to be called `probe`, which was one word carrying two rules that
-contradict each other. `check probe` is defined by **refusing** to fan out —
-"a probe MUST build its keys the way the product builds them", and a
-`*`-origin probe cannot catch a broken origin path (RFC 09 §6). `blob probe`
-*was* a fan-out: asking every origin who holds an object is the whole point
-(RFC 07 §2.5). So the fan-out took a different word, and `probe` now means
-exactly one thing.
+It used to share its word with v1's `blob probe`, one word carrying two rules
+that contradict each other. `check probe` is defined by **refusing** to fan
+out — "a probe MUST build its keys the way the product builds them" (RFC 09
+§6) — and reads one address the way a consumer does. `blob probe` *was* a
+fan-out, asking every origin who holds an object (RFC 07 §2.5), so it took a
+different word, `blob locate`, which left `main` with the blob profile (#612,
+FJ9). `probe` means exactly one thing.

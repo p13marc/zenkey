@@ -17,8 +17,9 @@
 //! forbids.
 //!
 //! Recency is the caller's too: `StatsTable` orders by an injected
-//! `last_seen: Instant`, `FactsCache` by a monotone observation counter, and
-//! `BoundedLru::admit` takes whichever as a projection out of the value.
+//! `last_seen: Instant` (v1's facts cache ordered by a monotone observation
+//! counter), and `BoundedLru::admit` takes whichever as a projection out of
+//! the value.
 
 use std::collections::HashMap;
 
@@ -35,8 +36,8 @@ pub const DEFAULT_MAX_KEYS: usize = 50_000;
 const EVICT_FRACTION: usize = 16;
 
 /// A map bounded at `max_keys` entries, evicting the least-recently-seen in
-/// batches — the mechanism behind both this module's [`StatsTable`] and
-/// [`FactsCache`](crate::model::facts::FactsCache), which carried a byte-identical
+/// batches — the mechanism behind this module's [`StatsTable`], and behind
+/// v1's facts cache (left at #612's FJ9), which had carried a byte-identical
 /// copy of it (deep review: same [`EVICT_FRACTION`], same batch scan, same
 /// `len - target` batch; only the recency *type* differed).
 ///
@@ -48,12 +49,12 @@ const EVICT_FRACTION: usize = 16;
 /// RFC 09 §5.1 O6 forbids.
 ///
 /// Recency is the caller's too: `StatsTable` orders by the injected
-/// `last_seen: Instant`, `FactsCache` by a monotone observation counter, and
-/// [`admit`](Self::admit) takes whichever as a projection out of the value.
+/// `last_seen: Instant`, and [`admit`](Self::admit) takes it as a projection
+/// out of the value.
 ///
 /// It lives here rather than in a module of its own because this is where the
 /// bound was first argued — [`DEFAULT_MAX_KEYS`], [`EVICT_FRACTION`] and the
-/// amortisation note `facts.rs` cites verbatim are all in this file.
+/// amortisation note are all in this file.
 #[derive(Debug)]
 pub(crate) struct BoundedLru<K, V> {
     entries: HashMap<K, V>,

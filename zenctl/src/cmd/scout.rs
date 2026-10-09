@@ -43,7 +43,7 @@ pub async fn run(cli: crate::cli::ScoutArgs) -> Result<()> {
         context,
         out,
     } = cli;
-    // No `BusArgs` here: --base/--registry are meaningless before a session
+    // No namespace here: a deployment is meaningless before a session
     // exists. Contexts still resolve, for endpoints and timeout — and this is
     // the caller that proves the ladders must take scalars: when they demanded
     // a `BusArgs`, this verb grew its own copy of two of them instead (#209).

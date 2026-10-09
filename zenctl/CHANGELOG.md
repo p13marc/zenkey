@@ -6,7 +6,70 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — observers and checks (#612, FJ8b)
+## Unreleased (`main`, zk2) — what was left of v1 (#612, FJ9)
+
+The last of v1 leaves `main`'s zenctl, and the binary no longer links v1's
+`zenkey` (`cargo tree -p zenctl -i zenkey@0.11.1` matches nothing). Three
+kinds of thing went. **The v1 registry**: the `--registry` union and RFC 08
+§6 introspection, the slice cache, the v1 roster, the served-schema decode
+ladder, and the verbs whose question was the registry (`why`, `check
+conform`, `check cutover`, `check retired`). **The dark profile features**:
+`config`, `blob` and `export`, with the kind and budget checks, which
+return when their profiles exist (#613). **v1's leftovers in verbs that
+stay**: `get`, `pub` and `replay` read and write a foreign key as bytes, and
+`storage`, `admin graph` and `cache` lose their v1 joins. The `v1` branch
+keeps all of it (0.14.x). No aliases and no shims: each row names where its
+question went, or that nothing on `main` asks it yet.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `why <selector> \| --origin/--class/--producer [--for]` | — | not yet asked on `main`. The rung a key stops at is `echo --format ndjson`'s `identity`; a deployment's breakage is `doctor`'s |
+| `why`'s 1 for a found cause | — | the polarity (#307) holds for the zk2 `why` when it lands |
+| `check cutover --old-root <KEYEXPR> [--for]` | `compat <old> <new>`; `zk2 contract compat\|check-history` in CI | a zk2 migration is a contract revision, judged before it ships; there is no old keyspace to watch go quiet |
+| `check retired [--for]` over `deprecated.lock` | `zk2 contract check-history` | a `.history` is append-only, and the classifier says what a revision breaks |
+| `check conform --producer P [--origin] [--for] [--deep] [--junit]` | not yet; `check schema`, `check probe`, `check expect --valid-payload`, `doctor` meanwhile | a contract as a conformance suite is a follow-up; `--deep`'s freshness and `[budget]` judgements need the freshness profile (#613) |
+| `config get\|set\|confirm\|cancel\|extend\|persist <origin> <producer> <resource> …` | — | dark until the configuration profile exists (#613) |
+| `blob list [--producer] [--tier]`, `blob locate <id>`, `blob fetch <target> --origin [-o] [--root] [--allow-unpinned] [--overwrite] [-q]` | — | dark until the blob profile exists (#613) |
+| `export [selector] [--bind] [--validate] [--doctor-every] [--max-series] [--once] [--for] [--prom] [--i-know]` | — | dark until its profile exists (#613) |
+| `--registry <DIR>` (every verb that took it) | `--contracts <PATH>` where a verb reads contracts | `--contracts` takes an authoring file, a directory of them, or a `.history` root |
+| `--registry` answering alone when the bus was down | — | a question `--contracts` answers alone opens no session at all (`schema show`, `iface show`, `compat`, `check schema`) |
+| `context create --registry <DIR>` | — | a stored context's `registry` is ignored by zenctl; zengui still reads it from the shared file (#614) |
+| `--origin`/`--class`/`--producer` (the composed selector) | a wire selector, or an address `<system>/<service>` | the last verbs that took them were `why` and `export` |
+| `get <selector>` rows: `origin`, `subject`, the registry's `type` | `identity`, and the declared `type` when a contract resolves one | each reply is resolved through the deployment in `--namespace`, as `echo` resolves a sample: a zk2 key decoded as its declared type, a foreign one rendered structurally. A reply error no longer carries an origin |
+| `get --body` through `pub`'s encode ladder | `get --body`, sent as typed | calling a zk2 operation through its contract is `call` |
+| `get --raw` (ship the body verbatim, print hex) | `get --raw` (print hex) | the body is always verbatim now |
+| `get --no-decode` (skip schema decode) | the same: no presence read, no bundle retrieved | |
+| `get`/`echo --fmt` `%o %c %p %s` | `%A %i %r %K` (FJ8b) | the v1 placeholders print literally now; `%t` is empty when nothing is declared |
+| `pub <key> <body> --qos sampled\|refreshed\|transition\|alert\|frame` | `pub <key> <body> --qos <priority/congestion/reliability[+express]>` | the token `echo` prints as `qos_axes`. Default zenoh's own, `data/drop/reliable` (was the subject's declared profile, else `sampled`); the choice is printed either way |
+| `pub --encoding` defaulting to the registry's | `pub --encoding`, none by default | |
+| `pub --raw` | — | every payload is sent as typed: there is no encoder to bypass |
+| `pub --no-validate` | — | no served schema to validate against; a zk2 key is refused (exit **2**, P3) and written through its contract by `call` or a mock owner |
+| `pub --from ndjson` row `qos` (a profile name) | `qos_axes` | the row's axes win over `--qos`; a v1 `qos` name is ignored |
+| `pub --from ndjson` delete rows on state keys, unpriced | every delete row needs `--i-know` | a tombstone on a key no contract describes is the operator's act; a row on a key a zk2 service owns is refused either way |
+| `replay --qos <profile>` (default `refreshed`) for rows that recorded none | `replay --qos <AXES>` (default `data/drop/reliable`) | a version-3 row publishes with its recorded `qos_axes`; a version-1 or 2 row's `qos` profile name is ignored |
+| `replay` recorded deletes on state keys, unpriced | every recorded delete needs `--i-know` | as `pub --from` |
+| `replay --registry` | — | `--base` (env `ZENCTL_BASE`, then the context) is still the deployment the capture's base must match unless `--force-base`; `--namespace` and the session flags are unchanged |
+| `.zrec`/ndjson rows `origin`, `subject`, `qos` | — | `identity` and `qos_axes` carry what is left; a reader of older rows ignores the three |
+| `storage list` `coverage` rows (declared state families against storages) and its `--registry` | `storage list` | the storages the routers' admin space reports; whether a storage answers on an owner's state keys is `doctor`'s `storage-on-state` (S4) |
+| `storage gen` `[storages.X] class = "state"\|"telemetry"\|"events"\|"catalog"\|"catalog-pdns"` | `[storages.X] selector = "<relative key expression>"`, required | a file that still names `class` is refused (exit **2**), serde naming the field. The plan's `class`, `covers` and `registry` fields are gone |
+| `storage gen` `gc_margin` (lifespan = longest `ttl_s` × margin) | `gc_lifespan_s`, default zenoh's 86400 s | no contract declares a tombstone lifetime to derive one from; the derivation line says which applied. Warnings `volatile_seed` and `lifespan_below_ttl` are gone |
+| `storage gen --base`, `--registry` | `storage gen --namespace NS` | the file's `base` still wins |
+| `admin graph --origins` | — | v1 origins over the router graph; joining zk2 instances to routers is a follow-up |
+| `admin routers\|graph --base\|--registry` | the session flags alone | the admin space is un-namespaced |
+| `cache show\|refresh\|clear` over the slice cache | `cache show\|clear` (session flags), `cache refresh --namespace NS` | the cache is zk2's name cache: per namespace, the service addresses and interfaces the last presence read saw. `refresh` re-reads presence |
+| completion of producers, classes, QoS profiles, blob tiers | completion of service addresses, interfaces and namespaces | from the name cache (FJ4) |
+| `watchdog --rule 'alert-firing …'` | — | still refused (exit **2**) until the alert profile exists (#613) |
+
+Gates: `scripts/check-degradation.sh` (#210, one door out of a missing
+registry) left with the registry. zenkey-fleet's feature axes (`decode`,
+`decode-protobuf`, `decode-cdr`, `validate-json`) forwarded to v1's codecs and
+are gone; `just features` and CI's `features` job check zenkey's
+`--no-default-features` build instead. Report families removed: `why`,
+`cutover`, `registry-retired`, `conform`, `config` and v1's `call` beside it,
+`blob-list`, `blob-probe`, `blob-tree`, `blob-fetch` and `export`; the
+`storage-list` family loses its `coverage` rows.
+
+## Observers and checks (#612, FJ8b)
 
 The verbs that watch traffic and judge it read zk2 now. The raw observers
 (`echo`, `rate`, `field`, `timeline`, `snapshot`, `watchdog`, `record --on`)

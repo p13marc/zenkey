@@ -157,7 +157,7 @@ ci:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
 # The criterion baselines behind docs/bench-baseline.md. Slow: tree/build_50k
-# and skeleton/merge_10k are tens of milliseconds an iteration.
+# is tens of milliseconds an iteration.
 bench:
     cargo bench --workspace
 

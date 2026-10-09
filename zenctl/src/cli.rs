@@ -466,7 +466,7 @@ pub(crate) enum Command {
     /// The schema artifacts of one revision (spec §7.1, §9.5): JSON Schema
     /// documents and protobuf descriptor sets, and which resource member
     /// names which type. Offline from `--contracts`, or retrieved from the
-    /// bus. Validating a v1 payload against a served schema is `check
+    /// bus. Validating one payload against a revision's type is `check
     /// schema`.
     #[command(subcommand)]
     Schema(SchemaCmd),
@@ -1181,11 +1181,12 @@ pub(crate) enum ServiceCmd {
 }
 
 /// How a session reaches the bus, and nothing about which deployment it
-/// reads: the connection half of every zk2 verb (#612, FJ4).
+/// reads: the connection half of every verb (#612, FJ4).
 ///
-/// `namespace list` takes it alone, because it looks *across* namespaces;
-/// every resolved verb takes it inside `NamespaceArgs`. The ladders are the
-/// v1 flags' (flag > env > active context > default), and the help is theirs.
+/// A raw verb (`namespace list`, `pub`, `admin`, `storage list`) takes it
+/// alone, because it reads no deployment; every resolved verb takes it
+/// inside `NamespaceArgs`. Every ladder is flag > env > active context >
+/// default.
 #[derive(Args, Clone)]
 pub(crate) struct SessionArgs {
     /// Use a named context from the config file for this invocation
