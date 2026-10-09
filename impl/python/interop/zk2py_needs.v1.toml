@@ -24,3 +24,10 @@ gate     = "capability:cal"
 [requires.upstream]
 interface = "zk2py_echo.v1"
 resources = ["echo"]
+
+# An optional role, which a control leaves unbound: its descriptor entry
+# carries `optional: true` (§3.3, 0.10).
+[requires.peer]
+interface = "zk2py_echo.v1"
+resources = ["health"]
+optional  = true

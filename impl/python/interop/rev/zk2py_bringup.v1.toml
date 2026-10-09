@@ -1,0 +1,41 @@
+# A later revision of ../zk2py_bringup.v1.toml, for §9.8's "On the bus,
+# revisions carry no order" (0.10): minor 1, with one optional operation
+# added. Two zk2py owners serve the two revisions side by side, and a tool
+# orders them by the minor their descriptors state. It must load with no
+# finding at all.
+[interface]
+name    = "zk2py_bringup"
+major   = 1
+minor   = 1
+summary = "zk2py's bring-up scenario interface"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.echo]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { track = "string" }
+cardinality = 8
+
+# A templated operation, served over its template with no member (O1, O-4):
+# a well-formed member is not_found, a key naming no member invalid_request.
+[resources."reset/{track}"]
+kind        = "operation"
+request     = { raw = "application/octet-stream" }
+response    = { raw = "application/octet-stream" }
+params      = { track = "string" }
+cardinality = 8
+
+# Added in minor 1.
+[resources.stats]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }
+optional = true

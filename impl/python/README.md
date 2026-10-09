@@ -80,15 +80,17 @@ contracts      96 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    36 passed     0 failed
+descriptors    37 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         517 passed     0 failed
+total         518 passed     0 failed
 ```
 
-The figures are against `core.md` 0.9, which adds no fixture.
-- Amendments 0.5 to 0.9 resolved F-01 to F-76.
+The figures are against `core.md` 0.10, whose one new fixture is
+`descriptors/ok-optional-role`.
+- Amendments 0.5 to 0.9 resolved F-01 to F-76. F-77 to F-79 are open
+  against 0.10.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -257,6 +259,25 @@ Four more runs:
   so the 0.8 round's two XFAILs are plain checks. Behind R1 it also runs
   operations.md §2 steps 1 and 4, and an unbound fan-out (`internal`).
 
+**Since 0.10.**
+- **The descriptor's additions (§3.3).** The owner writes `optional: true`
+  for an optional role, and states `meta.zid`. The runner checks both on
+  both owners. The owner example serves `zs.thresholds.v1`, whose role
+  `desired` is optional, behind R1.
+- **The tool rules, where the bus shows them** (run `tool-rules`, beside
+  the S1 run):
+  - `live.attribute_stamp` attributes a state stamp by `meta.zid`: `owner`,
+    `foreign` or `unattributable`. Hex spellings are compared as numbers
+    (F-78).
+  - `live.check_s4` reads `@/*/router`. With the admin space off, the
+    check is unobservable. With it on, read-only, a router running no
+    plugin is clean (F-79).
+  - `live.presence_faults` reads presence shapes twice, a grace apart. A
+    stray token removed within the grace passes, and one kept is a fault.
+  - `compat.classify_pair` orders two revisions met on the bus by their
+    descriptors' minor, or classifies both ways. Two zk2py owners serve
+    `zk2py_bringup.v1` at minor 0 and 1 (`interop/rev/`).
+
 **Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
 a rule the owner example does not meet yet.
 
@@ -268,7 +289,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 170 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 190 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
@@ -305,7 +326,9 @@ The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
   - constrained faces (§8.5);
   - the scenarios other than presence.md, retrieval.md and parts of
     state.md and operations.md. types.md §2 needs a renderer, which zk2py
-    does not have, and security.md §1's new step needs a grant generator.
+    does not have, and security.md §1's new step needs a grant generator;
+  - §8.3's budget count, and an archive's alignment as a tool sees it
+    (0.10): zk2py counts no budget and runs no archive.
 
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
@@ -376,7 +399,8 @@ impl/python/
     live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls
     owner.py          §3.3 §4 §5 §8 a minimal owner
     live_interop.py             the live runner, with the Rust owner and consume examples
-  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan
+  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan;
+                      rev/ holds bringup's minor 1
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.
