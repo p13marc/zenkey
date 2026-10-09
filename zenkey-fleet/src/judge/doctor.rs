@@ -1697,6 +1697,19 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
             ));
             continue;
         };
+        // §4.2 "Observing S1" (0.16): an owner whose session is a verified
+        // router stamps with the router's own id, so its stamp and the
+        // router's cannot be told apart, and the check proves nothing.
+        if let Some(Ok(a)) = &p.obs.admin
+            && a.routers.iter().any(|r| own.contains(&zid_value(&r.zid)))
+        {
+            undecided.push(unjudged(
+                subject,
+                "the owner's session is a router this run verified: its stamp and the router's \
+                 carry one id, so S1 cannot be observed here (§4.2, \"Observing S1\")",
+            ));
+            continue;
+        }
         owners += 1;
         replies += n;
         let mut wrong = Vec::new();
@@ -2822,6 +2835,21 @@ mod tests {
         );
         assert!(found(&read(&[None])).evidence.contains("unstamped"));
         assert!(clean(&read(&[])).contains("no stamp to attribute"));
+        // §4.2 (0.16): an owner that is itself a verified router proves
+        // nothing by its stamp.
+        o.admin = Some(Ok(AdminSpace {
+            routers: vec![router(&own, Some("1.10.1"))],
+            ..Default::default()
+        }));
+        let mut s = StateStamps {
+            complete: true,
+            ..Default::default()
+        };
+        let e = s.by_clock.entry(Some(own.clone())).or_default();
+        e.0 += 1;
+        e.1.push("zk2/h1/tc/tc.v1/state/x".into());
+        o.stamps = [(at.clone(), Ok(s))].into();
+        assert!(unseen(&check(&o, CheckId::StateStampForeign)).contains("Observing S1"));
     }
 
     // ── shm-memlock-low (§7.4) ──────────────────────────────────────────
