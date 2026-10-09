@@ -182,7 +182,7 @@ pub mod notes {
         Note::coverage(format!(
             "no session ({error}); answering from --registry only: {}.\n\
              That is what this checkout declares, not what the fleet \
-             serves — `zenctl doctor --registry <dir>` compares them \
+             serves — `zenctl check conform <producer> --registry <dir>` compares them \
              when the bus is reachable (RFC 05 §3.1).",
             dirs.iter()
                 .map(|d| d.as_ref().display().to_string())
@@ -203,8 +203,8 @@ pub mod notes {
     ) -> Note {
         Note::caveat(format!(
             "registry disagreement: {producer} — bus serves v{bus_version}, \
-             dirs carry v{dirs_version}{} (served wins; `zenctl doctor \
-             --registry <dir>` details the drift)",
+             dirs carry v{dirs_version}{} (served wins; `zenctl check conform \
+             {producer} --registry <dir>` details the drift)",
             if shape_differs { ", shapes differ" } else { "" }
         ))
     }
@@ -226,7 +226,7 @@ pub mod notes {
         Note::coverage(format!(
             "the fleet does not agree with itself about {producer}: {} — \
              this answer used one of them, and which one is arrival order \
-             (`zenctl doctor --registry <dir>` compares each origin)",
+             (`zenctl check conform {producer}` calls each origin)",
             who.join(", ")
         ))
         .cite("RFC 13 §3 O4")

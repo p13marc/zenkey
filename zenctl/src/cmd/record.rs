@@ -202,7 +202,9 @@ async fn run_triggered(
     let slices = args.slices_optional().await?;
     let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
     let fleet = args.fleet(&session);
+    let doctor = super::doctor::bus_for_rules(&rules, args, &session).await?;
     let spec = TriggerSpec {
+        doctor,
         selectors: vec![selector.clone()],
         pre: t.pre,
         post: t.post,

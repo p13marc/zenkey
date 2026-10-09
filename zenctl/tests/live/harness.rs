@@ -130,7 +130,7 @@ const TELEMETRY_PERIOD: Duration = Duration::from_millis(50);
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Extras {
     /// A second producer that holds `alive` and answers nothing — the
-    /// RFC 04 §5 violation `doctor` files as `introspect-coverage`.
+    /// RFC 04 §5 violation: alive ⇒ callable, broken.
     pub mute: bool,
     /// No producer at all (#510): the router listens and nothing on the bus
     /// holds a token, serves a procedure or publishes — a reachable bus with

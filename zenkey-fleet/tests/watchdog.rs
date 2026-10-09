@@ -78,6 +78,7 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
                 tick: Duration::from_millis(500),
                 ticks: Some(6),
                 timeout: Duration::from_millis(300),
+                doctor: None,
             };
             drain(&b, &slices, &spec).await
         }
@@ -157,6 +158,7 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
         tick: Duration::from_millis(200),
         ticks: Some(3),
         timeout: Duration::from_millis(300),
+        doctor: None,
     };
     let (transitions, summary) = drain(&b, &slices, &spec).await.expect("run");
     assert_eq!(summary.ticks, 3);
@@ -176,8 +178,8 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
 
 /// #338: the sweep no longer gates the sampling it is judging.
 ///
-/// An `origin-down` rule makes every tick ask the roster, and a roster sweep
-/// on this fixture takes the better part of a second. That sweep used to run
+/// A `doctor` rule makes every tick run the doctor, and zk2's doctor takes
+/// its grace period between two presence reads. A sweep used to run
 /// *after* the drain loop broke, so for its whole duration nobody attended
 /// the monitor's 1024-slot broadcast — and `dropped_tick` was reset
 /// immediately afterwards, so the samples lost to it were billed to the
@@ -196,19 +198,15 @@ async fn origin_down_fires_on_an_absent_origin_and_only_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_sweep_does_not_stop_the_sampling_it_judges() {
     let (a, b) = peer_pair().await;
-    // An  queryable that never answers, so the doctor sweep
-    // really costs its timeout — a fleet that answers nothing at all ends
-    // the query at once and would gate nothing.
-    let stuck: std::sync::Arc<std::sync::Mutex<Vec<zenoh::query::Query>>> =
-        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let _introspect = a
-        .declare_queryable("v1/h-dddddddddddd/@rpc/demo/introspect")
-        .callback({
-            let stuck = std::sync::Arc::clone(&stuck);
-            move |q| stuck.lock().expect("stuck lock").push(q)
-        })
-        .await
-        .expect("introspect queryable");
+    // The doctor sweep is long by construction: zk2's split-brain check
+    // reads presence twice, its grace period apart (2 s by default) — far
+    // longer than a tick, so a sweep that gated the drain would cost the
+    // window its samples many times over.
+    let doctor = zenkey_fleet::DoctorBus {
+        session: b.clone(),
+        raw: b.clone(),
+        namespace: String::new(),
+    };
 
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
         .await
@@ -226,12 +224,13 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
                     // watchdog subscribes to nothing and there is no drain
                     // to gate.
                     Condition::parse(&format!("qos-mismatch {KEY}")).expect("rule"),
-                    // The sweep: a whole doctor run per tick.
-                    Condition::parse("doctor slice-sync").expect("rule"),
+                    // The sweep: a doctor run per tick.
+                    Condition::parse("doctor split-brain").expect("rule"),
                 ],
                 tick: Duration::from_millis(300),
                 ticks: Some(3),
                 timeout: Duration::from_millis(500),
+                doctor: Some(doctor),
             };
             drain(&b, &slices, &spec).await
         }
@@ -293,6 +292,7 @@ async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown()
         tick: Duration::from_millis(100),
         ticks: Some(4),
         timeout: Duration::from_millis(200),
+        doctor: None,
     };
 
     let fleet = zenkey_fleet::Fleet::new(&b, "");
@@ -353,6 +353,7 @@ async fn alert_firing_sees_an_alert_that_was_firing_before_it_started() {
         tick: Duration::from_millis(400),
         ticks: Some(4),
         timeout: Duration::from_millis(300),
+        doctor: None,
     };
     // Resolve the alert after the second tick: the queryable stops answering.
     let stop = std::sync::Arc::clone(&serving);

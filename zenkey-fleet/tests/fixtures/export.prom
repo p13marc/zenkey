@@ -32,7 +32,7 @@ zenkey_doctor_info{state="ran"} 1
 zenkey_doctor_last_run_timestamp_seconds 1700000090
 # HELP zenkey_doctor_finding one series per finding of the last doctor run, by check id and severity
 # TYPE zenkey_doctor_finding gauge
-zenkey_doctor_finding{check_id="stale-state",severity="warning",subject="h-3fa9c2d41b7e/sysinfo"} 1
+zenkey_doctor_finding{check_id="split-brain",severity="error",subject="host-a/tc tc.netif.v1"} 1
 # HELP zenkey_scope_info one series per selector watched; `excluded` names the planes a wildcard cannot reach (RFC 13 §3 O5, RFC 03 §4 D2)
 # TYPE zenkey_scope_info gauge
 zenkey_scope_info{selector="acme/v1/*/**",excluded="@rpc,@media,@blob,@adv,service origins"} 1

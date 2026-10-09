@@ -588,7 +588,7 @@ fn origin_of(base: &str, key: &str) -> String {
 /// The well-known `@catalog` identity service (RFC 06 §5) is therefore asked
 /// by name, exactly as [`crate::bus::roster::roster()`] does for its alive token; other
 /// service origins remain reachable only via local registry files
-/// (`doctor --registry` asks each declared `service_origin` by name).
+/// (`check conform --registry` asks each declared `service_origin` by name).
 pub async fn fleet_registry(
     fleet: &Fleet<'_>,
     timeout: Duration,

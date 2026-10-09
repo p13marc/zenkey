@@ -32,8 +32,8 @@ use crate::model::prom::metric_name;
 use crate::model::retain::RetentionStats;
 use crate::model::stats::StatsTable;
 use crate::report::{
-    Asked, ContractCounters, DoctorFindingRef, DoctorSummary, ExportSnapshot, ObserverCounters,
-    QosMismatchRow, RegistryInfo, SeriesRow, SeriesState, V1DoctorReport,
+    Asked, ContractCounters, DoctorFindingRef, DoctorReport, DoctorSummary, ExportSnapshot,
+    ObserverCounters, QosMismatchRow, RegistryInfo, SeriesRow, SeriesState,
 };
 
 /// How many top-level numeric fields one subject family may fan out into
@@ -89,7 +89,7 @@ pub struct FoldInputs<'a> {
 /// A doctor report with the time it finished.
 #[derive(Debug, Clone, Copy)]
 pub struct DoctorRun<'a> {
-    pub report: &'a V1DoctorReport,
+    pub report: &'a DoctorReport,
     pub ran_at_unix_s: u64,
 }
 
@@ -513,8 +513,7 @@ impl ExportLedger {
                     ran_at_unix_s: run.ran_at_unix_s,
                     findings: run
                         .report
-                        .findings
-                        .iter()
+                        .findings()
                         .map(|f| DoctorFindingRef {
                             check: f.check,
                             severity: f.severity,

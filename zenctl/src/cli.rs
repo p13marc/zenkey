@@ -477,38 +477,41 @@ pub(crate) struct PubArgs {
 /// `doctor`'s flags — one struct, the `GenArgs` pattern.
 #[derive(clap::Args)]
 pub(crate) struct DoctorArgs {
-    /// Additionally GET current state to check freshness against each
-    /// subject's ttl (RFC 04 §1.2) and judge storage coverage — adds
-    /// fleet query load.
+    /// Seconds between the two presence reads split-brain and token-missing
+    /// compare (spec §6): a token in both reads lasted. Keep it above the
+    /// longest re-mint overlap the deployment allows; an owner SHOULD keep
+    /// one below a second.
+    #[arg(long, value_name = "SECS", default_value_t = 2.0)]
+    pub(crate) grace: f64,
+    /// Also ask state-stamp-foreign: GET every owner's state and check whose
+    /// clock stamped each reply (spec §4.2 S1–S2). Costs the owners' data
+    /// plane, so it is asked only here.
     #[arg(long)]
     pub(crate) deep: bool,
-    /// With --deep: drain at most N state samples per family — bounds
-    /// the sweep's cost, not just its output.
-    #[arg(long, value_name = "N", requires = "deep")]
-    pub(crate) sample: Option<usize>,
-    /// Listen passively to the data planes for this many seconds after the
-    /// GET fan-in and judge what rides (#161): undecodable/invalid payloads,
-    /// declared-vs-observed QoS, unregistered traffic, over-rate events. The
-    /// report states the window, its scopes, and what the bounded observer
-    /// dropped (O5/O6).
-    //
-    // `--for`, the one passive-window spelling (#307). It used to be
-    // `--listen-for`, which existed only to dodge `-l/--listen`, the endpoint
-    // flag on every verb; `--for` collides with nothing and says what it is.
-    #[arg(long = "for", value_name = "SECS")]
-    pub(crate) for_secs: Option<f64>,
-    /// Exit 1 when a finding at (or above) this severity exists.
-    /// Default: exit 0 whatever was found — findings are output, not
-    /// verdicts. Either way, a run that judged nothing (no producer holds
-    /// an alive token, no router answered) exits 2: an empty bus is not a
-    /// healthy fleet.
+    /// The token count presence-over-budget judges the presence domain
+    /// against (spec §8.3: about 10–15k tokens per domain).
+    #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_PRESENCE_BUDGET)]
+    pub(crate) presence_budget: usize,
+    /// Ask only this check (repeatable); every other is not asked.
+    #[arg(long = "check", value_name = "CHECK-ID", value_parser = check_id,
+          conflicts_with = "skip", add = ArgValueCandidates::new(completion::check_ids))]
+    pub(crate) checks: Vec<zenkey_fleet::report::CheckId>,
+    /// Do not ask this check (repeatable): it reads `not_asked`, which
+    /// neither passes nor fails the run.
+    #[arg(long, value_name = "CHECK-ID", value_parser = check_id,
+          add = ArgValueCandidates::new(completion::check_ids))]
+    pub(crate) skip: Vec<zenkey_fleet::report::CheckId>,
+    /// The lowest severity whose finding exits 1 (default: warning; an info
+    /// finding is worth knowing, not a failure). With no finding at or above
+    /// it, a check left unobservable — or an empty scope, no zk2 token
+    /// visible — exits 2: it could be hiding one.
     #[arg(long, value_enum, value_name = "SEVERITY")]
     pub(crate) fail_on: Option<FailOn>,
     /// Re-run the checks on an interval and report CHECK-ID TRANSITIONS as
-    /// ndjson (#227): the first run states the baseline (one line per stable
-    /// check id, from null), every later run prints only genuine changes —
-    /// and a run that fails flips every check to `unobservable`, never
-    /// silently to "ok".
+    /// ndjson (#227): the first run states the baseline (one line per check
+    /// asked, from null), every later run prints only genuine changes. A
+    /// check is `firing` on a finding, `ok` when established clean, and
+    /// `unobservable` otherwise — never silently `ok`.
     //
     // `--transitions`, not `--watch` (#307): `--watch` is a bare bool that
     // re-renders a *state* on the list verbs, and this emits a stream of
@@ -530,7 +533,18 @@ pub(crate) struct DoctorArgs {
     #[arg(long, value_name = "N", requires = "transitions")]
     pub(crate) count: Option<u64>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// A doctor check id, refused with the vocabulary when it is not one.
+fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
+    use zenkey_fleet::report::CheckId;
+    CheckId::parse(s).ok_or_else(|| {
+        format!(
+            "not a check id; one of: {}",
+            CheckId::ALL.map(CheckId::as_str).join(", ")
+        )
+    })
 }
 
 #[derive(Subcommand)]
@@ -824,13 +838,21 @@ pub(crate) enum Command {
     /// flows both ways.
     #[command(subcommand)]
     Check(CheckCmd),
-    /// Check the fleet against the contracts it claims: drift, freshness, QoS.
+    /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Drift, freshness, QoS, coverage. RFC 08 §6: "A disagreement between
-    /// introspection and the checked-in TOML is a finding, not an ambiguity."
-    /// Doctor *judges* the deployment, finding by finding. The local truth
-    /// comes from `--registry <dir>`; without it only the roster-vs-introspect
-    /// check runs.
+    /// Thirteen checks, each a question whose finding is the yes: split-brain
+    /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
+    /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
+    /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
+    /// archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep),
+    /// shm-memlock-low (§7.4), admin-unreachable and router-version-skew. The
+    /// deployment is read through a session in its namespace; the routers'
+    /// admin space and the presence domain through one in no namespace. A
+    /// check whose input could not be had is unobservable, with the reason —
+    /// never clean — and so is every check that reads presence when no zk2
+    /// token is visible. Exit 0 every check asked is clean, 1 a finding at or
+    /// above --fail-on (default warning), 2 no verdict: a check left
+    /// unobservable, an empty scope, or a run that could not start.
     Doctor(DoctorArgs),
     /// Explain why a key is silent, one established fact at a time.
     ///
@@ -2079,10 +2101,11 @@ pub(crate) struct ExportArgs {
     /// sample is `not_validated`, and the surface says so.
     #[arg(long)]
     pub(crate) validate: bool,
-    /// Run the doctor every SECS and expose its findings as
-    /// `zenkey_doctor_finding{check_id,severity}`. Off by default: a doctor
-    /// run costs the control plane (RFC 13 §3, frugality). Without it
-    /// `zenkey_doctor_info{state="not_asked"}` is the honest series.
+    /// Run zk2's doctor every SECS, in the deployment's namespace (`--base`),
+    /// and expose its findings as `zenkey_doctor_finding{check_id,severity}`.
+    /// Off by default: a doctor run costs the control plane (RFC 13 §3,
+    /// frugality). Without it `zenkey_doctor_info{state="not_asked"}` is the
+    /// honest series.
     #[arg(long, value_name = "SECS")]
     pub(crate) doctor_every: Option<f64>,
     /// Bound on distinct series; overflow is counted under
@@ -2292,8 +2315,10 @@ pub(crate) struct WatchdogArgs {
     /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`,
     /// `alert-firing <SEL> [<MIN-SEVERITY>]` (info | warning | critical,
     /// default warning). Selectors are full wire form (this session is
-    /// un-namespaced, RFC 09 §5); a doctor rule runs the doctor once per
-    /// tick, an alert-firing rule asks the alert plane once per tick.
+    /// un-namespaced, RFC 09 §5); a doctor rule runs zk2's doctor once per
+    /// tick, its named checks only, through a second session opened in the
+    /// deployment's namespace (`--base`); an alert-firing rule asks the
+    /// alert plane once per tick.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
     /// Seconds between evaluations — the one period flag (#307).

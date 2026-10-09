@@ -218,10 +218,16 @@ impl Bus {
 
     /// `zenctl <args> -c <endpoint>`, once.
     async fn zenctl(&self, args: &[&str]) -> Run {
+        self.zenctl_limited(args, None).await
+    }
+
+    /// [`Bus::zenctl`] under a soft `RLIMIT_MEMLOCK` of `memlock_kib`
+    /// (`ulimit -l`), when given: what the doctor's SHM check reads (FJ6).
+    async fn zenctl_limited(&self, args: &[&str], memlock_kib: Option<u64>) -> Run {
         let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         argv.extend(["-c".into(), self.endpoint.clone()]);
         let home = self.home.clone();
-        tokio::task::spawn_blocking(move || run(&argv, &home))
+        tokio::task::spawn_blocking(move || run(&argv, &home, memlock_kib))
             .await
             .expect("the zenctl runner")
     }
@@ -269,10 +275,23 @@ impl std::fmt::Display for Run {
 }
 
 /// The run itself: a hermetic environment, stdin closed, both pipes
-/// drained on threads of their own, killed at [`RUN_LIMIT`].
-fn run(argv: &[String], home: &Path) -> Run {
+/// drained on threads of their own, killed at [`RUN_LIMIT`]. Under a
+/// memlock limit, through `sh` and `ulimit -l` — lowering a soft limit
+/// needs no privilege.
+fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>) -> Run {
     use std::io::Read as _;
-    let mut child = Command::new(env!("CARGO_BIN_EXE_zenctl"))
+    let zenctl = env!("CARGO_BIN_EXE_zenctl");
+    let mut command = match memlock_kib {
+        Some(kib) => {
+            let mut c = Command::new("sh");
+            c.arg("-c")
+                .arg(format!("ulimit -l {kib} && exec \"$0\" \"$@\""))
+                .arg(zenctl);
+            c
+        }
+        None => Command::new(zenctl),
+    };
+    let mut child = command
         .args(argv)
         .env_remove("ZENCTL_CONTEXT")
         .env_remove("ZENKEY_EXPLORER_CONTEXT")
@@ -1662,4 +1681,259 @@ async fn replay_into_a_namespace_reaches_its_consumers_and_never_the_owners() {
         root.try_recv().ok().flatten().is_none(),
         "nothing reached the bus root, where the owners run"
     );
+}
+
+// ── doctor (FJ6) ───────────────────────────────────────────────────────────
+
+/// A doctor run's settings for these cases: a grace period above a
+/// re-mint's overlap and short enough to keep the suite quick.
+const DOCTOR: [&str; 5] = ["doctor", "--grace", "0.5", "--timeout", "2"];
+
+fn doctor_args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args: Vec<&str> = DOCTOR.to_vec();
+    args.extend_from_slice(extra);
+    args
+}
+
+/// One check's row in a `doctor --format json` document.
+fn check_row<'a>(doc: &'a Value, id: &str) -> &'a Value {
+    rows_of(doc, "check")
+        .into_iter()
+        .find(|r| r["check"] == id)
+        .unwrap_or_else(|| panic!("{id} has a row: {doc}"))
+}
+
+/// `doctor` over the tcgui deployment (presence.md §1, §2, §5): the
+/// frontend's `scenario` role selects no provider, which is the finding and
+/// exit 1; asked without it — and without the checks the routers' admin
+/// space answers, which this router keeps off — every check asked is clean,
+/// exit 0; pointed at a namespace nobody runs in, the scope is empty and
+/// the run is no verdict, exit 2, never green.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn doctor_exits_on_its_findings_and_never_green_on_an_empty_scope() {
+    let bus = Bus::up(None).await;
+    let _ = listing(&bus, &[]).await;
+
+    let run = bus
+        .until(&doctor_args(&["--format", "json"]), |r| r.code == 1)
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["report"], "doctor");
+    assert_eq!(doc["scope"]["namespace"], "");
+    assert_eq!(doc["scope"]["presence"]["services"], 3, "{run}");
+    let binding = check_row(&doc, "binding-unsatisfied");
+    assert_eq!(binding["verdict"]["answer"], "established", "{run}");
+    assert_eq!(binding["section"], "§3.2 R5");
+    assert_eq!(
+        binding["findings"][0]["subject"],
+        "ws-01/tcgui-frontend scenario"
+    );
+    assert_eq!(binding["findings"][0]["severity"], "warning");
+    for clean in [
+        "split-brain",
+        "token-missing",
+        "descriptor-invalid",
+        "contract-unavailable",
+    ] {
+        assert_eq!(
+            check_row(&doc, clean)["verdict"]["answer"],
+            "not_established",
+            "{clean}: {run}"
+        );
+    }
+    // The admin space is off on this router: S4 cannot be judged.
+    assert_eq!(
+        check_row(&doc, "storage-on-state")["verdict"]["answer"],
+        "unobservable",
+        "{run}"
+    );
+    assert_eq!(
+        check_row(&doc, "state-stamp-foreign")["verdict"]["answer"],
+        "not_asked"
+    );
+
+    let run = bus
+        .zenctl(&doctor_args(&[
+            "--skip",
+            "binding-unsatisfied",
+            "--skip",
+            "storage-on-state",
+            "--skip",
+            "router-version-skew",
+            "--format",
+            "json",
+        ]))
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        check_row(&doc, "binding-unsatisfied")["verdict"]["answer"],
+        "not_asked",
+        "{run}"
+    );
+    // The info finding — no router answered the admin space — is worth
+    // knowing and below the floor.
+    assert_eq!(
+        check_row(&doc, "admin-unreachable")["findings"][0]["severity"],
+        "info",
+        "{run}"
+    );
+
+    let run = bus
+        .zenctl(&doctor_args(&["--namespace", "nobody", "--format", "json"]))
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    let why = doc["unobservable"].as_str().expect("the empty scope");
+    assert!(why.contains("no zk2 token visible to this reader"), "{run}");
+    assert!(why.contains("\"nobody\""), "{run}");
+    assert_eq!(
+        check_row(&doc, "split-brain")["verdict"]["answer"],
+        "unobservable"
+    );
+    assert!(
+        run.stderr.contains("exit 2, the reserved non-verdict"),
+        "{run}"
+    );
+}
+
+/// The doctor reads a namespaced deployment through a session in its
+/// namespace: `--namespace acme` finds the three services, and the bus
+/// root, where none runs, is an empty scope.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn doctor_reads_a_deployment_in_its_namespace() {
+    let bus = Bus::up(Some("acme")).await;
+    let _ = listing(&bus, &["--namespace", "acme"]).await;
+    let only = ["--check", "token-missing", "--check", "split-brain"];
+
+    let mut args = doctor_args(&only);
+    args.extend(["--namespace", "acme", "--format", "json"]);
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["scope"]["namespace"], "acme");
+    assert_eq!(doc["scope"]["presence"]["services"], 3, "{run}");
+    assert_eq!(
+        check_row(&doc, "token-missing")["verdict"]["answer"],
+        "not_established"
+    );
+
+    let mut args = doctor_args(&only);
+    args.extend(["--namespace", "", "--format", "json"]);
+    let run = bus.zenctl(&args).await;
+    exits(&run, 2);
+    assert!(run.json()["unobservable"].is_string(), "{run}");
+}
+
+/// `--transitions` states one baseline line per check asked — firing on a
+/// finding, ok when clean — and a watchdog's `doctor <CHECK-ID>` rule runs
+/// the same doctor in the deployment's namespace, ending firing: exit 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn doctor_transitions_and_a_watchdog_rule_read_the_same_checks() {
+    let bus = Bus::up(None).await;
+    let _ = listing(&bus, &[]).await;
+
+    let run = bus
+        .until(
+            &doctor_args(&[
+                "--transitions",
+                "--count",
+                "1",
+                "--every",
+                "1",
+                "--check",
+                "binding-unsatisfied",
+                "--check",
+                "split-brain",
+            ]),
+            |r| r.code == 0 && r.stdout.contains("firing"),
+        )
+        .await;
+    exits(&run, 0);
+    let lines: Vec<Value> = run
+        .stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("ndjson"))
+        .collect();
+    assert_eq!(lines.len(), 2, "one baseline line per check asked: {run}");
+    let state = |rule: &str| {
+        lines
+            .iter()
+            .find(|t| t["rule"] == rule)
+            .unwrap_or_else(|| panic!("{rule}: {run}"))["to"]
+            .clone()
+    };
+    assert_eq!(state("doctor binding-unsatisfied"), "firing");
+    assert_eq!(state("doctor split-brain"), "ok");
+    assert!(lines.iter().all(|t| t["from"].is_null()), "{run}");
+
+    let run = bus
+        .until(
+            &[
+                "watchdog",
+                "--rule",
+                "doctor binding-unsatisfied",
+                "--every",
+                "1",
+                "--count",
+                "1",
+                "--timeout",
+                "2",
+            ],
+            |r| r.code == 1,
+        )
+        .await;
+    exits(&run, 1);
+    assert!(run.stdout.contains("\"to\":\"firing\""), "{run}");
+    assert!(
+        run.stdout.contains("ws-01/tcgui-frontend scenario"),
+        "{run}"
+    );
+}
+
+/// §7.4 and §8.3 from the flags a run is given: under `ulimit -l 64` the
+/// memlock is below the floor, an info finding that exits 0; and a
+/// presence budget the deployment is over is a warning, exit 1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_local_memlock_and_the_presence_budget_are_judged() {
+    let bus = Bus::up(None).await;
+    let _ = listing(&bus, &[]).await;
+
+    let run = bus
+        .zenctl_limited(
+            &doctor_args(&["--check", "shm-memlock-low", "--format", "json"]),
+            Some(64),
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    let shm = check_row(&doc, "shm-memlock-low");
+    assert_eq!(shm["verdict"]["answer"], "established", "{run}");
+    assert_eq!(shm["findings"][0]["severity"], "info");
+    assert!(
+        shm["findings"][0]["evidence"]
+            .as_str()
+            .is_some_and(|e| e.contains("64 KiB")),
+        "{run}"
+    );
+
+    let run = bus
+        .until(
+            &doctor_args(&[
+                "--check",
+                "presence-over-budget",
+                "--presence-budget",
+                "3",
+                "--format",
+                "json",
+            ]),
+            |r| r.code == 1,
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    let budget = check_row(&doc, "presence-over-budget");
+    assert_eq!(budget["findings"][0]["severity"], "warning", "{run}");
+    assert_eq!(budget["findings"][0]["subject"], "presence domain");
 }

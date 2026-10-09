@@ -1,0 +1,148 @@
+The doctor: a zk2 deployment judged against the core (#612, FJ6).
+
+Thirteen checks, each a question whose finding is the *yes* (the tooling
+guide's polarity rule), and each answered in the judgement shape: a finding,
+clean with its evidence, unobservable with its reason, or not asked. The
+deployment is read through a session in its namespace, `--namespace` (alias
+`--base`); the routers' admin space and the presence domain through one in no
+namespace, because neither belongs to a deployment. v1's registry checks — the
+slice diff, describe coverage, schema drift by registry, the listen phase —
+are not the doctor's any more; `check conform` still projects them.
+
+The exit is the report's own judgement under `--fail-on`: 0 every check asked
+is clean, 1 a finding at or above the floor (warning by default — an info
+finding is worth knowing, not failing), 2 no verdict — a check left
+unobservable, an empty scope, or a run that could not start.
+
+```console
+$ zenctl doctor --help
+Judge a zk2 deployment against the core: one verdict per check.
+
+Thirteen checks, each a question whose finding is the yes: split-brain (§6), binding-unsatisfied (§3.2), contract-drift (§9.8), contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4), admin-unreachable and router-version-skew. The deployment is read through a session in its namespace; the routers' admin space and the presence domain through one in no namespace. A check whose input could not be had is unobservable, with the reason — never clean — and so is every check that reads presence when no zk2 token is visible. Exit 0 every check asked is clean, 1 a finding at or above --fail-on (default warning), 2 no verdict: a check left unobservable, an empty scope, or a run that could not start.
+
+Usage: zenctl doctor [OPTIONS]
+
+Options:
+      --grace <SECS>
+          Seconds between the two presence reads split-brain and token-missing compare (spec §6): a token in both reads lasted. Keep it above the longest re-mint overlap the deployment allows; an owner SHOULD keep one below a second
+          
+          [default: 2]
+
+      --deep
+          Also ask state-stamp-foreign: GET every owner's state and check whose clock stamped each reply (spec §4.2 S1–S2). Costs the owners' data plane, so it is asked only here
+
+      --presence-budget <N>
+          The token count presence-over-budget judges the presence domain against (spec §8.3: about 10–15k tokens per domain)
+          
+          [default: 10000]
+
+      --check <CHECK-ID>
+          Ask only this check (repeatable); every other is not asked
+
+      --skip <CHECK-ID>
+          Do not ask this check (repeatable): it reads `not_asked`, which neither passes nor fails the run
+
+      --fail-on <SEVERITY>
+          The lowest severity whose finding exits 1 (default: warning; an info finding is worth knowing, not a failure). With no finding at or above it, a check left unobservable — or an empty scope, no zk2 token visible — exits 2: it could be hiding one
+
+          Possible values:
+          - error:   Fail on error-severity findings only
+          - warning: Fail on warnings or errors
+
+      --transitions
+          Re-run the checks on an interval and report CHECK-ID TRANSITIONS as ndjson (#227): the first run states the baseline (one line per check asked, from null), every later run prints only genuine changes. A check is `firing` on a finding, `ok` when established clean, and `unobservable` otherwise — never silently `ok`
+
+      --every <SECS>
+          With --transitions: seconds between runs
+          
+          [default: 10]
+
+      --count <N>
+          With --transitions: stop after N runs (default: run until interrupted)
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+A check id outside the vocabulary is refused with the vocabulary, before any
+session opens — exit 2, clap's code, because it is your input.
+
+```console
+$ zenctl doctor --check split-brian
+? 2
+error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew
+
+For more information, try '--help'.
+
+$ zenctl doctor --check split-brain --skip token-missing
+? 2
+error: the argument '--check <CHECK-ID>' cannot be used with '--skip <CHECK-ID>'
+
+Usage: zenctl doctor --check <CHECK-ID> --namespace <NS>
+
+For more information, try '--help'.
+
+```
+
+A grace period of zero would read presence twice at once, and a re-mint's
+overlap would then look like a split-brain: refused, exit 2.
+
+```console
+$ zenctl doctor --grace 0 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: --grace must be a positive number of seconds, got 0
+doctor: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

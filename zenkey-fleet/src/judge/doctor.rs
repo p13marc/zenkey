@@ -707,7 +707,9 @@ struct Presence<'o> {
     before: Result<&'o Observed, String>,
     now: BTreeMap<(Addr, InstanceId), Inst<'o>>,
     then: BTreeMap<(Addr, InstanceId), Inst<'o>>,
-    /// Both reads ended at the routers' final reply.
+    /// Every read taken ended at the routers' final reply. A first read
+    /// not taken — no check that compares two was asked — or one that
+    /// failed is not counted here: the checks that need it say so.
     complete: bool,
 }
 
@@ -722,7 +724,7 @@ impl<'o> Presence<'o> {
         Presence {
             obs,
             after,
-            complete: after.complete && before.as_ref().is_ok_and(|b| b.complete),
+            complete: after.complete && !before.as_ref().is_ok_and(|b| !b.complete),
             before,
             now: index(after),
             then,
@@ -2262,6 +2264,11 @@ mod tests {
         assert_eq!(f.subject, "ws/gui netif");
         assert_eq!(f.severity, DoctorSeverity::Warning);
         assert!(f.evidence.contains("visible to this reader"), "{f:?}");
+        // A run that asked no check comparing two reads took one: its read
+        // is complete, and the finding stands.
+        let mut o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
+        o.before = None;
+        found(&check(&o, CheckId::BindingUnsatisfied));
         // A contract's required role: an error; an optional one: info.
         for (optional, severity) in [(false, DoctorSeverity::Error), (true, DoctorSeverity::Info)] {
             let g = gui(optional);

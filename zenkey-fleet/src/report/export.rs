@@ -17,8 +17,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::asked::{Asked, u64_is_zero};
-use super::doctor::DoctorSeverity;
-use super::v1_checks::V1CheckId;
+use super::doctor::{CheckId, DoctorSeverity};
 
 /// One snapshot of the exporter's ledger, folded at scrape time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -214,7 +213,7 @@ pub struct DoctorSummary {
 /// One finding as a series identity: which check, how bad, on what.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorFindingRef {
-    pub check: V1CheckId,
+    pub check: CheckId,
     pub severity: DoctorSeverity,
     pub subject: String,
 }
@@ -365,9 +364,9 @@ mod tests {
         let doctor = DoctorSummary {
             ran_at_unix_s: 1_700_000_030,
             findings: vec![DoctorFindingRef {
-                check: V1CheckId::StaleState,
+                check: CheckId::SplitBrain,
                 severity: DoctorSeverity::Warning,
-                subject: "h-3fa9c2d41b7e/sysinfo".into(),
+                subject: "h1/tc tc.v1".into(),
             }],
         };
         assert_eq!(
@@ -375,7 +374,7 @@ mod tests {
             json!({
                 "ran_at_unix_s": 1_700_000_030,
                 "findings": [
-                    {"check": "stale-state", "severity": "warning", "subject": "h-3fa9c2d41b7e/sysinfo"}
+                    {"check": "split-brain", "severity": "warning", "subject": "h1/tc tc.v1"}
                 ],
             })
         );
