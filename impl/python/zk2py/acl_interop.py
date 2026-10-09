@@ -195,7 +195,7 @@ def _frozen_echo(call) -> None:
 def _deny_full(report, repo, gen, workdir) -> None:
     from . import acl, live
 
-    run = "acl: generated grants under deny (security.md §1, §3 step 3; core §11, 0.14–0.16)"
+    run = "acl: generated grants under deny (security.md §1, §3 step 3; core §11, 0.14–0.17)"
     w = World(repo, gen.block, workdir, handlers={"own-h2": {"@op/echo": _frozen_echo}})
     try:
         w.subscribe("consumer", "zk2/*/tc/zk2py_echo.v1/state/health", "named")
@@ -270,24 +270,33 @@ def _deny_full(report, repo, gen, workdir) -> None:
         by_tool = live.s1_check(w.sessions["tool"], hdoc, stamp)
         by_caller = live.s1_check(w.sessions["caller"], hdoc, stamp)
         report.check(run, "S1 from a tool (§4.2, 0.16): the Tool, with the admin read, judges h1 (a client of R1) "
-                          "clean; the caller, without it, verifies no router and reports S1 unobservable (F-89)",
+                          "clean; the caller, without it, verifies no router and reports S1 unobservable (§4.2, 0.17)",
                      by_tool[0] == "clean" and by_caller[0] == "unobservable", f"tool {by_tool}; caller {by_caller}")
-        # §5.1 (0.16): O3 judged from outside, under the grants.
+        # §5.1 O3 judged from outside (0.16, 0.17), under the grants: the
+        # tool is told its grants by the deployment's §11.1 input
+        # (acl.may_call), and reads presence for the owner.
         key = "zk2/h1/tc/zk2py_echo.v1/@op/echo"
         ungranted = live.call(w.sessions["consumer"], key, b"ping")
         granted = live.call(w.sessions["caller"], key, b"ping")
-        v_ungranted = live.o3_verdict(ungranted, acl.may_call(gen, "consumer", key))
-        v_granted = live.o3_verdict(granted, acl.may_call(gen, "caller", key))
-        report.check(run, "O3 from outside (§5.1, 0.16): the consumer, without the Call grant, gets silence, which "
-                          "is no O3 finding; the caller, with it, is answered: clean",
-                     ungranted.silent and v_ungranted[0] == "unjudged" and v_granted[0] == "clean",
-                     f"consumer {v_ungranted}; caller {v_granted}")
+        h1_present = bool(live.list_presence(w.sessions["caller"], "zk2/h1/tc/@zk/alive/**").alive)
+        v_ungranted = live.o3_verdict(ungranted, acl.may_call(gen, "consumer", key), h1_present)
+        v_untold = live.o3_verdict(ungranted, None, h1_present)
+        v_granted = live.o3_verdict(granted, acl.may_call(gen, "caller", key), h1_present)
+        report.check(run, "O3 from outside (§5.1, 0.17): the consumer, told by the deployment that its grants do "
+                          "not let it call, gets silence, which is unobservable, as it is when not told; the caller, "
+                          "whose grants let it call, is answered: clean",
+                     ungranted.silent and v_ungranted[0] == "unobservable" and v_untold[0] == "unobservable"
+                     and v_granted[0] == "clean", f"consumer {v_ungranted}; not told {v_untold}; caller {v_granted}")
         frozen_key = "zk2/h2/tc/zk2py_echo.v1/@op/echo"
         frozen = live.call(w.sessions["caller"], frozen_key, b"freeze")
-        v_frozen = live.o3_verdict(frozen, acl.may_call(gen, "caller", frozen_key))
-        report.check(run, "O3 from outside: a granted call that own-h2 leaves unanswered past the caller's timeout "
-                          "is the finding, said beside it to hold under grants that let the caller call",
-                     frozen.silent and v_frozen[0] == "finding", str(v_frozen))
+        h2_present = bool(live.list_presence(w.sessions["caller"], "zk2/h2/tc/@zk/alive/**").alive)
+        v_frozen = live.o3_verdict(frozen, acl.may_call(gen, "caller", frozen_key), h2_present)
+        v_frozen_untold = live.o3_verdict(frozen, None, h2_present)
+        report.check(run, "O3 from outside (0.17): a granted call that own-h2, whose tokens the caller reads, "
+                          "leaves unanswered past the caller's timeout is the finding; the same silence, not told "
+                          "the grants, is unobservable",
+                     frozen.silent and h2_present and v_frozen[0] == "finding"
+                     and v_frozen_untold[0] == "unobservable", f"{v_frozen}; not told {v_frozen_untold}")
         time.sleep(1.5)  # let own-h2's held call finish before the owners close
     finally:
         w.close()

@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fifteen rounds.**
+**Sixteen rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -20,11 +20,12 @@ where that was not enough, or where the spec said two things.
 - F-81 was found against 0.12.
 - Nothing new was found against 0.13 (see "At 0.13").
 - F-82 to F-88 were found against 0.14, building access control from §11.
-- Amendments 0.5 to 0.15 resolved F-01 to F-88. Each entry carries a
-  status line naming its amendment.
 - Nothing new was found against 0.15 (see "At 0.15").
-- **F-89 to F-91 are new**, found against 0.16, whose rules came from the
-  reference's tools rather than from zk2py (see "At 0.16" at the end).
+- F-89 to F-91 were found against 0.16, whose rules came from the
+  reference's tools rather than from zk2py.
+- Amendments 0.5 to 0.17 resolved F-01 to F-91. Each entry carries a
+  status line naming its amendment.
+- **F-92 and F-93 are new**, found against 0.17 (see "At 0.17" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -34,7 +35,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.16:** 91 entries.
+**Counts at 0.17:** 93 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -74,12 +75,16 @@ where that was not enough, or where the spec said two things.
   "every principal" per policy. It fixed what a storage is (F-86) and
   security.md §3 step 3 (F-88). Each resolution follows zk2py's
   measurement or guess.
-- F-89 to F-91: **new**, 1 ambiguity, 2 gaps.
+- F-89 to F-91: resolved by 0.17. 0.17 confirmed two of zk2py's
+  guesses: F-90's grants and F-91's refusal at step 2, which 0.17 also
+  backs with a D code. It overturned one part of F-89: a foreign stamp is
+  a finding even when no router is verified.
+- F-92 and F-93: **new**, 1 contradiction, 1 ambiguity.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.16 | Location | In one line |
+| Id | Severity | Status at 0.17 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -169,9 +174,11 @@ by the spec section that now states the rule.
 | F-86 | gap (measured) | resolved by 0.15 | §4.2 "What the check reads" (0.11) | The storages selector intersects a router's `router/queryable/<…/state/**>` records, so with any owner present, "nothing under the second" never holds. |
 | F-87 | gap (measured) | resolved by 0.15 | §11.1 "denies it to every principal under allow" (0.12) | A subject matching every session undoes the per-user denies in zenoh 1.10.1; "every principal" must be compiled per policy. |
 | F-88 | contradiction | resolved by 0.15 | security.md §3 step 3, §11.3 (0.14) | Under `allow`, the grants cannot refuse a session that is no principal: it matches no subject, and gets everything. |
-| F-89 | ambiguity | **new** | §4.2 "A tool's S1 check" (0.16) | What S1 reads for a tool that verifies no router: clean by `meta.zid` alone, or unobservable? |
-| F-90 | gap | **new** | §5.1 O3 judged from outside (0.16), §11.3 | "Only under grants that let it call": a tool cannot observe its grants, and the spec does not say where it learns them. |
-| F-91 | gap | **new** | §4.4 "Found by its token" (0.16) | An archive "MUST hold its archive.v1 interface token", but no step refuses a tokenless one and no check reports it. |
+| F-89 | ambiguity | resolved by 0.17 | §4.2 "A tool's S1 check" (0.16) | What S1 reads for a tool that verifies no router: clean by `meta.zid` alone, or unobservable? |
+| F-90 | gap | resolved by 0.17 | §5.1 O3 judged from outside (0.16), §11.3 | "Only under grants that let it call": a tool cannot observe its grants, and the spec does not say where it learns them. |
+| F-91 | gap | resolved by 0.17 | §4.4 "Found by its token" (0.16) | An archive "MUST hold its archive.v1 interface token", but no step refuses a tokenless one and no check reports it. |
+| F-92 | contradiction | **new** | §3.3 D011 against "Cascades and scope" (0.17) | Cascade 6 still lists `token` as deliberately unchecked, and no cascade places D011. |
+| F-93 | ambiguity | **new** | §4.2 "A tool's S1 check" (0.17) against "Who answered" (0.13) | "Verified" is two things: a connected router is verified (0.13), yet "verified at least one router" must mean an answer. |
 
 ---
 
@@ -2433,6 +2440,8 @@ cold. `just py-conformance` passes 519 of 519 (0.16 adds no fixture).
 
 ### F-89 · ambiguity · §4.2 "A tool's S1 check" (0.16): a tool that verifies no router
 
+**Status at 0.17: resolved by 0.17, partly against zk2py's guess.** §4.2 "A tool's S1 check": a foreign stamp is a finding whatever else the tool read. An owner's own stamp is clean only when the tool verified at least one router and `meta.zid` is none of the zids it knows to be routers. Otherwise S1 is unobservable. zk2py had held a foreign stamp unobservable when no router was verified, which 0.17 overturns: an owner that is its own router stamps with its own `meta.zid`. `live.s1_check` now judges the stamp first. The run shows a foreign stamp (an owner whose clock is another session's HLC) as a finding with routers verified, and again with none verified, by simulating a binding without the replier id.
+
 > "A tool that reads the admin space (§11.1, the admin read) compares the
 > owner's `meta.zid` with the verified routers' zids, by value. When they
 > match, the owner is its own router, and the tool reports S1 unobservable
@@ -2456,6 +2465,8 @@ reports h1 unobservable, while the Tool reports it clean.
 
 ### F-90 · gap · §5.1 (0.16) and §11.3: a tool's own grants
 
+**Status at 0.17: resolved by 0.17.** §5.1: a tool learns its grants from its operator or from the deployment's §11.1 input. A deployment without access control lets everyone call. Told so, a silence from an owner whose tokens it reads is the finding. Not told, it is unobservable, naming the premise it lacked. This is what zk2py had built, with one change: its verdict word for the untold case is now `unobservable`, where it was `unjudged`, and the finding needs the owner's tokens read (`live.o3_verdict(…, present)`).
+
 > "A tool judging O3 from outside, as a conformance suite does, holds a
 > silence as a finding only under grants that let it call: an
 > access-control refusal is silent too (O5, §11.3). It says so beside the
@@ -2477,6 +2488,8 @@ deployment's generated grants (`acl.may_call`), and reports a silence as:
 
 ### F-91 · gap · §4.4 (0.16): where an archive's tokenless configuration is refused
 
+**Status at 0.17: resolved by 0.17.** §8.2 step 2 refuses an owner whose tokenless set names `archive.v1`, whether or not it implements it. A descriptor marking `archive.v1` `"token": false` is D011 (`descriptors/d011-tokenless-archive`, `ok-archive`). zk2py already refused at step 2, whatever the owner implements. Its checker now reports D011, and presence.md §2 step 6 runs through R1 against its control (F-92).
+
 > "An archive MUST hold its `archive.v1` interface token: it is never in
 > the tokenless set (§8.1)."
 
@@ -2496,3 +2509,84 @@ configuration names `archive.v1`. Only the CHANGELOG says the reference
 **Resolved:** zk2py's owner refuses to start, with step 2's other
 refusals, before anything is declared. Its descriptor checker is
 unchanged, because the D-code table has no code for this.
+
+## At 0.17 (#609)
+
+`just py-conformance` passes 521 of 521, with `descriptors/d011-tokenless-archive`
+(D011) and `ok-archive`. `just py-live` passes 235 of 235, with no known
+deviation.
+
+What changed in zk2py:
+- **A tool's S1 check** (`live.s1_check`) judges the stamp first. A foreign
+  or missing stamp is a finding whatever else the tool read. An owner's own
+  stamp is clean only with a verified router answer, and with `meta.zid`
+  none of the zids known to be routers. Otherwise it is unobservable. The
+  `0.16` run shows:
+  - a client-mode owner, clean;
+  - a router-mode owner, unobservable;
+  - an owner's own stamp with no router verified (no replier id),
+    unobservable;
+  - a foreign stamp, a finding both with routers verified and with none.
+  Under `deny`, the Tool with the admin read judges h1 clean, and the
+  caller without it reports unobservable.
+- **O3 from outside** (`live.o3_verdict`) uses 0.17's words. Told its
+  grants let it call (by `acl.may_call`), a silence from a present owner
+  is the finding. Not told, or told they do not, the silence is
+  unobservable. Under `deny`:
+  - the consumer's ungranted call is unobservable;
+  - the caller's granted call is clean;
+  - a granted call that `own-h2` leaves unanswered is the finding, and the
+    same silence not told the grants is unobservable.
+- **D011** is checked per entry, after cascades 2 and 3, and without the
+  contract. presence.md §2 step 6 runs: an owner of `zk2py_needs.v1`, which
+  does not implement `archive.v1`, with `archive.v1` in its tokenless set,
+  refuses. The watcher through R1 sees no token, where the control (an
+  empty set) showed its instance token.
+
+### F-92 · contradiction · §3.3 D011 against "Cascades and scope" (0.17): `token` checked, and listed as unchecked
+
+> D011: "an interface entry for `archive.v1` is marked `"token": false`: an
+> archive is never tokenless (§4.4, 0.17) | error | per entry"
+
+> Cascade 6, "Not checked, deliberately": "`minor`, an integer from 0 to
+> 2^64−1 that no check reads …, and `token`"
+
+D011 checks `token`, while cascade 6 still lists it as deliberately
+unchecked. No cascade places D011 either:
+- **Cascade 5** says an interface none of the given contracts declares "is
+  checked for syntax only". Yet `d011-tokenless-archive` expects D011 with
+  `archive.v1`'s contract not given, so D011 counts there as syntax,
+  although it is a rule about one interface.
+- **Cascade 3** says an entry whose `contract` is not a fingerprint "is
+  checked no further". Whether D011 is still reported for it is not said,
+  and no fixture decides.
+
+**Resolved:** zk2py checks D011 for every entry whose `iface` is an
+interface id and whose `contract` is a fingerprint, so after cascades 2
+and 3, and before the contract lookup, so with or without the contract. It
+reports D011 once per such entry, a repeated one included (cascade 4).
+
+### F-93 · ambiguity · §4.2 (0.17) against (0.13): what "verified" means
+
+> 0.13, "Verified routers, outward": "the routers the tool's session is
+> connected to, and the session itself, are verified".
+
+> 0.17, "A tool's S1 check": "An owner's stamp is clean only when the tool
+> verified at least one router … and `meta.zid` is none of the zids it
+> knows to be routers: the routers its session is connected to, the
+> routers it verified, and every zid a verified router lists".
+
+Read with 0.13's meaning, a client tool has always "verified at least one
+router", its own, with no admin answer at all. With the admin space off,
+it would then call an owner's own stamp clean, although the owner may be a
+router it cannot see. 0.17's own list ("connected to … verified …
+lists") treats connected and verified as two sets. Its "Otherwise"
+names the cases where nothing is verified, and those include "the admin
+space is off". So the intent is an admin answer verified, but the word
+says the other.
+**Resolved:** zk2py reads "verified at least one router" as at least one
+router's admin answer verified ("Who answered"), and keeps 0.13's set
+(connected, the session, and the routers listed outward) as the zids it
+knows to be routers. The `0.16` run's simulated binding without the
+replier id is the case that tells the two readings apart. It reports an
+owner's own stamp unobservable there.

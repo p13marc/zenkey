@@ -592,62 +592,70 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
 
 def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str | None,
              timeout: float = GET_TIMEOUT_S, trust: bool = False) -> tuple[str, str]:
-    """§4.2 (0.16) "A tool's S1 check": "A tool that reads the admin space
-    … compares the owner's meta.zid with the verified routers' zids, by
-    value. When they match, the owner is its own router, and the tool
-    reports S1 unobservable for it, never clean."
+    """§4.2 "A tool's S1 check" (0.16, 0.17). "A tool attributes a state
+    reply's stamp by comparing its id with the owner's meta.zid (§3.3), by
+    value":
+    - "A foreign stamp is a finding whatever else the tool read: an owner
+      that is its own router stamps with that router's id, which is its own
+      meta.zid." A reply with no stamp is a finding too (S1, S2).
+    - "An owner's stamp is clean only when the tool verified at least one
+      router ("Who answered", above) and meta.zid is none of the zids it
+      knows to be routers: the routers its session is connected to, the
+      routers it verified, and every zid a verified router lists as a
+      router session."
+    - "Otherwise S1 is unobservable for that owner, never clean."
 
-    Returns (verdict, why). The verdict is one of:
-    - ``unattributable``: no ``meta.zid`` (§3.3);
-    - ``unobservable``, in either of two cases:
-      - the owner is a verified router, its own;
-      - no admin answer is verified, so the owner may be a router this tool
-        cannot see. Appendix B leaves "the checks that read the admin space
-        unobservable, never clean" then (SPEC-FINDINGS F-89).
-    - ``clean`` when the stamp is the owner's (:func:`attribute_stamp`);
-    - ``finding`` when it is foreign, or missing.
-
-    The verified routers are 0.13's outward set. ``trust`` is 0.12's
-    operator alternative."""
+    Without ``meta.zid`` the stamp is ``unattributable`` (§3.3). "Verified
+    at least one router" is read as one router's admin answer verified,
+    since 0.17 names the cases where none is: no admin read, the admin
+    space off, no replier id. ``trust`` is 0.12's operator alternative.
+    Returns (verdict, why)."""
     meta = descriptor.get("meta")
     zid = _zid_value(meta.get("zid") if isinstance(meta, dict) else None)
     if zid is None:
         return "unattributable", "the descriptor states no meta.zid (§3.3)"
+    who = attribute_stamp(stamp_id, descriptor)
+    if who != "owner":
+        return "finding", f"the stamp is {who}: an owner that is its own router stamps with its own meta.zid"
     records = [a for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout)
                if a.ok and a.key is not None]
-    verified = verified_routers(session, records)
+    known = verified_routers(session, records)  # connected, the session, verified and listed
     if trust:
-        verified |= {_zid_value(a.key.split("/")[1]) for a in records}
-    answered = [a for a in records if trust or unverified_why(a, verified) is None]
-    if zid in verified:
-        return "unobservable", "meta.zid is a verified router's zid: the owner is its own router"
+        known |= {_zid_value(a.key.split("/")[1]) for a in records}
+    answered = [a for a in records if trust or unverified_why(a, known) is None]
+    if zid in known:
+        return "unobservable", "meta.zid is a router's zid: the owner is its own router"
     if not answered:
-        return "unobservable", "no verified admin answer: the owner may be a router this tool cannot see"
-    who = attribute_stamp(stamp_id, descriptor)
-    if who == "owner":
-        return "clean", f"the stamp is the owner's, and meta.zid is none of {len(verified)} verified routers"
-    return "finding", f"the stamp is {who}"
+        return "unobservable", ("no router verified (no admin read, the admin space off, or no replier id): "
+                                "the owner may be a router this tool cannot see")
+    return "clean", f"the stamp is the owner's, and meta.zid is none of {len(known)} known routers"
 
 
-# -- §5.1 O3 judged from outside (0.16) ------------------------------------------
+# -- §5.1 O3 judged from outside (0.16, 0.17) --------------------------------------
 
-def o3_verdict(result: CallResult, may_call: bool | None) -> tuple[str, str]:
-    """§5.1 (0.16): "A tool judging O3 from outside … holds a silence as a
-    finding only under grants that let it call: an access-control refusal
-    is silent too (O5, §11.3). It says so beside the finding."
+def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None = None) -> tuple[str, str]:
+    """§5.1 O3 judged from outside (0.16, 0.17). "No tool can observe its
+    grants (§11.3). It learns that they let it call from its operator, or
+    from the deployment's §11.1 input when it holds one; a deployment that
+    runs no access control lets every principal call. Told so, the tool
+    holds a silence from an owner whose tokens it reads as the finding. Not
+    told, the silence is unobservable, and the tool names the premise it
+    lacked: a silence is never a verdict on its own (O5)."
 
-    ``may_call`` is whether the caller's grants let it make this call. No
-    tool observes its grants (§11.3), so it comes from the deployment's
-    configuration, here the generated grants (``acl.may_call``), or None
-    when unknown (SPEC-FINDINGS F-90). Returns (verdict, why): ``clean``,
-    ``finding`` or ``unjudged``."""
+    ``may_call`` is what the tool was told: True (its grants let it call),
+    False (they do not), or None (not told). zk2py reads it from the
+    deployment's input through ``acl.may_call``. ``present`` is whether the
+    tool reads the owner's tokens. Returns (verdict, why): ``clean``,
+    ``finding`` or ``unobservable``."""
     if not result.silent:
         return "clean", f"answered: {len(result.replies)} replies"
-    if may_call is True:
-        return "finding", "silent, under grants that let this caller call (O3)"
+    if may_call is None:
+        return "unobservable", "silent, and not told that its grants let it call (O5)"
     if may_call is False:
-        return "unjudged", "silent, but the grants do not let this caller call: a refusal is silent too"
-    return "unjudged", "silent, and this caller's grants are unknown: a refusal is silent too"
+        return "unobservable", "silent, and told that its grants do not let it call: a refusal is silent too"
+    if present is False:
+        return "unobservable", "silent, and the owner's tokens are not read: absent, not unanswered (O5)"
+    return "finding", "silent, from a present owner, under grants that let this caller call (O3)"
 
 
 # -- §2.6 events replay, the consumer's bound (0.16) -----------------------------

@@ -80,17 +80,21 @@ contracts      96 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    38 passed     0 failed
+descriptors    40 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         519 passed     0 failed
+total         521 passed     0 failed
 ```
 
-The figures are against `core.md` 0.16, which adds no fixture. 0.10 added
-`descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
-- Amendments 0.5 to 0.15 resolved F-01 to F-88. F-89 to F-91 are open
-  against 0.16.
+The figures are against `core.md` 0.17. Three releases added descriptor
+fixtures:
+- 0.10, `descriptors/ok-optional-role`;
+- 0.11, `ok-optional-unchecked`;
+- 0.17, `d011-tokenless-archive` and `ok-archive`.
+
+- Amendments 0.5 to 0.17 resolved F-01 to F-91. F-92 and F-93 are open
+  against 0.17.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -350,23 +354,27 @@ S4's storages read keeps only answers whose key the selector includes,
 ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
 `router/queryable/<…/state/**>` records intersect the selector.
 
-**Since 0.16** (run `0.16`, and the `acl` run under `deny`):
-- **A tool's S1 check (§4.2)** is `live.s1_check`. It compares `meta.zid`
-  with the verified routers' zids by value, then judges the stamp. Its
-  poles:
+**Since 0.16 and 0.17** (run `0.16`, and the `acl` run under `deny`):
+- **A tool's S1 check (§4.2)** is `live.s1_check`. It judges the stamp
+  first, then compares `meta.zid` with the zids it knows to be routers,
+  by value. Its poles:
+  - a foreign stamp is a finding, whether or not a router is verified;
   - an owner in client mode under a verified router is clean;
   - an owner opened in router mode and linked to R1 (`Owner(router_connect=…)`)
     is unobservable;
-  - a tool that verifies no router reports unobservable (F-89).
-- **O3 judged from outside (§5.1)** is `live.o3_verdict`, with the grants
-  taken from the deployment (`acl.may_call`, F-90).
-  - An ungranted call's silence is `unjudged`.
+  - with no router verified, an owner's own stamp is unobservable (F-93).
+- **O3 judged from outside (§5.1)** is `live.o3_verdict`. It takes the
+  grants from the deployment (`acl.may_call`) and the owner's presence.
+  - A silence is unobservable when the tool was not told its grants, or
+    was told they do not let it call.
   - A granted call is clean.
-  - A granted call an owner leaves unanswered is the finding.
+  - A granted call that a present owner leaves unanswered is the finding.
   - `CallResult.silent` no longer counts zenoh's `Timeout` error reply as
     an answer (§5.1).
 - **U22's tokenless set** is `Owner(tokenless=…)`: `"token": false`, no
-  interface token. `archive.v1` in it is refused at start (§4.4, F-91).
+  interface token. `archive.v1` in it is refused at step 2, whatever the
+  owner implements (§4.4, §8.2 step 2). presence.md §2 step 6 runs in the
+  refusal run, and the descriptor checker reports D011 (F-92).
 - **§2.6's replay bound** is `live.replay_events`. It GETs with `_time`
   and filters by the ULID's time, so the consumer applies the retention
   even against a storage that ignores `_time`. zenoh-python routers run no
@@ -387,7 +395,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 232 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 235 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
