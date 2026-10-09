@@ -1,56 +1,58 @@
-"""A grant generator from core.md §11.1–§11.2 (0.14) alone: a deployment
-compiled into zenoh 1.10.1's ``access_control`` block, under
+"""A grant generator from core.md §11.1–§11.2 (0.15): a deployment compiled
+into zenoh 1.10.1's ``access_control`` block, under
 ``default_permission: deny`` or ``allow``.
 
-**The input is zk2py's own.** The spec states the grant shapes, but no
-deployment format: the only bindings file in ``examples/zk2/`` calls its
-shape "recommended, not normative" (SPEC-FINDINGS F-82). A deployment here
-is a list of :class:`Principal`, each bound to one usrpwd username (§11.3:
-"Principals are bound by certificate CN or username"):
+**The input is zk2py's own** (§11.1 "The input", 0.15: "The format is the
+generator's own"). A deployment is a list of :class:`Principal`, each bound
+to one usrpwd username (§11.3: "Principals are bound by certificate CN or
+username"):
 - ``service`` and ``implements``: the Own grant on ``zk2/<system>/<service>``
   for the contracts it serves;
 - ``consumes``: Consume, one :class:`Use` per binding (interface, providers,
   resources);
 - ``calls``: Call, the same for operations;
 - ``inspects``: presence alone on the services a tool inspects;
+- ``admin_read``: whether a tool reads the admin space;
 - a principal with no ``service`` is the Tool shape (0.14).
 
-**The messages each shape compiles to** are zk2py's reading of §11.1 plus
-measurement, since §11.1 names actions, not zenoh's nine messages and two
-flows (SPEC-FINDINGS F-83):
-- Own: on ingress ``put``, ``delete``, ``declare_queryable``, ``reply`` and
-  ``liveliness_token`` on its keys; on egress ``query`` and
-  ``declare_subscriber`` on them (0.14).
-- Consume: on ingress ``declare_subscriber`` and ``query`` on each selector;
-  on egress ``put``, ``delete`` and ``reply`` on it.
-- Call: on ingress ``query`` on each operation selector; on egress
-  ``reply``.
-- Presence, on ``…/@zk/**`` of each provider: liveliness reads, ingress
-  ``liveliness_query`` and ``declare_liveliness_subscriber``, egress
-  ``liveliness_token`` (measured: a liveliness GET's tokens come back as an
-  egress ``liveliness_token``, not a ``reply``); and the descriptor's GET
-  and subscription (0.14), ingress ``query`` and ``declare_subscriber``,
-  egress ``reply`` and ``put``.
-- Contract bundles are open: every principal may ``query``,
-  ``declare_queryable`` and ``reply`` on ``zk2/@zk/contract/**``, both
-  flows.
-- §11.2: every consumer selector that intersects a provider's keys is
-  added to that provider's egress ``query`` and ``declare_subscriber``, and
-  to its ingress ``reply`` (refusals are checked against the query's key).
-- The admin space: no principal declares queryables under ``@/**``; under
-  ``allow`` each principal's policy denies ``declare_queryable`` and
-  ``reply`` there. Not a subject matching every session: in zenoh 1.10.1
-  one undoes the per-user subjects' denies (measured, SPEC-FINDINGS F-87).
-  A Tool may read the admin space (``query`` ingress, ``reply`` egress),
-  which §11.1 does not grant (SPEC-FINDINGS F-84).
+Of §11.1's input, zk2py takes neither history nor archives nor a
+namespace: its deployments use none.
 
-**Under ``allow``** each grant compiles into denies of its complement
-(§11.2). Key expressions have no negation, so the complement is taken over
-the deployment's own keys (SPEC-FINDINGS F-85): every resource of every
-contract a principal serves, as a key expression, and each service's
-``@zk/**``. A universe key that a grant includes is left open; one a grant
-only intersects is the R2-narrowed case ("no complement by inclusion",
-0.14), left open with a ``complement_partial`` warning; any other is denied.
+**Messages and flows** are §11.2's table (0.15), which zk2py had measured
+the same way in 0.14:
+
+=========  ==============================================  ====================================
+Grant      Ingress (from the holder)                       Egress (toward the holder)
+=========  ==============================================  ====================================
+Own        put, delete, declare_queryable, reply,          query, declare_subscriber
+           liveliness_token
+Fan-in     reply                                           query, declare_subscriber
+Consume    declare_subscriber, query                       put, delete, reply
+Presence   declare_liveliness_subscriber,                  liveliness_token, reply, put
+           liveliness_query, query, declare_subscriber
+Call       query                                           reply
+Contracts  declare_queryable, reply, query                 query, reply
+Admin      query                                           reply
+=========  ==============================================  ====================================
+
+- Fan-in (§11.2): every reader selector that intersects a provider's keys
+  is added to that provider's egress, and to its ingress ``reply``, since
+  a refusal is checked against the query's key.
+- The admin read (§11.1 Tool, 0.15): ``@/*/router`` and ``@/*/router/**``,
+  never namespaced.
+- No principal declares queryables under ``@/**``. Under ``allow`` the deny
+  is a rule in each principal's own policy, never a catch-all subject's
+  (§11.2, 0.15: such a subject "makes the per-user subjects lose their
+  denies").
+
+**Under ``allow``** each grant compiles into denies of its complement,
+taken over "the deployment's own keys: each resource the enrolled
+services' contracts declare, each service's …/@zk/**, and the contract
+keys" (§11.2, 0.15). A key in that set that a grant includes is left open.
+One a grant only intersects is the R2-narrowed case ("no complement by
+inclusion", 0.14), left open with a ``complement_partial`` warning. Any
+other is denied. Keys no contract declares stay open, the admin space
+included.
 """
 
 from __future__ import annotations
@@ -66,6 +68,9 @@ MESSAGES = ("put", "delete", "declare_subscriber", "query", "declare_queryable",
             "liveliness_token", "declare_liveliness_subscriber", "liveliness_query")
 CONTRACTS = "zk2/@zk/contract/**"
 ADMIN = "@/**"
+#: §11.1 Tool (0.15): the admin read, "query on @/*/router and @/*/router/**,
+#: and their reply, never namespaced".
+ADMIN_READ = ["@/*/router", "@/*/router/**"]
 
 
 @dataclass
@@ -90,7 +95,7 @@ class Principal:
     inspects: list[str] = field(default_factory=list)
     #: a variant for the scenarios: drop the presence a shape carries
     presence: bool = True
-    #: Tool's admin-space read (SPEC-FINDINGS F-84)
+    #: the Tool's admin read (§11.1, 0.15)
     admin_read: bool = False
 
 
@@ -191,8 +196,8 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
             add(p.id, ("liveliness_token", "reply", "put"), EGRESS, sels)
             readers += [(p.id, s) for s in sels]
         if p.admin_read:
-            add(p.id, ("query",), INGRESS, [ADMIN])
-            add(p.id, ("reply",), EGRESS, [ADMIN])
+            add(p.id, ("query",), INGRESS, ADMIN_READ)
+            add(p.id, ("reply",), EGRESS, ADMIN_READ)
     # §11.2: a provider's egress, and its ingress reply, carry every reader
     # selector that intersects what it serves.
     for p in principals:
@@ -209,9 +214,8 @@ def compile_grants(principals: list[Principal], *, egress_selectors: bool = True
 
 
 def universe(principals: list[Principal]) -> list[str]:
-    """The keys the complement is taken over under ``allow`` (SPEC-FINDINGS
-    F-85): each service's resources and its ``@zk/**``, and the contract
-    keys."""
+    """The keys the complement is taken over under ``allow`` (§11.2, 0.15):
+    each service's resources and its ``@zk/**``, and the contract keys."""
     keys: list[str] = []
     for p in principals:
         if p.service:
@@ -276,11 +280,9 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
             policies.append({"id": f"{p.id}-policy", "rules": [x["id"] for x in r], "subjects": [p.id]})
     if posture == "allow" and not allow_rules_under_allow:
         # §11.1 (0.12): no principal declares queryables under @/**, denied
-        # "to every principal under allow". The deny goes into each
-        # principal's policy: a subject matching every session (no
-        # attribute, or every link protocol) undoes the per-user subjects'
-        # denies in zenoh 1.10.1 (measured, SPEC-FINDINGS F-87). A session
-        # matching no subject is not reached (§11.3).
+        # "to every principal under allow"; §11.2 (0.15): "a rule in each
+        # principal's policy, never one catch-all subject's". A session
+        # matching no subject is not reached (§11.3; security.md §3 step 3).
         rules.append({"id": "admin-space-deny", "messages": ["declare_queryable", "reply"], "flows": [INGRESS],
                       "permission": "deny", "key_exprs": [ADMIN]})
         for pol in policies:

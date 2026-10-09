@@ -87,10 +87,9 @@ examples       97 passed     0 failed
 total         519 passed     0 failed
 ```
 
-The figures are against `core.md` 0.14, which adds no fixture. 0.10 added
+The figures are against `core.md` 0.15, which adds no fixture. 0.10 added
 `descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
-- Amendments 0.5 to 0.13 resolved F-01 to F-81. F-82 to F-88 are open
-  against 0.14.
+- Amendments 0.5 to 0.15 resolved F-01 to F-88. None is open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -298,34 +297,46 @@ Four more runs:
     descriptors' minor, or classifies both ways. Two zk2py owners serve
     `zk2py_bringup.v1` at minor 0 and 1 (`interop/rev/`).
 
-**Access control (0.14).** `zk2py.acl` is a grant generator written from
-§11.1–§11.2 alone. Its input is zk2py's own, since the spec defines none
-(F-82): a list of `Principal`s, each bound to a usrpwd user, with the
-service it owns, the contracts it implements, `Use`s for Consume and for
-Call, and the services it inspects. A principal with no service is the
-Tool shape. `acl.generate(principals, "deny" | "allow")` returns zenoh's
-`access_control` block:
-- **under `deny`**, allow rules, one per (principal, key set), carrying its
-  (message, flow) pairs;
-- **under `allow`**, denies of each grant's complement, over the
-  deployment's own keys (F-85), with a `complement_partial` warning for an
-  R2-narrowed grant;
-- **Own, Consume, Call and presence** compile to the message and flow
-  pairs in the module's docstring, measured where they could be (F-83);
-- **§11.2's provider egress** and ingress `reply` carry every reader
-  selector that intersects the provider's keys;
-- **the `@/**` queryable deny** goes into each principal's policy under
-  `allow` (F-87);
-- **a Tool may read the admin space** (F-84).
+**Access control (0.14, 0.15).** `zk2py.acl` is a grant generator written
+from §11.1–§11.2 alone. Its input is zk2py's own format, as §11.1 "The
+input" allows (0.15). It is a list of `Principal`s, each bound to a usrpwd
+user, with:
+- the service it owns and the contracts it implements;
+- `Use`s for Consume and for Call;
+- the services it inspects;
+- whether it reads the admin space.
 
-`zk2py.acl_interop` (`--only acl`) runs a deployment of two owners, a
-consumer, a caller (and the same caller with its presence removed), a
-Tool, and a client `S` that is no principal. R1 is a zenoh-python router
-with usrpwd and the generated block. Each posture and each variant of
-security.md §2's generator check runs on a router of its own. It shows:
+A principal with no service is the Tool shape. `acl.generate(principals,
+"deny" | "allow")` returns zenoh's `access_control` block:
+- **under `deny`**, allow rules, one per (principal, key set), carrying
+  §11.2's message and flow pairs (0.15's table, which zk2py measured
+  first);
+- **under `allow`**, denies of each grant's complement, over the
+  deployment's own keys (§11.2, 0.15), with a `complement_partial` warning
+  for an R2-narrowed grant;
+- **fan-in:** a provider's egress and ingress `reply` carry every reader
+  selector that intersects its keys;
+- **the `@/**` queryable deny** is a rule in each principal's own policy
+  under `allow`, never a catch-all subject's;
+- **the Tool's admin read** (0.15): `query` on `@/*/router` and
+  `@/*/router/**`, and their `reply`.
+
+`zk2py.acl_interop` (`--only acl`) runs a deployment of:
+- two owners;
+- a consumer;
+- a caller, and the same caller with its presence removed;
+- a Tool with the admin read;
+- an enrolled `S` holding only the open contract grants;
+- a client `S` that is no principal.
+
+R1 is a zenoh-python router with usrpwd and the generated block. Each
+posture and each variant of security.md §2's generator check runs on a
+router of its own. It shows:
 - security.md §1 and §2's expectations;
-- §3 step 3 for a principal under both postures, and for `S` under `deny`
-  (F-88);
+- §3 step 3 as amended in 0.15, with `S` enrolled and not, under both
+  postures;
+- the Tool's admin read under `deny`: the tool runs S4, and a principal
+  without the admin read gets nothing;
 - 0.14's measured facts:
   - a value reply is checked against its own key, a refusal against the
     query's;
@@ -334,9 +345,9 @@ security.md §2's generator check runs on a router of its own. It shows:
   - presence grants read the descriptor;
 - §11.3's link refusal of an unauthenticated session.
 
-S4's storages read now keeps only answers whose key the selector
-includes: a router's `router/queryable/<…/state/**>` records intersect it
-(F-86).
+S4's storages read keeps only answers whose key the selector includes,
+ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
+`router/queryable/<…/state/**>` records intersect the selector.
 
 **Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
 a rule the owner example does not meet yet.

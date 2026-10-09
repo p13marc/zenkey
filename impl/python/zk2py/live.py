@@ -538,11 +538,13 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
-        # A router's admin space also holds `router/queryable/<key expr>`,
-        # whose key embeds a declared key expression: one ending in `**`
-        # (every owner's `state/**`, S2) intersects the storages selector.
-        # Only a key the selector includes is a storage (SPEC-FINDINGS F-86).
-        if not storages_sel.includes(zenoh.KeyExpr(a.key)):
+        # §4.2 (0.15): "A storage is an answer to the second selector whose
+        # key the selector includes, ending …/storage_manager/storages/<name>.
+        # Other answers arrive too, and are not storages": a router's
+        # `router/queryable/<key expr>` record of a `**` queryable (every
+        # owner's `state/**`, S2) intersects the selector.
+        chunks = a.key.split("/")
+        if not storages_sel.includes(zenoh.KeyExpr(a.key)) or chunks[-3:-1] != ["storage_manager", "storages"]:
             continue
         why = None if trust else unverified_why(a, verified, storage=True)
         if why is not None:

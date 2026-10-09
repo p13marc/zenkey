@@ -1,6 +1,7 @@
-"""Access control, live (core.md §11, 0.14; security.md §1–§3): zk2py's own
-deployment, compiled by :mod:`zk2py.acl` into zenoh's ``access_control``
-block, run on a zenoh-python router R1 that binds principals by usrpwd.
+"""Access control, live (core.md §11, 0.14–0.15; security.md §1–§3): zk2py's
+own deployment, compiled by :mod:`zk2py.acl` into zenoh's
+``access_control`` block, run on a zenoh-python router R1 that binds
+principals by usrpwd.
 
 The deployment (``deployment()``):
 - ``own-h1`` and ``own-h2``: zk2py owners of ``h1/tc`` and ``h2/tc``, each
@@ -12,9 +13,11 @@ The deployment (``deployment()``):
 - ``caller-blind`` (``ops/blind``): the same Call with its presence
   removed, security.md §1's "with its liveliness reads removed";
 - ``tool``: the Tool shape, Consume ``state/health``, Call
-  ``@op/diagnostics``, presence on ``*/tc``, and the admin-space read;
+  ``@op/diagnostics``, presence on ``*/tc``, and the admin read (0.15);
+- ``S-enrolled`` (user ``spoofer``): an enrolled principal holding nothing
+  but the open contract grants, security.md §3 step 3's enrolled ``S``;
 - ``S`` (user ``stranger``): authenticated by R1, and no principal of the
-  deployment.
+  deployment, step 3's other ``S``.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from typing import Any
 
 PASSWORD = "pw-{}"
 USERS = {"own-h1": "h1tc", "own-h2": "h2tc", "consumer": "dash", "caller": "ctl", "caller-blind": "blind",
-         "tool": "tool"}
+         "tool": "tool", "S-enrolled": "spoofer"}
 STRANGER = "stranger"
 
 
@@ -49,6 +52,9 @@ def deployment(repo) -> list:
         Principal("caller-blind", USERS["caller-blind"], service="ops/blind", calls=list(calls), presence=False),
         Principal("tool", USERS["tool"], consumes=[health],
                   calls=[Use("zk2py_tc.v1", ["*/tc"], ["@op/diagnostics"])], inspects=["*/tc"], admin_read=True),
+        # security.md §3 step 3 (0.15): S as an enrolled principal, which
+        # holds nothing but the open contract grants.
+        Principal("S-enrolled", USERS["S-enrolled"]),
     ]
 
 
@@ -80,7 +86,7 @@ class World:
         self.zid = str(self.router.zid())
         self.endpoint = f"tcp/127.0.0.1:{port}"
         self.sessions: dict[str, Any] = {}
-        for pid in ("consumer", "caller", "caller-blind", "tool"):
+        for pid in ("consumer", "caller", "caller-blind", "tool", "S-enrolled"):
             u = USERS[pid]
             self.sessions[pid] = live.open_client(self.endpoint, (u, PASSWORD.format(u)))
         self.sessions["S"] = live.open_client(self.endpoint, (STRANGER, PASSWORD.format(STRANGER)))
@@ -252,12 +258,16 @@ def _deny_full(report, repo, block, workdir) -> None:
 
 
 def _admin_spoof(report, run, w: World, posture: str) -> None:
+    """security.md §3 step 3 (0.15): "repeat step 1 twice: once with S an
+    enrolled principal, and once with S an authenticated session that is
+    no principal". And the Tool's admin read (§11.1, 0.15): under deny,
+    the tool reads @/*/router and runs S4; a principal without it cannot."""
     import zenoh
 
     from . import live
 
     own = f"@/{w.zid}/router"
-    spoofers = {"S": w.sessions["S"], "own-h1": w.owners["own-h1"].session}
+    spoofers = {"S, enrolled": w.sessions["S-enrolled"], "S, no principal": w.sessions["S"]}
     zids = {name: str(s.zid()) for name, s in spoofers.items()}
 
     def read() -> tuple[list[tuple[str, str | None]], Any]:
@@ -265,7 +275,6 @@ def _admin_spoof(report, run, w: World, posture: str) -> None:
                                                           zenoh.QueryTarget.ALL, 1.0) if a.ok]
         return got, live.check_s4(w.sessions["tool"])
 
-    arrived: dict[str, bool] = {}
     for name, session in spoofers.items():
         q = session.declare_queryable(own, zenoh.handlers.Callback(
             lambda qq: qq.reply(own, json.dumps({"plugins": None}), encoding="application/json")))
@@ -274,29 +283,30 @@ def _admin_spoof(report, run, w: World, posture: str) -> None:
             answers, s4 = read()
         finally:
             q.undeclare()
-        arrived[name] = (own, zids[name]) in answers
-        if name == "own-h1" or posture == "deny":
-            report.check(run, f"§3 step 3: the generated grants refuse {name}'s queryable on @/<R1>/router; only "
-                              "R1's own answer arrives, verified, and S4 reads clean",
+        if name == "S, enrolled" or posture == "deny":
+            report.check(run, f"§3 step 3 ({name}): its queryable on @/<R1>/router is refused; only R1's own "
+                              "answer arrives, verified, and S4 reads clean",
                          answers == [(own, w.zid)] and s4.verdict == "clean",
                          f"answers {answers}; {s4.verdict}: {s4.detail}")
         else:
-            # §11.3: "A session that matches no subject gets no policy", so
-            # under allow nothing reaches S but a subject matching every
-            # session, which undoes the per-user denies (F-87). S's answer
-            # arrives; 0.12's replier check is what holds (F-88).
-            report.check(run, "§3 step 3 under allow: S, no principal, matches no subject and is not refused "
-                              "(F-88); its answer on R1's key arrives under its own replier id, unverified, so "
-                              "S4 is not clean (§4.2, 0.12)",
-                         arrived[name] and s4.verdict == "unobservable"
+            # §11.3: "A session that matches no subject gets no policy"; under
+            # allow it gets everything, and only the replier id holds (0.15).
+            report.check(run, f"§3 step 3 ({name}) under allow: it matches no subject and gets everything, so its "
+                              "answer on R1's key arrives, under its own replier id, unverified, and S4 is not "
+                              "clean (§4.2)",
+                         (own, zids[name]) in answers and s4.verdict == "unobservable"
                          and (own, zids[name], "a replier other than its key's router") in s4.unverified,
                          f"answers {answers}; {s4.verdict}: {s4.detail}")
     unread = [a for a in live._answers(w.sessions["caller"], "@/*/router", zenoh.QueryTarget.ALL, 1.0)]
     if posture == "deny":
-        report.check(run, "a principal without the admin-space read (the caller) gets nothing from @/*/router "
-                          "under deny (F-84)", not unread, f"{len(unread)} answers")
+        answers, s4 = read()
+        report.check(run, "§11.1 (0.15), the Tool's admin read: under deny the tool reads @/*/router and runs "
+                          "S4 (clean); the caller, without it, gets nothing",
+                     answers == [(own, w.zid)] and s4.verdict == "clean" and not unread,
+                     f"tool {answers}, {s4.verdict}; caller {len(unread)} answers")
     else:
-        report.info(run, f"under allow, the caller reads @/*/router too: {len(unread)} answers (F-84)")
+        report.info(run, f"under allow, the caller reads @/*/router too: {len(unread)} answers (the admin "
+                         "space is outside the complement's key set, §11.2)")
 
 
 def _deny_variant(report, repo, block, workdir, which: str) -> None:
