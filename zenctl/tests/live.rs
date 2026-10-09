@@ -80,27 +80,6 @@ async fn get_is_0_with_a_value_and_2_on_silence() {
     assert!(run.stderr.contains("no replies"), "{run}");
 }
 
-/// `echo --count N` prints exactly N samples and exits 0.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn echo_stops_after_count() {
-    let bus = Bus::up().await;
-    let key = cpu(&bus);
-    let run = bus
-        .until(&["echo", &key, "--count", "3", "--format", "ndjson"], |r| {
-            r.code == 0
-        })
-        .await;
-    exits(&run, 0);
-    let samples = run.ndjson();
-    assert_eq!(samples.len(), 3, "{run}");
-    for s in &samples {
-        assert_eq!(s["key"], json!(key), "{run}");
-        assert_eq!(s["type"], json!("Cpu"), "decoded against describe\n{run}");
-        assert_eq!(s["delete"], json!(false), "{run}");
-        assert!(s["value"]["value"].is_number(), "{run}");
-    }
-}
-
 /// `rate --for` measures the window it was given and counts what rode it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rate_counts_a_window() {
@@ -116,51 +95,6 @@ async fn rate_counts_a_window() {
     assert_eq!(doc["window_s"], json!(2.0), "{run}");
     assert_eq!(doc["keys"], json!(1), "{run}");
     assert!(doc["total_count"].as_u64().unwrap() > 0, "{run}");
-}
-
-/// A base-relative selector under `--base` is a subscription to nothing: the
-/// wire verbs take wire keys (RFC 09 §5). The run carries on — the window is
-/// still measured, and stdout is still one clean JSON document — but stderr
-/// says once what `why` would have said, with the wire key it meant (#512).
-/// The wire-key form says nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_base_relative_selector_is_hinted_on_stderr() {
-    let bus = Bus::up().await;
-    let wire = bus.key("v1/**");
-    let hint = format!(
-        r#"hint: "v1/**" does not sit under base "{}" — selectors are wire keys (RFC 09 §5); did you mean "{wire}"?"#,
-        bus.base
-    );
-
-    let run = bus
-        .zenctl(&["rate", "v1/**", "--for", "1", "--format", "json"])
-        .await;
-    exits(&run, 0);
-    assert_eq!(
-        run.json()["total_count"],
-        json!(0),
-        "nothing under v1/**\n{run}"
-    );
-    assert_eq!(
-        run.stderr.matches(&hint).count(),
-        1,
-        "exactly one hint, on stderr\n{run}"
-    );
-    assert!(
-        !run.stdout.contains("hint:"),
-        "stdout stays the document\n{run}"
-    );
-
-    let run = bus
-        .until(&["rate", &wire, "--for", "1", "--format", "json"], |r| {
-            r.code == 0 && r.json()["total_count"].as_u64().is_some_and(|n| n > 0)
-        })
-        .await;
-    exits(&run, 0);
-    assert!(
-        !run.stderr.contains("hint:"),
-        "the wire key is not hinted\n{run}"
-    );
 }
 
 // ── acts ────────────────────────────────────────────────────────────────
@@ -310,57 +244,6 @@ async fn pub_from_ndjson_refuses_a_wildcard_row() {
 }
 
 // ── verdicts ────────────────────────────────────────────────────────────
-
-/// `check expect`: 0 when the expectation is met, 1 when a clean
-/// observation does not meet it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn check_expect_is_0_when_met_and_1_when_not() {
-    let bus = Bus::up().await;
-    let key = cpu(&bus);
-
-    let met = bus
-        .until(
-            &[
-                "check",
-                "expect",
-                &key,
-                "--for",
-                "10",
-                "--at-least",
-                "3",
-                "--format",
-                "json",
-            ],
-            |r| r.code == 0,
-        )
-        .await;
-    exits(&met, 0);
-    assert_eq!(met.json()["verdict"], json!("met"), "{met}");
-    assert_eq!(met.json()["samples"], json!(3), "{met}");
-
-    // Twenty a second against a one-a-second ceiling: not met, on samples
-    // that did arrive — the 1 is about the rate, not about silence.
-    let unmet = bus
-        .until(
-            &[
-                "check",
-                "expect",
-                &key,
-                "--for",
-                "2",
-                "--rate-max",
-                "1",
-                "--format",
-                "json",
-            ],
-            |r| r.code == 1 && r.json()["samples"].as_u64().is_some_and(|n| n > 2),
-        )
-        .await;
-    exits(&unmet, 1);
-    let doc = unmet.json();
-    assert_eq!(doc["verdict"], json!("not_met"), "{unmet}");
-    assert!(doc["unmet"].to_string().contains("ceiling"), "{unmet}");
-}
 
 /// `why` exits 1 when it establishes a cause: a subject the producer's own
 /// served slice does not declare (RFC 08 §2).

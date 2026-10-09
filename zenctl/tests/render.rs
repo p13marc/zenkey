@@ -523,11 +523,17 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
         ),
         "{t}"
     );
-    assert!(t.contains("presence: held by host-a/tc — up, and silent"), "{t}");
+    assert!(
+        t.contains("presence: held by host-a/tc — up, and silent"),
+        "{t}"
+    );
     assert!(t.contains("NOTHING USABLE ARRIVED — the finding"), "{t}");
     assert_eq!(silent.verdict, Judgement::Established);
     let n = notes(&silent);
-    assert!(n.contains("2 sample(s) on a wildcard key discarded by rule"), "{n}");
+    assert!(
+        n.contains("2 sample(s) on a wildcard key discarded by rule"),
+        "{n}"
+    );
     assert!(n.contains("resolved to no member of the resource"), "{n}");
 
     // No token, with a read that completed: the access-control caveat.
@@ -566,7 +572,10 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
     let t = table(&arrived);
     assert!(t.contains("ARRIVED") && !t.contains("NOTHING"), "{t}");
     assert!(!t.contains("presence:"), "not asked is not drawn:\n{t}");
-    assert!(!t.contains("current state"), "a stream has none to read:\n{t}");
+    assert!(
+        !t.contains("current state"),
+        "a stream has none to read:\n{t}"
+    );
 
     let unobservable = ProbeReport {
         verdict: Judgement::Unobservable {
@@ -575,7 +584,10 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
         ..silent.clone()
     };
     let t = table(&unobservable);
-    assert!(t.contains("UNOBSERVABLE — the silence cannot be attributed"), "{t}");
+    assert!(
+        t.contains("UNOBSERVABLE — the silence cannot be attributed"),
+        "{t}"
+    );
     assert!(t.contains("  ! the presence read failed"), "{t}");
 
     // The verdict rides the envelope, and the exits are 1, 0, 2.
@@ -880,7 +892,9 @@ host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface} · hlc · stamper 33 (2 on t
     assert_eq!(envelope["stamper"], "33");
     assert_eq!(envelope["unstamped_excluded"], 1);
     assert_eq!(
-        out.lines().filter(|l| l.contains("\"row\":\"break\"")).count(),
+        out.lines()
+            .filter(|l| l.contains("\"row\":\"break\""))
+            .count(),
         0,
         "a drop has no position on this clock"
     );
@@ -1025,7 +1039,10 @@ fn two_namespaces_diff_by_zk2_key_and_say_so() {
     assert!(t.contains("(acme/zk2/*/*/*/state/**)"), "{t}");
     assert!(t.contains("(staging/zk2/*/*/*/state/**)"), "{t}");
     assert!(t.contains("IDENTICAL"), "{t}");
-    assert!(!t.contains("  ~") && !t.contains("  +") && !t.contains("  -"), "{t}");
+    assert!(
+        !t.contains("  ~") && !t.contains("  +") && !t.contains("  -"),
+        "{t}"
+    );
     let n = notes(&d);
     assert!(n.contains("clocks are not compared"), "{n}");
 }
@@ -3363,7 +3380,10 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         ..sample
     };
     let lines = zenctl::render::sample_lines(&off);
-    assert_eq!(lines[2], "  invalid against its type: /is_up: expected boolean");
+    assert_eq!(
+        lines[2],
+        "  invalid against its type: /is_up: expected boolean"
+    );
     assert!(
         lines[3].starts_with("  QoS not as declared (spec §2.4): priority")
             && lines[3].contains("data")
