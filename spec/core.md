@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.17** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.18** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -10,8 +10,9 @@ order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
 a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
 who may answer the admin space, in 0.13 how a far router is verified, and
 in 0.14 what access control measured, in 0.15 what §11 needs to be built
-from, in 0.16 what the tools' last verbs could not decide, and in 0.17
-what a tool needs that it cannot read off the bus).
+from, in 0.16 what the tools' last verbs could not decide, in 0.17
+what a tool needs that it cannot read off the bus, and in 0.18 two words
+0.17 left loose).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -573,7 +574,13 @@ and reports these codes. `[F: descriptors/]`
    fingerprint (D005–D007). An interface none of the given contracts
    declares is checked for syntax only; one given at other fingerprints
    only is D004. `[F: descriptors/ok-unknown-interface, d004-revision]`
-6. Not checked, deliberately `[F: descriptors/ok-unchecked]`:
+6. D011 reads an entry's `iface` and `token`, and nothing else (0.18). It
+   is reported for every entry whose `iface` is `archive.v1`, whether or
+   not that contract is given, and whatever its `contract` says: cascades
+   3 and 5 do not suppress it. An entry checked no further by cascade 2 is
+   no `archive.v1` entry. `[F: descriptors/d011-tokenless-archive,
+   d011-bad-fingerprint]`
+7. Not checked, deliberately `[F: descriptors/ok-unchecked]`:
    - that a `cause` agrees with the resource's gates: an owner may lack a
      resource for a reason its gates do not name;
    - R3's completeness, that every requirement a contract declares is
@@ -582,7 +589,8 @@ and reports these codes. `[F: descriptors/]`
      `[requires]`, and that `params` values fit the required interface;
    - that `profiles` is the union of the contracts' `uses`;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
-     read it to order two revisions, §9.8), and `token`;
+     read it to order two revisions, §9.8), and `token` except on
+     `archive.v1` (D011, cascade 6);
    - that a role's `optional` agrees with the contract that declares it
      (0.11): a tool reads the contract's `[requires]` instead.
      `[F: descriptors/ok-optional-unchecked]`
@@ -686,16 +694,20 @@ a timestamp, through the same router, arrives with the router's zid.
   - **A foreign stamp is a finding** whatever else the tool read: an owner
     that is its own router stamps with that router's id, which is its own
     `meta.zid`.
-  - **An owner's stamp is clean** only when the tool verified at least one
-    router ("Who answered", above) and `meta.zid` is none of the zids it
-    knows to be routers: the routers its session is connected to, the
-    routers it verified, and every zid a verified router lists as a
-    `router` session.
+  - **An owner's stamp is clean** only when the tool counted at least one
+    router's own answer ("Who answered", above) and `meta.zid` is none of
+    the zids it knows to be routers: the routers its session is connected
+    to, the routers whose answers it counted, and every zid such an answer
+    lists as a `router` session.
+  - **A counted answer, not a connection** (0.18). The routers a session is
+    connected to are verified routers, and verification starts from them,
+    but a connection alone shows nothing about the owner: only a router's
+    own answer lists the router sessions behind it.
   - **Otherwise S1 is unobservable for that owner,** never clean. Either
     `meta.zid` is a router's, so the owner is its own router, or the tool
-    verified no router (it has no admin read, the admin space is off, or it
-    cannot read the replier id, Appendix B), so the owner may be a router
-    it cannot see.
+    counted no router's answer (it has no admin read, the admin space is
+    off, or it cannot read the replier id, Appendix B), so the owner may be
+    a router it cannot see.
 
 ### 4.3 Clocks (S7)
 

@@ -3,6 +3,32 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.18 — 2026-10-09: two words 0.17 left loose (#716)
+
+The Python implementation read 0.17 cold (PR #715). Both runners passed,
+and 0.17's three rules held. Two words in them did not.
+
+**Changed: wording only.**
+- **D011's place among the cascades (§3.3; F-92).** Cascade 6, now 7,
+  still listed `token` as deliberately unchecked, and no cascade said
+  whether a malformed `contract` (cascade 3) suppresses D011. A new cascade
+  6 says D011 reads `iface` and `token` only, so it is reported whatever the
+  entry's `contract` says, and with or without that contract given. The
+  reference already did this. The new fixture `d011-bad-fingerprint` expects
+  D003 and D011 together.
+- **"Verified at least one router" (§4.2, "A tool's S1 check"; F-93).** 0.13
+  calls the routers a session is connected to "verified routers", so the
+  phrase could be met by a connection alone. Read that way, a client tool
+  with the admin space off would call an owner's own stamp clean. 0.17's
+  own list of causes (no admin read, admin space off, no replier id) shows
+  the intent: a router's own answer, counted. The text now says so. Both
+  implementations already read it that way.
+
+**Deliberately not changed.**
+- **"Verified router" keeps its 0.13 meaning.** Verification still starts
+  from the routers a session is connected to. Only S1's premise is
+  restated, as an answer counted.
+
 ## 0.17 — 2026-10-09: what a tool needs that it cannot read off the bus (#713)
 
 The Python implementation read 0.16 cold (PR #712, F-89 to F-91). Its rules
