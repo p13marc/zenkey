@@ -3,6 +3,63 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.21 — 2026-10-09: the first published vocabulary, and a re-put (#720, PC)
+
+`freshness.v1` (text 0.1, draft) is the second profile written, and the
+first with an annotation vocabulary: `freshness.ttl_s`, the staleness
+horizon of D16, which about 20 contracts of `examples/zk2/` already
+declare. The maintainer decided on 2026-10-09 to write it before
+`health.v1`, which uses it. Writing it showed what the core had to say
+first.
+
+**Changed: rules stated.**
+- **A published vocabulary (§10 point 2, §9.2 W105, Appendix D).**
+  Appendix D's `freshness` row moves to a table of published vocabularies,
+  with the profile's text as its source: `profiles/freshness/v1.md` §4.
+  W105 reads a profile's published table where it has one, and its interim
+  table otherwise. The keys are unchanged (`ttl_s`), so no contract's codes
+  change. §10 says that a published vocabulary replaces its interim table.
+- **A re-put is a mutation (§4.2, after S7).** A put that repeats a
+  member's current value, as an owner refreshing it makes, carries a
+  timestamp the owner set (S1), minted above every stamp it issued (§4.3),
+  and the owner's GET answers carry that stamp from then on (S2): a reply
+  represents the latest put, not the latest change. Without it, a runtime
+  could answer with the stamp of the last change, and a GET reader aging
+  the reply (`freshness.v1` §2.6) would find a refreshed value stale.
+  - Evidence: `profiles/freshness/scenarios.md` §1, step 3.
+- **Ahead (§4.3).** An owner that stops writing state stops its re-puts
+  too, and its members go stale, by design.
+  - Evidence: `profiles/freshness/scenarios.md` §2, step 5.
+
+**Changed: wording.**
+- **§2.4** points at `freshness.v1` §2.4 for the `ttl_s/2` re-put it
+  cites, and **R7** at its §2.9 for how a consumer measures freshness
+  across a face. §10 names `freshness.v1` among the profiles a rule names.
+  Appendix C indexes the two profile scenarios the core now cites.
+
+**Deliberately not changed.**
+- **No lint for an annotation's value.** A `freshness.ttl_s` that is not
+  a horizon (`1.5`, `"60"`, a negative number) is the profile's to refuse
+  (`freshness.v1` §2.1), which reads the resource's freshness as
+  unobservable. The core's fixtures that carry odd `freshness.ttl_s` values
+  (`e000-integer-range`, `e020-datetime`, `e028-*`, `ok-float-integral`)
+  test the core's own lints, and keep their codes.
+- **S2's wording.** "The mutation it represents" already covers a re-put,
+  once a re-put is a mutation: the paragraph after the table says so,
+  rather than a new rule.
+- **R7's rule.** It still judges liveness from the freshness of what
+  crosses, and says unobservable where nothing does. The profile states the
+  measurement (a subscriber's receive clock), and adds streams to what can
+  carry it.
+- **The tombstone window (S3)** stays independent of any horizon. v1 tied
+  tombstone visibility to `ttl_s`; zk2's owner answers its own deletes.
+- **The HLC delta (§4.1).** The profile names it as the bound a GET
+  reader's clock is trusted to, and the core's value stays 500 ms by
+  default.
+- **The core still depends on no profile.** Each new mention names
+  `freshness.v1` as the standard way to meet a rule the core states in its
+  own terms, as §2.4 and R7 already did by name.
+
 ## 0.20 — 2026-10-09: a provider on the service's own system, the order of `profiles`, and a derived address (#719, PB)
 
 `hostid.v1`'s runtime landed (PB). A system the runtime mints is not
