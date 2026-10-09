@@ -148,7 +148,7 @@ or `-c tls/other:7447` overrides it for one invocation.
 
 ```bash
 zenctl service list                                # which zk2 services are up, and what they serve
-zenctl doctor --registry path/to/registry          # does the fleet match what we ship?
+zenctl doctor                                      # does the deployment keep the core's rules?
 zenctl echo --class state                          # current state traffic, decoded
 ```
 
@@ -186,8 +186,9 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; `why` established a cause; an act (`pub`, `replay`, `gen`, `blob fetch`, `registry migrate`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `why`) land **any** failure before the question was
-put on 2, so a dead bus never reads as a pass or as a finding.
+Verdict verbs (`check *`, `compat`, `doctor`, `why`) land **any** failure
+before the question was put on 2, so a dead bus never reads as a pass or as a
+finding.
 
 **Nagios and friends.** Their convention is 0 OK, 1 WARNING, 2 CRITICAL,
 3 UNKNOWN, and zenctl's 2 is the UNKNOWN, not the CRITICAL. Map it:
@@ -195,9 +196,9 @@ put on 2, so a dead bus never reads as a pass or as a finding.
 ```bash
 #!/bin/sh
 # check_zenkey_doctor — a Nagios/Icinga plugin over zenctl's exit contract.
-out=$(zenctl doctor --context prod --registry /srv/registry --fail-on error 2>&1)
+out=$(zenctl doctor --context prod --fail-on error 2>&1)
 case $? in
-  0) echo "OK - fleet matches its contracts"; exit 0 ;;
+  0) echo "OK - every check asked is clean"; exit 0 ;;
   1) echo "CRITICAL - $out" | head -n 5; exit 2 ;;
   *) echo "UNKNOWN - no verdict: $out" | head -n 5; exit 3 ;;
 esac
@@ -206,9 +207,9 @@ esac
 ## Monitoring recipes
 
 ```bash
-# The fleet against what we ship: exit 1 on an error-severity finding.
-zenctl doctor --registry /srv/registry --fail-on error
-zenctl doctor --deep --sample 10 --for 30 --fail-on warning   # + freshness, coverage, live traffic
+# The deployment against the core: exit 1 on an error-severity finding.
+zenctl doctor --namespace prod --fail-on error
+zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state; no admin space here
 
 # One expectation, for CI or a cron job: at least one health sample in 60 s.
 zenctl check expect 'prod/v1/*/state/sysinfo/health' --for 60 --at-least 1
@@ -329,8 +330,9 @@ and `zenctl check probe` (the two halves of cutover acceptance: the old family
 silent while the new one speaks; a consumer-shaped probe with concrete keys) ·
 `zenctl check retired` (which `[[deprecated]]` subjects are actually gone) ·
 `zenctl check conform` (a producer's registry as a conformance suite) ·
-`zenctl check schema` (one payload against its schema) · `zenctl doctor` (the
-fleet against the contracts it claims) · `zenctl why <key>` (why it is silent)
+`zenctl check schema` (one payload against its schema) · `zenctl doctor` (a
+zk2 deployment against the core, one verdict per check) · `zenctl why <key>`
+(why it is silent)
 · `zenctl watchdog --rule …` (conditions, as transitions) · `zenctl export`
 (the bus and its contract as Prometheus metrics, the observer's own blind spots
 included).
@@ -356,7 +358,8 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 > are gone. FJ4 (#612) moved v1's registry nouns the same way — `topic`,
 > `node`, `base`, `interface` and `registry` → zk2's `service`, `iface`,
 > `schema`, `namespace`, `graph` and `compat`; FJ5 replaced `service call`
-> with zk2's `call`, added `get state` and `watch`, and dropped `retire`.
+> with zk2's `call`, added `get state` and `watch`, and dropped `retire`; FJ6
+> re-cut `doctor` for zk2, its registry diff now `check conform`'s.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -367,8 +370,9 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 | **`--registry <dir>`** | local registry files — `*.toml`, or `*.kdl` (RFC 08 §5.1) | yes | what *should* exist (declared) |
 | **the bus** (default) | each producer's served introspect slice | no | what *does* exist (served) |
 
-The gap between those two is where drift lives, and `doctor` is the command
-that reports it. These are the v1 verbs' sources; zk2's are below.
+The gap between those two is where drift lives, and `check conform
+--registry` is the command that reports it. These are the v1 verbs' sources;
+zk2's are below.
 
 ## zk2 inspection
 
@@ -485,8 +489,8 @@ zenctl storage list --base acme         # declared state subjects vs storage cov
 zenctl blob list --base acme            # who declares which @blob tier (registry only)
 zenctl blob locate 01jqz3demo0001       # who *holds* it, and at which content root
 zenctl blob fetch 01jqz3demo0001 --origin h-3fa9 --root <hex> -o bundle.bin
-zenctl doctor --base acme --registry path/to/registry
-zenctl doctor --deep --sample 10 --fail-on error   # bounded deep sweep; 1 on errors, 2 if nothing was judged
+zenctl doctor --namespace acme          # thirteen checks; 1 on a finding, 2 if one could not be judged
+zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
 zenctl context edit                     # the whole config file, in $EDITOR, validated
 ```
@@ -635,42 +639,56 @@ from measuring it. `--i-know` overrides. The convention's own reads
 (`introspect`, `describe`) need no registry permission — RFC 08 §6/§7 define
 them, so their idempotence is not an application's to declare.
 
-## `doctor` — the one `ros2` has no answer for
+## `doctor` — a deployment against the core
 
-`introspect` is served by the *running binary*, from the same source as its key
-constants — so it cannot drift from behavior. RFC 08 §6:
+zk2's doctor (#612, FJ6) asks thirteen questions of a deployment, each worded
+so that its finding is the *yes*, and answers each in the judgement shape: a
+finding, clean with the evidence that makes it clean, unobservable with what
+stood in the way, or not asked. The deployment is read through a session in
+its namespace; the routers' admin space and the presence domain through one in
+none.
 
-> A disagreement between introspection and the checked-in TOML is a **finding,
-> not an ambiguity**: the TOML says what *should* run, the introspection says
-> what *does*.
-
-`doctor` fans `introspect` across the fleet and diffs each reply against the
-`--registry` TOMLs:
+| check | the question | spec |
+|---|---|---|
+| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? | §6 |
+| `binding-unsatisfied` | does a role's binding select no provider visible to this reader? | §3.2 R5 |
+| `contract-drift` | do providers of one interface serve revisions the classifier calls review or breaking against each other? | §9.8 |
+| `contract-unavailable` | does a descriptor name a revision no holder serves verified? | §8.4 |
+| `descriptor-invalid` | does a descriptor fail the descriptor check (a D-code)? | §3.3 |
+| `token-missing` | do an instance's tokens disagree with its descriptor? | §8.1 |
+| `presence-over-budget` | does the presence domain hold more tokens than its budget? | §8.3 |
+| `storage-on-state` | does a router storage answer on an owner's state keys? | §4.2 S4 |
+| `archive-unaligned` | does an archive serve keys its alignment has not confirmed? | §4.4 |
+| `state-stamp-foreign` | does an owner answer its state with a stamp that is not its own? (`--deep`) | §4.2 S1–S2 |
+| `shm-memlock-low` | is this host's `RLIMIT_MEMLOCK` below what a shared-memory pool needs? | §7.4 |
+| `admin-unreachable` | does no router answer the admin space? | §4.2 |
+| `router-version-skew` | do the routers run different zenoh versions? | App. B |
 
 ```
-$ zenctl doctor --base acme --registry registry -c tcp/127.0.0.1:7447
-✗ h-9706b31ddad3/sysinfo: registry 1.1 (we compiled 1.2)
-✗ h-9706b31ddad3/sysinfo: does not serve telemetry thermal/{zone}/temp_celsius
-2 finding(s).
+$ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
+✗  split-brain (§6)                  finding — 1 subject(s)
+    ✗ error: host-a/tc tc.netif.v1 — 2 instances hold its interface token in two presence reads 2.0s apart …
+⚠  binding-unsatisfied (§3.2 R5)     finding — 1 subject(s)
+    ⚠ warning: ws-01/tcgui-frontend scenario — its bindings (*/tc) select no provider of tc.scenario.v1 visible to this reader
+?  contract-drift (§9.8)             unobservable — 1 subject(s) unjudged
+✓  descriptor-invalid (§3.3)         clean — 3 descriptor(s) pass the descriptor check against the contracts they name
+—  state-stamp-foreign (§4.2 S1–S2)  not asked
+…
 ```
 
-Version skew, subjects a host serves that we cannot name, subjects we expect
-that it does not publish, and hosts still serving a deprecated subject — in one
-round trip, without SSH.
+Exit 0 when every check asked is clean; 1 on a finding at or above
+`--fail-on` (warning by default: an info finding — a low memlock, an admin
+space this reader cannot see — is worth knowing and never fails); **2 is no
+verdict**: a check left unobservable (a bundle no holder serves leaves what
+needed it unjudged), an empty scope (a wrong namespace or endpoint is never
+green), or a run that could not start. A check you cannot judge here —
+`storage-on-state` where the admin space is off — is `--skip`ped rather than
+left to read 2: not asked neither passes nor fails. `--check` asks one alone,
+and `--transitions` re-runs and prints only what changed.
 
-As a monitoring job, give it a threshold — findings are output, not verdicts,
-until you do:
-
-```
-zenctl doctor --base acme -c tcp/router:7447 --fail-on error
-```
-
-0 is a fleet with no error finding, 1 is one with an error finding, and **2
-is no verdict**: the session never opened, or it opened onto a bus where no
-producer holds an `alive` token and no router answers — a wrong endpoint or a
-wrong `--base` looks exactly like that, and it is never green (#510).
-`watchdog --count N` follows the same contract on how its rules ended:
-1 firing, 2 unobservable, 0 ok (#511).
+The v1 doctor — `introspect` fanned across the fleet and diffed against the
+`--registry` TOMLs (RFC 08 §6) — is `check conform`'s now, producer by
+producer.
 
 ## Things it will not do, on purpose
 

@@ -55,11 +55,36 @@ pub async fn admin_get_within(
     selector: &str,
     opts: &GetOpts,
 ) -> Result<Vec<AdminEntry>> {
+    Ok(admin_read_within(session, selector, opts).await?.entries)
+}
+
+/// One admin-space read, and how it ended (#612, FJ6).
+#[derive(Debug, Clone)]
+pub struct AdminRead {
+    /// The entries, sorted by key.
+    pub entries: Vec<AdminEntry>,
+    /// Whether the GET ended at the routers' final reply, every reply kept.
+    /// An error reply — the `Timeout` zenoh sends a GET that reaches its
+    /// timeout among them — or a reply past the bound leaves the read
+    /// possibly incomplete: it may have missed a router.
+    pub complete: bool,
+}
+
+/// [`admin_get`], saying whether the read was complete. A complete read
+/// with no entry is the admin space not answering this reader — disabled,
+/// a peer-only mesh, or denied — which is an answer; an incomplete one is
+/// not.
+pub async fn admin_read(session: &Session, selector: &str, timeout: Duration) -> Result<AdminRead> {
+    admin_read_within(session, selector, &GetOpts::new(timeout)).await
+}
+
+async fn admin_read_within(session: &Session, selector: &str, opts: &GetOpts) -> Result<AdminRead> {
     let replies = crate::bus::query::disciplined_get(session, selector, opts)
         .await
         .map_err(|e| Error::bus("admin get", selector, e))?;
     let mut out = Vec::new();
     let mut elided = 0u64;
+    let mut errors = 0usize;
     while let Ok(reply) = replies.recv_async().await {
         // Past the bound the replies are drained but not kept: the count
         // stays exact, the memory stays bounded.
@@ -67,7 +92,10 @@ pub async fn admin_get_within(
             elided += 1;
             continue;
         }
-        let Ok(sample) = reply.result() else { continue };
+        let Ok(sample) = reply.result() else {
+            errors += 1;
+            continue;
+        };
         let bytes = sample.payload().to_bytes();
         let value = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
             serde_json::Value::String(String::from_utf8_lossy(&bytes).to_string())
@@ -79,48 +107,58 @@ pub async fn admin_get_within(
     }
     opts.note_elided(elided);
     out.sort_by(|a, b| a.key.cmp(&b.key));
-    Ok(out)
+    Ok(AdminRead {
+        entries: out,
+        complete: errors == 0 && elided == 0,
+    })
 }
+
+/// The selector [`routers`] reads.
+pub const ROUTERS: &str = "@/*/router";
+
+/// The selector [`storages`] reads.
+pub const STORAGES: &str = "@/*/router/**/storage_manager/storages/**";
 
 /// Enumerate routers/peers from `@/*/router` (and the fields every layout
 /// carries).
 pub async fn routers(session: &Session, timeout: Duration) -> Result<Vec<RouterInfo>> {
-    let entries = admin_get(session, "@/*/router", timeout).await?;
-    Ok(entries
-        .into_iter()
-        .map(|e| {
-            let zid = e
-                .value
-                .get("zid")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    // Fall back to the key's zid chunk: @/<zid>/router.
-                    e.key.split('/').nth(1).unwrap_or("?").to_string()
-                });
-            let version = e
-                .value
-                .get("version")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            let locators = e
-                .value
-                .get("locators")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|l| l.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            RouterInfo {
-                zid,
-                version,
-                locators,
-                raw: e.value,
-            }
+    let entries = admin_get(session, ROUTERS, timeout).await?;
+    Ok(entries.into_iter().map(router_from_admin_entry).collect())
+}
+
+/// A router from its `@/<zid>/router` entry, tolerantly: the fields every
+/// 1.x layout carries, and the rest in `raw`. Pure.
+pub fn router_from_admin_entry(e: AdminEntry) -> RouterInfo {
+    let zid = e
+        .value
+        .get("zid")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            // Fall back to the key's zid chunk: @/<zid>/router.
+            e.key.split('/').nth(1).unwrap_or("?").to_string()
+        });
+    let version = e
+        .value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let locators = e
+        .value
+        .get("locators")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l.as_str().map(str::to_string))
+                .collect()
         })
-        .collect())
+        .unwrap_or_default();
+    RouterInfo {
+        zid,
+        version,
+        locators,
+        raw: e.value,
+    }
 }
 
 /// Extract a storage from one admin entry, tolerantly: the key shape is
@@ -194,12 +232,7 @@ pub fn merge_storage_rows(mut rows: Vec<StorageInfo>) -> Vec<StorageInfo> {
 /// Enumerate configured storages across the mesh (issue #14). Zero routers
 /// (peer mesh, admin disabled) is an empty vec, never an error.
 pub async fn storages(session: &Session, timeout: Duration) -> Result<Vec<StorageInfo>> {
-    let entries = admin_get(
-        session,
-        "@/*/router/**/storage_manager/storages/**",
-        timeout,
-    )
-    .await?;
+    let entries = admin_get(session, STORAGES, timeout).await?;
     let rows: Vec<StorageInfo> = entries
         .iter()
         .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))

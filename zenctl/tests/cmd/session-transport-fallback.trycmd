@@ -23,7 +23,7 @@ nouns (#612); the `--registry` union this pins goes with v1 at FJ9.
 ```console
 $ zenctl blob list --producer netring --format table --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry
 no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
-That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
+That is what this checkout declares, not what the fleet serves — `zenctl check conform <producer> --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 declared @blob tiers:
 
   netring  artifact  v1.1
@@ -47,7 +47,7 @@ the envelope first.
 ```console
 $ zenctl blob list --producer netring --format ndjson --zenoh-config tests/cmd/fixtures/dead-bus.json5 --registry ../fixture-tests/registry
 no session (failed to open the Zenoh session); answering from --registry only: ../fixture-tests/registry.
-That is what this checkout declares, not what the fleet serves — `zenctl doctor --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
+That is what this checkout declares, not what the fleet serves — `zenctl check conform <producer> --registry <dir>` compares them when the bus is reachable (RFC 05 §3.1).
 {"notes":[{"text":"2 of 11 slice(s) declare a tier. A declaration is a capability, never possession — `zenctl blob locate <id>` asks who actually holds one"}],"report":"blob-list","slices_considered":11,"slices_without_blob":9}
 {"description":"packet captures and debug bundles minted by @rpc/netring/artifact","encoding":"application/vnd.tcpdump.pcap","endpoints":["manifest","slice","have","push","fanout"],"known_tier":true,"producer":"netring","reference":"BlobReference","registry_version":"1.1","row":"tier","since":"1.8","tier":"artifact"}
 {"description":"capture-bundle directory snapshots, keyed by their own root hash","known_tier":true,"producer":"netring","reference":"BlobReference","registry_version":"1.1","row":"tier","since":"1.8","tier":"tree"}

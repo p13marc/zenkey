@@ -23,7 +23,7 @@ mod harness;
 
 use std::time::{Duration, Instant};
 
-use harness::{Bus, Extras, HEALTH, HOST, PRODUCER, Run, SETTLE};
+use harness::{Bus, HEALTH, HOST, PRODUCER, Run, SETTLE};
 use serde_json::{Value, json};
 use zenoh::sample::SampleKind;
 
@@ -383,99 +383,6 @@ async fn why_is_1_when_a_cause_is_established() {
         .find(|r| r["id"] == "origin-alive")
         .expect("the roster rung");
     assert_eq!(alive["answer"], json!("established"), "{run}");
-}
-
-/// `doctor --fail-on error` is 0 on a producer that keeps its contracts.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn doctor_fail_on_error_is_0_on_a_healthy_producer() {
-    let bus = Bus::up().await;
-    let run = bus
-        .until(
-            &["doctor", "--fail-on", "error", "--format", "ndjson"],
-            |r| {
-                let head = &r.ndjson()[0];
-                r.code == 0 && head["live_producers"] == 1 && head["introspect_answered"] == 1
-            },
-        )
-        .await;
-    exits(&run, 0);
-    let head = &run.ndjson()[0];
-    assert_eq!(head["describe_served"], json!(1), "{run}");
-    assert!(
-        run.rows("finding").iter().all(|f| f["severity"] != "error"),
-        "{run}"
-    );
-}
-
-/// … and 1 when a producer holds `alive` and answers nothing — alive ⇒
-/// callable (RFC 04 §5) broken, filed as `introspect-coverage`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn doctor_fail_on_error_is_1_on_a_mute_producer() {
-    let bus = Bus::with(Extras {
-        mute: true,
-        ..Extras::default()
-    })
-    .await;
-    let run = bus
-        .until(
-            &["doctor", "--fail-on", "error", "--format", "ndjson"],
-            |r| {
-                let head = &r.ndjson()[0];
-                r.code == 1 && head["live_producers"] == 2 && head["introspect_answered"] == 1
-            },
-        )
-        .await;
-    exits(&run, 1);
-    let errors: Vec<Value> = run
-        .rows("finding")
-        .into_iter()
-        .filter(|f| f["severity"] == "error")
-        .collect();
-    assert!(
-        !errors.is_empty() && errors.iter().all(|f| f["check"] == "introspect-coverage"),
-        "{run}"
-    );
-}
-
-/// … and 2 on a reachable bus with nothing on it (#510): no producer holds
-/// a token and no router answers the admin space, so the run judged nothing
-/// — under `--fail-on` and without it. Each runs once: there is nothing on a
-/// bare bus for a later run to find, and a report on stdout is the proof the
-/// session opened (a session that never opened is #503's 2, with no report).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn doctor_is_2_on_a_bus_with_nothing_to_judge() {
-    let bus = Bus::with(Extras {
-        bare: true,
-        ..Extras::default()
-    })
-    .await;
-    for args in [
-        &["doctor", "--fail-on", "error", "--format", "json"][..],
-        &["doctor", "--format", "json"][..],
-    ] {
-        let run = bus.zenctl(args).await;
-        exits(&run, 2);
-        let doc = run.json();
-        assert_eq!(doc["live_producers"], json!(0), "{run}");
-        assert_eq!(doc["routers"], json!(0), "{run}");
-        assert!(
-            doc["unobservable"]
-                .as_str()
-                .is_some_and(|why| why.contains("nothing in scope") && why.contains(&bus.base)),
-            "{run}"
-        );
-        assert!(run.stderr.contains("nothing was judged — exit 2"), "{run}");
-    }
-
-    // `--transitions` reads the same run as unobservable for every check —
-    // never a clean baseline (the stream itself exits 0: it is not a verdict).
-    let run = bus
-        .zenctl(&["doctor", "--transitions", "--count", "1", "--every", "1"])
-        .await;
-    exits(&run, 0);
-    let rows = run.rows("transition");
-    assert!(!rows.is_empty(), "{run}");
-    assert!(rows.iter().all(|t| t["to"] == "unobservable"), "{run}");
 }
 
 /// `watchdog --count` exits on how its rules ended (#511): a `rate-above`

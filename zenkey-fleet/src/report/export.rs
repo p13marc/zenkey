@@ -364,9 +364,9 @@ mod tests {
         let doctor = DoctorSummary {
             ran_at_unix_s: 1_700_000_030,
             findings: vec![DoctorFindingRef {
-                check: CheckId::StaleState,
+                check: CheckId::SplitBrain,
                 severity: DoctorSeverity::Warning,
-                subject: "h-3fa9c2d41b7e/sysinfo".into(),
+                subject: "h1/tc tc.v1".into(),
             }],
         };
         assert_eq!(
@@ -374,7 +374,7 @@ mod tests {
             json!({
                 "ran_at_unix_s": 1_700_000_030,
                 "findings": [
-                    {"check": "stale-state", "severity": "warning", "subject": "h-3fa9c2d41b7e/sysinfo"}
+                    {"check": "split-brain", "severity": "warning", "subject": "h1/tc tc.v1"}
                 ],
             })
         );

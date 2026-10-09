@@ -1,1607 +1,2706 @@
-//! The doctor checks as engine functions (#55): every finding both frontends
-//! render comes from here — `zenctl doctor` orchestrates and renders, the
-//! zengui doctor panel calls the same [`run_doctor`] and renders the same
-//! [`DoctorReport`]. A check that lives in one frontend is a check the other
-//! frontend's user never sees (RFC 08 §6.1's argument, applied to ourselves).
+//! zk2's doctor (#612, FJ6): the deployment judged against the core, one
+//! check per rule a tool can see broken from outside.
 //!
-//! Check ids are **stable API**: scripts key on them (`--format json`), the
-//! GUI keys deltas on them. New checks add ids; nothing renames one. The full
-//! set is pinned in [`crate::report::CheckId`].
+//! **Two halves.** [`observe`] reads the bus into a
+//! [`DoctorObservation`] — values, every read with how it ended — and
+//! [`judge`] turns one into a [`DoctorReport`] without a session, so every
+//! verdict's honesty is testable from values ([`run_doctor`] is the two in
+//! a row). The checks and their questions are [`CheckId`]'s; each verdict
+//! is in the judgement shape, its finding on the *yes*
+//! (`docs/zk2/tooling-guide.md` §1).
+//!
+//! **Two sessions** ([`DoctorBus`], decided 2026-10-08): everything about
+//! the deployment is read through a session **in** its namespace —
+//! presence, descriptors, bundles, archives, state — as its own consumers
+//! read it; the routers' admin space and the presence domain's token count
+//! are read through one in **no** namespace, because neither belongs to a
+//! deployment.
+//!
+//! **What reading presence costs a verdict** (§8.1). Two presence reads,
+//! [`DoctorSpec::grace`] apart, feed the checks that ask whether something
+//! *lasts*: split-brain (§6's own procedure, through the runtime's
+//! [`zk2::ownership::compare`]) and token-missing, whose findings must hold
+//! in both reads, because start-up and a re-mint pass through the same
+//! shapes for a moment. A read that ended at its timeout can miss a token
+//! and never invents one, so an absence it would claim is left unjudged;
+//! one that saw no zk2 token at all is the empty scope, and the checks
+//! that read presence are unobservable with it — never clean (tooling guide
+//! §1). Absence is worded as what this reader could see: a read access
+//! control refuses is complete and empty too (0.8).
+//!
+//! **What reading a contract costs a verdict** (§8.4). The revisions the
+//! descriptors name are retrieved through a [`BundleStore`], absences
+//! forgotten first so each run asks again. One no holder serves is
+//! `contract-unavailable`'s finding, and every other check that needed it
+//! leaves that subject unjudged with the reason, rather than guessing.
+//!
+//! **Not asked.** A check the spec leaves out is `NotAsked`, and so is
+//! `state-stamp-foreign` without [`DoctorSpec::deep`]: its GETs cost the
+//! owners' data plane, the frugality v1's `--deep` checks had.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::Result;
-use zenkey::grammar::with_base;
-use zenkey::{Declared, RegistrySlice};
+use zenkey_model::canonical::Fingerprint;
+use zenkey_model::compat::Class;
+use zenkey_model::contract::Contract;
+use zenkey_model::descriptor::{Descriptor, InterfaceEntry};
+use zenkey_model::grammar::{Addr, Fp16, GRAMMAR, IfaceId, InstanceId, ZkKey};
+use zenoh::Session;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+use zenoh::sample::SampleKind;
 
-use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
-use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
+use crate::bus::admin::{
+    ROUTERS, STORAGES, admin_read, merge_storage_rows, router_from_admin_entry,
+    storage_from_admin_entry,
+};
+use crate::bus::contracts::BundleStore;
+use crate::bus::presence::Scope;
+use crate::judge::common::FINDING_CAP;
+use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Revision};
 use crate::model::examples::Examples;
-use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity, DriftVerdict};
+use crate::report::{
+    Asked, CheckId, CheckReport, DoctorFinding, DoctorPresence, DoctorReport, DoctorScope,
+    DoctorSeverity, RouterInfo, StorageInfo, Unjudged,
+};
 
-// The run-over-run comparison lives beside the doctor by name; it is
-// ungated (no session, no decode) and so has a file of its own.
-pub use crate::judge::doctor_delta::doctor_delta;
+/// How far apart the two presence reads are, by default. Above the one
+/// second an owner SHOULD keep a re-mint's overlap below (§6, §8.1), so a
+/// make-before-break re-mint is in one read at most.
+pub const DEFAULT_GRACE: Duration = Duration::from_secs(2);
 
-/// What a doctor run should cost.
+/// The presence budget judged against, by default: the low end of §8.3's
+/// "about 10–15k tokens" per presence domain.
+pub const DEFAULT_PRESENCE_BUDGET: usize = 10_000;
+
+/// The selectors the presence domain's tokens are counted through, in no
+/// namespace: every token whose key holds no verbatim chunk, and every zk2
+/// token under any namespace (`*` and `**` never cross a verbatim chunk,
+/// so `@zk` is named). Tokens of other applications under a verbatim chunk
+/// are not counted, and the evidence says so (O5).
+pub const DOMAIN_SELECTORS: [&str; 2] = ["**", "**/zk2/*/*/@zk/**"];
+
+/// `archive.v1`'s interface id: its providers are the archives.
+const ARCHIVE: &str = "archive.v1";
+
+/// What a doctor run asks.
 #[derive(Debug, Clone)]
 pub struct DoctorSpec {
-    /// Run the deep checks too (per-family state snapshots for freshness,
-    /// storage-coverage join) — real query load, opt-in.
-    pub deep: bool,
-    /// At most this many state samples drained per family in the deep
-    /// checks (`--sample N`) — bounds the sweep's cost, not just its output.
-    /// `None` = unbounded.
-    pub sample: Option<usize>,
-    /// Per-query timeout.
+    /// Each read's timeout: a liveliness GET, a descriptor GET, a
+    /// retrieval attempt, an admin GET, an archive or state GET.
     pub timeout: Duration,
-    /// Listen passively to the data planes for this long after the GET
-    /// fan-in (`--for`, #161) and judge what rides: decode/validity,
-    /// declared-vs-observed QoS, unregistered traffic, over-rate events.
-    /// `None` = the phase does not run and the report carries no
-    /// observation section.
-    pub listen: Option<Duration>,
+    /// How far apart the two presence reads are taken (§6). It SHOULD
+    /// exceed the longest re-mint overlap the deployment allows.
+    pub grace: Duration,
+    /// The token count `presence-over-budget` judges against (§8.3).
+    pub presence_budget: usize,
+    /// Ask `state-stamp-foreign`, whose GETs cost the owners' data plane.
+    pub deep: bool,
+    /// The checks to ask; the rest are `NotAsked`.
+    pub checks: BTreeSet<CheckId>,
+}
+
+impl DoctorSpec {
+    /// Every check, with the default grace and budget, not deep.
+    pub fn new(timeout: Duration) -> DoctorSpec {
+        DoctorSpec {
+            timeout,
+            grace: DEFAULT_GRACE,
+            presence_budget: DEFAULT_PRESENCE_BUDGET,
+            deep: false,
+            checks: CheckId::ALL.into_iter().collect(),
+        }
+    }
+
+    /// Whether the run asks `check`.
+    pub fn asks(&self, check: CheckId) -> bool {
+        self.checks.contains(&check) && (check != CheckId::StateStampForeign || self.deep)
+    }
+
+    fn asks_presence(&self) -> bool {
+        CheckId::ALL
+            .into_iter()
+            .any(|c| c.reads_presence() && self.asks(c))
+    }
+
+    fn asks_admin(&self) -> bool {
+        [
+            CheckId::StorageOnState,
+            CheckId::AdminUnreachable,
+            CheckId::RouterVersionSkew,
+        ]
+        .into_iter()
+        .any(|c| self.asks(c))
+    }
+}
+
+/// Where a doctor run reads (decided 2026-10-08): a session in the
+/// deployment's namespace for the deployment, and one in no namespace for
+/// the routers' admin space and the presence domain.
+#[derive(Debug, Clone)]
+pub struct DoctorBus {
+    /// A session **in** the namespace.
+    pub session: Session,
+    /// A session in **no** namespace.
+    pub raw: Session,
+    /// The namespace `session` is in; empty for the bus root.
+    pub namespace: String,
+}
+
+// ─── what one run read ──────────────────────────────────────────────────────
+
+/// Everything one doctor run read, as values: what [`judge`] decides from.
+/// `None` is "not read", because no check that needs it was asked; an
+/// `Err` is a read that could not be put on the bus, with why.
+#[derive(Debug, Clone, Default)]
+pub struct DoctorObservation {
+    /// The namespace the deployment was read in.
+    pub namespace: String,
+    /// How far apart `before` and `after` were taken.
+    pub grace: Duration,
+    /// The first presence read, tokens only.
+    pub before: Option<Result<Observed, String>>,
+    /// The second, with every instance's descriptor.
+    pub after: Option<Result<Observed, String>>,
+    /// What asking for each revision the descriptors name found.
+    pub contracts: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    /// The routers' admin space.
+    pub admin: Option<Result<AdminSpace, String>>,
+    /// The presence domain's tokens.
+    pub domain: Option<Result<DomainTokens, String>>,
+    /// Each archive's keys.
+    pub archives: BTreeMap<Addr, Result<ArchiveKeys, String>>,
+    /// Each owner's state replies, by service and interface.
+    pub stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
+    /// This process's `RLIMIT_MEMLOCK`.
+    pub memlock: Option<Memlock>,
+}
+
+/// The routers' admin space, as two reads found it.
+#[derive(Debug, Clone, Default)]
+pub struct AdminSpace {
+    pub routers: Vec<RouterInfo>,
+    pub storages: Vec<StorageInfo>,
+    /// Whether both reads ended at the routers' final reply.
+    pub complete: bool,
+}
+
+/// The presence domain's tokens, counted through [`DOMAIN_SELECTORS`].
+#[derive(Debug, Clone, Default)]
+pub struct DomainTokens {
+    /// Distinct tokens across both reads.
+    pub tokens: usize,
+    /// Of which zk2 tokens, under any namespace.
+    pub zk2: usize,
+    /// The namespaces those sit under, the bus root included.
+    pub namespaces: usize,
+    /// Whether both reads ended at the routers' final reply.
+    pub complete: bool,
+}
+
+/// One archive's keys (§4.4): what a GET over its `@state` served.
+#[derive(Debug, Clone, Default)]
+pub struct ArchiveKeys {
+    /// Values served.
+    pub values: usize,
+    /// Values served `confirmed: false`, or with no readable attachment,
+    /// which §4.4 reads the same way.
+    pub unconfirmed: usize,
+    /// The first of them, by key.
+    pub examples: Vec<String>,
+    /// Tombstones served (`reply_del`): positive evidence, never unaligned.
+    pub tombstones: usize,
+    /// Whether the GET ended at the final reply.
+    pub complete: bool,
+}
+
+/// An owner's state replies (S4's GET), grouped by the clock that stamped
+/// them: `None` for an unstamped reply.
+#[derive(Debug, Clone, Default)]
+pub struct StateStamps {
+    /// Per clock: how many replies, and the first keys.
+    pub by_clock: BTreeMap<Option<String>, (usize, Vec<String>)>,
+    /// Whether every GET ended at the final reply.
+    pub complete: bool,
+}
+
+/// `RLIMIT_MEMLOCK`, as `zenkey::shm` reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Memlock {
+    /// The soft limit, in bytes.
+    Limited(u64),
+    /// Unlimited — or unreadable, which `zenkey::shm::memlock_limit` does
+    /// not tell apart.
+    Unlimited,
+}
+
+// ─── the run ────────────────────────────────────────────────────────────────
+
+/// One doctor run: [`observe`], then [`judge`].
+///
+/// `store` keeps verified revisions across runs (a bundle is
+/// content-addressed); its absences are forgotten at the start of each, so
+/// a revision is asked about again every run.
+pub async fn run_doctor(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> DoctorReport {
+    let observation = observe(bus, store, spec).await;
+    judge(&observation, spec)
+}
+
+/// Reads what the checks `spec` asks need. Reads that do not depend on one
+/// another run at once; the presence reads take `grace` between them.
+pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> DoctorObservation {
+    let t = spec.timeout;
+    let presence = async {
+        if !spec.asks_presence() {
+            return Default::default();
+        }
+        presence_phase(bus, store, spec).await
+    };
+    let admin = async {
+        if !spec.asks_admin() {
+            return None;
+        }
+        Some(admin_space(&bus.raw, t).await)
+    };
+    let domain = async {
+        if !spec.asks(CheckId::PresenceOverBudget) {
+            return None;
+        }
+        Some(domain_tokens(&bus.raw, t).await)
+    };
+    let (p, admin, domain) = tokio::join!(presence, admin, domain);
+    DoctorObservation {
+        namespace: bus.namespace.clone(),
+        grace: spec.grace,
+        before: p.before,
+        after: p.after,
+        contracts: p.contracts,
+        admin,
+        domain,
+        archives: p.archives,
+        stamps: p.stamps,
+        memlock: spec
+            .asks(CheckId::ShmMemlockLow)
+            .then(|| zk2::shm::memlock_limit().map_or(Memlock::Unlimited, Memlock::Limited)),
+    }
+}
+
+/// What the presence half of a run read.
+#[derive(Default)]
+struct PresencePhase {
+    before: Option<Result<Observed, String>>,
+    after: Option<Result<Observed, String>>,
+    contracts: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    archives: BTreeMap<Addr, Result<ArchiveKeys, String>>,
+    stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
+}
+
+async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
+    let (s, t) = (&bus.session, spec.timeout);
+    let scope = Scope::all();
+    let before = if spec.asks(CheckId::SplitBrain) || spec.asks(CheckId::TokenMissing) {
+        let read = crate::bus::presence::read_tokens(s, &scope, t)
+            .await
+            .map_err(|e| crate::one_line(&e));
+        tokio::time::sleep(spec.grace).await;
+        Some(read)
+    } else {
+        None
+    };
+    let after = crate::bus::presence::observe(s, &scope, t)
+        .await
+        .map_err(|e| crate::one_line(&e));
+    let Ok(observed) = &after else {
+        return PresencePhase {
+            before,
+            after: Some(after),
+            ..Default::default()
+        };
+    };
+    let wanted = Catalog::new(observed).wanted();
+    store.forget_absences();
+    let contracts = async {
+        let answers = store.fetch_all(s, &wanted).await;
+        wanted
+            .iter()
+            .cloned()
+            .zip(
+                answers
+                    .into_iter()
+                    .map(|a| a.map_err(|e| crate::one_line(&e))),
+            )
+            .collect::<BTreeMap<_, _>>()
+    };
+    let archives = async {
+        if !spec.asks(CheckId::ArchiveUnaligned) {
+            return BTreeMap::new();
+        }
+        let mut out = BTreeMap::new();
+        for addr in archives_in(observed) {
+            let read = archive_keys(s, &addr, t).await;
+            out.insert(addr, read);
+        }
+        out
+    };
+    let stamps = async {
+        if !spec.asks(CheckId::StateStampForeign) {
+            return BTreeMap::new();
+        }
+        let mut out = BTreeMap::new();
+        for (addr, iface) in owners_in(observed) {
+            let read = state_stamps(s, &addr, &iface, t).await;
+            out.insert((addr, iface), read);
+        }
+        out
+    };
+    let (contracts, archives, stamps) = tokio::join!(contracts, archives, stamps);
+    PresencePhase {
+        before,
+        after: Some(after),
+        contracts,
+        archives,
+        stamps,
+    }
+}
+
+/// Every address presence shows providing `archive.v1`, by token or by
+/// descriptor.
+fn archives_in(observed: &Observed) -> BTreeSet<Addr> {
+    let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
+    let catalog = Catalog::new(observed);
+    catalog
+        .addresses()
+        .filter(|a| catalog.provides(a, &archive))
+        .cloned()
+        .collect()
+}
+
+/// Every (service, interface) a served descriptor lists, `archive.v1`
+/// aside: an archive answers with the stamps of the owners it recorded
+/// (§4.4), never its own.
+fn owners_in(observed: &Observed) -> BTreeSet<(Addr, IfaceId)> {
+    served(observed)
+        .flat_map(|(addr, _, d)| {
+            d.interfaces
+                .iter()
+                .filter(|e| e.iface != ARCHIVE)
+                .filter_map(move |e| Some((addr.clone(), IfaceId::from_str(&e.iface).ok()?)))
+        })
+        .collect()
+}
+
+/// Every served descriptor, with its instance.
+fn served(observed: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Descriptor)> {
+    observed
+        .descriptors
+        .iter()
+        .flatten()
+        .filter_map(|((a, i), read)| Some((a, i, read.descriptor()?)))
+}
+
+/// The routers' admin space: `@/*/router` and the storages, in no
+/// namespace. Either read failing is the whole answer failing.
+async fn admin_space(raw: &Session, timeout: Duration) -> Result<AdminSpace, String> {
+    let (routers, storages) = tokio::join!(
+        admin_read(raw, ROUTERS, timeout),
+        admin_read(raw, STORAGES, timeout)
+    );
+    let routers = routers.map_err(|e| crate::one_line(&e))?;
+    let storages = storages.map_err(|e| crate::one_line(&e))?;
+    Ok(AdminSpace {
+        complete: routers.complete && storages.complete,
+        routers: routers
+            .entries
+            .into_iter()
+            .map(router_from_admin_entry)
+            .collect(),
+        storages: merge_storage_rows(
+            storages
+                .entries
+                .iter()
+                .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
+                .collect(),
+        ),
+    })
+}
+
+/// The presence domain's tokens through [`DOMAIN_SELECTORS`], in no
+/// namespace, on the liveliness chokepoint's unbounded handler (§8.1).
+async fn domain_tokens(raw: &Session, timeout: Duration) -> Result<DomainTokens, String> {
+    let [all, zk2] = DOMAIN_SELECTORS;
+    let (plain, zk2_read) = tokio::join!(
+        crate::bus::presence::liveliness_read(raw, all, timeout),
+        crate::bus::presence::liveliness_read(raw, zk2, timeout)
+    );
+    let plain = plain.map_err(|e| crate::one_line(&e))?;
+    let zk2_read = zk2_read.map_err(|e| crate::one_line(&e))?;
+    let namespaces = crate::model::catalog::namespaces(zk2, &zk2_read.keys, zk2_read.complete)
+        .namespaces
+        .len();
+    let distinct: BTreeSet<&String> = plain.keys.iter().chain(&zk2_read.keys).collect();
+    Ok(DomainTokens {
+        tokens: distinct.len(),
+        zk2: zk2_read.keys.len(),
+        namespaces,
+        complete: plain.complete && zk2_read.complete,
+    })
+}
+
+/// One archive's keys: a GET over its whole `@state` (§4.4), target `All`
+/// and consolidation `None`, each value's attachment read for
+/// `confirmed`.
+async fn archive_keys(s: &Session, addr: &Addr, timeout: Duration) -> Result<ArchiveKeys, String> {
+    let selector = [
+        GRAMMAR,
+        addr.system.as_str(),
+        addr.service.as_str(),
+        ARCHIVE,
+        "@state",
+        "**",
+    ]
+    .join("/");
+    let replies = s
+        .get(&selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .await
+        .map_err(|e| format!("GET {selector}: {e}"))?;
+    let mut keys = ArchiveKeys {
+        complete: true,
+        ..ArchiveKeys::default()
+    };
+    let mut examples = Examples::new(FINDING_CAP);
+    while let Ok(reply) = replies.recv_async().await {
+        let Ok(sample) = reply.result() else {
+            keys.complete = false;
+            continue;
+        };
+        if sample.kind() == SampleKind::Delete {
+            keys.tombstones += 1;
+            continue;
+        }
+        keys.values += 1;
+        let confirmed = sample
+            .attachment()
+            .and_then(|a| serde_json::from_slice::<serde_json::Value>(&a.to_bytes()).ok())
+            .and_then(|v| v["confirmed"].as_bool())
+            .unwrap_or(false);
+        if !confirmed {
+            keys.unconfirmed += 1;
+            examples.push(sample.key_expr().as_str().to_owned());
+        }
+    }
+    keys.examples = examples.into_vec();
+    Ok(keys)
+}
+
+/// An owner's state, read as S4 reads it — target `All`, consolidation
+/// `Latest` — over `state/**` and `@state/**` of one interface, each reply
+/// grouped by the clock that stamped it.
+async fn state_stamps(
+    s: &Session,
+    addr: &Addr,
+    iface: &IfaceId,
+    timeout: Duration,
+) -> Result<StateStamps, String> {
+    let iface = iface.to_string();
+    let mut out = StateStamps {
+        complete: true,
+        ..StateStamps::default()
+    };
+    for token in ["state", "@state"] {
+        let selector = [
+            GRAMMAR,
+            addr.system.as_str(),
+            addr.service.as_str(),
+            iface.as_str(),
+            token,
+            "**",
+        ]
+        .join("/");
+        let replies = s
+            .get(&selector)
+            .target(QueryTarget::All)
+            .consolidation(ConsolidationMode::Latest)
+            .timeout(timeout)
+            .await
+            .map_err(|e| format!("GET {selector}: {e}"))?;
+        while let Ok(reply) = replies.recv_async().await {
+            let Ok(sample) = reply.result() else {
+                out.complete = false;
+                continue;
+            };
+            let clock = sample.timestamp().map(|t| t.get_id().to_string());
+            let (n, keys) = out.by_clock.entry(clock).or_default();
+            *n += 1;
+            if keys.len() < crate::judge::common::EXPANSION_CAP {
+                keys.push(sample.key_expr().as_str().to_owned());
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ─── the judgement ──────────────────────────────────────────────────────────
+
+/// The checks `spec` asks, judged from `obs` — no session, so every
+/// verdict below is decided from values a test can write.
+pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
+    let presence: Result<Presence<'_>, String> = match &obs.after {
+        None => Err("presence was not read".into()),
+        Some(Err(e)) => Err(format!("the presence read failed: {e}")),
+        Some(Ok(after)) if after.tokens.is_empty() => Err(empty_scope(&obs.namespace, after)),
+        Some(Ok(after)) => Ok(Presence::new(obs, after)),
+    };
+    let checks = CheckId::ALL
+        .into_iter()
+        .map(|check| {
+            if !spec.asks(check) {
+                return CheckReport::not_asked(check);
+            }
+            if !check.reads_presence() {
+                return match check {
+                    CheckId::PresenceOverBudget => presence_over_budget(obs, spec),
+                    CheckId::StorageOnState => storage_on_state(obs),
+                    CheckId::ShmMemlockLow => shm_memlock_low(obs),
+                    CheckId::AdminUnreachable => admin_unreachable(obs),
+                    CheckId::RouterVersionSkew => router_version_skew(obs),
+                    _ => unreachable!("every check that reads no presence is above"),
+                };
+            }
+            let p = match &presence {
+                Ok(p) => p,
+                Err(why) => return CheckReport::unobservable(check, why.clone()),
+            };
+            match check {
+                CheckId::SplitBrain => split_brain(p),
+                CheckId::BindingUnsatisfied => binding_unsatisfied(p),
+                CheckId::ContractDrift => contract_drift(p),
+                CheckId::ContractUnavailable => contract_unavailable(p),
+                CheckId::DescriptorInvalid => descriptor_invalid(p),
+                CheckId::TokenMissing => token_missing(p),
+                CheckId::ArchiveUnaligned => archive_unaligned(p),
+                CheckId::StateStampForeign => state_stamp_foreign(p),
+                _ => unreachable!("every check that reads presence is above"),
+            }
+        })
+        .collect();
+    let unobservable = match (&obs.after, &presence) {
+        (Some(_), Err(why)) => Some(why.clone()),
+        _ => None,
+    };
+    DoctorReport {
+        scope: scope_of(obs),
+        checks,
+        unobservable,
+    }
+}
+
+/// The empty scope's reason: what was read, and that nothing in it was a
+/// zk2 token visible to this reader.
+fn empty_scope(namespace: &str, after: &Observed) -> String {
+    let ns = if namespace.is_empty() {
+        "the bus root".to_owned()
+    } else {
+        format!("namespace {namespace:?}")
+    };
+    let how = if after.complete {
+        ""
+    } else {
+        " (and the read ended at its timeout)"
+    };
+    format!(
+        "no zk2 token visible to this reader in {ns} (`{}`){how}: a run over an empty scope \
+         judged nothing, which is not a healthy deployment",
+        after.selector
+    )
+}
+
+fn scope_of(obs: &DoctorObservation) -> DoctorScope {
+    let presence = match &obs.after {
+        Some(Ok(after)) => {
+            let catalog = Catalog::new(after);
+            let instances = after.instances();
+            let undescribed = after
+                .descriptors
+                .iter()
+                .flatten()
+                .filter(|(_, r)| r.descriptor().is_none())
+                .count();
+            Asked::Asked(DoctorPresence {
+                selector: after.selector.clone(),
+                complete: after.complete && !matches!(&obs.before, Some(Ok(b)) if !b.complete),
+                grace_s: obs.grace.as_secs_f64(),
+                services: catalog.addresses().count(),
+                instances: instances.len(),
+                tokens: after.tokens.len(),
+                undescribed,
+                revisions: obs.contracts.len(),
+                held: obs
+                    .contracts
+                    .values()
+                    .filter(|r| matches!(r, Ok(ContractState::Held(_))))
+                    .count(),
+            })
+        }
+        _ => Asked::NotAsked,
+    };
+    DoctorScope {
+        namespace: obs.namespace.clone(),
+        presence,
+        routers: match &obs.admin {
+            Some(Ok(a)) => Asked::Asked(a.routers.len()),
+            _ => Asked::NotAsked,
+        },
+    }
+}
+
+/// One instance, as one presence read shows it.
+#[derive(Debug, Default)]
+struct Inst<'o> {
+    instance_token: bool,
+    /// Interface tokens, by interface: the revision prefixes they carry.
+    alive: BTreeMap<IfaceId, BTreeSet<Fp16>>,
+    descriptor: Option<&'o DescriptorRead>,
+}
+
+fn index(observed: &Observed) -> BTreeMap<(Addr, InstanceId), Inst<'_>> {
+    let mut out: BTreeMap<(Addr, InstanceId), Inst<'_>> = BTreeMap::new();
+    for t in &observed.tokens {
+        match t {
+            ZkKey::Instance { addr, instance } => {
+                out.entry((addr.clone(), instance.clone()))
+                    .or_default()
+                    .instance_token = true;
+            }
+            ZkKey::Alive {
+                addr,
+                iface,
+                instance,
+                fp,
+            } => {
+                out.entry((addr.clone(), instance.clone()))
+                    .or_default()
+                    .alive
+                    .entry(iface.clone())
+                    .or_default()
+                    .insert(fp.clone());
+            }
+            _ => {}
+        }
+    }
+    for (key, read) in observed.descriptors.iter().flatten() {
+        out.entry(key.clone()).or_default().descriptor = Some(read);
+    }
+    out
+}
+
+/// The presence half of an observation, indexed once for every check that
+/// reads it.
+struct Presence<'o> {
+    obs: &'o DoctorObservation,
+    after: &'o Observed,
+    /// The first read, or why there is none to compare with.
+    before: Result<&'o Observed, String>,
+    now: BTreeMap<(Addr, InstanceId), Inst<'o>>,
+    then: BTreeMap<(Addr, InstanceId), Inst<'o>>,
+    /// Every read taken ended at the routers' final reply. A first read
+    /// not taken — no check that compares two was asked — or one that
+    /// failed is not counted here: the checks that need it say so.
+    complete: bool,
+}
+
+impl<'o> Presence<'o> {
+    fn new(obs: &'o DoctorObservation, after: &'o Observed) -> Presence<'o> {
+        let before = match &obs.before {
+            Some(Ok(b)) => Ok(b),
+            Some(Err(e)) => Err(format!("the first presence read failed: {e}")),
+            None => Err("the first presence read was not taken".to_owned()),
+        };
+        let then = before.as_ref().map(|b| index(b)).unwrap_or_default();
+        Presence {
+            obs,
+            after,
+            complete: after.complete && !before.as_ref().is_ok_and(|b| !b.complete),
+            before,
+            now: index(after),
+            then,
+        }
+    }
+
+    fn served(&self) -> impl Iterator<Item = (&'o Addr, &'o InstanceId, &'o Descriptor)> {
+        served(self.after)
+    }
+
+    fn descriptors(&self) -> Vec<Descriptor> {
+        self.served().map(|(_, _, d)| d.clone()).collect()
+    }
+
+    /// The instances whose descriptor was asked for and did not read, each
+    /// as an [`Unjudged`] for `what`.
+    fn undescribed(&self, what: &str) -> Vec<Unjudged> {
+        self.now
+            .iter()
+            .filter_map(|((a, i), inst)| {
+                let read = inst.descriptor?;
+                read.descriptor().is_none().then(|| Unjudged {
+                    subject: format!("{a}@{i}"),
+                    reason: format!(
+                        "its descriptor did not read ({}): {what}",
+                        undescribed_why(read)
+                    ),
+                })
+            })
+            .collect()
+    }
+
+    /// The revision `(iface, fp)`, or why it cannot be had.
+    fn revision(&self, iface: &IfaceId, fp: &Fingerprint) -> Result<&'o Arc<Revision>, String> {
+        match self.obs.contracts.get(&(iface.clone(), fp.clone())) {
+            Some(Ok(ContractState::Held(r))) => Ok(r),
+            Some(Ok(ContractState::Unavailable { .. })) => Err(format!(
+                "{iface} {fp} is unavailable: no holder served it verified"
+            )),
+            Some(Ok(ContractState::Unreadable { reason })) => {
+                Err(format!("{iface} {fp} is unreadable: {reason}"))
+            }
+            Some(Err(e)) => Err(format!("{iface} {fp} could not be retrieved: {e}")),
+            None => Err(format!("{iface} {fp} was not retrieved")),
+        }
+    }
+
+    /// The revision an interface entry names, or why it cannot be had.
+    fn entry_revision(&self, e: &InterfaceEntry) -> Result<&'o Arc<Revision>, String> {
+        let iface = IfaceId::from_str(&e.iface)
+            .map_err(|err| format!("{:?} is not an interface id: {err}", e.iface))?;
+        let fp = Fingerprint::parse(&e.contract)
+            .map_err(|err| format!("{:?} is not a fingerprint: {err}", e.contract))?;
+        self.revision(&iface, &fp)
+    }
+
+    fn grace_s(&self) -> f64 {
+        self.obs.grace.as_secs_f64()
+    }
+}
+
+fn undescribed_why(read: &DescriptorRead) -> String {
+    match read {
+        DescriptorRead::Served(_) => "served".into(),
+        DescriptorRead::Invalid(why) => format!("invalid: {why}"),
+        DescriptorRead::Silent => "no reply within the timeout".into(),
+        DescriptorRead::Failed(why) => format!("the GET failed: {why}"),
+    }
 }
 
 fn finding(
-    severity: DoctorSeverity,
     check: CheckId,
+    severity: DoctorSeverity,
     subject: impl Into<String>,
     evidence: impl Into<String>,
-    citation: Option<&str>,
 ) -> DoctorFinding {
     DoctorFinding {
         severity,
         check,
         subject: subject.into(),
         evidence: evidence.into(),
-        citation: citation.map(str::to_string),
     }
 }
 
-/// Run every check against the live fleet and report typed findings.
-///
-/// `locals` is the caller's registry (loaded from `--registry` dirs or GUI
-/// settings). `None` means none was loaded: the served-vs-declared diff is
-/// skipped and only bus-derived checks run, and the report says so rather
-/// than reading in sync (O4 — "not asked" must not render as "clean").
-///
-/// `Option<&SliceSet>` and not `&[RegistrySlice]`: this is the engine's
-/// standing shape for "a registry, or honestly none" (`facts.rs` states it as
-/// policy), an empty slice could not tell the two apart, and the set arrives
-/// already indexed — doctor used to rebuild one from a clone of every slice
-/// halfway through the run.
-pub async fn run_doctor(
-    fleet: &crate::Fleet<'_>,
-    locals: Option<&crate::model::registry::SliceSet>,
-    spec: &DoctorSpec,
-) -> Result<DoctorReport> {
-    Ok(run_doctor_inner(fleet, locals, spec).await?.0)
-}
-
-/// What one doctor run saw that its [`DoctorReport`] does not carry (#222)
-/// — the conformance suite's inputs beside the findings, never a wire
-/// shape. `check conform` projects a scoped doctor run onto its assertions
-/// ([`crate::judge::conform`]), and a finding says what is *wrong*; what
-/// was *seen* clean is here, so a met assertion names its evidence rather
-/// than inferring it from a silence of findings.
-#[derive(Debug, Default)]
-pub(crate) struct DoctorInternals {
-    /// `(origin, producer)` pairs whose `introspect` answered the
-    /// served-vs-declared GET — what makes an absent `slice-sync` finding a
-    /// met assertion rather than an unasked one.
-    pub(crate) introspected: std::collections::BTreeSet<(String, String)>,
-    /// Producers whose `describe` was served.
-    pub(crate) described: std::collections::BTreeSet<String>,
-    /// `(producer, declared path)` → what the listen window saw of it:
-    /// the origins it rode from and how many samples. Filled beside the
-    /// cardinality refine, from the same resolved facts.
-    pub(crate) seen: std::collections::BTreeMap<(String, String), SeenFamily>,
-    /// `(producer, declared path)` → state samples the `--deep` freshness
-    /// sweep read for it. Absent is "the sweep did not reach it".
-    pub(crate) fresh_read: std::collections::BTreeMap<(String, String), usize>,
-}
-
-/// One declared family, as the listen window saw it.
-#[derive(Debug, Default, Clone)]
-pub(crate) struct SeenFamily {
-    pub(crate) origins: std::collections::BTreeSet<String>,
-    pub(crate) samples: u64,
-}
-
-/// [`run_doctor`], with the [`DoctorInternals`] beside the report. One run,
-/// two readers: the public verb keeps its shape, and the conformance suite
-/// reads the same observation instead of a second copy of the checks.
-pub(crate) async fn run_doctor_inner(
-    fleet: &crate::Fleet<'_>,
-    locals: Option<&crate::model::registry::SliceSet>,
-    spec: &DoctorSpec,
-) -> Result<(DoctorReport, DoctorInternals)> {
-    let (session, base) = (fleet.session(), fleet.base());
-    let mut internals = DoctorInternals::default();
-
-    // A registry that declares nothing answers no question this run asks, so
-    // it takes the same path as none at all — normalised once, here, rather
-    // than at each of the four places that branch on it below.
-    let locals = locals.filter(|set| !set.slices().is_empty());
-    let roster = crate::bus::roster::roster(fleet, spec.timeout).await?;
-
-    let mut findings: Vec<DoctorFinding> = Vec::new();
-    let mut synced: Vec<String> = Vec::new();
-    let mut answered = 0usize;
-
-    // --- served-vs-declared diff (RFC 08 §6) --------------------------
-    for local in locals.iter().flat_map(|set| set.slices()) {
-        let key = crate::model::registry::rpc_key(base, local, "introspect")?;
-        let answers = fleet_get(fleet, &key, &GetOpts::new(spec.timeout)).await?;
-        for answer in &answers {
-            let Answer::Value(bytes) = &answer.answer else {
-                continue;
-            };
-            answered += 1;
-            internals
-                .introspected
-                .insert((answer.origin.clone(), local.name.clone()));
-            let served_toml = bytes.to_bytes();
-            let served_toml = String::from_utf8_lossy(&served_toml);
-            // Read in the spelling the reply declares (RFC 08 §6, v1.44); a
-            // declaration that is neither spelling is a finding naming it.
-            let served = match zenkey::parse_served(answer.encoding.as_deref(), &served_toml) {
-                Ok(s) => s,
-                Err(e) => {
-                    findings.push(finding(
-                        DoctorSeverity::Error,
-                        CheckId::SliceParse,
-                        format!("{}/{}", answer.origin, local.name),
-                        format!("served slice does not parse: {e}"),
-                        Some("RFC 08 §6"),
-                    ));
-                    continue;
-                }
-            };
-            let diff = zenkey::slice::diff(&served, local);
-            if diff.is_empty() {
-                synced.push(format!(
-                    "{}/{} (registry {})",
-                    answer.origin, local.name, served.version
-                ));
-            } else {
-                for f in &diff {
-                    findings.push(finding(
-                        DoctorSeverity::Error,
-                        CheckId::SliceSync,
-                        format!("{}/{}", answer.origin, local.name),
-                        f.summary(),
-                        Some("RFC 08 §6"),
-                    ));
-                }
-            }
-        }
-    }
-
-    // One declared registry sweep (#37) serves both fallbacks below —
-    // doctor used to fan the identical wildcard GETs twice per run.
-    let sweep = if locals.is_none() {
-        let repeating = RepeatingRegistry::declare(fleet, spec.timeout).await?;
-        let swept = repeating.sweep().await?;
-        repeating.undeclare().await?;
-        // An answer that did not read is still an answer (#491): it counts
-        // toward coverage below — it was not silence — and is the same
-        // `slice-parse` finding the served-vs-declared diff files, naming
-        // the encoding (RFC 08 §6, v1.44; RFC 13 §3 O4). Before, this path
-        // dropped it, and `introspect-coverage` called the producer silent.
-        answered = swept.served.len() + swept.unreadable.len();
-        for u in &swept.unreadable {
-            findings.push(finding(
-                DoctorSeverity::Error,
-                CheckId::SliceParse,
-                format!("{}/{}", u.origin, u.producer),
-                format!(
-                    "served slice does not parse (encoding {}): {}",
-                    u.unreadable.encoding.as_deref().unwrap_or("undeclared"),
-                    u.unreadable.error
-                ),
-                Some("RFC 08 §6"),
-            ));
-        }
-        let slices: Vec<RegistrySlice> = swept.served.into_iter().map(|s| s.slice).collect();
-        Some(slices)
-    } else {
-        None
-    };
-
-    // The roster is what makes silence legible (RFC 05 §3.1): a producer
-    // that holds an `alive` token but did not answer `introspect` is a bug,
-    // because producers MUST declare their @rpc queryables *before* their
-    // token — "alive ⇒ callable" (RFC 04 §5). Coverage is judged over the
-    // producers that were actually *asked*: with `--registry` covering a
-    // subset, a live producer outside the locals was never queried, and
-    // "not asked" must not render as "did not answer" (RFC 09 §5.1 O4).
-    let live: usize = roster.values().map(Vec::len).sum();
-    findings.extend(judge_introspect_coverage(
-        &roster,
-        locals.map(crate::model::registry::SliceSet::slices),
-        answered,
-    ));
-
-    // --- admin reachability ------------------------------------------
-    let routers = crate::routers(session, spec.timeout)
-        .await
-        .unwrap_or_default();
-    let mut router_version = None;
-    if routers.is_empty() {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            CheckId::AdminUnreachable,
-            "mesh",
-            "no routers answered @/*/router (peer-only mesh, or the admin space is \
-             disabled) — storage/version checks skipped",
-            None,
-        ));
-    } else {
-        let versions: std::collections::BTreeSet<&str> = routers
-            .iter()
-            .filter_map(|r| r.version.as_deref())
-            .collect();
-        if versions.len() > 1 {
-            findings.push(finding(
-                DoctorSeverity::Error,
-                CheckId::RouterVersionSkew,
-                "mesh",
-                format!("router version skew across the mesh: {versions:?}"),
-                None,
-            ));
-        } else {
-            router_version = versions.iter().next().map(|v| v.to_string());
-        }
-    }
-
-    // --- schema conformance (RFC 08 §7) ------------------------------
-    // Which slices to judge: the locals when given, else what the fleet
-    // serves (the sweep above).
-    let slice_set: std::borrow::Cow<'_, crate::model::registry::SliceSet> = match sweep {
-        Some(slices) => {
-            std::borrow::Cow::Owned(crate::model::registry::SliceSet::from_slices(slices))
-        }
-        // The caller's set is already indexed; rebuilding it here reparsed
-        // every subject pattern to arrive at the set we were handed.
-        None => match locals {
-            Some(set) => std::borrow::Cow::Borrowed(set),
-            None => std::borrow::Cow::Owned(crate::model::registry::SliceSet::default()),
-        },
-    };
-    // One sweep, kept whole (#410): every answer attributed to the host that
-    // gave it, because `describe` fans in across every host running a
-    // producer and keeping one of them was how a schema disagreement came
-    // to name a producer and never a host (#398). The same helper serves
-    // `interface show --schema`, so the two no longer each hold a copy of
-    // "do these carriers agree".
-    let describes = crate::bus::describe::describe_sweep(fleet, &slice_set, spec.timeout).await?;
-    // One per producer, for the consumers whose question *is* the producer:
-    // totality, the listen phase's store, the served count, and the field
-    // table's declared-path join. Where several hosts answered this is the
-    // first of them — arrival order, which is not a fact about the fleet, and
-    // is why the drift check below reads the attributed list instead (#398).
-    let described: Vec<(String, zenkey::schema::SchemaSet)> = describes.first_per_producer();
-    let undescribed = describes.undescribed.len();
-    internals
-        .described
-        .extend(described.iter().map(|(producer, _)| producer.clone()));
-    // Totality through the one engine implementation (`totality_gaps`) —
-    // doctor used to carry a parallel referenced-names path.
-    for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
-        findings.push(finding(
-            DoctorSeverity::Error,
-            CheckId::DescribeTotality,
-            gap.producer.clone(),
-            format!(
-                "describe is not total — missing: {}",
-                gap.missing.join(", ")
-            ),
-            Some("RFC 08 §7"),
-        ));
-    }
-    for drift in crate::model::decode::schema_drift(&describes.answers) {
-        let servers: Vec<String> = drift
-            .servers
-            .iter()
-            // `producer@origin`, because a type with two identities and no
-            // host to go and look at is the finding you can do least with
-            // (#398).
-            .map(|s| match s.hash.as_option() {
-                Some(h) => format!("{}@{} ({h})", s.producer, s.origin),
-                None => format!("{}@{} (no identity served)", s.producer, s.origin),
-            })
-            .collect();
-        // The two verdicts are not the same finding. A disagreement is a
-        // defect; a producer that served no identity leaves the question
-        // *unanswered*, and calling that an error would be the mirror of the
-        // bug #370 fixed — reporting a verdict nobody's evidence supports.
-        let (severity, evidence) = match drift.verdict {
-            DriftVerdict::Disagree => (
-                DoctorSeverity::Error,
-                format!("served with different schemas by {}", servers.join(", ")),
-            ),
-            DriftVerdict::Unjudgeable => (
-                DoctorSeverity::Warning,
-                format!(
-                    "agreement cannot be judged — {} served no schema identity: {} \
-                     (RFC 09 §5.1 O4; the hash exists for exactly this, RFC 08 §7)",
-                    drift
-                        .servers
-                        .iter()
-                        .filter(|s| s.hash.is_not_asked())
-                        .count(),
-                    servers.join(", ")
-                ),
-            ),
-        };
-        findings.push(finding(
-            severity,
-            CheckId::SchemaDrift,
-            drift.type_name.clone(),
-            evidence,
-            Some("RFC 08 §7"),
-        ));
-    }
-    if undescribed > 0 {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            CheckId::DescribeMissing,
-            "fleet",
-            format!(
-                "{undescribed} producer(s) serve no describe (a SHOULD; generic tools \
-                 render their payloads structurally)"
-            ),
-            Some("RFC 08 §7"),
-        ));
-    }
-
-    // --- deep: freshness + storage coverage --------------------------
-    if spec.deep {
-        let now = std::time::SystemTime::now();
-        let mut unstamped = 0usize;
-        for slice in slice_set.slices() {
-            for subject in &slice.subjects {
-                let (Some(ttl), true) = (subject.ttl_s, subject.class.is(&zenkey::Class::State))
-                else {
-                    continue;
-                };
-                let Ok(pattern) = zenkey::pattern::SubjectPattern::parse(&subject.path) else {
-                    continue;
-                };
-                let selector = match &slice.service_origin {
-                    Some(origin) => with_base(
-                        base,
-                        format!("v1/{origin}/state/{}", pattern.selector_tail()),
-                    ),
-                    None => with_base(
-                        base,
-                        format!("v1/*/state/{}/{}", slice.name, pattern.selector_tail()),
-                    ),
-                };
-                let samples = state_snapshot(session, &selector, spec.timeout, spec.sample).await?;
-                *internals
-                    .fresh_read
-                    .entry((slice.name.clone(), subject.path.clone()))
-                    .or_default() += samples.len();
-                let (family_findings, family_unstamped) = judge_state_samples(&samples, ttl, now);
-                findings.extend(family_findings);
-                unstamped += family_unstamped;
-            }
-        }
-        // Declared `[budget]` versus the health document's `self_stats`
-        // (#391, RFC 08 §2 v1.32, RFC 04 §1.2). Under `--deep` because a
-        // health fetch costs the data plane, and RFC 13 §3 asks for that
-        // explicitly rather than folded into an ambient run (its frugality
-        // note); a slice without a budget is not asked, and issues no GET.
-        // `state_snapshot` carries no payload, so this is a `fleet_get` with
-        // the reply bytes read structurally — the listen phase's reading.
-        for slice in slice_set.slices().iter().filter(|s| s.budget.is_some()) {
-            let selector = match &slice.service_origin {
-                Some(origin) => with_base(base, format!("v1/{origin}/state/health")),
-                None => with_base(base, format!("v1/*/state/{}/health", slice.name)),
-            };
-            let answers = fleet_get(fleet, &selector, &GetOpts::new(spec.timeout)).await?;
-            let read: Vec<(String, Option<crate::judge::self_stats::SelfStats>)> = answers
-                .iter()
-                .filter_map(|a| match &a.answer {
-                    Answer::Value(bytes) => Some((
-                        a.origin.clone(),
-                        crate::model::decode::structural_value(&bytes.to_bytes())
-                            .as_ref()
-                            .and_then(crate::judge::self_stats::read_self_stats),
-                    )),
-                    Answer::Error { .. } => None,
-                })
-                .collect();
-            let asked = roster
-                .iter()
-                .filter(|(origin, producers)| match &slice.service_origin {
-                    Some(service) => service.token() == origin.as_str(),
-                    None => producers.iter().any(|p| {
-                        zenkey::grammar::Producer::parse_chunk(p)
-                            .map(|p| p.name() == slice.name)
-                            .unwrap_or(p == &slice.name)
-                    }),
-                })
-                .count();
-            findings.extend(crate::judge::self_stats::judge_self_stats(
-                slice, &read, asked,
-            ));
-        }
-        if unstamped > 0 {
-            findings.push(finding(
-                DoctorSeverity::Warning,
-                CheckId::UnstampedState,
-                "fleet",
-                format!(
-                    "{unstamped} state sample(s) carry no HLC timestamp — the deployment \
-                     lacks timestamping, which LWW requires; freshness is unjudgeable \
-                     for them"
-                ),
-                Some("RFC 04 §4"),
-            ));
-        }
-        let storages = crate::storages(session, spec.timeout)
-            .await
-            .unwrap_or_default();
-        let coverage = crate::state_coverage(&slice_set, base, &storages);
-        let uncovered: Vec<&crate::CoverageRow> = coverage
-            .iter()
-            .filter(|r| r.coverage == crate::Coverage::Uncovered)
-            .collect();
-        if !uncovered.is_empty() {
-            findings.push(finding(
-                DoctorSeverity::Info,
-                CheckId::StorageCoverage,
-                "fleet",
-                format!(
-                    "{} state famil(y|ies) have no storage coverage (volatile seeding \
-                     may ride the advanced-pub/sub cache): {}",
-                    uncovered.len(),
-                    uncovered
-                        .iter()
-                        .map(|r| format!("{}/{}", r.producer, r.path))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                Some("RFC 04 §3.5"),
-            ));
-        }
-    }
-
-    // --- listen: judge what actually rides (#161) --------------------
-    let observation = match spec.listen {
-        Some(window) => {
-            let store = crate::model::decode::SchemaStore::new(base, spec.timeout);
-            // The GET phase above already asked every producer for its
-            // `describe` document. Hand those to the window's store rather
-            // than letting it re-ask the fleet, mid-window, for what this
-            // run is holding (RFC 08 §7; the store's frugality note).
-            for (producer, set) in &described {
-                store.insert(producer, set.clone());
-            }
-            // And sealed for the window (#337): the GET phase asked every
-            // producer the registry names, so a miss inside the window is a
-            // producer that served nothing — already counted as
-            // `describe_missing`. Left unsealed, that miss is a `describe`
-            // GET awaited inside the drain loop, re-asked every time its
-            // backoff expires, with nobody attending the broadcast.
-            let _sealed = store.seal();
-            let (listen_findings, summary, seen) =
-                observe_traffic(fleet, &slice_set, &store, &described, window).await?;
-            findings.extend(listen_findings);
-            internals.seen = seen;
-            Some(summary)
-        }
-        None => None,
-    };
-
-    // An empty scope judged nothing (#510). With no producer on the roster
-    // and no router answering, every check above ran over nothing:
-    // `introspect-coverage` compares 0 with 0, and the one finding left is
-    // the Info `admin-unreachable`. That is the report a wrong endpoint or a
-    // wrong base produces, and it read as a healthy fleet. Anything that did
-    // answer or ride — an introspect without a token, a describe, a state
-    // read, a sample in the window — is something judged, and keeps the run
-    // a verdict.
-    let fresh_read: usize = internals.fresh_read.values().sum();
-    let heard = observation.as_ref().map_or(0, |o| o.samples);
-    let unobservable = (live == 0
-        && routers.is_empty()
-        && answered == 0
-        && described.is_empty()
-        && fresh_read == 0
-        && heard == 0)
-        .then(|| {
-            format!(
-                "nothing in scope: no producer holds an alive token under the base {base:?} \
-                 and no router answered the admin space — a run over an empty bus judged \
-                 nothing, which is not a healthy fleet (RFC 13 §1.2)"
-            )
-        });
-
-    let report = DoctorReport {
-        findings,
-        // `None` when no local registry was given: the served-vs-declared
-        // diff never ran, and the report must say so rather than looking
-        // like "ran, none in sync" (RFC 09 §5.1 O4, review finding R1).
-        synced: locals.is_some().then_some(synced).into(),
-        introspect_answered: answered,
-        live_producers: live,
-        describe_served: described.len(),
-        describe_missing: undescribed,
-        routers: routers.len(),
-        router_version,
-        deep: spec.deep,
-        observation,
-        unobservable,
-    };
-    Ok((report, internals))
-}
-
-/// How many decode attempts each key gets during the listen window — the
-/// budget that keeps a hot bus from turning the doctor into a load test.
-const DECODE_BUDGET: u8 = 2;
-
-/// The remainder wording every per-key listen check shares.
-const SAME_FINDING: &str = "more key(s) with the same finding";
-
-/// Spill a capped collector into `findings`, followed by the remainder note
-/// when the cap bit.
-///
-/// Filter and judge **into** the collector, never around it (deep-review D4):
-/// the `qos-observed-mismatch` cap used to bound the judged *keys*, so
-/// violators past the first [`FINDING_CAP`] of them vanished and the
-/// remainder note under-counted. [`Examples`] counts what it is offered, so
-/// the note cannot disagree with the population it summarises.
-fn emit_capped(
-    findings: &mut Vec<DoctorFinding>,
-    ex: Examples<DoctorFinding>,
-    check: CheckId,
-    tail: &str,
-) {
-    let more = ex.more(tail);
-
-    findings.extend(ex.into_vec());
-
-    if let Some(evidence) = more {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            check,
-            "fleet",
-            evidence,
-            None,
-        ));
+fn unjudged(subject: impl Into<String>, reason: impl Into<String>) -> Unjudged {
+    Unjudged {
+        subject: subject.into(),
+        reason: reason.into(),
     }
 }
 
-/// The declared events rate class as an hourly cap (RFC 04 §1.3):
-/// `rare` ≤ 1/h, `low` ≤ 1/min, `burst(n/h)` a declared cap.
-struct RateWindow {
-    /// The declared hourly cap, from [`RateClass::cap_per_hour`]. `None` is
-    /// a rate token this build cannot read — "cannot judge", never a
-    /// guessed budget (RFC 09 §5.1 O4).
-    cap: Option<u64>,
-    /// Samples seen on the family during the window.
-    seen: u64,
-}
-
-/// The passive listening phase: watch the data planes for `window`, judge
-/// each sample through the ladders that already exist — the Registration
-/// ladder, `qos_matches`, `decode_sample` — and aggregate per key so a hot
-/// key is one finding with a count, not a finding per sample.
-async fn observe_traffic(
-    fleet: &crate::Fleet<'_>,
-    slices: &crate::model::registry::SliceSet,
-    store: &crate::model::decode::SchemaStore,
-    described: &[(String, zenkey::schema::SchemaSet)],
-    window: Duration,
-) -> Result<(
-    Vec<DoctorFinding>,
-    crate::report::ObservationSummary,
-    std::collections::BTreeMap<(String, String), SeenFamily>,
-)> {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    let (session, base) = (fleet.session(), fleet.base());
-
-    // Scope statement (O5): the three data classes for host origins, plus
-    // each declared service origin's three — `*` never matches an `@` chunk
-    // (D4), so the service planes must be named to be seen. Shared with the
-    // `topic list --budget` observation (#221).
-    let scopes = crate::judge::common::data_plane_scopes(base, slices);
-
-    // The liveliness planes ride too (#422): a `counter` may reset across
-    // its producer's restart, and RFC 08 §2 makes the `alive` token cycling
-    // the one sanctioned reset — so the window has to see the cycle to
-    // excuse the drop. Two selectors, never one: `*` cannot reach a verbatim
-    // service origin (RFC 03 §4 D4), so `@catalog` and every service origin
-    // the slices declare are named. Zero payload by construction (RFC 04 §5).
-    let mut liveliness = vec![
-        fleet.wire(zenkey::selector::all_liveliness(
-            zenkey::selector::Scope::fleet(),
-        )),
-        // And the devices a producer tracks (v1.39): a counter under a
-        // device subject may reset across *that device's* token cycling, a
-        // modem re-enumerating under a driver that never restarted. A
-        // different arity, so a selector of its own.
-        fleet.wire(zenkey::selector::all_device_liveliness(
-            zenkey::selector::Scope::fleet(),
-        )),
-        fleet.wire(zenkey::selector::service_alive(
-            &zenkey::ServiceOrigin::catalog(),
-        )),
-    ];
-    for slice in slices.slices() {
-        if let Some(origin) = slice.service_origin.as_ref().and_then(|o| o.known())
-            && *origin != zenkey::ServiceOrigin::catalog()
-        {
-            liveliness.push(fleet.wire(zenkey::selector::service_alive(origin)));
-        }
-    }
-    let monitor = crate::Monitor::start(
-        session,
-        crate::MonitorSpec {
-            liveliness,
-            ..Default::default()
-        },
+/// The "possibly incomplete" subject a check adds when a presence read
+/// ended at its timeout and the check claims an absence.
+fn incomplete(what: &str) -> Unjudged {
+    unjudged(
+        "presence",
+        format!("a presence read ended at its timeout: it can miss a token, so {what} (§8.1)"),
     )
-    .await?;
-    let mut events = monitor.events();
-    // A scope that fails to declare tears the monitor down on the way out,
-    // rather than leaving a `**` subscriber to `Drop` (#336).
-    let monitor = monitor.watching(&scopes).await?;
-    let started = tokio::time::Instant::now();
-    let deadline = started + window;
-
-    // Field intelligence (#223): per-dotted-path stats over the structural
-    // value — sync and schema-free, so it rides every sample within the
-    // decode budget's reach and beyond.
-    let mut fields =
-        crate::judge::field::FieldObservation::new(crate::judge::field::DEFAULT_MAX_PATHS);
-    let mut samples: u64 = 0;
-    let mut dropped: u64 = 0;
-    let mut synthetic: u64 = 0;
-    // Bounded (#107): one projection per distinct key, LRU past the bound,
-    // evictions counted into the observation summary (O6).
-    let mut facts_cache = crate::model::facts::FactsCache::default();
-    let mut decode_budget: BTreeMap<String, u8> = BTreeMap::new();
-    // Per-key aggregates: key → count (+ what was wrong, first occurrence).
-    let mut unregistered: BTreeMap<String, u64> = BTreeMap::new();
-    let mut qos_bad: BTreeMap<String, (String, u64, u64)> = BTreeMap::new();
-    let mut undecodable: BTreeMap<String, (String, u64)> = BTreeMap::new();
-    let mut invalid: BTreeMap<String, (String, u64)> = BTreeMap::new();
-    // Per-family event counts: (family subject, declared rate) → what was
-    // seen and what was declared.
-    let mut event_counts: BTreeMap<(String, String), RateWindow> = BTreeMap::new();
-    // Stamping nodes that are not the publisher (#213): zid → samples.
-    let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
-    // Declared versus observed `kind` (#422): per key, with the producers
-    // whose `alive` token is currently down — a `NodeUp` that follows one
-    // is a cycle; a lone `NodeUp` (history replaying the tokens that are
-    // simply alive at window start) is not.
-    let mut kinds = crate::judge::kind::KindObservation::new();
-    let mut alive_down: BTreeSet<(String, String)> = BTreeSet::new();
-    let mut device_down: BTreeSet<(String, String, String)> = BTreeSet::new();
-    // Which declared families rode, per producer (#222): a conformance
-    // suite's `observed/<path>` is met by presence, and presence is only
-    // provable from here.
-    let mut seen: BTreeMap<(String, String), SeenFamily> = BTreeMap::new();
-
-    // One timer for the whole window, not one per iteration (#346).
-    // `sleep_until` builds a future and registers a timer each time it
-    // is evaluated, and a `select!` in a loop evaluates it on every
-    // pass — at 100k samples/s that is 100k registrations a second for
-    // a deadline that never moves.
-    let window_over = tokio::time::sleep_until(deadline);
-    tokio::pin!(window_over);
-    loop {
-        let item = tokio::select! {
-            item = events.recv() => item,
-            () = &mut window_over => break,
-        };
-        match item {
-            Some(crate::StreamItem::Event(crate::FleetEvent::Sample(s))) => {
-                samples += 1;
-                if let Some(att) = &s.attachment
-                    && is_synthetic_marker(&att.to_bytes())
-                {
-                    synthetic += 1;
-                }
-                // Who stamped it (#213). A router doing the timestamping is
-                // not a fault — it is a deployment choice — but it silently
-                // changes what every latency in this suite measures, so it is
-                // worth saying out loud once.
-                if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
-                    *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
-                }
-                // A tombstone is a retirement, not a document (RFC 04 §1.2):
-                // a Delete carries no payload to read, decode, or validate,
-                // so the field and payload ladders skip it — judging the
-                // empty body as a value manufactures `payload-undecodable`
-                // out of a correct retirement (zensight#830). Everything
-                // that is a wire fact about the publisher — QoS axes,
-                // registration, stamping — still applies and stays judged.
-                let is_put = s.kind == zenoh::sample::SampleKind::Put;
-                // Same bound as `run_field`'s drain (#346): the parse is
-                // per sample by design, so the payload size is what has to be
-                // bounded, and the skip is counted rather than read as an
-                // absent document.
-                let bytes = s.payload.to_bytes();
-                // The structural document, read once for the field ladder
-                // and the kind judge alike; `None` for an oversized or
-                // undecodable body, which each of them counts as unread.
-                let mut doc = None;
-                if is_put {
-                    if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
-                        fields.observe_unread(&s.key);
-                    } else {
-                        doc = crate::model::decode::structural_value(&bytes);
-                        fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
-                    }
-                }
-                facts_cache.ensure(base, &s.key, Some(slices));
-                let facts = facts_cache.get(&s.key).expect("just ensured this key");
-                match &facts.registration {
-                    crate::model::facts::Registration::Unregistered => {
-                        *unregistered.entry(s.key.clone()).or_default() += 1;
-                    }
-                    crate::model::facts::Registration::Registered(sf) => {
-                        if let (Some(producer), crate::model::facts::KeyShape::V1(v)) = (
-                            crate::judge::common::producer_of(facts, Some(slices)),
-                            &facts.shape,
-                        ) {
-                            let family = seen.entry((producer, sf.path.clone())).or_default();
-                            family.origins.insert(v.origin.clone());
-                            family.samples += 1;
-                        }
-                        if let (Some(profile), Some(declared)) = (sf.declared_qos(), &sf.qos) {
-                            let entry = qos_bad
-                                .entry(s.key.clone())
-                                .or_insert_with(|| (declared.token().to_string(), 0, 0));
-                            entry.2 += 1;
-                            if !s.qos_matches(profile) {
-                                entry.1 += 1;
-                            }
-                        }
-                        if let (Some(rate), crate::model::facts::KeyShape::V1(v)) =
-                            (&sf.rate, &facts.shape)
-                            && v.class == "events"
-                        {
-                            let family = match &v.producer {
-                                Some(p) => format!("{p}/{}", sf.path),
-                                None => format!("{}/{}", v.origin, sf.path),
-                            };
-                            // The cap is taken from the typed `RateClass`
-                            // here, where it is in hand — this used to
-                            // stringify the token and re-parse it below
-                            // through a second copy of RFC 04 §1.3's
-                            // mapping (#350's sweep).
-                            event_counts
-                                .entry((family, rate.token()))
-                                .or_insert_with(|| RateWindow {
-                                    cap: rate.cap_per_hour(),
-                                    seen: 0,
-                                })
-                                .seen += 1;
-                        }
-                        // Declared `kind` (#422, RFC 08 §2): judged only where
-                        // the entry declares one this build knows — absent
-                        // or foreign is not asked (RFC 13 §3).
-                        if let (Some(declared), crate::model::facts::KeyShape::V1(v)) =
-                            (sf.kind.as_ref().and_then(|k| k.known()), &facts.shape)
-                            && is_put
-                        {
-                            // The producer half of the identity spelled the
-                            // way `token_identity` reads a liveliness token,
-                            // so a cycle lands on the keys it restarted.
-                            let producer = v
-                                .producer
-                                .clone()
-                                .unwrap_or_else(|| v.origin.trim_start_matches('@').to_string());
-                            kinds.observe_under(
-                                &s.key,
-                                &v.origin,
-                                &producer,
-                                // The device, if the key sits under one
-                                // (RFC 06 §3): its own token's cycle is the
-                                // second sanctioned reset (v1.39).
-                                v.subject.first().map(String::as_str),
-                                *declared,
-                                sf.buckets.as_ref().map(zenkey::slice::Buckets::as_slice),
-                                doc.as_ref(),
-                            );
-                        }
-                        let budget = decode_budget.entry(s.key.clone()).or_default();
-                        if is_put && *budget < DECODE_BUDGET {
-                            *budget += 1;
-                            // `Some`: the doctor's slice set comes from its
-                            // own live introspect sweep, so the registry was
-                            // always asked here — `NoRegistry` (#246) cannot
-                            // arise, and like every not-validated reason
-                            // other than `Undecodable` it would fall through
-                            // the `_` arm below: not asked/not checkable is
-                            // never a finding (RFC 09 §5.1 O4).
-                            let d = crate::model::decode::decode_sample(
-                                fleet,
-                                store,
-                                Some(slices),
-                                &s.key,
-                                Some(&s.encoding),
-                                &s.payload.to_bytes(),
-                            )
-                            .await;
-                            match d.verdict {
-                                crate::Verdict::NotValidated(
-                                    zenkey::schema::validate::NotValidated::Undecodable,
-                                ) => {
-                                    let e = undecodable.entry(s.key.clone()).or_insert_with(|| {
-                                        (
-                                            d.decode_error
-                                                .unwrap_or_else(|| "does not decode".into()),
-                                            0,
-                                        )
-                                    });
-                                    e.1 += 1;
-                                }
-                                crate::Verdict::Invalid(errors) => {
-                                    let e = invalid
-                                        .entry(s.key.clone())
-                                        .or_insert_with(|| (errors.join("; "), 0));
-                                    e.1 += 1;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Some(crate::StreamItem::Dropped(n)) => dropped += n,
-            Some(crate::StreamItem::Event(crate::FleetEvent::NodeDown(key))) => {
-                // A device token first: `token_identity` would read it as
-                // its producer's, and a device's restart must excuse only
-                // the counters under that device (v1.39).
-                if let Some(id) = crate::bus::roster::token_device(base, &key) {
-                    device_down.insert(id);
-                } else if let Some(id) = crate::bus::roster::token_identity(base, &key) {
-                    alive_down.insert(id);
-                }
-            }
-            Some(crate::StreamItem::Event(crate::FleetEvent::NodeUp(key))) => {
-                // A cycle is down *then* up. History replays the tokens
-                // alive at window start as bare `NodeUp`s; those excuse
-                // nothing.
-                if let Some((origin, producer, device)) =
-                    crate::bus::roster::token_device(base, &key)
-                {
-                    if device_down.remove(&(origin.clone(), producer.clone(), device.clone())) {
-                        kinds.device_alive_cycled(&origin, &producer, &device);
-                    }
-                } else if let Some((origin, producer)) =
-                    crate::bus::roster::token_identity(base, &key)
-                    && alive_down.remove(&(origin.clone(), producer.clone()))
-                {
-                    kinds.alive_cycled(&origin, &producer);
-                }
-            }
-            Some(_) => continue,
-            None => break,
-        }
-    }
-    let keys_seen = facts_cache.len();
-    monitor.shutdown().await?;
-
-    // Key-population budgets (#221): the window's distinct keys, grouped
-    // into `{var}` families per origin, judged against each family's
-    // declared `cardinality`.
-    let budgets =
-        crate::judge::budget::BudgetObservation::observe(base, slices, facts_cache.keys());
-
-    let window_s = window.as_secs_f64();
-    let mut findings = Vec::new();
-
-    let mut ex = Examples::new(FINDING_CAP);
-    for (key, (error, n)) in &undecodable {
-        ex.push_with(|| {
-            finding(
-                DoctorSeverity::Error,
-                CheckId::PayloadUndecodable,
-                key.clone(),
-                format!(
-                    "payload does not decode as its declared type: {error} ({n} sample(s) tried)"
-                ),
-                Some("RFC 08 §7"),
-            )
-        });
-    }
-    emit_capped(&mut findings, ex, CheckId::PayloadUndecodable, SAME_FINDING);
-    let mut ex = Examples::new(FINDING_CAP);
-    for (key, (violations, n)) in &invalid {
-        ex.push_with(|| {
-            finding(
-                DoctorSeverity::Error,
-                CheckId::PayloadInvalid,
-                key.clone(),
-                format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
-                Some("RFC 08 §7"),
-            )
-        });
-    }
-    emit_capped(&mut findings, ex, CheckId::PayloadInvalid, SAME_FINDING);
-    findings.extend(judge_qos_observed(&qos_bad));
-    if !foreign_stampers.is_empty() {
-        let mut named: Vec<String> = foreign_stampers
-            .iter()
-            .map(|(zid, n)| format!("{zid} ({n} sample(s))"))
-            .collect();
-        named.sort();
-        findings.push(finding(
-            DoctorSeverity::Info,
-            CheckId::TimestampStampedElsewhere,
-            "fleet".to_string(),
-            format!(
-                "HLCs on this bus are stamped by {} node(s) that are not the publishing \
-                 session — a deployment with router-side timestamping, which is legal and \
-                 common. Latency measured from these stamps is stamper→observer, not \
-                 publisher→observer: {}",
-                foreign_stampers.len(),
-                named.join(", ")
-            ),
-            Some("RFC 09 §5.1 O7"),
-        ));
-    }
-    let mut ex = Examples::new(FINDING_CAP);
-    for (key, n) in &unregistered {
-        ex.push_with(|| {
-            finding(
-                DoctorSeverity::Warning,
-                CheckId::UnregisteredTraffic,
-                key.clone(),
-                format!(
-                    "{n} sample(s) on a subject the producer's slice does not declare — \
-                     for a conforming producer, a subject that is not registered does not exist"
-                ),
-                Some("RFC 08 §2"),
-            )
-        });
-    }
-    emit_capped(
-        &mut findings,
-        ex,
-        CheckId::UnregisteredTraffic,
-        SAME_FINDING,
-    );
-    // Over-rate only, and only when provable: within any window no longer
-    // than an hour, exceeding the hourly cap is conclusive. Absence or
-    // under-rate in a bounded window is never a finding (O1/O4).
-    if window <= Duration::from_secs(3600) {
-        for ((family, rate), RateWindow { cap, seen: count }) in &event_counts {
-            let Some(cap) = cap else {
-                continue;
-            };
-            if count > cap {
-                findings.push(finding(
-                    DoctorSeverity::Warning,
-                    CheckId::RateOverDeclared,
-                    family.clone(),
-                    format!(
-                        "{count} event(s) in {window_s:.0}s exceeds the declared \
-                         `{rate}` cap ({cap}/h)"
-                    ),
-                    Some("RFC 04 §1.3"),
-                ));
-            }
-        }
-    }
-
-    findings.extend(judge_cardinality(slices, &budgets, window_s));
-    findings.extend(crate::judge::kind::judge_kind(&kinds, window_s));
-
-    // Field intelligence (#223): the three field-granular checks, judged
-    // with what is known per key — declared `ttl_s`/type from the resolved
-    // facts, declared paths from the describe sets the GET phase gathered.
-    let field_ctx = field_context_from(slices, described, &facts_cache);
-    findings.extend(crate::judge::field::judge_fields(
-        &fields, window_s, &field_ctx,
-    ));
-
-    Ok((
-        findings,
-        crate::report::ObservationSummary {
-            window_s,
-            scopes,
-            samples,
-            keys_seen,
-            dropped,
-            synthetic_marked: synthetic,
-            // The per-path table is bounded like every other table here, and
-            // its cost is a wire fact (RFC 09 §5.1 O6).
-            field_paths_dropped: fields.dropped_paths(),
-            facts_evicted: facts_cache.evicted(),
-        },
-        seen,
-    ))
 }
 
-/// The per-key context the field judges need (#223), built from the listen
-/// phase's resolved facts and the already-gathered describe sets — pure, so
-/// the join is testable without a bus.
-fn field_context_from(
-    slices: &crate::model::registry::SliceSet,
-    described: &[(String, zenkey::schema::SchemaSet)],
-    facts: &crate::model::facts::FactsCache,
-) -> std::collections::BTreeMap<String, crate::judge::field::KeyFieldContext> {
-    use std::collections::BTreeMap;
+// ─── the checks that read presence ──────────────────────────────────────────
 
-    let mut declared_cache: BTreeMap<(String, String), Option<crate::judge::field::DeclaredPaths>> =
-        BTreeMap::new();
-    let mut ctx = BTreeMap::new();
-    for (key, f) in facts.iter() {
-        let mut c = crate::judge::field::KeyFieldContext::default();
-        if let crate::model::facts::Registration::Registered(sf) = &f.registration {
-            c.ttl_s = sf.ttl_s;
-            c.type_name = Some(sf.type_name.clone());
-            if let Some(producer) = crate::judge::common::producer_of(f, Some(slices))
-                && !sf.type_name.is_empty()
-            {
-                let declared = declared_cache
-                    .entry((producer.clone(), sf.type_name.clone()))
-                    .or_insert_with(|| {
-                        described
-                            .iter()
-                            .find(|(name, _)| *name == producer)
-                            .and_then(|(_, set)| set.get(&sf.type_name))
-                            .and_then(|schema| schema.json_document())
-                            .and_then(crate::judge::field::DeclaredPaths::from_json_schema)
-                    });
-                c.declared = declared.clone();
-            }
-        }
-        ctx.insert(key.to_string(), c);
-    }
-    ctx
-}
-
-/// The `qos-observed-mismatch` findings from the listen window's per-key
-/// aggregates: `key → (declared profile, mismatched, judged)` — pure, so
-/// the cap arithmetic is testable without a bus.
-///
-/// Filter **then** cap, [`judge_cardinality`]'s pattern (deep-review D4):
-/// the map holds every judged key, most of them clean, so capping the map
-/// *entries* first silently dropped violators past the first
-/// [`FINDING_CAP`] keys and made the remainder note miscount. The cap
-/// bounds the findings; the filter decides what a finding is.
-fn judge_qos_observed(
-    qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
-) -> Vec<DoctorFinding> {
-    let mut findings = Vec::new();
-
-    let mut ex = Examples::new(FINDING_CAP);
-
-    for (key, (declared, bad, total)) in qos_bad.iter().filter(|(_, (_, bad, _))| *bad > 0) {
-        ex.push_with(|| {
-            finding(
-                DoctorSeverity::Warning,
-                CheckId::QosObservedMismatch,
-                key.clone(),
-                format!(
-                    "{bad} of {total} sample(s) did not ride the declared {declared} — this \
-                     is what actually rode: an interceptor MAY rewrite QoS, so it is a \
-                     deviation, not proof of the publisher"
-                ),
-                Some("RFC 04 §3"),
-            )
-        });
-    }
-    emit_capped(
-        &mut findings,
-        ex,
-        CheckId::QosObservedMismatch,
-        SAME_FINDING,
-    );
-    findings
-}
-
-/// Judge introspect coverage — "alive ⇒ callable" (RFC 04 §5) — against the
-/// producers that were actually asked. Pure, so the O4 boundary is testable
-/// without a bus.
-///
-/// `locals: Some` is the `--registry` run: only the producers the local
-/// slices name were queried, so only those count toward coverage — a live
-/// producer whose slice a *partial* registry does not carry was never asked,
-/// and counting it as "did not answer" would be a false finding (RFC 09
-/// §5.1 O4; deep-review D3). `None` is the wildcard sweep, where every
-/// roster producer was in the fan-in. Either way the evidence states the
-/// scope it checked.
-///
-/// Matching follows the roster's own conventions: an instance suffix shares
-/// its base slice (`sysinfo-2` → `sysinfo`, RFC 03 §1.5), and a service
-/// origin's token names the service as its producer (RFC 06 §5), matched by
-/// the slice's declared origin or name.
-fn judge_introspect_coverage(
-    roster: &std::collections::BTreeMap<String, Vec<String>>,
-    locals: Option<&[RegistrySlice]>,
-    answered: usize,
-) -> Option<DoctorFinding> {
-    let live: usize = roster.values().map(Vec::len).sum();
-
-    let (in_scope, scope) = match locals {
-        None => (
-            live,
-            "scope: the whole roster (fleet-wide wildcard sweep)".to_string(),
-        ),
-        Some(locals) => {
-            let named = |origin: &str, producer: &str| {
-                let base_name = zenkey::grammar::Producer::parse_chunk(producer)
-                    .map(|p| p.name().to_string())
-                    .unwrap_or_else(|_| producer.to_string());
-                locals.iter().any(|l| {
-                    l.name == base_name
-                        || l.service_origin.as_ref().map(Declared::token) == Some(origin)
-                })
-            };
-            let in_scope: usize = roster
-                .iter()
-                .map(|(origin, producers)| producers.iter().filter(|p| named(origin, p)).count())
-                .sum();
-            let mut names: Vec<&str> = locals.iter().map(|l| l.name.as_str()).collect();
-            names.sort_unstable();
-            names.dedup();
-            let not_asked = live - in_scope;
-            (
-                in_scope,
-                format!(
-                    "scope: the producer(s) the local registry names ({}); {} other \
-                     live producer(s) were not asked and are not counted (O4)",
-                    names.join(", "),
-                    not_asked
-                ),
-            )
-        }
+/// §6, through the runtime's own diagnosis ([`zk2::ownership::compare`])
+/// over the two reads, the served descriptors and the held contracts.
+fn split_brain(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::SplitBrain;
+    let before = match &p.before {
+        Ok(b) => *b,
+        Err(why) => return CheckReport::unobservable(C, why.clone()),
     };
-    (answered < in_scope).then(|| {
-        finding(
-            DoctorSeverity::Error,
-            CheckId::IntrospectCoverage,
-            "fleet",
-            format!(
-                "{} of {} live producer(s) in scope did not answer introspect — \
-                 alive ⇒ callable, so this is a finding, not a boot race; {scope}",
-                in_scope - answered,
-                in_scope
-            ),
-            Some("RFC 04 §5"),
-        )
-    })
-}
-
-/// Judge one state family's samples against its declared ttl — pure, so the
-/// freshness math is testable without a bus. Returns the stale findings and
-/// the count of unstamped samples (aggregated by the caller into the one
-/// `unstamped-state` finding).
-fn judge_state_samples(
-    samples: &[crate::StateSample],
-    ttl: i64,
-    now: std::time::SystemTime,
-) -> (Vec<DoctorFinding>, usize) {
-    let mut findings = Vec::new();
-
-    let mut unstamped = 0usize;
-
-    for sample in samples {
-        match sample.timestamp {
-            Some(ts) => {
-                let stamped = ts.get_time().to_system_time();
-                if let Ok(age) = now.duration_since(stamped)
-                    && age.as_secs() as i64 > ttl
-                {
-                    findings.push(finding(
-                        DoctorSeverity::Error,
-                        CheckId::StaleState,
-                        sample.key.clone(),
-                        format!(
-                            "{}s old against ttl {ttl}s (refresh <= ttl/2)",
-                            age.as_secs()
-                        ),
-                        Some("RFC 04 §1.2"),
-                    ));
-                }
-            }
-            None => unstamped += 1,
-        }
+    let descriptors = p.descriptors();
+    let held: Vec<Arc<Contract>> = p
+        .obs
+        .contracts
+        .values()
+        .filter_map(|r| match r {
+            Ok(ContractState::Held(rev)) => Some(rev.shared_contract()),
+            _ => None,
+        })
+        .collect();
+    let refs: Vec<&Contract> = held.iter().map(|c| &**c).collect();
+    let d = zk2::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
+    let candidates = zk2::ownership::candidates(&before.tokens, &p.after.tokens).len();
+    let findings = d
+        .findings
+        .iter()
+        .map(|sb| {
+            let instances: Vec<String> = sb.instances.iter().map(ToString::to_string).collect();
+            finding(
+                C,
+                DoctorSeverity::Error,
+                format!("{} {}", sb.service, sb.iface),
+                format!(
+                    "{} instances hold its interface token in two presence reads {:.1}s apart \
+                     ({}), and at least two expose an exclusive resource. Nothing is fenced: \
+                     exclusivity is redundancy.v1's",
+                    instances.len(),
+                    p.grace_s(),
+                    instances.join(", ")
+                ),
+            )
+        })
+        .collect();
+    let mut undecided: Vec<Unjudged> = d
+        .undecided
+        .iter()
+        .map(|u| {
+            unjudged(
+                format!("{} {}", u.holders.service, u.holders.iface),
+                format!(
+                    "held by {} instances, and whether two expose an exclusive resource \
+                     cannot be decided: {}",
+                    u.holders.instances.len(),
+                    u.why.join("; ")
+                ),
+            )
+        })
+        .collect();
+    if !p.complete {
+        undecided.push(incomplete("no split-brain seen is not none"));
     }
-    (findings, unstamped)
+    let explained = if candidates > 0 {
+        format!(
+            "; {candidates} held by several instances in both reads, of which at most one \
+             exposes an exclusive resource (replicated serving)"
+        )
+    } else {
+        String::new()
+    };
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "no interface held by two instances of one service in both reads {:.1}s apart \
+             exposes an exclusive resource{explained}; the tokenless set holds no interface \
+             token and is not covered",
+            p.grace_s()
+        ),
+    )
 }
 
-/// Judge every declared `{var}` family's key population against its declared
-/// `cardinality` (#221) — pure, so the acceptance case (declared 16, 40
-/// observed) is testable without a bus.
-///
-/// The honesty rules, verbatim from the issue:
-///
-/// - Observed **over** declared is a finding (RFC 04 §1.2's budget is a
-///   MUST); observed **under** declared is **not** — an idle host declares
-///   nothing wrong, and a bounded window proves a lower bound, never the
-///   population (RFC 09 §5.1 O4/O6). The window rides in the evidence.
-/// - `{path...}` rest-variable families are unbounded by construction and
-///   are **exempt and say so** — "exempt: rest-variable", never a silent
-///   skip and never a pass (the RFC 08 §6.1 v1.20 shape for subject checks).
-/// - Judged **per origin**: RFC 04 §1 bounds cardinality per producer, so
-///   one origin over the bound is conclusive and two origins' healthy
-///   populations are never summed into a fake violation.
-fn judge_cardinality(
-    slices: &crate::model::registry::SliceSet,
-    observed: &crate::judge::budget::BudgetObservation,
-    window_s: f64,
-) -> Vec<DoctorFinding> {
+/// Whether a role must be bound, as far as can be told.
+enum Need {
+    Required,
+    Optional,
+    /// The descriptor does not say: a role a component's own manifest
+    /// declares carries no `optional` (§3.3), or its contract could not
+    /// be read.
+    Unknown(String),
+}
+
+/// §3.2 R5 and the unbound-role rule: each role's bindings against the
+/// providers this reader sees, through the runtime's own edges (R3).
+fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::BindingUnsatisfied;
+    let descriptors = p.descriptors();
+    let edges: BTreeSet<(String, String)> = zk2::presence::edges(&descriptors, &p.after.tokens)
+        .into_iter()
+        .map(|e| (e.consumer, e.role))
+        .collect();
+    let undescribed: Vec<Addr> = p
+        .now
+        .iter()
+        .filter(|(_, i)| i.descriptor.is_some_and(|r| r.descriptor().is_none()))
+        .map(|((a, _), _)| a.clone())
+        .collect();
     let mut findings = Vec::new();
-
-    let mut over: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
-
-    for slice in slices.slices() {
-        for s in &slice.subjects {
-            if !s.path.contains('{') {
-                continue; // a literal subject's population is 1 by construction
-            }
-            if s.path.contains("...") {
-                let seen: usize = observed
-                    .family(&slice.name, &s.path)
-                    .map(|origins| origins.values().map(|keys| keys.len()).sum())
-                    .unwrap_or(0);
-                findings.push(finding(
-                    DoctorSeverity::Info,
-                    CheckId::CardinalityOverDeclared,
-                    format!("{}/{}", slice.name, s.path),
-                    format!(
-                        "exempt: rest-variable — a `{{var...}}` family is unbounded by \
-                         construction, so its declared cardinality is not a bound this \
-                         check can pass or fail; {seen} distinct key(s) observed in \
-                         {window_s:.0}s"
-                    ),
-                    Some("RFC 08 §6.1"),
-                ));
+    let mut undecided = p.undescribed("its roles cannot be read");
+    let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+    let (mut bound, mut unbound) = (0usize, 0usize);
+    for (_, _, d) in p.served() {
+        for r in &d.requires {
+            let key = (d.service.clone(), r.role.clone());
+            if !seen.insert(key.clone()) {
                 continue;
             }
-            let Some(declared) = s.cardinality else {
-                continue; // nothing declared, nothing to judge (the RFC 08 §5
-                // lint that requires the field is the producer build's)
-            };
-            let Some(origins) = observed.family(&slice.name, &s.path) else {
-                continue; // unobserved is not "within budget" — no verdict
-            };
-            for (origin, keys) in origins {
-                if keys.len() as i64 <= declared {
-                    continue; // under/at declared: not a finding (O4)
-                }
-                let examples = Examples::collect(
-                    crate::judge::common::EXPANSION_CAP,
-                    keys.iter().map(String::as_str),
-                );
-                let subject = if origin.starts_with('@') {
-                    format!("{origin}/{}", s.path)
-                } else {
-                    format!("{origin}/{}/{}", slice.name, s.path)
-                };
-                over.push_with(|| {
-                    finding(
-                        DoctorSeverity::Warning,
-                        CheckId::CardinalityOverDeclared,
+            let subject = format!("{} {}", d.service, r.role);
+            let need = need_of(p, d, r);
+            if r.bindings.is_empty() {
+                unbound += 1;
+                if let Need::Required = need {
+                    findings.push(finding(
+                        C,
+                        DoctorSeverity::Error,
                         subject,
                         format!(
-                            "{} distinct key(s) observed in {window_s:.0}s exceed the \
-                         declared cardinality {declared} — e.g. {}. A bounded window \
-                         observes a lower bound: the population is at least this",
-                            keys.len(),
-                            examples.as_slice().join(", ")
+                            "required role {} ({}) is bound to nothing: an owner whose \
+                             configuration leaves a required role unbound MUST NOT start (§3.2)",
+                            r.role, r.interface
                         ),
-                        Some("RFC 04 §1.2"),
-                    )
-                });
+                    ));
+                }
+                continue;
+            }
+            bound += 1;
+            if edges.contains(&key) {
+                continue;
+            }
+            if !p.complete {
+                undecided.push(unjudged(
+                    subject,
+                    "a presence read ended at its timeout: a provider may be present and unseen",
+                ));
+                continue;
+            }
+            let hidden: Vec<String> = undescribed
+                .iter()
+                .filter(|a| {
+                    r.bindings
+                        .iter()
+                        .any(|b| zk2::consumer::Provider::parse(b).is_ok_and(|pat| pat.matches(a)))
+                })
+                .map(ToString::to_string)
+                .collect();
+            if !hidden.is_empty() {
+                undecided.push(unjudged(
+                    subject,
+                    format!(
+                        "{} match its bindings and their descriptors did not read: they may \
+                         provide {} tokenlessly",
+                        hidden.join(", "),
+                        r.interface
+                    ),
+                ));
+                continue;
+            }
+            let (severity, why) = match &need {
+                Need::Required => (DoctorSeverity::Error, "a required role".to_owned()),
+                Need::Optional => (
+                    DoctorSeverity::Info,
+                    "an optional role: the consumer runs without it".to_owned(),
+                ),
+                Need::Unknown(why) => (
+                    DoctorSeverity::Warning,
+                    format!("whether it is required cannot be told: {why}"),
+                ),
+            };
+            findings.push(finding(
+                C,
+                severity,
+                subject,
+                format!(
+                    "{why}; its bindings ({}) select no provider of {} visible to this reader — \
+                     no interface token, no descriptor listing it (a read access control \
+                     refuses is empty too, §8.1)",
+                    r.bindings.join(", "),
+                    r.interface
+                ),
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{bound} bound role(s), each selecting a provider present now{}",
+            if unbound > 0 {
+                format!("; {unbound} optional role(s) left unbound, as §3.2 allows")
+            } else {
+                String::new()
+            }
+        ),
+    )
+}
+
+fn need_of(p: &Presence<'_>, d: &Descriptor, r: &zenkey_model::descriptor::RequireEntry) -> Need {
+    let Some(by) = &r.declared_by else {
+        return Need::Unknown(
+            "its component's manifest declares it, and a descriptor carries no `optional` \
+             for such a role (§3.3)"
+                .into(),
+        );
+    };
+    let Some(entry) = d.interfaces.iter().find(|e| &e.iface == by) else {
+        return Need::Unknown(format!(
+            "it is declared by {by}, which the descriptor does not list"
+        ));
+    };
+    match p.entry_revision(entry) {
+        Ok(rev) => match rev.contract().requires.get(&r.role) {
+            Some(q) if q.optional => Need::Optional,
+            Some(_) => Need::Required,
+            None => Need::Unknown(format!("{by}'s contract declares no role {}", r.role)),
+        },
+        Err(why) => Need::Unknown(why),
+    }
+}
+
+/// §9.8: every pair of revisions one interface's providers serve, through
+/// the contract CI's own classifier.
+fn contract_drift(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ContractDrift;
+    let mut by_iface: BTreeMap<IfaceId, BTreeMap<Fingerprint, Vec<String>>> = BTreeMap::new();
+    // The minor each revision's descriptors state: an order hint, read only
+    // when they agree (see `classify`).
+    let mut minors: BTreeMap<Fingerprint, BTreeSet<u64>> = BTreeMap::new();
+    for (a, i, d) in p.served() {
+        for e in &d.interfaces {
+            let (Ok(iface), Ok(fp)) =
+                (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+            else {
+                continue;
+            };
+            minors.entry(fp.clone()).or_default().insert(e.minor);
+            by_iface
+                .entry(iface)
+                .or_default()
+                .entry(fp)
+                .or_default()
+                .push(format!("{a}@{i}"));
+        }
+    }
+    let minor = |fp: &Fingerprint| match minors.get(fp) {
+        Some(m) if m.len() == 1 => m.first().copied(),
+        _ => None,
+    };
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    // A token held by an instance whose descriptor did not read, at a prefix
+    // no descriptor names: a revision that exists and cannot be retrieved.
+    for ((a, i), inst) in &p.now {
+        if inst.descriptor.is_some_and(|r| r.descriptor().is_some()) {
+            continue;
+        }
+        for (iface, fps) in &inst.alive {
+            for fp16 in fps {
+                let named = by_iface
+                    .get(iface)
+                    .is_some_and(|m| m.keys().any(|f| f.hex().fp16() == *fp16));
+                if !named {
+                    undecided.push(unjudged(
+                        format!("{iface} {fp16}"),
+                        format!(
+                            "{a}@{i} holds a token at this prefix and its descriptor did not \
+                             read: a revision is retrieved by its full fingerprint, never a \
+                             prefix (§8.4)"
+                        ),
+                    ));
+                }
             }
         }
     }
-    emit_capped(
-        &mut findings,
-        over,
-        CheckId::CardinalityOverDeclared,
-        "more origin famil(y|ies) over their declared cardinality",
+    let mut compatible = 0usize;
+    let mut single = 0usize;
+    for (iface, revisions) in &by_iface {
+        let fps: Vec<&Fingerprint> = revisions.keys().collect();
+        if fps.len() == 1 {
+            single += 1;
+        }
+        for (n, a) in fps.iter().enumerate() {
+            for b in &fps[n + 1..] {
+                let subject = format!("{iface} {} {}", a.hex().fp16(), b.hex().fp16());
+                let (ra, rb) = match (p.revision(iface, a), p.revision(iface, b)) {
+                    (Ok(ra), Ok(rb)) => (ra, rb),
+                    (Err(why), _) | (_, Err(why)) => {
+                        undecided.push(unjudged(subject, format!("not classified: {why}")));
+                        continue;
+                    }
+                };
+                let served =
+                    |fp: &Fingerprint| format!("{fp} (served by {})", revisions[fp].join(", "));
+                match classify((ra, minor(a)), (rb, minor(b))) {
+                    Drift::Compatible => compatible += 1,
+                    Drift::Found { class, why } => findings.push(finding(
+                        C,
+                        if class == Class::Breaking {
+                            DoctorSeverity::Error
+                        } else {
+                            DoctorSeverity::Warning
+                        },
+                        subject,
+                        format!(
+                            "{} and {}: {why} — providers of one interface at revisions a \
+                             consumer cannot bind to alike (R4)",
+                            served(a),
+                            served(b)
+                        ),
+                    )),
+                    Drift::Unordered(why) => undecided.push(unjudged(subject, why)),
+                }
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} interface(s): {single} served at one revision{}",
+            by_iface.len(),
+            if compatible > 0 {
+                format!(", and {compatible} pair(s) of revisions the classifier calls compatible")
+            } else {
+                String::new()
+            }
+        ),
+    )
+}
+
+/// How a pair of revisions served at once classifies.
+enum Drift {
+    Compatible,
+    Found {
+        class: Class,
+        why: String,
+    },
+    /// The class depends on which revision came first, and nothing says.
+    Unordered(String),
+}
+
+/// One pair through the classifier (§9.8). It classifies an earlier
+/// revision against a later one, never the reverse — its rules already
+/// cover an old reader of a new writer and the other way round — so the
+/// pair needs an order. The bus carries none that binds: the `minor` the
+/// descriptors state for each revision (§3.3), informative and outside the
+/// fingerprint, is read as a hint when every descriptor naming a revision
+/// agrees on it and the two differ. Otherwise both orders are classified:
+/// compatible either way is clean, review or breaking either way is the
+/// finding (the milder class), and a disagreement is left unjudged,
+/// because the answer is the order's.
+fn classify((a, ma): (&Revision, Option<u64>), (b, mb): (&Revision, Option<u64>)) -> Drift {
+    use zenkey_model::compat::{Revision as Compared, compare};
+    let (ca, cb) = (
+        Compared::of_bundle(a.bundle()),
+        Compared::of_bundle(b.bundle()),
     );
-    findings
+    let say = |earlier: &Revision, later: &Revision, v: &zenkey_model::compat::Verdict| {
+        let class = v.class();
+        let first = v
+            .findings
+            .iter()
+            .find(|f| f.class == class)
+            .map(|f| format!(" ({} at {}: {})", f.rule, f.at, f.detail))
+            .unwrap_or_default();
+        let more = match v.findings.len() {
+            0 | 1 => String::new(),
+            n => format!(" and {} more change(s)", n - 1),
+        };
+        format!(
+            "{} → {} is {}{first}{more}",
+            earlier.fingerprint().hex().fp16(),
+            later.fingerprint().hex().fp16(),
+            class.as_str()
+        )
+    };
+    let ordered = match (ma, mb) {
+        (Some(x), Some(y)) if x < y => Some((a, &ca, x, b, &cb, y)),
+        (Some(x), Some(y)) if y < x => Some((b, &cb, y, a, &ca, x)),
+        _ => None,
+    };
+    if let Some((e, ce, me, l, cl, ml)) = ordered {
+        let v = compare(ce, cl);
+        return match v.class() {
+            Class::Compatible => Drift::Compatible,
+            class => Drift::Found {
+                class,
+                why: format!(
+                    "{}, ordered by the minors their descriptors state ({me} < {ml})",
+                    say(e, l, &v)
+                ),
+            },
+        };
+    }
+    let (ab, ba) = (compare(&ca, &cb), compare(&cb, &ca));
+    match (ab.class(), ba.class()) {
+        (Class::Compatible, Class::Compatible) => Drift::Compatible,
+        (x, y) if x != Class::Compatible && y != Class::Compatible => Drift::Found {
+            class: x.min(y),
+            why: format!(
+                "{}; {} — whichever came first",
+                say(a, b, &ab),
+                say(b, a, &ba)
+            ),
+        },
+        _ => Drift::Unordered(format!(
+            "the class depends on which revision came first, and their minors do not say: \
+             {}; {}",
+            say(a, b, &ab),
+            say(b, a, &ba)
+        )),
+    }
+}
+
+/// §8.4: every revision a descriptor names, as retrieval found it.
+fn contract_unavailable(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ContractUnavailable;
+    let mut named: BTreeMap<(IfaceId, Fingerprint), Vec<String>> = BTreeMap::new();
+    for (a, i, d) in p.served() {
+        for e in &d.interfaces {
+            if let (Ok(iface), Ok(fp)) =
+                (IfaceId::from_str(&e.iface), Fingerprint::parse(&e.contract))
+            {
+                named
+                    .entry((iface, fp))
+                    .or_default()
+                    .push(format!("{a}@{i}"));
+            }
+        }
+    }
+    let mut findings = Vec::new();
+    let mut undecided = p.undescribed("the revisions it implements are unknown");
+    for ((iface, fp), by) in &named {
+        let subject = format!("{iface} {fp}");
+        match p.obs.contracts.get(&(iface.clone(), fp.clone())) {
+            Some(Ok(ContractState::Held(_))) => {}
+            Some(Ok(ContractState::Unavailable { refused })) => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject,
+                format!(
+                    "named by {}; no holder served a bundle that verified ({}): an owner MUST \
+                     hold the bundle of every interface it implements (§8.2), and a tool never \
+                     decodes with an unverified one",
+                    by.join(", "),
+                    if refused.is_empty() {
+                        "no reply".to_owned()
+                    } else {
+                        format!("refused: {}", refused.join(", "))
+                    }
+                ),
+            )),
+            Some(Ok(ContractState::Unreadable { reason })) => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject,
+                format!(
+                    "named by {}; a bundle verified and its contract does not read: {reason}",
+                    by.join(", ")
+                ),
+            )),
+            Some(Err(e)) => undecided.push(unjudged(
+                subject,
+                format!("the retrieval could not be put on the bus: {e}"),
+            )),
+            None => undecided.push(unjudged(subject, "not retrieved")),
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} revision(s) named by descriptors, each retrieved from a holder and verified",
+            named.len()
+        ),
+    )
+}
+
+/// §3.3: every descriptor through `zenkey_model::descriptor::check`, with
+/// the contracts its entries name.
+///
+/// The presence read already checked each reply without contracts, which
+/// is every code but D004–D007: a reply that failed is `Invalid`, with its
+/// codes. A served one is checked again here against the revisions it
+/// names, as the runtime checks its own before serving it — re-encoded
+/// from the parsed record, which the first check proved the reply's shape.
+fn descriptor_invalid(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::DescriptorInvalid;
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut checked = 0usize;
+    for ((a, i), inst) in &p.now {
+        let subject = format!("{a}@{i}");
+        let Some(read) = inst.descriptor else {
+            continue;
+        };
+        let d = match read {
+            DescriptorRead::Served(d) => d,
+            DescriptorRead::Invalid(why) => {
+                findings.push(finding(C, DoctorSeverity::Error, subject, why.clone()));
+                continue;
+            }
+            other => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("{}: silence is not a verdict", undescribed_why(other)),
+                ));
+                continue;
+            }
+        };
+        checked += 1;
+        let mut contracts: Vec<&Contract> = Vec::new();
+        let mut syntax_only = Vec::new();
+        for e in &d.interfaces {
+            match p.entry_revision(e) {
+                Ok(rev) => contracts.push(rev.contract()),
+                Err(why) => syntax_only.push(why),
+            }
+        }
+        let text = serde_json::to_string(&**d).expect("a descriptor serializes");
+        let (_, report) = zenkey_model::descriptor::check(&text, &contracts);
+        let codes: Vec<String> = report
+            .errors()
+            .chain(report.warnings())
+            .map(|f| format!("{} {}: {}", f.code, f.at, f.message))
+            .collect();
+        if !codes.is_empty() {
+            let severity = if report.has_errors() {
+                DoctorSeverity::Error
+            } else {
+                DoctorSeverity::Warning
+            };
+            findings.push(finding(C, severity, subject, codes.join("; ")));
+        } else if !syntax_only.is_empty() {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "checked for syntax only, D004–D007 need the contract: {}",
+                    syntax_only.join("; ")
+                ),
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{checked} descriptor(s) pass the descriptor check against the contracts they name"
+        ),
+    )
+}
+
+/// §8.1: each instance's tokens against its descriptor. A finding must
+/// hold in both reads: start-up declares the instance token before the
+/// interface tokens, and a capability lost undeclares a token as the
+/// descriptor changes.
+fn token_missing(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::TokenMissing;
+    if let Err(why) = &p.before {
+        return CheckReport::unobservable(C, why.clone());
+    }
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let mut checked = 0usize;
+    for (key, now) in &p.now {
+        let (a, i) = key;
+        let subject = format!("{a}@{i}");
+        let Some(then) = p.then.get(key) else {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "it appeared within the {:.1}s grace period: a token's absence is judged \
+                     only when it lasts",
+                    p.grace_s()
+                ),
+            ));
+            continue;
+        };
+        if !now.instance_token && !then.instance_token && !now.alive.is_empty() {
+            if p.complete {
+                findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    subject.clone(),
+                    "holds interface tokens and no instance token, in both reads: every \
+                     instance MUST hold one",
+                ));
+            } else {
+                undecided.push(incomplete("an instance token unseen may be held"));
+            }
+        }
+        let d = match now.descriptor {
+            Some(DescriptorRead::Served(d)) => d,
+            Some(other) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!(
+                        "its descriptor did not read ({}): its tokens cannot be checked \
+                         against it",
+                        undescribed_why(other)
+                    ),
+                ));
+                continue;
+            }
+            None => continue,
+        };
+        checked += 1;
+        let listed: BTreeMap<&str, &InterfaceEntry> =
+            d.interfaces.iter().map(|e| (e.iface.as_str(), e)).collect();
+        // Tokens the descriptor does not account for.
+        for (iface, fps) in &now.alive {
+            let at = format!("{subject} {iface}");
+            let held_then = then.alive.contains_key(iface);
+            match listed.get(iface.to_string().as_str()) {
+                None if held_then => findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    at,
+                    format!("holds a token for {iface}, which its descriptor does not list"),
+                )),
+                Some(e) if !e.token && held_then => findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    at,
+                    format!(
+                        "holds a token for {iface}, which its descriptor marks tokenless \
+                         (`\"token\": false`)"
+                    ),
+                )),
+                Some(e) => {
+                    let named = Fingerprint::parse(&e.contract).ok().map(|f| f.hex().fp16());
+                    let other: Vec<String> = fps
+                        .iter()
+                        .filter(|f| Some(*f) != named.as_ref())
+                        .map(ToString::to_string)
+                        .collect();
+                    if e.token && !other.is_empty() && held_then {
+                        findings.push(finding(
+                            C,
+                            DoctorSeverity::Error,
+                            at,
+                            format!(
+                                "its token names revision prefix {}, and its descriptor lists \
+                                 {iface} at {}",
+                                other.join(", "),
+                                e.contract
+                            ),
+                        ));
+                    }
+                }
+                None => {}
+            }
+        }
+        // Interfaces the descriptor lists, outside the tokenless set.
+        for e in d.interfaces.iter().filter(|e| e.token) {
+            let Ok(iface) = IfaceId::from_str(&e.iface) else {
+                continue;
+            };
+            let at = format!("{subject} {iface}");
+            let held = now.alive.contains_key(&iface);
+            let held_then = then.alive.contains_key(&iface);
+            let exposed = match p.entry_revision(e) {
+                Ok(rev) => d.exposed(rev.contract()).map(|r| r.len()),
+                Err(why) => {
+                    if !held {
+                        undecided.push(unjudged(
+                            at,
+                            format!("whether it exposes a resource needs its contract: {why}"),
+                        ));
+                    }
+                    continue;
+                }
+            };
+            match (exposed, held) {
+                (Some(0), true) if held_then => findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    at,
+                    format!(
+                        "holds a token for {iface} and exposes none of its resources: an \
+                         instance holds one per interface of which it exposes a resource, and \
+                         none otherwise"
+                    ),
+                )),
+                (Some(n), false) if n > 0 && !held_then => {
+                    if p.complete {
+                        findings.push(finding(
+                            C,
+                            DoctorSeverity::Error,
+                            at,
+                            format!(
+                                "exposes {n} resource(s) of {iface}, outside the tokenless set, \
+                                 and holds no interface token for it in two reads {:.1}s apart",
+                                p.grace_s()
+                            ),
+                        ));
+                    } else {
+                        undecided.push(incomplete("a token unseen may be held"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{checked} instance(s): every token agrees with its descriptor, and each interface \
+             exposed outside the tokenless set holds its token"
+        ),
+    )
+}
+
+/// §4.4: each archive's keys, as their `confirmed` flags say.
+fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::ArchiveUnaligned;
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut values, mut tombstones) = (0usize, 0usize);
+    for (addr, read) in &p.obs.archives {
+        let subject = addr.to_string();
+        let keys = match read {
+            Ok(k) => k,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its keys could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        values += keys.values;
+        tombstones += keys.tombstones;
+        if keys.unconfirmed > 0 {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                subject,
+                format!(
+                    "{} of {} key(s) served `confirmed: false` (e.g. {}): no alignment has \
+                     confirmed them by re-reading their owner or a peer archive, and a \
+                     consumer reads them as last-known and unconfirmed",
+                    keys.unconfirmed,
+                    keys.values,
+                    keys.examples.join(", ")
+                ),
+            ));
+        } else if !keys.complete {
+            undecided.push(unjudged(
+                subject,
+                "the read ended at its timeout: a key unseen may be unconfirmed",
+            ));
+        }
+    }
+    if p.obs.archives.is_empty() && !p.complete {
+        undecided.push(incomplete("an archive unseen may be present"));
+    }
+    let clean = if p.obs.archives.is_empty() {
+        "no archive.v1 provider visible to this reader: nothing to align".to_owned()
+    } else {
+        format!(
+            "{} archive(s) serve {values} value(s), every one confirmed, and {tombstones} \
+             tombstone(s)",
+            p.obs.archives.len()
+        )
+    };
+    CheckReport::of(C, findings, undecided, clean)
+}
+
+/// §4.2 S1–S2: each owner's state replies, by the clock that stamped them,
+/// against the owner's own session — the `meta.zid` its descriptors name.
+fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::StateStampForeign;
+    let mut zids: BTreeMap<&Addr, BTreeSet<String>> = BTreeMap::new();
+    for (a, _, d) in p.served() {
+        if let Some(z) = d.meta.get("zid").and_then(|v| v.as_str()) {
+            zids.entry(a).or_default().insert(z.to_owned());
+        }
+    }
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut replies, mut owners) = (0usize, 0usize);
+    for ((addr, iface), read) in &p.obs.stamps {
+        let subject = format!("{addr} {iface}");
+        let stamps = match read {
+            Ok(s) => s,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its state could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        let n: usize = stamps.by_clock.values().map(|(n, _)| n).sum();
+        if n == 0 {
+            if !stamps.complete {
+                undecided.push(unjudged(subject, "the GET ended at its timeout"));
+            }
+            continue;
+        }
+        let Some(own) = zids.get(addr) else {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "no descriptor of {addr} names its session's zid (`meta.zid`): whose clock \
+                     is the owner's cannot be told"
+                ),
+            ));
+            continue;
+        };
+        owners += 1;
+        replies += n;
+        let mut wrong = Vec::new();
+        for (clock, (count, keys)) in &stamps.by_clock {
+            match clock {
+                None => wrong.push(format!(
+                    "{count} unstamped (e.g. {}): a reply MUST carry its mutation's timestamp",
+                    keys.join(", ")
+                )),
+                Some(c) if !own.contains(c) => wrong.push(format!(
+                    "{count} stamped by clock {c} (e.g. {}), not the owner's session",
+                    keys.join(", ")
+                )),
+                Some(_) => {}
+            }
+        }
+        if !wrong.is_empty() {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject,
+                format!(
+                    "of {n} state repl(y|ies), {}; the owner's session is {}",
+                    wrong.join("; "),
+                    own.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            ));
+        } else if !stamps.complete {
+            undecided.push(unjudged(
+                subject,
+                "the GET ended at its timeout: a reply unseen may be stamped elsewhere",
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        if replies == 0 {
+            "no owner answered a state GET with a value: no stamp to attribute".to_owned()
+        } else {
+            format!(
+                "{replies} state repl(y|ies) from {owners} owner interface(s), each stamped by \
+                 its owner's own session"
+            )
+        },
+    )
+}
+
+// ─── the checks that read no presence ───────────────────────────────────────
+
+/// §8.3: the domain's token count against the budget. A read that ended at
+/// its timeout counted a lower bound: over the budget is still a finding,
+/// within it is not established.
+fn presence_over_budget(obs: &DoctorObservation, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::PresenceOverBudget;
+    let d = match &obs.domain {
+        Some(Ok(d)) => d,
+        Some(Err(e)) => {
+            return CheckReport::unobservable(C, format!("the token count failed: {e}"));
+        }
+        None => return CheckReport::not_asked(C),
+    };
+    let budget = spec.presence_budget;
+    let counted = format!(
+        "{} token(s) visible to this reader in the presence domain ({} zk2, under {} \
+         namespace(s); {} other), through `{}`{}",
+        d.tokens,
+        d.zk2,
+        d.namespaces,
+        d.tokens - d.zk2.min(d.tokens),
+        DOMAIN_SELECTORS.join("` and `"),
+        if d.complete {
+            ""
+        } else {
+            " — a lower bound: a read ended at its timeout"
+        }
+    );
+    if d.tokens > budget {
+        return CheckReport::of(
+            C,
+            vec![finding(
+                C,
+                DoctorSeverity::Warning,
+                "presence domain",
+                format!(
+                    "{counted}; the budget is {budget}: about 10–15k tokens per domain kept \
+                     discovery within 2–4 s, and 50k took 46–49 s or never finished (spike S2). \
+                     Tokens under another application's verbatim chunk are not counted"
+                ),
+            )],
+            vec![],
+            "unused",
+        );
+    }
+    if !d.complete {
+        return CheckReport::unobservable(C, format!("{counted}, within the budget {budget}"));
+    }
+    CheckReport::of(
+        C,
+        vec![],
+        vec![],
+        format!("{counted}; within the budget {budget}"),
+    )
+}
+
+/// The admin space, or the verdict a check takes without it.
+fn admin_of(obs: &DoctorObservation, check: CheckId) -> Result<&AdminSpace, CheckReport> {
+    match &obs.admin {
+        Some(Ok(a)) => Ok(a),
+        Some(Err(e)) => Err(CheckReport::unobservable(
+            check,
+            format!("the admin space could not be asked: {e}"),
+        )),
+        None => Err(CheckReport::not_asked(check)),
+    }
+}
+
+/// The reason an admin-space check is unobservable when no router answered.
+fn no_router(a: &AdminSpace) -> String {
+    if a.complete {
+        format!(
+            "no router answered `{ROUTERS}` through this reader: the admin space is disabled, \
+             the mesh is peer-only, or access control denies it"
+        )
+    } else {
+        format!("the admin read of `{ROUTERS}` ended at its timeout with no router")
+    }
+}
+
+/// §4.2 S4: each storage's key expression against every owner's state
+/// keys in this namespace — `state/**` and `@state/**`, named apart
+/// because `*` and `**` never cross a verbatim chunk.
+fn storage_on_state(obs: &DoctorObservation) -> CheckReport {
+    const C: CheckId = CheckId::StorageOnState;
+    let a = match admin_of(obs, C) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    if a.routers.is_empty() {
+        return CheckReport::unobservable(C, no_router(a));
+    }
+    let owners: Vec<(String, zenoh::key_expr::OwnedKeyExpr)> = ["state", "@state"]
+        .into_iter()
+        .filter_map(|token| {
+            let rel = [GRAMMAR, "*", "*", "*", token, "**"].join("/");
+            let full = zenkey::grammar::with_base(&obs.namespace, rel);
+            let ke = zenoh::key_expr::OwnedKeyExpr::try_from(full.clone()).ok()?;
+            Some((full, ke))
+        })
+        .collect();
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    for s in &a.storages {
+        let subject = format!("{}@{}", s.name, s.zid);
+        let Some(text) = &s.key_expr else {
+            undecided.push(unjudged(subject, "its admin document names no key_expr"));
+            continue;
+        };
+        let Ok(ke) = zenoh::key_expr::OwnedKeyExpr::try_from(text.clone()) else {
+            undecided.push(unjudged(
+                subject,
+                format!("{text:?} is not a key expression"),
+            ));
+            continue;
+        };
+        let hits: Vec<&str> = owners
+            .iter()
+            .filter(|(_, o)| ke.intersects(o))
+            .map(|(full, _)| full.as_str())
+            .collect();
+        if !hits.is_empty() {
+            findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                subject,
+                format!(
+                    "captures `{text}`, which answers on owners' state keys (`{}`): the owner \
+                     is authoritative for its state, and last-known state is an archive.v1's \
+                     (§4.4)",
+                    hits.join("`, `")
+                ),
+            ));
+        }
+    }
+    if !a.complete {
+        undecided.push(unjudged(
+            "admin space",
+            "a read ended at its timeout: a storage may be unseen",
+        ));
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} storage(s) on {} router(s), none answering on an owner's `state/**` or \
+             `@state/**` keys in this namespace",
+            a.storages.len(),
+            a.routers.len()
+        ),
+    )
+}
+
+/// The admin space S4's check reads: a complete read with no router is the
+/// finding, worth knowing rather than a defect.
+fn admin_unreachable(obs: &DoctorObservation) -> CheckReport {
+    const C: CheckId = CheckId::AdminUnreachable;
+    let a = match admin_of(obs, C) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    if !a.routers.is_empty() {
+        return CheckReport::of(
+            C,
+            vec![],
+            vec![],
+            format!("{} router(s) answered `{ROUTERS}`", a.routers.len()),
+        );
+    }
+    if !a.complete {
+        return CheckReport::unobservable(C, no_router(a));
+    }
+    CheckReport::of(
+        C,
+        vec![finding(
+            C,
+            DoctorSeverity::Info,
+            "admin space",
+            format!(
+                "{}; storage-on-state and router-version-skew cannot be judged",
+                no_router(a)
+            ),
+        )],
+        vec![],
+        "unused",
+    )
+}
+
+/// Every router's version, as its admin document states it: the core
+/// relies on zenoh 1.10.1's behaviour (Appendix B).
+fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
+    const C: CheckId = CheckId::RouterVersionSkew;
+    let a = match admin_of(obs, C) {
+        Ok(a) => a,
+        Err(r) => return r,
+    };
+    if a.routers.is_empty() {
+        return CheckReport::unobservable(C, no_router(a));
+    }
+    let mut versions: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut undecided = Vec::new();
+    for r in &a.routers {
+        match &r.version {
+            Some(v) => versions.entry(v).or_default().push(&r.zid),
+            None => undecided.push(unjudged(
+                format!("router {}", r.zid),
+                "its admin document states no version",
+            )),
+        }
+    }
+    let mut findings = Vec::new();
+    if versions.len() > 1 {
+        findings.push(finding(
+            C,
+            DoctorSeverity::Warning,
+            "mesh",
+            format!(
+                "the routers run {}: the core relies on zenoh 1.10.1's behaviour (Appendix B), \
+                 which a mixed mesh may not hold",
+                versions
+                    .iter()
+                    .map(|(v, zids)| format!("{v} ({})", zids.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    } else if !a.complete {
+        undecided.push(unjudged(
+            "admin space",
+            "a read ended at its timeout: a router may be unseen",
+        ));
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{} router(s), all at {}",
+            a.routers.len(),
+            versions.keys().next().copied().unwrap_or("?")
+        ),
+    )
+}
+
+/// §7.4, locally: below the floor, an `@stream` writer's shared memory
+/// falls back to TCP and nothing tells its sender.
+fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
+    const C: CheckId = CheckId::ShmMemlockLow;
+    const MIB: u64 = 1024 * 1024;
+    let floor = zk2::shm::MEMLOCK_FLOOR;
+    match obs.memlock {
+        None => CheckReport::not_asked(C),
+        Some(Memlock::Limited(l)) if l < floor => CheckReport::of(
+            C,
+            vec![finding(
+                C,
+                DoctorSeverity::Info,
+                "this host",
+                format!(
+                    "RLIMIT_MEMLOCK is {} KiB, below the {} MiB floor: a shared-memory pool of \
+                     a service started under it falls back to TCP silently (a deployment \
+                     SHOULD allow the pool plus 2 MiB). This is zenctl's own limit, as \
+                     inherited where it runs",
+                    l / 1024,
+                    floor / MIB
+                ),
+            )],
+            vec![],
+            "unused",
+        ),
+        Some(Memlock::Limited(l)) => CheckReport::of(
+            C,
+            vec![],
+            vec![],
+            format!(
+                "RLIMIT_MEMLOCK is {} KiB, at or above the {} MiB floor",
+                l / 1024,
+                floor / MIB
+            ),
+        ),
+        Some(Memlock::Unlimited) => CheckReport::of(
+            C,
+            vec![],
+            vec![],
+            "RLIMIT_MEMLOCK is unlimited, as zenkey::shm reads it (it reads an unreadable \
+             limit the same way)",
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    //! Every check's three poles from values: the finding, the clean
+    //! answer, and the subject it could not decide — and the empty scope.
+
     use super::*;
+    use crate::report::{ContractSource, Judgement};
+    use serde_json::json;
 
-    const BOUNDED: &str = r#"
-        [registry]
-        version = "1.0"
-        app = "t"
-        convention = 1
-        [producer]
-        name = "sysinfo"
-        [[subject]]
-        path = "disk/{mount}/used"
-        class = "telemetry"
-        type = "Point"
-        cardinality = 16
-    "#;
+    const A: &str = "000000000000000a";
+    const B: &str = "000000000000000b";
 
-    /// The #221 acceptance case: declared 16, 40 observed expansions — the
-    /// finding fires with the count, the declared bound, examples, and the
-    /// window it rests on.
-    #[test]
-    fn cardinality_over_declared_fires_with_count_and_examples() {
-        let slices = crate::model::registry::SliceSet::from_toml_for_tests(BOUNDED);
-        let keys: Vec<String> = (0..40)
-            .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/m{i:02}/used"))
-            .collect();
-        let obs = crate::judge::budget::BudgetObservation::observe(
-            "",
-            &slices,
-            keys.iter().map(String::as_str),
-        );
-        let findings = judge_cardinality(&slices, &obs, 10.0);
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        let f = &findings[0];
-        assert_eq!(f.check, CheckId::CardinalityOverDeclared);
-        assert_eq!(f.severity, DoctorSeverity::Warning);
-        assert_eq!(f.subject, "h-aaaaaaaaaaaa/sysinfo/disk/{mount}/used");
-        assert!(f.evidence.contains("40 distinct key(s)"), "{}", f.evidence);
-        assert!(f.evidence.contains("cardinality 16"), "{}", f.evidence);
-        assert!(f.evidence.contains("10s"), "the window is stated");
-        assert!(
-            f.evidence.contains("disk/m00/used"),
-            "examples are named: {}",
-            f.evidence
-        );
+    fn load(text: &str) -> Contract {
+        let l = zenkey_model::contract::load_str(text, std::path::Path::new("."), None);
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
     }
 
-    /// Under (or at) the declared bound is **not** a finding: an idle host
-    /// declares nothing wrong, and a bounded window proves a lower bound,
-    /// never the population (O4/O6).
-    #[test]
-    fn cardinality_under_declared_is_not_a_finding() {
-        let slices = crate::model::registry::SliceSet::from_toml_for_tests(BOUNDED);
-        let keys = [
-            "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/root/used",
-            "v1/h-aaaaaaaaaaaa/telemetry/sysinfo/disk/var/used",
-            // Two origins at 15 each must never be summed into a fake 30 > 16.
-            "v1/h-bbbbbbbbbbbb/telemetry/sysinfo/disk/root/used",
-        ];
-        let obs = crate::judge::budget::BudgetObservation::observe("", &slices, keys);
-        assert!(judge_cardinality(&slices, &obs, 5.0).is_empty());
+    /// `tc.v1`: `set`, optional and exclusive, `diagnostics` beside it,
+    /// replicated when `replicated`; `extra` adds an optional operation,
+    /// and `minor` is the informative minor.
+    fn tc(minor: u32, replicated: bool, extra: bool) -> Contract {
+        let op = |name: &str, more: &str| {
+            format!(
+                "[resources.{name}]\nkind = \"operation\"\n{more}\
+                 request = {{ raw = \"text/plain\" }}\nresponse = {{ raw = \"text/plain\" }}\n"
+            )
+        };
+        let mut t = format!("[interface]\nname = \"tc\"\nmajor = 1\nminor = {minor}\n");
+        t += &op("set", "optional = true\n");
+        t += &op(
+            "diagnostics",
+            if replicated {
+                "idempotent = true\nserving = \"replicated\"\n"
+            } else {
+                "idempotent = true\n"
+            },
+        );
+        if extra {
+            t += &op("extra", "optional = true\n");
+        }
+        load(&t)
     }
 
-    /// The other #221 acceptance case: a `{path...}` family yields the
-    /// exemption wording — "exempt: rest-variable" — and never a pass (nor an
-    /// over-finding, however many members it grows).
-    #[test]
-    fn rest_variable_families_are_exempt_and_say_so() {
-        let toml = r#"
-            [registry]
-            version = "1.0"
-            app = "t"
-            convention = 1
-            [producer]
-            name = "gnmi"
-            [[subject]]
-            path = "{device}/{path...}"
-            class = "telemetry"
-            type = "Point"
-            cardinality = 2
-        "#;
-        let slices = crate::model::registry::SliceSet::from_toml_for_tests(toml);
-        let keys: Vec<String> = (0..5)
-            .map(|i| format!("v1/h-aaaaaaaaaaaa/telemetry/gnmi/sw1/if/eth{i}/rx"))
-            .collect();
-        let obs = crate::judge::budget::BudgetObservation::observe(
-            "",
-            &slices,
-            keys.iter().map(String::as_str),
-        );
-        let findings = judge_cardinality(&slices, &obs, 5.0);
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        let f = &findings[0];
-        assert_eq!(f.severity, DoctorSeverity::Info, "an exemption, not a pass");
-        assert!(
-            f.evidence.starts_with("exempt: rest-variable"),
-            "{}",
-            f.evidence
-        );
-        assert!(f.evidence.contains("5 distinct key(s)"), "{}", f.evidence);
-        // And with nothing observed the family still says so — exempt is a
-        // property of the declaration, not of the traffic.
-        let quiet = judge_cardinality(&slices, &Default::default(), 5.0);
-        assert_eq!(quiet.len(), 1);
-        assert!(quiet[0].evidence.starts_with("exempt: rest-variable"));
+    /// `gui.v1`, declaring a role `netif` on `tc.v1`, optional or not.
+    fn gui(optional: bool) -> Contract {
+        load(&format!(
+            "[interface]\nname = \"gui\"\nmajor = 1\n\
+             [resources.status]\nkind = \"state\"\ntype = {{ raw = \"text/plain\" }}\n\
+             [requires.netif]\ninterface = \"tc.v1\"\nresources = [\"set\"]\noptional = {optional}\n"
+        ))
     }
 
-    /// Deep-review D4: the qos-observed-mismatch cap bounds *violators*, not
-    /// map entries. 30 judged keys where the first 5 (in map order) are
-    /// clean and the remaining 25 violate: every violator is counted — the
-    /// first 20 as findings, the other 5 in a remainder note that counts
-    /// correctly. Capping before filtering used to drop the violators past
-    /// the first 20 map entries and miscount the note.
-    #[test]
-    fn qos_mismatch_cap_bounds_violators_not_map_entries() {
-        let mut qos_bad: std::collections::BTreeMap<String, (String, u64, u64)> =
-            std::collections::BTreeMap::new();
-        for i in 0..30u32 {
-            // k00..k04 sort first and are clean; k05..k29 are violators.
-            let bad = if i < 5 { 0 } else { 1 };
-            qos_bad.insert(
-                format!("v1/h-a/telemetry/x/k{i:02}"),
-                ("tel".into(), bad, 10),
+    fn fp(c: &Contract) -> Fingerprint {
+        Fingerprint::of(c)
+    }
+
+    fn alive(service: &str, iface: &str, instance: &str, c: &Contract) -> String {
+        format!(
+            "zk2/{service}/@zk/alive/{iface}/{instance}/{}",
+            fp(c).hex().fp16()
+        )
+    }
+
+    fn inst(service: &str, instance: &str) -> String {
+        format!("zk2/{service}/@zk/instance/{instance}")
+    }
+
+    /// A descriptor of `service@instance` implementing `entries` (each an
+    /// interface entry's JSON), requiring `requires`.
+    fn descriptor(
+        service: &str,
+        instance: &str,
+        entries: &[serde_json::Value],
+        requires: &[serde_json::Value],
+    ) -> DescriptorRead {
+        let d: Descriptor = serde_json::from_value(json!({
+            "format": "zk2-descriptor/0.1",
+            "service": service,
+            "instance": instance,
+            "interfaces": entries,
+            "requires": requires,
+            "meta": {"zid": format!("zid-{instance}")},
+        }))
+        .expect("a descriptor");
+        DescriptorRead::Served(Box::new(d))
+    }
+
+    fn entry(c: &Contract) -> serde_json::Value {
+        json!({"iface": c.iface.to_string(), "contract": fp(c).to_string(),
+               "minor": c.minor.unwrap_or(0)})
+    }
+
+    fn observed(keys: &[String], descriptors: Vec<((&str, &str), DescriptorRead)>) -> Observed {
+        let mut o = Observed::from_keys("zk2/*/*/@zk/**", keys, true);
+        o.descriptors = Some(
+            descriptors
+                .into_iter()
+                .map(|((s, i), r)| ((s.parse().unwrap(), i.parse().unwrap()), r))
+                .collect(),
+        );
+        o
+    }
+
+    /// An observation of `after`, read twice alike, with `held` retrieved
+    /// and `unavailable` not.
+    fn obs(after: Observed, held: &[&Contract], unavailable: &[&Contract]) -> DoctorObservation {
+        let mut contracts = BTreeMap::new();
+        for c in held {
+            let r = Revision::from_contract((*c).clone(), ContractSource::Bus);
+            contracts.insert(
+                (c.iface.clone(), fp(c)),
+                Ok(ContractState::Held(Arc::new(r))),
             );
         }
-        let findings = judge_qos_observed(&qos_bad);
-        let per_key: Vec<&DoctorFinding> = findings
-            .iter()
-            .filter(|f| f.severity == DoctorSeverity::Warning)
-            .collect();
-        assert_eq!(per_key.len(), FINDING_CAP, "the cap bounds the findings");
-        assert!(
-            per_key.iter().all(|f| f.evidence.starts_with("1 of 10")),
-            "only violators become findings: {findings:#?}"
-        );
-        assert!(
-            per_key.iter().any(|f| f.subject.ends_with("k24")),
-            "violators past the first {FINDING_CAP} map entries (k20..k24) are \
-             not dropped: {findings:#?}"
-        );
-        let note = findings
-            .iter()
-            .find(|f| f.severity == DoctorSeverity::Info)
-            .expect("a remainder note");
-        assert_eq!(
-            note.evidence, "… and 5 more key(s) with the same finding",
-            "the note counts violators (25 − 20), not map entries"
-        );
-
-        // At or under the cap: every violator is a finding, no note.
-        let few: std::collections::BTreeMap<String, (String, u64, u64)> = qos_bad
-            .iter()
-            .take(10)
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let findings = judge_qos_observed(&few);
-        assert_eq!(findings.len(), 5, "{findings:#?}");
-        assert!(
-            findings
-                .iter()
-                .all(|f| f.severity == DoctorSeverity::Warning)
-        );
+        for c in unavailable {
+            contracts.insert(
+                (c.iface.clone(), fp(c)),
+                Ok(ContractState::Unavailable { refused: vec![] }),
+            );
+        }
+        let mut before = after.clone();
+        before.descriptors = None;
+        DoctorObservation {
+            namespace: "acme".into(),
+            grace: Duration::from_secs(2),
+            before: Some(Ok(before)),
+            after: Some(Ok(after)),
+            contracts,
+            ..Default::default()
+        }
     }
 
-    fn roster_of(entries: &[(&str, &[&str])]) -> std::collections::BTreeMap<String, Vec<String>> {
-        entries
-            .iter()
-            .map(|(origin, producers)| {
-                (
-                    origin.to_string(),
-                    producers.iter().map(|p| p.to_string()).collect(),
-                )
-            })
-            .collect()
+    fn spec() -> DoctorSpec {
+        DoctorSpec {
+            deep: true,
+            ..DoctorSpec::new(Duration::from_secs(1))
+        }
     }
 
-    fn slice_named(name: &str) -> RegistrySlice {
-        zenkey::parse_slice(&format!(
-            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
-             [producer]\nname = \"{name}\"\n"
-        ))
-        .expect("fixture slice parses")
+    fn check(o: &DoctorObservation, id: CheckId) -> CheckReport {
+        judge(o, &spec()).check(id).expect("every check").clone()
     }
 
-    /// Deep-review D3: with `--registry` covering a subset of the fleet, a
-    /// live producer the locals do not name was never asked — so it must not
-    /// count as "did not answer" (O4). One local slice, answered by its one
-    /// origin, beside an extra live producer: no finding.
-    #[test]
-    fn a_partial_registry_does_not_count_unasked_producers_against_coverage() {
-        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
-        let locals = [slice_named("sysinfo")];
-        assert_eq!(
-            judge_introspect_coverage(&roster, Some(&locals), 1),
-            None,
-            "the un-asked producer is out of scope, not silent"
-        );
+    #[track_caller]
+    fn found(r: &CheckReport) -> &DoctorFinding {
+        assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
+        &r.findings[0]
     }
 
-    /// …and when an in-scope producer really did not answer, the finding
-    /// fires and its evidence states the scope it checked — including that
-    /// the out-of-scope producer was not counted. An instance suffix shares
-    /// its base slice (RFC 03 §1.5), so `sysinfo-2` is in scope too.
-    #[test]
-    fn introspect_coverage_evidence_states_its_scope() {
-        let roster = roster_of(&[
-            ("h-aaaaaaaaaaaa", &["sysinfo", "extra"]),
-            ("h-bbbbbbbbbbbb", &["sysinfo-2"]),
-        ]);
-        let locals = [slice_named("sysinfo")];
-        let f = judge_introspect_coverage(&roster, Some(&locals), 1).expect("a finding");
-        assert_eq!(f.check, CheckId::IntrospectCoverage);
-        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
-        assert!(
-            f.evidence.contains("the local registry names (sysinfo)"),
-            "{}",
-            f.evidence
-        );
-        assert!(
-            f.evidence
-                .contains("1 other live producer(s) were not asked"),
-            "{}",
-            f.evidence
-        );
+    #[track_caller]
+    fn clean(r: &CheckReport) -> String {
+        match &r.verdict {
+            Judgement::NotEstablished { reason } => reason.clone(),
+            other => panic!("not clean: {other:?}\n{r:#?}"),
+        }
     }
 
-    /// A service origin's token names the service as its producer (RFC 06
-    /// §5); a local slice matches it by declared origin.
-    #[test]
-    fn a_service_slice_scopes_its_origin_into_coverage() {
-        let roster = roster_of(&[("@catalog", &["catalog"]), ("h-aaaaaaaaaaaa", &["extra"])]);
-        let locals = [zenkey::parse_slice(
-            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
-             [service]\nname = \"catalog\"\norigin = \"@catalog\"\n",
-        )
-        .expect("service slice parses")];
-        assert_eq!(judge_introspect_coverage(&roster, Some(&locals), 1), None);
-        let f = judge_introspect_coverage(&roster, Some(&locals), 0).expect("a finding");
-        assert!(f.evidence.contains("1 of 1"), "{}", f.evidence);
+    #[track_caller]
+    fn unseen(r: &CheckReport) -> String {
+        match &r.verdict {
+            Judgement::Unobservable { reason } => reason.clone(),
+            other => panic!("not unobservable: {other:?}\n{r:#?}"),
+        }
     }
 
-    /// The wildcard sweep keeps the whole roster in scope, and says so.
-    #[test]
-    fn the_wildcard_sweep_judges_the_whole_roster() {
-        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
-        let f = judge_introspect_coverage(&roster, None, 1).expect("a finding");
-        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
-        assert!(f.evidence.contains("whole roster"), "{}", f.evidence);
-        assert_eq!(judge_introspect_coverage(&roster, None, 2), None);
+    fn after_mut(o: &mut DoctorObservation) -> &mut Observed {
+        match &mut o.after {
+            Some(Ok(after)) => after,
+            _ => panic!("an observation with a presence read"),
+        }
     }
+
+    // ── split-brain (§6) ────────────────────────────────────────────────
 
     #[test]
-    fn freshness_judgement_is_pure_and_ttl_bound() {
-        let now = std::time::SystemTime::now();
-        let fresh_ts = zenoh::time::Timestamp::new(
-            zenoh::time::NTP64::from(now.duration_since(std::time::UNIX_EPOCH).unwrap()),
-            zenoh::time::TimestampId::rand(),
-        );
-        let stale_ts = zenoh::time::Timestamp::new(
-            zenoh::time::NTP64::from(
-                now.duration_since(std::time::UNIX_EPOCH).unwrap() - Duration::from_secs(120),
-            ),
-            zenoh::time::TimestampId::rand(),
-        );
-        let samples = vec![
-            crate::StateSample {
-                key: "b/v1/h-aaaaaaaaaaaa/state/p/health".into(),
-                timestamp: Some(fresh_ts),
-                payload_len: 2,
-            },
-            crate::StateSample {
-                key: "b/v1/h-bbbbbbbbbbbb/state/p/health".into(),
-                timestamp: Some(stale_ts),
-                payload_len: 2,
-            },
-            crate::StateSample {
-                key: "b/v1/h-cccccccccccc/state/p/health".into(),
-                timestamp: None,
-                payload_len: 2,
-            },
+    fn split_brain_is_two_exclusive_holders_in_both_reads() {
+        let c = tc(0, false, false);
+        let keys = [
+            inst("h1/tc", A),
+            inst("h1/tc", B),
+            alive("h1/tc", "tc.v1", A, &c),
+            alive("h1/tc", "tc.v1", B, &c),
         ];
-        let (findings, unstamped) = judge_state_samples(&samples, 30, now);
-        assert_eq!(
-            findings.len(),
-            1,
-            "only the stale stamped sample is a finding"
+        let o = obs(observed(&keys, vec![]), &[&c], &[]);
+        let f = found(&check(&o, CheckId::SplitBrain)).clone();
+        assert_eq!(f.subject, "h1/tc tc.v1");
+        assert_eq!(f.severity, DoctorSeverity::Error);
+        assert!(f.evidence.contains(A) && f.evidence.contains(B), "{f:?}");
+
+        // A re-mint: the old instance in the first read only.
+        let mut o = obs(
+            observed(&[inst("h1/tc", B), alive("h1/tc", "tc.v1", B, &c)], vec![]),
+            &[&c],
+            &[],
         );
-        assert_eq!(findings[0].check, CheckId::StaleState);
-        assert!(findings[0].subject.contains("h-bbbbbbbbbbbb"));
-        assert_eq!(unstamped, 1, "the unstamped sample is counted, not judged");
+        o.before = Some(Ok(observed(&keys, vec![])));
+        assert!(clean(&check(&o, CheckId::SplitBrain)).contains("tokenless set"));
+
+        // The contract unread: undecided, never clear (O5).
+        let o = obs(observed(&keys, vec![]), &[], &[&c]);
+        assert!(unseen(&check(&o, CheckId::SplitBrain)).contains("cannot be decided"));
+
+        // Replicated serving: one holder lists the exclusive `set`
+        // unavailable, so at most one exposes it.
+        let r = tc(0, true, false);
+        let both = [
+            inst("h1/tc", A),
+            inst("h1/tc", B),
+            alive("h1/tc", "tc.v1", A, &r),
+            alive("h1/tc", "tc.v1", B, &r),
+        ];
+        let mut replica = entry(&r);
+        replica["unavailable"] = json!([{"resource": "@op/set", "cause": "config"}]);
+        let o = obs(
+            observed(
+                &both,
+                vec![
+                    (("h1/tc", A), descriptor("h1/tc", A, &[entry(&r)], &[])),
+                    (("h1/tc", B), descriptor("h1/tc", B, &[replica], &[])),
+                ],
+            ),
+            &[&r],
+            &[],
+        );
+        assert!(clean(&check(&o, CheckId::SplitBrain)).contains("replicated serving"));
+
+        // A read that ended at its timeout: no split-brain seen is not none.
+        let mut o = obs(observed(&keys[..2], vec![]), &[&c], &[]);
+        after_mut(&mut o).complete = false;
+        assert!(unseen(&check(&o, CheckId::SplitBrain)).contains("timeout"));
+    }
+
+    // ── binding-unsatisfied (§3.2) ──────────────────────────────────────
+
+    fn role(declared_by: Option<&str>, bindings: &[&str]) -> serde_json::Value {
+        json!({"role": "netif", "interface": "tc.v1", "declared_by": declared_by,
+               "bindings": bindings})
+    }
+
+    /// The tc provider `h1/tc` and a consumer `ws/gui` whose role `netif`
+    /// is bound to `to`, declared by `gui.v1` when `by_contract`.
+    fn bound(c: &Contract, g: Option<&Contract>, to: &[&str]) -> Observed {
+        let entries: Vec<serde_json::Value> = g.iter().map(|g| entry(g)).collect();
+        observed(
+            &[
+                inst("h1/tc", A),
+                alive("h1/tc", "tc.v1", A, c),
+                inst("ws/gui", B),
+            ],
+            vec![
+                (("h1/tc", A), descriptor("h1/tc", A, &[entry(c)], &[])),
+                (
+                    ("ws/gui", B),
+                    descriptor("ws/gui", B, &entries, &[role(g.map(|_| "gui.v1"), to)]),
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_role_whose_bindings_select_nothing_is_graded_by_whether_it_is_required() {
+        let c = tc(0, false, false);
+        // Satisfied by the provider's token.
+        let o = obs(bound(&c, None, &["*/tc"]), &[&c], &[]);
+        assert!(clean(&check(&o, CheckId::BindingUnsatisfied)).starts_with("1 bound role"));
+        // A manifest role selecting nothing: its need cannot be told.
+        let o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
+        let r = check(&o, CheckId::BindingUnsatisfied);
+        let f = found(&r);
+        assert_eq!(f.subject, "ws/gui netif");
+        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert!(f.evidence.contains("visible to this reader"), "{f:?}");
+        // A run that asked no check comparing two reads took one: its read
+        // is complete, and the finding stands.
+        let mut o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
+        o.before = None;
+        found(&check(&o, CheckId::BindingUnsatisfied));
+        // A contract's required role: an error; an optional one: info.
+        for (optional, severity) in [(false, DoctorSeverity::Error), (true, DoctorSeverity::Info)] {
+            let g = gui(optional);
+            let o = obs(bound(&c, Some(&g), &["h9/tc"]), &[&c, &g], &[]);
+            assert_eq!(
+                found(&check(&o, CheckId::BindingUnsatisfied)).severity,
+                severity
+            );
+        }
+        // A required role bound to nothing at all.
+        let g = gui(false);
+        let o = obs(bound(&c, Some(&g), &[]), &[&c, &g], &[]);
+        assert!(
+            found(&check(&o, CheckId::BindingUnsatisfied))
+                .evidence
+                .contains("MUST NOT start")
+        );
+        // An optional one unbound is what §3.2 allows.
+        let g = gui(true);
+        let o = obs(bound(&c, Some(&g), &[]), &[&c, &g], &[]);
+        assert!(clean(&check(&o, CheckId::BindingUnsatisfied)).contains("left unbound"));
+        // A read that ended at its timeout: the provider may be unseen.
+        let mut o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
+        after_mut(&mut o).complete = false;
+        assert!(unseen(&check(&o, CheckId::BindingUnsatisfied)).contains("present and unseen"));
+    }
+
+    // ── contract-drift (§9.8) ───────────────────────────────────────────
+
+    #[test]
+    fn providers_at_two_revisions_are_classified_in_their_order() {
+        let two = |a: &Contract, b: &Contract| {
+            observed(
+                &[
+                    inst("h1/tc", A),
+                    inst("h2/tc", B),
+                    alive("h1/tc", "tc.v1", A, a),
+                    alive("h2/tc", "tc.v1", B, b),
+                ],
+                vec![
+                    (("h1/tc", A), descriptor("h1/tc", A, &[entry(a)], &[])),
+                    (("h2/tc", B), descriptor("h2/tc", B, &[entry(b)], &[])),
+                ],
+            )
+        };
+        // An optional operation added, minor 0 → 1: compatible.
+        let (old, added) = (tc(0, false, false), tc(1, false, true));
+        let o = obs(two(&old, &added), &[&old, &added], &[]);
+        assert!(clean(&check(&o, CheckId::ContractDrift)).contains("compatible"));
+        // The same change the other way, by the minors' order: removed.
+        let (removed, base) = (tc(0, false, true), tc(1, false, false));
+        let o = obs(two(&removed, &base), &[&removed, &base], &[]);
+        let r = check(&o, CheckId::ContractDrift);
+        let f = found(&r);
+        assert!(f.evidence.contains("ordered by the minors"), "{f:?}");
+        assert_ne!(f.severity, DoctorSeverity::Info);
+        // No order to read: the minors agree, and the classes do not.
+        let same_minor = tc(0, false, true);
+        let o = obs(two(&old, &same_minor), &[&old, &same_minor], &[]);
+        assert!(unseen(&check(&o, CheckId::ContractDrift)).contains("came first"));
+        // A revision that cannot be had is not classified.
+        let o = obs(two(&old, &added), &[&old], &[&added]);
+        assert!(unseen(&check(&o, CheckId::ContractDrift)).contains("unavailable"));
+        // One revision: nothing to classify.
+        let o = obs(two(&old, &old), &[&old], &[]);
+        assert!(clean(&check(&o, CheckId::ContractDrift)).contains("1 served at one revision"));
+    }
+
+    // ── contract-unavailable (§8.4) ─────────────────────────────────────
+
+    #[test]
+    fn a_revision_no_holder_serves_is_the_finding_and_silence_is_not() {
+        let c = tc(0, false, false);
+        let one = |read: DescriptorRead| {
+            observed(
+                &[inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)],
+                vec![(("h1/tc", A), read)],
+            )
+        };
+        let served = || descriptor("h1/tc", A, &[entry(&c)], &[]);
+        let o = obs(one(served()), &[], &[&c]);
+        let f = found(&check(&o, CheckId::ContractUnavailable)).clone();
+        assert_eq!(f.subject, format!("tc.v1 {}", fp(&c)));
+        assert!(f.evidence.contains("named by h1/tc@"), "{f:?}");
+        let o = obs(one(served()), &[&c], &[]);
+        clean(&check(&o, CheckId::ContractUnavailable));
+        let o = obs(one(DescriptorRead::Silent), &[], &[]);
+        assert!(unseen(&check(&o, CheckId::ContractUnavailable)).contains("did not read"));
+    }
+
+    // ── descriptor-invalid (§3.3) ───────────────────────────────────────
+
+    #[test]
+    fn a_descriptor_is_checked_against_the_contracts_it_names() {
+        let c = tc(0, false, false);
+        let with = |e: serde_json::Value| {
+            observed(
+                &[inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)],
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[e], &[]))],
+            )
+        };
+        let mut bad = entry(&c);
+        bad["unavailable"] = json!([{"resource": "@op/nope", "cause": "config"}]);
+        let o = obs(with(bad.clone()), &[&c], &[]);
+        let f = found(&check(&o, CheckId::DescriptorInvalid)).clone();
+        assert!(f.evidence.starts_with("D005"), "{f:?}");
+        // Its contract unheld: syntax only, said so.
+        let o = obs(with(bad), &[], &[&c]);
+        assert!(unseen(&check(&o, CheckId::DescriptorInvalid)).contains("syntax only"));
+        let o = obs(with(entry(&c)), &[&c], &[]);
+        clean(&check(&o, CheckId::DescriptorInvalid));
+        // A reply the presence read refused carries its codes.
+        let o = obs(
+            observed(
+                &[inst("h1/tc", A)],
+                vec![(("h1/tc", A), DescriptorRead::Invalid("D002 bad".into()))],
+            ),
+            &[],
+            &[],
+        );
+        assert_eq!(
+            found(&check(&o, CheckId::DescriptorInvalid)).evidence,
+            "D002 bad"
+        );
+    }
+
+    // ── token-missing (§8.1) ────────────────────────────────────────────
+
+    #[test]
+    fn tokens_must_agree_with_the_descriptor_in_both_reads() {
+        let c = tc(0, false, false);
+        let d = || descriptor("h1/tc", A, &[entry(&c)], &[]);
+        let bare = || observed(&[inst("h1/tc", A)], vec![(("h1/tc", A), d())]);
+        // Exposes tc.v1 and holds no token for it.
+        let o = obs(bare(), &[&c], &[]);
+        let f = found(&check(&o, CheckId::TokenMissing)).clone();
+        assert_eq!(f.subject, format!("h1/tc@{A} tc.v1"));
+        // Holding it: clean.
+        let keys = [inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)];
+        let o = obs(observed(&keys, vec![(("h1/tc", A), d())]), &[&c], &[]);
+        clean(&check(&o, CheckId::TokenMissing));
+        // Tokenless: no token expected.
+        let mut e = entry(&c);
+        e["token"] = json!(false);
+        let o = obs(
+            observed(
+                &[inst("h1/tc", A)],
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[e], &[]))],
+            ),
+            &[&c],
+            &[],
+        );
+        clean(&check(&o, CheckId::TokenMissing));
+        // A token its descriptor does not list.
+        let o = obs(
+            observed(
+                &keys,
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[], &[]))],
+            ),
+            &[&c],
+            &[],
+        );
+        assert!(
+            found(&check(&o, CheckId::TokenMissing))
+                .evidence
+                .contains("does not list")
+        );
+        // Came up within the grace period: not judged yet.
+        let mut o = obs(bare(), &[&c], &[]);
+        o.before = Some(Ok(observed(&[], vec![])));
+        assert!(unseen(&check(&o, CheckId::TokenMissing)).contains("grace period"));
+        // Its contract unheld: whether it exposes anything is unknown.
+        let o = obs(bare(), &[], &[&c]);
+        assert!(unseen(&check(&o, CheckId::TokenMissing)).contains("needs its contract"));
+        // A read that ended at its timeout: the token may be unseen.
+        let mut o = obs(bare(), &[&c], &[]);
+        after_mut(&mut o).complete = false;
+        assert!(unseen(&check(&o, CheckId::TokenMissing)).contains("timeout"));
+    }
+
+    // ── the empty scope, and what is not asked ──────────────────────────
+
+    #[test]
+    fn an_empty_scope_is_unobservable_and_the_rest_still_answer() {
+        let mut o = obs(observed(&[], vec![]), &[], &[]);
+        o.namespace = "wrong".into();
+        o.admin = Some(Ok(AdminSpace {
+            routers: vec![router("r1", Some("1.10.1"))],
+            storages: vec![],
+            complete: true,
+        }));
+        o.memlock = Some(Memlock::Limited(64 * 1024 * 1024));
+        let report = judge(&o, &spec());
+        let why = report.unobservable.clone().expect("the empty scope");
+        assert!(
+            why.contains("no zk2 token visible") && why.contains("\"wrong\""),
+            "{why}"
+        );
+        for c in &report.checks {
+            if c.check.reads_presence() {
+                assert!(c.verdict.is_unobservable(), "{c:?}");
+            }
+        }
+        clean(report.check(CheckId::RouterVersionSkew).unwrap());
+        clean(report.check(CheckId::ShmMemlockLow).unwrap());
+        assert_eq!(
+            crate::report::judgement_exit_code(&report.judgement(DoctorSeverity::Warning)),
+            2
+        );
+    }
+
+    #[test]
+    fn checks_not_asked_say_so() {
+        let o = obs(observed(&[inst("h1/tc", A)], vec![]), &[], &[]);
+        let mut s = spec();
+        s.checks = [CheckId::SplitBrain].into();
+        let report = judge(&o, &s);
+        for c in &report.checks {
+            assert_eq!(
+                c.verdict.is_not_asked(),
+                c.check != CheckId::SplitBrain,
+                "{c:?}"
+            );
+        }
+        let s = DoctorSpec::new(Duration::from_secs(1));
+        assert!(!s.asks(CheckId::StateStampForeign), "deep only");
+        let report = judge(&o, &s);
+        assert!(
+            report
+                .check(CheckId::StateStampForeign)
+                .unwrap()
+                .verdict
+                .is_not_asked()
+        );
+    }
+
+    // ── presence-over-budget (§8.3) ─────────────────────────────────────
+
+    #[test]
+    fn the_budget_reads_a_lower_bound_honestly() {
+        let mut s = spec();
+        s.presence_budget = 3;
+        let domain = |tokens, complete| {
+            let o = DoctorObservation {
+                domain: Some(Ok(DomainTokens {
+                    tokens,
+                    zk2: tokens,
+                    namespaces: 1,
+                    complete,
+                })),
+                ..Default::default()
+            };
+            judge(&o, &s)
+                .check(CheckId::PresenceOverBudget)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(found(&domain(4, true)).severity, DoctorSeverity::Warning);
+        found(&domain(4, false));
+        clean(&domain(3, true));
+        assert!(unseen(&domain(3, false)).contains("lower bound"));
+    }
+
+    // ── the admin space (§4.2) ──────────────────────────────────────────
+
+    fn router(zid: &str, version: Option<&str>) -> RouterInfo {
+        RouterInfo {
+            zid: zid.into(),
+            version: version.map(str::to_owned),
+            locators: vec![],
+            raw: json!({}),
+        }
+    }
+
+    fn storage(ke: Option<&str>) -> StorageInfo {
+        StorageInfo {
+            zid: "r1".into(),
+            name: "st".into(),
+            key_expr: ke.map(str::to_owned),
+            strip_prefix: None,
+            volume: None,
+            raw: json!({}),
+        }
+    }
+
+    fn admin(
+        routers: Vec<RouterInfo>,
+        storages: Vec<StorageInfo>,
+        complete: bool,
+    ) -> DoctorObservation {
+        DoctorObservation {
+            namespace: "acme".into(),
+            admin: Some(Ok(AdminSpace {
+                routers,
+                storages,
+                complete,
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_storage_on_an_owner_s_state_keys_is_the_s4_finding() {
+        let r = || vec![router("r1", Some("1.10.1"))];
+        for ke in ["acme/zk2/**", "acme/zk2/h1/tc/tc.v1/@state/**", "**"] {
+            let o = admin(r(), vec![storage(Some(ke))], true);
+            let f = found(&check(&o, CheckId::StorageOnState)).clone();
+            assert_eq!(f.subject, "st@r1", "{ke}");
+        }
+        // Another namespace's keys, and a stream's, are not this owner's state.
+        for ke in ["other/zk2/**", "acme/zk2/*/*/*/stream/**"] {
+            let o = admin(r(), vec![storage(Some(ke))], true);
+            clean(&check(&o, CheckId::StorageOnState));
+        }
+        let o = admin(r(), vec![storage(None)], true);
+        assert!(unseen(&check(&o, CheckId::StorageOnState)).contains("no key_expr"));
+        // No router answered: S4 cannot be judged, and admin-unreachable fires.
+        let o = admin(vec![], vec![], true);
+        assert!(unseen(&check(&o, CheckId::StorageOnState)).contains("no router answered"));
+        assert_eq!(
+            found(&check(&o, CheckId::AdminUnreachable)).severity,
+            DoctorSeverity::Info
+        );
+        let o = admin(vec![], vec![], false);
+        assert!(unseen(&check(&o, CheckId::AdminUnreachable)).contains("timeout"));
+        let o = admin(r(), vec![], true);
+        clean(&check(&o, CheckId::AdminUnreachable));
+    }
+
+    #[test]
+    fn routers_at_two_versions_are_a_skew() {
+        let o = admin(
+            vec![router("r1", Some("1.10.1")), router("r2", Some("1.9.0"))],
+            vec![],
+            true,
+        );
+        assert!(
+            found(&check(&o, CheckId::RouterVersionSkew))
+                .evidence
+                .contains("1.9.0")
+        );
+        let o = admin(vec![router("r1", Some("1.10.1"))], vec![], true);
+        assert!(clean(&check(&o, CheckId::RouterVersionSkew)).contains("1.10.1"));
+        let o = admin(vec![router("r1", None)], vec![], true);
+        assert!(unseen(&check(&o, CheckId::RouterVersionSkew)).contains("no version"));
+    }
+
+    // ── archive-unaligned (§4.4) ────────────────────────────────────────
+
+    #[test]
+    fn an_archive_serving_unconfirmed_keys_is_unaligned() {
+        let keys = [inst("g/archive", A)];
+        let mut o = obs(observed(&keys, vec![]), &[], &[]);
+        let addr: Addr = "g/archive".parse().unwrap();
+        let mut read = |k: ArchiveKeys| {
+            o.archives = [(addr.clone(), Ok(k))].into();
+            check(&o, CheckId::ArchiveUnaligned)
+        };
+        let f = found(&read(ArchiveKeys {
+            values: 2,
+            unconfirmed: 1,
+            examples: vec!["zk2/g/archive/archive.v1/@state/x".into()],
+            tombstones: 0,
+            complete: true,
+        }))
+        .clone();
+        assert_eq!(f.subject, "g/archive");
+        assert!(f.evidence.contains("1 of 2"), "{f:?}");
+        clean(&read(ArchiveKeys {
+            values: 2,
+            complete: true,
+            ..Default::default()
+        }));
+        unseen(&read(ArchiveKeys::default()));
+        o.archives.clear();
+        assert!(clean(&check(&o, CheckId::ArchiveUnaligned)).contains("no archive.v1"));
+    }
+
+    // ── state-stamp-foreign (§4.2 S1–S2) ────────────────────────────────
+
+    #[test]
+    fn a_state_reply_is_stamped_by_its_owner_or_it_is_the_finding() {
+        let c = tc(0, false, false);
+        let keys = [inst("h1/tc", A), alive("h1/tc", "tc.v1", A, &c)];
+        let mut o = obs(
+            observed(
+                &keys,
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[entry(&c)], &[]))],
+            ),
+            &[&c],
+            &[],
+        );
+        let at: (Addr, IfaceId) = ("h1/tc".parse().unwrap(), "tc.v1".parse().unwrap());
+        let mut read = |clocks: &[Option<&str>]| {
+            let mut s = StateStamps {
+                complete: true,
+                ..Default::default()
+            };
+            for c in clocks {
+                let e = s.by_clock.entry(c.map(str::to_owned)).or_default();
+                e.0 += 1;
+                e.1.push("zk2/h1/tc/tc.v1/state/x".into());
+            }
+            o.stamps = [(at.clone(), Ok(s))].into();
+            check(&o, CheckId::StateStampForeign)
+        };
+        let own = format!("zid-{A}");
+        clean(&read(&[Some(&own)]));
+        assert!(
+            found(&read(&[Some("feed")]))
+                .evidence
+                .contains("clock feed")
+        );
+        assert!(found(&read(&[None])).evidence.contains("unstamped"));
+        assert!(clean(&read(&[])).contains("no stamp to attribute"));
+    }
+
+    // ── shm-memlock-low (§7.4) ──────────────────────────────────────────
+
+    #[test]
+    fn a_memlock_below_the_floor_is_worth_knowing() {
+        let at = |m| {
+            let o = DoctorObservation {
+                memlock: Some(m),
+                ..Default::default()
+            };
+            check(&o, CheckId::ShmMemlockLow)
+        };
+        let f = found(&at(Memlock::Limited(64 * 1024))).clone();
+        assert_eq!(f.severity, DoctorSeverity::Info);
+        assert!(f.evidence.contains("64 KiB"), "{f:?}");
+        clean(&at(Memlock::Limited(zk2::shm::MEMLOCK_FLOOR)));
+        clean(&at(Memlock::Unlimited));
     }
 }

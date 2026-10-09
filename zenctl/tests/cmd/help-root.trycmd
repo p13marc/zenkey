@@ -56,7 +56,7 @@ Commands:
   gen          Generate test traffic from the registry: a mock producer
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
-  doctor       Check the fleet against the contracts it claims: drift, freshness, QoS
+  doctor       Judge a zk2 deployment against the core: one verdict per check
   why          Explain why a key is silent, one established fact at a time
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
@@ -125,7 +125,7 @@ Commands:
   gen          Generate test traffic from the registry: a mock producer
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
-  doctor       Check the fleet against the contracts it claims: drift, freshness, QoS
+  doctor       Judge a zk2 deployment against the core: one verdict per check
   why          Explain why a key is silent, one established fact at a time
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)

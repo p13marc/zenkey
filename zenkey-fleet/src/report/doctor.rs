@@ -1,126 +1,194 @@
-//! The doctor plane: conformance findings, and the observation that
-//! produced them.
+//! zk2's doctor (#612, FJ6): one verdict per check, in the judgement shape.
 //!
-//! [`ObservationSummary`] is not decoration. A finding is only as good as
-//! the window it was found in, so the document carries what was watched, for
-//! how long, and — crucially — what was **dropped** (RFC 09 §5.1 O6): a
-//! clean report over a lossy window is not a clean fleet.
+//! Every check asks one question about the deployment and answers it on the
+//! RFC 13 core ([`Judgement`]), with the polarity the tooling guide asks
+//! every vocabulary to document (`docs/zk2/tooling-guide.md` §1): each id
+//! is **named for a condition firing**, so its finding is the *yes* —
+//! `Established` — and a clean check is `NotEstablished`, with the evidence
+//! that makes it clean as its reason. A check whose input could not be had
+//! is `Unobservable` with the reason, never clean; one the run was told not
+//! to ask is `NotAsked`. The two Unestablished poles stay apart in every
+//! medium, as everywhere else in this crate.
+//!
+//! A check carries three lists, each spelled once:
+//! - **findings**: what fired, one per subject, with its severity — the
+//!   subject is the key [`crate::doctor_delta`] compares runs on;
+//! - **unjudged**: the subjects it could not decide, each with what stood
+//!   in the way (a descriptor that did not answer, a bundle no holder
+//!   served, a read that ended at its timeout);
+//! - **section**: the core section it enforces.
+//!
+//! [`DoctorScope`] is what makes an empty findings list legible: what the
+//! run read, in which namespace, and whether its reads were complete. An
+//! empty scope (no zk2 token visible to this reader) is the report's own
+//! [`DoctorReport::unobservable`]: a doctor pointed at the wrong namespace
+//! must not be green.
 
 use std::fmt;
 
-use super::asked::{Asked, u64_is_zero};
+use super::asked::Asked;
 use super::judgement::Judgement;
 use serde::{Deserialize, Serialize};
 
-/// Every check [`run_doctor`](crate::judge::doctor::run_doctor) can emit.
+/// Every check zk2's doctor runs.
 ///
-/// **Stable API**: scripts key on these through `--format json`, and the GUI
-/// keys deltas on them. New checks append; nothing renames one — which is
-/// exactly why this is an enum and no longer a `[&str; 21]` beside a
-/// `check: String`. The wire spelling is unchanged (kebab-case, one token per
-/// variant), and `check_ids_are_stable` still pins the list (#347).
+/// **Stable API**: scripts key on these through `--format json`, a
+/// watchdog's `doctor <CHECK-ID>` rule names one, and a notifier keys its
+/// deltas on them. New checks append; nothing renames one.
+/// [`CheckId::question`] is each one's question, worded so that its finding
+/// is the yes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CheckId {
-    SliceParse,
-    SliceSync,
-    IntrospectCoverage,
+    /// Two instances of one service exposing an exclusive resource at once
+    /// (§6), from two presence reads a grace period apart.
+    SplitBrain,
+    /// A role whose bindings select no provider this reader can see (§3.2).
+    BindingUnsatisfied,
+    /// Providers of one interface at revisions the classifier calls review
+    /// or breaking against each other (§9.8).
+    ContractDrift,
+    /// A revision a descriptor names that no holder serves verified (§8.4).
+    ContractUnavailable,
+    /// A descriptor that fails the descriptor check: the D-codes (§3.3).
+    DescriptorInvalid,
+    /// An instance whose tokens disagree with its descriptor (§8.1).
+    TokenMissing,
+    /// More tokens in the presence domain than its budget (§8.3).
+    PresenceOverBudget,
+    /// A router storage answering on an owner's state keys (§4.2 S4).
+    StorageOnState,
+    /// An archive serving keys its alignment has not confirmed (§4.4).
+    ArchiveUnaligned,
+    /// An owner answering its state with a stamp that is not its own
+    /// (§4.2 S1–S2). A data-plane read, asked under `deep` only.
+    StateStampForeign,
+    /// This host's `RLIMIT_MEMLOCK` below what a shared-memory pool needs
+    /// (§7.4).
+    ShmMemlockLow,
+    /// No router answering the admin space, which S4's check reads (§4.2).
     AdminUnreachable,
+    /// Routers of the mesh at different zenoh versions (Appendix B).
     RouterVersionSkew,
-    DescribeTotality,
-    SchemaDrift,
-    DescribeMissing,
-    StaleState,
-    UnstampedState,
-    StorageCoverage,
-    // The `--for` passive phase (#161) — traffic judged as it rides.
-    PayloadUndecodable,
-    PayloadInvalid,
-    QosObservedMismatch,
-    UnregisteredTraffic,
-    RateOverDeclared,
-    TimestampStampedElsewhere,
-    /// Key-population budgets (#221): declared `cardinality` vs the observed
-    /// expansion count, per origin. `{path...}` families are exempt and say so.
-    CardinalityOverDeclared,
-    // Field intelligence (#223): per-dotted-path judgement over the listen
-    // window — the failure modes per-sample validation cannot see.
-    FieldVanished,
-    FieldStuck,
-    FieldNew,
-    /// Declared versus observed (#422, RFC 08 §2 v1.32, RFC 13 §3): a
-    /// self-describing payload's tag disagrees with the subject's declared
-    /// `kind`, or a `counter` decreased within one origin's series with no
-    /// `alive` cycle in between.
-    KindMismatch,
-    /// A producer's declared `[budget]` (#391, RFC 08 §2 v1.32, RFC 13 §3)
-    /// against the `self_stats` on its health document (RFC 04 §1.2): the
-    /// resident set over `rss_mb`, or a named table over its bound. Asked
-    /// under `--deep`, because a health fetch costs the data plane.
-    BudgetExceeded,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 23] = [
-        CheckId::SliceParse,
-        CheckId::SliceSync,
-        CheckId::IntrospectCoverage,
+    pub const ALL: [CheckId; 13] = [
+        CheckId::SplitBrain,
+        CheckId::BindingUnsatisfied,
+        CheckId::ContractDrift,
+        CheckId::ContractUnavailable,
+        CheckId::DescriptorInvalid,
+        CheckId::TokenMissing,
+        CheckId::PresenceOverBudget,
+        CheckId::StorageOnState,
+        CheckId::ArchiveUnaligned,
+        CheckId::StateStampForeign,
+        CheckId::ShmMemlockLow,
         CheckId::AdminUnreachable,
         CheckId::RouterVersionSkew,
-        CheckId::DescribeTotality,
-        CheckId::SchemaDrift,
-        CheckId::DescribeMissing,
-        CheckId::StaleState,
-        CheckId::UnstampedState,
-        CheckId::StorageCoverage,
-        CheckId::PayloadUndecodable,
-        CheckId::PayloadInvalid,
-        CheckId::QosObservedMismatch,
-        CheckId::UnregisteredTraffic,
-        CheckId::RateOverDeclared,
-        CheckId::TimestampStampedElsewhere,
-        CheckId::CardinalityOverDeclared,
-        CheckId::FieldVanished,
-        CheckId::FieldStuck,
-        CheckId::FieldNew,
-        CheckId::KindMismatch,
-        CheckId::BudgetExceeded,
     ];
 
     /// The wire token, exactly as it serializes.
     pub fn as_str(self) -> &'static str {
         match self {
-            CheckId::SliceParse => "slice-parse",
-            CheckId::SliceSync => "slice-sync",
-            CheckId::IntrospectCoverage => "introspect-coverage",
+            CheckId::SplitBrain => "split-brain",
+            CheckId::BindingUnsatisfied => "binding-unsatisfied",
+            CheckId::ContractDrift => "contract-drift",
+            CheckId::ContractUnavailable => "contract-unavailable",
+            CheckId::DescriptorInvalid => "descriptor-invalid",
+            CheckId::TokenMissing => "token-missing",
+            CheckId::PresenceOverBudget => "presence-over-budget",
+            CheckId::StorageOnState => "storage-on-state",
+            CheckId::ArchiveUnaligned => "archive-unaligned",
+            CheckId::StateStampForeign => "state-stamp-foreign",
+            CheckId::ShmMemlockLow => "shm-memlock-low",
             CheckId::AdminUnreachable => "admin-unreachable",
             CheckId::RouterVersionSkew => "router-version-skew",
-            CheckId::DescribeTotality => "describe-totality",
-            CheckId::SchemaDrift => "schema-drift",
-            CheckId::DescribeMissing => "describe-missing",
-            CheckId::StaleState => "stale-state",
-            CheckId::UnstampedState => "unstamped-state",
-            CheckId::StorageCoverage => "storage-coverage",
-            CheckId::PayloadUndecodable => "payload-undecodable",
-            CheckId::PayloadInvalid => "payload-invalid",
-            CheckId::QosObservedMismatch => "qos-observed-mismatch",
-            CheckId::UnregisteredTraffic => "unregistered-traffic",
-            CheckId::RateOverDeclared => "rate-over-declared",
-            CheckId::TimestampStampedElsewhere => "timestamp-stamped-elsewhere",
-            CheckId::CardinalityOverDeclared => "cardinality-over-declared",
-            CheckId::FieldVanished => "field-vanished",
-            CheckId::FieldStuck => "field-stuck",
-            CheckId::FieldNew => "field-new",
-            CheckId::KindMismatch => "kind-mismatch",
-            CheckId::BudgetExceeded => "budget-exceeded",
         }
     }
 
-    /// Read a check id a caller supplied — `doctor --transitions`, a
-    /// `check expect` condition, a script's filter.
+    /// Read a check id a caller supplied: `doctor --check`, a watchdog's
+    /// `doctor <CHECK-ID>` rule, a script's filter.
     pub fn parse(token: &str) -> Option<CheckId> {
         CheckId::ALL.into_iter().find(|c| c.as_str() == token)
+    }
+
+    /// The core section the check enforces (`spec/core.md`).
+    pub fn section(self) -> &'static str {
+        match self {
+            CheckId::SplitBrain => "§6",
+            CheckId::BindingUnsatisfied => "§3.2 R5",
+            CheckId::ContractDrift => "§9.8",
+            CheckId::ContractUnavailable => "§8.4",
+            CheckId::DescriptorInvalid => "§3.3",
+            CheckId::TokenMissing => "§8.1",
+            CheckId::PresenceOverBudget => "§8.3",
+            CheckId::StorageOnState => "§4.2 S4",
+            CheckId::ArchiveUnaligned => "§4.4",
+            CheckId::StateStampForeign => "§4.2 S1–S2",
+            CheckId::ShmMemlockLow => "§7.4",
+            CheckId::AdminUnreachable => "§4.2",
+            CheckId::RouterVersionSkew => "App. B",
+        }
+    }
+
+    /// The check's question, worded so that its finding is the **yes**:
+    /// the polarity every renderer and exit map reads (tooling guide §1).
+    pub fn question(self) -> &'static str {
+        match self {
+            CheckId::SplitBrain => {
+                "do two instances of one service hold one interface's token for longer than \
+                 the grace period, with at least two exposing an exclusive resource?"
+            }
+            CheckId::BindingUnsatisfied => {
+                "does a role's binding select no provider visible to this reader?"
+            }
+            CheckId::ContractDrift => {
+                "do providers of one interface serve revisions the classifier calls review \
+                 or breaking against each other?"
+            }
+            CheckId::ContractUnavailable => {
+                "does a descriptor name a revision that no holder serves verified?"
+            }
+            CheckId::DescriptorInvalid => "does a descriptor fail the descriptor check?",
+            CheckId::TokenMissing => {
+                "do an instance's tokens disagree with its descriptor: an exposed interface \
+                 outside the tokenless set without its token, or a token its descriptor \
+                 does not list?"
+            }
+            CheckId::PresenceOverBudget => {
+                "does the presence domain hold more tokens than its budget?"
+            }
+            CheckId::StorageOnState => "does a router storage answer on an owner's state keys?",
+            CheckId::ArchiveUnaligned => {
+                "does an archive serve keys its alignment has not confirmed?"
+            }
+            CheckId::StateStampForeign => {
+                "does an owner answer its state with a stamp that is not its own?"
+            }
+            CheckId::ShmMemlockLow => {
+                "is this host's RLIMIT_MEMLOCK below what a shared-memory pool needs?"
+            }
+            CheckId::AdminUnreachable => "does no router answer the admin space?",
+            CheckId::RouterVersionSkew => "do the routers run different zenoh versions?",
+        }
+    }
+
+    /// Whether the check reads the deployment's presence. Over an empty
+    /// scope (no zk2 token visible) these are unobservable; the others —
+    /// the admin space, the presence domain, this host — are not about the
+    /// namespace and still answer.
+    pub fn reads_presence(self) -> bool {
+        !matches!(
+            self,
+            CheckId::PresenceOverBudget
+                | CheckId::StorageOnState
+                | CheckId::ShmMemlockLow
+                | CheckId::AdminUnreachable
+                | CheckId::RouterVersionSkew
+        )
     }
 }
 
@@ -130,14 +198,18 @@ impl fmt::Display for CheckId {
     }
 }
 
-/// How bad a doctor finding is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// How bad a finding is: the ladder a `--fail-on` floor reads.
+///
+/// Shared with v1's check vocabulary ([`crate::report::V1Finding`]), whose
+/// findings `field` and `check conform` still produce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DoctorSeverity {
-    /// A contract violation — the fleet disagrees with the RFCs or with
-    /// itself.
+    /// A rule broken: a MUST or MUST NOT of the core, or the deployment
+    /// disagreeing with itself.
     Error,
-    /// Suspicious but explainable — judgement is degraded, not wrong.
+    /// A SHOULD unmet, or a change a human has to accept: judgement is
+    /// degraded, not wrong.
     Warning,
     /// Worth knowing; not a defect.
     Info,
@@ -167,30 +239,231 @@ impl DoctorSeverity {
     }
 }
 
-/// One machine-readable doctor finding (issue #46): what check fired, on
-/// what, with the evidence and the normative citation — the shape the GUI
-/// doctor panel renders as-is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// One finding: what fired, on what, and the evidence.
+///
+/// `(check, subject)` is the finding's identity: [`crate::doctor_delta`]
+/// compares runs on it, so a subject is spelled the same way every run —
+/// `<system>/<service>@<instance>`, `<system>/<service> <role>`,
+/// `<iface> <fingerprint>`, `<storage>@<zid>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DoctorFinding {
     pub severity: DoctorSeverity,
-    /// Which check fired. Serializes to the same kebab-case token it always
-    /// has; it is a type now so a typo is a compile error rather than a
-    /// finding nothing matches (#347).
     pub check: CheckId,
-    /// What the finding is about (producer, key, or mesh-level subject).
     pub subject: String,
-    /// The observed evidence, human-readable.
+    /// What was observed, for a person.
     pub evidence: String,
-    /// The RFC section that makes this a finding (`None` when the check is
-    /// operational judgement rather than a normative clause).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub citation: Option<String>,
+}
+
+/// A subject a check could not decide, and what stood in the way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unjudged {
+    pub subject: String,
+    pub reason: String,
+}
+
+/// One check's verdict (tooling guide §1): `Established` when it found
+/// something, `NotEstablished` with the evidence of a clean answer,
+/// `Unobservable` when a subject it had to decide could not be read, and
+/// `NotAsked` when the run was not to ask it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckReport {
+    pub check: CheckId,
+    /// The core section the check enforces.
+    pub section: &'static str,
+    /// The check's question answered: the finding is the yes.
+    pub verdict: Judgement,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<DoctorFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unjudged: Vec<Unjudged>,
+}
+
+impl CheckReport {
+    /// A check the run did not ask.
+    pub fn not_asked(check: CheckId) -> CheckReport {
+        CheckReport {
+            check,
+            section: check.section(),
+            verdict: Judgement::NotAsked,
+            findings: Vec::new(),
+            unjudged: Vec::new(),
+        }
+    }
+
+    /// A check whose input could not be had at all.
+    pub fn unobservable(check: CheckId, reason: impl Into<String>) -> CheckReport {
+        CheckReport {
+            check,
+            section: check.section(),
+            verdict: Judgement::Unobservable {
+                reason: reason.into(),
+            },
+            findings: Vec::new(),
+            unjudged: Vec::new(),
+        }
+    }
+
+    /// The verdict its lists support: a finding is `Established`; with
+    /// none, a subject left undecided is `Unobservable`; with neither, the
+    /// check is clean and `clean` says why.
+    pub fn of(
+        check: CheckId,
+        findings: Vec<DoctorFinding>,
+        unjudged: Vec<Unjudged>,
+        clean: impl Into<String>,
+    ) -> CheckReport {
+        let verdict = if !findings.is_empty() {
+            Judgement::Established
+        } else if let [one] = unjudged.as_slice() {
+            Judgement::Unobservable {
+                reason: format!("{}: {}", one.subject, one.reason),
+            }
+        } else if let Some(first) = unjudged.first() {
+            Judgement::Unobservable {
+                reason: format!(
+                    "{} subjects could not be judged; the first, {}: {}",
+                    unjudged.len(),
+                    first.subject,
+                    first.reason
+                ),
+            }
+        } else {
+            Judgement::NotEstablished {
+                reason: clean.into(),
+            }
+        };
+        CheckReport {
+            check,
+            section: check.section(),
+            verdict,
+            findings,
+            unjudged,
+        }
+    }
+}
+
+/// What one doctor run read: the scope that makes its silences legible.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DoctorScope {
+    /// The deployment's namespace; empty for the bus root.
+    pub namespace: String,
+    /// The presence selector, base-relative in the namespace. Absent when
+    /// no check that reads presence was asked.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub presence: Asked<DoctorPresence>,
+    /// Routers that answered the admin space (`@/*/router`), read in no
+    /// namespace. Absent when no check that reads it was asked.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub routers: Asked<usize>,
+}
+
+/// The presence half of [`DoctorScope`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DoctorPresence {
+    pub selector: String,
+    /// Whether every presence read ended at the routers' final reply. A
+    /// read that ended at its timeout may have missed tokens (§8.1).
+    pub complete: bool,
+    /// How far apart the two reads split-brain compares were taken.
+    pub grace_s: f64,
+    pub services: usize,
+    pub instances: usize,
+    pub tokens: usize,
+    /// Instances whose descriptor was asked for and did not read.
+    pub undescribed: usize,
+    /// Revisions the descriptors name, and how many of them are held.
+    pub revisions: usize,
+    pub held: usize,
+}
+
+/// zk2's doctor report: one [`CheckReport`] per check, in
+/// [`CheckId::ALL`] order, and the scope they were judged over.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DoctorReport {
+    pub scope: DoctorScope,
+    pub checks: Vec<CheckReport>,
+    /// Set when presence showed no zk2 token at all — the empty scope —
+    /// with what was read. Every check that reads presence is then
+    /// unobservable, and the run is no verdict however clean the rest:
+    /// a doctor pointed at the wrong namespace must not be green.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unobservable: Option<String>,
+}
+
+impl DoctorReport {
+    /// One check's verdict.
+    pub fn check(&self, id: CheckId) -> Option<&CheckReport> {
+        self.checks.iter().find(|c| c.check == id)
+    }
+
+    /// Every finding of every check, in check order.
+    pub fn findings(&self) -> impl Iterator<Item = &DoctorFinding> {
+        self.checks.iter().flat_map(|c| c.findings.iter())
+    }
+
+    /// How many findings have `severity`.
+    pub fn count(&self, severity: DoctorSeverity) -> usize {
+        self.findings().filter(|f| f.severity == severity).count()
+    }
+
+    /// The run as one [`Judgement`] under a severity `floor` — what a
+    /// frontend exits through.
+    ///
+    /// The judged claim is *"the deployment has a finding at or above
+    /// `floor`"*: a hit is `Established` (exit 1). Without one, the run is
+    /// clean only when every check it asked was established clean: an
+    /// empty scope, or a check left unobservable, could be hiding the
+    /// finding, so the run is `Unobservable` (exit 2). A check not asked
+    /// is not counted either way, and a run that asked nothing is no
+    /// verdict.
+    pub fn judgement(&self, floor: DoctorSeverity) -> Judgement {
+        if self.findings().any(|f| f.severity.reaches(floor)) {
+            return Judgement::Established;
+        }
+        if let Some(why) = &self.unobservable {
+            return Judgement::Unobservable {
+                reason: why.clone(),
+            };
+        }
+        let asked: Vec<&CheckReport> = self
+            .checks
+            .iter()
+            .filter(|c| !c.verdict.is_not_asked())
+            .collect();
+        if asked.is_empty() {
+            return Judgement::Unobservable {
+                reason: "no check was asked".into(),
+            };
+        }
+        let unobservable: Vec<&str> = asked
+            .iter()
+            .filter(|c| c.verdict.is_unobservable())
+            .map(|c| c.check.as_str())
+            .collect();
+        if !unobservable.is_empty() {
+            return Judgement::Unobservable {
+                reason: format!(
+                    "no finding at or above {}, and {} check(s) could not be established: {}",
+                    floor.as_str(),
+                    unobservable.len(),
+                    unobservable.join(", ")
+                ),
+            };
+        }
+        Judgement::NotEstablished {
+            reason: format!(
+                "no finding at or above {} among the {} check(s) asked",
+                floor.as_str(),
+                asked.len()
+            ),
+        }
+    }
 }
 
 /// What one doctor run says relative to the previous one (#389): findings
 /// keyed on `(check, subject)`, so evidence and severity drift count as
-/// unchanged. Computed by [`crate::doctor_delta`]; rendered by the GUI
-/// panel and routed by a notifier's `doctor` rule.
+/// unchanged. Computed by [`crate::doctor_delta`]; routed by a notifier's
+/// scheduled doctor.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct DoctorDelta {
     /// Findings present now and absent from the previous run.
@@ -210,326 +483,228 @@ impl DoctorDelta {
     }
 }
 
-/// The full doctor run: findings plus the coverage summary that makes an
-/// empty findings list legible (what was checked, not just what was found —
-/// RFC 05 §3.1: silence needs attribution).
-#[derive(Debug, Clone, Serialize)]
-pub struct DoctorReport {
-    pub findings: Vec<DoctorFinding>,
-    /// Producer slices confirmed in sync with the local registry
-    /// (`origin/producer`).
-    ///
-    /// `NotAsked` = no local registry was given, so the served-vs-declared
-    /// diff **never ran** — which must not read like "ran, none in sync"
-    /// (RFC 09 §5.1 O4). `Asked(vec![])` = the diff ran and confirmed
-    /// nothing; the findings say why. The `Vec` used to skip-if-empty, which
-    /// conflated the two (review finding R1); the `Option` that fixed it is
-    /// now [`Asked`], wire-identically (#246 / P1).
-    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
-    pub synced: Asked<Vec<String>>,
-    /// Introspect replies received across the fleet — readable or not: an
-    /// unreadable one was received, and is a `slice-parse` finding, never
-    /// counted as silence (#491, RFC 13 §3 O4).
-    pub introspect_answered: usize,
-    /// Producers on the liveliness roster.
-    pub live_producers: usize,
-    /// Producers serving an RFC 08 §7 `describe`.
-    pub describe_served: usize,
-    /// Producers serving no `describe` (a SHOULD, not a MUST).
-    pub describe_missing: usize,
-    /// Routers that answered the admin sweep.
-    pub routers: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub router_version: Option<String>,
-    /// Whether the `--deep` freshness/storage checks ran.
-    pub deep: bool,
-    /// The passive listening phase (`--for`, #161) — absent when it did
-    /// not run, so pre-#161 JSON consumers see an unchanged document.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub observation: Option<ObservationSummary>,
-    /// Set when the run **judged nothing** (#510), with the reason: no
-    /// producer on the liveliness roster, no router answering the admin
-    /// space, and nothing else that answered or rode — every check ran over
-    /// an empty scope, so its silence is not a clean bill (RFC 13 §1.2's
-    /// `Unobservable`; RFC 05 §3.1, silence needs attribution). A doctor
-    /// pointed at the wrong endpoint or base used to look exactly like a
-    /// healthy fleet. Absent whenever something was in scope, so an ordinary
-    /// document is unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unobservable: Option<String>,
-}
-
-/// What `doctor --for` observed (#161) — the scope statement that keeps
-/// its findings honest (O5: `**` never crosses an `@`-chunk, so this section
-/// names exactly which selectors were watched), and the drop count that
-/// taints them (O6).
-#[derive(Debug, Clone, Serialize)]
-pub struct ObservationSummary {
-    pub window_s: f64,
-    /// The selectors actually watched — coverage is a statement, not a vibe.
-    pub scopes: Vec<String>,
-    pub samples: u64,
-    pub keys_seen: usize,
-    /// Samples the bounded observer missed; non-zero weakens every
-    /// listen-phase finding and the report says so.
-    pub dropped: u64,
-    /// Samples carrying the synthetic-traffic marker (RFC 09 §5.3, #162) —
-    /// generated traffic judged as real would be a self-inflicted finding.
-    pub synthetic_marked: u64,
-    /// Field-intelligence paths (#223) the bounded per-path table refused to
-    /// track — the O6 cost of that bound, absent when zero so pre-#223
-    /// consumers see an unchanged document.
-    #[serde(skip_serializing_if = "u64_is_zero")]
-    pub field_paths_dropped: u64,
-    /// Key projections the bounded facts cache (#107) retired during the
-    /// window — non-zero means `keys_seen`, the budget sweep and the field
-    /// context cover the retained keys only, and the report says what the
-    /// bound cost (RFC 09 §5.1 O6). Absent when zero, so earlier JSON
-    /// consumers see an unchanged document.
-    #[serde(skip_serializing_if = "u64_is_zero", default)]
-    pub facts_evicted: u64,
-}
-
-impl DoctorReport {
-    pub fn count(&self, severity: DoctorSeverity) -> usize {
-        self.findings
-            .iter()
-            .filter(|f| f.severity == severity)
-            .count()
-    }
-
-    /// The run as an RFC 13 §1.2 [`Judgement`], under an optional severity
-    /// threshold — what a frontend exits through (#510).
-    ///
-    /// The judged claim is *"the fleet has a finding at or above
-    /// `threshold`"*, so a hit is `Established` and none is
-    /// `NotEstablished`. With no threshold, findings are output rather than
-    /// verdicts and the run is `NotEstablished` whatever it found. A run that
-    /// [judged nothing](DoctorReport::unobservable) is `Unobservable` under
-    /// every threshold, `None` included: no threshold turns an empty scope
-    /// into a healthy fleet.
-    pub fn judgement(&self, threshold: Option<DoctorSeverity>) -> Judgement {
-        if let Some(reason) = &self.unobservable {
-            return Judgement::Unobservable {
-                reason: reason.clone(),
-            };
-        }
-        let Some(floor) = threshold else {
-            return Judgement::NotEstablished {
-                reason: "no severity threshold: findings are output, not verdicts".into(),
-            };
-        };
-        if self.findings.iter().any(|f| f.severity.reaches(floor)) {
-            Judgement::Established
-        } else {
-            Judgement::NotEstablished {
-                reason: format!("no finding at or above {}", floor.as_str()),
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::Asked;
+    use crate::report::judgement_exit_code;
 
-    /// The serialized DoctorReport is a wire contract: `zenctl doctor
-    /// --format json` scripts and the GUI panel both consume this exact
-    /// shape. Field renames/removals break users — this golden pin makes
-    /// that a deliberate act.
+    fn finding(check: CheckId, severity: DoctorSeverity) -> DoctorFinding {
+        DoctorFinding {
+            severity,
+            check,
+            subject: "host-a/tc@3fa9c2d41b7e0012".into(),
+            evidence: "e".into(),
+        }
+    }
+
+    fn scope() -> DoctorScope {
+        DoctorScope {
+            namespace: "acme".into(),
+            presence: Asked::Asked(DoctorPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                grace_s: 2.0,
+                services: 3,
+                instances: 3,
+                tokens: 7,
+                undescribed: 0,
+                revisions: 2,
+                held: 2,
+            }),
+            routers: Asked::Asked(1),
+        }
+    }
+
+    /// The serialized report is a wire contract: `zenctl doctor --format
+    /// json` scripts and a notifier read this exact shape. Every verdict
+    /// pole is pinned, the lists are absent when empty, and the empty scope
+    /// is absent unless set.
     #[test]
     fn doctor_report_json_shape_is_pinned() {
         let report = DoctorReport {
-            findings: vec![DoctorFinding {
-                severity: DoctorSeverity::Error,
-                check: CheckId::SliceSync,
-                subject: "h-3fa9c2d41b7e/sysinfo".into(),
-                evidence: "registry version differs: served 1.0, local 2.0".into(),
-                citation: Some("RFC 08 §6".into()),
-            }],
-            // R1: `Option` since the report-honesty batch — `Some` serializes
-            // exactly as the old non-empty `Vec` did.
-            synced: Asked::Asked(vec!["h-3fa9c2d41b7e/other (registry 1.0)".into()]),
-            introspect_answered: 2,
-            live_producers: 3,
-            describe_served: 1,
-            describe_missing: 1,
-            routers: 1,
-            router_version: Some("1.9.0".into()),
-            deep: false,
-            observation: None,
+            scope: scope(),
+            checks: vec![
+                CheckReport::of(
+                    CheckId::SplitBrain,
+                    vec![DoctorFinding {
+                        severity: DoctorSeverity::Error,
+                        check: CheckId::SplitBrain,
+                        subject: "h1/tc tc.v1".into(),
+                        evidence: "two holders".into(),
+                    }],
+                    vec![],
+                    "unused",
+                ),
+                CheckReport::of(
+                    CheckId::BindingUnsatisfied,
+                    vec![],
+                    vec![],
+                    "every role bound",
+                ),
+                CheckReport::of(
+                    CheckId::ContractDrift,
+                    vec![],
+                    vec![Unjudged {
+                        subject: "tc.v1".into(),
+                        reason: "a revision is unavailable".into(),
+                    }],
+                    "unused",
+                ),
+                CheckReport::not_asked(CheckId::StateStampForeign),
+            ],
             unobservable: None,
         };
-        let json = serde_json::to_value(&report).unwrap();
         assert_eq!(
-            json,
+            serde_json::to_value(&report).unwrap(),
             serde_json::json!({
-                "findings": [{
-                    "severity": "error",
-                    "check": "slice-sync",
-                    "subject": "h-3fa9c2d41b7e/sysinfo",
-                    "evidence": "registry version differs: served 1.0, local 2.0",
-                    "citation": "RFC 08 §6",
-                }],
-                "synced": ["h-3fa9c2d41b7e/other (registry 1.0)"],
-                "introspect_answered": 2,
-                "live_producers": 3,
-                "describe_served": 1,
-                "describe_missing": 1,
-                "routers": 1,
-                "router_version": "1.9.0",
-                "deep": false,
-            }),
-            "without --for the document is byte-identical to pre-#161"
-        );
-        // R1 (report-honesty batch): `synced` is three-state. Absent = the
-        // served-vs-declared diff never ran (no registry, O4); `[]` = it ran
-        // and confirmed nothing; non-empty pins above. The wire change is
-        // deliberate: a no-registry run serialized nothing here before, and
-        // still does — only the ran-and-empty case gains a visible `[]`.
-        let unchecked = DoctorReport {
-            synced: Asked::NotAsked,
-            ..report.clone()
-        };
-        let json = serde_json::to_value(&unchecked).unwrap();
-        assert!(
-            !json.as_object().unwrap().contains_key("synced"),
-            "diff never ran: the key is absent, exactly as pre-R1 no-registry \
-             runs serialized"
-        );
-        let ran_empty = DoctorReport {
-            synced: Asked::Asked(vec![]),
-            ..report.clone()
-        };
-        let json = serde_json::to_value(&ran_empty).unwrap();
-        assert_eq!(
-            json["synced"],
-            serde_json::json!([]),
-            "ran and confirmed nothing is `[]`, not absence"
-        );
-        // With the listen phase, the observation section pins too. Note
-        // `field_paths_dropped` (#223) is absent at zero — appended, like
-        // #213/#221's additions, so pre-#223 consumers see an unchanged
-        // document.
-        let report = DoctorReport {
-            observation: Some(ObservationSummary {
-                window_s: 10.0,
-                scopes: vec!["v1/*/state/**".into()],
-                samples: 42,
-                keys_seen: 7,
-                dropped: 0,
-                synthetic_marked: 3,
-                field_paths_dropped: 0,
-                facts_evicted: 0,
-            }),
-            ..report
-        };
-        let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(
-            json["observation"],
-            serde_json::json!({
-                "window_s": 10.0,
-                "scopes": ["v1/*/state/**"],
-                "samples": 42,
-                "keys_seen": 7,
-                "dropped": 0,
-                "synthetic_marked": 3,
+                "scope": {
+                    "namespace": "acme",
+                    "presence": {
+                        "selector": "zk2/*/*/@zk/**",
+                        "complete": true,
+                        "grace_s": 2.0,
+                        "services": 3,
+                        "instances": 3,
+                        "tokens": 7,
+                        "undescribed": 0,
+                        "revisions": 2,
+                        "held": 2,
+                    },
+                    "routers": 1,
+                },
+                "checks": [
+                    {
+                        "check": "split-brain",
+                        "section": "§6",
+                        "verdict": {"answer": "established"},
+                        "findings": [{
+                            "severity": "error",
+                            "check": "split-brain",
+                            "subject": "h1/tc tc.v1",
+                            "evidence": "two holders",
+                        }],
+                    },
+                    {
+                        "check": "binding-unsatisfied",
+                        "section": "§3.2 R5",
+                        "verdict": {"answer": "not_established", "reason": "every role bound"},
+                    },
+                    {
+                        "check": "contract-drift",
+                        "section": "§9.8",
+                        "verdict": {
+                            "answer": "unobservable",
+                            "reason": "tc.v1: a revision is unavailable",
+                        },
+                        "unjudged": [{"subject": "tc.v1", "reason": "a revision is unavailable"}],
+                    },
+                    {
+                        "check": "state-stamp-foreign",
+                        "section": "§4.2 S1–S2",
+                        "verdict": {"answer": "not_asked"},
+                    },
+                ],
             })
         );
-        // …and pins by name when the field table did drop (O6 is a wire
-        // fact, not only a table note).
-        let report = DoctorReport {
-            observation: Some(ObservationSummary {
-                field_paths_dropped: 2,
-                ..report.observation.unwrap()
-            }),
-            ..report
+        // The empty scope, by name and with its reason; and the scope's
+        // halves absent when not asked, never zero.
+        let empty = DoctorReport {
+            scope: DoctorScope {
+                namespace: String::new(),
+                presence: Asked::NotAsked,
+                routers: Asked::NotAsked,
+            },
+            checks: vec![],
+            unobservable: Some("no zk2 token visible to this reader".into()),
         };
-        let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["observation"]["field_paths_dropped"], 2);
-        // The facts-cache eviction count (#107) follows the same append
-        // rule: absent at zero, pinned by name when the bound cost keys.
-        assert!(
-            !json["observation"]
-                .as_object()
-                .unwrap()
-                .contains_key("facts_evicted")
+        assert_eq!(
+            serde_json::to_value(&empty).unwrap(),
+            serde_json::json!({
+                "scope": {"namespace": ""},
+                "checks": [],
+                "unobservable": "no zk2 token visible to this reader",
+            })
         );
-        let report = DoctorReport {
-            observation: Some(ObservationSummary {
-                facts_evicted: 5,
-                ..report.observation.unwrap()
-            }),
-            ..report
-        };
-        let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["observation"]["facts_evicted"], 5);
-        // #510: a run that judged nothing says so, by name and with its
-        // reason — appended, absent otherwise, like every addition above.
-        assert!(!json.as_object().unwrap().contains_key("unobservable"));
-        let report = DoctorReport {
-            unobservable: Some("nothing in scope".into()),
-            ..report
-        };
-        let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["unobservable"], "nothing in scope");
     }
 
-    /// #510: the run's judgement under a threshold — a hit is the finding
-    /// (1), none is clean (0), no threshold is always clean, and a run that
-    /// judged nothing is unobservable (2) under every threshold, `None`
-    /// included.
+    /// The run's judgement: a finding at or above the floor is the 1; below
+    /// it, a check left unobservable or an empty scope is the 2; every check
+    /// asked clean is the 0; a check not asked counts for neither; and a
+    /// run that asked nothing is no verdict.
     #[test]
-    fn the_judgement_reads_the_threshold_and_the_empty_scope() {
-        use crate::report::judgement_exit_code;
-        let warning = DoctorFinding {
-            severity: DoctorSeverity::Warning,
-            check: CheckId::SchemaDrift,
-            subject: "Health".into(),
-            evidence: "agreement cannot be judged".into(),
-            citation: None,
-        };
-        let report = DoctorReport {
-            findings: vec![warning],
-            synced: Asked::NotAsked,
-            introspect_answered: 1,
-            live_producers: 1,
-            describe_served: 1,
-            describe_missing: 0,
-            routers: 0,
-            router_version: None,
-            deep: false,
-            observation: None,
+    fn the_judgement_reads_the_floor_the_unobservable_checks_and_the_empty_scope() {
+        let exit = |r: &DoctorReport, floor| judgement_exit_code(&r.judgement(floor));
+        let clean = CheckReport::of(CheckId::SplitBrain, vec![], vec![], "none");
+        let warned = CheckReport::of(
+            CheckId::PresenceOverBudget,
+            vec![finding(
+                CheckId::PresenceOverBudget,
+                DoctorSeverity::Warning,
+            )],
+            vec![],
+            "unused",
+        );
+        let unseen = CheckReport::unobservable(CheckId::StorageOnState, "admin unreachable");
+        let report = |checks: Vec<CheckReport>| DoctorReport {
+            scope: scope(),
+            checks,
             unobservable: None,
         };
-        let exit = |r: &DoctorReport, t| judgement_exit_code(&r.judgement(t));
-        assert_eq!(exit(&report, None), 0);
-        assert_eq!(exit(&report, Some(DoctorSeverity::Error)), 0);
-        assert_eq!(exit(&report, Some(DoctorSeverity::Warning)), 1);
-        assert_eq!(exit(&report, Some(DoctorSeverity::Info)), 1);
 
-        let empty = DoctorReport {
-            findings: vec![],
-            live_producers: 0,
-            introspect_answered: 0,
-            describe_served: 0,
-            unobservable: Some("nothing in scope".into()),
-            ..report
-        };
-        for t in [
-            None,
-            Some(DoctorSeverity::Error),
-            Some(DoctorSeverity::Warning),
-            Some(DoctorSeverity::Info),
-        ] {
-            assert_eq!(exit(&empty, t), 2, "{t:?}");
-        }
+        let r = report(vec![
+            clean.clone(),
+            CheckReport::not_asked(CheckId::TokenMissing),
+        ]);
+        assert_eq!(exit(&r, DoctorSeverity::Warning), 0);
+        let r = report(vec![clean.clone(), warned.clone()]);
+        assert_eq!(exit(&r, DoctorSeverity::Warning), 1);
         assert_eq!(
-            empty.judgement(None),
+            exit(&r, DoctorSeverity::Error),
+            0,
+            "a warning under --fail-on error"
+        );
+        let r = report(vec![warned.clone(), unseen.clone()]);
+        assert_eq!(
+            exit(&r, DoctorSeverity::Warning),
+            1,
+            "a finding is a finding"
+        );
+        assert_eq!(
+            exit(&r, DoctorSeverity::Error),
+            2,
+            "below the floor, an unobservable check could hide one"
+        );
+        let r = DoctorReport {
+            unobservable: Some("no token".into()),
+            ..report(vec![clean.clone()])
+        };
+        assert_eq!(exit(&r, DoctorSeverity::Warning), 2);
+        let r = report(vec![CheckReport::not_asked(CheckId::SplitBrain)]);
+        assert_eq!(exit(&r, DoctorSeverity::Warning), 2, "nothing asked");
+    }
+
+    /// The verdict a check's lists support: findings win, then the
+    /// undecided, then the clean reason.
+    #[test]
+    fn a_check_s_verdict_follows_its_lists() {
+        let f = finding(CheckId::TokenMissing, DoctorSeverity::Error);
+        let u = Unjudged {
+            subject: "s".into(),
+            reason: "r".into(),
+        };
+        let both = CheckReport::of(CheckId::TokenMissing, vec![f], vec![u.clone()], "c");
+        assert_eq!(both.verdict, Judgement::Established);
+        let two = CheckReport::of(CheckId::TokenMissing, vec![], vec![u.clone(), u], "c");
+        assert_eq!(
+            two.verdict,
             Judgement::Unobservable {
-                reason: "nothing in scope".into()
+                reason: "2 subjects could not be judged; the first, s: r".into()
             }
+        );
+        let clean = CheckReport::of(CheckId::TokenMissing, vec![], vec![], "c");
+        assert_eq!(
+            clean.verdict,
+            Judgement::NotEstablished { reason: "c".into() }
         );
     }
 }
@@ -539,52 +714,57 @@ mod check_id_tests {
     use super::*;
 
     /// The id vocabulary is API: additions append, nothing renames. If this
-    /// test fails you are renaming a shipped check id — don't.
-    ///
-    /// It asserts the *wire* spelling, not the variant names, which is the
-    /// half that is promised: #347 turned a `[&str; 21]` into an enum, and
-    /// this is what proves the turn cost nothing on the wire.
+    /// test fails you are renaming a check id — don't.
     #[test]
     fn check_ids_are_stable() {
         assert_eq!(
             CheckId::ALL.map(CheckId::as_str),
             [
-                "slice-parse",
-                "slice-sync",
-                "introspect-coverage",
+                "split-brain",
+                "binding-unsatisfied",
+                "contract-drift",
+                "contract-unavailable",
+                "descriptor-invalid",
+                "token-missing",
+                "presence-over-budget",
+                "storage-on-state",
+                "archive-unaligned",
+                "state-stamp-foreign",
+                "shm-memlock-low",
                 "admin-unreachable",
                 "router-version-skew",
-                "describe-totality",
-                "schema-drift",
-                "describe-missing",
-                "stale-state",
-                "unstamped-state",
-                "storage-coverage",
-                "payload-undecodable",
-                "payload-invalid",
-                "qos-observed-mismatch",
-                "unregistered-traffic",
-                "rate-over-declared",
-                "timestamp-stamped-elsewhere",
-                "cardinality-over-declared",
-                "field-vanished",
-                "field-stuck",
-                "field-new",
-                "kind-mismatch",
-                "budget-exceeded",
             ]
         );
     }
 
-    /// `as_str`, serde and `parse` are one vocabulary, not three.
+    /// `as_str`, serde and `parse` are one vocabulary, not three; every id
+    /// names its section and its question.
     #[test]
-    fn every_check_id_round_trips_through_serde_and_parse() {
+    fn every_check_id_round_trips_and_names_its_section() {
         for id in CheckId::ALL {
             let json = serde_json::to_string(&id).unwrap();
             assert_eq!(json, format!("\"{}\"", id.as_str()));
             assert_eq!(serde_json::from_str::<CheckId>(&json).unwrap(), id);
             assert_eq!(CheckId::parse(id.as_str()), Some(id));
+            assert!(!id.section().is_empty());
+            assert!(id.question().ends_with('?'), "{id}");
         }
-        assert_eq!(CheckId::parse("slice-sinc"), None);
+        assert_eq!(CheckId::parse("split-brian"), None);
+    }
+
+    /// The severity vocabulary is the stable lowercase one, and its ladder
+    /// is what a floor reads.
+    #[test]
+    fn severities_serialize_lowercase_and_climb_the_ladder() {
+        for (s, w) in [
+            (DoctorSeverity::Error, "error"),
+            (DoctorSeverity::Warning, "warning"),
+            (DoctorSeverity::Info, "info"),
+        ] {
+            assert_eq!(serde_json::to_value(s).unwrap(), w);
+            assert_eq!(s.as_str(), w);
+        }
+        assert!(DoctorSeverity::Error.reaches(DoctorSeverity::Warning));
+        assert!(!DoctorSeverity::Info.reaches(DoctorSeverity::Warning));
     }
 }

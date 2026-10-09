@@ -125,6 +125,7 @@ Error: failed to open the Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+doctor: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -135,6 +136,7 @@ Error: failed to open the Zenoh session
 
 Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+doctor: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 

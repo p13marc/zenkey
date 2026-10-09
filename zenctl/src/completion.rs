@@ -404,6 +404,16 @@ pub fn namespaces() -> Vec<CompletionCandidate> {
     candidates(names.namespaces.into_iter().filter(|n| !n.is_empty()))
 }
 
+/// The doctor's check ids (#612, FJ6): a closed vocabulary, so offered
+/// whole, with no cache to read.
+pub fn check_ids() -> Vec<CompletionCandidate> {
+    candidates(
+        zenkey_fleet::report::CheckId::ALL
+            .into_iter()
+            .map(|c| c.as_str().to_owned()),
+    )
+}
+
 /// Keys, completed from the *declared* keyspace: `v1/<origin>/<class>/…`.
 ///
 /// Subject patterns reach the user through here rather than on their own: a

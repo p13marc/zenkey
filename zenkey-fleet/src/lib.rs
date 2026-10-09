@@ -16,7 +16,9 @@
 //! services, descriptors and contract bundles; [`model::catalog`],
 //! [`model::render`] and [`model::structural`] turn them into views and
 //! honest renderings; `report`'s `presence`, `iface`, `graph`, `contract`
-//! and `payload` domains are what zenctl prints. The zk2 functions take a
+//! and `payload` domains are what zenctl prints; [`judge::doctor`] (FJ6)
+//! judges a deployment against the core, reading through a [`DoctorBus`]:
+//! one session in the namespace, one in none. The zk2 functions take a
 //! bare `&Session` and spell base-relative keys, because zk2's resolved
 //! verbs read through a session **in** the deployment's namespace (decided
 //! 2026-10-08), which ends RFC 09 §5's rule above for zk2; raw verbs and the
@@ -75,9 +77,10 @@
 //!   session, and that is load-bearing: it is what lets a frontend replay a
 //!   `.zrec` through the same projections it runs live.
 //!
-//! * **[`judge`]** — everything that takes a position. `doctor`, `expect`,
-//!   `condition`, `conform`, `field`, `why`, `cutover`, `retired`, `budget`, and
-//!   [`judge::common`] for the vocabulary they share. The honesty rules
+//! * **[`judge`]** — everything that takes a position. `doctor` (zk2's, FJ6)
+//!   and its `doctor_delta`, `expect`, `condition`, `conform` and the v1
+//!   `registry_checks` it projects, `field`, `why`, `cutover`, `retired`,
+//!   `budget`, and [`judge::common`] for the vocabulary they share. The honesty rules
 //!   (RFC 13, v1.24) bite hardest here, so the layer states them once.
 //!
 //! * **[`report`]** — every serde-pinned wire shape in the crate, split by
@@ -164,9 +167,6 @@ pub use judge::condition::{
 pub use judge::conform::{ConformSpec, run_conform};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::doctor::{DoctorSpec, run_doctor};
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -240,6 +240,13 @@ pub use bus::write::{
 };
 pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
+// zk2's doctor (#612, FJ6): the run, its two halves, and the delta a
+// notifier compares runs with.
+pub use judge::doctor::{
+    AdminSpace, ArchiveKeys, DEFAULT_GRACE, DEFAULT_PRESENCE_BUDGET, DOMAIN_SELECTORS, DoctorBus,
+    DoctorObservation, DoctorSpec, DomainTokens, Memlock, StateStamps, judge as judge_doctor,
+    observe as observe_doctor, run_doctor,
+};
 pub use judge::doctor_delta::doctor_delta;
 pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
 // Types reachable *through* root-exported ones — a caller that matches on

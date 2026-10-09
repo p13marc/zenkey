@@ -74,7 +74,7 @@ async fn run_inner(
 
 /// Whether a finding list trips an opt-in `--fail-on` ceiling — `doctor`'s
 /// rule, spelled once here because the findings are the same type.
-fn trips(findings: &[crate::report::DoctorFinding], fail_on: Option<FailOn>) -> bool {
+fn trips(findings: &[crate::report::V1Finding], fail_on: Option<FailOn>) -> bool {
     let any = |s: DoctorSeverity| findings.iter().any(|f| f.severity == s);
     match fail_on {
         Some(FailOn::Error) => any(DoctorSeverity::Error),

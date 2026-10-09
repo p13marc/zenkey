@@ -66,51 +66,122 @@ pub fn storage_list() -> StorageList {
     }
 }
 
-/// A doctor run with one finding of each severity, and the listen phase's
-/// bounded observation.
+/// zk2's doctor (#612, FJ6): every verdict pole — a finding of each
+/// severity, clean checks, one left unobservable with the subject it could
+/// not decide, one not asked — over a scope whose every count is non-zero,
+/// because a renderer that sums two counts passes any fixture where one is
+/// zero (tooling guide §7).
 pub fn doctor_report() -> DoctorReport {
+    let netem = format!("sha256:{}", "e".repeat(64));
+    let finding = |check, severity, subject: &str, evidence: &str| DoctorFinding {
+        severity,
+        check,
+        subject: subject.into(),
+        evidence: evidence.into(),
+    };
+    let clean = |check, why: &str| CheckReport::of(check, vec![], vec![], why);
     DoctorReport {
-        findings: vec![
-            DoctorFinding {
-                severity: DoctorSeverity::Error,
-                check: CheckId::SliceSync,
-                subject: format!("{ORIGIN}/sysinfo"),
-                evidence: "does not serve state health".into(),
-                citation: Some("RFC 08 §6".into()),
-            },
-            DoctorFinding {
-                severity: DoctorSeverity::Warning,
-                check: CheckId::QosObservedMismatch,
-                subject: format!("{ORIGIN}/sysinfo/health"),
-                evidence: "declared refreshed, observed data/drop/reliable".into(),
-                citation: None,
-            },
-            DoctorFinding {
-                severity: DoctorSeverity::Info,
-                check: CheckId::TimestampStampedElsewhere,
-                subject: "fleet".into(),
-                evidence: "stamped by 1 node that is not the publisher".into(),
-                citation: Some("RFC 09 §5.1 O7".into()),
-            },
+        scope: DoctorScope {
+            namespace: "acme".into(),
+            presence: Asked::Asked(DoctorPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                grace_s: 2.0,
+                services: 3,
+                instances: 4,
+                tokens: 9,
+                undescribed: 1,
+                revisions: 3,
+                held: 2,
+            }),
+            routers: Asked::Asked(2),
+        },
+        checks: vec![
+            CheckReport::of(
+                CheckId::SplitBrain,
+                vec![finding(
+                    CheckId::SplitBrain,
+                    DoctorSeverity::Error,
+                    "host-a/tc tc.netif.v1",
+                    "2 instances hold its interface token in two presence reads 2.0s apart \
+                     (3fa9c2d41b7e0012, 3fa9c2d41b7e0013), and at least two expose an exclusive \
+                     resource",
+                )],
+                vec![],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::BindingUnsatisfied,
+                vec![finding(
+                    CheckId::BindingUnsatisfied,
+                    DoctorSeverity::Warning,
+                    "ws-01/tcgui-frontend scenario",
+                    "its bindings (*/tc) select no provider of tc.scenario.v1 visible to this \
+                     reader",
+                )],
+                vec![],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::ContractDrift,
+                vec![],
+                vec![Unjudged {
+                    subject: "tc.netem.v1 eeeeeeeeeeeeeeee 5d1c0a9b2e3f4a6b".into(),
+                    reason: format!("not classified: tc.netem.v1 {netem} is unavailable"),
+                }],
+                "unused",
+            ),
+            CheckReport::of(
+                CheckId::ContractUnavailable,
+                vec![finding(
+                    CheckId::ContractUnavailable,
+                    DoctorSeverity::Error,
+                    &format!("tc.netem.v1 {netem}"),
+                    "named by host-b/tc@3fa9c2d41b7e0014; no holder served a bundle that \
+                     verified (no reply)",
+                )],
+                vec![],
+                "unused",
+            ),
+            clean(
+                CheckId::DescriptorInvalid,
+                "3 descriptor(s) pass the descriptor check against the contracts they name",
+            ),
+            clean(
+                CheckId::TokenMissing,
+                "3 instance(s): every token agrees with its descriptor",
+            ),
+            clean(
+                CheckId::PresenceOverBudget,
+                "9 token(s) visible to this reader in the presence domain; within the budget \
+                 10000",
+            ),
+            clean(
+                CheckId::StorageOnState,
+                "1 storage(s) on 2 router(s), none answering on an owner's state keys",
+            ),
+            clean(
+                CheckId::ArchiveUnaligned,
+                "no archive.v1 provider visible to this reader: nothing to align",
+            ),
+            CheckReport::not_asked(CheckId::StateStampForeign),
+            CheckReport::of(
+                CheckId::ShmMemlockLow,
+                vec![finding(
+                    CheckId::ShmMemlockLow,
+                    DoctorSeverity::Info,
+                    "this host",
+                    "RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor",
+                )],
+                vec![],
+                "unused",
+            ),
+            clean(
+                CheckId::AdminUnreachable,
+                "2 router(s) answered `@/*/router`",
+            ),
+            clean(CheckId::RouterVersionSkew, "2 router(s), all at 1.10.1"),
         ],
-        synced: Asked::Asked(vec![format!("{ORIGIN}/catalog (registry 1.1)")]),
-        introspect_answered: 2,
-        live_producers: 3,
-        describe_served: 1,
-        describe_missing: 1,
-        routers: 1,
-        router_version: Some("1.9.0".into()),
-        deep: false,
-        observation: Some(ObservationSummary {
-            window_s: 10.0,
-            scopes: vec!["v1/**".into()],
-            samples: 412,
-            keys_seen: 7,
-            dropped: 3,
-            synthetic_marked: 0,
-            field_paths_dropped: 0,
-            facts_evicted: 0,
-        }),
         unobservable: None,
     }
 }
@@ -162,9 +233,9 @@ pub fn field_report() -> FieldReport {
                 values: Some(vec!["\"degraded\"".into(), "\"ok\"".into()]),
             },
         ],
-        findings: vec![DoctorFinding {
+        findings: vec![V1Finding {
             severity: DoctorSeverity::Warning,
-            check: CheckId::FieldStuck,
+            check: V1CheckId::FieldStuck,
             subject: format!("{key} · temperature_c"),
             evidence: "value 21.5 unchanged across 40 sample(s) spanning 29.5s — at \
                        least 3× the declared ttl_s 5s — while the key kept publishing. \
@@ -643,7 +714,6 @@ pub fn conform_report() -> ConformReport {
             keys_seen: 2,
             dropped: 3,
             synthetic_marked: 40,
-            field_paths_dropped: 0,
             facts_evicted: 0,
         }),
         deep: false,
@@ -1939,9 +2009,9 @@ pub fn export_snapshot() -> ExportSnapshot {
         doctor: Asked::Asked(DoctorSummary {
             ran_at_unix_s: 1_700_000_090,
             findings: vec![DoctorFindingRef {
-                check: CheckId::StaleState,
-                severity: DoctorSeverity::Warning,
-                subject: format!("{ORIGIN}/sysinfo"),
+                check: CheckId::SplitBrain,
+                severity: DoctorSeverity::Error,
+                subject: "host-a/tc tc.netif.v1".into(),
             }],
         }),
     }

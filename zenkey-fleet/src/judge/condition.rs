@@ -34,6 +34,7 @@ use crate::{Error, Result};
 
 use crate::bus::monitor::SampleView;
 use crate::bus::query::FleetAnswer;
+use crate::judge::doctor::DoctorBus;
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
 use crate::report::{CheckId, DoctorReport};
@@ -70,9 +71,11 @@ pub enum Condition {
     /// [`Condition::InvalidPayload`]; samples with no declared profile are
     /// unjudgeable and counted in the evidence, not the state.
     QosMismatch { selector: String },
-    /// A doctor run reported at least one finding with this check id
-    /// (the stable [`crate::report::CheckId`] vocabulary). A failed doctor run is
-    /// unobservable for every doctor condition — never `ok`.
+    /// A check of zk2's doctor established a finding (the stable
+    /// [`crate::report::CheckId`] vocabulary, #612 FJ6). A check the run
+    /// could not establish, and a failed run, are unobservable — never `ok`.
+    /// The doctor reads the deployment through a session in its namespace,
+    /// which the runner is given ([`WatchdogSpec::doctor`]).
     DoctorCheck { check: CheckId },
     /// The origin holds no `alive` token on the liveliness roster
     /// (RFC 04 §5). A roster that could not be asked is unobservable —
@@ -457,9 +460,12 @@ impl Condition {
     }
 
     /// Judge a doctor run. `None` unless this is [`Condition::DoctorCheck`].
-    /// A failed run is unobservable for every doctor condition — never `ok`
-    /// — and so is a run that judged nothing (#510): an empty scope has not
-    /// said any check is clean.
+    ///
+    /// The check's own verdict, projected (#612, FJ6): `Established` is
+    /// firing, `NotEstablished` is ok, and both Unestablished poles are
+    /// unobservable — a check the run could not establish, or did not ask,
+    /// has not said it is clean. A failed run is unobservable for every
+    /// doctor condition, and so is a run over an empty scope (#510).
     pub fn judge_doctor(&self, outcome: Result<&DoctorReport, &str>) -> Option<Eval> {
         let Condition::DoctorCheck { check } = self else {
             return None;
@@ -476,24 +482,32 @@ impl Condition {
                 state: CondState::Unobservable,
                 evidence: format!("the doctor run judged nothing: {why}"),
             },
-            Ok(report) => {
-                let mut hits = report.findings.iter().filter(|f| f.check == *check);
-                match hits.next() {
-                    Some(first) => Eval {
-                        state: CondState::Firing,
-                        evidence: format!(
+            Ok(report) => match report.check(*check).map(|c| (&c.verdict, &c.findings)) {
+                Some((Judgement::Established, findings)) => Eval {
+                    state: CondState::Firing,
+                    evidence: match findings.first() {
+                        Some(first) => format!(
                             "{} finding(s); first: {} — {}",
-                            1 + hits.count(),
+                            findings.len(),
                             first.subject,
                             first.evidence
                         ),
+                        None => format!("{check} established a finding"),
                     },
-                    None => Eval {
-                        state: CondState::Ok,
-                        evidence: format!("no {check} findings"),
-                    },
-                }
-            }
+                },
+                Some((Judgement::NotEstablished { reason }, _)) => Eval {
+                    state: CondState::Ok,
+                    evidence: reason.clone(),
+                },
+                Some((Judgement::Unobservable { reason }, _)) => Eval {
+                    state: CondState::Unobservable,
+                    evidence: reason.clone(),
+                },
+                Some((Judgement::NotAsked, _)) | None => Eval {
+                    state: CondState::Unobservable,
+                    evidence: format!("the doctor run did not ask {check}"),
+                },
+            },
         })
     }
 }
@@ -640,6 +654,20 @@ pub fn judge_doctor_check(check: CheckId, outcome: Option<Result<&DoctorReport, 
     Condition::DoctorCheck { check }
         .judge_doctor(outcome)
         .expect("a DoctorCheck is judged by the doctor")
+}
+
+/// One tick's doctor run for the doctor rules (#612, FJ6), or why there is
+/// none: zk2's doctor reads the deployment through a session in its
+/// namespace, and a runner given none cannot ask it.
+pub(crate) async fn tick_doctor(
+    bus: Option<&DoctorBus>,
+    store: &crate::bus::contracts::BundleStore,
+    spec: &crate::judge::doctor::DoctorSpec,
+) -> std::result::Result<DoctorReport, String> {
+    match bus {
+        Some(bus) => Ok(crate::judge::doctor::run_doctor(bus, store, spec).await),
+        None => Err("no session in the deployment's namespace was given to the doctor".into()),
+    }
 }
 
 /// Judge one origin against this tick's roster ask — likewise total.
@@ -861,7 +889,7 @@ impl RuleState {
 /// check id ([`CheckId`]), fed by `doctor --transitions`. The
 /// first run states the baseline (one transition per check id); every later run yields
 /// only genuine changes. A failed run flips every check to `unobservable` —
-/// a doctor that could not run has not said the fleet is healthy.
+/// a doctor that could not run has not said the deployment is healthy.
 #[derive(Debug, Clone)]
 pub struct DoctorWatch {
     /// One state per check. A `Vec<(Condition, RuleState)>` until #352 — the
@@ -870,11 +898,17 @@ pub struct DoctorWatch {
 }
 
 impl DoctorWatch {
+    /// One state per check id there is.
     pub fn new() -> DoctorWatch {
+        DoctorWatch::of(CheckId::ALL)
+    }
+
+    /// One state per check in `checks`: the ones a run asks.
+    pub fn of(checks: impl IntoIterator<Item = CheckId>) -> DoctorWatch {
         DoctorWatch {
-            checks: CheckId::ALL
-                .iter()
-                .map(|id| RuleState::new(Condition::DoctorCheck { check: *id }))
+            checks: checks
+                .into_iter()
+                .map(|check| RuleState::new(Condition::DoctorCheck { check }))
                 .collect(),
         }
     }
@@ -915,6 +949,11 @@ pub struct WatchdogSpec {
     pub ticks: Option<u64>,
     /// Per-ask timeout for the roster and doctor conditions.
     pub timeout: Duration,
+    /// Where a `doctor <CHECK-ID>` rule's doctor reads (#612, FJ6): zk2's
+    /// doctor reads the deployment through a session in its namespace, which
+    /// the watchdog's own session is not. `None` makes every doctor rule
+    /// unobservable, saying why.
+    pub doctor: Option<DoctorBus>,
 }
 
 /// How many decode attempts each key gets per tick under an
@@ -1061,6 +1100,24 @@ impl<'a> RuleSet<'a> {
         self.rules
             .iter()
             .any(|r| matches!(r.rule, Condition::DoctorCheck { .. }))
+    }
+
+    /// The doctor a tick runs for the rules (#612, FJ6): only the checks
+    /// they name, and `deep` when one names `state-stamp-foreign` — a rule
+    /// asked for it — with every other setting the doctor's default.
+    pub fn doctor_spec(&self, timeout: Duration) -> crate::judge::doctor::DoctorSpec {
+        let checks: std::collections::BTreeSet<CheckId> = self
+            .rules
+            .iter()
+            .filter_map(|r| match r.rule {
+                Condition::DoctorCheck { check } => Some(check),
+                _ => None,
+            })
+            .collect();
+        let mut spec = crate::judge::doctor::DoctorSpec::new(timeout);
+        spec.deep = checks.contains(&CheckId::StateStampForeign);
+        spec.checks = checks;
+        spec
     }
 
     /// Some rule judges the liveliness roster, so the driver owes one ask
@@ -1326,6 +1383,10 @@ pub fn watchdog<'a>(
             rules.wants_alerts(),
         );
         let alert_selectors = rules.alert_selectors();
+        // The doctor rules' doctor: only the checks they name, and one
+        // contract store for the run, whose verified bundles outlive a tick.
+        let doctor_spec = rules.doctor_spec(spec.timeout);
+        let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
 
         // Warmed before the first tick and sealed for the run (#337): a decode
         // inside the drain loop must never become a `describe` GET, because
@@ -1366,20 +1427,7 @@ pub fn watchdog<'a>(
             // assumed — so the drops land in the tick that incurred them.
             let sweep = async {
                 let doctor = if wants_doctor {
-                    Some(
-                        crate::judge::doctor::run_doctor(
-                            fleet,
-                            slices,
-                            &crate::judge::doctor::DoctorSpec {
-                                deep: false,
-                                sample: None,
-                                timeout: spec.timeout,
-                                listen: None,
-                            },
-                        )
-                        .await
-                        .map_err(|e| e.to_string()),
-                    )
+                    Some(tick_doctor(spec.doctor.as_ref(), &bundles, &doctor_spec).await)
                 } else {
                     None
                 };
@@ -1517,29 +1565,34 @@ pub fn watchdog<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::{DoctorFinding, DoctorSeverity};
+    use crate::report::{CheckReport, DoctorFinding, DoctorScope, DoctorSeverity};
 
+    /// A zk2 doctor report whose checks are clean but for one finding per
+    /// entry of `checks`, each under its own check.
     fn report_with(checks: &[CheckId]) -> DoctorReport {
         DoctorReport {
-            findings: checks
-                .iter()
-                .map(|c| DoctorFinding {
-                    severity: DoctorSeverity::Error,
-                    check: *c,
-                    subject: "s".into(),
-                    evidence: "e".into(),
-                    citation: None,
+            scope: DoctorScope {
+                namespace: String::new(),
+                presence: crate::report::Asked::NotAsked,
+                routers: crate::report::Asked::NotAsked,
+            },
+            checks: CheckId::ALL
+                .into_iter()
+                .map(|id| {
+                    let findings = checks
+                        .iter()
+                        .filter(|c| **c == id)
+                        .enumerate()
+                        .map(|(n, c)| DoctorFinding {
+                            severity: DoctorSeverity::Error,
+                            check: *c,
+                            subject: format!("s{n}"),
+                            evidence: "e".into(),
+                        })
+                        .collect();
+                    CheckReport::of(id, findings, vec![], "clean")
                 })
                 .collect(),
-            synced: crate::report::Asked::NotAsked,
-            introspect_answered: 0,
-            live_producers: 0,
-            describe_served: 0,
-            describe_missing: 0,
-            routers: 0,
-            router_version: None,
-            deep: false,
-            observation: None,
             unobservable: None,
         }
     }
@@ -1555,7 +1608,7 @@ mod tests {
             "silent-for v1/*/events/** 30",
             "invalid-payload v1/*/state/**",
             "qos-mismatch v1/*/telemetry/**",
-            "doctor slice-sync",
+            "doctor split-brain",
             "origin-down h-aaaaaaaaaaaa",
             "dropped",
             "alert-firing v1/*/state/*/alert/* critical",
@@ -1585,7 +1638,7 @@ mod tests {
         // A doctor rule outside the stable check-id vocabulary is refused at
         // parse, naming the vocabulary.
         let err = Condition::parse("doctor no-such-check").unwrap_err();
-        assert!(err.to_string().contains("slice-sync"), "{err}");
+        assert!(err.to_string().contains("split-brain"), "{err}");
     }
 
     fn alert_answer(key: &str, doc: &str) -> FleetAnswer {
@@ -1895,10 +1948,10 @@ mod tests {
             "an unchanged run emits nothing"
         );
 
-        let drifted = report_with(&[CheckId::SchemaDrift, CheckId::SchemaDrift]);
+        let drifted = report_with(&[CheckId::SplitBrain, CheckId::SplitBrain]);
         let changes = watch.observe(Ok(&drifted), "t2");
         assert_eq!(changes.len(), 1, "only the changed check transitions");
-        assert_eq!(changes[0].rule, "doctor schema-drift");
+        assert_eq!(changes[0].rule, "doctor split-brain");
         assert_eq!(changes[0].to, CondState::Firing);
         assert!(changes[0].evidence.contains("2 finding(s)"));
 

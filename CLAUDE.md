@@ -132,6 +132,14 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
+  FJ6's `doctor` judges a zk2 deployment against the core: thirteen checks
+  (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
+  `Judgement` whose finding is the yes, read through a session in the
+  namespace and one in none for the admin space and the presence domain;
+  exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
+  check is unobservable or the scope is empty. The watchdog's `doctor` rule,
+  `record --on` and `export --doctor-every` run it too. v1's registry checks
+  survive only as `check conform`'s projection (`judge::registry_checks`).
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,

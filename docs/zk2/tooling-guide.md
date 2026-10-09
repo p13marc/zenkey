@@ -77,6 +77,7 @@ Worked mappings in the zk2 tools:
 | A presence read: does a token match? (§8.1) | the tokens | complete and empty, worded "no token visible to this reader" (below) | a read that ended at its timeout: possibly incomplete (Unobservable) |
 | A state GET: what is the current value? (S4) | the owner's value, or its deletion | none: a GET answers or is silent | silence (Unobservable). An archive's answer is a *different* question (§2). |
 | Split-brain: do two instances serve one exclusive operation at once? (§6) | `split-brain`: the finding | none seen | a holder whose descriptor or bundle could not be read (`undecided`) |
+| A `doctor` check: does its condition fire? Every id names the condition, `split-brain` to `router-version-skew` (#612, FJ6) | a finding, with its severity, subject and evidence | clean, with the evidence that makes it clean as the reason | a subject it could not decide (Unobservable, each listed `unjudged` with why); every check that reads presence over an empty scope (Unobservable); a check the run did not ask (NotAsked) |
 
 ## 2. Silence is never a verdict
 

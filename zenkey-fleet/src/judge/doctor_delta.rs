@@ -5,8 +5,9 @@
 //!
 //! A finding is identified by `(check, subject)`: evidence and severity
 //! drift count as unchanged — the *fact* persists, its wording may move.
-//! Ungated on purpose: the doctor itself needs a session and the `decode`
-//! feature, but comparing two of its reports needs neither.
+//! zk2's checks (#612, FJ6) spell every subject the same way every run for
+//! exactly this reason. Ungated on purpose: the doctor needs a session, but
+//! comparing two of its reports needs none.
 
 use std::collections::BTreeSet;
 
@@ -17,19 +18,23 @@ fn key_of(f: &DoctorFinding) -> (CheckId, &str) {
 }
 
 /// What `current` says that `previous` did not, and the other way round.
+///
+/// A check that was not established in one of the runs — not asked, or
+/// unobservable — has no findings there, so its findings read as new or
+/// fixed against it. A notifier that must not announce a fix nobody saw
+/// reads the check's verdict beside the delta, as zenwatch's scheduled
+/// doctor does.
 pub fn doctor_delta(previous: &DoctorReport, current: &DoctorReport) -> DoctorDelta {
-    let cur_keys: BTreeSet<(CheckId, &str)> = current.findings.iter().map(key_of).collect();
-    let prev_keys: BTreeSet<(CheckId, &str)> = previous.findings.iter().map(key_of).collect();
+    let cur_keys: BTreeSet<(CheckId, &str)> = current.findings().map(key_of).collect();
+    let prev_keys: BTreeSet<(CheckId, &str)> = previous.findings().map(key_of).collect();
     DoctorDelta {
         new: current
-            .findings
-            .iter()
+            .findings()
             .filter(|f| !prev_keys.contains(&key_of(f)))
             .cloned()
             .collect(),
         fixed: previous
-            .findings
-            .iter()
+            .findings()
             .filter(|f| !cur_keys.contains(&key_of(f)))
             .cloned()
             .collect(),
@@ -40,7 +45,7 @@ pub fn doctor_delta(previous: &DoctorReport, current: &DoctorReport) -> DoctorDe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::{Asked, DoctorSeverity};
+    use crate::report::{Asked, CheckReport, DoctorScope, DoctorSeverity};
 
     fn finding(check: CheckId, subject: &str) -> DoctorFinding {
         DoctorFinding {
@@ -48,51 +53,60 @@ mod tests {
             check,
             subject: subject.into(),
             evidence: "e".into(),
-            citation: None,
         }
     }
 
+    /// A report whose checks carry `findings`, each under its own check.
     fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
+        let checks = CheckId::ALL
+            .into_iter()
+            .map(|id| {
+                let mine: Vec<DoctorFinding> =
+                    findings.iter().filter(|f| f.check == id).cloned().collect();
+                CheckReport::of(id, mine, vec![], "clean")
+            })
+            .collect();
         DoctorReport {
-            findings,
-            synced: Asked::NotAsked,
-            introspect_answered: 0,
-            live_producers: 0,
-            describe_served: 0,
-            describe_missing: 0,
-            routers: 0,
-            router_version: None,
-            deep: false,
-            observation: None,
+            scope: DoctorScope {
+                namespace: String::new(),
+                presence: Asked::NotAsked,
+                routers: Asked::NotAsked,
+            },
+            checks,
             unobservable: None,
         }
     }
 
-    /// Ported from zengui: keyed on `(check, subject)`, evidence drift is
-    /// still the same finding.
+    /// Keyed on `(check, subject)` over zk2's check ids: evidence drift is
+    /// still the same finding, and one subject under two checks is two.
     #[test]
     fn deltas_key_on_check_and_subject() {
         let prev = report(vec![
-            finding(CheckId::SliceSync, "h-1/sysinfo"),
-            finding(CheckId::StaleState, "v1/h-1/state/p/health"),
+            finding(CheckId::SplitBrain, "h1/tc tc.v1"),
+            finding(CheckId::ContractUnavailable, "tc.v1 sha256:00"),
         ]);
-        let mut changed = finding(CheckId::SliceSync, "h-1/sysinfo");
+        let mut changed = finding(CheckId::SplitBrain, "h1/tc tc.v1");
         changed.evidence = "different wording".into();
         let cur = report(vec![
             changed,
-            finding(CheckId::SchemaDrift, "TelemetryPoint"),
+            finding(CheckId::TokenMissing, "h1/tc@0000000000000001 tc.v1"),
+            finding(CheckId::DescriptorInvalid, "h1/tc tc.v1"),
         ]);
 
         let d = doctor_delta(&prev, &cur);
         assert_eq!(d.unchanged, 1, "evidence drift is still the same finding");
         assert_eq!(d.fixed.len(), 1);
-        assert_eq!(d.fixed[0].check, CheckId::StaleState);
-        assert_eq!(d.new.len(), 1);
-        assert!(d.is_new(&finding(CheckId::SchemaDrift, "TelemetryPoint")));
-        assert!(!d.is_new(&finding(CheckId::SliceSync, "h-1/sysinfo")));
+        assert_eq!(d.fixed[0].check, CheckId::ContractUnavailable);
+        assert_eq!(d.new.len(), 2);
+        assert!(d.is_new(&finding(
+            CheckId::TokenMissing,
+            "h1/tc@0000000000000001 tc.v1"
+        )));
+        assert!(d.is_new(&finding(CheckId::DescriptorInvalid, "h1/tc tc.v1")));
+        assert!(!d.is_new(&finding(CheckId::SplitBrain, "h1/tc tc.v1")));
     }
 
-    /// Two empty runs: nothing new, nothing fixed, nothing unchanged.
+    /// Two clean runs: nothing new, nothing fixed, nothing unchanged.
     #[test]
     fn two_clean_runs_differ_in_nothing() {
         let d = doctor_delta(&report(vec![]), &report(vec![]));

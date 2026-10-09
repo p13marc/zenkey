@@ -473,12 +473,12 @@ fn a_blob_probe_reports_what_it_asked_and_what_answered() {
     );
 }
 
-/// The listen phase is additive: a report from a run without `--for` must
-/// be byte-identical to one from before the phase existed, so a pre-#161
-/// consumer keeps parsing. `doctor_report_json_shape_is_pinned` covers the
-/// document; this covers the severity vocabulary its findings branch on.
+/// zk2's doctor (#612, FJ6): `doctor_report_json_shape_is_pinned` covers
+/// the document; this covers the severity vocabulary its findings branch
+/// on, one finding's shape, and the shared fixture's every verdict pole —
+/// each spelled apart, so not asked never reads as clean or unobservable.
 #[test]
-fn doctor_severities_are_the_stable_lowercase_vocabulary() {
+fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
     for (s, wire) in [
         (DoctorSeverity::Error, "error"),
         (DoctorSeverity::Warning, "warning"),
@@ -488,20 +488,37 @@ fn doctor_severities_are_the_stable_lowercase_vocabulary() {
     }
     let finding = DoctorFinding {
         severity: DoctorSeverity::Info,
-        check: zenkey_fleet::report::CheckId::TimestampStampedElsewhere,
-        subject: "fleet".into(),
-        evidence: "stamped by 1 node that is not the publisher".into(),
-        citation: None,
+        check: CheckId::ShmMemlockLow,
+        subject: "this host".into(),
+        evidence: "RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor".into(),
     };
     assert_eq!(
         serde_json::to_value(&finding).unwrap(),
         json!({
             "severity": "info",
-            "check": "timestamp-stamped-elsewhere",
-            "subject": "fleet",
-            "evidence": "stamped by 1 node that is not the publisher",
-        }),
-        "an uncited finding omits the key rather than nulling it"
+            "check": "shm-memlock-low",
+            "subject": "this host",
+            "evidence": "RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor",
+        })
+    );
+    let report = serde_json::to_value(fx::doctor_report()).unwrap();
+    let answer = |id: &str| {
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["check"] == id)
+            .unwrap_or_else(|| panic!("{id} is reported"))["verdict"]["answer"]
+            .clone()
+    };
+    assert_eq!(answer("split-brain"), "established");
+    assert_eq!(answer("descriptor-invalid"), "not_established");
+    assert_eq!(answer("contract-drift"), "unobservable");
+    assert_eq!(answer("state-stamp-foreign"), "not_asked");
+    assert_eq!(
+        report["checks"].as_array().unwrap().len(),
+        CheckId::ALL.len(),
+        "every check id has its verdict"
     );
 }
 
@@ -1297,7 +1314,7 @@ fn an_export_snapshot_is_pinned() {
             "doctor": {
                 "ran_at_unix_s": 1_700_000_090,
                 "findings": [
-                    {"check": "stale-state", "severity": "warning", "subject": "h-3fa9c2d41b7e/sysinfo"}
+                    {"check": "split-brain", "severity": "error", "subject": "host-a/tc tc.netif.v1"}
                 ],
             },
         })

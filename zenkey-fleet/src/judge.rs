@@ -40,6 +40,7 @@
 pub mod budget;
 pub mod common;
 pub mod cutover;
+pub mod doctor;
 pub mod doctor_delta;
 pub mod retired;
 pub mod self_stats;
@@ -50,10 +51,10 @@ pub mod condition;
 #[cfg(feature = "decode")]
 pub mod conform;
 #[cfg(feature = "decode")]
-pub mod doctor;
-#[cfg(feature = "decode")]
 pub mod expect;
 #[cfg(feature = "decode")]
 pub mod field;
 #[cfg(feature = "decode")]
 pub mod kind;
+#[cfg(feature = "decode")]
+pub mod registry_checks;

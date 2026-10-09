@@ -513,8 +513,7 @@ impl ExportLedger {
                     ran_at_unix_s: run.ran_at_unix_s,
                     findings: run
                         .report
-                        .findings
-                        .iter()
+                        .findings()
                         .map(|f| DoctorFindingRef {
                             check: f.check,
                             severity: f.severity,

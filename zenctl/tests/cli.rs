@@ -23,11 +23,12 @@
 //! Verbs that must reach a producer to say anything are pinned by
 //! **`tests/live.rs`** (#499): the real binary against an in-process producer
 //! on an OS-given port — `get`, `echo`, `rate`, `pub`, `retire`, `service
-//! call`, every 0 and 1 of `check expect`, `why` and `doctor --fail-on`, and
-//! the `config` write lifecycle against an RFC 05 §5.1 double (#500) — and by
-//! **`tests/live_zk2.rs`** (FJ4): `service`, `iface`, `graph`, `namespace`,
-//! `schema` and `compat` against services the zk2 runtime brings up from the
-//! tcgui contracts, namespaced and not. This file used to call anything on a
+//! call`, every 0 and 1 of `check expect` and `why`, and the `config` write
+//! lifecycle against an RFC 05 §5.1 double (#500) — and by
+//! **`tests/live_zk2.rs`** (FJ4–FJ6): `service`, `iface`, `graph`,
+//! `namespace`, `schema`, `compat`, the acts and reads, and every exit of
+//! `doctor` against services the zk2 runtime brings up from the tcgui
+//! contracts, namespaced and not. This file used to call anything on a
 //! bus "a flake wearing a test's name"; that was true of hand-carved fixed
 //! ports, and stopped being true when #301 moved every bus suite to ephemeral
 //! ports on in-process sessions — the footing the live suites stand on. Their

@@ -80,59 +80,112 @@ declared state families vs storage coverage:
     );
 }
 
-/// A doctor run says what it *checked*, not only what it found — and the
-/// coverage paragraph reaches the machine formats, which is what it never did
-/// before the seam.
+/// zk2's doctor (#612, FJ6): one row per check, every verdict pole spelled
+/// apart in every medium — a word and a mark in the table, an `answer` in
+/// the row — and the scope it read reaching the machine formats as notes.
+/// The fixture has every pole and every count non-zero (tooling guide §7):
+/// a renderer that summed two counts, or drew not asked as clean, fails here.
 #[test]
-fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
-    let stderr = notes(&fx::doctor_report());
-    assert!(stderr.contains("2 introspect repl"), "{stderr}");
-    assert!(stderr.contains("3 dropped"), "the O6 bound: {stderr}");
+fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
+    let report = fx::doctor_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+✗  split-brain (§6)                  finding — 1 subject(s)
+    ✗ error: host-a/tc tc.netif.v1 — 2 instances hold its interface token in two presence reads 2.0s apart (3fa9c2d41b7e0012, 3fa9c2d41b7e0013), and at least two expose an exclusive resource
+⚠  binding-unsatisfied (§3.2 R5)     finding — 1 subject(s)
+    ⚠ warning: ws-01/tcgui-frontend scenario — its bindings (*/tc) select no provider of tc.scenario.v1 visible to this reader
+?  contract-drift (§9.8)             unobservable — 1 subject(s) unjudged
+    ? unjudged tc.netem.v1 eeeeeeeeeeeeeeee 5d1c0a9b2e3f4a6b: not classified: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is unavailable
+✗  contract-unavailable (§8.4)       finding — 1 subject(s)
+    ✗ error: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee — named by host-b/tc@3fa9c2d41b7e0014; no holder served a bundle that verified (no reply)
+✓  descriptor-invalid (§3.3)         clean — 3 descriptor(s) pass the descriptor check against the contracts they name
+✓  token-missing (§8.1)              clean — 3 instance(s): every token agrees with its descriptor
+✓  presence-over-budget (§8.3)       clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
+✓  storage-on-state (§4.2 S4)        clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
+✓  archive-unaligned (§4.4)          clean — no archive.v1 provider visible to this reader: nothing to align
+—  state-stamp-foreign (§4.2 S1–S2)  not asked
+·  shm-memlock-low (§7.4)            finding — 1 subject(s)
+    · info: this host — RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor
+✓  admin-unreachable (§4.2)          clean — 2 router(s) answered `@/*/router`
+✓  router-version-skew (App. B)      clean — 2 router(s), all at 1.10.1
 
-    let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
-    let envelope_notes = envelope["notes"]
-        .as_array()
-        .expect("notes ride the envelope");
+"#]]
+    );
+
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "doctor");
+    assert_eq!(envelope["scope"]["namespace"], "acme");
     assert!(
-        envelope_notes
-            .iter()
-            .any(|n| n["text"].as_str().unwrap().contains("dropped")),
-        "the bound reaches a script too: {envelope_notes:?}"
+        !envelope.as_object().unwrap().contains_key("checks"),
+        "checks are rows, not an envelope field"
+    );
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), zenkey_fleet::report::CheckId::ALL.len());
+    assert!(rows.iter().all(|r| r["row"] == "check"));
+    let answers: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r["verdict"]["answer"].as_str().expect("an answer"))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "established",
+            "not_asked",
+            "not_established",
+            "unobservable"
+        ]
+        .into(),
+        "four poles, four spellings"
+    );
+    let not_asked = rows
+        .iter()
+        .find(|r| r["verdict"]["answer"] == "not_asked")
+        .expect("a check not asked");
+    assert!(
+        not_asked.get("findings").is_none() && not_asked.get("unjudged").is_none(),
+        "not asked carries no lists, never empty ones: {not_asked}"
+    );
+    let said = notes(&report);
+    assert!(
+        said.contains("3 service(s), 4 instance(s), 9 token(s)"),
+        "{said}"
     );
     assert!(
-        !envelope.as_object().unwrap().contains_key("findings"),
-        "findings are rows, not an envelope field"
+        said.contains("not asked: state-stamp-foreign (pass --deep)"),
+        "{said}"
+    );
+    assert!(
+        said.contains("4 finding(s): 2 error(s), 1 warning(s), 1 info"),
+        "{said}"
     );
 
-    // R1: with no registry the served-vs-declared diff never ran, and the
-    // degradation is a note in the report — it used to be a bare eprintln in
-    // the command, invisible to every machine format.
-    let unchecked = zenkey_fleet::report::DoctorReport {
-        synced: zenkey_fleet::report::Asked::NotAsked,
+    // The empty scope: a silence note naming it, and no verdict in the
+    // summary — never a clean bill.
+    let empty = zenkey_fleet::report::DoctorReport {
+        unobservable: Some("no zk2 token visible to this reader in namespace \"x\"".into()),
         ..fx::doctor_report()
     };
-    let n = notes(&unchecked);
-    assert!(n.contains("diff never ran"), "{n}");
-    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
+    let n = notes(&empty);
+    assert!(n.contains("no zk2 token visible"), "{n}");
+    assert!(n.contains("no verdict on the deployment"), "{n}");
     let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&unchecked).lines().next().unwrap()).unwrap();
-    assert!(
-        !envelope.as_object().unwrap().contains_key("synced"),
-        "diff never ran: the key is absent (O4), never an empty list"
-    );
+        serde_json::from_str(ndjson(&empty).lines().next().unwrap()).unwrap();
     assert!(
         envelope["notes"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|note| note["text"].as_str().unwrap().contains("diff never ran")),
-        "the degradation reaches a script too: {envelope}"
+            .any(|note| note["text"]
+                .as_str()
+                .unwrap()
+                .contains("no zk2 token visible")),
+        "the empty scope reaches a script too: {envelope}"
     );
-    // …and the fixture's checked run keeps the key.
-    let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&fx::doctor_report()).lines().next().unwrap()).unwrap();
-    assert!(envelope["synced"].is_array(), "{envelope}");
 }
 
 /// The `why` ladder (#214): one line per rung, the three answer states drawn
@@ -1821,9 +1874,11 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::conform_report());
     assert_eq!(s.asked, ["h-3fa9c2d41b7e/@rpc/sysinfo", "v1/*/state/**"]);
     assert_eq!(s.window_s, Some(10.0));
-    // The doctor's scope is its listen phase; the fixture ran one.
+    // The doctor's scope is what it read: presence in the namespace, the
+    // admin space in none.
     let s = scoped(&fx::doctor_report());
-    assert_eq!(s.asked, ["v1/**"]);
+    assert_eq!(s.asked, ["zk2/*/*/@zk/**", "@/*/router"]);
+    assert_eq!(s.window_s, None);
     // `storage gen --check` sweeps the admin space once, no window.
     let s = scoped(&fx::storage_check());
     assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
@@ -2207,7 +2262,7 @@ fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
     assert_data_eq!(
         ndjson(&fx::export_snapshot()),
         str![[r#"
-{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"stale-state","severity":"warning","subject":"h-3fa9c2d41b7e/sysinfo"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
+{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"split-brain","severity":"error","subject":"host-a/tc tc.netif.v1"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
 {"class":"telemetry","drop_exposed":2,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage","kind":"gauge","last_seen_unix_s":1700000119,"name":"zenkey_subject_sysinfo_cpu_usage_percent","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":240,"state":"live","subject":"cpu/usage","unit":"percent","value":12.5}
 {"class":"telemetry","key":"acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used","labels":{"mount":"var-log"},"last_seen_unix_s":1700000040,"name":"zenkey_subject_sysinfo_disk_used_bytes","origin":"h-0000deadbeef","producer":"sysinfo","row":"series","samples":80,"state":"origin_down","subject":"disk/{mount}/used","unit":"bytes"}
 {"class":"telemetry","field":"rx","key":"acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes","kind":"counter","labels":{"iface":"eth0"},"last_seen_unix_s":1700000100,"name":"zenkey_subject_netlink_iface_rx_bytes_total","origin":"h-3fa9c2d41b7e","producer":"netlink","row":"series","samples":5,"state":"evicted","subject":"iface/{iface}/rx_bytes","unit":"bytes"}

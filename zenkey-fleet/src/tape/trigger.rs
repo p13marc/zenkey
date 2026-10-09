@@ -68,6 +68,10 @@ pub struct TriggerSpec {
     pub tick: Duration,
     /// Per-ask timeout: the roster and doctor sweeps, and the preamble GET.
     pub timeout: Duration,
+    /// Where a `doctor <CHECK-ID>` rule's doctor reads (#612, FJ6), as
+    /// [`crate::WatchdogSpec::doctor`]: `None` makes every doctor rule
+    /// unobservable, saying why.
+    pub doctor: Option<crate::judge::doctor::DoctorBus>,
     /// Stop waiting after this long with nothing fired; `None` waits until
     /// the caller stops the future.
     pub give_up: Option<Duration>,
@@ -240,6 +244,10 @@ where
         rules.wants_alerts(),
     );
     let alert_selectors = rules.alert_selectors();
+    // The doctor rules' doctor (#612, FJ6): only the checks they name, one
+    // contract store for the capture.
+    let doctor_spec = rules.doctor_spec(spec.timeout);
+    let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
     if wants_decode {
         crate::model::decode::prewarm(fleet, store, slices).await;
     }
@@ -271,18 +279,12 @@ where
         let sweep = async {
             let doctor = if wants_doctor {
                 Some(
-                    crate::judge::doctor::run_doctor(
-                        fleet,
-                        slices,
-                        &crate::judge::doctor::DoctorSpec {
-                            deep: false,
-                            sample: None,
-                            timeout: spec.timeout,
-                            listen: None,
-                        },
+                    crate::judge::condition::tick_doctor(
+                        spec.doctor.as_ref(),
+                        &bundles,
+                        &doctor_spec,
                     )
-                    .await
-                    .map_err(|e| e.to_string()),
+                    .await,
                 )
             } else {
                 None

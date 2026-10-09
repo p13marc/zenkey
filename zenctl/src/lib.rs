@@ -14,8 +14,9 @@
 //! * **`--registry <dir>`** (repeatable): local `registry/*.{toml,kdl}` files — what
 //!   a checked-out application *declares*. Works with the fleet down.
 //!
-//! The gap between the two is drift, and `doctor` (bus + `--registry`) is the
-//! command that reports it.
+//! The gap between the two is drift, and `check conform <producer>
+//! --registry <dir>` reports it (it was `doctor`'s until #612's FJ6 made the
+//! doctor zk2's).
 //!
 //! **zk2's nouns** (#612, FJ4) — `service`, `iface`, `schema`, `namespace`,
 //! and the `graph` and `compat` verbs — read no slice at all: presence

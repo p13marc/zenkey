@@ -43,7 +43,7 @@
 //!    revision no holder serves, FJ4).
 //! 2. [`asked`] — the verdict verbs' pre-run guard. `check expect`, `check
 //!    cutover`, `check retired`, `check probe`, `check conform`, `check
-//!    schema`, `compat` and `why` give their 0 **and their 1** meanings, so a
+//!    schema`, `compat`, `doctor` and `why` give their 0 **and their 1** meanings, so a
 //!    `?` on their setup path would *claim a verdict the run never reached*. Every
 //!    pre-run failure of theirs — resolution, session, registry, the
 //!    observation itself — lands on the reserved 2 instead.

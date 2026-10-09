@@ -16,8 +16,8 @@
 use std::time::Duration;
 
 use zenkey::schema::{SchemaSet, TypeSchema};
-use zenkey_fleet::report::CheckId;
-use zenkey_fleet::{DoctorSpec, run_doctor};
+use zenkey_fleet::judge::registry_checks::{RegistrySpec, run as registry_checks};
+use zenkey_fleet::report::V1CheckId;
 
 mod util;
 use util::peer_pair;
@@ -81,8 +81,8 @@ async fn serve_describe(
         .expect("describe queryable")
 }
 
-fn spec() -> DoctorSpec {
-    DoctorSpec {
+fn spec() -> RegistrySpec {
+    RegistrySpec {
         deep: false,
         sample: None,
         timeout: Duration::from_secs(2),
@@ -110,13 +110,13 @@ async fn a_schema_disagreement_names_which_host_serves_which_identity() {
     // Routing propagation is async; retry bounded until the finding appears.
     let drift = tokio::time::timeout(util::SETTLE, async {
         loop {
-            let report = run_doctor(&fleet, Some(&locals), &spec())
+            let report = registry_checks(&fleet, Some(&locals), &spec())
                 .await
                 .expect("doctor");
             let drift: Vec<_> = report
                 .findings
                 .iter()
-                .filter(|f| f.check == CheckId::SchemaDrift)
+                .filter(|f| f.check == V1CheckId::SchemaDrift)
                 .cloned()
                 .collect();
             if !drift.is_empty() {
@@ -141,8 +141,7 @@ async fn a_schema_disagreement_names_which_host_serves_which_identity() {
     assert_eq!(drift[0].citation.as_deref(), Some("RFC 08 §7"));
 }
 
-/// One host answering is not a disagreement, and the producer is still
-/// described: the SHOULD is met, and nothing is reported.
+/// One host answering is not a disagreement: nothing is reported.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_single_host_serving_a_schema_is_no_finding() {
     let (a, b) = peer_pair().await;
@@ -152,34 +151,29 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
     let locals = zenkey_fleet::SliceSet::from_slices(vec![local]);
     let fleet = zenkey_fleet::Fleet::new(&b, "");
 
-    let report = tokio::time::timeout(util::SETTLE, async {
+    tokio::time::timeout(util::SETTLE, async {
         loop {
-            let report = run_doctor(&fleet, Some(&locals), &spec())
+            let sweep = zenkey_fleet::describe_sweep(&fleet, &locals, Duration::from_millis(500))
                 .await
-                .expect("doctor");
-            if report.describe_served >= 1 {
-                break report;
+                .expect("a describe sweep");
+            if !sweep.answers.is_empty() {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
     .expect("the one host should answer within the settle window");
+    let report = registry_checks(&fleet, Some(&locals), &spec())
+        .await
+        .expect("the registry checks");
 
     assert!(
         !report
             .findings
             .iter()
-            .any(|f| f.check == CheckId::SchemaDrift),
+            .any(|f| f.check == V1CheckId::SchemaDrift),
         "one claim is nothing to compare: {:#?}",
-        report.findings
-    );
-    assert!(
-        !report
-            .findings
-            .iter()
-            .any(|f| f.check == CheckId::DescribeMissing),
-        "the producer *is* described: {:#?}",
         report.findings
     );
 }
@@ -188,8 +182,8 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
 /// instead of a `SchemaStore`: two hosts serving one producer at two hashes
 /// come back as two attributed answers with distinct origins, the
 /// per-producer fold keeps exactly one, and `schema_drift` over the answers
-/// is the disagreement — the same verdict `doctor` reports above, from the
-/// same evidence.
+/// is the disagreement — the same verdict the registry checks report above,
+/// from the same evidence.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_sweep_helper_keeps_one_answer_per_origin() {
     let (a, b) = peer_pair().await;

@@ -48,11 +48,13 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
     // judge (O4), and doctor rules run their own asks.
     let slices = args.slices_optional().await?;
     let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
+    let doctor = super::doctor::bus_for_rules(&rules, args, &session).await?;
     let spec = WatchdogSpec {
         rules,
         tick,
         ticks: count,
         timeout: args.timeout(),
+        doctor,
     };
 
     eprintln!(

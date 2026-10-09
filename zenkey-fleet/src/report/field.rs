@@ -2,7 +2,7 @@
 //! moved, what never did, and which paths the cap turned away.
 
 use super::asked::u64_is_zero;
-use super::doctor::DoctorFinding;
+use super::v1_checks::V1Finding;
 use serde::Serialize;
 
 /// One dotted path's statistics over a `zenctl field` window (#223) — the
@@ -77,7 +77,7 @@ pub struct FieldReport {
     #[serde(skip_serializing_if = "u64_is_zero", default)]
     pub facts_evicted: u64,
     pub rows: Vec<FieldRow>,
-    pub findings: Vec<DoctorFinding>,
+    pub findings: Vec<V1Finding>,
 }
 
 #[cfg(test)]

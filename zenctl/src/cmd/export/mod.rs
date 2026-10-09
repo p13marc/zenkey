@@ -174,30 +174,30 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
     // The doctor, on its own task with its own session handle: a run costs
     // the control plane for up to a timeout, and the drain must not stall
     // behind it — a stall would show up as drops this exporter caused.
-    let doctor_task = doctor_every.map(|every| {
+    //
+    // zk2's doctor (#612, FJ6) reads the deployment through a session in its
+    // namespace — `--base` — beside this verb's un-namespaced one, which
+    // reads the admin space; opened only when the doctor is asked for.
+    let doctor_bus = match doctor_every {
+        Some(_) => Some(zenkey_fleet::DoctorBus {
+            session: args.session_in(&base).await?,
+            raw: session.clone(),
+            namespace: base.clone(),
+        }),
+        None => None,
+    };
+    let doctor_task = doctor_every.zip(doctor_bus).map(|(every, bus)| {
         let shared = Arc::clone(&shared);
-        let session = session.clone();
-        let base = base.clone();
-        let slices = slices.clone();
         let timeout = args.timeout();
         tokio::spawn(async move {
-            let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let spec = zenkey_fleet::DoctorSpec {
-                deep: false,
-                sample: None,
-                timeout,
-                listen: None,
-            };
+            let spec = zenkey_fleet::DoctorSpec::new(timeout);
+            let store = zenkey_fleet::BundleStore::new(timeout);
             let mut interval = tokio::time::interval(every);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 interval.tick().await;
-                match zenkey_fleet::run_doctor(&fleet, slices.as_ref(), &spec).await {
-                    Ok(report) => {
-                        *shared.doctor.lock().expect("doctor lock") = Some((report, unix_now()));
-                    }
-                    Err(e) => eprintln!("export: doctor run failed: {e}"),
-                }
+                let report = zenkey_fleet::run_doctor(&bus, &store, &spec).await;
+                *shared.doctor.lock().expect("doctor lock") = Some((report, unix_now()));
             }
         })
     });
