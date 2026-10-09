@@ -171,6 +171,11 @@ pub struct ArchiveSpec {
 pub struct ToolSpec {
     /// A plain chunk, naming the tool in rule ids.
     pub name: String,
+    /// Reads the routers' admin space, for S4's check and the doctor
+    /// (§4.2, §11.1 Tool, 0.15). Under `deny`, no grant reaches it
+    /// otherwise.
+    #[serde(default)]
+    pub admin: bool,
     #[serde(default)]
     pub bindings: BTreeMap<String, BindingSpec>,
     #[serde(default)]
@@ -403,6 +408,9 @@ pub enum AclGrantKind {
     /// Under `allow` (#684, F-80): no principal declares a queryable in the
     /// routers' admin space, `@/**`, which the routers serve themselves.
     DenyAdminSpace,
+    /// A tool that reads the routers' admin space (§4.2, §11.1 Tool, 0.15):
+    /// query on the router documents and their subtree, never namespaced.
+    AdminRead,
     /// A far router in a south region (§8.5, U23): this router's queryables
     /// over what the far side may query, declared toward it, without which
     /// it routes no query here (measured, #612 FJ7).
@@ -428,6 +436,7 @@ impl AclGrantKind {
             AclGrantKind::DenyRead => "deny_read",
             AclGrantKind::DenyReceive => "deny_receive",
             AclGrantKind::DenyAdminSpace => "deny_admin_space",
+            AclGrantKind::AdminRead => "admin_read",
             AclGrantKind::FaceDeclarations => "face_declarations",
             AclGrantKind::FacePresence => "face_presence",
             AclGrantKind::FaceStream => "face_stream",

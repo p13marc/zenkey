@@ -3,6 +3,134 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.15 — 2026-10-09: what §11 needs to be built from (#695)
+
+The Python implementation built §11's access control from the spec alone
+(PR #694): a generator for both postures, run live on zenoh-python
+routers. **§11 was not enough on its own.** It had to invent or measure
+the input, the message pairs, a tool's admin read and the complement's
+key set. It also found two errors, one of them mine in 0.12. These are
+F-82..F-88. The reference generator (FJ7) is the rule where it was right,
+and it is extended where it lacked a grant.
+
+**Changed: rules stated, so that §11 can be built from.**
+- **The input (F-82, §11.1)** is stated abstractly:
+  - principals, each bound to a user or a CN;
+  - services, with the contracts they implement;
+  - bindings, calls and inspected services;
+  - whether a tool reads the admin space;
+  - archives, and the namespace.
+
+  The format is a generator's own. The reference's enrollment is
+  informative.
+- **Messages and flows (F-83, §11.2)** are a table per grant. Both
+  implementations measured the same pairs. A liveliness read needs its
+  egress `liveliness_token` too.
+- **The complement's key set (F-85, §11.2)** is the deployment's own keys:
+  declared resources, each service's `@zk/**`, and the contract keys.
+  Undeclared keys stay open under `allow`.
+- **"Every principal" is compiled into each policy (F-87, §11.2).** In
+  zenoh 1.10.1, measured, a catch-all subject makes the per-user subjects
+  lose their denies. The reference already compiled the `@/**` deny into
+  each policy.
+
+**Changed: a grant added, and the reference generator extended.**
+- **The admin read (F-84, §11.1 Tool).** Under `deny`, no grant reached the
+  admin space, so a tool could not check S4.
+  - A tool that checks S4 or runs a doctor now holds `query` on
+    `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced.
+  - The reference enrollment's `[[tool]]` takes `admin = true`. The
+    generator emits `admin-read-in` and `admin-read-out` (grant
+    `admin_read`).
+  - The walkthrough enrollment's `ops` tool uses it, and the pinned plans
+    are re-blessed.
+
+**Changed: two errors fixed.**
+- **What a storage is (F-86, §4.2, against 0.11).** A router's admin space
+  records each queryable as `@/<zid>/router/queryable/<key expr>`. The
+  record of a `**` queryable, such as an owner's `…/state/**`, answers
+  S4's storages selector. So 0.11's "nothing under the second selector"
+  never held with an owner present.
+  - A storage is now an answer whose key the selector includes, ending
+    `…/storage_manager/storages/<name>`.
+  - The reference's parser already read it that way. The text was wrong.
+- **`security.md §3` step 3 (F-88, against 0.12).** It expected R1 to
+  refuse `S` under each posture. Under `allow`, a session that is no
+  principal matches no subject and gets everything (§11.3), so its spoof
+  is answered, and only the replier check keeps S4 from clean. The step
+  now runs `S` as a principal and as a non-principal, with the right
+  expectation for each.
+
+**Deliberately not changed.**
+- **No input format is made normative.** Deployments describe themselves
+  in many ways. The spec states what a generator must know, not how it is
+  written.
+
+## 0.14 — 2026-10-09: what access control measured (#689)
+
+zk2's `acl gen` (#612, FJ7, PR #692) was built against spike S14's
+principals and run live on zenoh 1.10.1. It measured four facts §11 had
+wrong or left out, and found nine gaps. The generator's behaviour becomes
+the reference.
+
+**Measured, now stated.**
+- **Value replies and error replies are checked differently (§11.2).** A
+  value reply is checked against its own key, and an error reply, which has
+  none, against the query's. S14's general claim holds only for refusals.
+  So a provider's value replies pass through Own, and the consumer
+  selectors granted for its ingress `reply` exist for its refusals.
+- **Under `allow`, an ungranted wildcard GET gets nothing back (§11.3).**
+  Each value reply is denied by its own key.
+- **Under `allow`, a wildcard call is in no deny (§11.3).** A `fanout =
+  "allowed"` operation executes on every provider for a principal never
+  granted it. Such an operation that must not run for everyone MUST be
+  `fanout = "forbidden"` under `allow`, or the deployment runs `deny`.
+- **A far router in a south region needs declarations sent toward it
+  (§8.5).** Its queries are never routed without an egress
+  `declare_queryable` grant toward it. The generator's `face-declarations`
+  rule is this grant.
+
+**Changed: the grant shapes (§11.1).**
+- **Own** now names `reply` on ingress, and its egress: queries and
+  subscriber declarations on its own keys. Both came from S14, unstated
+  until now.
+- **Presence reads the descriptor too.** It now includes the descriptor's
+  GET and subscription (§3.3), which share the `@zk` subtree.
+  - Without them, a consumer could not resolve a token's `fp16` (§8.4),
+    and a tool could not draw the graph.
+  - The generator's presence rules gain `query` and `declare_subscriber`
+    on ingress, and `reply` and `put` on egress.
+  - FJ7's live test now reads a descriptor under the grant, and finds it
+    silent without.
+- **A Tool shape**, for a principal with no address: Consume, Call and
+  presence on what it reads, calls and inspects.
+- **Archives:** Own, Consume on their records and on peers' archive forms
+  of them, and presence on owners and peers, as the generator emits.
+- **History:** a consumer's advanced subscriber MUST NOT declare a
+  subscriber-detection token, whose key would sit under the provider's
+  prefix. The reference consumer declares no advanced subscriber.
+- **A union storage** (§2.6) is the one cross-principal serving grant, and
+  a deployment names it explicitly. It is not generated at this version.
+- **The namespace:** grant keys carry it, and the admin space never does.
+
+**Changed: other rules stated.**
+- **§11.2:** an R2-narrowed grant has no complement by inclusion, so under
+  `allow` its unnamed members stay readable. The generator warns
+  (`complement_partial`).
+- **§11.3:** a session matching no subject gets `default_permission`, so a
+  deployment under `allow` MUST refuse unauthenticated sessions at the
+  link.
+- **§8.5:**
+  - access control is per hop, and the near router sees a far router as
+    one principal carrying the union of its side's grants;
+  - `link.v1`'s exceptions to the `@stream` deny are its own (#613), and
+    the generator denies `@stream` wholesale.
+
+**Deliberately not changed.**
+- **No union-storage generation.** The shape is stated; emitting it waits
+  for a deployment that runs one.
+- **`link.v1` downsampling** is not modelled in the generator.
+
 ## 0.13 — 2026-10-09: a far router is verified through the routers that list it (#687)
 
 The Python implementation's round against 0.12 (PR #686) found F-81.

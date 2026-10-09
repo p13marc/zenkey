@@ -319,6 +319,9 @@ fn seen(got: &Got) -> Vec<String> {
 }
 
 /// The replies to a GET: (value keys, error payloads).
+/// h1's descriptor key (§3.3), under its Own grant's `@zk` subtree.
+const DESCRIPTOR: &str = "zk2/h1/tc/@zk/instance/0123456789abcdef";
+
 async fn get(
     s: &zenoh::Session,
     selector: &str,
@@ -741,6 +744,20 @@ async fn under_deny_the_grants_are_exactly_what_is_allowed() {
         .unwrap();
     assert!(h1.complete, "{h1:?}");
     assert_eq!(h1.keys.len(), 2, "{h1:?}");
+    // 0.14: and its descriptor, which shares the `@zk` subtree (§3.3): a
+    // consumer resolves a token's `fp16` through it (§8.4).
+    let _descriptor = serve(bus.of("tc-h1"), DESCRIPTOR, "{}").await;
+    eventually("the frontend reads h1's descriptor", || async {
+        get(
+            bus.of("frontend"),
+            "zk2/h1/tc/@zk/instance/*",
+            QueryTarget::All,
+            T,
+        )
+        .await
+        .0 == [DESCRIPTOR]
+    })
+    .await;
 
     // §2.5: an advanced publisher declares its cache and token under Own,
     // and a late reader with history gets the value from the cache.
@@ -838,6 +855,24 @@ async fn without_its_presence_grant_a_read_is_complete_and_empty() {
     assert!(
         read.keys.is_empty(),
         "refused, and indistinguishable from absence: {read:?}"
+    );
+    // 0.14: the descriptor rides the same grant, so it goes with it.
+    let _descriptor = serve(bus.of("tc-h1"), DESCRIPTOR, "{}").await;
+    eventually("the router reaches h1's descriptor", || async {
+        get(&bus._router, DESCRIPTOR, QueryTarget::All, T).await.0 == [DESCRIPTOR]
+    })
+    .await;
+    assert!(
+        get(
+            bus.of("frontend"),
+            "zk2/h1/tc/@zk/instance/*",
+            QueryTarget::All,
+            T
+        )
+        .await
+        .0
+        .is_empty(),
+        "no presence grant, no descriptor"
     );
 
     let publisher = bus

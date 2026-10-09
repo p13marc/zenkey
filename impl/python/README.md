@@ -87,9 +87,9 @@ examples       97 passed     0 failed
 total         519 passed     0 failed
 ```
 
-The figures are against `core.md` 0.13, which adds no fixture. 0.10 added
+The figures are against `core.md` 0.15, which adds no fixture. 0.10 added
 `descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
-- Amendments 0.5 to 0.13 resolved F-01 to F-81. None is open.
+- Amendments 0.5 to 0.15 resolved F-01 to F-88. None is open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -297,6 +297,58 @@ Four more runs:
     descriptors' minor, or classifies both ways. Two zk2py owners serve
     `zk2py_bringup.v1` at minor 0 and 1 (`interop/rev/`).
 
+**Access control (0.14, 0.15).** `zk2py.acl` is a grant generator written
+from §11.1–§11.2 alone. Its input is zk2py's own format, as §11.1 "The
+input" allows (0.15). It is a list of `Principal`s, each bound to a usrpwd
+user, with:
+- the service it owns and the contracts it implements;
+- `Use`s for Consume and for Call;
+- the services it inspects;
+- whether it reads the admin space.
+
+A principal with no service is the Tool shape. `acl.generate(principals,
+"deny" | "allow")` returns zenoh's `access_control` block:
+- **under `deny`**, allow rules, one per (principal, key set), carrying
+  §11.2's message and flow pairs (0.15's table, which zk2py measured
+  first);
+- **under `allow`**, denies of each grant's complement, over the
+  deployment's own keys (§11.2, 0.15), with a `complement_partial` warning
+  for an R2-narrowed grant;
+- **fan-in:** a provider's egress and ingress `reply` carry every reader
+  selector that intersects its keys;
+- **the `@/**` queryable deny** is a rule in each principal's own policy
+  under `allow`, never a catch-all subject's;
+- **the Tool's admin read** (0.15): `query` on `@/*/router` and
+  `@/*/router/**`, and their `reply`.
+
+`zk2py.acl_interop` (`--only acl`) runs a deployment of:
+- two owners;
+- a consumer;
+- a caller, and the same caller with its presence removed;
+- a Tool with the admin read;
+- an enrolled `S` holding only the open contract grants;
+- a client `S` that is no principal.
+
+R1 is a zenoh-python router with usrpwd and the generated block. Each
+posture and each variant of security.md §2's generator check runs on a
+router of its own. It shows:
+- security.md §1 and §2's expectations;
+- §3 step 3 as amended in 0.15, with `S` enrolled and not, under both
+  postures;
+- the Tool's admin read under `deny`: the tool runs S4, and a principal
+  without the admin read gets nothing;
+- 0.14's measured facts:
+  - a value reply is checked against its own key, a refusal against the
+    query's;
+  - under `allow`, an ungranted wildcard GET gets nothing back, while a
+    wildcard call to a `fanout = "allowed"` operation still executes;
+  - presence grants read the descriptor;
+- §11.3's link refusal of an unauthenticated session.
+
+S4's storages read keeps only answers whose key the selector includes,
+ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
+`router/queryable/<…/state/**>` records intersect the selector.
+
 **Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
 a rule the owner example does not meet yet.
 
@@ -308,7 +360,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 198 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 223 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
@@ -345,7 +397,10 @@ The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
   - constrained faces (§8.5);
   - the scenarios other than presence.md, retrieval.md and parts of
     state.md and operations.md. types.md §2 needs a renderer, which zk2py
-    does not have, and security.md §1's new step needs a grant generator;
+    does not have;
+  - §11's History, Archive and union-storage grants, the namespace, and
+    §8.5's face declarations toward a far router in a south region: the
+    generator emits none of them;
   - §8.3's budget count, and an archive's alignment as a tool sees it
     (0.10): zk2py counts no budget and runs no archive.
 
@@ -418,6 +473,8 @@ impl/python/
     live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls
     owner.py          §3.3 §4 §5 §8 a minimal owner
     live_interop.py             the live runner, with the Rust owner and consume examples
+    acl.py            §11       the grant generator: a deployment → zenoh's access_control block
+    acl_interop.py    §11       the access-control run (`--only acl`)
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan;
                       rev/ holds bringup's minor 1
 ```

@@ -52,13 +52,16 @@ GET_TIMEOUT_S = 1.0
 _DONE = object()
 
 
-def open_client(endpoint: str) -> zenoh.Session:
+def open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
     """A *client* session to one router endpoint, multicast scouting off: a
-    tool that sees exactly the router it is pointed at."""
+    tool that sees exactly the router it is pointed at. ``auth`` is a
+    usrpwd (user, password), the principal's binding (§11.3)."""
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     conf.insert_json5("scouting/multicast/enabled", "false")
+    if auth is not None:
+        conf.insert_json5("transport/auth/usrpwd", json.dumps({"user": auth[0], "password": auth[1]}))
     return zenoh.open(conf)
 
 
@@ -531,8 +534,17 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
         out.detail = f"no router answered {S4_ROUTERS}: the admin space is off"
         return out
     unreadable = []
+    storages_sel = zenoh.KeyExpr(S4_STORAGES)
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
+            continue
+        # §4.2 (0.15): "A storage is an answer to the second selector whose
+        # key the selector includes, ending …/storage_manager/storages/<name>.
+        # Other answers arrive too, and are not storages": a router's
+        # `router/queryable/<key expr>` record of a `**` queryable (every
+        # owner's `state/**`, S2) intersects the selector.
+        chunks = a.key.split("/")
+        if not storages_sel.includes(zenoh.KeyExpr(a.key)) or chunks[-3:-1] != ["storage_manager", "storages"]:
             continue
         why = None if trust else unverified_why(a, verified, storage=True)
         if why is not None:

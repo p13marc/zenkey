@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twelve rounds.**
+**Fourteen rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -18,9 +18,11 @@ where that was not enough, or where the spec said two things.
 - F-77 to F-79 were found against 0.10.
 - F-80 was found against 0.11.
 - F-81 was found against 0.12.
-- Amendments 0.5 to 0.13 resolved F-01 to F-81. Each entry carries a
+- Nothing new was found against 0.13 (see "At 0.13").
+- F-82 to F-88 were found against 0.14, building access control from §11.
+- Amendments 0.5 to 0.15 resolved F-01 to F-88. Each entry carries a
   status line naming its amendment.
-- **Nothing new was found against 0.13** (see "At 0.13" at the end).
+- **Nothing new was found against 0.15** (see "At 0.15" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -30,7 +32,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.13:** 81 entries, all resolved.
+**Counts at 0.15:** 88 entries, all resolved.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -65,11 +67,16 @@ where that was not enough, or where the spec said two things.
 - F-81: resolved by 0.13. Routers are verified outward through the
   session lists of routers already verified, so a client tool verifies a
   far router through its own router.
+- F-82 to F-88: resolved by 0.15. §11 now states the input, the message
+  and flow table, the Tool's admin read, the complement's key set, and
+  "every principal" per policy. It fixed what a storage is (F-86) and
+  security.md §3 step 3 (F-88). Each resolution follows zk2py's
+  measurement or guess.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.13 | Location | In one line |
+| Id | Severity | Status at 0.15 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -152,6 +159,13 @@ by the spec section that now states the rule.
 | F-79 | gap | resolved by 0.11 | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
 | F-80 | gap | resolved by 0.12 | §4.2 S4, "What the check reads" (0.11) | Any session can answer `@/*/router`: with the routers' admin space off, one record turns "unobservable" into "clean". |
 | F-81 | gap | resolved by 0.13 | §4.2 "Who answered" (0.12), Appendix B | Only a router the tool's session is connected to is verified, and a client connects to one: with two routers, a client tool's S4 is never clean. |
+| F-82 | gap | resolved by 0.15 | §11, security.md common setup (0.14) | Grants are "generated from contracts and bindings", but no deployment input is specified: who owns, binds, calls, inspects, and which username binds whom. |
+| F-83 | gap (measured) | resolved by 0.15 | §11.1 (0.14) | The shapes name actions, not zenoh's messages and flows; a liveliness GET's tokens need egress `liveliness_token`, not `reply`. |
+| F-84 | gap (measured) | resolved by 0.15 | §11.1 Tool, §4.2 S4 (0.14) | No shape grants reading the admin space: under `deny` a tool cannot run S4's check. |
+| F-85 | ambiguity | resolved by 0.15 | §11.2 "denies of its complement" (0.14) | Key expressions have no negation: over which keys is the complement taken? |
+| F-86 | gap (measured) | resolved by 0.15 | §4.2 "What the check reads" (0.11) | The storages selector intersects a router's `router/queryable/<…/state/**>` records, so with any owner present, "nothing under the second" never holds. |
+| F-87 | gap (measured) | resolved by 0.15 | §11.1 "denies it to every principal under allow" (0.12) | A subject matching every session undoes the per-user denies in zenoh 1.10.1; "every principal" must be compiled per policy. |
+| F-88 | contradiction | resolved by 0.15 | security.md §3 step 3, §11.3 (0.14) | Under `allow`, the grants cannot refuse a session that is no principal: it matches no subject, and gets everything. |
 
 ---
 
@@ -2086,3 +2100,275 @@ What changed in zk2py:
   verifies both directly, and reads the same verdict.
 
 Implementing 0.13 raised no new question.
+
+## New at 0.14: access control from §11 (#609)
+
+This round tested whether §11 is enough to build access control from.
+zk2py gained a grant generator, `zk2py.acl`, written from §11.1–§11.2
+alone, and a live run, `zk2py.acl_interop` (`--only acl`).
+- The run has a deployment of its own:
+  - two owners, `h1/tc` and `h2/tc`, each serving `zk2py_echo.v1`,
+    `zk2py_tc.v1` and `zk2py_bringup.v1`;
+  - a consumer, a caller, the same caller with its presence removed, and
+    a Tool;
+  - a client `S`, authenticated by R1 but no principal of the deployment.
+- Each principal is bound by a usrpwd user (§11.3).
+- The generator compiles the deployment into zenoh's `access_control`
+  block: 48 allow rules under `deny`, 59 deny rules under `allow`. Each
+  posture and each generator-check variant runs on a zenoh-python router of
+  its own.
+
+`just py-conformance` passes 519 of 519 (0.14 adds no fixture). `just
+py-live` passes 223 of 223, with no known deviation, 25 of them in the
+access-control run.
+
+**What the run shows, against security.md and 0.14:**
+- **§1 under `deny`.**
+  - An owner's put reaches the consumer that names it.
+  - A subscription the bindings do not name is blocked.
+  - The fan-in GET over `zk2/*/tc/…` gets one reply per backend.
+  - A put, a queryable and a token on another principal's keys are all
+    blocked, and so is a put on a wildcard key.
+  - The caller reads h1's instance and interface tokens. With its
+    presence removed, the same read is complete and empty.
+  - A contract fetch works for every principal.
+- **0.14, presence reads the descriptor.** The caller's descriptor GET is
+  answered, and its descriptor subscription receives both owners' first
+  puts. Without presence, both are silent.
+- **§2 under `allow`.**
+  - The same forgeries and the unnamed subscription are blocked, except a
+    put on a wildcard key, which reaches the consumer.
+  - The deny posture's allow rules, under `default_permission: allow`,
+    block nothing.
+- **§2's generator check, and 0.14's reply rule.** Under `deny`:
+  - Without the consumer selectors in the providers' egress, the fan-in GET
+    gets 0 replies. A concrete GET still gets its one.
+  - Without them in the providers' ingress `reply`, a wildcard
+    `diagnostics` call still gets both values: a value reply is checked
+    against its own key.
+  - A wildcard `set` call reaches both providers, both refuse it, and no
+    refusal reaches the caller: a refusal is checked against the query's
+    key.
+- **0.14 under `allow`.**
+  - The caller's ungranted wildcard GET gets nothing back.
+  - The consumer's wildcard call to `diagnostics`, `fanout = "allowed"` and
+    never granted to it, executes on both providers, and only its answers
+    are denied.
+- **§11.2.** A binding narrowed to one member (`tracks/t1`) makes the
+  generator warn `complement_partial`.
+- **§11.3.** With usrpwd on R1, a session with no credentials or a wrong
+  password is refused at the link. `S`, authenticated but matching no
+  subject, reads everything under `allow`.
+- **security.md §3 step 3.** The generated grants refuse a principal's
+  queryable (`own-h1`) on `@/<R1>/router` under both postures. They refuse
+  `S`'s under `deny` only (F-88).
+
+**§11 rules zk2py could not build from the text alone:**
+- **The deployment input** (F-82): invented.
+- **The messages and flows** each shape compiles to (F-83): read from the
+  CHANGELOG's account of the reference generator, and measured.
+- **The admin-space read for a tool** (F-84): added.
+- **The complement's universe under `allow`** (F-85): guessed.
+- **"Every principal" under `allow`** (F-87): measured, and compiled per
+  policy.
+- **Not built at all, because nothing here exercises them:**
+  - §8.5's face declarations toward a far router in a south region, which
+    need a regional deployment;
+  - the History, Archive and union-storage grants;
+  - the namespace, which this deployment does not use.
+
+### F-82 · gap · §11 (0.14): no deployment to generate from
+
+**Status at 0.15: resolved by 0.15.** §11.1 "The input" states what a generator compiles: principals bound to a user name or CN, the services each runs with their contracts, bindings, calls, inspected services and the admin read, archives, and the namespace. "The format is the generator's own"; the reference's enrollment is informative. zk2py keeps `acl.Principal` and `acl.Use`, and takes neither history nor archives nor a namespace, which its deployments do not use.
+
+> security.md: "Grants are generated from contracts and bindings."
+> §11.1: "Consume | Subscribe or GET on the prefixes a principal's bindings
+> name … Call | Query on specific …/@op/<op> keys … Tool | … on what it
+> reads and calls, and presence on the services it inspects."
+
+A generator needs, per principal:
+- the service it owns;
+- its bindings;
+- the operations it calls;
+- the services it inspects;
+- the username or certificate CN that binds it (§11.3).
+
+The spec defines none of them as an input. R1 makes bindings a matter of
+configuration, and the only bindings file in `examples/zk2/` calls its
+shape "recommended, not normative". Nothing names what a caller calls, or
+what a tool inspects, in any file.
+**Resolved:** zk2py's own input, `acl.Principal` and `acl.Use`. A
+principal has a username, an optional service and the contracts it
+implements, uses for Consume and for Call, and services it inspects. A
+`Use` has an interface, provider patterns, and resources named
+`<kind token>/<template>`.
+
+### F-83 · gap (measured) · §11.1 (0.14): actions, not messages and flows
+
+**Status at 0.15: resolved by 0.15.** §11.2 "Messages and flows" is a table per grant, which both implementations measured the same way, the liveliness read's egress `liveliness_token` included. zk2py's pairs were already the table's. Its docstring now cites the table.
+
+> "Own | A service principal puts, deletes, declares queryables, replies
+> and declares tokens … On egress, it receives queries and subscriber
+> declarations"; "presence: liveliness reads (GETs and subscriptions) …
+> and the descriptor's GET and subscription"
+
+zenoh 1.10.1's access control has nine messages and two flows, and a rule
+grants pairs of them. §11.1 states actions, and leaves the pairs to the
+implementer, Own's egress aside.
+- **The CHANGELOG states some pairs, not the core.** It says of the
+  reference generator that presence "gain[s] query and declare_subscriber
+  on ingress, and reply and put on egress".
+- **The liveliness pair could only be found by measuring.** Under `deny`,
+  a liveliness GET needs `liveliness_query` on ingress and
+  `liveliness_token` on egress. `liveliness_query` on both flows, or with
+  `reply` on egress, returns no token.
+- **The reader's selector must also be included in the grant.** A
+  wildcard read needs the wildcard granted, not the providers' concrete
+  prefixes.
+- **Consume and Call need their deliveries granted on egress** (`put`,
+  `delete`, `reply`), which the table does not say either.
+
+**Resolved:** zk2py's pairs, in `zk2py.acl`'s docstring. They are
+measured where the run exercises them, and every check passes on them.
+
+### F-84 · gap (measured) · §11.1 Tool and §4.2 S4 (0.14): reading the admin space
+
+**Status at 0.15: resolved by 0.15.** §11.1 Tool: "A tool that checks S4 or runs a doctor also holds the admin read: `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced." zk2py's grant was `@/**`, and is now those two keys. The run shows that under `deny` the tool reads `@/*/router` and runs S4, clean, while the caller, without the admin read, gets nothing.
+
+> §4.2: "A deployment that wants S4 checked enables it, read-only, for the
+> tools' principals"; §11.1: "No principal declares queryables under
+> `@/**`"; "Tool | … Consume and Call on what it reads and calls, and
+> presence on the services it inspects."
+
+"Read-only, for the tools' principals" is the admin space's own setting.
+Under `default_permission: deny`, the tool also needs an access-control
+grant: `query` on ingress and `reply` on egress, on `@/**`. No shape
+includes one, and §11.1 speaks of `@/**` only to forbid queryables there.
+Measured: the caller, with no such grant, gets nothing from `@/*/router`.
+The tool, granted it, reads R1's answer and runs S4. Under `allow`, every
+principal reads the admin space, since no deny names it.
+**Resolved:** zk2py's Tool shape takes an admin-space read
+(`Principal.admin_read`), compiled to those two pairs.
+
+### F-85 · ambiguity · §11.2 (0.14): the complement of a grant
+
+**Status at 0.15: resolved by 0.15.** §11.2 "The complement's key set": the deployment's own keys, meaning declared resources, each service's `@zk/**` and the contract keys. Undeclared keys stay open under `allow`. This was zk2py's guess. The admin space is outside the set, so under `allow` every principal reads it. The run reports that as information.
+
+> "Under `allow`, Zenoh does not evaluate allow rules. A grant compiles
+> into denies of its complement, regenerated on every contract revision."
+
+A key expression has no negation, and a deny works by inclusion, so a
+complement has to be enumerated over some finite set of keys. §11.2 does
+not say which set. "Regenerated on every contract revision" suggests the
+contracts' keys, but the text gives no set and no granularity:
+- **per service prefix:** too wide, since a deny of `zk2/h1/tc/**` would
+  also deny a consumer's own concrete reads there;
+- **per resource;**
+- **per message and flow.**
+
+Keys no contract declares are in no complement, so they stay open under
+`allow`, which security.md §2's "every unauthorized action is blocked"
+does not anticipate.
+**Resolved:** a guess, `acl.universe`. The set is each served resource's
+key expression, each service's `@zk/**` and the contract keys, taken for
+each of the nine messages on each flow. A universe key that a grant
+includes is left open. One a grant only intersects is the R2-narrowed case
+(`complement_partial`, 0.14), and is left open too. Any other is denied.
+The run's `allow` checks pass on it.
+
+### F-86 · gap (measured) · §4.2 "What the check reads" (0.11): storage records that are not storages
+
+**Status at 0.15: resolved by 0.15.** §4.2: "A storage is an answer to the second selector whose key the selector includes, ending …/storage_manager/storages/<name>. Other answers arrive too, and are not storages." zk2py's inclusion test was the rule. It now also requires the `storage_manager/storages/<name>` ending (`live.check_s4`).
+
+> "`@/*/router/**/storage_manager/storages/**`, one key per storage …
+> A router that answers the first selector and has nothing under the
+> second runs no storage."
+
+A router's admin space also holds `@/<zid>/router/queryable/<key expr>`,
+one record per declared queryable. The key embeds the queryable's key
+expression, wildcards included. A queryable over `…/state/**` (S2) gives a
+record whose key ends in `**`, and that key intersects the storages
+selector. Measured with two zk2py owners on R1, admin space on: the
+storages selector is answered with six `router/queryable/…/state/**`
+records, one per owner per interface, none a storage and none with a
+`key_expr`. So with any owner present, "nothing under the second" never
+holds. A tool that reads each answer as a storage finds none it can read,
+and calls the check unobservable. zk2py's run showed exactly that before
+the fix.
+**Resolved:** zk2py keeps only an answer whose key the selector includes,
+not merely intersects (`live.check_s4`). R1's real storage records would
+be included, and the queryable records are not.
+
+### F-87 · gap (measured) · §11.1 (0.12, 0.14): "every principal" under `allow`
+
+**Status at 0.15: resolved by 0.15.** §11.2: "every principal" is a rule in each principal's own policy, never one catch-all subject's, with the measurement stated. zk2py already compiled it that way.
+
+> "No principal declares queryables under `@/**` … A generator allows it
+> to none under `deny`, and denies it to every principal under `allow`."
+
+The natural compilation of "every principal" is one subject that matches
+every session: no attribute, or `link_protocols: ["tcp"]`. Measured on
+zenoh 1.10.1, with the per-user subjects of the generated `allow` block
+beside such a subject:
+- the per-user denies stop applying: `own-h1`'s put on h2's key arrives,
+  and the caller's ungranted GET gets both replies;
+- `own-h1`'s queryable on `@/<R1>/router` is answered;
+- only `S`, which matches no per-user subject, is refused.
+
+The spec does not say how to express "every principal", nor that this
+compilation fails.
+**Resolved:** the `@/**` deny goes into each principal's own policy. All
+the run's `allow` checks pass with it, and `own-h1`'s spoof is refused.
+
+### F-88 · contradiction · security.md §3 step 3 against §11.3 (0.14): a session that is no principal
+
+**Status at 0.15: resolved by 0.15.** security.md §3 step 3 now runs `S` twice: as an enrolled principal, and as an authenticated session that is no principal. An enrolled principal is refused under both postures. A non-principal is refused under `deny`, but under `allow` its answer arrives, and only the replier id keeps S4 from clean. zk2py runs both: `S-enrolled` (user `spoofer`, holding only the open contract grants) and `S` (user `stranger`). It measures exactly those outcomes.
+
+> security.md §3: "Under each posture, generate R1's grants … and repeat
+> step 1." Expected: "R1 refuses `S`'s queryable."
+> §11.3: "A session that matches no subject gets no policy, so it gets
+> `default_permission`, which under `allow` is everything."
+
+`S` is "a client `S` that is no router", and here no principal either.
+Under `deny`, the generated grants refuse it: it matches no subject, so
+it gets nothing. Under `allow`, it matches no subject, so no generated
+deny reaches it:
+- only a subject matching every session would, and that undoes the
+  per-user denies (F-87);
+- measured: `S`'s queryable on `@/<R1>/router` is answered under `allow`.
+
+Step 3 holds under `allow` only for an `S` that is a principal, which the
+run shows (`own-h1`'s spoof is refused), or for an `S` refused at the link,
+which never declares anything. What still holds is 0.12's replier check:
+`S`'s answer carries `S`'s replier id, stays unverified, and S4 is not
+clean.
+**Resolved:** zk2py checks step 3 for a principal under both postures, and
+records `S` under `allow` as this finding, checking that S4 is not clean
+beside it. A deployment under `allow` keeps every authenticated user a
+principal of the deployment (§11.3's link MUST, extended to the
+dictionary).
+
+## At 0.15 (#609)
+
+`just py-conformance` passes 519 of 519 (0.15 adds no fixture). `just
+py-live` passes 223 of 223, with no known deviation. The access-control
+run (`--only acl`) is 25 of them.
+
+What changed in zk2py:
+- **The generator follows §11.2's table** (`zk2py.acl`). Its pairs were
+  already the table's. The admin read is now `@/*/router` and
+  `@/*/router/**` rather than `@/**`. The complement's key set and the
+  per-policy `@/**` deny were already 0.15's.
+- **The Tool's admin read, under `deny`.** The tool reads `@/*/router` and
+  runs S4, which reads clean. The caller, without the admin read, gets
+  nothing.
+- **security.md §3 step 3, as amended**, with `S` both ways:
+  - `S-enrolled`, a principal holding only the open contract grants, is
+    refused under both postures.
+  - `S`, authenticated but no principal, is refused under `deny`. Under
+    `allow`, its answer on R1's key arrives under its own replier id,
+    unverified, and S4 is not clean.
+- **A storage** must also end `…/storage_manager/storages/<name>`, beside
+  the inclusion test (`live.check_s4`).
+
+Implementing 0.15 raised no new question.
