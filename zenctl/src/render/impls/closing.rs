@@ -1,5 +1,5 @@
-//! The four families that end something and report what happened: `record`,
-//! `replay`, `check cutover`, `check expect`.
+//! The families that end something and report what happened: `record`,
+//! `replay`, `check expect`, `check probe`.
 //!
 //! They are the legitimate row-less impls. A capture is not a list of samples
 //! — it is a file, and a count of what went into it; a verdict is not a list
@@ -11,7 +11,7 @@
 //! observation, and each one has to say what the bound cost before it states
 //! a verdict — O6 is the reason `Impaired` and `Unproven` exist at all.
 
-use zenkey_fleet::report::{CutoverReport, CutoverVerdict, ExpectReport, ExpectVerdict};
+use zenkey_fleet::report::{ExpectReport, ExpectVerdict};
 use zenkey_fleet::{RecordReport, ReplayReport};
 
 use crate::render::{
@@ -251,89 +251,6 @@ impl Render for ReplayReport {
             );
         }
         notes
-    }
-}
-
-impl Render for CutoverReport {
-    const FAMILY: &'static str = "cutover";
-
-    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        envelope_of(self)
-    }
-
-    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
-
-    fn table(&self, t: &mut Table) {
-        t.line(format!(
-            "old root {}: {} sample(s) on {} key(s) over {}s",
-            self.old_root, self.old_samples, self.old_keys_seen, self.window_s
-        ));
-        let mut g = Grid::unheaded(2);
-        for k in &self.old_examples {
-            g.row([Cell::text("  ✗"), Cell::text(k)]);
-        }
-        t.grid(g);
-        t.line(format!(
-            "new plane {}**: {} sample(s)",
-            self.new_prefix, self.new_samples
-        ));
-        if self.leak_samples > 0 {
-            t.line(format!(
-                "leaks (outside {} and not the old root): {} sample(s) on {} key(s)",
-                self.new_prefix, self.leak_samples, self.leaked_keys_seen
-            ));
-            let mut g = Grid::unheaded(2);
-            for k in &self.leak_examples {
-                g.row([Cell::text("  !"), Cell::text(k)]);
-            }
-            t.grid(g);
-        }
-        // The word is the carrier; the colour repeats it (#200).
-        let (word, style) = match self.verdict {
-            CutoverVerdict::Pass => ("PASS", crate::render::style::PASS),
-            CutoverVerdict::OldStillSpeaks => ("FAIL", crate::render::style::ERROR),
-            // Dim, not yellow: "unproven" is the absence of a verdict rather
-            // than a milder failure.
-            CutoverVerdict::Unproven => ("UNPROVEN", crate::render::style::UNPROVEN),
-        };
-        t.line_styled(word, style);
-    }
-
-    fn bounds(&self) -> Vec<BoundCost> {
-        vec![BoundCost::new(
-            BoundKind::Missed,
-            self.dropped,
-            "sample(s) dropped while behind — the silence claim covers only \
-             what was seen",
-        )]
-    }
-
-    fn scope(&self) -> Option<ObservedScope> {
-        Some(ObservedScope {
-            asked: vec![self.old_root.clone(), format!("{}**", self.new_prefix)],
-            window_s: Some(self.window_s),
-        })
-    }
-
-    fn notes(&self) -> Vec<Note> {
-        // The verdict word is on stdout beside the evidence; the sentence that
-        // says what it *means* is a note, so a script gets it too.
-        vec![match self.verdict {
-            CutoverVerdict::Pass => Note::coverage(
-                "the retired family is silent while the new plane carries traffic — \
-                 both halves",
-            )
-            .cite("RFC 09 §6"),
-            CutoverVerdict::OldStillSpeaks => Note::coverage(
-                "the retired family still speaks; a migration you can assert the \
-                 absence of is a migration you can finish",
-            )
-            .cite("RFC 09 §6"),
-            CutoverVerdict::Unproven => Note::silence(
-                "the old root was silent but so was the new plane: a dead fleet \
-                 passes the silence half for free. Bring the fleet up and run it again",
-            ),
-        }]
     }
 }
 

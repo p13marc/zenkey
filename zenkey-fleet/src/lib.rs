@@ -170,9 +170,6 @@ pub use judge::condition::{
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::conform::{ConformSpec, run_conform};
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -249,7 +246,7 @@ pub use bus::write::{
     check_concrete, check_fanout, check_retire, declare_publication, declare_publication_with,
 };
 pub use judge::budget::BudgetObservation;
-pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
+pub use judge::common::EXPANSION_CAP;
 // zk2's doctor (#612, FJ6): the run, its two halves, and the delta a
 // notifier compares runs with.
 pub use judge::doctor::{
@@ -321,7 +318,6 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 pub use judge::condition::{
     SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone,
 };
-pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it
 // was ours to use.
@@ -330,18 +326,6 @@ pub use error::{BoxedCause, Error, Result, one_line};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::field::DEFAULT_MAX_PATHS;
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::why::is_cause;
-// The two scope notes keep their own names rather than one: they are two
-// different O5 statements about two different windows, which is why
-// `judge/common.rs` declined to merge them. A name collision is not a reason
-// for an item to be unreachable from the root, though (#350).
-pub use judge::cutover::run_cutover;
-pub use judge::cutover::scope_note as cutover_scope_note;
-pub use judge::retired::run_retired;
-pub use judge::retired::scope_note as retired_scope_note;
-pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, run_why};
 // `diff` is `value_diff` at the root: a bare `diff` beside `byte_diff` in a
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
 // zk2's access control (spec §11, #612 FJ7): planned from an enrollment
@@ -373,16 +357,15 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
-    ConformReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity,
-    DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind,
-    ExpectReport, ExportSnapshot, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView,
-    ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink, OriginAttachment,
-    RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
-    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, ServeSummary, ServedCall, Snapshot,
-    SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge,
-    TopologyNode, TopologyReport, TotalityGap, ValueSource, WhyReport, WhyVerdict, ZrecHeader,
-    ZsnapHeader, judgement_exit_code,
+    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer, Coverage,
+    CoverageRow, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport, DriftVerdict,
+    EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, FieldReport,
+    GenPlan, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement, LatencyReport,
+    LatencySummary, MeshLink, OriginAttachment, RecordReport, RenderSource, ReplayReport,
+    RouterInfo, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, ServeSummary, ServedCall,
+    Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge,
+    TopologyNode, TopologyReport, TotalityGap, ValueSource, ZrecHeader, ZsnapHeader,
+    judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands

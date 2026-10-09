@@ -296,22 +296,6 @@ pub(crate) struct GenArgs {
     pub(crate) ns: NamespaceArgs,
 }
 
-/// The `why` verb's flags (#214) — one struct, the `GenArgs` pattern, so the
-/// ladder's whole body lives in `cmd/why.rs` (#209's rule: `run()`
-/// dispatches, it does not compute).
-#[derive(clap::Args)]
-pub(crate) struct WhyArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
-    /// Listen passively for this many seconds — the one rung that costs the
-    /// data plane (RFC 09 §5.1, the v1.18 frugality note). Without it the
-    /// wire-heard rung reads "not asked", never "silent" (O4).
-    #[arg(long = "for", value_name = "SECS")]
-    pub(crate) for_secs: Option<f64>,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
 /// The `echo` verb's flags (#612, FJ8b) — one struct, the `GenArgs`
 /// pattern. A raw verb: the selector is a wire key, on a session in no
 /// namespace; `--namespace` says which deployment the keys are resolved
@@ -857,20 +841,6 @@ pub(crate) enum Command {
     /// above --fail-on (default warning), 2 no verdict: a check left
     /// unobservable, an empty scope, or a run that could not start.
     Doctor(DoctorArgs),
-    /// Explain why a key is silent, one established fact at a time.
-    ///
-    /// The non-verdict, itemised (#214): a rung ladder over facts the engine
-    /// already holds: scope reach, grammar, registry declaration, the
-    /// liveliness roster, declared publishers, storage coverage, a stored
-    /// value, freshness, admin reachability. Every rung answers established /
-    /// not-established (with its reason) / NOT ASKED — "not asked" is never
-    /// rendered as "no" (RFC 09 §5.1 O4), because silence is never a verdict
-    /// (RFC 05 §3.1). "No publisher declared" never reads as a bug: publishers
-    /// declare lazily, on the first publication (RFC 08 §6.1). The default run
-    /// costs the control plane only; `--for` adds the one data-plane rung. Exit
-    /// 0 = nothing found and everything checked looks healthy; 1 = a cause was
-    /// established — the finding; 2 = the observation was impaired.
-    Why(WhyArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -930,35 +900,6 @@ pub(crate) enum CheckCmd {
     /// read that timed out, session failure). `--absent` is legitimate ONLY
     /// because of that 2.
     Expect(CheckExpectArgs),
-    /// Cutover acceptance: the old key family is silent and the new one speaks.
-    ///
-    /// Half one of RFC 09 §6: assert a retired key family SILENT while the
-    /// new plane carries traffic. Three verdicts, three exits: 0 = old silent AND new speaking; 1 =
-    /// the old family still speaks; 2 = everything was quiet — a
-    /// non-verdict, because a dead fleet passes the silence half for free.
-    /// The leak check's meaning is stated, not inferred: anything outside
-    /// `<base>/v1/` that is not the old root.
-    Cutover(CheckCutoverArgs),
-    /// Which deprecated subjects are actually gone from the bus.
-    ///
-    /// The deprecation burn-down: which `[[deprecated]]` entries are actually
-    /// finished. Exit 0 = every entry passes, 1 = a retired subject still
-    /// speaks, 2 = unproven — silence is not a pass (RFC 05 §3.1).
-    ///
-    /// For each ledger entry of the `--registry` dirs, four facts: still on
-    /// the wire (`--for`), still declared active by a served introspect slice
-    /// (the RFC 08 §6.1 lie), still subscribed to by any session (admin
-    /// space), and whether `replaced_by` carries traffic — the cutover pair,
-    /// per entry. Without `--for`, wire facts read "not listened", never
-    /// "absent" (RFC 09 §5.1 O4).
-    Retired {
-        /// Listen passively for this many seconds to hear the retired
-        /// families and their replacements. No window = no wire facts.
-        #[arg(long = "for", value_name = "SECS")]
-        for_secs: Option<f64>,
-        #[command(flatten)]
-        bus: BusArgs,
-    },
     /// Read a zk2 resource as a consumer does; do values arrive in a window?
     ///
     /// The consumer-shaped acceptance probe (zk2's since #612, FJ8b): "a
@@ -973,26 +914,6 @@ pub(crate) enum CheckCmd {
     /// values arrived and none decoded as their type; 2 the presence read
     /// timed out, or the probe could not stand up.
     Probe(CheckProbeArgs),
-    /// Run a producer's registry as a conformance suite against the bus.
-    ///
-    /// #222: 0 = conforms, 1 = an assertion is not met, 2 = unproven. One
-    /// assertion per declared surface, three states each — met, not
-    /// met, unknowable with its reason (RFC 13 §3) — and unknowable is never
-    /// folded into not met. Every origin the roster shows running the
-    /// producer is CALLED: introspect and each concrete `read` procedure,
-    /// with no arguments (`error/invalid-args` is a reply, and met). A write
-    /// is never called; it is met when the origin's served slice declares
-    /// it. `error/unsupported` or `error/gated` from a `when` procedure is
-    /// exempt and says so — unless the device's registration document
-    /// claims the capability (RFC 04 §5) — and from any other procedure it
-    /// is not met (RFC 08 §6.1). Silence from a rostered origin is not met:
-    /// alive ⇒ callable (RFC 13 §2). Then v1's registry checks, scoped to the
-    /// producer: slice sync, describe totality, schema drift; with `--for`,
-    /// each declared subject — a window proves presence, never absence, so a
-    /// subject that did not speak is unknowable. With `--registry` the suite
-    /// is those files (the contract the build ships); without, what the
-    /// fleet serves.
-    Conform(CheckConformArgs),
     /// Check one payload against a type of a zk2 contract, exit-coded for CI.
     ///
     /// No bus write (#159): 0 = it conforms, 1 = it does not, 2 = could not
@@ -2484,50 +2405,6 @@ pub(crate) struct CheckExpectArgs {
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
-}
-
-/// The `check cutover` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct CheckCutoverArgs {
-    /// The retired key family (a full wire key expression).
-    #[arg(long = "old-root", value_name = "KEYEXPR")]
-    pub(crate) old_root: String,
-    /// Listening window, seconds.
-    #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
-    pub(crate) for_secs: f64,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
-}
-
-/// The `check conform` verb's flags — one struct the dispatcher hands over
-/// whole, destructured in the verb rather than in `run()` (#354).
-#[derive(clap::Args)]
-pub(crate) struct CheckConformArgs {
-    /// The producer whose registry slice is the suite.
-    #[arg(long, value_parser = chunk_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: String,
-    /// Call this origin only (`h-…` or `@service`), not every origin the
-    /// roster shows. Off the roster, its silence is unknowable, not a
-    /// failure.
-    #[arg(long, value_name = "ORIGIN")]
-    pub(crate) origin: Option<String>,
-    /// Listen passively for this many seconds and judge each declared
-    /// subject: presence, QoS, payload, kind, rate, cardinality. No window =
-    /// the subject assertions are not asked.
-    #[arg(long = "for", value_name = "SECS")]
-    pub(crate) for_secs: Option<f64>,
-    /// Also judge freshness against `ttl_s` and the declared `[budget]` —
-    /// a state snapshot and a health fetch, real query load.
-    #[arg(long)]
-    pub(crate) deep: bool,
-    /// Write the assertions as JUnit XML: not met is a failure, unknowable
-    /// is SKIPPED (never failed), an exemption rides system-out.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) junit: Option<std::path::PathBuf>,
-    #[command(flatten)]
-    pub(crate) bus: BusArgs,
 }
 
 /// The `check probe` verb's flags (zk2's since #612, FJ8b) — one struct the

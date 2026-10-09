@@ -245,29 +245,6 @@ async fn pub_from_ndjson_refuses_a_wildcard_row() {
 
 // ── verdicts ────────────────────────────────────────────────────────────
 
-/// `why` exits 1 when it establishes a cause: a subject the producer's own
-/// served slice does not declare (RFC 08 §2).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn why_is_1_when_a_cause_is_established() {
-    let bus = Bus::up().await;
-    let key = bus.key(&format!("v1/{HOST}/telemetry/{PRODUCER}/nothere"));
-    let run = bus
-        .until(&["why", &key, "--format", "ndjson"], |r| {
-            r.code == 1 && r.ndjson()[0]["causes"] == json!(["registry-declared"])
-        })
-        .await;
-    exits(&run, 1);
-    let head = &run.ndjson()[0];
-    assert_eq!(head["verdict"], json!("explained"), "{run}");
-    assert_eq!(head["causes"], json!(["registry-declared"]), "{run}");
-    let alive = run
-        .rows("rung")
-        .into_iter()
-        .find(|r| r["id"] == "origin-alive")
-        .expect("the roster rung");
-    assert_eq!(alive["answer"], json!("established"), "{run}");
-}
-
 /// `watchdog --count` exits on how its rules ended (#511): a `rate-above`
 /// under the 20 Hz telemetry is still firing at the last tick — 1; one far
 /// above it ends ok — 0; a silence claim longer than the run could watch

@@ -188,93 +188,6 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     );
 }
 
-/// The `why` ladder (#214): one line per rung, the three answer states drawn
-/// as three marks — `✓` established, `✗`/`·` not-established (a cause / a
-/// mere fact), `?` NOT ASKED — reasons and evidence indented, verdict word
-/// last. The fixture is the acceptance posture: declared, alive, never
-/// published, under the `Healthy` verdict.
-#[test]
-fn a_why_ladder_draws_one_rung_per_line_with_its_three_states() {
-    assert_data_eq!(
-        table(&fx::why_report()),
-        str![[r#"
-✓  scope-reach         does a `**` explorer scope reach this key?
-      the `v1/**` explorer scope intersects this key
-✓  key-parse           does it parse as a v1 key under the base?
-      origin h-3fa9c2d41b7e (host), class telemetry, producer sysinfo, subject disk/root/used
-✓  registry-declared   does a loaded registry slice declare it?
-      declared as disk/{mount}/used (TelemetryPoint)
-✓  origin-alive        is the origin on the liveliness roster?
-      h-3fa9c2d41b7e is on the roster with producer(s): sysinfo
-·  publisher-declared  did any session declare a matching publisher?
-      ↳ declared, alive, never published — publishers declare lazily (RFC 08 §6.1): no publisher declaration exists until the first publication, so this is not evidence of a bug
-✓  storage-coverage    is a storage configured to capture it?
-      storage latest@aabbccdd (v1/*/telemetry/**) captures every key this expression names
-·  stored-value        does a stored value answer a bounded GET?
-      ↳ none of get, @adv cache returned a value — which is silence, not proof no value exists (RFC 05 §3.1)
-?  sample-freshness    is the last known sample within its declared ttl?
-      no sample in hand to age — the stored-value rung found none
-✓  admin-answered      is the admin space answering at all?
-      1 admin root document(s) answered @/*/*
-?  wire-heard          did the key speak during a listen window?
-      not listened — the data plane costs one deliberate action (RFC 09 §5.1, v1.18 frugality); pass --for <SECS> to watch the wire
-NO CAUSE ESTABLISHED
-
-"#]]
-    );
-}
-
-/// The `why` notes carry the honesty sentences into every format: the
-/// RFC 05 §3.1 framing, the exit-code meaning, and the next step for the one
-/// rung that was not asked.
-#[test]
-fn a_why_ladders_notes_state_the_non_verdict_and_the_exit() {
-    let stderr = notes(&fx::why_report());
-    assert!(stderr.contains("silence is never a verdict"), "{stderr}");
-    assert!(stderr.contains("exit 1"), "{stderr}");
-    assert!(stderr.contains("--for"), "{stderr}");
-}
-
-/// The `why` ndjson: the envelope leads with the verdict and the cause ids
-/// (so a script need not re-derive the exit-0 policy), then one tagged row
-/// per rung — `not_asked` rows carrying no `reason`.
-#[test]
-fn a_why_ladders_ndjson_leads_with_the_verdict_then_tags_every_rung() {
-    let out = ndjson(&fx::why_report());
-    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["report"], "why");
-    assert_eq!(envelope["verdict"], "healthy");
-    assert_eq!(envelope["causes"], serde_json::json!([]));
-    assert!(
-        !envelope.as_object().unwrap().contains_key("rungs"),
-        "rungs are rows, not an envelope field"
-    );
-    let rows: Vec<serde_json::Value> = out
-        .lines()
-        .skip(1)
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(rows.len(), 10, "one row per rung");
-    let lazy = rows
-        .iter()
-        .find(|r| r["id"] == "publisher-declared")
-        .unwrap();
-    assert_eq!(lazy["answer"], "not_established");
-    assert!(
-        lazy["reason"]
-            .as_str()
-            .unwrap()
-            .contains("publishers declare lazily"),
-        "{lazy}"
-    );
-    let unasked = rows.iter().find(|r| r["id"] == "wire-heard").unwrap();
-    assert_eq!(unasked["answer"], "not_asked");
-    assert!(
-        unasked.get("reason").is_none(),
-        "not asked has no negative answer to spell (O4)"
-    );
-}
-
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -284,7 +197,6 @@ fn no_family_emits_trailing_whitespace() {
     let renderings = [
         table(&fx::storage_list()),
         table(&fx::doctor_report()),
-        table(&fx::why_report()),
         table(&catalog.services()),
         table(&catalog.service(&"host-a/tc".parse().expect("an address"))),
         table(&catalog.ifaces()),
@@ -643,61 +555,6 @@ fn a_partial_page_says_stopped_early_and_a_null_cursor_is_a_caveat() {
     assert_eq!(report.exit_code(), 0, "a call is an act, not a judgement");
 }
 
-#[test]
-fn a_cutover_puts_the_verdict_word_beside_its_evidence() {
-    assert_data_eq!(
-        table(&fx::cutover_report()),
-        str![[r#"
-old root acme/legacy: 12 sample(s) on 2 key(s) over 30s
-  ✗  acme/legacy/sysinfo/health
-  ✗  acme/legacy/sysinfo/disk
-new plane acme/v1/**: 480 sample(s)
-leaks (outside acme/v1/ and not the old root): 3 sample(s) on 1 key(s)
-  !  acme/scratch/tmp
-FAIL
-
-"#]]
-    );
-    assert!(notes(&fx::cutover_report()).contains("still speaks"));
-}
-
-/// The burn-down (#226): each ledger entry carries its four facts, each fact
-/// honest about whether it was even asked, and the verdict word closes the
-/// table exactly as `check cutover`'s does — same vocabulary, same exit
-/// discipline.
-#[test]
-fn a_retired_report_puts_four_facts_beside_each_ledger_entry() {
-    assert_data_eq!(
-        table(&fx::retired_report()),
-        str![[r#"
-✗  logs: logs/errors_total              wire 3 sample(s) · STILL SERVED · 1 subscriber(s) · → logs/journald/errors_total: 480 sample(s)
-✓  logs: logs/by_unit/{unit}/burn_rate  wire silent · not served · 0 subscriber(s) · → logs/journald/burn_rate: 120 sample(s)
-?  logs: logs/units_in_failure          wire silent · not served · 0 subscriber(s) · → logs/journald/units_in_failure: 0 sample(s)
-FAIL
-
-"#]]
-    );
-    let notes = notes(&fx::retired_report());
-    assert!(
-        notes.contains("one checkout's slice"),
-        "the report must state which registries it read: {notes}"
-    );
-    // The envelope leads the ndjson, with the coverage claim intact and the
-    // entries reduced to a count (the rows carry them).
-    let first = ndjson(&fx::retired_report())
-        .lines()
-        .next()
-        .unwrap()
-        .to_string();
-    let envelope: serde_json::Value = serde_json::from_str(&first).unwrap();
-    assert_eq!(envelope["report"], "registry-retired");
-    assert_eq!(envelope["entries"], 3);
-    assert_eq!(
-        envelope["registries"][0],
-        "../zensight/zensight-common/registry"
-    );
-}
-
 /// The field window (#223): per-path stats beside their findings, the path
 /// table's bound stated in every format. Over zk2 (#612, FJ8b) a path is
 /// declared by the contract's type or not, and field-stuck is *not asked*
@@ -777,44 +634,6 @@ IMPAIRED — the observation cannot carry the claim:
 "#]]
     );
     assert!(notes(&fx::expect_report()).contains("not a verdict either way"));
-}
-
-/// The conformance suite (#222): the state word leads every row, an
-/// exemption is named beside its evidence, unknowable carries its reason —
-/// and the verdict closes the table. The notes carry what was not asked,
-/// and the drop, in every format.
-#[test]
-fn a_conform_report_keeps_three_states_and_names_the_exemption() {
-    assert_data_eq!(
-        table(&fx::conform_report()),
-        str![[r#"
-✓ met         procedure/introspect          h-3fa9c2d41b7e: a value reply  [RFC 08 §6]
-✓ exempt      procedure/dns                 when: config:collect.dns — h-3fa9c2d41b7e: error/gated — conditional, and said so  [RFC 08 §6.1]
-✗ not met     qos-observed-mismatch/health  v1/h-3fa9c2d41b7e/state/sysinfo/health: 4 of 4 sample(s) did not ride the declared transition  [RFC 04 §3]
-? unknowable  observed/disk/{mount}/used    a window proves presence, never absence — not seen in 10s  [RFC 13 §3]
-VIOLATES
-
-"#]]
-    );
-    let notes = notes(&fx::conform_report());
-    assert!(notes.contains("not asked: stale-state"), "{notes}");
-    assert!(notes.contains("3 sample(s) dropped"), "{notes}");
-    assert!(notes.contains("synthetic marker"), "{notes}");
-    let lines: Vec<serde_json::Value> = ndjson(&fx::conform_report())
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(lines[0]["report"], "conform");
-    assert_eq!(lines[0]["verdict"], "violates");
-    assert!(lines[0].get("assertions").is_none(), "rows are rows");
-    let states: Vec<&str> = lines[1..]
-        .iter()
-        .map(|l| {
-            assert_eq!(l["row"], "assertion");
-            l["state"].as_str().unwrap()
-        })
-        .collect();
-    assert_eq!(states, ["met", "met", "not_met", "unknowable"]);
 }
 
 /// The fleet timeline (#216), arrival axis: lanes per zk2 resource of one
@@ -1820,11 +1639,9 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "call",
         "compat",
         "config",
-        "conform",
         "context",
         "context-action",
         "context-list",
-        "cutover",
         "doctor",
         "expect",
         "export",
@@ -1842,7 +1659,6 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "probe",
         "rate",
         "record",
-        "registry-retired",
         "replay",
         "schema-check",
         "schema-show",
@@ -1857,7 +1673,6 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-list",
         "storage-plan",
         "timeline",
-        "why",
     ];
 
     fn families(dir: &std::path::Path, out: &mut Vec<String>) {
@@ -1915,8 +1730,6 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::expect_report());
     assert_eq!(s.asked, ["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*"]);
     assert_eq!(s.window_s, Some(5.0));
-    let s = scoped(&fx::cutover_report());
-    assert_eq!(s.asked.len(), 2, "both halves of the claim: {:?}", s.asked);
     let s = scoped(&fx::field_report());
     assert_eq!(s.window_s, Some(30.0));
     let s = scoped(&zenctl::render::RateView {
@@ -1942,11 +1755,6 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::export_snapshot());
     assert_eq!(s.asked, ["acme/v1/*/**"]);
     assert_eq!(s.window_s, Some(120.0));
-    // The conformance suite's scope is every origin it called, plus its
-    // listen window's selectors.
-    let s = scoped(&fx::conform_report());
-    assert_eq!(s.asked, ["h-3fa9c2d41b7e/@rpc/sysinfo", "v1/*/state/**"]);
-    assert_eq!(s.window_s, Some(10.0));
     // The doctor's scope is what it read: presence in the namespace, the
     // admin space in none.
     let s = scoped(&fx::doctor_report());
@@ -1956,10 +1764,6 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::storage_check());
     assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
     assert_eq!(s.window_s, None);
-    // The burn-down: one asked selector per ledger entry.
-    let s = scoped(&fx::retired_report());
-    assert_eq!(s.asked.len(), 3);
-    assert_eq!(s.window_s, Some(30.0));
 
     // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
     let s = scoped(&fx::call_report());
@@ -1983,7 +1787,6 @@ fn every_observing_family_states_its_scope() {
     });
     assert_eq!(s.asked, ["acme/v1/**/state/**"]);
     scoped(&fx::bench_report());
-    scoped(&fx::why_report());
     // A config read is a GET: its key, over its wait.
     let s = scoped(&config_report());
     assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0"]);

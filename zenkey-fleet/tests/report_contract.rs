@@ -299,17 +299,10 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
     );
 }
 
-/// The three-state verdicts. Silence has its own word in both, and that is the
-/// whole reason they are not booleans.
+/// The three-state verdict. Silence has its own word, and that is the whole
+/// reason it is not a boolean.
 #[test]
 fn the_three_state_verdicts_keep_their_third_state() {
-    for (v, wire) in [
-        (CutoverVerdict::Pass, "pass"),
-        (CutoverVerdict::OldStillSpeaks, "old_still_speaks"),
-        (CutoverVerdict::Unproven, "unproven"),
-    ] {
-        assert_eq!(serde_json::to_value(v).unwrap(), json!(wire));
-    }
     for (v, wire) in [
         (ExpectVerdict::Met, "met"),
         (ExpectVerdict::NotMet, "not_met"),
@@ -359,67 +352,6 @@ fn the_three_state_verdicts_keep_their_third_state() {
         }),
         "an empty violation list is absent, `rate_hz: None` means not asked, and \
          presence not asked is absent"
-    );
-}
-
-/// The conformance report (#222), whole: each assertion's state flat under
-/// `state`, the reason only where the answer is "could not say", `exempt`
-/// only where an exemption was claimed, and the window's drops carried — a
-/// script keys on `id` and `state`, and CI on the verdict.
-#[test]
-fn a_conform_report_keeps_unknowable_apart_from_not_met() {
-    assert_eq!(
-        serde_json::to_value(fx::conform_report()).unwrap(),
-        json!({
-            "producer": "sysinfo",
-            "slice_source": "dirs",
-            "origins_asked": ["h-3fa9c2d41b7e"],
-            "assertions": [
-                {
-                    "id": "procedure/introspect",
-                    "subject": "@rpc/introspect",
-                    "state": "met",
-                    "evidence": "h-3fa9c2d41b7e: a value reply",
-                    "citation": "RFC 08 §6",
-                },
-                {
-                    "id": "procedure/dns",
-                    "subject": "@rpc/dns",
-                    "state": "met",
-                    "evidence": "h-3fa9c2d41b7e: error/gated — conditional, and said so",
-                    "citation": "RFC 08 §6.1",
-                    "exempt": "when: config:collect.dns",
-                },
-                {
-                    "id": "qos-observed-mismatch/health",
-                    "subject": "state/health",
-                    "state": "not_met",
-                    "evidence": "v1/h-3fa9c2d41b7e/state/sysinfo/health: 4 of 4 sample(s) \
-                                 did not ride the declared transition",
-                    "citation": "RFC 04 §3",
-                },
-                {
-                    "id": "observed/disk/{mount}/used",
-                    "subject": "telemetry/disk/{mount}/used",
-                    "state": "unknowable",
-                    "reason": "a window proves presence, never absence",
-                    "evidence": "not seen in 10s",
-                    "citation": "RFC 13 §3",
-                },
-            ],
-            "summary": {"met": 2, "not_met": 1, "unknowable": 1, "exempt": 1},
-            "verdict": "violates",
-            "observation": {
-                "window_s": 10.0,
-                "scopes": ["v1/*/state/**"],
-                "samples": 40,
-                "keys_seen": 2,
-                "dropped": 3,
-                "synthetic_marked": 40,
-            },
-            "deep": false,
-            "not_asked": ["stale-state/*, budget: not asked without --deep"],
-        })
     );
 }
 
@@ -547,66 +479,6 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
     );
 }
 
-/// A `retired` run without a listen window and without a reachable admin
-/// space serializes *no* wire facts at all — "not asked" is carried by
-/// absence, never by zero or null (RFC 09 §5.1 O4, issue #226).
-#[test]
-fn a_retired_entry_omits_every_fact_that_was_never_asked() {
-    let entry = RetiredEntry {
-        producer: "logs".into(),
-        path: "logs/errors_total".into(),
-        since: None,
-        replaced_by: None,
-        selector: "v1/*/*/logs/logs/errors_total".into(),
-        wire_samples: Asked::NotAsked,
-        still_declared: None,
-        subscribers: None,
-        replacement_samples: Asked::NotAsked,
-        verdict: CutoverVerdict::Unproven,
-    };
-    assert_eq!(
-        serde_json::to_value(&entry).unwrap(),
-        json!({
-            "producer": "logs",
-            "path": "logs/errors_total",
-            "selector": "v1/*/*/logs/logs/errors_total",
-            "verdict": "unproven",
-        }),
-        "an unasked fact is absent, not zero and not null"
-    );
-    // R6: `dropped` joined the window-gated wire facts — it serialized an
-    // unconditional `0` here, claiming a clean observation on a run that
-    // never observed. The pin change is the visible act.
-    let report = RetiredReport {
-        registries: vec!["registry".into()],
-        entries: vec![],
-        window_s: Asked::NotAsked,
-        plane_samples: Asked::NotAsked,
-        dropped: Asked::NotAsked,
-        introspect_answered: 0,
-        admin_entities: None,
-        verdict: CutoverVerdict::Pass,
-    };
-    assert_eq!(
-        serde_json::to_value(&report).unwrap(),
-        json!({
-            "registries": ["registry"],
-            "entries": [],
-            "introspect_answered": 0,
-            "verdict": "pass",
-        }),
-        "no window: every wire fact — dropped included — stays absent; the \
-         registries always state themselves"
-    );
-    // The shared fixture exercises the listened case: every fact present.
-    let full = serde_json::to_value(fx::retired_report()).unwrap();
-    // `30.0`: the seconds unification (#218) — see `timeout_s` above.
-    assert_eq!(full["window_s"], 30.0);
-    assert_eq!(full["dropped"], 5, "a listened run carries its drop count");
-    assert_eq!(full["entries"][0]["still_declared"], true);
-    assert_eq!(full["entries"][2]["verdict"], "unproven");
-}
-
 /// Every enum in this surface, its wire spelling, behind an exhaustive
 /// `match`.
 ///
@@ -640,41 +512,11 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
             DoctorSeverity::Info => "info",
         }
     }
-    fn cutover(v: &CutoverVerdict) -> &'static str {
-        match v {
-            CutoverVerdict::Pass => "pass",
-            CutoverVerdict::OldStillSpeaks => "old_still_speaks",
-            CutoverVerdict::Unproven => "unproven",
-        }
-    }
     fn expect(v: &ExpectVerdict) -> &'static str {
         match v {
             ExpectVerdict::Met => "met",
             ExpectVerdict::NotMet => "not_met",
             ExpectVerdict::Impaired => "impaired",
-        }
-    }
-    // #222: the conformance suite's two vocabularies — the verdict, and the
-    // per-assertion state it folds (a `state` tag, flattened).
-    fn conform(v: &ConformVerdict) -> &'static str {
-        match v {
-            ConformVerdict::Conforms => "conforms",
-            ConformVerdict::Violates => "violates",
-            ConformVerdict::Unproven => "unproven",
-        }
-    }
-    fn assertion_state(v: &AssertionState) -> &'static str {
-        match v {
-            AssertionState::Met => "met",
-            AssertionState::NotMet => "not_met",
-            AssertionState::Unknowable { .. } => "unknowable",
-        }
-    }
-    fn conform_source(v: &ConformSource) -> &'static str {
-        match v {
-            ConformSource::Bus => "bus",
-            ConformSource::Dirs => "dirs",
-            ConformSource::Union => "union",
         }
     }
     // #232: this one was PascalCase, alone in the file.
@@ -739,39 +581,11 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         assert_eq!(wire(&v, ""), severity(&v));
     }
     for v in [
-        CutoverVerdict::Pass,
-        CutoverVerdict::OldStillSpeaks,
-        CutoverVerdict::Unproven,
-    ] {
-        assert_eq!(wire(&v, ""), cutover(&v));
-    }
-    for v in [
         ExpectVerdict::Met,
         ExpectVerdict::NotMet,
         ExpectVerdict::Impaired,
     ] {
         assert_eq!(wire(&v, ""), expect(&v));
-    }
-    for v in [
-        ConformVerdict::Conforms,
-        ConformVerdict::Violates,
-        ConformVerdict::Unproven,
-    ] {
-        assert_eq!(wire(&v, ""), conform(&v));
-    }
-    for v in [
-        AssertionState::Met,
-        AssertionState::NotMet,
-        AssertionState::Unknowable { reason: "r".into() },
-    ] {
-        assert_eq!(wire(&v, "state"), assertion_state(&v));
-    }
-    for v in [
-        ConformSource::Bus,
-        ConformSource::Dirs,
-        ConformSource::Union,
-    ] {
-        assert_eq!(wire(&v, ""), conform_source(&v));
     }
     for v in [
         Coverage::Covered("s".into()),
@@ -812,64 +626,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
     ] {
         assert_eq!(wire(&v, "event"), blob_progress(&v));
     }
-}
-
-/// The `why` ladder's wire shape (#214): one rung per stable id in order, the
-/// three-state answer flattened as a snake_case tag — and `not_asked` carries
-/// **no** `reason`, because a question that was not put has no negative
-/// answer to spell (RFC 09 §5.1 O4). Absent optionals stay absent: an empty
-/// `impairments` and an unrequested listen window serialize as nothing, not
-/// as `[]`/`null`.
-#[test]
-fn a_why_rung_keeps_not_asked_distinct_on_the_wire() {
-    let v = serde_json::to_value(fx::why_report()).unwrap();
-    assert_eq!(v["verdict"], "healthy");
-    assert!(
-        v.get("impairments").is_none(),
-        "no impairments is absence, not an empty list"
-    );
-    assert!(
-        v.get("listened_s").is_none(),
-        "not listened is absence (O4), never null"
-    );
-    let ids: Vec<&str> = v["rungs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        ids,
-        zenkey_fleet::report::RungId::ALL.map(zenkey_fleet::report::RungId::as_str),
-        "one rung per id, in order"
-    );
-
-    let established = &v["rungs"][0];
-    assert_eq!(established["answer"], "established");
-    assert!(established.get("reason").is_none());
-
-    let lazy = &v["rungs"][4];
-    assert_eq!(lazy["id"], "publisher-declared");
-    assert_eq!(lazy["answer"], "not_established");
-    assert!(
-        lazy["reason"]
-            .as_str()
-            .unwrap()
-            .contains("publishers declare lazily"),
-        "the RFC 08 §6.1 wording rides the wire: {lazy}"
-    );
-    assert!(
-        lazy.get("evidence").is_none(),
-        "empty evidence is absent, not []"
-    );
-
-    let not_asked = &v["rungs"][9];
-    assert_eq!(not_asked["id"], "wire-heard");
-    assert_eq!(not_asked["answer"], "not_asked");
-    assert!(
-        not_asked.get("reason").is_none(),
-        "not_asked has no negative answer to spell"
-    );
 }
 
 // ── The consumers join (#224) ─────────────────────────────────────────────
