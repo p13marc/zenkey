@@ -221,7 +221,9 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             ));
         }
         ifaces.insert(e.iface.clone());
-        // §4.4 (0.17): an archive is never tokenless, whatever its contract.
+        // §4.4 (0.17): an archive is never tokenless. D011 reads `iface` and
+        // `token` only, so a malformed `contract` below does not suppress it
+        // (cascade 6, 0.18).
         if e.iface == "archive.v1" && !e.token {
             report.push(Diagnostic::error(
                 "D011",

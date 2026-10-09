@@ -379,7 +379,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.17 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.18 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
@@ -397,6 +397,20 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     `v1` branch keeps them;
   - no zenctl, zengui or zenwatch release from `main` until FJ9; fixes ship
     from `v1`.
+
+- **Decided 2026-10-09 (FL, #614's in-repo half: zengui and zenwatch onto
+  zk2, chunks FL1–FL12):**
+  - `hostid.v1` and `health.v1` (#613's first tier) come before the port;
+  - zenwatch ports with `alerts` dark until alarms.v1. Inhibition is
+    removed, not dark: it read v1's catalog, and no profile brings it back;
+  - the population budget is core (§2.2, `cardinality`), lit up with a spec
+    amendment. This reverses that part of FJ's "kind and budget go dark";
+  - zengui moves pane by pane, beside v1's fleet under a renamed dependency
+    (`zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }`);
+    zenwatch requires `publish.address` until hostid.v1; contracts come by
+    flag, never a named context (the config file is shared with the v1
+    tools); no zengui or zenwatch release from `main` without the
+    maintainer.
 
 ## Commands
 

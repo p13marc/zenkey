@@ -150,6 +150,12 @@
         "D010"
       ]
     },
+    "d011-bad-fingerprint": {
+      "codes": [
+        "D003",
+        "D011"
+      ]
+    },
     "d011-tokenless-archive": {
       "codes": [
         "D011"
