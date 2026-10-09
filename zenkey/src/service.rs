@@ -4,7 +4,11 @@
 //! tokens.
 //!
 //! ```text
-//! ServiceBuilder::new ─ implement / require / declare_* / expose / unavailable
+//! ServiceBuilder::new ─ the address resolved: a minted system, once per run
+//!        │              (hostid.v1 §2.7); `self.system/<service>` providers
+//!        │              spelled out (R1, 0.20). A failure declares nothing.
+//!        │
+//!        ├─ implement / require / declare_* / expose / unavailable
 //!        │
 //!        ▼ start()                                          (§8.2)
 //!   1. resources: already declared on the builder
@@ -39,6 +43,7 @@ use crate::config::ServiceConfig;
 use crate::consumer::Consumer;
 use crate::descriptor;
 use crate::error::{Error, Result, zenoh};
+use crate::hostid::{HostIdError, HostIdMinter, Minted};
 use crate::implementation::{Implementation, missing_capability, resource_name};
 use crate::qos;
 use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
@@ -72,7 +77,17 @@ pub(crate) struct Role {
 /// [`ServiceBuilder::start`].
 pub struct ServiceBuilder {
     session: zenoh::Session,
+    /// Its `self.system` providers spelled out (R1, 0.20) once the address
+    /// is resolved.
     config: ServiceConfig,
+    /// The address, resolved once when the builder is made (`hostid.v1`
+    /// §2.7), or why it could not be: then nothing is declared, and
+    /// [`ServiceBuilder::start`] returns why.
+    addr: std::result::Result<Addr, Arc<HostIdError>>,
+    /// How the system was minted, for a minted address (§2.8).
+    minted: Option<Minted>,
+    /// The host name a minted system states as `meta.host` (§2.13).
+    host: Option<String>,
     instance: InstanceId,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
@@ -86,6 +101,28 @@ pub struct ServiceBuilder {
 
 fn mint() -> InstanceId {
     InstanceId::from_u64(rand::random())
+}
+
+/// Says how a service's system was minted, at every start (`hostid.v1`
+/// §2.6): an ephemeral one as a warning, with every path tried.
+fn log_minted(addr: &Addr, m: &Minted) {
+    let trail = crate::hostid::Trail(m.trail());
+    if m.is_ephemeral() {
+        tracing::warn!(
+            address = %addr,
+            inputs = %trail,
+            "hostid.v1: this system is EPHEMERAL: no input gave an id and the shared file \
+             was not created, so it lives for this run only and another start mints another \
+             (hostid.v1 §2.6)"
+        );
+    } else {
+        tracing::info!(
+            address = %addr,
+            from = m.source().unwrap_or("?"),
+            inputs = %trail,
+            "hostid.v1: the system is minted from this host's id"
+        );
+    }
 }
 
 /// Finds the state of `iface`.
@@ -106,14 +143,51 @@ fn find_mut<'s>(impls: &'s mut [ImplState], iface: &IfaceId) -> Result<&'s mut I
 impl ServiceBuilder {
     /// Starts declaring the service `config.address` on `session`, with a
     /// freshly minted instance id (§1.5).
+    ///
+    /// A minted address (`@hostid.v1/<service>`) is resolved here, through
+    /// the process's minter ([`HostIdMinter::global`]): at most once per
+    /// run (`hostid.v1` §2.7), and before anything is declared. When it
+    /// cannot be, every method that needs the address returns why, and so
+    /// does [`ServiceBuilder::start`]: the service declares nothing (§2.6).
+    /// [`ServiceConfig::resolve`] mints the same system before the session
+    /// opens, where the caller can.
     #[must_use]
     pub fn new(session: &zenoh::Session, config: ServiceConfig) -> Self {
+        Self::with_hostid(session, config, HostIdMinter::global())
+    }
+
+    /// As [`ServiceBuilder::new`], minting through `hostid` instead of the
+    /// process's minter: a test's, on a root of its own.
+    #[must_use]
+    pub fn with_hostid(
+        session: &zenoh::Session,
+        mut config: ServiceConfig,
+        hostid: &HostIdMinter,
+    ) -> Self {
         let window = config
             .tombstone_window_s
             .map_or(DEFAULT_WINDOW, std::time::Duration::from_secs);
+        let (addr, minted) = match config.resolve_with(hostid) {
+            Ok(r) => (Ok(r.address), r.minted),
+            Err(e) => (Err(Arc::new(e)), None),
+        };
+        if let Ok(a) = &addr {
+            // R1 (0.20): `self.system/<service>`, resolved once, as the
+            // address is.
+            for b in config.bindings.values_mut() {
+                *b = b.resolved(&a.system);
+            }
+        }
+        if let (Ok(a), Some(m)) = (&addr, &minted) {
+            log_minted(a, m);
+        }
+        let host = minted.as_ref().and_then(|_| crate::hostid::hostname());
         Self {
             session: session.clone(),
             config,
+            addr,
+            minted,
+            host,
             instance: mint(),
             impls: Vec::new(),
             roles: Vec::new(),
@@ -169,6 +243,18 @@ impl ServiceBuilder {
     #[must_use]
     pub fn instance(&self) -> &InstanceId {
         &self.instance
+    }
+
+    /// The address this service comes up at, resolved (`hostid.v1` §2.7),
+    /// or why it has none (§2.6, or a configuration error, §2.3).
+    pub fn address(&self) -> Result<&Addr> {
+        self.addr.as_ref().map_err(|e| Error::HostId(Arc::clone(e)))
+    }
+
+    /// How its system was minted, for a minted address (`hostid.v1`).
+    #[must_use]
+    pub fn minted(&self) -> Option<&Minted> {
+        self.minted.as_ref()
     }
 
     /// Implements an interface. Its contract's requirements become roles of
@@ -284,18 +370,19 @@ impl ServiceBuilder {
     /// The concrete key of a resource member: `values` binds every template
     /// parameter, raw (they are slugged here, §1.4).
     pub fn key(&self, iface: &IfaceId, resource: &str, values: &Bindings) -> Result<Key> {
-        resource_key(&self.config.address, &self.impls, iface, resource, values)
+        resource_key(self.address()?, &self.impls, iface, resource, values)
     }
 
     /// Every member of a resource's template, as one key expression: each
     /// parameter becomes `*`, a rest parameter `**`.
     pub fn pattern(&self, iface: &IfaceId, resource: &str) -> Result<OwnedKeyExpr> {
+        let addr = self.address()?;
         let s = find(&self.impls, iface)?;
         let r = s.imp.resource(resource)?;
         let mut chunks = vec![
             "zk2".to_owned(),
-            self.config.address.system.to_string(),
-            self.config.address.service.to_string(),
+            addr.system.to_string(),
+            addr.service.to_string(),
             iface.to_string(),
             r.token.to_string(),
         ];
@@ -396,6 +483,9 @@ impl ServiceBuilder {
     /// Brings the service up in the order of §8.2. On any refusal, nothing
     /// alive is declared.
     pub async fn start(self) -> Result<Service> {
+        // Before step 1 (hostid.v1 §2.7): a service whose minted system
+        // could not be had declared nothing, and starts nothing (§2.6).
+        let addr = self.address()?.clone();
         // 2. Exposure.
         check_exposure(&self.impls, &self.config)?;
         // §4.4, §8.2 step 2 (0.17): an archive is never tokenless. The set
@@ -435,6 +525,9 @@ impl ServiceBuilder {
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
+            addr,
+            minted: self.minted,
+            host: self.host,
             instance: self.instance,
             impls: self.impls,
             roles: self.roles,
@@ -472,10 +565,7 @@ impl ServiceBuilder {
         }
         // 4. The instance token, then the interface tokens.
         let instance = svc.instance.clone();
-        svc.instance_token = Some(
-            svc.token(instance_key(&svc.config.address, &instance)?)
-                .await?,
-        );
+        svc.instance_token = Some(svc.token(instance_key(&svc.addr, &instance)?).await?);
         svc.alive = svc.declare_alive(&instance).await?;
         Ok(svc)
     }
@@ -565,6 +655,11 @@ pub struct Service {
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
+    /// Resolved once at start, and kept across every re-mint (`hostid.v1`
+    /// §2.7).
+    addr: Addr,
+    minted: Option<Minted>,
+    host: Option<String>,
     instance: InstanceId,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
@@ -573,9 +668,17 @@ pub struct Service {
 }
 
 impl Service {
+    /// The address, resolved: a minted system spelled out.
     #[must_use]
     pub fn address(&self) -> &Addr {
-        &self.config.address
+        &self.addr
+    }
+
+    /// How its system was minted, for a minted address (`hostid.v1`); `None`
+    /// for a literal one.
+    #[must_use]
+    pub fn minted(&self) -> Option<&Minted> {
+        self.minted.as_ref()
     }
 
     /// The current instance id (§1.5).
@@ -586,7 +689,7 @@ impl Service {
 
     /// The instance key: the instance token's and the descriptor's.
     pub fn instance_key(&self) -> Result<Key> {
-        Ok(instance_key(&self.config.address, &self.instance)?)
+        Ok(instance_key(&self.addr, &self.instance)?)
     }
 
     /// The descriptor currently served, as JSON bytes.
@@ -597,7 +700,7 @@ impl Service {
 
     /// The concrete key of a resource member (see [`ServiceBuilder::key`]).
     pub fn key(&self, iface: &IfaceId, resource: &str, values: &Bindings) -> Result<Key> {
-        resource_key(&self.config.address, &self.impls, iface, resource, values)
+        resource_key(&self.addr, &self.impls, iface, resource, values)
     }
 
     /// A [`Writer`] on a member of an exposed resource: for templates whose
@@ -659,7 +762,7 @@ impl Service {
             }
             let ke = OwnedKeyExpr::try_from(format!(
                 "zk2/{}/{}/{iface}/{token}/**",
-                self.config.address.system, self.config.address.service
+                self.addr.system, self.addr.service
             ))
             .map_err(zenoh)?;
             let store = Arc::clone(&self.store);
@@ -709,7 +812,7 @@ impl Service {
         let b = self.config.bindings.get(role).cloned().unwrap_or_default();
         Consumer::new(
             &self.session,
-            Some(&self.config.address),
+            Some(&self.addr),
             role,
             contract,
             &b.providers,
@@ -754,7 +857,7 @@ impl Service {
             let iface = s.imp.iface();
             if want.contains(iface) && !self.alive.contains_key(iface) {
                 let key = alive_key(
-                    &self.config.address,
+                    &self.addr,
                     iface,
                     &instance,
                     &s.imp.fingerprint().hex().fp16(),
@@ -805,9 +908,7 @@ impl Service {
     pub async fn new_epoch(&mut self) -> Result<InstanceId> {
         let next = mint();
         let (q, current) = self.serve_descriptor(&next).await?;
-        let token = self
-            .token(instance_key(&self.config.address, &next)?)
-            .await?;
+        let token = self.token(instance_key(&self.addr, &next)?).await?;
         let alive = self.declare_alive(&next).await?;
         // Break: the old tokens, then the old descriptor queryable.
         let old_alive = std::mem::replace(&mut self.alive, alive);
@@ -833,7 +934,7 @@ impl Service {
         self.member_template(iface)?;
         let member = chunk_slug(value);
         let epoch = mint();
-        let key = member_key(&self.config.address, iface, &member, &epoch)?;
+        let key = member_key(&self.addr, iface, &member, &epoch)?;
         let token = self.token(key).await?;
         if let Some((_, old)) = self
             .members
@@ -906,7 +1007,7 @@ impl Service {
         let mut out = BTreeMap::new();
         for s in self.impls.iter().filter(|s| want.contains(s.imp.iface())) {
             let key = alive_key(
-                &self.config.address,
+                &self.addr,
                 s.imp.iface(),
                 instance,
                 &s.imp.fingerprint().hex().fp16(),
@@ -926,14 +1027,13 @@ impl Service {
 
     fn encode_descriptor(&self, instance: &InstanceId) -> Result<Vec<u8>> {
         let zid = self.session.zid().to_string();
-        let d = descriptor::build(
-            &self.config.address,
-            instance,
-            &self.impls,
-            &self.roles,
-            &self.config,
-            &zid,
-        );
+        let id = descriptor::Identity {
+            addr: &self.addr,
+            minted: self.minted.is_some(),
+            host: self.host.as_deref(),
+            zid: &zid,
+        };
+        let d = descriptor::build(&id, instance, &self.impls, &self.roles, &self.config);
         descriptor::encode_checked(&d, &self.impls)
     }
 
@@ -944,7 +1044,7 @@ impl Service {
         instance: &InstanceId,
     ) -> Result<(Queryable<()>, Arc<RwLock<Arc<[u8]>>>)> {
         let bytes: Arc<[u8]> = self.encode_descriptor(instance)?.into();
-        let key = instance_key(&self.config.address, instance)?.into_keyexpr();
+        let key = instance_key(&self.addr, instance)?.into_keyexpr();
         let current = Arc::new(RwLock::new(Arc::clone(&bytes)));
         let shared = Arc::clone(&current);
         let reply_key = key.clone();
@@ -975,7 +1075,7 @@ impl Service {
     fn publish_descriptor(&mut self) -> Result<()> {
         let bytes: Arc<[u8]> = self.encode_descriptor(&self.instance)?.into();
         *self.descriptor.write().expect("not poisoned") = Arc::clone(&bytes);
-        let key = instance_key(&self.config.address, &self.instance)?.into_keyexpr();
+        let key = instance_key(&self.addr, &self.instance)?.into_keyexpr();
         self.session
             .put(key, bytes.to_vec())
             .encoding(Encoding::APPLICATION_JSON)

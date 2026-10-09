@@ -27,6 +27,10 @@ use crate::grammar::Name;
 /// computed.
 pub const SALT: &str = "zk2-hostid-v1";
 
+/// The profile's id, as an instance whose system is minted lists it in its
+/// descriptor's `profiles` (§2.8; core §3.3, 0.19).
+pub const PROFILE: &str = "hostid.v1";
+
 /// The prefix of a minted system (§2.1).
 pub const PREFIX: &str = "h-";
 

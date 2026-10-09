@@ -54,6 +54,20 @@ pub enum Error {
     /// caller, never a network condition.
     #[error("the descriptor fails its check: {0}")]
     Descriptor(String),
+    /// `hostid.v1` gave this service no system
+    /// (`spec/profiles/hostid/v1.md` §2.3, §2.6): the host has no id it can
+    /// use, every path tried named with its outcome, or the process's
+    /// `hostid.ephemeral` setting is another. The service declared nothing.
+    #[cfg(feature = "hostid")]
+    #[error(transparent)]
+    HostId(std::sync::Arc<crate::hostid::HostIdError>),
+}
+
+#[cfg(feature = "hostid")]
+impl From<crate::hostid::HostIdError> for Error {
+    fn from(e: crate::hostid::HostIdError) -> Self {
+        Self::HostId(std::sync::Arc::new(e))
+    }
 }
 
 #[cfg_attr(not(feature = "zenoh"), allow(dead_code))]
