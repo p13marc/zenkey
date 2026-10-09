@@ -103,7 +103,8 @@ rule.
 **Since FJ9 (#612)** the `skeleton/*`, `facts/*`, `registry/*` and
 `fanin/origin_attribution_*` benches are gone with the v1 machinery they
 measured, and `lens/resolve_*` measures zk2's resolution path in their place;
-the rows above are kept as they were measured, and a new baseline is owed.
+the rows above are kept as they were measured. The zk2 fleet's baseline
+is [its own section](#fleet-engine-after-the-zk2-port-706-2026-10-09) (#706).
 
 **Rows marked `~` are not trustworthy as a comparison point.** They varied by
 more than 2× across repeated runs of *identical code* on this workstation
@@ -375,3 +376,53 @@ At the link's 512-sample batch cap the spans add at most ~0.45 ms per 250 ms
 tick. The row itself grew from 20 to 44 px (two lines that had been drawn in
 one row's height, unclipped), so a screenful now draws ~20 rows rather than
 ~40 — fewer widgets per frame, not more.
+
+## Fleet engine after the zk2 port (#706), 2026-10-09
+
+FJ9 (#612) took the v1 machinery out of the fleet, so the `skeleton/*`,
+`facts/*`, `registry/*` and `fanin/*` benches went with it, and `lens/*`
+measures zk2's resolution in their place. This is the fleet table re-taken
+with `cargo bench -p zenkey-fleet --bench fleet`, twice on a quiet host.
+
+- Commit: `cfb517d` (`main`, spec 0.16)
+- Date: 2026-10-09
+- Machine: Linux 6.12.107+deb13-cloud-amd64 x86_64, AMD Ryzen 5 PRO 3600
+  (6 vCPUs, no cpufreq governor exposed), load average about 1 during both runs
+
+| Bench | Run 1 | Run 2 | |
+|---|---|---|---|
+| stats/record_hit | 42.3 ns | 41.6 ns | the per-sample floor |
+| stats/record_new_key | 515.7 ns | 541.3 ns |  |
+| stats/record_past_the_bound | 970.6 ns | 947.1 ns |  |
+| stats/totals_10k | 18.4 µs | 18.2 µs |  |
+| stats/retire_unwatched_1k | 446 µs | 414 µs |  |
+| decode/structural_json | 503.7 ns | 510.3 ns | per sample on every render path |
+| decode/structural_value_json | 361.0 ns | 352.7 ns |  |
+| decode/structural_cbor | 1.04 µs | 1.02 µs |  |
+| decode/structural_text | 174.5 ns | 175.5 ns |  |
+| decode/structural_opaque | 189.4 ns | 187.2 ns |  |
+| tree/rows_1k | 17.8 µs | 17.6 µs |  |
+| tree/rows_10k | 176 µs | 178 µs |  |
+| tree/rows_50k | 1.44 ms | 2.04 ms ~ |  |
+| tree/build_1k | 545 µs | 559 µs |  |
+| tree/build_10k | 6.99 ms | 7.68 ms |  |
+| tree/build_50k | 48.8 ms | 60.5 ms ~ | per tick at `DEFAULT_MAX_KEYS` |
+| lens/resolve_zk2_unread | 626.4 ns | 655.5 ns | a zk2 key, as far as it goes before a presence read |
+| lens/resolve_not_zk2 | 40.6 ns | 43.3 ns | a foreign key turned away |
+| lens/resolve_not_in_namespace | 41.4 ns | 43.7 ns |  |
+| monitor/ingest | 565.8 ns | 568.7 ns | the whole per-sample cost |
+| monitor/tick_10k | 8.26 ms | 8.35 ms |  |
+
+**Rows marked `~` moved by more than 1.2× between the two runs.** Every
+other row agreed within 10%. Both are 50,000-key tree walks, and in each run
+criterion warned that one of them could not take its 100 samples in the 5 s
+window.
+
+**This machine is not the one behind the #44 table.** That was a Fedora
+workstation, so a row that differs between the two tables shows a host
+difference as readily as a code change. Later runs compare against this
+table, on this host.
+
+**The doctor's presence phase is not benched.** It holds a session, and its
+cost is the bus round trips of one doctor run, never a per-sample cost. The
+judges it feeds run over observations already in hand, once per run.
