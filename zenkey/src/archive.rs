@@ -17,7 +17,7 @@
 //! `archive.v1` is a profile (#613); this is what the core requires of it,
 //! and the contract below is its minimal form until the profile is written.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -568,21 +568,67 @@ pub async fn last_known(
         .map_err(zenoh)?;
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
-        let att: Value = s
-            .attachment()
-            .and_then(|a| serde_json::from_slice(&a.to_bytes()).ok())
-            .unwrap_or(Value::Null);
-        let put = s.kind() == SampleKind::Put;
-        return Ok(Some(LastKnown {
-            origin: origin.to_owned(),
-            value: put.then(|| s.payload().to_bytes().into_owned()),
-            encoding: put.then(|| s.encoding().clone()),
-            timestamp: s.timestamp().copied(),
-            confirmed: att["confirmed"].as_bool().unwrap_or(false),
-            identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
-        }));
+        return Ok(Some(recorded(origin.to_owned(), &s)));
     }
     Ok(None)
+}
+
+/// Reads the last-known state of every origin `pattern` selects from the
+/// archive at `archive`, explicitly (S5; #671). `pattern` is an origin key
+/// expression, wildcards allowed where a parameter goes (`zk2/v1/nav/
+/// nav.v2/state/tracks/*`). One entry per origin the archive holds, sorted
+/// by origin; empty when it answered nothing. A reply whose origin the
+/// pattern does not select (a wildcard of the archive form also matches a
+/// slugged verbatim chunk, §1.3) is left out.
+pub async fn last_known_all(
+    session: &zenoh::Session,
+    archive: &Addr,
+    pattern: &str,
+    timeout: Duration,
+) -> Result<Vec<LastKnown>> {
+    let selector = OwnedKeyExpr::try_from(pattern.to_owned()).map_err(zenoh)?;
+    let rx = session
+        .get(archive_key(archive, pattern))
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .with(flume::unbounded::<Reply>())
+        .await
+        .map_err(zenoh)?;
+    let mut out: BTreeMap<String, LastKnown> = BTreeMap::new();
+    while let Ok(r) = rx.recv_async().await {
+        let Ok(s) = r.into_result() else { continue };
+        let Some(origin) = peer_origin(&selector, s.key_expr().as_str()) else {
+            continue;
+        };
+        let lk = recorded(origin.clone(), &s);
+        // Two archive replies for one origin (one archive reached twice):
+        // keep the newer stamp.
+        let newer = out
+            .get(&origin)
+            .is_none_or(|have| lk.timestamp > have.timestamp);
+        if newer {
+            out.insert(origin, lk);
+        }
+    }
+    Ok(out.into_values().collect())
+}
+
+/// What an archive's reply records for `origin`.
+fn recorded(origin: String, s: &Sample) -> LastKnown {
+    let att: Value = s
+        .attachment()
+        .and_then(|a| serde_json::from_slice(&a.to_bytes()).ok())
+        .unwrap_or(Value::Null);
+    let put = s.kind() == SampleKind::Put;
+    LastKnown {
+        origin,
+        value: put.then(|| s.payload().to_bytes().into_owned()),
+        encoding: put.then(|| s.encoding().clone()),
+        timestamp: s.timestamp().copied(),
+        confirmed: att["confirmed"].as_bool().unwrap_or(false),
+        identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
+    }
 }
 
 #[cfg(test)]

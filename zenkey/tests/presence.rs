@@ -690,16 +690,27 @@ async fn stalling_proxy(upstream: &str) -> (String, Arc<std::sync::atomic::Atomi
 /// Core §8.1: a liveliness GET that ends at its timeout is read as possibly
 /// incomplete, and its error reply is reported, not dropped (#660). The
 /// router's replies are held back, so its final reply never comes in time.
+/// The selector names the instance tokens: an ambient one (`zk2/**`)
+/// selects no control token (§1.3), and its "no token" could never fail
+/// (F-75, #670).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_read_that_ends_at_its_timeout_says_so() {
     use std::sync::atomic::Ordering;
+    let instances = "zk2/*/*/@zk/instance/*";
     let (_r1, ep) = router(None).await;
     let (proxied, stalled) = stalling_proxy(&ep).await;
+    let owner = client(&ep).await;
     let tool = client(&proxied).await;
-    let open = presence::liveliness_read(&tool, "zk2/**", T).await.unwrap();
+    let (b, _held) = nav_builder(&owner, "p1/nav", &[]).await;
+    let svc = b.start().await.unwrap();
+    seen(&tool, &svc).await;
+    let open = presence::liveliness_read(&tool, instances, T)
+        .await
+        .unwrap();
     assert!(open.complete && open.errors.is_empty(), "{open:?}");
+    assert_eq!(open.keys, [svc.instance_key().unwrap().to_string()]);
     stalled.store(true, Ordering::SeqCst);
-    let held = presence::liveliness_read(&tool, "zk2/**", std::time::Duration::from_millis(300))
+    let held = presence::liveliness_read(&tool, instances, std::time::Duration::from_millis(300))
         .await
         .unwrap();
     stalled.store(false, Ordering::SeqCst);

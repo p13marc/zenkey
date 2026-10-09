@@ -202,9 +202,10 @@ class OpCall:
         """O3: "A handler that ends without replying is answered internal";
         with replies = "many", a declared summary is owed too, "after any
         values it sent". A handler that raised is internal unless it had
-        answered a one-reply call. A ``many`` handler that sent nothing,
-        named member or not, ends with completion alone, "the operation's
-        own answer" (SPEC-FINDINGS F-76)."""
+        answered a one-reply call. §5.1 (0.9) "Sending nothing needs no
+        member": a ``many`` handler that sent nothing, named member or not,
+        ends "as zero values then completion, when no summary is declared,
+        and is answered internal when one is"."""
         r = self.resource
         if self.envelopes:
             return
@@ -490,10 +491,17 @@ class Owner:
         enc = envelope.envelope_encoding(r)
 
         def handle(query: zenoh.Query) -> None:
+            asked = str(query.key_expr)
+            self.calls.append(asked)
+            # §5.1 (0.9) "The order of refusals": fanout_forbidden (O2)
+            # first, then unavailable (O3), then a key that names no member.
+            if any(templates.is_wild(c) for c in asked.split("/")) and r["fanout"] != "allowed":
+                _refuse(query, enc, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
+                                                        "call one concrete key (O2)")
+                return
             # O3: "MUST answer a call to an optional operation it does not
             # expose with unavailable and its cause".
-            query.reply_err(envelope.encode(enc, "unavailable", f"{r['template']} is not exposed here",
-                                            cause=cause), encoding=enc)
+            _refuse(query, enc, "unavailable", f"{r['template']} is not exposed here", cause=cause)
 
         return handle
 
@@ -515,8 +523,11 @@ class Owner:
             asked = str(query.key_expr)
             self.calls.append(asked)
             try:
-                # O2: a call on a key that is not concrete. Checked first,
-                # on the key expression as a whole (SPEC-FINDINGS F-74).
+                # O2: a call on a key that is not concrete. §5.1 (0.9) "The
+                # order of refusals": fanout_forbidden first, "whatever its
+                # other chunks hold"; then a key that names no member. (An
+                # operation not exposed has its own queryable, which keeps
+                # the same order: _unavailable_handler.)
                 if any(templates.is_wild(c) for c in asked.split("/")) and r["fanout"] != "allowed":
                     _refuse(query, enc, "fanout_forbidden", f"{r['template']} is fanout = \"forbidden\": "
                                                             "call one concrete key (O2)")

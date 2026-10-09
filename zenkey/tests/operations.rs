@@ -491,6 +491,11 @@ async fn s2_fan_out() {
     let every = fan(&caller_s, "zk2/*/tc/tc.v1/@op/interfaces/*/set", req).await;
     assert_eq!(refusal_codes(&every), ["fanout_forbidden"; 3]);
     assert_eq!(values(&every), 0, "no value");
+    // O2 comes before the key's member (F-74, #670): a wildcard call whose
+    // parameter chunk is not canonical is `fanout_forbidden`, not
+    // `invalid_request`, from every instance.
+    let both = fan(&caller_s, "zk2/*/tc/tc.v1/@op/interfaces/ETH0/set", req).await;
+    assert_eq!(refusal_codes(&both), ["fanout_forbidden"; 3]);
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!((0..3).all(|i| count(&seen(i).set) == 0), "0 executions");
     // The caller's side of O2: a fleet refuses to fan `set` out at all.
@@ -1457,4 +1462,43 @@ async fn one_member_per_call_with_many_replies() {
     let second = refused.lock().unwrap().clone().expect("the handler ran");
     let err = second.expect_err("a second member is refused");
     assert!(err.contains("one member per call"), "{err}");
+}
+
+/// Core §5.1, §5 "Answering" (F-76, #670): a template-wide `many` handler
+/// without a declared summary that names no member and sends nothing ends
+/// the call as zero values, then completion: no envelope, because only a
+/// reply needs a member's key, and without a summary nothing more is owed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_many_handler_that_sends_nothing_completes() {
+    const SCAN: &str = "@op/ports/{port}/scan";
+    let (_r1, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let scan: IfaceId = "scan.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("h1/scan"));
+    b.implement(imp("scan.v1")).unwrap();
+    let ran = Arc::new(AtomicU64::new(0));
+    let r = Arc::clone(&ran);
+    let _server = b
+        .serve(&scan, SCAN, None, move |_call: Call| {
+            let r = Arc::clone(&r);
+            async move {
+                r.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    let _svc = b.start().await.unwrap();
+    eventually("the scan instance is present", || async {
+        zenkey::presence::tokens(&tool, "zk2/h1/scan/@zk/alive/scan.v1/**", T)
+            .await
+            .unwrap()
+            .len()
+            == 1
+    })
+    .await;
+
+    let replies = fan(&tool, "zk2/h1/scan/scan.v1/@op/ports/*/scan", b"").await;
+    assert_eq!(count(&ran), 1, "the handler ran");
+    assert!(replies.is_empty(), "zero values, no envelope: {replies:?}");
 }

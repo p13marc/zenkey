@@ -139,6 +139,7 @@ pub struct Subscription {
 #[derive(Default)]
 struct Seen {
     discarded: AtomicU64,
+    unresolved: AtomicU64,
     last: Mutex<BTreeMap<Addr, Instant>>,
 }
 
@@ -279,7 +280,10 @@ impl Consumer {
 
     /// Subscribes to `resource` across the bound providers. It resolves at
     /// once, without presence (R1, R5). Samples on a non-concrete key are
-    /// discarded and counted (R6); every other one is delivered attributed.
+    /// discarded and counted (R6). A sample on a concrete key that does not
+    /// resolve to a member of the resource through a bound provider is
+    /// dropped and counted apart ([`Subscription::unresolved`]); every other
+    /// one is delivered attributed.
     pub async fn subscribe<C>(&self, resource: &str, callback: C) -> Result<Subscription>
     where
         C: Fn(Delivery) + Send + Sync + 'static,
@@ -314,9 +318,11 @@ impl Consumer {
                             ..
                         }) = parse(key)
                         else {
+                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
                         if got != iface || !providers.iter().any(|p| p.matches(&addr)) {
+                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         }
                         if r.kind == Kind::Event {
@@ -324,6 +330,7 @@ impl Consumer {
                         }
                         let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
                         let Some(values) = r.template.matches(&refs) else {
+                            seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
                         seen.last
@@ -567,6 +574,17 @@ impl Subscription {
     #[must_use]
     pub fn discarded(&self) -> u64 {
         self.seen.discarded.load(Ordering::Relaxed)
+    }
+
+    /// Samples dropped because their concrete key did not resolve: it is
+    /// not a zk2 data key, names another interface or an unbound provider,
+    /// or fits none of the resource's template positions (#671). These are
+    /// a mismatch between the bus and the contract, not R6's rule, and a
+    /// tool reports them apart from [`Subscription::discarded`] (the
+    /// tooling guide's O6).
+    #[must_use]
+    pub fn unresolved(&self) -> u64 {
+        self.seen.unresolved.load(Ordering::Relaxed)
     }
 
     /// When `provider` last delivered.

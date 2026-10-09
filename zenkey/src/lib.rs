@@ -79,7 +79,7 @@ pub use zenoh;
 
 pub use call::{CallInfo, CallMetadata, OpError, Sink};
 #[cfg(feature = "zenoh")]
-pub use client::{Client, Fleet, Outcome};
+pub use client::{Client, Fleet, Outcome, Present};
 pub use config::{Binding, ServiceConfig};
 pub use error::{Error, Result};
 pub use implementation::Implementation;

@@ -426,6 +426,20 @@ async fn s4_last_known_from_an_archive() {
             .to_string()
     );
     assert_eq!(lk.identity["type"]["kind"], "raw");
+    // The same, over a pattern (#671): every origin the archive holds that
+    // the pattern selects, here the one it recorded.
+    let all = archive::last_known_all(
+        &x.vehicle,
+        &common::addr("vehicle-01/archive"),
+        "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*",
+        T,
+    )
+    .await
+    .unwrap();
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(all[0].origin, ORIGIN);
+    assert_eq!(all[0].value.as_deref(), Some(&b"v3"[..]));
+    assert_eq!(all[0].timestamp, t3);
 }
 
 /// §5: alignment after reconnect drops a key only on a `reply_del`, keeps
