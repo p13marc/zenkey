@@ -594,9 +594,10 @@ pub(crate) enum Command {
     /// router block that makes it persist (RFC 09 §2).
     #[command(subcommand)]
     Storage(StorageCmd),
-    /// Router access control, generated from an enrollment file.
+    /// Router access control, generated from an enrollment and the contracts.
     ///
-    /// RFC 09 §3's grant matrix, generated from an enrollment file (#392).
+    /// zk2's grant shapes (spec §11), compiled from an enrollment and the
+    /// contracts into a router's `access_control` block (#612).
     #[command(subcommand)]
     Acl(AclCmd),
     /// Bulk content: who serves it, and fetching it.
@@ -1119,48 +1120,59 @@ pub(crate) enum AdminCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum AclCmd {
-    /// Generate the router's `access_control` block from an enrollment file
+    /// Generate the router's `access_control` block from an enrollment
     ///
-    /// CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+    /// zk2's three grant shapes (spec §11.1), compiled per principal from
+    /// the enrollment and the contracts (`--contracts`):
     ///
-    /// Four facts of zenoh ACL shape every rule, and each is a way a
-    /// hand-written block fails silently: matching is keyexpr INCLUSION and
-    /// `**` never crosses `@rpc`/`@media`/`@blob` (one rule per plane); `*`
-    /// never covers `@catalog` (its own rule); rules alone are refused —
-    /// subjects and policies are required; under default deny every
-    /// DECLARATION needs allowing too. A fifth, from the reference
-    /// deployment: a consumer's declares are checked on egress toward the
-    /// publisher's face, so every publishing policy carries a shared
-    /// egress-only `interest-prop` rule. With `--registry`, the planes are
-    /// narrowed to what host producers declare and `no-remote-actions`
-    /// denies exactly the declared write procedures; without one the plan
-    /// says what it could not narrow. Field names are zenoh 1.10's
-    /// (zenoh-config-1.10.0/src/lib.rs). Exit 1 when a principal was
-    /// refused.
+    ///   Own      put, delete, serve and declare tokens under the service's
+    ///            prefix, each verbatim subtree spelled out (`**` never
+    ///            crosses one): */@stream/**, */@state/**, */@op/**, @zk/**;
+    ///            and the @adv subtrees where its contracts declare history
+    ///   Consume  subscribe or GET on what its bindings name (R1, R2), the
+    ///            @adv subtrees where it reads with history, and liveliness
+    ///            reads on each provider's @zk/** (0.8)
+    ///   Call     query on the specific …/@op/<op> keys, and the same
+    ///            liveliness reads on each service called
     ///
-    /// The enrollment file:
+    /// Egress is checked by inclusion against the query's or subscription's
+    /// own key (§11.2): every consumer or caller selector over what a
+    /// provider serves joins its egress grant, and its ingress reply. Contract
+    /// bundles are open. Under --default-permission allow, zenoh evaluates no
+    /// allow rule, so each grant compiles into denies of its complement,
+    /// enumerated from the contracts. Every rule names its grant and the fact
+    /// it exists for. A principal the plan cannot place is refused, never
+    /// dropped: exit 1.
     ///
-    ///   base = "zensight"                 # optional; default --base
-    ///   [fleet]
-    ///   catalog_adv = true                # spell @catalog/**/@adv/**
-    ///   salt = "zensight-host-id-v1"      # for machine_id → origin (RFC 06 §1)
+    /// The enrollment file (examples/zk2/acl/ holds two):
+    ///
+    ///   namespace = "fleet-a"                  # optional; default --namespace
     ///   [[principal]]
-    ///   cn = "h-3fa9c2d41b7e"             # the certificate CN
-    ///   role = "host"                     # host | catalog | console | desired-author | watch
-    ///   origin = "h-3fa9c2d41b7e"         # or machine_id = "<32 hex>"; both must agree
-    ///   adv = true                        # @adv sidecars
-    ///   blob_seed = true                  # seeds the router @blob store
-    ///   media = true                      # publishes @media
-    ///   [[principal]]
-    ///   cn = "zensight-console"
-    ///   role = "console"
-    ///   remote_actions = false            # true drops the no-remote-actions deny
-    ///   [[principal]]
-    ///   user = "ops"                      # a zenoh usrpwd user, in place of cn
-    ///   role = "console"
-    ///   writes = ["modem/config/*/*/set"] # per-resource write grants
-    // Verbatim, so the enrollment example above keeps its lines: clap would
-    // otherwise fold it into one.
+    ///   user     = "thruster-l"                # a usrpwd user, or cn = "…"; never a zid
+    ///   services = ["vehicle-01/thruster-l"]   # and archives = […], tools = […]
+    ///   [[service]]
+    ///   address    = "vehicle-01/thruster-l"
+    ///   implements = ["thruster.v1"]
+    ///   [service.bindings.cmd]                 # a role; interface and resources
+    ///   providers = ["vehicle-01/teleop"]      #   from the contract's [requires]
+    ///   [[service]]
+    ///   address = "vehicle-01/executor"
+    ///   [service.bindings.plan]
+    ///   interface = "mission_plan.v1"          # a role of its own manifest
+    ///   providers = ["ground/fleet-mgr"]
+    ///   params    = { vehicle = "self.system" }
+    ///   [[service.calls]]
+    ///   interface  = "nav.v2"
+    ///   providers  = ["vehicle-01/navigation"]
+    ///   operations = ["set_origin"]            # default: every operation
+    ///   [[archive]]
+    ///   address = "vehicle-01/archive"
+    ///   records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
+    ///   peers   = ["ground/archive"]
+    ///   [[tool]]
+    ///   name = "ops"                           # bindings and calls, no address
+    // Verbatim, so the table and the enrollment example keep their lines:
+    // clap would otherwise fold them into one.
     #[command(verbatim_doc_comment)]
     Gen(AclGenArgs),
 }
@@ -2534,92 +2546,91 @@ pub(crate) struct AdminGraphArgs {
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct AclGenArgs {
-    /// The enrollment file (TOML): CN or user ↔ role ↔ origin, one
-    /// [[principal]] each. See `zenctl acl gen --help` for the shape.
+    /// The enrollment file (TOML): principals, the services, archives and
+    /// tools they run, their bindings and calls. See `zenctl acl gen --help`
+    /// for the shape.
     #[arg(long, value_name = "FILE")]
     pub(crate) enrollment: PathBuf,
-    /// Emit the router's `access_control` JSON5 block on stdout, a comment
-    /// per rule naming its matrix row and its fact — pipe it into the
-    /// router config. A foreign schema, so `--format` has no say over it.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    /// The router's default_permission (spec §11.2): `deny`, where grants are
+    /// allow rules (RECOMMENDED), or `allow`, where zenoh evaluates no allow
+    /// rule and each grant compiles into denies of its complement.
+    #[arg(long, visible_alias = "posture", value_enum, value_name = "PERMISSION",
+          default_value_t = DefaultPermission::Deny)]
+    pub(crate) default_permission: DefaultPermission,
+    /// Emit the router config fragment on stdout: the `access_control` block,
+    /// a comment per rule naming its grant and its fact, and for a south
+    /// region the `gateway` block. A foreign schema, zenoh's, so `--format`
+    /// has no say over it.
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long, conflicts_with_all = ["check", "explain"])]
     pub(crate) json5: bool,
     /// Compare the plan against a router config file (`--against`): missing,
-    /// extra and changed rules, subjects and policies, a CN the enrollment
-    /// does not know. Exit 0 identical / 1 findings / 2 not asked.
+    /// extra and changed rules, subjects and policies, an identity the
+    /// enrollment does not know, a south region not placed. Exit 0
+    /// identical / 1 findings / 2 not asked.
     ///
-    /// A file, not the admin space: zenoh 1.10 serves no GET on
-    /// `@/<zid>/router/config/**` (it only subscribes to it for runtime
-    /// edits), so the running block is not observable from the bus.
+    /// A file, not the bus: access control is enforced per hop and the
+    /// running configuration is not observable (spec §11.3).
     #[arg(long, requires = "against", conflicts_with = "explain")]
     pub(crate) check: bool,
     /// With --check: the router's JSON5 config file, read through zenoh's
     /// own loader so what is compared is what zenohd would run.
     #[arg(long, value_name = "FILE", requires = "check")]
     pub(crate) against: Option<PathBuf>,
-    /// Does PRINCIPAL (a subject id, CN or user) hold MESSAGE on KEY, via which
-    /// rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0.
+    /// Does PRINCIPAL (a subject id, user or CN) hold MESSAGE on KEY (the
+    /// wire key, namespace included), via which rules, in which direction?
+    /// Inclusion by zenoh-keyexpr. Exit 0.
     #[arg(long, num_args = 3, value_names = ["PRINCIPAL", "KEY", "MESSAGE"])]
     pub(crate) explain: Option<Vec<String>>,
-    /// Admit `zid = "…"` subjects. Prototyping only: a ZID is not backed by
-    /// authentication, and zenoh's own config says so.
-    #[arg(long)]
-    pub(crate) allow_zid_subjects: bool,
-    /// Plan a constrained face instead of the principals (RFC 09 §4): the
-    /// `access_control` and `downsampling` blocks that keep the registry's
-    /// `host`-exposed surfaces off one link and cap the `link`-exposed ones.
-    /// Needs `--registry` — the markers are the registry's — and a
-    /// `--link-protocol` or `--link-interface` to select the face. A `user`
-    /// console or watch in the enrollment is planned onto the face (v1.49);
-    /// every other principal is refused.
-    #[arg(long, value_name = "constrained", requires = "link_interval")]
+    /// Guard a constrained face too (spec §8.5): the far principal's policy
+    /// carries the `@zk` and `@stream` denies, and loses its presence and
+    /// contract grants (bindings resolve statically there, R7).
+    #[arg(long, value_name = "constrained", requires_all = ["attach", "far"])]
     pub(crate) face: Option<Face>,
-    /// With --face: a link protocol that selects the face (`unixsock-stream`,
-    /// `tcp`, …), repeatable. A unixsock-stream link reports no interface
-    /// name in zenoh 1.10, so a modem lane is selected this way.
-    #[arg(long, value_name = "PROTOCOL", requires = "face")]
-    pub(crate) link_protocol: Vec<String>,
-    /// With --face: an interface that selects the face (`wlan0`), repeatable.
-    #[arg(long, value_name = "IFACE", requires = "face")]
-    pub(crate) link_interface: Vec<String>,
-    /// With --face: what a `link`-exposed subject may cost — at most one
-    /// sample every SECS per subject (a `downsampling` rule each), or `none`
-    /// when no rate is affordable (a billed channel), which keeps the `link`
-    /// subjects home too. Required with --face, because the default is allow.
-    #[arg(long, value_name = "SECS|none", requires = "face")]
-    pub(crate) link_interval: Option<LinkIntervalArg>,
+    /// With --face: how the far side attaches. `client`: one far-side or
+    /// gateway session, a client of this router. `south-region`: a far
+    /// router in a south region of this one (`gateway.south`; needs
+    /// --region). `router` is refused: a deny on a router-to-router link
+    /// hides the declarations but lets their key strings cross.
+    #[arg(long, value_enum, value_name = "ATTACHMENT", requires = "face")]
+    pub(crate) attach: Option<Attach>,
+    /// With --face: the far side's principal (its id, user or CN): the
+    /// gateway session, or the far router.
+    #[arg(long, value_name = "PRINCIPAL", requires = "face")]
+    pub(crate) far: Option<String>,
+    /// With --attach south-region: the far router's `region_name`, which
+    /// this router's `gateway.south` lists.
+    #[arg(long, value_name = "NAME", requires = "face")]
+    pub(crate) region: Option<String>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) ns: NamespaceArgs,
 }
 
-/// The one face profile RFC 09 §4 describes.
+/// `--default-permission`: the router's posture (spec §11.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum DefaultPermission {
+    Deny,
+    Allow,
+}
+
+/// The one face profile spec §8.5 describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum Face {
-    /// A bandwidth-limited leaf: radio, cell, tactical, satellite.
+    /// A bandwidth-limited link: radio, cell, tactical, satellite.
     Constrained,
 }
 
-/// `--link-interval`: seconds, or `none`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LinkIntervalArg {
-    None,
-    EverySecs(u64),
-}
-
-impl std::str::FromStr for LinkIntervalArg {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("none") {
-            return Ok(LinkIntervalArg::None);
-        }
-        match s.parse::<u64>() {
-            Ok(n) if n > 0 => Ok(LinkIntervalArg::EverySecs(n)),
-            _ => Err(format!(
-                "{s:?}: a positive number of seconds, or `none` when no rate is affordable"
-            )),
-        }
-    }
+/// `--attach`: how the far side of a constrained face attaches (§8.5, U23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Attach {
+    /// One far-side session, or a gateway session, as a client.
+    Client,
+    /// A far router in a south region of this router.
+    SouthRegion,
+    /// A far router linked router to router: refused, with why.
+    Router,
 }
 
 /// The `storage list` verb's flags — one struct the dispatcher hands over whole,
