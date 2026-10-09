@@ -3,8 +3,17 @@
 //! input closes.
 //!
 //! ```text
-//! cargo run -p zenkey --example owner -- [--connect <endpoint>] <system>/<service> <contract.toml>...
+//! cargo run -p zenkey --example owner -- [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral] <address> <contract.toml>...
 //! ```
+//!
+//! The address is `<system>/<service>`, or `@hostid.v1/<service>` for a
+//! system minted from the machine id (`spec/profiles/hostid/v1.md` §2.3,
+//! #719). The system is minted before the session opens (§2.7), and a host
+//! with no id stops the owner with nothing declared (§2.6): the error names
+//! every path, and the exit is 1. `--hostid-root <dir>` reads the inputs
+//! under `<dir>` instead of `/`, its links resolved in it, as a scenario's
+//! root (`spec/profiles/hostid/scenarios.md`); `--hostid-ephemeral` is
+//! `hostid = { ephemeral = true }`.
 //!
 //! By default the session is a router listening on an ephemeral loopback
 //! port, so a test connects to it as a client. Two lines on standard output
@@ -46,11 +55,12 @@ use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
 
+use zenkey::hostid::{HostIdMinter, HostIdSource};
 use zenkey::model::authoring::Kind;
 use zenkey::model::contract::{Body, load_path};
 use zenkey::model::schema::TypeId;
 use zenkey::model::template::Bindings;
-use zenkey::{Implementation, OpError, ServiceBuilder, ServiceConfig};
+use zenkey::{Address, Implementation, OpError, ServiceBuilder, ServiceConfig};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -58,24 +68,52 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub struct Options {
     /// `--connect <endpoint>`: a client of that router, not a router.
     pub connect: Option<String>,
+    /// `--hostid-root <dir>`: the directory standing in for `/` when the
+    /// address is minted (hostid.v1); `/` otherwise.
+    pub hostid_root: Option<PathBuf>,
+    /// `--hostid-ephemeral`: `hostid.ephemeral` (hostid.v1 §2.6).
+    pub hostid_ephemeral: bool,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
 
 impl Options {
-    /// Reads `[--connect <endpoint>] <system>/<service> <contract.toml>...`.
+    /// Reads `[--connect <endpoint>] [--hostid-root <dir>]
+    /// [--hostid-ephemeral] <address> <contract.toml>...`, in any order
+    /// before the address.
     pub fn parse(args: &[String]) -> Result<Self, String> {
-        let usage = || "usage: owner [--connect <endpoint>] <system>/<service> <contract.toml>...";
-        let (connect, rest) = match args {
-            [flag, endpoint, rest @ ..] if flag == "--connect" => (Some(endpoint.clone()), rest),
-            [flag, ..] if flag.starts_with("--") => return Err(usage().to_owned()),
-            rest => (None, rest),
+        let usage = || {
+            "usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral] \
+             <system>/<service>|@hostid.v1/<service> <contract.toml>..."
+                .to_owned()
         };
+        let (mut connect, mut hostid_root, mut hostid_ephemeral) = (None, None, false);
+        let mut rest = args;
+        loop {
+            match rest {
+                [flag, value, tail @ ..] if flag == "--connect" => {
+                    connect = Some(value.clone());
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--hostid-root" => {
+                    hostid_root = Some(PathBuf::from(value));
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--hostid-ephemeral" => {
+                    hostid_ephemeral = true;
+                    rest = tail;
+                }
+                [flag, ..] if flag.starts_with("--") => return Err(usage()),
+                _ => break,
+            }
+        }
         let [address, files @ ..] = rest else {
-            return Err(usage().to_owned());
+            return Err(usage());
         };
         Ok(Self {
             connect,
+            hostid_root,
+            hostid_ephemeral,
             address: address.clone(),
             contracts: files.iter().map(PathBuf::from).collect(),
         })
@@ -89,7 +127,11 @@ pub async fn run(
     say: impl Fn(String),
     until: impl Future<Output = ()>,
 ) -> Result<(), BoxError> {
-    let mut config = ServiceConfig::new(opts.address.parse()?);
+    let mut address: Address = opts.address.parse()?;
+    if let Address::HostId { ephemeral, .. } = &mut address {
+        *ephemeral = opts.hostid_ephemeral;
+    }
+    let mut config = ServiceConfig::at(address);
     let mut imps = Vec::new();
     for f in &opts.contracts {
         let l = load_path(f);
@@ -103,6 +145,18 @@ pub async fn run(
         }
         imps.push(Implementation::new(c));
     }
+
+    // hostid.v1 §2.7: the system is minted before the session opens, and a
+    // host without an id stops here, with nothing declared (§2.6).
+    let under_root;
+    let minter = match &opts.hostid_root {
+        Some(root) => {
+            under_root = HostIdMinter::new(HostIdSource::at(root));
+            &under_root
+        }
+        None => HostIdMinter::global(),
+    };
+    config.resolve_with(minter)?;
 
     let mut z = zenoh::Config::default();
     z.insert_json5("scouting/multicast/enabled", "false")?;
@@ -133,7 +187,7 @@ pub async fn run(
         }
     };
 
-    let mut b = ServiceBuilder::new(&session, config);
+    let mut b = ServiceBuilder::with_hostid(&session, config, minter);
     let mut states = Vec::new();
     let mut servers = Vec::new();
     let none = Bindings::new();

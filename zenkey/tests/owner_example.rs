@@ -215,3 +215,72 @@ async fn the_owner_example_as_a_client_of_a_separate_router() {
     stop.send(()).unwrap();
     running.await.unwrap().unwrap();
 }
+
+/// `@hostid.v1/<service>` (#719): the system is minted under
+/// `--hostid-root` before the session opens (hostid.v1 §2.7), and a root
+/// without an id stops the owner before it says anything (§2.6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_with_a_minted_system() {
+    let (_r1, ep) = router(None).await;
+    let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/interop.v1.toml");
+    let root = tempfile::tempdir().unwrap();
+    let args = |root: &Path| -> Vec<String> {
+        vec![
+            "--connect".into(),
+            ep.clone(),
+            "--hostid-root".into(),
+            root.display().to_string(),
+            "@hostid.v1/owner".into(),
+            contract.display().to_string(),
+        ]
+    };
+
+    // No id under the root, and a shared file that holds none: refused.
+    std::fs::create_dir_all(root.path().join("var/lib/zk2")).unwrap();
+    std::fs::write(root.path().join("var/lib/zk2/hostid"), "garbage\n").unwrap();
+    let (say, lines) = flume::unbounded::<String>();
+    let e = owner::run(
+        owner::Options::parse(&args(root.path())).unwrap(),
+        move |l| {
+            let _ = say.send(l);
+        },
+        async {},
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(e.contains("/var/lib/zk2/hostid: refused"), "{e}");
+    assert!(lines.try_recv().is_err(), "nothing said: no session opened");
+
+    // M1 under the root: the owner comes up at its minted system.
+    std::fs::create_dir_all(root.path().join("etc")).unwrap();
+    std::fs::write(
+        root.path().join("etc/machine-id"),
+        "b642b4217b34b1e8d3bd915fc65c4452\n",
+    )
+    .unwrap();
+    let (say, lines) = flume::unbounded::<String>();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let opts = owner::Options::parse(&args(root.path())).unwrap();
+    let running = tokio::spawn(async move {
+        owner::run(
+            opts,
+            move |l| {
+                let _ = say.send(l);
+            },
+            async {
+                let _ = stopped.await;
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())
+    });
+    assert_eq!(line(&lines).await, format!("connected {ep}"));
+    let ready = line(&lines).await;
+    assert!(
+        ready.starts_with("ready zk2/h-bbd1aa1db10b/owner/@zk/instance/"),
+        "{ready}"
+    );
+    stop.send(()).unwrap();
+    running.await.unwrap().unwrap();
+}
