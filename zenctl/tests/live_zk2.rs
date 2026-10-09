@@ -3951,8 +3951,9 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// #703: a conforming service — FJ8a's mock owner, `gen`, publishing every
 /// resource of `tc.netif.v1` through the runtime's writers and answering
 /// every operation — passes every case asked, exit 0; the operation that
-/// is not idempotent is not called, and freshness and budget are not
-/// asked. `--junit` writes the suite. The router's admin space is on: the
+/// is not idempotent is not called, a resource with no horizon is not asked
+/// its freshness, and budget is not asked. `--junit` writes the suite. The
+/// router's admin space is on: the
 /// owner's own stamp passes only against a router this run verified (S1,
 /// §4.2, 0.17).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -4026,8 +4027,16 @@ async fn check_conform_passes_a_conforming_service() {
         set["verdict"]["answer"], "not_asked",
         "not idempotent: {run}"
     );
+    // freshness.v1 (#720): `gen` puts its state at 5 Hz, so the window
+    // hears it fresh, and its replies' stamps age against a clock measured
+    // on those puts; `state/namespaces` declares no horizon.
     assert_eq!(
-        conform_case(&doc, "freshness", "service")["verdict"]["answer"],
+        conform_case(&doc, "freshness", "state/interfaces/{ns}/{iface}")["verdict"]["answer"],
+        "not_established",
+        "{run}"
+    );
+    assert_eq!(
+        conform_case(&doc, "freshness", "state/namespaces")["verdict"]["answer"],
         "not_asked"
     );
     let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
@@ -4125,4 +4134,156 @@ async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation(
         s["verdict"]["reason"].to_string().contains("§11.3"),
         "{run}"
     );
+}
+
+/// `beacon.v1`, freshness.v1's scenario contract, kept with the runtime's.
+fn beacon() -> Contract {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/beacon.v1.toml");
+    let l = load_path(&path);
+    l.contract
+        .unwrap_or_else(|| panic!("beacon.v1 does not load:\n{}", l.report))
+}
+
+/// `spec/profiles/freshness/scenarios.md` §6 (#720): `check conform` judges
+/// freshness per resource at the end of its window. An owner refreshing
+/// `status`, holding `intent` (never stale) and `note` (no horizon), and
+/// publishing `level` every 200 ms reads fresh, fresh, not asked, fresh.
+/// Read again, with the `status` writer closed and `level` stopped 0.5 s
+/// into the window, it reads `status` and `level` stale: violations, exit
+/// 1, though the owner holds its tokens throughout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_judges_a_stopped_refresher_stale() {
+    let mut bus = Bus::admin(None).await;
+    let id = iface("beacon.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/beacon".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(beacon()))
+        .expect("implement");
+    let none = Bindings::new();
+    let status = b
+        .declare_state_writer(&id, "state/status", &none)
+        .await
+        .expect("status");
+    let intent = b
+        .declare_state_writer(&id, "state/intent", &none)
+        .await
+        .expect("intent");
+    let note = b
+        .declare_state_writer(&id, "state/note", &none)
+        .await
+        .expect("note");
+    let level = Arc::new(
+        b.declare_writer(&id, "stream/level", &none)
+            .await
+            .expect("level"),
+    );
+    status.put("up").await.expect("put");
+    intent.put("i").await.expect("put");
+    note.put("n").await.expect("put");
+    bus.services.push(b.start().await.expect("start"));
+    let l = Arc::clone(&level);
+    let publishing = Task(tokio::spawn(async move {
+        let mut n = 0u64;
+        loop {
+            n += 1;
+            let _ = l.put(format!("{n}")).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }));
+    bus.keep((intent, note));
+    wait_for(&bus, &["lab/beacon"]).await;
+    let args = [
+        "check",
+        "conform",
+        "lab/beacon",
+        "beacon.v1",
+        "--for",
+        "4",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let fresh = |r: &Run| {
+        serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+            ["state/status", "state/intent", "stream/level"]
+                .iter()
+                .all(|s| {
+                    rows_of(&d, "case").iter().any(|c| {
+                        c["case"] == "freshness"
+                            && c["subject"] == *s
+                            && c["verdict"]["answer"] == "not_established"
+                    })
+                })
+        })
+    };
+    let run = bus.until(&args, fresh).await;
+    let doc = run.json();
+    for s in ["state/status", "state/intent", "stream/level"] {
+        assert_eq!(
+            conform_case(&doc, "freshness", s)["verdict"]["answer"],
+            "not_established",
+            "{s}: {run}"
+        );
+    }
+    assert!(
+        conform_case(&doc, "freshness", "state/intent")["verdict"]["reason"]
+            .to_string()
+            .contains("never stale"),
+        "{run}"
+    );
+    assert_eq!(
+        conform_case(&doc, "freshness", "state/note")["verdict"]["answer"],
+        "not_asked",
+        "{run}"
+    );
+
+    // Step 2: the tool reads again; once its subscription on `level` is
+    // declared (the last it declares, just before its window opens) and
+    // 0.5 s have passed, the refresher and the stream stop.
+    let matching = |want: bool| {
+        let level = Arc::clone(&level);
+        async move {
+            let deadline = Instant::now() + SETTLE;
+            while level.matching().await.expect("matching") != want {
+                assert!(Instant::now() < deadline, "level never matched {want}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    matching(false).await;
+    let pending = bus.spawn(&args);
+    matching(true).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(status);
+    drop(publishing);
+    let run = pending.await.expect("the zenctl runner");
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["judgement"]["answer"], "established", "{run}");
+    for s in ["state/status", "stream/level"] {
+        let c = conform_case(&doc, "freshness", s);
+        assert_eq!(c["verdict"]["answer"], "established", "{s}: {run}");
+        assert!(
+            c["detail"]
+                .to_string()
+                .contains("never the owner's presence"),
+            "{s}: {run}"
+        );
+    }
+    assert_eq!(
+        conform_case(&doc, "freshness", "state/intent")["verdict"]["answer"],
+        "not_established",
+        "{run}"
+    );
+    assert_eq!(
+        conform_case(&doc, "freshness", "state/note")["verdict"]["answer"],
+        "not_asked",
+        "{run}"
+    );
+    // Present throughout: stale is the value's, never the owner's presence.
+    wait_for(&bus, &["lab/beacon"]).await;
 }

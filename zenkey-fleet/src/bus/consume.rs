@@ -452,4 +452,13 @@ impl Watch {
     pub fn selectors(&self) -> &[String] {
         &self.selectors
     }
+
+    /// The runtime's subscription under it: each member's last delivery on
+    /// this host's monotonic clock, and each stamping clock's offset at
+    /// receipt (`freshness.v1` §2.5, §2.6). It records every delivery in
+    /// zenoh's callback, so a reader that fell behind ([`Watch::lagged`])
+    /// does not make its record incomplete.
+    pub fn subscription(&self) -> &zenkey::consumer::Subscription {
+        &self.sub
+    }
 }

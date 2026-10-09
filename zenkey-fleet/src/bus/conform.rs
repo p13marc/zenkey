@@ -14,18 +14,23 @@
 //!    call — an `idempotent` one, or every one under `call_all` — with a
 //!    request synthesized from the bundle; and, for a templated operation
 //!    that forbids fan-out, a call over its template's wildcard (O2), whose
-//!    refusal must come before any handler runs.
+//!    refusal must come before any handler runs;
+//! 4. at the window's end, for `freshness.v1` (#720): each member's last
+//!    delivery on this host's monotonic clock, each stamping clock's offset
+//!    at receipt, and this host's wall clock, which the GET replies' stamps
+//!    are aged against.
 //!
 //! Nothing is judged here: [`crate::judge::conform`] decides every case
 //! from the [`ConformObservation`] this returns.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use zenkey_model::authoring::Kind;
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Fanout, Resource};
+use zenkey_model::freshness::{Observation, StampAge};
 use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId};
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::Session;
@@ -64,6 +69,11 @@ pub struct ConformSpec {
     /// can observe its grants (§11.3): without this, a present owner's
     /// silence is unobservable, never the O3 finding (O5).
     pub calls_granted: bool,
+    /// The operator's word that this tool's clock and the owners' agree
+    /// within the HLC delta (`freshness.v1` §2.6, ground 1). Without it, a
+    /// GET reply's stamp is aged only against a clock this run measured on
+    /// a live put of the same clock, and is unobservable otherwise.
+    pub clocks_synced: bool,
 }
 
 /// What one resource's subscription heard in the window.
@@ -80,6 +90,17 @@ pub struct Heard {
     pub unresolved: u64,
     /// The key expressions subscribed, base-relative.
     pub selectors: Vec<String>,
+    /// Each member delivered in the window, as a `freshness.v1`
+    /// observation at the window's end (§2.5): its last delivery's age on
+    /// this host's monotonic clock, and how long the subscription listened.
+    pub members: BTreeMap<String, Observation>,
+    /// Per stamping clock, the offset at receipt of the delivery whose
+    /// stamp came closest to this host's clock: what a GET reply's stamp is
+    /// trusted against (§2.6, ground 2).
+    pub clocks: BTreeMap<String, StampAge>,
+    /// How long the subscription listened: from its declaration to the
+    /// window's end. A member it never heard is judged on this (§2.5).
+    pub listened: Duration,
 }
 
 /// What a call over an operation's template wildcard drew (O2).
@@ -139,6 +160,10 @@ pub struct ConformObservation {
     /// The routers' admin space, read un-namespaced: an owner's own stamp
     /// proves S1 only against the routers it verified (§4.2, 0.17).
     pub admin: Option<std::result::Result<crate::judge::doctor::AdminSpace, String>>,
+    /// This host's clock at the window's end: the instant every member's
+    /// freshness is judged at, a GET reply's stamp aged against it
+    /// (`freshness.v1` §2.6). `None` when no window ran.
+    pub read_at: Option<SystemTime>,
 }
 
 impl ConformObservation {
@@ -244,6 +269,7 @@ pub async fn observe(
         gets: BTreeMap::new(),
         calls: BTreeMap::new(),
         admin: Some(admin),
+        read_at: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;
@@ -277,6 +303,9 @@ pub async fn observe(
     // The subscriptions first, so what the GETs and the calls stir up is
     // heard too.
     let deadline = tokio::time::Instant::now() + spec.window;
+    // The window's end on this host's wall clock: every watch observes its
+    // members then, and the GET replies are aged then (freshness.v1 §2.6).
+    obs.read_at = Some(SystemTime::now() + spec.window);
     let mut watches = Vec::new();
     for r in exposed.iter().filter(|r| r.kind != Kind::Operation) {
         let name = zenkey::implementation::resource_name(r);
@@ -302,6 +331,18 @@ pub async fn observe(
             heard.lagged = w.lagged();
             heard.discarded = w.discarded();
             heard.unresolved = w.unresolved();
+            // freshness.v1 §2.5: each member as the window's end sees it.
+            let sub = w.subscription();
+            heard.members = sub
+                .members()
+                .into_iter()
+                .map(|k| {
+                    let o = sub.freshness(&k);
+                    (k, o)
+                })
+                .collect();
+            heard.clocks = sub.clock_offsets();
+            heard.listened = sub.listened();
             (name, heard)
         }));
     let asks = async {

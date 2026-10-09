@@ -44,6 +44,9 @@
 //! - [`hostid`]: `hostid.v1`'s derivation of a system from a machine id
 //!   (`spec/profiles/hostid/v1.md`, #719). The inputs, the shared file and
 //!   failing closed are the runtime's.
+//! - [`freshness`]: `freshness.v1`'s horizon and its pure judgement of a
+//!   member's freshness (`spec/profiles/freshness/v1.md`, #720). The
+//!   owner's re-puts are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -58,6 +61,7 @@ pub mod decode;
 pub mod descriptor;
 pub mod diag;
 pub mod envelope;
+pub mod freshness;
 pub mod grammar;
 pub mod history;
 pub mod hostid;

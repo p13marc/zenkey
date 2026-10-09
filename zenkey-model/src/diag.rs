@@ -258,7 +258,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("W104", "`[interface] minor` is missing"),
     (
         "W105",
-        "an annotation key is not in its profile's interim vocabulary (D19)",
+        "an annotation key is not in its profile's vocabulary: the published one, else the interim one (D19)",
     ),
     ("W107", "the file is not named <name>.v<major>.toml"),
 ];

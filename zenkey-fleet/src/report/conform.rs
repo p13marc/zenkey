@@ -9,7 +9,10 @@
 //! heard from in the window, a stamp no `meta.zid` attributes — and one the
 //! run did not ask is `NotAsked`, with why in `detail`: an operation that
 //! is not idempotent without `--i-know`, a raw type with no structure, a
-//! profile-backed case whose profile does not exist yet (#613).
+//! resource that declares no `freshness.ttl_s`, a profile-backed case whose
+//! profile does not exist yet (#613). The `freshness` case is the "no" of
+//! `freshness.v1`'s "is this value fresh?" turned into the suite's
+//! polarity: a stale member is the finding (#720).
 
 use std::fmt;
 
@@ -48,8 +51,11 @@ pub enum CaseId {
     /// The owner answers a GET over the state resource, each reply carrying
     /// its mutation's timestamp (S2).
     StateGet,
-    /// Values within their declared freshness: `freshness.v1`'s, which
-    /// waits for its profile (#613). Never asked here.
+    /// Each member of a stream or state resource that declares
+    /// `freshness.ttl_s` confirmed within that horizon, at the window's end
+    /// (`freshness.v1` §5, #720): by this run's receive clock, or a GET
+    /// reply's stamp against a clock trusted to the HLC delta. One verdict
+    /// per resource; a resource with no horizon is not asked.
     Freshness,
     /// Rates and populations within a declared budget: a profile's, which
     /// waits for it (#613). Never asked here.
@@ -310,7 +316,12 @@ mod tests {
                 "invalid",
             ),
             ConformCase::unobservable(CaseId::ResourceServed, "state/namespaces", "silent"),
-            ConformCase::not_asked(CaseId::Freshness, "service", "waits for freshness.v1"),
+            ConformCase::failed(
+                CaseId::Freshness,
+                "state/interfaces/{ns}/{iface}",
+                "1 of 1 member(s) stale",
+            ),
+            ConformCase::not_asked(CaseId::Freshness, "state/namespaces", "no freshness.ttl_s"),
         ]);
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
@@ -328,8 +339,11 @@ mod tests {
                      "section": "§7.2", "verdict": {"answer": "established"}, "detail": "invalid"},
                     {"case": "resource-served", "subject": "state/namespaces", "section": "§8.2",
                      "verdict": {"answer": "unobservable", "reason": "silent"}},
-                    {"case": "freshness", "subject": "service", "section": "freshness.v1",
-                     "verdict": {"answer": "not_asked"}, "detail": "waits for freshness.v1"},
+                    {"case": "freshness", "subject": "state/interfaces/{ns}/{iface}",
+                     "section": "freshness.v1", "verdict": {"answer": "established"},
+                     "detail": "1 of 1 member(s) stale"},
+                    {"case": "freshness", "subject": "state/namespaces", "section": "freshness.v1",
+                     "verdict": {"answer": "not_asked"}, "detail": "no freshness.ttl_s"},
                 ],
             })
         );

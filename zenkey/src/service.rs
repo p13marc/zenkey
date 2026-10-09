@@ -97,6 +97,9 @@ pub struct ServiceBuilder {
     store: Arc<Store>,
     /// Interfaces whose state this service answers GETs for (S2).
     state_ifaces: BTreeSet<IfaceId>,
+    /// Set when the service closes, and dropped with it: its state
+    /// writers' refreshers stop on either (`freshness.v1` §2.4).
+    closed: tokio::sync::watch::Sender<bool>,
 }
 
 fn mint() -> InstanceId {
@@ -195,6 +198,7 @@ impl ServiceBuilder {
             minter: Arc::new(Minter::new(session)),
             store: Arc::new(Store::new(window)),
             state_ifaces: BTreeSet::new(),
+            closed: tokio::sync::watch::Sender::new(false),
         }
     }
 
@@ -207,7 +211,10 @@ impl ServiceBuilder {
 
     /// A [`StateWriter`] on a state member: stamped puts and deletes (S1),
     /// answered by the service's state queryables (S2, S3), which `start`
-    /// declares for this interface. Exposes the resource.
+    /// declares for this interface. Exposes the resource. Where the
+    /// contract declares `freshness.ttl_s` above 0, the writer re-puts the
+    /// member at least every ttl/2 (`freshness.v1` §2.4), from its first put
+    /// on, before `start` included, until it drops or the service closes.
     pub async fn declare_state_writer(
         &mut self,
         iface: &IfaceId,
@@ -228,6 +235,8 @@ impl ServiceBuilder {
             w,
             Arc::clone(&self.store),
             Arc::clone(&self.minter),
+            &zenkey_model::freshness::horizon_of(&r),
+            self.closed.subscribe(),
         ))
     }
 
@@ -533,6 +542,7 @@ impl ServiceBuilder {
             roles: self.roles,
             minter: self.minter,
             store: self.store,
+            closed: self.closed,
         };
         // 1. (continued) The state queryables, with the other resources.
         for iface in &self.state_ifaces {
@@ -665,6 +675,9 @@ pub struct Service {
     roles: Vec<Role>,
     minter: Arc<Minter>,
     store: Arc<Store>,
+    /// Set by [`Service::close`], dropped with the service: either stops
+    /// its state writers' refreshers (`freshness.v1` §2.4).
+    closed: tokio::sync::watch::Sender<bool>,
 }
 
 impl Service {
@@ -719,7 +732,8 @@ impl Service {
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
     /// templates whose members appear while the service runs. The
-    /// interface's state queryables are declared on first use.
+    /// interface's state queryables are declared on first use. It re-puts
+    /// the member as [`ServiceBuilder::declare_state_writer`]'s does.
     pub async fn state_writer(
         &mut self,
         iface: &IfaceId,
@@ -739,6 +753,8 @@ impl Service {
             w,
             Arc::clone(&self.store),
             Arc::clone(&self.minter),
+            &zenkey_model::freshness::horizon_of(&r),
+            self.closed.subscribe(),
         ))
     }
 
@@ -959,8 +975,10 @@ impl Service {
         Ok(())
     }
 
-    /// Undeclares the tokens, then the queryables, and waits for each.
+    /// Stops its state writers' re-puts (`freshness.v1` §2.4), then
+    /// undeclares the tokens, then the queryables, and waits for each.
     pub async fn close(mut self) -> Result<()> {
+        self.closed.send_replace(true);
         for (_, t) in std::mem::take(&mut self.alive) {
             t.undeclare().await.map_err(zenoh)?;
         }

@@ -12,12 +12,22 @@
 
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+use std::time::Duration;
+
 use serde_json::{Value, json};
+use zenkey_model::authoring::Kind;
+use zenkey_model::freshness::{self, ClockTrust, Horizon, Last, Observation, Reply, StampAge};
 use zenkey_model::hostid;
 use zenkey_model::slug::chunk_slug;
 
 /// The fixtures this crate runs, as (profile directory, file name).
-const KNOWN: &[(&str, &str)] = &[("hostid", "vectors.json"), ("hostid", "shapes.json")];
+const KNOWN: &[(&str, &str)] = &[
+    ("hostid", "vectors.json"),
+    ("hostid", "shapes.json"),
+    ("freshness", "horizons.json"),
+    ("freshness", "judgements.json"),
+];
 
 fn profiles() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles")
@@ -137,6 +147,130 @@ fn hostid_shapes() {
             case,
             json!(hostid::is_minted_shape(&value)),
             &format!("{value:?}"),
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A case's kind and merged annotations, as `freshness/conformance/` writes
+/// them.
+fn resource(case: &Value) -> (Kind, BTreeMap<String, Value>) {
+    let kind = match case["kind"].as_str().expect("kind") {
+        "stream" => Kind::Stream,
+        "state" => Kind::State,
+        "event" => Kind::Event,
+        "operation" => Kind::Operation,
+        other => panic!("kind {other:?}"),
+    };
+    let annotations = case["annotations"]
+        .as_object()
+        .expect("annotations")
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    (kind, annotations)
+}
+
+fn secs(v: &Value) -> Duration {
+    Duration::from_secs_f64(v.as_f64().expect("seconds"))
+}
+
+/// `freshness/conformance/horizons.json`: a resource's kind and annotations
+/// → its horizon (freshness.v1 §2.1–§2.3), with the owner's bound between
+/// two puts (§2.4).
+#[test]
+fn freshness_horizons() {
+    let path = profiles().join("freshness/conformance/horizons.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, annotations) = resource(case);
+        let h = freshness::horizon(kind, &annotations);
+        let got = match &h {
+            Horizon::Undeclared => json!({"horizon": "none"}),
+            Horizon::Ignored => json!({"horizon": "ignored"}),
+            Horizon::Invalid(_) => json!({"horizon": "invalid"}),
+            Horizon::Never => json!({"horizon": "never"}),
+            Horizon::Within(t) => json!({
+                "horizon": "within",
+                "ttl_s": t.as_secs(),
+                "refresh_ms": u64::try_from(h.refresh_bound().expect("a bound").as_millis())
+                    .expect("fits"),
+            }),
+        };
+        let what = format!("{} {}", kind.as_str(), case["annotations"]);
+        expect(case, got, &what);
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// One observation, as `judgements.json` writes it.
+fn observation(o: &Value) -> Observation {
+    match o["via"].as_str().expect("via") {
+        "archive" => Observation::Archived,
+        "subscription" => Observation::Subscribed {
+            last: match &o["last"] {
+                Value::Null => None,
+                l => {
+                    let age = secs(&l["age_s"]);
+                    match l["kind"].as_str().expect("last.kind") {
+                        "put" => Some(Last::Put(age)),
+                        "delete" => Some(Last::Delete(age)),
+                        other => panic!("last.kind {other:?}"),
+                    }
+                }
+            },
+            listened: secs(&o["listened_s"]),
+            complete: o["complete"].as_bool().expect("complete"),
+        },
+        "get" => {
+            let clock = match o.get("clock") {
+                Some(c) if c["trusted"] == json!(true) => ClockTrust::Trusted {
+                    delta: secs(&c["delta_s"]),
+                },
+                _ => ClockTrust::Untrusted,
+            };
+            let reply = match &o["reply"] {
+                Value::Null => None,
+                r => Some(match r["kind"].as_str().expect("reply.kind") {
+                    "delete" => Reply::Delete,
+                    "put" => Reply::Put {
+                        stamp_age: r["stamp_age_s"].as_f64().map(StampAge::from_secs_f64),
+                    },
+                    other => panic!("reply.kind {other:?}"),
+                }),
+            };
+            Observation::Got { reply, clock }
+        }
+        other => panic!("via {other:?}"),
+    }
+}
+
+/// `freshness/conformance/judgements.json`: a horizon and the observations
+/// of one member → the combined verdict and its reason class
+/// (freshness.v1 §2.3, §2.5–§2.8).
+#[test]
+fn freshness_judgements() {
+    let path = profiles().join("freshness/conformance/judgements.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let (kind, annotations) = resource(case);
+        let h = freshness::horizon(kind, &annotations);
+        let observations: Vec<Observation> = case["observations"]
+            .as_array()
+            .expect("observations")
+            .iter()
+            .map(observation)
+            .collect();
+        let j = freshness::judge_all(&h, &observations);
+        let what = format!("{}: {}", case["note"], case["observations"]);
+        expect(
+            case,
+            json!({"verdict": j.verdict.as_str(), "reason": j.reason.as_str()}),
+            &what,
         );
     }
     if bless() {

@@ -10,6 +10,7 @@ and `examples/zk2/`.
 | Profile | Text | Status | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|
 | [`hostid.v1`](hostid/v1.md) | 0.2 | draft | 0.20 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
+| [`freshness.v1`](freshness/v1.md) | 0.1 | draft | 0.21 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 
 ## Layout
 
@@ -83,7 +84,9 @@ thing in the same place.
   changes first, through [`../CHANGELOG.md`](../CHANGELOG.md).
   `hostid.v1` needed 0.19, so that an instance can declare a profile no
   contract uses, and its runtime 0.20, so that a binding can name a
-  provider on the service's own, minted, system.
+  provider on the service's own, minted, system. `freshness.v1` needed
+  0.21, so that W105 reads its published vocabulary and a re-put is a
+  mutation.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -98,9 +101,10 @@ thing in the same place.
     ```bash
     ZK2_BLESS=1 cargo test -p zenkey-model --test profiles
     ```
-  - A profile's session-free code lives in `zenkey-model` (`hostid`), and
-    its runtime in `zenkey`. Its scenarios run as tests of the runtime, one
-    test per section, named after it, as the core's do.
+  - A profile's session-free code lives in `zenkey-model` (`hostid`,
+    `freshness`), and its runtime in `zenkey`. Its scenarios run as tests
+    of the runtime, one test per section, named after it, as the core's
+    do. A scenario that is a tool's runs as a test of that tool.
 - **Other implementations** run the same files. Each fixture states its
   format in its `description` member, as the core's fixtures do (core
   Appendix E). The second implementation (`impl/python/`) takes in each

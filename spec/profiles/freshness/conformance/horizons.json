@@ -1,0 +1,325 @@
+{
+  "cases": [
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 30000,
+        "ttl_s": 60
+      },
+      "kind": "state",
+      "note": "tcgui's and zenoh-modem's horizon: re-put at least every 30 s (§2.4)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 900
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 450000,
+        "ttl_s": 900
+      },
+      "kind": "state",
+      "note": "ZenSight's evidence horizon"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 31536000
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 15768000000,
+        "ttl_s": 31536000
+      },
+      "kind": "state",
+      "note": "zs.catalog's alias horizon, a year: a re-put every half year"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 61
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 30500,
+        "ttl_s": 61
+      },
+      "kind": "state",
+      "note": "an odd horizon: the bound is 30.5 s, so refresh_ms carries it exactly"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 500,
+        "ttl_s": 1
+      },
+      "kind": "state",
+      "note": "the smallest horizon above 0: a re-put at least every 500 ms"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 9007199254740991
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 4503599627370495500,
+        "ttl_s": 9007199254740991
+      },
+      "kind": "state",
+      "note": "2^53-1, the largest (§2.1, core §9.5)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "horizon": "never"
+      },
+      "kind": "state",
+      "note": "never stale (§2.3, D16): no re-put"
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "horizon": "none"
+      },
+      "kind": "state",
+      "note": "no freshness.ttl_s: freshness is not asked (§2.3)"
+    },
+    {
+      "annotations": {
+        "telemetry.unit": "s"
+      },
+      "expect": {
+        "horizon": "none"
+      },
+      "kind": "state",
+      "note": "other profiles' annotations only"
+    },
+    {
+      "annotations": {
+        "freshness.ttl": 60
+      },
+      "expect": {
+        "horizon": "none"
+      },
+      "kind": "state",
+      "note": "freshness.ttl, not ttl_s: W105's business, and no horizon"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60.0
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 30000,
+        "ttl_s": 60
+      },
+      "kind": "state",
+      "note": "an integral float is that integer: JCS writes 60.0 as 60 (§2.1)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1000.0
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 500000,
+        "ttl_s": 1000
+      },
+      "kind": "state",
+      "note": "1e3 in TOML is the float 1000.0, so the integer 1000"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 9007199254740991.0
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 4503599627370495500,
+        "ttl_s": 9007199254740991
+      },
+      "kind": "state",
+      "note": "2^53-1 written as a float is exact, so the integer"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0.0
+      },
+      "expect": {
+        "horizon": "never"
+      },
+      "kind": "state",
+      "note": "0.0 is 0"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": -0.0
+      },
+      "expect": {
+        "horizon": "never"
+      },
+      "kind": "state",
+      "note": "-0.0 is 0: JCS writes it 0, and -0.0 >= 0"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1.5
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a fraction is not a horizon: sub-second staleness is timing.v1's (§2.1)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0.5
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "half a second is not a horizon either"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": -1
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a negative number"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": -60.0
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a negative integral float"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 9007199254740992
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "2^53, beyond the canonical domain (a contract holding it is E028)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": "60"
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a string, even of digits"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": true
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a boolean"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": [
+          60
+        ]
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "an array"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": {
+          "s": 60
+        }
+      },
+      "expect": {
+        "horizon": "invalid"
+      },
+      "kind": "state",
+      "note": "a table"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "horizon": "within",
+        "refresh_ms": 500,
+        "ttl_s": 1
+      },
+      "kind": "stream",
+      "note": "a stream: fresh while a sample arrived within ttl (§2.2)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "horizon": "never"
+      },
+      "kind": "stream",
+      "note": "a stream at 0"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "horizon": "ignored"
+      },
+      "kind": "event",
+      "note": "an event has no freshness: ignored, as [defaults] may spread it (§2.2)"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "horizon": "ignored"
+      },
+      "kind": "operation",
+      "note": "an operation has no freshness"
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": "x"
+      },
+      "expect": {
+        "horizon": "ignored"
+      },
+      "kind": "event",
+      "note": "the kind is read before the value"
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "horizon": "none"
+      },
+      "kind": "event",
+      "note": "an event without a horizon is not asked either"
+    }
+  ],
+  "description": "freshness.v1 §2.1, §2.2, §2.3: a resolved resource's authoring kind (stream, state, event, operation; @stream and @state are read as stream and state) and its merged annotations -> its horizon. expect.horizon is one of: \"none\" (no freshness.ttl_s: not asked); \"ignored\" (an event or an operation, whatever the value: no freshness); \"invalid\" (a value that is not a whole number of seconds from 0 to 2^53-1; an integral float is that integer); \"never\" (0); \"within\", with ttl_s, the horizon in seconds, and refresh_ms, the owner's bound between two puts of a member, ttl_s/2 in milliseconds (§2.4). The kind is read before the value."
+}

@@ -1,0 +1,26 @@
+# freshness.v1's scenarios (#720), as `spec/profiles/freshness/scenarios.md`
+# states the contract: one state per kind of horizon, and a stream.
+[interface]
+name  = "beacon"
+major = 1
+minor = 0
+uses  = ["freshness.v1"]
+
+[resources.status]                         # re-put at least every 1 s
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+
+[resources.intent]                         # never stale
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 0 }
+
+[resources.note]                           # no horizon
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.level]                          # a stream, ttl 1 s
+kind        = "stream"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 1 }

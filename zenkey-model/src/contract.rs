@@ -527,10 +527,12 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
     }
 }
 
-/// The interim annotation vocabularies of draft 1 (r3.3 D19), until each
-/// profile ships its own table (#613).
-const INTERIM_VOCABULARIES: &[(&str, &[&str])] = &[
-    ("freshness", &["ttl_s"]),
+/// The annotation vocabularies W105 reads (core §10 point 2, Appendix D):
+/// a profile's published table where it has one, else the interim table
+/// of draft 1 (r3.3 D19), until each profile ships its own (#613).
+/// `freshness.v1` publishes its own (`freshness::VOCABULARY`, core 0.21).
+const VOCABULARIES: &[(&str, &[&str])] = &[
+    (crate::freshness::NAME, crate::freshness::VOCABULARY),
     ("timing", &["period_ms", "deadline_ms", "lifespan_ms"]),
     ("telemetry", &["unit", "kind", "buckets", "semantic"]),
     ("link", &["exposure", "downsample_ms"]),
@@ -585,13 +587,13 @@ fn check_annotations(
                 at,
                 format!("annotation {k:?}: profile {p:?} is not listed in `uses`"),
             ));
-        } else if let Some((_, keys)) = INTERIM_VOCABULARIES.iter().find(|(n, _)| *n == p)
+        } else if let Some((_, keys)) = VOCABULARIES.iter().find(|(n, _)| *n == p)
             && !keys.contains(&key)
         {
             report.push(Diagnostic::warning(
                 "W105",
                 at,
-                format!("annotation {k:?} is not in {p}'s interim vocabulary {keys:?}"),
+                format!("annotation {k:?} is not in {p}'s vocabulary {keys:?}"),
             ));
         }
     }

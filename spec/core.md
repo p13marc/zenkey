@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.20** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.21** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -13,8 +13,9 @@ in 0.14 what access control measured, in 0.15 what §11 needs to be built
 from, in 0.16 what the tools' last verbs could not decide, in 0.17
 what a tool needs that it cannot read off the bus, in 0.18 two words
 0.17 left loose, in 0.19 profiles that only derive, and where
-profiles live, and in 0.20 a provider on the service's own system, the
-order of `profiles`, and a derived address).
+profiles live, in 0.20 a provider on the service's own system, the
+order of `profiles`, and a derived address, and in 0.21 the first
+vocabulary a profile publishes, `freshness.v1`'s, and a re-put).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -332,7 +333,9 @@ with it. The fields map one-to-one onto Zenoh's stable QoS.
 
 - **State and events** SHOULD keep `reliable` and `block`. A state declared
   `best_effort` relies on re-puts to heal a lost update: zenoh-modem re-puts
-  each document every `ttl_s/2` (`freshness.v1`). An archive (§4.4)
+  each document every `ttl_s/2`, as
+  [`freshness.v1`](profiles/freshness/v1.md) §2.4 requires of an owner
+  whose state declares a horizon (0.21). An archive (§4.4)
   recording such a state can then miss values between re-puts. Spike S5
   lost 10,917 of 100,000 values put with `drop` on their way to a storage.
 - **`express`** is opt-in. A contract's author SHOULD set it only on
@@ -420,7 +423,7 @@ the required interface, and MUST NOT be empty.
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
-| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses. Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. | `[Sc: constrained.md §3]` |
+| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it (0.21). Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. | `[Sc: constrained.md §3]` |
 
 When several providers are bound, choosing between them is the consumer's
 (`arbitration.v1`).
@@ -675,6 +678,14 @@ and reports these codes. `[F: descriptors/]`
 | S6 | **Consumer:** current state is the owner's answer. A consumer turns to an archive only when the owner gave no reply within the GET's timeout, or presence shows it absent. That silence is not a verdict about the key (O5). The archive's answer is last-known, never current, and a consumer MUST NOT present it as current. | `[Sc: state.md §4]` |
 | S7 | **Owner:** clocks are bounded both ways (§4.3). | `[Sc: state.md §7]` |
 
+**A re-put is a mutation** (0.21). A put that repeats a member's current
+value, as an owner refreshing it under
+[`freshness.v1`](profiles/freshness/v1.md) §2.4 makes, is a put like any
+other: it carries a timestamp the owner set (S1), minted above every stamp
+it issued (§4.3), and the owner's GET answers carry that stamp from then
+on (S2). A reply represents the member's latest put, not its latest change.
+`[Sc: profiles/freshness/scenarios.md §1]`
+
 A **tool** checks S4 against the routers' storage admin space. A consumer
 cannot tell under `Latest` which replier answered.
 - **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
@@ -791,7 +802,10 @@ a timestamp, through the same router, arrives with the router's zid.
     such as a subscription to a router-stamped heartbeat key, because its
     own puts are never echoed back.
   - When a detection shows it beyond the delta, it MUST stop writing
-    state, and SHOULD report it (`health.v1` is the standard way).
+    state, re-puts included, and SHOULD report it (`health.v1` is the
+    standard way). Its members then go stale, by design
+    ([`freshness.v1`](profiles/freshness/v1.md) §2.10, 0.21).
+    `[Sc: profiles/freshness/scenarios.md §2]`
   - Spike S12 showed the harm: a clock 2 s ahead produced a revision with
     two timestamps, and the next correctly clocked write looked stale.
 
@@ -1716,7 +1730,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
 | W104 | `minor` is absent | once |
-| W105 | an annotation key outside its profile's interim vocabulary (Appendix D); a profile without one has none to be outside of (§10) | per key |
+| W105 | an annotation key outside its profile's vocabulary: the table the profile publishes, else its interim one (Appendix D, 0.21); a profile with neither has none to be outside of (§10) | per key |
 | W107 | the file is not named `<name>.v<major>.toml` | once |
 
 **Cascades.** A fixture's codes do not depend on the order lints run in,
@@ -2351,7 +2365,8 @@ the new variant, and an old reader refuses it. A branch added to an
 A **profile** is an independently versioned specification, such as
 `timing.v1` or `archive.v1`. The core never depends on one. Where a rule
 here names a profile (`health.v1` for reporting, `link.v1` for face
-configuration, `archive.v1` for archives), it names the standard way to
+configuration, `archive.v1` for archives, `freshness.v1` for a value's
+age), it names the standard way to
 meet the rule, which the core states in its own terms. A profile
 contributes through these four points, and through no other:
 1. **A standard contract**: an interface it defines.
@@ -2362,6 +2377,9 @@ contributes through these four points, and through no other:
    them is a warning. `[F: contracts/w105-vocabulary]` A profile that
    Appendix D does not list has no interim table, so none of its keys is
    outside one: no W105. `[F: contracts/ok-profile-without-vocabulary]`
+   A published vocabulary replaces its interim table, and W105 reads it
+   the same way (0.21). The first is `freshness.v1`'s
+   ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4).
    What a published vocabulary defines (`views.v1`'s documents among them,
    §9.6) is the profile's, not the core's.
 3. **A registered verbatim kind**, such as `@blob`, at position 5. This
@@ -2648,6 +2666,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
+| `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
@@ -2673,12 +2692,18 @@ E019).
 | `request`, `response` | — | — | — | required | no |
 | `error`, `summary`, `idempotent`, `fanout`, `serving`, `replies`, `timeout_ms` | — | — | — | ✓ | yes, except `error` and `summary` |
 
+**Published annotation vocabularies** (W105 outside them, 0.21): the
+profile's own table replaces its interim one.
+
+| Profile | Keys | Published by |
+|---|---|---|
+| `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
+
 **Interim annotation vocabularies** (W105 outside them, until each profile
 publishes its own):
 
 | Profile | Keys |
 |---|---|
-| `freshness` | `ttl_s` |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` |
 | `telemetry` | `unit`, `kind`, `buckets`, `semantic` |
 | `link` | `exposure`, `downsample_ms` |

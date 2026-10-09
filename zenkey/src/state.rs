@@ -9,15 +9,29 @@
 //! | S4 a consumer's GET: the owner's keys, target `All`, consolidation `Latest` | [`crate::consumer::Consumer::get`] |
 //! | S6 current is the owner's answer; silence is no verdict | [`StateGet`] |
 //! | S7 clocks: minting, catch-up, new epoch, ahead | [`Minter`], the clock guard (`ServiceConfig::clock_reference`) |
+//! | a re-put is a mutation (0.21); `freshness.v1` §2.4, §2.10 | [`StateWriter`]'s refresher |
 //!
 //! Last-known state (S5) is an archive's: [`crate::archive`].
+//!
+//! **The refresher** (`freshness.v1` §2.4, #720). A state resource whose
+//! contract declares `freshness.ttl_s` above 0 is confirmed at least every
+//! ttl/2: a [`StateWriter`] on one of its members re-puts the member's
+//! current value, unchanged, whenever that long passes without a put. The
+//! re-put is a mutation like any other (core 0.21): a fresh stamp from the
+//! [`Minter`], recorded for the GET answers (S2), then published. It is on
+//! by default, since the contract asks it of every owner, and
+//! [`StateWriter::set_refresh`] turns it off for an owner that can no longer
+//! vouch for its value (§2.4). It stops when the writer drops, when the
+//! service closes or drops, after a delete until the next put, and while
+//! the clock guard holds writes (§2.10).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
+use zenkey_model::freshness::{ClockTrust, Horizon, Observation, Reply, StampAge};
 use zenoh::Wait;
 use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::key_expr::OwnedKeyExpr;
@@ -27,6 +41,19 @@ use zenoh::time::{NTP64, Timestamp};
 
 use crate::error::{Error, Result};
 use crate::writer::Writer;
+
+/// How early the refresher re-puts: at this share of the ttl/2 bound, so
+/// that a timer's lateness never takes an interval past it (`freshness.v1`
+/// §2.4).
+pub const REFRESH_LEAD: f64 = 0.95;
+
+/// How often a re-put the clock guard holds is tried again, or every
+/// period when that is shorter (`freshness.v1` §2.10).
+const HELD_RETRY: Duration = Duration::from_secs(1);
+
+/// The longest single sleep of the refresher: a far horizon (a year, in
+/// ZenSight's catalog) is waited out in steps.
+const STEP: Duration = Duration::from_secs(3600);
 
 /// The tombstone window when the deployment configures none (S3).
 pub const DEFAULT_WINDOW: Duration = Duration::from_secs(60);
@@ -235,24 +262,197 @@ impl Store {
     }
 }
 
+/// What a member's writer last put, for its refresher.
+struct Held {
+    /// The payload and attachment of the last put, kept only when the
+    /// resource has a horizon above 0; `None` after a delete.
+    value: Option<(Vec<u8>, Option<Vec<u8>>)>,
+    /// When the last put went out (a change or a re-put), or when a re-put
+    /// the clock guard held was last tried.
+    at: tokio::time::Instant,
+}
+
+/// One member's writer state, shared with its refresher. Puts take `held`
+/// for their whole mint-record-publish, so a re-put never overtakes a
+/// change with an older value.
+struct Member {
+    held: tokio::sync::Mutex<Held>,
+    /// [`StateWriter::set_refresh`].
+    refresh: AtomicBool,
+    /// A put, a delete, or the refresh switched: the refresher looks again.
+    wake: tokio::sync::Notify,
+}
+
+/// Everything the refresher of one member needs.
+struct Refresher {
+    member: Arc<Member>,
+    writer: Arc<Writer>,
+    store: Arc<Store>,
+    minter: Arc<Minter>,
+    key: OwnedKeyExpr,
+    period: Duration,
+    closed: tokio::sync::watch::Receiver<bool>,
+}
+
+impl Refresher {
+    /// Re-puts the member whenever `period` passes without a put
+    /// (`freshness.v1` §2.4), until the service closes.
+    async fn run(mut self) {
+        loop {
+            if *self.closed.borrow() {
+                return;
+            }
+            let due = {
+                let h = self.member.held.lock().await;
+                (self.member.refresh.load(Ordering::Relaxed) && h.value.is_some()).then_some(h.at)
+            };
+            let period = self.period;
+            let sleep = async move {
+                let Some(at) = due else {
+                    return std::future::pending::<()>().await;
+                };
+                loop {
+                    let elapsed = at.elapsed();
+                    if elapsed >= period {
+                        return;
+                    }
+                    tokio::time::sleep((period - elapsed).min(STEP)).await;
+                }
+            };
+            tokio::select! {
+                () = sleep => {}
+                () = self.member.wake.notified() => continue,
+                changed = self.closed.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            }
+            self.once().await;
+        }
+    }
+
+    /// One re-put, if it is still due.
+    async fn once(&self) {
+        let mut h = self.member.held.lock().await;
+        if *self.closed.borrow()
+            || !self.member.refresh.load(Ordering::Relaxed)
+            || h.at.elapsed() < self.period
+        {
+            return;
+        }
+        let Some((bytes, attachment)) = h.value.clone() else {
+            return;
+        };
+        match self.minter.mint() {
+            Ok(ts) => {
+                self.store.put(
+                    &self.key,
+                    bytes.clone(),
+                    self.writer.encoding().clone(),
+                    attachment.clone(),
+                    ts,
+                );
+                h.at = tokio::time::Instant::now();
+                if let Err(e) = self
+                    .writer
+                    .put_stamped(bytes.into(), attachment.map(Into::into), ts)
+                    .await
+                {
+                    tracing::warn!(key = %self.key, "freshness.v1: a re-put failed: {e}");
+                }
+            }
+            Err(_) => {
+                // §4.3, freshness.v1 §2.10: the clock guard holds writes, so
+                // the member goes stale by design. Try again shortly.
+                let retry = HELD_RETRY.min(self.period);
+                let now = tokio::time::Instant::now();
+                h.at = now.checked_sub(self.period - retry).unwrap_or(now);
+            }
+        }
+    }
+}
+
 /// A writer on one state member: every put and delete stamped by the owner
 /// (S1), recorded for the owner's GET answers (S2), then published.
+///
+/// On a resource whose contract declares `freshness.ttl_s` above 0, it
+/// re-puts the member's value unchanged whenever ttl/2 passes without a
+/// put (the module doc's refresher). Dropping it stops that.
 pub struct StateWriter {
-    writer: Writer,
+    writer: Arc<Writer>,
     key: OwnedKeyExpr,
     store: Arc<Store>,
     minter: Arc<Minter>,
+    member: Arc<Member>,
+    /// The refresher's period: [`REFRESH_LEAD`] of ttl/2.
+    period: Option<Duration>,
+    refresher: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for StateWriter {
+    fn drop(&mut self) {
+        if let Some(t) = self.refresher.take() {
+            t.abort();
+        }
+    }
 }
 
 impl StateWriter {
-    pub(crate) fn new(writer: Writer, store: Arc<Store>, minter: Arc<Minter>) -> Self {
+    pub(crate) fn new(
+        writer: Writer,
+        store: Arc<Store>,
+        minter: Arc<Minter>,
+        horizon: &Horizon,
+        closed: tokio::sync::watch::Receiver<bool>,
+    ) -> Self {
         let key = writer.key_expr().clone().into_owned();
         let key = OwnedKeyExpr::from(key);
+        let writer = Arc::new(writer);
+        let member = Arc::new(Member {
+            held: tokio::sync::Mutex::new(Held {
+                value: None,
+                at: tokio::time::Instant::now(),
+            }),
+            refresh: AtomicBool::new(true),
+            wake: tokio::sync::Notify::new(),
+        });
+        let period = horizon
+            .refresh_bound()
+            .map(|b| b.mul_f64(REFRESH_LEAD))
+            .filter(|p| !p.is_zero());
+        let refresher = period.and_then(|period| {
+            let Ok(rt) = tokio::runtime::Handle::try_current() else {
+                tracing::warn!(
+                    key = %key,
+                    "freshness.v1: no tokio runtime here, so this member is not re-put"
+                );
+                return None;
+            };
+            Some(
+                rt.spawn(
+                    Refresher {
+                        member: Arc::clone(&member),
+                        writer: Arc::clone(&writer),
+                        store: Arc::clone(&store),
+                        minter: Arc::clone(&minter),
+                        key: key.clone(),
+                        period,
+                        closed,
+                    }
+                    .run(),
+                ),
+            )
+        });
         Self {
             writer,
             key,
             store,
             minter,
+            member,
+            period,
+            refresher,
         }
     }
 
@@ -266,6 +466,32 @@ impl StateWriter {
     #[must_use]
     pub fn writer(&self) -> &Writer {
         &self.writer
+    }
+
+    /// How often the member is re-put without a change (`freshness.v1`
+    /// §2.4): [`REFRESH_LEAD`] of ttl/2, or `None` when the resource
+    /// declares no horizon above 0.
+    #[must_use]
+    pub fn refresh_period(&self) -> Option<Duration> {
+        self.period.filter(|_| self.refresher.is_some())
+    }
+
+    /// Whether the member is re-put now: it has a horizon above 0, and
+    /// [`StateWriter::set_refresh`] has not turned it off.
+    #[must_use]
+    pub fn is_refreshing(&self) -> bool {
+        self.refresh_period().is_some() && self.member.refresh.load(Ordering::Relaxed)
+    }
+
+    /// Turns the re-puts off, or back on (`freshness.v1` §2.4, "only a value
+    /// it holds current"). An owner that can no longer vouch for the value,
+    /// because the source it reports went away, turns them off and lets the
+    /// member go stale, rather than confirming a value it does not know to
+    /// be current. Turned back on, a member whose interval has run out is
+    /// re-put at once.
+    pub fn set_refresh(&self, on: bool) {
+        self.member.refresh.store(on, Ordering::Relaxed);
+        self.member.wake.notify_one();
     }
 
     /// Puts a value (already in the contract's type), stamped. Returns the
@@ -282,17 +508,22 @@ impl StateWriter {
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<Timestamp> {
+        let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
         let payload: ZBytes = payload.into();
         let attachment: Option<ZBytes> = attachment.map(Into::into);
-        self.store.put(
-            &self.key,
-            payload.to_bytes().into_owned(),
-            self.writer.encoding().clone(),
-            attachment.as_ref().map(|a| a.to_bytes().into_owned()),
-            ts,
-        );
-        self.writer.put_stamped(payload, attachment, ts).await?;
+        let bytes = payload.to_bytes().into_owned();
+        let kept = attachment.as_ref().map(|a| a.to_bytes().into_owned());
+        if self.period.is_some() {
+            held.value = Some((bytes.clone(), kept.clone()));
+        }
+        held.at = tokio::time::Instant::now();
+        self.store
+            .put(&self.key, bytes, self.writer.encoding().clone(), kept, ts);
+        let sent = self.writer.put_stamped(payload, attachment, ts).await;
+        drop(held);
+        self.member.wake.notify_one();
+        sent?;
         Ok(ts)
     }
 
@@ -305,9 +536,16 @@ impl StateWriter {
     /// Deletes the member, stamped; GETs within the window answer it with
     /// `reply_del` (S3).
     pub async fn delete(&self) -> Result<Timestamp> {
+        let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
+        // A deleted member is not re-put (`freshness.v1` §2.4).
+        held.value = None;
+        held.at = tokio::time::Instant::now();
         self.store.delete(&self.key, ts);
-        self.writer.delete_stamped(ts).await?;
+        let sent = self.writer.delete_stamped(ts).await;
+        drop(held);
+        self.member.wake.notify_one();
+        sent?;
         Ok(ts)
     }
 }
@@ -337,6 +575,40 @@ impl Current {
         match self {
             Self::Value { sample, .. } => sample.timestamp().copied(),
             Self::Deleted { timestamp, .. } => *timestamp,
+        }
+    }
+
+    /// The id of the clock that stamped it, the owner's session's zid when
+    /// S1 holds: what a reader's clock trust is against (`freshness.v1`
+    /// §2.6).
+    #[must_use]
+    pub fn clock(&self) -> Option<String> {
+        self.timestamp().map(|t| t.get_id().to_string())
+    }
+
+    /// This reply as a `freshness.v1` observation (§2.6): its stamp aged
+    /// against this host's clock now, under the reader's `clock` trust
+    /// against [`Current::clock`]. Judge it with
+    /// [`zenkey_model::freshness::judge`].
+    #[must_use]
+    pub fn freshness(&self, clock: ClockTrust) -> Observation {
+        self.freshness_at(SystemTime::now(), clock)
+    }
+
+    /// [`Current::freshness`] at the instant `now`.
+    #[must_use]
+    pub fn freshness_at(&self, now: SystemTime, clock: ClockTrust) -> Observation {
+        let reply = match self {
+            Self::Value { sample, .. } => Reply::Put {
+                stamp_age: sample
+                    .timestamp()
+                    .map(|t| StampAge::between(t.get_time().to_system_time(), now)),
+            },
+            Self::Deleted { .. } => Reply::Delete,
+        };
+        Observation::Got {
+            reply: Some(reply),
+            clock,
         }
     }
 }

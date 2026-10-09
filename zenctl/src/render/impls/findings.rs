@@ -377,8 +377,8 @@ impl Render for zenkey_fleet::ConformReport {
         }
         notes.push(
             Note::coverage(
-                "freshness and budget are not asked: their profiles do not exist yet (#613) — \
-                 not asked is neither a pass nor a violation",
+                "budget is not asked: its profile does not exist yet (#613) — not asked is \
+                 neither a pass nor a violation",
             )
             .cite("tooling guide O4"),
         );
