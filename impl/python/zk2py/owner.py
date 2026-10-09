@@ -224,7 +224,9 @@ class Owner:
                  withhold: set[str] | None = None, handlers: dict[str, Any] | None = None,
                  members: dict[str, list[dict[str, Any]]] | None = None, hold_s: float = 0.0,
                  auth: tuple[str, str] | None = None, tokenless: set[str] | None = None,
-                 router_connect: str | None = None):
+                 router_connect: str | None = None, hostid: Any = None,
+                 hostid_ephemeral: bool | None = None, meta_host: str | None = None,
+                 state_zid: bool = True):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -249,7 +251,16 @@ class Owner:
           ``archive.v1`` is refused (§4.4, 0.16).
         - ``router_connect``: as a router (no ``connect``), also link to that
           router endpoint, so this owner's own session is a router of the
-          deployment (§4.2, "A tool's S1 check")."""
+          deployment (§4.2, "A tool's S1 check").
+        - ``hostid``: the process's :class:`zk2py.hostid.Runtime`. With
+          ``system`` ``@hostid.v1`` (hostid.v1 §2.3) the system is minted by
+          it before the session opens (§2.7), and the descriptor lists
+          ``hostid.v1`` (§2.8, core §3.3, 0.19). ``hostid_ephemeral`` is the
+          configuration's ``hostid.ephemeral``.
+        - ``meta_host``: the descriptor's ``meta.host``; a minted service
+          states the host name by default (hostid.v1 §2.13).
+        - ``state_zid``: False leaves ``meta.zid`` out (hostid scenarios
+          §6 step 3)."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -265,6 +276,12 @@ class Owner:
         self.auth = auth
         self.tokenless = set(tokenless or ())
         self.router_connect = router_connect
+        self.hostid = hostid
+        self.hostid_ephemeral = hostid_ephemeral
+        self.meta_host = meta_host
+        self.state_zid = state_zid
+        #: hostid.v1 §2.8: whether this service's system is minted
+        self.minted = False
         self.port = None if connect else (port or free_loopback_port())
         self.endpoint = connect or f"tcp/127.0.0.1:{self.port}"
         #: core.md §1.2: 64 random bits, 16 lowercase hex digits.
@@ -350,7 +367,23 @@ class Owner:
 
     # -- bring-up (§8.2) --------------------------------------------------
 
+    def resolve_system(self) -> None:
+        """hostid.v1 §2.3 and §2.7: read the address as the configuration
+        spells it, and mint the system "before that service's session opens".
+        A configuration error, or a failure to mint, raises before anything
+        is declared."""
+        if self.hostid is None and self.hostid_ephemeral is None and not self.system.startswith("@"):
+            return
+        if self.hostid is None:
+            raise ValueError("a system starting with @ needs a hostid runtime")
+        config: dict[str, Any] = {"address": f"{self.system}/{self.service}"}
+        if self.hostid_ephemeral is not None:
+            config["hostid"] = {"ephemeral": self.hostid_ephemeral}
+        resolved = self.hostid.configure(config)
+        self.system, self.minted = resolved.system, resolved.minted
+
     def start(self) -> None:
+        self.resolve_system()  # hostid.v1 §2.7: before the session, and before step 1
         plan = self._plan()  # step 2 first: a refusal declares nothing
         conf = zenoh.Config()
         if self.connect:
@@ -471,8 +504,13 @@ class Owner:
                 "bindings": list(self.bindings.get(role, [])), "params": {},
                 **({"optional": True} if req["optional"] else {}),
             } for c in self.contracts for role, req in c.canonical["requires"].items()],
-            "profiles": sorted({u for c in self.contracts for u in c.canonical["uses"]}),
-            "meta": {"zid": str(self.session.zid())},
+            # Core §3.3 (0.19): "the union of two sets": the contracts' uses,
+            # and the derivation-only profiles the instance follows.
+            "profiles": sorted({u for c in self.contracts for u in c.canonical["uses"]}
+                               | ({"hostid.v1"} if self.minted else set())),
+            "meta": {**({"zid": str(self.session.zid())} if self.state_zid else {}),
+                     **({"host": self.meta_host} if self.meta_host is not None
+                        else {"host": socket.gethostname()} if self.minted else {})},
         }
         return json.dumps(doc, separators=(",", ":")).encode()
 

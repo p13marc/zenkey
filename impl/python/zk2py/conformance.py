@@ -343,6 +343,54 @@ def _example_against_history(ex: Path, rel: str, c, built: bytes) -> list[Result
     return out
 
 
+# -- profiles/<name>/conformance/ (core §10, 0.19; profiles/README.md) ------
+
+def _hostid_vectors(path: Path) -> list[Result]:
+    """hostid.v1 §2.1: "a machine id and a salt -> the minted system, or null
+    when the input is refused. The input is a JSON string, whose UTF-8
+    encoding is the file's bytes"."""
+    from . import hostid
+
+    return [_check(f"vectors: {c['input']!r} with {c['salt']} ({c['note']})",
+                   hostid.derive(c["input"].encode("utf-8"), c["salt"]), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _hostid_shapes(path: Path) -> list[Result]:
+    """hostid.v1 §2.11: "a string -> whether it is in the minted shape"."""
+    from . import hostid
+
+    return [_check(f"shapes: {c['value']!r} ({c['note']})", hostid.is_minted_shape(c["value"]), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+#: Each profile's fixtures, by file name. profiles/README.md: "An unknown
+#: file fails the test, so a fixture cannot land unrun. A README.md there
+#: is prose."
+PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
+    "hostid": {"vectors.json": _hostid_vectors, "shapes.json": _hostid_shapes},
+}
+
+
+def _profile_family(name: str) -> Callable[[Path], list[Result]]:
+    def family(root: Path) -> list[Result]:
+        directory = root.parent / "profiles" / name / "conformance"
+        if not directory.is_dir():
+            raise CannotRun(f"{directory} not found")
+        out: list[Result] = []
+        for path in sorted(directory.iterdir()):
+            if path.name == "README.md":
+                continue
+            run = PROFILE_FIXTURES[name].get(path.name)
+            if run is None:
+                out.append((f"{path.name}", False, "an unknown fixture file: the runner does not read it"))
+                continue
+            out += run(path)
+        return out
+
+    return family
+
+
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "keys": family_keys,
     "slugs": family_slugs,
@@ -355,6 +403,9 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "errors": family_errors,
     "compat": family_compat,
     "examples": family_examples,
+    # The profiles, one family each (profiles/README.md, "How the harnesses
+    # take profiles in").
+    **{name: _profile_family(name) for name in PROFILE_FIXTURES},
 }
 
 
