@@ -140,8 +140,27 @@ fn walkthrough_with_the_ground_as_a_client() {
 }
 
 /// The ground's router in a south region of the vehicle router (U23), under
-/// the allow posture zenoh-modem's faces run: the face's denies, the
-/// complement's, and the near router's `gateway.south`.
+/// deny: the face's denies, the queryables the far router may query
+/// declared toward it, and the near router's `gateway.south`.
+#[test]
+fn walkthrough_with_the_ground_router_south_under_deny() {
+    pinned(
+        "walkthrough.face-south-deny.json5",
+        &plan(
+            "walkthrough",
+            "walkthrough",
+            AclPermission::Deny,
+            Some(AclFace {
+                attach: FaceAttach::SouthRegion,
+                far: "ground".into(),
+                region: Some("ground".into()),
+            }),
+        ),
+    );
+}
+
+/// The same, under the allow posture zenoh-modem's faces run: the face's
+/// denies, the complement's, and the near router's `gateway.south`.
 #[test]
 fn walkthrough_with_the_ground_router_south() {
     pinned(

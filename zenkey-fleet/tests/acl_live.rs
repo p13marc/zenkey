@@ -771,7 +771,7 @@ async fn under_deny_the_grants_are_exactly_what_is_allowed() {
 async fn history(bus: &Bus) -> Vec<String> {
     let got: Arc<Mutex<Vec<String>>> = Arc::default();
     let g = Arc::clone(&got);
-    let _sub = bus
+    let sub = bus
         .of("reader")
         .declare_subscriber("zk2/*/beacon/beacon.v1/state/position")
         .history(HistoryConfig::default().detect_late_publishers())
@@ -787,6 +787,7 @@ async fn history(bus: &Bus) -> Vec<String> {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let out = got.lock().unwrap().clone();
+    drop(sub);
     out
 }
 

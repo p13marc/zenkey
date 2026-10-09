@@ -403,6 +403,10 @@ pub enum AclGrantKind {
     /// Under `allow` (#684, F-80): no principal declares a queryable in the
     /// routers' admin space, `@/**`, which the routers serve themselves.
     DenyAdminSpace,
+    /// A far router in a south region (§8.5, U23): this router's queryables
+    /// over what the far side may query, declared toward it, without which
+    /// it routes no query here (measured, #612 FJ7).
+    FaceDeclarations,
     /// A constrained face (§8.5): no `@zk` traffic across it.
     FacePresence,
     /// A constrained face (§8.5): no `@stream` keys across it.
@@ -424,6 +428,7 @@ impl AclGrantKind {
             AclGrantKind::DenyRead => "deny_read",
             AclGrantKind::DenyReceive => "deny_receive",
             AclGrantKind::DenyAdminSpace => "deny_admin_space",
+            AclGrantKind::FaceDeclarations => "face_declarations",
             AclGrantKind::FacePresence => "face_presence",
             AclGrantKind::FaceStream => "face_stream",
         }

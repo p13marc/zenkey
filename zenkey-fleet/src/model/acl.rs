@@ -258,6 +258,11 @@ const CITE_DENY_ADMIN_SPACE: &str = "#684 (F-80, spec amendment 0.12): the route
      one that does can answer a tool's admin-space read, and turn a check from unobservable \
      into a false clean. Deny works by inclusion: `@/**` covers `@/<zid>/router`. The admin \
      space is never namespaced";
+const CITE_FACE_DECLARATIONS: &str = "§8.5, U23: a far router in a south region learns of this \
+     router's queryables by declaration, on interest, and routes a query here only for one it \
+     has learnt; the queryables over what the far side may GET or call are declared toward it \
+     (measured, #612 FJ7: without this rule its GET gets no reply). A client principal needs \
+     none: it sends every query to its router";
 const CITE_FACE_PRESENCE: &str = "§8.5: no `@zk` traffic across a constrained face. Bindings \
      resolve statically (R7), bundles are held on each side, and presence never crosses";
 const CITE_FACE_STREAM: &str = "§8.5: `@stream` keys denied across the face unless `link.v1` \
@@ -1470,6 +1475,31 @@ pub fn plan_acl(
                     }
                 }
                 if is_far {
+                    let south = opts
+                        .face
+                        .as_ref()
+                        .is_some_and(|f| f.attach == FaceAttach::SouthRegion);
+                    let mut queried = Vec::new();
+                    for h in &pl.holders {
+                        let h = held(&holders, h);
+                        for k in h.data.iter().chain(&h.history).chain(&h.calls) {
+                            push_unique(&mut queried, k.clone());
+                        }
+                    }
+                    if south && !queried.is_empty() {
+                        let id = &pl.subject.id;
+                        ids.push(rules.push(rule(
+                            format!("face-declarations:{id}"),
+                            AclPermission::Allow,
+                            OUT,
+                            &[AclMessage::DeclareQueryable],
+                            &ns,
+                            &queried,
+                            AclGrantKind::FaceDeclarations,
+                            Some(id),
+                            CITE_FACE_DECLARATIONS,
+                        )));
+                    }
                     ids.extend(face_rules(&mut rules, &pl.subject.id));
                 } else {
                     ids.push(contracts_in.clone());
@@ -3476,8 +3506,40 @@ type = { raw = "text/plain" }
                     let gw = plan.gateway.as_ref().expect("a gateway");
                     assert_eq!(gw.south.len(), 2);
                     assert_eq!(gw.south[1].filters[0].region_names, ["ground"]);
+                    // A far router learns of what it may query by
+                    // declaration: those queryables are declared toward it.
+                    let d = rule_of(&plan, "face-declarations:ground");
+                    assert_eq!(
+                        (d.permission, d.flows.as_slice(), d.messages.as_slice()),
+                        (
+                            AclPermission::Allow,
+                            &[AclFlow::Egress][..],
+                            &[AclMessage::DeclareQueryable][..]
+                        )
+                    );
+                    assert!(
+                        d.key_exprs
+                            .contains(&"zk2/vehicle-01/navigation/nav.v2/state/**".to_owned())
+                    );
+                    assert!(
+                        d.key_exprs
+                            .contains(&"zk2/vehicle-01/thruster-l/thruster.v1/@op/arm".to_owned())
+                    );
+                    assert!(
+                        ground
+                            .rules
+                            .contains(&"face-declarations:ground".to_owned())
+                    );
                 }
-                _ => assert!(plan.gateway.is_none()),
+                _ => {
+                    assert!(plan.gateway.is_none());
+                    assert!(
+                        !ground
+                            .rules
+                            .iter()
+                            .any(|r| r.starts_with("face-declarations"))
+                    );
+                }
             }
         }
     }
