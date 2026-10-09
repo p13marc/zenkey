@@ -811,3 +811,40 @@ async fn an_empty_namespace_is_no_verdict() {
         2
     );
 }
+
+// ─── binding-unsatisfied: bindings.md §1, R5 ────────────────────────────────
+
+/// bindings.md §1 (R5): a role bound to a provider present now is clean;
+/// once the provider is gone — no token, no descriptor visible to this
+/// reader — the same role is the finding, graded by what the descriptor
+/// says of its need (a role the component's own manifest declares carries
+/// none, so a warning).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_bound_role_is_clean_while_its_provider_is_present() {
+    let (_r, ep) = router(false).await;
+    let (owners, consumers, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let provider = bring_up(
+        &owners,
+        config("host-a/tc"),
+        &[example("tcgui/tc.netif.v1")],
+    )
+    .await;
+    let mut gui = ServiceBuilder::new(
+        &consumers,
+        config("ws-01/gui").bind("netif", &["host-a/tc"]),
+    );
+    gui.require("netif", iface("tc.netif.v1"), false);
+    let _gui = gui.start().await.expect("the consumer");
+    settled(&tool, &["host-a/tc", "ws-01/gui"]).await;
+    let only = spec(&[CheckId::BindingUnsatisfied]);
+
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    assert!(clean(&r, CheckId::BindingUnsatisfied).starts_with("1 bound role"));
+
+    provider.close().await.expect("the provider closes");
+    tokens(&tool, "zk2/host-a/tc/@zk/instance/*", 0).await;
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    let f = found(&r, CheckId::BindingUnsatisfied, "ws-01/gui netif");
+    assert_eq!(f.severity, DoctorSeverity::Warning);
+    assert!(f.evidence.contains("host-a/tc"), "{f:?}");
+}

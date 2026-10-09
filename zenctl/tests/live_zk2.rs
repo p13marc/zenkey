@@ -1893,8 +1893,9 @@ async fn doctor_transitions_and_a_watchdog_rule_read_the_same_checks() {
 }
 
 /// §7.4 and §8.3 from the flags a run is given: under `ulimit -l 64` the
-/// memlock is below the floor, an info finding that exits 0; and a
-/// presence budget the deployment is over is a warning, exit 1.
+/// memlock is below the floor, an info finding that exits 0, and at the
+/// floor it is clean; and a presence budget the deployment is over is a
+/// warning, exit 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_local_memlock_and_the_presence_budget_are_judged() {
     let bus = Bus::up(None).await;
@@ -1915,6 +1916,20 @@ async fn the_local_memlock_and_the_presence_budget_are_judged() {
         shm["findings"][0]["evidence"]
             .as_str()
             .is_some_and(|e| e.contains("64 KiB")),
+        "{run}"
+    );
+    // At the floor (8 MiB, Debian's default hard limit too): clean.
+    let run = bus
+        .zenctl_limited(
+            &doctor_args(&["--check", "shm-memlock-low", "--format", "json"]),
+            Some(8192),
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        check_row(&doc, "shm-memlock-low")["verdict"]["answer"],
+        "not_established",
         "{run}"
     );
 
