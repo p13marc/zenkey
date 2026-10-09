@@ -3,6 +3,60 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.12 — 2026-10-09: who may answer the admin space (#684)
+
+The Python implementation's round against 0.11 (PR #683) found F-80:
+**any session can answer the admin space**. A plain client declaring a
+queryable on `@/<zid>/router` turned S4's check from unobservable to
+clean: the false clean 0.10 forbids. The reference's doctor had the same
+hole. It is fixed here.
+
+**Measured, beyond the finding.** zk2py's first defence was to accept an
+answer only for a router its session is connected to, judged by the zid
+in the key. That is not enough. A spoofer chooses the key, so it can
+answer on the real router's own key. The reference measured this on zenoh
+1.10.1 (`zenkey/tests/admin_spoof.rs`):
+- with the admin space off, the spoof on the router's own key is the
+  only answer;
+- the reply's replier id names the spoofer, not the router.
+
+The replier id is what tells them apart. The key and the document never
+do.
+
+**Changed: rules stated.**
+- **Who answered (§4.2).** A tool counts an admin answer as a router's
+  only when the reply's replier id is the zid its key names, and that zid
+  is a router its session is connected to, or the session itself.
+  - Any other answer is unverified, and never contributes to a clean
+    verdict.
+  - The replier id is unstable API (Appendix B, now stating what it
+    names). A tool that cannot read it holds every answer unverified.
+  - An operator MAY tell a tool to trust every answer when the grants deny
+    `@/**` queryables to every principal, which no tool can observe.
+- **No principal declares queryables under `@/**` (§11.1).** The routers
+  serve the admin space themselves. A generator allows it to none under
+  `deny`, and denies it to every principal under `allow`. §11.3 states the
+  fact.
+- **`security.md §3`** runs the spoof with the admin space off and on, and
+  then under generated grants. That last step waits for FJ7's generator.
+
+**Changed: the reference was wrong, and is fixed with this amendment.**
+- **The doctor (`zenkey-fleet`)** read every admin answer as a router's.
+  - Now it records each reply's replier id (`AdminEntry::replier`) and
+    verifies every answer as above. It lists unverified ones as unjudged,
+    naming the key and who answered, so `storage-on-state` and
+    `router-version-skew` are never clean beside one.
+  - `DoctorSpec::trust_admin`, which is zenctl's `doctor
+    --trust-admin-space`, is the operator's alternative.
+  - The live storage test played a storage manager from a raw session,
+    which is the spoof, so it now runs trusted.
+  - A new live test runs the spoof with the admin space off and on.
+
+**Deliberately not changed.**
+- **The core still requires no unstable API.** The replier id is how a
+  tool verifies, and a tool that cannot read it loses the clean verdict,
+  not its correctness.
+
 ## 0.11 — 2026-10-09: how a zid compares, and what S4's check reads (#681)
 
 The Python implementation's round against 0.10 (PR #680) found three gaps,

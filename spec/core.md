@@ -1,13 +1,14 @@
 # zk2 core specification
 
-**Version 0.11** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.12** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
 operations runtime's decisions and the codegen's gaps, in 0.8 what
 implementing 0.7 found, a refused presence read first, in 0.9 the
 order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
-a doctor can and cannot decide, and in 0.11 how a zid is compared).
+a doctor can and cannot decide, in 0.11 how a zid is compared, and in 0.12
+who may answer the admin space).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -625,6 +626,26 @@ cannot tell under `Latest` which replier answered.
   `@state/**` breaks S4. A router that answers the first selector and has
   nothing under the second runs no storage. When no router answers the
   first, the check is unobservable.
+- **Who answered** (0.12, F-80).
+  - **The problem.** Any session can declare a queryable under
+    `@/<zid>/router`, a real router's zid included. The key names the zid
+    its declarer chose, and the document is whatever that session sends.
+  - **Measured on zenoh 1.10.1.** With the admin space off, a client's
+    answer on the router's own key is the only answer. A tool that read it
+    as the router's would report S4 clean.
+  - **The rule.** A tool counts an answer as a router's only when the
+    reply's replier id is the zid the key names, and that zid is a router
+    its session is connected to, or the session itself. Any other answer is
+    **unverified**, and an unverified answer never contributes to a clean
+    verdict.
+  - **The replier id** is unstable API in zenoh 1.10.1 (Appendix B), which
+    the core does not require (§0). A tool that cannot read it holds every
+    answer unverified.
+  - **The operator's alternative.** An operator MAY tell a tool to trust
+    every answer when the deployment's grants deny `@/**` queryables to
+    every principal (§11.1), which no tool can observe.
+
+  `[Sc: security.md §3]`
 
 **Observing S1.** An owner's stamp is told from a router's by its id: the
 owner's session's zid, against the router's (§4.1). Where the owner's
@@ -2219,6 +2240,10 @@ Ownership (§6) reduces access control to three grant shapes:
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
+- **No principal declares queryables under `@/**`** (0.12): the routers
+  serve the admin space themselves. A generator allows it to none under
+  `deny`, and denies it to every principal under `allow` (§4.2, "Who
+  answered"). `[Sc: security.md §3]`
 - **There are no cross-principal write grants.**
 - **An archive principal** has Own on its own prefix, plus Consume on what it
   records.
@@ -2256,6 +2281,8 @@ Ownership (§6) reduces access control to three grant shapes:
 - A refused liveliness read is answered complete and empty (§8.1). A deny
   on presence hides a service from a reader exactly as its absence would,
   so a reader the grants refuse attributes silence to absence.
+- Any session can answer under `@/**`, a router's own keys included,
+  unless the grants deny it (§4.2, "Who answered").
 
 ---
 
@@ -2328,7 +2355,8 @@ Appendix B. These are the ones the rules above cite:
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
 - A reply error carries a payload and an encoding, and no key expression.
-  `Reply::replier_id` is behind the `unstable` feature.
+  `Reply::replier_id` is behind the `unstable` feature. It names the session
+  that sent the reply, whatever key the reply is on.
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.

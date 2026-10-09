@@ -16,7 +16,7 @@ the runtime (#610 onward).
 | [`bindings.md`](bindings.md) | §3.2: R1–R6 |
 | [`retrieval.md`](retrieval.md) | §8.4 |
 | [`types.md`](types.md) | §2.4 QoS, §7.1–§7.2 |
-| [`security.md`](security.md) | §11 |
+| [`security.md`](security.md) | §11; §4.2's admin space |
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
 
 Conventions: R1 and R2 are routers, linked R2 → R1 unless a scenario says

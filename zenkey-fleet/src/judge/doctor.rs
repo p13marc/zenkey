@@ -53,7 +53,7 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::SampleKind;
 
 use crate::bus::admin::{
-    ROUTERS, STORAGES, admin_read, merge_storage_rows, router_from_admin_entry,
+    AdminEntry, ROUTERS, STORAGES, admin_read, merge_storage_rows, router_from_admin_entry,
     storage_from_admin_entry,
 };
 use crate::bus::contracts::BundleStore;
@@ -100,6 +100,11 @@ pub struct DoctorSpec {
     pub deep: bool,
     /// The checks to ask; the rest are `NotAsked`.
     pub checks: BTreeSet<CheckId>,
+    /// Trust every admin-space answer, on the operator's word that the
+    /// deployment's grants deny `@/**` queryables to every principal
+    /// (§4.2, §11.1, 0.12), which no tool can observe. Off by default:
+    /// an answer is then trusted only when it is verifiably a router's.
+    pub trust_admin: bool,
 }
 
 impl DoctorSpec {
@@ -111,6 +116,7 @@ impl DoctorSpec {
             presence_budget: DEFAULT_PRESENCE_BUDGET,
             deep: false,
             checks: CheckId::ALL.into_iter().collect(),
+            trust_admin: false,
         }
     }
 
@@ -181,10 +187,19 @@ pub struct DoctorObservation {
 /// The routers' admin space, as two reads found it.
 #[derive(Debug, Clone, Default)]
 pub struct AdminSpace {
+    /// The routers whose answers were verified (below).
     pub routers: Vec<RouterInfo>,
+    /// The storages those routers run.
     pub storages: Vec<StorageInfo>,
     /// Whether both reads ended at the routers' final reply.
     pub complete: bool,
+    /// Answers that could not be shown to be a router's (§4.2, 0.12,
+    /// F-80), one line each: any session can answer under
+    /// `@/<zid>/router`. An answer is verified when its replier id is the
+    /// zid its key names and that zid is a router this session is
+    /// connected to, or the session itself. Never counted toward a clean
+    /// verdict.
+    pub unverified: Vec<String>,
 }
 
 /// The presence domain's tokens, counted through [`DOMAIN_SELECTORS`].
@@ -263,7 +278,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         if !spec.asks_admin() {
             return None;
         }
-        Some(admin_space(&bus.raw, t).await)
+        Some(admin_space(&bus.raw, t, spec.trust_admin).await)
     };
     let domain = async {
         if !spec.asks(CheckId::PresenceOverBudget) {
@@ -406,28 +421,68 @@ fn served(observed: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Des
 }
 
 /// The routers' admin space: `@/*/router` and the storages, in no
-/// namespace. Either read failing is the whole answer failing.
-async fn admin_space(raw: &Session, timeout: Duration) -> Result<AdminSpace, String> {
+/// namespace. Either read failing is the whole answer failing. Each answer
+/// is verified as a router's (§4.2, 0.12): its replier id is the zid its
+/// key names, and that zid is a router this session is connected to, or
+/// this session itself; or, with `trust`, on the operator's word.
+async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<AdminSpace, String> {
+    let mut here: BTreeSet<String> = raw
+        .info()
+        .routers_zid()
+        .await
+        .map(|z| zid_value(&z.to_string()))
+        .collect();
+    here.insert(zid_value(&raw.zid().to_string()));
     let (routers, storages) = tokio::join!(
         admin_read(raw, ROUTERS, timeout),
         admin_read(raw, STORAGES, timeout)
     );
     let routers = routers.map_err(|e| crate::one_line(&e))?;
     let storages = storages.map_err(|e| crate::one_line(&e))?;
-    Ok(AdminSpace {
-        complete: routers.complete && storages.complete,
-        routers: routers
+    let complete = routers.complete && storages.complete;
+    let mut unverified = BTreeSet::new();
+    let mut verified = |e: &AdminEntry| -> bool {
+        let named = crate::bus::admin::admin_key_zid(&e.key).map(zid_value);
+        let by = e.replier.as_deref().map(zid_value);
+        match (&named, &by) {
+            _ if trust => true,
+            (Some(n), Some(b)) if n == b && here.contains(n) => true,
+            _ => {
+                unverified.insert(format!(
+                    "`{}`, answered by {}{}",
+                    e.key,
+                    e.replier
+                        .as_deref()
+                        .unwrap_or("a session zenoh did not name"),
+                    if named.as_ref().is_some_and(|n| here.contains(n)) {
+                        ""
+                    } else {
+                        ", for a router this session is not connected to"
+                    }
+                ));
+                false
+            }
+        }
+    };
+    let routers: Vec<RouterInfo> = routers
+        .entries
+        .into_iter()
+        .filter(|e| verified(e))
+        .map(router_from_admin_entry)
+        .collect();
+    let storages = merge_storage_rows(
+        storages
             .entries
-            .into_iter()
-            .map(router_from_admin_entry)
+            .iter()
+            .filter(|e| verified(e))
+            .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
             .collect(),
-        storages: merge_storage_rows(
-            storages
-                .entries
-                .iter()
-                .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
-                .collect(),
-        ),
+    );
+    Ok(AdminSpace {
+        complete,
+        routers,
+        storages,
+        unverified: unverified.into_iter().collect(),
     })
 }
 
@@ -1792,14 +1847,40 @@ fn admin_of(obs: &DoctorObservation, check: CheckId) -> Result<&AdminSpace, Chec
 
 /// The reason an admin-space check is unobservable when no router answered.
 fn no_router(a: &AdminSpace) -> String {
-    if a.complete {
+    let base = if a.complete {
         format!(
             "no router answered `{ROUTERS}` through this reader: the admin space is disabled, \
              the mesh is peer-only, or access control denies it"
         )
     } else {
         format!("the admin read of `{ROUTERS}` ended at its timeout with no router")
+    };
+    if a.unverified.is_empty() {
+        base
+    } else {
+        format!(
+            "{base}; {} answer(s) could not be shown to be a router's, and are not trusted \
+             (§4.2, 0.12): {}",
+            a.unverified.len(),
+            a.unverified.join("; ")
+        )
     }
+}
+
+/// The answers no check may count, as unjudged subjects (§4.2, 0.12).
+fn unverified_answers(a: &AdminSpace) -> Vec<Unjudged> {
+    a.unverified
+        .iter()
+        .map(|u| {
+            unjudged(
+                "admin space",
+                format!(
+                    "{u}: any session can answer under `@/<zid>/router`, so only a router's own \
+                     reply, from a router this session is connected to, is trusted (§4.2, 0.12)"
+                ),
+            )
+        })
+        .collect()
 }
 
 /// §4.2 S4: each storage's key expression against every owner's state
@@ -1824,7 +1905,7 @@ fn storage_on_state(obs: &DoctorObservation) -> CheckReport {
         })
         .collect();
     let mut findings = Vec::new();
-    let mut undecided = Vec::new();
+    let mut undecided = unverified_answers(a);
     for s in &a.storages {
         let subject = format!("{}@{}", s.name, s.zid);
         let Some(text) = &s.key_expr else {
@@ -1923,7 +2004,7 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
         return CheckReport::unobservable(C, no_router(a));
     }
     let mut versions: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut undecided = Vec::new();
+    let mut undecided = unverified_answers(a);
     for r in &a.routers {
         match &r.version {
             Some(v) => versions.entry(v).or_default().push(&r.zid),
@@ -2513,6 +2594,7 @@ mod tests {
             routers: vec![router("r1", Some("1.10.1"))],
             storages: vec![],
             complete: true,
+            unverified: vec![],
         }));
         o.memlock = Some(Memlock::Limited(64 * 1024 * 1024));
         let report = judge(&o, &spec());
@@ -2619,9 +2701,41 @@ mod tests {
                 routers,
                 storages,
                 complete,
+                unverified: vec![],
             })),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_admin_answer_no_router_can_be_shown_to_have_sent_is_never_clean() {
+        // §4.2 (0.12, F-80): a session answering `@/<zid>/router` itself.
+        let spoof = "`@/r1/router`, answered by c0ffee".to_owned();
+        let mut o = admin(vec![], vec![], true);
+        if let Some(Ok(a)) = &mut o.admin {
+            a.unverified.push(spoof.clone());
+        }
+        for c in [CheckId::StorageOnState, CheckId::RouterVersionSkew] {
+            assert!(
+                unseen(&check(&o, c)).contains("could not be shown"),
+                "{c:?}"
+            );
+        }
+        assert!(
+            found(&check(&o, CheckId::AdminUnreachable))
+                .evidence
+                .contains("c0ffee")
+        );
+        // Beside a verified router, still no clean verdict.
+        let mut o = admin(vec![router("r1", Some("1.10.1"))], vec![], true);
+        if let Some(Ok(a)) = &mut o.admin {
+            a.unverified.push(spoof);
+        }
+        let r = check(&o, CheckId::StorageOnState);
+        assert!(
+            !matches!(r.verdict, Judgement::NotEstablished { .. }),
+            "{r:#?}"
+        );
     }
 
     #[test]

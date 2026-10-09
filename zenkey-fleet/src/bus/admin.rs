@@ -31,6 +31,11 @@ use crate::report::{
 pub struct AdminEntry {
     pub key: String,
     pub value: serde_json::Value,
+    /// The zid of the session that sent the reply, when zenoh says
+    /// (`Reply::replier_id`, unstable API, Appendix B). Any session can
+    /// answer under `@/<zid>/router`, a real router's zid included, so the
+    /// key alone never shows who answered (§4.2, 0.12, F-80).
+    pub replier: Option<String>,
 }
 
 /// GET an admin selector (default `@/**`). Fans to every node (target All,
@@ -92,6 +97,7 @@ async fn admin_read_within(session: &Session, selector: &str, opts: &GetOpts) ->
             elided += 1;
             continue;
         }
+        let replier = reply.replier_id().map(|g| g.zid().to_string());
         let Ok(sample) = reply.result() else {
             errors += 1;
             continue;
@@ -103,6 +109,7 @@ async fn admin_read_within(session: &Session, selector: &str, opts: &GetOpts) ->
         out.push(AdminEntry {
             key: sample.key_expr().as_str().to_string(),
             value,
+            replier,
         });
     }
     opts.note_elided(elided);
@@ -111,6 +118,15 @@ async fn admin_read_within(session: &Session, selector: &str, opts: &GetOpts) ->
         entries: out,
         complete: errors == 0 && elided == 0,
     })
+}
+
+/// The zid an admin key names: `@/<zid>/…`.
+#[must_use]
+pub fn admin_key_zid(key: &str) -> Option<&str> {
+    key.strip_prefix("@/")?
+        .split('/')
+        .next()
+        .filter(|z| !z.is_empty())
 }
 
 /// The selector [`routers`] reads.
