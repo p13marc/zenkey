@@ -3,6 +3,49 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.11 — 2026-10-09: how a zid compares, and what S4's check reads (#681)
+
+The Python implementation's round against 0.10 (PR #680) found three gaps,
+F-77 to F-79, and one editorial slip in 0.10. One gap was a real bug in
+the reference's doctor, and is fixed here.
+
+**Changed: the reference was wrong, and is fixed with this amendment.**
+- **A zid compares by value (F-78, §3.3, Appendix B).** zenoh 1.10.1 writes
+  a zid as lowercase hex without leading zeros: the owner example's
+  `meta.zid` was 31 digits, where `descriptors/ok-full` shows 16. The
+  doctor's `state-stamp-foreign` compared the two texts, so a `meta.zid`
+  spelled with a leading zero, or in capitals, would have called an owner's
+  own stamp foreign.
+  - **The rule:** a tool MUST compare two zids by value, never as text. An
+    owner SHOULD write `meta.zid` as zenoh writes it.
+  - **The fix:** the doctor now compares by value. A unit test pins it.
+  - **What did not need fixing:** zk2py already compared numerically. The
+    tooling guide's O7 now says so too.
+
+**Changed: rules stated.**
+- **What S4's check reads (F-79, §4.2).** 0.10 sent a tool to "the
+  routers' storage admin space" without naming its keys. The reference
+  reads two selectors:
+  - `@/*/router`, for the routers that answer;
+  - `@/*/router/**/storage_manager/storages/**`, one key per storage, its
+    value the storage's configuration with its `key_expr`.
+
+  A storage whose `key_expr` intersects an owner's state breaks S4. A
+  router that answers the first selector and has nothing under the second
+  runs no storage. When no router answers, the check is unobservable.
+  zk2py read the router document's `plugins`, which agrees for a router
+  with no plugin.
+- **A role's `optional` against its contract (F-77, §3.3).** For a role a
+  contract declares, a tool takes the need from the contract. A
+  disagreeing `optional` is listed under "Not checked, deliberately", and
+  `optional: false` written out is the same as absent.
+  `descriptors/ok-optional-unchecked` pins both, with no code. This is what
+  the reference and zk2py both did.
+
+**Editorial.** In §9.8, 0.10's bullet on revision order was inserted inside
+a paragraph and swallowed its second half ("Each rule below is a
+transition…"). The paragraph is whole again, and the bullet follows it.
+
 ## 0.10 — 2026-10-09: what a doctor can and cannot decide (#677)
 
 Writing zk2's `doctor` (#612, FJ6, PR #678) found eight places where a

@@ -1,13 +1,13 @@
 # zk2 core specification
 
-**Version 0.10** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.11** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
 operations runtime's decisions and the codegen's gaps, in 0.8 what
 implementing 0.7 found, a refused presence read first, in 0.9 the
-order of an owner's refusals and a scenario 0.8 got wrong, and in 0.10 what
-a doctor can and cannot decide).
+order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
+a doctor can and cannot decide, and in 0.11 how a zid is compared).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -495,10 +495,13 @@ gate does not name.
   A role the configuration leaves unbound is listed with `"bindings": []`
   (§3.2). `[F: descriptors/d009-*]`
   - **`optional`** (0.10) is `true` for a role the instance works without,
-    and absent otherwise: absent is required. For a role a contract
-    declares, it repeats that contract's `[requires]`. For a manifest role
-    it is the only place a tool learns the role's need, which is why it was
-    added. `[F: descriptors/ok-optional-role]`
+    and absent otherwise: absent is required, and `false` written out is
+    the same as absent. For a manifest role it is the only place a tool
+    learns the role's need, which is why it was added. For a role a
+    contract declares, it repeats that contract's `[requires]`, and a tool
+    takes the need from the contract: a value that disagrees is not checked
+    (0.11, below). `[F: descriptors/ok-optional-role,
+    ok-optional-unchecked]`
 - **`profiles`** is the union of the `uses` of the contracts the instance
   implements, sorted and deduplicated (§10 point 4).
 - **`meta`** is informative: host, process, build, and nothing in it is
@@ -507,6 +510,12 @@ gate does not name.
   stamp to its owner by comparing the stamp's id with it (S1, §4.2,
   "Observing S1"). Without it, a stamp's clock is unattributable, never
   foreign.
+  - **How a zid compares** (0.11). zenoh 1.10.1 writes a zid as lowercase
+    hexadecimal without leading zeros, at most 32 digits (Appendix B), so a
+    zid's text can be shorter than 32 digits, and another writer can spell
+    the same id differently. An owner SHOULD write `meta.zid` as zenoh
+    writes it. A tool MUST compare two zids by value, never by their text:
+    case and leading zeros carry no meaning.
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
@@ -563,7 +572,10 @@ and reports these codes. `[F: descriptors/]`
      `[requires]`, and that `params` values fit the required interface;
    - that `profiles` is the union of the contracts' `uses`;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
-     read it to order two revisions, §9.8), and `token`.
+     read it to order two revisions, §9.8), and `token`;
+   - that a role's `optional` agrees with the contract that declares it
+     (0.11): a tool reads the contract's `[requires]` instead.
+     `[F: descriptors/ok-optional-unchecked]`
 
 ---
 
@@ -603,6 +615,16 @@ cannot tell under `Latest` which replier answered.
   deployment that wants S4 checked enables it, read-only, for the tools'
   principals (0.10). Without it, a tool reports the check unobservable,
   never clean.
+- **What the check reads** (0.11). The reference reads two selectors:
+  - `@/*/router`, the routers that answer;
+  - `@/*/router/**/storage_manager/storages/**`, one key per storage a
+    router's storage manager runs, its value the storage's configuration
+    with its `key_expr`.
+
+  A storage whose `key_expr` intersects an owner's `state/**` or
+  `@state/**` breaks S4. A router that answers the first selector and has
+  nothing under the second runs no storage. When no router answers the
+  first, the check is unobservable.
 
 **Observing S1.** An owner's stamp is told from a router's by its id: the
 owner's session's zid, against the router's (§4.1). Where the owner's
@@ -1917,15 +1939,16 @@ role, writer or reader, never a swap of old and new:
 - for requests, the caller writes and the owner reads.
 
 The classifier compares each earlier revision to the candidate, never the
-reverse.
+reverse. Each rule below is a transition from the earlier revision to the
+candidate, and its class already accounts for an old reader of a new writer
+and a new reader of an old writer: that is what "both directions" means.
+
 - **On the bus, revisions carry no order** (0.10). A bundle keeps no
   `minor` (§9.5), and two providers can serve two revisions side by side.
   A tool that classifies them against each other MAY take the order from
   the `minor` their descriptors state, when the two differ. Otherwise it
   classifies both ways: the pair is clean only when both directions are
-  compatible, a finding when neither is, and undecided when they disagree. Each rule below is a transition from the earlier revision to the
-candidate, and its class already accounts for an old reader of a new writer
-and a new reader of an old writer: that is what "both directions" means.
+  compatible, a finding when neither is, and undecided when they disagree.
 
 A change is **compatible**, **review** or **breaking**. The candidate's
 class is the worst over every rule and every earlier revision. A candidate
@@ -2301,6 +2324,7 @@ Appendix B. These are the ones the rules above cite:
 - Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
   beyond the HLC delta (500 ms).
 - The admin space is disabled by default (`adminspace.enabled: false`).
+- A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
 - A reply error carries a payload and an encoding, and no key expression.
