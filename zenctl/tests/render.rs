@@ -1274,9 +1274,9 @@ rules:
       zk2/*/tc/tc.netif.v1/state/**
   consume-out:ops/frontend   consume       egress   put, delete, reply
       zk2/*/tc/tc.netif.v1/state/**
-  presence-in:ops/frontend   presence      ingress  declare_liveliness_subscriber, liveliness_query
+  presence-in:ops/frontend   presence      ingress  declare_liveliness_subscriber, liveliness_query, query, declare_subscriber
       zk2/*/tc/@zk/**
-  presence-out:ops/frontend  presence      egress   liveliness_token
+  presence-out:ops/frontend  presence      egress   liveliness_token, reply, put
       zk2/*/tc/@zk/**
   call-in:ops/frontend       call          ingress  query
       zk2/*/tc/tc.netif.v1/@op/interfaces/*/set
