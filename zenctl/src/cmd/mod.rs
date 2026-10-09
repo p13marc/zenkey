@@ -247,23 +247,6 @@ pub fn positive_secs(flag: &str, secs: f64) -> Result<std::time::Duration> {
     Ok(std::time::Duration::from_secs_f64(secs))
 }
 
-/// `-` in a call's producer position, against its target (#509).
-///
-/// `-` stands for *no producer chunk*, which only a service origin's `@rpc`
-/// has (RFC 06 §5) — clap admits it for `bench rpc` and
-/// cannot see the origin beside it. A host or the fleet needs a name, and
-/// the key builders assert on `-` exactly as on any illegal chunk, so it is
-/// refused here as this tool's own refusal of the input: exit 2.
-pub fn producer_slot(target: &zenkey_fleet::CallTarget, producer: &str) -> Result<()> {
-    if producer == "-" && !matches!(target, zenkey_fleet::CallTarget::Service(_)) {
-        return Err(unaskable!(
-            "producer `-` stands for no producer chunk, which only a service origin (`@…`) \
-             has (RFC 06 §5) — a host or the fleet needs the producer's name"
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,51 +1,57 @@
-//! `bench rpc`: the one family that is a real grid — a header and six numeric
-//! columns — and the one where "a truncated number is a wrong number" is not
-//! an abstract rule.
+//! `bench call` (#612, FJ8a): the one family that is a real grid — a header
+//! and six numeric columns — and the one where "a truncated number is a
+//! wrong number" is not an abstract rule.
+//!
+//! The populations stay apart in every medium: the latency rows are value
+//! replies by the key they went on (O3); refusals, malformed envelopes, the
+//! transport's errors, silent calls, R6's discards and panicked calls are
+//! counted beside them and never averaged in (the tooling guide's O6), and
+//! each token holder is tallied against the calls it sent no value in.
 
-use zenkey_fleet::report::BenchReport;
+use zenkey_fleet::report::{BenchReport, CallMode, Latency};
 
-use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
+use super::zk2::short_fp;
+use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
+
+fn latency_cells(l: &Latency) -> [Cell; 5] {
+    [
+        Cell::num(l.min_ms, 2),
+        Cell::num(l.p50_ms, 2),
+        Cell::num(l.p95_ms, 2),
+        Cell::num(l.p99_ms, 2),
+        Cell::num(l.max_ms, 2),
+    ]
+}
 
 impl Render for BenchReport {
     const FAMILY: &'static str = "bench";
 
+    /// The whole report, less the repliers, which are the rows. The
+    /// non-answers stay on the envelope: averaging one into a latency
+    /// figure is how a benchmark lies.
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut e = serde_json::Map::new();
-        e.insert("key".into(), self.key.clone().into());
-        e.insert("requested".into(), self.requested.into());
-        e.insert("completed".into(), self.completed.into());
-        e.insert("concurrency".into(), self.concurrency.into());
-        e.insert(
-            "elapsed_s".into(),
-            serde_json::Number::from_f64(self.elapsed_s)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        e.insert(
-            "calls_per_s".into(),
-            serde_json::Number::from_f64(self.calls_per_s)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-        );
-        // Counted apart from the latency rows on purpose: averaging a
-        // non-answer into a latency figure is how a benchmark lies.
-        e.insert("errors".into(), self.errors.into());
-        e.insert("silent".into(), self.silent.into());
-        // A third population, apart from both (#329): a panicked call is news
-        // about this tool, not about the fleet, and it belongs in neither of
-        // the other two counters.
-        e.insert("panicked".into(), self.panicked.into());
-        e
+        envelope_without(self, &["repliers"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
-        for o in &self.origins {
-            out(Row::of("origin", o));
+        for r in &self.repliers {
+            out(Row::of("replier", r));
         }
     }
 
     fn table(&self, t: &mut Table) {
-        t.line(format!("→ {}", self.key));
+        t.line(format!(
+            "bench {} {}@{} {}  ({}, {}s per call)",
+            self.address,
+            self.iface,
+            short_fp(&self.fingerprint),
+            self.operation,
+            match self.mode {
+                CallMode::Concrete => "one address",
+                CallMode::Fanout => "fan-out",
+            },
+            self.timeout_s
+        ));
         t.line(format!(
             "{} call(s), concurrency {}, {:.2}s — {:.1} calls/s",
             self.completed, self.concurrency, self.elapsed_s, self.calls_per_s
@@ -57,65 +63,101 @@ impl Render for BenchReport {
                 self.requested
             ));
         }
-        if self.panicked > 0 {
+        if !self.repliers.is_empty() {
+            t.blank();
+            let mut grid = Grid::new([
+                "replier", "replies", "min ms", "p50 ms", "p95 ms", "p99 ms", "max ms",
+            ])
+            .max(0, 24);
+            for r in &self.repliers {
+                let [a, b, c, d, e] = latency_cells(&r.latency);
+                grid.row([Cell::text(&r.address), Cell::int(r.replies), a, b, c, d, e]);
+            }
+            t.grid(grid);
+        }
+        if self.refusals.count > 0 {
+            let codes: Vec<String> = self
+                .refusals
+                .codes
+                .iter()
+                .map(|(c, n)| format!("{c} ×{n}"))
+                .collect();
             t.line(format!(
-                "  {} of those panicked in this tool — measured nothing",
-                self.panicked
+                "refused {} time(s), unattributed: {}{}",
+                self.refusals.count,
+                codes.join(", "),
+                self.refusals
+                    .latency
+                    .map(|l| format!(" (p50 {:.2} ms)", l.p50_ms))
+                    .unwrap_or_default()
             ));
         }
-        if self.origins.is_empty() {
-            return;
+        for h in self.presence.holders.iter().filter(|h| h.without_value > 0) {
+            t.line(format!(
+                "{} holds the interface's token and sent no value in {} call(s): refused or \
+                 silent, which a caller cannot tell apart",
+                h.address, h.without_value
+            ));
         }
-        t.blank();
-        let mut grid = Grid::new([
-            "origin", "replies", "min ms", "p50 ms", "p95 ms", "p99 ms", "max ms",
-        ])
-        .max(0, 16);
-        for o in &self.origins {
-            grid.row([
-                Cell::text(&o.origin),
-                Cell::int(o.replies as u64),
-                Cell::num(o.min_ms, 2),
-                Cell::num(o.p50_ms, 2),
-                Cell::num(o.p95_ms, 2),
-                Cell::num(o.p99_ms, 2),
-                Cell::num(o.max_ms, 2),
-            ]);
-        }
-        t.grid(grid);
     }
 
     fn notes(&self) -> Vec<Note> {
-        let mut notes = Vec::new();
-        if self.origins.is_empty() {
-            notes.push(Note::silence(
-                "no origin answered — a non-verdict, not proof of absence; \
-                 `zenctl doctor` says who is up",
-            ));
+        let mut notes = vec![
+            Note::caveat(
+                "every latency is this tool's round trip, query sent to reply received — never \
+                 a stamp",
+            )
+            .cite("tooling guide O7"),
+        ];
+        if self.repliers.is_empty() {
+            notes.push(
+                Note::silence(
+                    "no value from any replier — a non-verdict, not proof of absence; `zenctl \
+                     service list` says who is up",
+                )
+                .cite("spec §5.1 O5"),
+            );
         }
-        if self.errors > 0 || self.silent > 0 {
+        let apart = [
+            ("refusal(s)", self.refusals.count),
+            ("malformed envelope(s)", self.malformed),
+            ("transport error(s)", self.transport),
+            ("silent call(s)", self.silent),
+            ("discarded value(s) (R6)", self.discarded),
+            ("call(s) that panicked in this tool", self.panicked),
+        ];
+        let nonzero: Vec<String> = apart
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(what, n)| format!("{n} {what}"))
+            .collect();
+        if !nonzero.is_empty() {
             notes.push(Note::coverage(format!(
-                "{} error repl(ies), {} call(s) drew no reply at all — counted apart \
-                 from the latencies above, because averaging a non-answer into a \
-                 latency figure is how a benchmark lies",
-                self.errors, self.silent
+                "{} — counted apart from the latencies above, because averaging a non-answer \
+                 into a latency figure is how a benchmark lies",
+                nonzero.join(", ")
             )));
         }
-        if self.panicked > 0 {
-            notes.push(Note::coverage(format!(
-                "{} call(s) panicked inside this tool and are counted apart from \
-                 both — a panicked call is not an error reply and not attributable \
-                 silence, and folding it into either would report a bug here as a \
-                 fact about the fleet",
-                self.panicked
-            )));
+        if !self.presence.complete {
+            notes.push(
+                Note::coverage(match &self.presence.error {
+                    Some(e) => format!(
+                        "the selection's presence could not be read ({e}): who sent no value \
+                         is not known"
+                    ),
+                    None => "the selection's presence read may be incomplete: a holder that \
+                             sent no value may be missing"
+                        .into(),
+                })
+                .cite("spec §8.1"),
+            );
         }
         notes
     }
 
     fn scope(&self) -> Option<ObservedScope> {
         Some(ObservedScope {
-            asked: vec![self.key.clone()],
+            asked: self.selectors.clone(),
             window_s: Some(self.elapsed_s),
         })
     }

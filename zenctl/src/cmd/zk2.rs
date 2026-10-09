@@ -264,6 +264,56 @@ pub fn bindings(params: &[(String, String)]) -> Bindings {
     out
 }
 
+/// The `--bind ROLE=SYSTEM/SERVICE[,…]` bindings a mock owner was given
+/// (R1, FJ8a): each provider an address, either position `*`. A role given
+/// twice is refused, never merged.
+pub fn binds(args: &[String]) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut out = std::collections::BTreeMap::new();
+    for arg in args {
+        let Some((role, providers)) = arg.split_once('=') else {
+            return Err(unaskable!(
+                "--bind {arg}: expected ROLE=SYSTEM/SERVICE[,SYSTEM/SERVICE…]"
+            ));
+        };
+        let providers: Vec<String> = providers.split(',').map(str::to_owned).collect();
+        for p in &providers {
+            ResolvedTarget::parse(p)?;
+        }
+        if out.insert(role.to_owned(), providers).is_some() {
+            return Err(unaskable!(
+                "--bind {role}: given twice; list its providers once, comma-separated"
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// Every revision `--contracts` loaded, one per interface: what a mock owner
+/// implements when no interface is named (FJ8a). Two revisions of one
+/// interface are refused until one is named, as `pick` refuses them.
+pub fn every_revision(contracts: &ContractSet) -> Result<Vec<Arc<Revision>>> {
+    let mut by_iface: std::collections::BTreeMap<String, Vec<&Arc<Revision>>> =
+        std::collections::BTreeMap::new();
+    for r in contracts.iter() {
+        by_iface.entry(r.iface().to_string()).or_default().push(r);
+    }
+    if by_iface.is_empty() {
+        return Err(unaskable!(
+            "no contract: name the interfaces (IFACE[@FP]) or load them with --contracts"
+        ));
+    }
+    by_iface
+        .into_iter()
+        .map(|(iface, revs)| match revs.as_slice() {
+            [one] => Ok(Arc::clone(one)),
+            several => Err(unaskable!(
+                "--contracts holds {} revisions of {iface}: name one with {iface}@<fingerprint>",
+                several.len()
+            )),
+        })
+        .collect()
+}
+
 /// How a sentence names a namespace: `namespace "x"`, or the bus root.
 pub fn namespace_phrase(ns: &str) -> String {
     if ns.is_empty() {

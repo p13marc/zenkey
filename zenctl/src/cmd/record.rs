@@ -1,18 +1,25 @@
-//! `zenctl record` (issue #53): capture a selector's traffic to a `.zrec`
-//! file through the Monitor — the same bounded broadcast every other
-//! consumer runs on, so a bus that outruns the disk surfaces as drop
-//! records *in the file* (RFC 09 §5.1 O6 applied to a capture, §5.2 for
-//! the format). Progress rides stderr; the final counts are the report's
-//! job, rendered by `output.rs`.
+//! `zenctl record` (#53; zk2's since #612, FJ8a): capture wire selectors'
+//! traffic to a `.zrec` file through the Monitor — the same bounded
+//! broadcast every other consumer runs on, so a bus that outruns the disk
+//! surfaces as drop records *in the file*, where the gaps happened (the
+//! tooling guide's O6). Progress rides stderr; the final counts are the
+//! report's job.
+//!
+//! The capture is `.zrec` version 3 (the guide's §5): taken on a session in
+//! no namespace, so rows keep their full wire keys; the header carries the
+//! namespace the operator stated (`--namespace`, alias `--base`: zk2's base
+//! is the namespace), the exact selectors, and the verbatim chunks none of
+//! them reach (O5). With no selector it captures the deployment's zk2 data,
+//! `<ns>/zk2/**`, and says what that excludes.
 //!
 //! `--on <RULE> --pre <SECS>` (#218) is the triggered form: nothing is
 //! written until a rule fires, and then the file carries the state
-//! preamble, the retained pre-roll, the trigger record and the post-roll
-//! (RFC 13 §4.1 version 2). The engine's [`record_on`] does all of it over
+//! preamble (the owners' own answer, S4), the retained pre-roll, the trigger
+//! record and the post-roll. The engine's [`record_on`] does all of it over
 //! one event stream; this verb parses the rules the way `watchdog` does,
-//! opens the file when told to, and renders what came back. Nothing firing
-//! within `--for` is exit 0 with a silence note — a rule not firing is not
-//! a finding (RFC 05 §3.1).
+//! refuses the ones that judge v1 rather than zk2 before a session opens,
+//! and renders what came back. Nothing firing within `--for` is exit 0
+//! with a silence note — a rule not firing is not a finding.
 
 use std::io::BufWriter;
 
@@ -20,18 +27,17 @@ use anyhow::Result;
 use zenkey_fleet::judge::condition::Condition;
 use zenkey_fleet::report::PreambleSemantics;
 use zenkey_fleet::{
-    RecordBounds, RecordReport, TriggerEvent, TriggerSpec, ZREC_VERSION, ZrecHeader, ZrecSink,
+    DoctorBus, RecordBounds, RecordReport, TriggerEvent, TriggerSpec, ZrecHeader, ZrecSink,
     record_on,
 };
 
-use crate::Bus;
-use crate::cli::{PreambleMode, SelectorArgs};
+use crate::bus::Deployment;
+use crate::cli::PreambleMode;
 
 pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
+    let dep = Deployment::resolve(&cli.ns)?;
     let crate::cli::RecordArgs {
-        selector,
+        selectors,
         out,
         for_secs,
         count,
@@ -41,13 +47,14 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         every,
         preamble,
         overwrite,
-        bus: _,
+        ns: _,
     } = cli;
     // Before anything else that could take time: an existing capture is
     // refused unless --overwrite (#514), and no session opens to find out.
     let mode = super::output_mode(&out, overwrite)?;
+    let selectors = selectors_of(&selectors, dep.namespace())?;
     if on.is_empty() {
-        return run_inner(&selector, &out, mode, for_secs, count, args).await;
+        return run_inner(&selectors, &out, mode, for_secs, count, &dep).await;
     }
     // `requires = "on"` on `--pre`, and `requires = "pre"` on `--on`: clap
     // has already refused one without the other, so this is the type's
@@ -73,36 +80,77 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             PreambleMode::None => None,
         },
     };
-    run_triggered(&selector, &out, mode, triggered, args).await
+    run_triggered(&selectors, &out, mode, triggered, &dep).await
+}
+
+/// The selectors a capture watches: the ones typed (through the raw seam,
+/// RFC 03 §2's `$*` refusal), or the deployment's zk2 data. A typed zk2
+/// selector outside the namespace gets a one-line hint: selectors are wire
+/// keys, and `replay --namespace` moves only what sits under the
+/// capture's namespace.
+fn selectors_of(typed: &[String], namespace: &str) -> Result<Vec<String>> {
+    if typed.is_empty() {
+        return Ok(vec![zenkey::grammar::with_base(namespace, "zk2/**")]);
+    }
+    let mut out = Vec::new();
+    for s in typed {
+        let s = super::raw_selector(s)?;
+        if let Some(hint) = off_namespace_hint(s, namespace) {
+            eprintln!("{hint}");
+        }
+        out.push(s.to_owned());
+    }
+    Ok(out)
+}
+
+/// The hint for a base-relative zk2 selector typed under a non-empty
+/// namespace, or `None`: `zk2/**` under `--namespace prod` watches a
+/// keyspace this deployment does not publish on.
+fn off_namespace_hint(sel: &str, namespace: &str) -> Option<String> {
+    if namespace.is_empty() || zenkey::grammar::strip_base(namespace, sel).is_some() {
+        return None;
+    }
+    let first = sel.split(['/', '?']).next().unwrap_or_default();
+    (first == "zk2").then(|| {
+        format!(
+            "hint: {sel:?} does not sit under namespace {namespace:?} — selectors are wire \
+             keys; did you mean {:?}? `replay --namespace` moves only rows under the \
+             capture's namespace",
+            zenkey::grammar::with_base(namespace, sel)
+        )
+    })
+}
+
+/// What a capture of `selectors` cannot contain, said before it starts (O5).
+fn excluded_line(header: &ZrecHeader) -> String {
+    match header.excluded.as_deref() {
+        Some([]) | None => String::new(),
+        Some(ex) => format!(
+            " — {} excluded: no selector names them, and `*`/`**` never match one",
+            ex.join(", ")
+        ),
+    }
 }
 
 async fn run_inner(
-    sel: &SelectorArgs,
+    selectors: &[String],
     out: &str,
     mode: super::OutputMode,
     for_secs: Option<f64>,
     count: u64,
-    args: &Bus,
+    dep: &Deployment,
 ) -> Result<()> {
-    let selector = super::selector_of(sel, args)?;
     let duration = match for_secs {
         Some(secs) => Some(super::positive_secs("--for", secs)?),
         None => None,
     };
-    let header = ZrecHeader {
-        zrec: ZREC_VERSION,
-        selectors: vec![selector.clone()],
-        base: args.base().to_string(),
-        captured_at: zenkey_fleet::rfc3339_now(),
-        preamble: None,
-        pre_roll: None,
-    };
+    let header = ZrecHeader::capture(selectors.to_vec(), dep.namespace());
     // The session first (#514): a bus that never answered leaves no file
     // behind — a header-only capture would only be refused by the re-run.
-    let session = args.session().await?;
+    // In no namespace: the rows keep their wire keys whole.
+    let session = dep.link().session().await?;
     // Both halves off the runtime (#332): the create through `tokio::fs`,
     // and every row after it on the blocking pool behind the sink's queue.
-    // A capture that stalls its own drain records drops it caused itself.
     // Never over an existing capture (#514): `output_mode` refused one
     // before the session, and `create_new` refuses one that appeared since.
     let file = super::open_output_or_refuse(out, mode).await?;
@@ -111,23 +159,20 @@ async fn run_inner(
     let monitor =
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    monitor.watch(&selector).await?;
+    for s in selectors {
+        monitor.watch(s).await?;
+    }
 
-    // A `**` selector never crosses an `@`-chunk: say what the capture
-    // cannot contain up front, not after someone replays it (O5).
     eprintln!(
-        "recording {selector} to {out}{} (ctrl-c to stop){}",
+        "recording {} to {out}{} (ctrl-c to stop){}",
+        selectors.join(" + "),
         match (for_secs, count) {
             (Some(d), 0) => format!(" for {d}s"),
             (None, n) if n > 0 => format!(" for {n} sample(s)"),
             (Some(d), n) => format!(" for {d}s or {n} sample(s)"),
             _ => String::new(),
         },
-        if selector.contains("**") {
-            " — `**` cannot cross `@`-planes; they are excluded, not empty"
-        } else {
-            ""
-        }
+        excluded_line(&header)
     );
 
     let bounds = RecordBounds {
@@ -163,7 +208,7 @@ async fn run_inner(
         pre_roll: None,
         preamble_rows: 0,
     };
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     Ok(())
 }
 
@@ -179,38 +224,46 @@ struct Triggered {
 }
 
 async fn run_triggered(
-    sel: &SelectorArgs,
+    selectors: &[String],
     out: &str,
     mode: super::OutputMode,
     t: Triggered,
-    args: &Bus,
+    dep: &Deployment,
 ) -> Result<()> {
-    let selector = super::selector_of(sel, args)?;
     // The rules, the `watchdog` way: parsed before a session exists, so a
-    // rule outside the closed vocabulary is a refusal and not a connect.
+    // rule outside the closed vocabulary — or one that judges v1 rather
+    // than zk2 — is a refusal and not a connect.
     let rules: Vec<Condition> = t
         .rules
         .iter()
         .map(|r| Condition::parse(r))
         .collect::<std::result::Result<_, _>>()
         .map_err(anyhow::Error::from)?;
+    zenkey_fleet::zk2_rules(&rules)?;
 
-    let session = args.session().await?;
-    // Slices enrich: `qos-mismatch` and `invalid-payload` judge against the
-    // registry; with none loaded they observe and say what they could not
-    // judge (O4).
-    let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let fleet = args.fleet(&session);
-    let doctor = super::doctor::bus_for_rules(&rules, args, &session).await?;
+    let session = dep.link().session().await?;
+    // A `doctor <CHECK-ID>` rule's doctor reads the deployment through a
+    // session in its namespace, beside this one (#612, FJ6).
+    let doctor = if rules
+        .iter()
+        .any(|r| matches!(r, Condition::DoctorCheck { .. }))
+    {
+        Some(DoctorBus {
+            session: dep.session().await?,
+            raw: session.clone(),
+            namespace: dep.namespace().to_owned(),
+        })
+    } else {
+        None
+    };
     let spec = TriggerSpec {
         doctor,
-        selectors: vec![selector.clone()],
+        selectors: selectors.to_vec(),
         pre: t.pre,
         post: t.post,
         rules,
         tick: t.every,
-        timeout: args.timeout(),
+        timeout: dep.timeout(),
         give_up: t.give_up,
         preamble: t.preamble,
         max_samples: t.max_samples,
@@ -218,27 +271,23 @@ async fn run_triggered(
     };
 
     eprintln!(
-        "armed on {} rule(s) over {selector}: retaining the last {:.1}s, writing {out} only \
-         when a rule fires (+{:.1}s after){}{}",
+        "armed on {} rule(s) over {}: retaining the last {:.1}s, writing {out} only when a \
+         rule fires (+{:.1}s after){}{}",
         spec.rules.len(),
+        selectors.join(" + "),
         t.pre.as_secs_f64(),
         t.post.as_secs_f64(),
         match t.give_up {
             Some(d) => format!("; giving up after {:.1}s", d.as_secs_f64()),
             None => String::new(),
         },
-        if selector.contains("**") {
-            " — `**` cannot cross `@`-planes; they are excluded, not empty"
-        } else {
-            ""
-        }
+        excluded_line(&ZrecHeader::capture(selectors.to_vec(), dep.namespace()))
     );
 
     let armed = std::time::Instant::now();
     let capture = record_on(
-        &fleet,
-        slices.as_ref(),
-        &store,
+        &session,
+        dep.namespace(),
         &spec,
         // The create through `tokio::fs` (#332), and only once something
         // fired: a run that gives up leaves no file behind. The existing-file
@@ -321,6 +370,30 @@ async fn run_triggered(
     if report.trigger.is_some() {
         report.out = Some(out.to_string());
     }
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// No selector is the deployment's zk2 data; a base-relative zk2
+    /// selector under a namespace is hinted, a wire key is not.
+    #[test]
+    fn the_default_is_the_namespaces_zk2_data_and_a_relative_selector_is_hinted() {
+        assert_eq!(selectors_of(&[], "prod").unwrap(), ["prod/zk2/**"]);
+        assert_eq!(selectors_of(&[], "").unwrap(), ["zk2/**"]);
+        let hint = off_namespace_hint("zk2/**", "prod").expect("hinted");
+        assert!(hint.contains(r#"did you mean "prod/zk2/**"?"#), "{hint}");
+        for (sel, ns) in [
+            ("prod/zk2/**", "prod"),
+            ("zk2/**", ""),
+            ("staging/zk2/**", "prod"),
+            ("v1/**", "prod"),
+        ] {
+            assert_eq!(off_namespace_hint(sel, ns), None, "{sel} under {ns:?}");
+        }
+        assert!(selectors_of(&["zk2/$*/x".into()], "").is_err());
+    }
 }

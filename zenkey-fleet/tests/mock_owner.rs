@@ -150,7 +150,7 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     );
 
     let during = address_presence(&tool, &address, T).await.unwrap();
-    assert_eq!(during.instances, [instance.clone()]);
+    assert_eq!(during.instances, std::slice::from_ref(&instance));
     let refused = check_address(&during, &address, false).unwrap_err();
     assert!(refused.is_unaskable(), "{refused}");
     assert!(refused.to_string().contains("--i-know"), "{refused}");

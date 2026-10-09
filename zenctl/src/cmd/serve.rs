@@ -1,199 +1,279 @@
-//! `zenctl serve` — a mock queryable for the dev loop (#121).
+//! `zenctl serve` (#612, FJ8a) — one operation of an interface, served by a
+//! mock owner, every call logged.
 //!
-//! Deliberately no reply scripting: static bytes, prepared once through the
-//! same encode ladder as `pub`. The incoming-query log is half the
-//! feature — it doubles as a "who is querying this key" probe.
+//! The mock is a real zk2 service at the address you name (P3, spec §6),
+//! brought up by the runtime (`zenkey_fleet::serve_operation`): the
+//! operation answers every call with one fixed reply — JSON encoded as the
+//! contract's response type, as `call` encodes a request — or refuses it
+//! with the envelope `--refuse` names; every other operation of the
+//! interface is answered too, never silent (O3). The log is half the
+//! feature: each call as it was answered, its key, what it binds, the
+//! request decoded through the bundle and the metadata the caller claims
+//! (O7) — a "who is calling this operation" probe.
+//!
+//! It replaced v1's `serve <keyexpr> <reply>`, a queryable on any key with
+//! one body run through the registry's encoder: on a zk2 key that is a
+//! second answerer beside the owner (P3), and its encoding was v1's
+//! registry. Like `gen`, it refuses an address an instance already runs at
+//! unless `--i-know` ([`guard_address`]).
+
+use std::time::Instant;
 
 use anyhow::Result;
+use zenkey_fleet::report::{ServeEnd, ServeSummary, ServedAnswer, ServedCall};
+use zenkey_fleet::{MockAnswer, ServeSpec, Synth};
+use zenkey_model::authoring::Kind;
+use zenkey_model::contract::{Body, Replies};
+use zenkey_model::descriptor::Cause;
+use zenkey_model::grammar::Addr;
 
-use crate::Bus;
+use crate::bus::Deployment;
+use crate::cli::{CauseArg, RefuseCode};
+use crate::cmd::zk2;
 use crate::exit::unaskable;
+use crate::render::{Mode, Sink};
 
-pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
-    let crate::cli::ServeArgs {
-        keyexpr,
-        reply,
-        encoding,
-        no_validate,
-        raw,
-        complete,
-        count,
-        i_know,
-        bus: _,
-    } = cli;
-    let (keyexpr, reply, encoding) = (keyexpr.as_str(), &reply, encoding.as_deref());
-    // RFC 05 §2.1 (G-05c): `@rpc` queryables are **never** declared
-    // complete — one complete queryable short-circuits every default
-    // (`BestMatching`) fleet call to a single reply. Refused before any
-    // session opens, so the refusal is offline-testable like gen's guards.
-    //
-    // A refusal of the command line, so a 2 (`crate::exit`) — it was a bare
-    // `bail!`, a 1, until #507 put serve's guards on the contract.
-    let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
-    if complete && key_part.split('/').any(|c| c == "@rpc") {
-        return Err(unaskable!(
-            "--complete on an @rpc key expression: RFC 05 §2.1 forbids it — a \
-             `complete` @rpc queryable short-circuits every BestMatching fleet \
-             call to this one responder, silently collapsing the fleet to a \
-             single reply. Serve the procedure without --complete."
-        ));
-    }
-    // A mock answers real GETs (#507): a wildcard stands it in front of every
-    // key it intersects, across every producer's — a storage's state
-    // included — and `--complete` makes zenoh's default BestMatching target
-    // stop at it. Either is a decision about a bus, so either needs the one
-    // acknowledgement this verb has; the `@rpc` refusal above is not
-    // overridable, and comes first.
-    if !i_know {
-        if key_part.contains(['*', '$']) {
-            return Err(unaskable!(
-                "{key_part} is a wildcard: this queryable answers every GET it \
-                 intersects, across every producer's keys, with one static body — \
-                 state a storage would have answered included. Pass --i-know to \
-                 mean it."
-            ));
-        }
-        if complete {
-            return Err(unaskable!(
-                "--complete claims this responder holds all the data {key_part} \
-                 names: zenoh's default (BestMatching) GET stops at a complete \
-                 queryable, so a production read of that state gets this static \
-                 body instead of the storage's. Pass --i-know to mean it."
-            ));
-        }
-    }
-
-    let typed = reply.read()?;
-
-    let session = args.session().await?;
-    // The reply body rides the pub encode ladder: a concrete keyexpr that
-    // refines to a registered subject gets the served schema's encoding; a
-    // wildcard degrades honestly to as-typed, with the note.
-    let slices = if raw {
-        None
-    } else {
-        args.slices_optional().await?
-    };
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let key_part = keyexpr.split('?').next().unwrap_or(keyexpr);
-    let prepared = zenkey_fleet::prepare_publish(
-        &args.fleet(&session),
-        &store,
-        slices.as_ref(),
-        key_part,
-        zenkey_fleet::PrepareSpec {
-            declared_encoding: encoding,
-            body: &typed,
-            mode: super::publish::mode(raw, no_validate),
-        },
-    )
-    .await?;
-    if let Some(note) = &prepared.note {
-        eprintln!("note: {note}");
-    }
-
-    let responder = zenkey_fleet::declare_responder(
-        &session,
-        keyexpr,
-        prepared.bytes.clone(),
-        prepared.encoding.as_deref(),
-        complete,
-    )
-    .await?;
-
-    // One resolution for the whole run, and it happens in `Mode::of` (#198).
-    // A streaming verb's question is only ever "is a program reading this" —
-    // it has rows for one and prose for the other, and no third answer.
-    let ndjson = crate::render::Mode::of(args.format()).machine();
-    if !ndjson {
+/// The address guard `gen` and `serve` share: one presence read of the
+/// address's instance tokens, refused when one is there unless `i_know`
+/// (`zenkey_fleet::check_address`). A read that may be incomplete, or that
+/// access control may have emptied, is said, not read as "free" (§8.1).
+pub(crate) async fn guard_address(
+    session: &zenoh::Session,
+    address: &Addr,
+    dep: &Deployment,
+    i_know: bool,
+) -> Result<()> {
+    let presence = zenkey_fleet::address_presence(session, address, dep.timeout()).await?;
+    zenkey_fleet::check_address(&presence, address, i_know)?;
+    if !presence.instances.is_empty() {
         eprintln!(
-            "serving {keyexpr} — replying {} bytes{}{} per query (ctrl-c to stop)",
-            prepared.bytes.len(),
-            prepared
-                .encoding
-                .as_deref()
-                .map(|e| format!(" as {e}"))
-                .unwrap_or_default(),
-            if complete { ", declared complete" } else { "" },
+            "--i-know: {address} is running already (instance {}); this mock starts beside it",
+            presence.instances.join(", ")
         );
-    }
-
-    let mut served = 0usize;
-    // One listener for the whole run (#334): a fresh `ctrl_c()` per query was
-    // registered only while the `select!` was parked, so a SIGINT arriving
-    // while a reply was being rendered was lost — and with SIGINT's default
-    // disposition already displaced by the first call, nothing ended the
-    // process either.
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-    loop {
-        // Only the *receive* rides the select (#333): once a query is in
-        // hand, answering and logging it are not something ctrl-c — or any
-        // deadline a later flag adds here — can interrupt half-way. The
-        // listener is the pinned one (#334) and goes first, biased.
-        let query = tokio::select! {
-            biased;
-            _ = &mut ctrl_c => None,
-            q = responder.next() => q,
-        };
-        let Some(query) = query else { break };
-        let view = responder.answer(query).await;
-        served += 1;
-        if ndjson {
-            let mut obj = serde_json::json!({
-                "n": served,
-                "selector": view.selector,
-                "parameters": view.parameters,
-            });
-            // Present only when the query carried one — absent, never null.
-            if let Some(p) = &view.payload {
-                obj["payload"] =
-                    zenkey_fleet::structural_value(&p.to_bytes()).unwrap_or_else(|| {
-                        serde_json::Value::String(zenkey_fleet::structural(&p.to_bytes()))
-                    });
-                obj["payload_bytes"] = p.len().into();
-            }
-            if let Some(e) = &view.encoding {
-                obj["encoding"] = serde_json::Value::String(e.clone());
-            }
-            if let Some(a) = &view.attachment {
-                obj["attachment"] = super::sample::attachment_json(a);
-                obj["attachment_bytes"] = a.len().into();
-            }
-            // Present only when the reply failed to send — the doc-promised
-            // surfacing of the reply path's error (never silently dropped).
-            if let Some(e) = &view.reply_error {
-                obj["reply_error"] = serde_json::Value::String(e.clone());
-            }
-            println!("{}", crate::render::Row::tagged("query", obj).into_line());
-        } else {
-            let body = match &view.payload {
-                Some(p) => format!(
-                    "  body: {} ({} bytes)",
-                    zenkey_fleet::structural(&p.to_bytes()),
-                    p.len()
-                ),
-                None => String::new(),
-            };
-            println!("[{served}] {}{body}", view.selector);
-            if let Some(e) = &view.reply_error {
-                // The ask is logged either way; a reply that never left says
-                // why, or the log reads as service.
-                eprintln!("  reply failed: {e}");
-            }
-        }
-        if count > 0 && served >= count {
-            break;
-        }
-    }
-    responder.undeclare().await?;
-    if !ndjson {
+    } else if !presence.complete {
         eprintln!(
-            "{served} quer{} served",
-            if served == 1 { "y" } else { "ies" }
+            "note: the presence read of {address} may be incomplete — an instance this reader \
+             did not see may be running there"
         );
     }
     Ok(())
+}
+
+/// The refusal `--refuse` names (§5.2), in the engine's vocabulary:
+/// `unavailable` with its cause, and a cause on no other code.
+fn refusal(
+    code: RefuseCode,
+    message: Option<String>,
+    cause: Option<CauseArg>,
+) -> Result<MockAnswer> {
+    let code = match code {
+        RefuseCode::InvalidRequest => "invalid_request",
+        RefuseCode::NotFound => "not_found",
+        RefuseCode::Unavailable => "unavailable",
+        RefuseCode::Forbidden => "forbidden",
+        RefuseCode::Busy => "busy",
+        RefuseCode::Internal => "internal",
+        RefuseCode::App => "app",
+    };
+    let cause = cause.map(|c| match c {
+        CauseArg::Build => Cause::Build,
+        CauseArg::Config => Cause::Config,
+        CauseArg::Capability => Cause::Capability,
+    });
+    Ok(MockAnswer::refusal(
+        code,
+        message.unwrap_or_else(|| "refused by zenctl serve".to_owned()),
+        cause,
+    )?)
+}
+
+pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
+    let dep = Deployment::resolve(&cli.ns)?;
+    let crate::cli::ServeArgs {
+        address,
+        target,
+        operation,
+        reply,
+        refuse,
+        message,
+        cause,
+        binds,
+        seed,
+        count,
+        for_secs,
+        i_know,
+        contracts,
+        ns: _,
+    } = cli;
+    // Everything the command line can be refused for, before a session.
+    let contracts = zk2::load_contracts(&contracts)?;
+    let bindings = zk2::binds(&binds)?;
+    let window = for_secs
+        .map(|s| super::positive_secs("--for", s))
+        .transpose()?;
+    if count == Some(0) {
+        return Err(unaskable!(
+            "--count is a stop bound and must be at least 1; leave it out to run until \
+             interrupted"
+        ));
+    }
+    let refused = refuse
+        .map(|code| refusal(code, message, cause))
+        .transpose()?;
+    let typed = reply
+        .as_ref()
+        .map(|src| {
+            src.read()
+                .map_err(|e| unaskable!("the reply could not be read: {e:#}"))
+        })
+        .transpose()?;
+
+    let mut session = None;
+    let revision = zk2::revision(&dep, &contracts, &target, &mut session).await?;
+    let r = zenkey_fleet::resolve_resource(&revision, &operation, &[Kind::Operation])?;
+    let name = format!("{}/{}", r.token, r.template);
+    let answer = match refused {
+        Some(refusal) => refusal,
+        None => {
+            let synth = Synth::new(seed);
+            let synthesized = |member| {
+                synth
+                    .sample(&revision, r, member, 0)
+                    .map(|s| s.bytes)
+                    .map_err(|why| unaskable!("{name}: {why}"))
+            };
+            let bytes = match &typed {
+                Some(input) => zenkey_fleet::encode_response(&revision, r, input)?,
+                None => synthesized(zenkey_fleet::Member::Response)?,
+            };
+            let summary = match &r.body {
+                Body::Operation(op) if op.replies == Replies::Many && op.summary.is_some() => {
+                    Some(synthesized(zenkey_fleet::Member::Summary)?)
+                }
+                _ => None,
+            };
+            MockAnswer::Reply { bytes, summary }
+        }
+    };
+
+    let session = match session {
+        Some(s) => s,
+        None => dep.session().await?,
+    };
+    guard_address(&session, &address, &dep, i_know).await?;
+    let mut served = zenkey_fleet::serve_operation(
+        &session,
+        ServeSpec {
+            address: address.clone(),
+            revision: std::sync::Arc::clone(&revision),
+            operation: name.clone(),
+            answer,
+            bindings,
+            tool: "zenctl serve".into(),
+        },
+    )
+    .await?;
+
+    let mode = Mode::of(dep.format());
+    let (mut out, mut err) = (std::io::stdout(), std::io::stderr());
+    let mut sink = Sink::with_color(
+        &mut out,
+        &mut err,
+        dep.format(),
+        crate::render::term_width(),
+        dep.color(),
+    );
+    if !mode.machine() {
+        eprintln!(
+            "serving {name} of {}@{} at {address} as instance {}, in {} (ctrl-c to stop)",
+            revision.iface(),
+            &revision.fingerprint().hex().as_str()[..12],
+            served.instance(),
+            zk2::namespace_phrase(dep.namespace())
+        );
+    }
+
+    let started = Instant::now();
+    let deadline = window.map(|w| tokio::time::Instant::now() + w);
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+    let mut calls = 0u64;
+    let ended = loop {
+        tokio::select! {
+            biased;
+            _ = &mut ctrl_c => break ServeEnd::Interrupted,
+            () = async {
+                match deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending().await,
+                }
+            } => break ServeEnd::Window,
+            call = served.next() => {
+                let Some(call) = call else { break ServeEnd::Interrupted };
+                calls += 1;
+                sink.row("call", serde_json::to_value(&call)?)?;
+                if !sink.machine() {
+                    sink.line(call_line(&call))?;
+                }
+                sink.flush()?;
+                if count.is_some_and(|n| calls >= n) {
+                    break ServeEnd::Count;
+                }
+            }
+        }
+    };
+    let summary = ServeSummary {
+        address: address.to_string(),
+        instance: served.instance(),
+        iface: revision.iface().to_string(),
+        fingerprint: revision.fingerprint().to_string(),
+        operation: name,
+        calls,
+        elapsed_s: started.elapsed().as_secs_f64(),
+        ended,
+    };
+    served.close().await?;
+    sink.row("summary", serde_json::to_value(&summary)?)?;
+    sink.flush()?;
+    if !mode.machine() {
+        eprintln!(
+            "{} call(s) served in {:.1}s ({})",
+            summary.calls,
+            summary.elapsed_s,
+            match summary.ended {
+                ServeEnd::Count => "--count reached",
+                ServeEnd::Window => "--for elapsed",
+                ServeEnd::Interrupted => "interrupted",
+            }
+        );
+    }
+    Ok(())
+}
+
+/// One served call, on one line, for a person.
+fn call_line(c: &ServedCall) -> String {
+    let answer = match &c.answer {
+        ServedAnswer::Reply { summary: true } => "→ reply, then the summary".to_owned(),
+        ServedAnswer::Reply { summary: false } => "→ reply".to_owned(),
+        ServedAnswer::Refused { code } => format!("→ refused {code}"),
+        ServedAnswer::Failed { error } => format!("→ failed ({error}): answered internal"),
+    };
+    let who = c
+        .metadata
+        .as_ref()
+        .map(|m| {
+            format!(
+                "  (claims actor {}, request {})",
+                m.actor.as_deref().unwrap_or("—"),
+                m.request_id.as_deref().unwrap_or("—")
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "[{}] {}{}\n  request {}\n  {answer}",
+        c.n,
+        c.key,
+        who,
+        crate::render::payload_text(&c.request)
+    )
 }

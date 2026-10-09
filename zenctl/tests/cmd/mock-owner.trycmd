@@ -1,0 +1,95 @@
+`gen` and `serve` bring up a mock owner (#612, FJ8a): a real zk2 service at
+the address you name, with an instance, a descriptor and tokens (P3, spec
+§6). Everything they can refuse of the command line is refused before a
+session opens, which is what lets these cases run without a bus.
+
+The plan prints before anything is brought up. With `--contracts` holding
+every interface asked for, `--dry-run` opens no session at all: every member
+of every stream, state and event resource, with its key, type, `Encoding`,
+the contract's QoS and its rate; every operation, answering calls. A
+templated resource no `--member` names gets two synthetic members, stated.
+
+```console
+$ zenctl gen host-a/tc tc.netif.v1 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --member 'bandwidth/{ns}/{iface}=default/eth0' --dry-run --format table --color never
+plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:4f531ebec4c4eee0…, for 10s (seed 42)
+  zk2/host-a/tc/tc.netif.v1/@op/diagnostics [json:DiagnosticsResponse, application/json] answers calls
+    ↳ answers each call with one synthesized response
+  zk2/host-a/tc/tc.netif.v1/@op/interfaces/*/*/set [json:InterfaceControlResponse, application/json] answers calls
+    ↳ answers each call with one synthesized response; served over its whole template
+  zk2/host-a/tc/tc.netif.v1/state/interfaces/ns-1/iface-1 [json:NetworkInterface, application/json] 0.50 Hz, qos data/block/reliable
+    ↳ synthetic members (name them with --member)
+  zk2/host-a/tc/tc.netif.v1/state/interfaces/ns-2/iface-2 [json:NetworkInterface, application/json] 0.50 Hz, qos data/block/reliable
+    ↳ synthetic members (name them with --member)
+  zk2/host-a/tc/tc.netif.v1/state/namespaces [json:Namespaces, application/json] 0.50 Hz, qos data/block/reliable
+  zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0 [json:BandwidthUpdate, application/json] 1.00 Hz, qos data/drop/best_effort
+plan: 6 entr(y|ies) at host-a/tc, every sample through the runtime's writers — the contract's QoS and Encoding, the owner's stamp on state, a fresh ULID per event (spec §2.4, §4.2 S1, §2.6)
+the descriptor's meta carries the synthetic marker {"seed":42,"synthetic":true,"tool":"zenctl gen"}: one writer per key makes it a statement about every sample on these keys (spec §3.3, §6)
+synthetic members stand in where --member named none: <param>-1, <param>-2
+--dry-run: nothing brought up
+
+```
+
+A `--member` is the template's values in order, joined by `/`: one that does
+not fit the template is refused by name, and so is one for an operation,
+which a mock serves over its whole template.
+
+```console
+$ zenctl gen host-a/tc tc.netif.v1 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --member 'bandwidth/{ns}/{iface}=eth0' --dry-run
+? 2
+Error: --member bandwidth/{ns}/{iface}: eth0 is 1 value(s), and bandwidth/{ns}/{iface} takes 2 (ns, iface), in template order, joined by `/`
+
+$ zenctl gen host-a/tc tc.netif.v1 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --member 'interfaces/{ns}/{iface}/set=default/eth0' --dry-run
+? 2
+Error: --member interfaces/{ns}/{iface}/set: @op/interfaces/{ns}/{iface}/set is an operation: a mock serves it over its whole template
+
+```
+
+A contract's required role must be bound, or the runtime does not start the
+service (R1, spec §3.2): the mock says so before it declares anything.
+
+```console
+$ zenctl gen vehicle-01/detector detections.v1 --contracts ../examples/zk2/walkthrough/detections.v1.toml --dry-run
+? 2
+Error: detections.v1 role input: is required (camera.v1), and a service whose configuration binds a required role to nothing does not start (R1, spec §3.2): bind it with --bind input=<system>/<service>
+
+```
+
+`serve` answers one operation with a fixed reply, encoded as the contract's
+response type, or refuses it with an envelope code — `unavailable` with its
+cause, and a cause with no other code (spec §5.2). A resource that is not an
+operation is refused by the revision, and a reply that is not JSON by the
+encoder.
+
+```console
+$ zenctl serve host-a/tc tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --refuse unavailable
+? 2
+Error: refusal unavailable: `unavailable` carries a cause: build, config or capability (spec §5.2)
+
+$ zenctl serve host-a/tc tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --refuse busy --cause config
+? 2
+Error: refusal busy: a cause goes with `unavailable` alone (spec §5.2)
+
+$ zenctl serve host-a/tc tc.netif.v1 namespaces --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: namespaces: tc.netif.v1 declares no operation resource "namespaces"; it declares: @op/diagnostics, @op/interfaces/{ns}/{iface}/set
+
+$ zenctl serve host-a/tc tc.netif.v1 diagnostics '{not json' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+? 2
+Error: the reply of @op/diagnostics: not JSON (key must be a string at line 1 column 2); a JSON Schema reply is given as JSON
+
+```
+
+What a mock refuses only with a bus — an address whose instance token is
+already present, without `--i-know` — needs a session to read presence, so
+it is pinned by the live suite (`tests/live_zk2.rs`). Against the dead-bus
+fixture the run stops at the session, and the 2 is the session's.
+
+```console
+$ zenctl serve host-a/tc tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+```

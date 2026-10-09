@@ -125,6 +125,19 @@ impl Render for RecordReport {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
+        // Version 3 (#612, FJ8a): what the selectors cannot reach, said —
+        // an excluded verbatim chunk is not an empty one.
+        if let Some(ex) = self.header.excluded.as_deref().filter(|e| !e.is_empty()) {
+            notes.push(
+                Note::coverage(format!(
+                    "{} excluded: no watched selector names them, and `*`/`**` never match a \
+                     verbatim chunk — the capture holds none of their traffic, which is not \
+                     the same as there being none",
+                    ex.join(", ")
+                ))
+                .cite("tooling guide O5"),
+            );
+        }
         if self.pre_roll.is_some() {
             notes.push(
                 Note::coverage(

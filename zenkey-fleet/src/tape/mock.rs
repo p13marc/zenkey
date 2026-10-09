@@ -203,6 +203,48 @@ pub enum MockAnswer {
     Refuse(OpError),
 }
 
+impl MockAnswer {
+    /// A refusal by its envelope code (§5.2): `invalid_request`,
+    /// `not_found`, `unavailable` (which carries its cause, and no other
+    /// code does), `forbidden`, `busy`, `internal` or `app` (without a
+    /// detail). `fanout_forbidden` is the runtime's own (O2), never a
+    /// handler's, and is refused here with every unknown code.
+    pub fn refusal(
+        code: &str,
+        message: impl Into<String>,
+        cause: Option<zenkey_model::descriptor::Cause>,
+    ) -> Result<MockAnswer> {
+        let message = message.into();
+        let refuse = |why: &str| Err(Error::unaskable(format!("refusal {code}"), why));
+        if cause.is_some() && code != "unavailable" {
+            return refuse("a cause goes with `unavailable` alone (spec §5.2)");
+        }
+        let e = match code {
+            "invalid_request" => OpError::invalid_request(message),
+            "not_found" => OpError::not_found(message),
+            "unavailable" => match cause {
+                Some(c) => OpError::unavailable(c, message),
+                None => {
+                    return refuse(
+                        "`unavailable` carries a cause: build, config or capability (spec §5.2)",
+                    );
+                }
+            },
+            "forbidden" => OpError::forbidden(message),
+            "busy" => OpError::busy(message),
+            "internal" => OpError::internal(message),
+            "app" => OpError::app_without_detail(message),
+            _ => {
+                return refuse(
+                    "not a code a server sends: invalid_request, not_found, unavailable, \
+                     forbidden, busy, internal or app (spec §5.2)",
+                );
+            }
+        };
+        Ok(MockAnswer::Refuse(e))
+    }
+}
+
 /// A member's default value for a parameter a call leaves open: what a
 /// mock names when a fan-out over its template binds no member (§5.1).
 pub(crate) fn default_value(name: &str, nth: usize) -> String {

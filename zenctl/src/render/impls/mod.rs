@@ -31,6 +31,7 @@ mod rate;
 pub use rate::RateView;
 mod listings;
 pub mod local;
+mod mock;
 mod snapshot;
 pub mod storage;
 mod timeline;

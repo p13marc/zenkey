@@ -383,7 +383,7 @@ pub use report::{
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use report::WatchdogSummary;
 pub use report::{CondState, PreRollInfo, PreambleInfo, PreambleSemantics, Transition};
-pub use tape::bench::{BenchSpec, run_bench};
+pub use tape::bench::{BenchSpec, check_bench, run_bench};
 pub use tape::ingest::{IngestRow, StreamLine, parse_row, parse_stream_line};
 pub use tape::record::{
     PREAMBLE_SKIP_REASON, RecordBounds, ReplayEvent, ReplaySpec, ReplayTarget, SinkCounts,

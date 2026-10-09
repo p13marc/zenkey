@@ -48,10 +48,10 @@
 
 mod impls;
 pub use impls::RateView;
-pub use impls::acts::{sample_lines, summary_lines};
+pub use impls::acts::{payload_text, sample_lines, summary_lines};
 pub use impls::local::{
     CacheAction, CacheReport, CachedSlice, ContextAction, ContextList, ContextRow, ContextShow,
-    GenPlan, GetReport, KeyCanon, KeyOp, KeyRelation, SchemaCheck, SchemaCheckVerdict,
+    GetReport, KeyCanon, KeyOp, KeyRelation, SchemaCheck, SchemaCheckVerdict,
 };
 pub use impls::observations::TopologyView;
 pub use impls::storage::refusal_notes;

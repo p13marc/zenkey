@@ -135,7 +135,9 @@ fn the_corpus_refuses_an_environment_it_does_not_control() {
 
 #[test]
 fn the_offline_surface_prints_what_it_has_always_printed() {
-    cases().case("tests/cmd/*.trycmd");
+    // `.toml` cases are the ones a console block cannot spell: their input
+    // rides stdin (`pub --from ndjson`, #612 FJ8a).
+    cases().case("tests/cmd/*.trycmd").case("tests/cmd/*.toml");
 }
 
 /// The context/cache family (`tests/cmd/contexts/`) runs in a home of its

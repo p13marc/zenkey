@@ -1,0 +1,5 @@
+published 0 row(s) and 0 tombstone(s) — stdin held no publishable rows
+1 tagged meta line(s) skipped (dropped/seed markers — stream metadata, not rows)
+0 malformed row(s), 2 refused row(s) — counted, not silently skipped:
+  line 1: zk2/host-a/tc/tc.netif.v1/state/namespaces: is a key host-a/tc owns, and only the owner writes its keys (P3, spec §6) — act on the service through its operations: zenctl call
+  line 3: prod/zk2/host-a/tc/tc.netif.v1/@op/diagnostics: is a key host-a/tc owns, and only the owner writes its keys (P3, spec §6) — act on the service through its operations: zenctl call

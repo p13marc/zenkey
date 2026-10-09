@@ -161,17 +161,6 @@ fn chunk_arg(s: &str) -> Result<String, String> {
     }
 }
 
-/// A producer chunk, or `-` for none — a service origin's `@rpc` has no
-/// producer chunk (RFC 06 §5), and `bench rpc` takes a positional for it
-/// all the same.
-fn producer_slot_arg(s: &str) -> Result<String, String> {
-    if s == "-" {
-        return Ok(s.to_string());
-    }
-    chunk_arg(s)
-        .map_err(|_| format!("not a plain chunk, nor `-` for a service origin — {CHUNK_RULE}"))
-}
-
 /// A procedure path: plain chunks joined by `/` (`artifact/status`).
 fn procedure_arg(s: &str) -> Result<String, String> {
     match s
@@ -261,32 +250,38 @@ pub struct Cli {
     pub(crate) command: Command,
 }
 
-/// The `gen` verb's flags (#162/#163) — one struct so the verb's whole body,
-/// the fault double-guard included, lives in `cmd/generate.rs` (#209's rule:
-/// `run()` dispatches, it does not compute).
+/// The `gen` verb's flags (#612, FJ8a) — one struct so the verb's whole
+/// body lives in `cmd/generate.rs` (#209's rule: `run()` dispatches, it
+/// does not compute).
 #[derive(clap::Args)]
 pub(crate) struct GenArgs {
-    /// Only this producer's subjects.
-    #[arg(long, value_parser = chunk_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: Option<String>,
-    /// Only subjects whose declared path contains this.
-    #[arg(long)]
-    pub(crate) subject: Option<String>,
-    /// Value for a `{var}` in a declared path (repeatable, k=v).
-    /// Unnamed vars get deterministic synthetic values, stated in the
-    /// plan.
-    #[arg(long = "var", value_name = "K=V")]
-    pub(crate) vars: Vec<String>,
-    /// Origin the generated keys claim (h-<12 hex>). Naming one is
-    /// publishing as that host, so it needs --i-know (not with
-    /// --dry-run). Default: derived from this session's zid — printed
-    /// either way, and stamped into the marker.
-    #[arg(long)]
-    pub(crate) origin: Option<String>,
-    /// Override every entry's rate (Hz). Default: registry-driven —
-    /// telemetry 1 Hz, state refreshes at ttl/2, events inside their
-    /// declared budget.
+    /// The address the mock owner runs at, `<system>/<service>`: yours to
+    /// name. One whose instance token is already present is refused
+    /// unless --i-know.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// The interfaces it implements, `<name>.v<major>[@<fingerprint>]`,
+    /// each from --contracts or retrieved from the bus (spec §8.4).
+    /// Omitted: every contract --contracts loads, one revision each.
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) ifaces: Vec<RevisionSpec>,
+    /// The members a templated resource publishes, repeatable:
+    /// `<resource>=<member>[,<member>…]`, each member its parameter values
+    /// in template order joined by `/` (`bandwidth/{ns}/{iface}=
+    /// default/eth0,default/eth1`). A resource named by none gets two
+    /// synthetic members (`<param>-1`, `<param>-2`), stated in the plan.
+    #[arg(long = "member", value_name = "RESOURCE=MEMBERS")]
+    pub(crate) members: Vec<String>,
+    /// A role binding, `ROLE=SYSTEM/SERVICE[,…]`, repeatable (R1): a
+    /// contract's required role must be bound, or a service does not
+    /// start.
+    #[arg(long = "bind", value_name = "ROLE=PROVIDERS")]
+    pub(crate) binds: Vec<String>,
+    /// Override every stream's and state's rate (Hz). Default: 1 Hz for a
+    /// stream, a state re-put every 2 s; an event stays within its
+    /// declared rate whatever this says (spec §2.6).
     #[arg(long, value_name = "HZ")]
     pub(crate) rate: Option<f64>,
     /// Send-timing shape (all deterministic under --seed).
@@ -300,47 +295,19 @@ pub(crate) struct GenArgs {
     /// Synthesis/jitter seed — same seed, same run.
     #[arg(long, default_value_t = 42)]
     pub(crate) seed: u64,
-    /// Inject fault(s) into otherwise-valid samples (#163) for
-    /// consumer-robustness testing on a bus you own. Comma-separated
-    /// kinds: truncate, wrong-type, extra-field, unregistered-key,
-    /// wrong-qos, missing-encoding, unstamped. Each perturbs one dimension
-    /// post-synthesis; the plan states the delta per key, and every
-    /// faulted sample's marker carries fault=<kind> (RFC 09 §5.3).
-    /// DOUBLE-GUARDED: requires --i-know AND an endpoint or --base TYPED on
-    /// this command line — an exported ZENCTL_BASE or context default is the
-    /// ambient bus the shell was pointed at, which is exactly what faults
-    /// must never land on.
-    #[arg(long = "fault", value_name = "KIND", value_delimiter = ',')]
-    pub(crate) fault: Vec<String>,
-    /// SchemaSet JSON document (RFC 08 §7) for payload shapes when the
-    /// bus serves no describe (the registry carries type names, not
-    /// shapes).
-    #[arg(long, value_name = "FILE")]
-    pub(crate) schema_set: Option<PathBuf>,
-    /// Also answer introspect (and describe, with --schema-set) for the
-    /// impersonated producers — a complete mock producer, not just a
-    /// firehose.
-    #[arg(long)]
-    pub(crate) serve_describe: bool,
-    /// Print the plan and publish nothing.
+    /// Print the plan and bring nothing up (no session is opened when
+    /// --contracts holds every interface).
     #[arg(long)]
     pub(crate) dry_run: bool,
-    /// Mean traffic that lies on purpose: the acknowledging half of
-    /// --fault's double guard, and an --origin that names a host.
-    //
-    // One `--i-know` per verb (#307). `gen` had two guards on it —
-    // deliberately non-conforming traffic, and a fleet-wide impersonation —
-    // and one flag discharging both meant acknowledging the wide run also
-    // armed the fault injector. The graver guard kept the name; the other is
-    // `--wide`. A named `--origin` (#507) joined the graver one: it is the
-    // same decision — untrue traffic — about the sender instead of the body.
+    /// Start beside an instance already running at the address: a second
+    /// writer of its keys (P3) and a split-brain on every exclusive
+    /// resource (spec §6).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
-    /// Acknowledge a run wider than 10 subjects — a fleet-wide impersonation.
-    #[arg(long)]
-    pub(crate) wide: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `why` verb's flags (#214) — one struct, the `GenArgs` pattern, so the
@@ -622,7 +589,7 @@ pub(crate) enum Command {
     /// No session is opened. RFC 03 §4's footguns, diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
-    /// Measure the fleet.
+    /// Measure how a deployment answers its operations.
     #[command(subcommand)]
     Bench(BenchCmd),
 
@@ -710,13 +677,19 @@ pub(crate) enum Command {
     /// report says so (O4). Findings are output, not verdicts — exit 0
     /// unless you opt in with `--fail-on`.
     Field(FieldArgs),
-    /// Capture a selector's traffic to a .zrec file.
+    /// Capture wire selectors' traffic to a .zrec file.
     ///
-    /// A capture (RFC 09 §5.2), taken through the Monitor: a bus that outruns
-    /// the disk surfaces as drop records *in the file*, where the gaps happened
-    /// (RFC 09 §5.1 O6) — a capture is a bounded observer and says what it
-    /// cost. Replay with `zenctl replay`; the file is ndjson (one row per line,
-    /// payloads lossless as base64 `bytes`), so `jq` reads it too.
+    /// A capture (`.zrec` version 3, the tooling guide's §5), taken through
+    /// the Monitor on a session in no namespace, so rows keep their full wire
+    /// keys and their payloads lossless (base64 `bytes`), with the QoS axes
+    /// they rode with and the stamp they carried, informatively. The header
+    /// carries the namespace you stated (`--namespace`, alias `--base`) and
+    /// the exact selectors, and names the verbatim chunks none of them reach
+    /// (`@stream`, `@state`, `@op`, `@zk`, `@adv`: O5) — a `zk2/**` capture
+    /// excludes them, it does not find them empty. A bus that outruns the
+    /// disk surfaces as drop records in the file, where the gaps happened
+    /// (O6). Replay with `zenctl replay --namespace`; the file is ndjson, so
+    /// `jq` reads it too.
     Record(RecordArgs),
     /// Replay a .zrec capture onto the bus (this publishes).
     ///
@@ -805,25 +778,36 @@ pub(crate) enum Command {
     /// REFUSED up front: OTLP, histograms and summaries, push gateways and
     /// remote write — `/metrics` over plain HTTP is the whole surface.
     Export(ExportArgs),
-    /// Stand up a mock queryable that answers one keyexpr and logs every ask.
+    /// Serve one operation of an interface as a mock owner, and log each call.
     ///
-    /// Every query on the keyexpr gets one static body (#121). The log doubles
-    /// as a "who is querying this key" probe. Deliberately no reply scripting —
-    /// static and file bodies cover the dev-loop case; the shell covers dynamic
-    /// replies by restarting serve. (nuze and zsak own the embedded-language
-    /// lane, at the cost of a Nushell dependency and a linked libpython
-    /// respectively.)
+    /// A real zk2 service at the address you name (P3, spec §6): an
+    /// instance, a descriptor (its `meta` carrying the synthetic marker) and
+    /// tokens, brought up by the runtime in §8.2's order. The operation
+    /// answers every call with one fixed reply — JSON encoded as the
+    /// contract's response type, as `call` encodes a request; bytes for a
+    /// raw type; synthesized when omitted — or refuses it with --refuse.
+    /// Every other operation of the interface is answered too, never silent
+    /// (O3): an optional one `unavailable`, a required one `internal`. Each
+    /// call is logged as it is answered: its key, what it binds, the request
+    /// decoded through the bundle, and the metadata the caller claims (O7).
+    /// An address whose instance token is already present is refused unless
+    /// --i-know. Ends at --count calls, after --for, or on ctrl-c.
     Serve(ServeArgs),
-    /// Generate test traffic from the registry: a mock producer.
+    /// Bring up a mock owner publishing every resource of its contracts.
     ///
-    /// Registry-driven (#162): every declared subject of a producer,
-    /// schema-synthesized payloads, declared QoS, class-conscious rates — a
-    /// mock producer for testing consumers. The full plan prints BEFORE
-    /// anything is published; every sample carries the RFC 09 §5.3 synthetic
-    /// marker ({"synthetic":true,"tool":…,"origin":…}), so a `check conform
-    /// --for` window or a capture can tell this traffic from real. Events stay inside
-    /// their declared rate budget on write-once keys. A run wider than 10
-    /// subjects needs --wide; faults need --i-know.
+    /// Contract-driven (#612, FJ8a): a real zk2 service at the address you
+    /// name (P3, spec §6) — an instance, a descriptor (its `meta` carrying
+    /// the synthetic marker {"synthetic":true,"tool":…,"seed":…}) and tokens
+    /// — publishing every stream, state and event resource of each interface
+    /// through the runtime's writers: the contract's QoS and `Encoding`, the
+    /// owner's stamp on every state put (S1), a fresh ULID per event (§2.6),
+    /// events within their declared rate. Every operation answers each call
+    /// with one synthesized response. Payloads are synthesized from the
+    /// bundle, deterministic per --seed: JSON Schema values that validate,
+    /// protobuf messages with every field filled, raw bytes of the media
+    /// type's size class. The full plan prints BEFORE anything is brought up.
+    /// An address whose instance token is already present is refused unless
+    /// --i-know.
     Gen(GenArgs),
     /// Listen for raw scouting Hellos: zid, whatami, locators.
     ///
@@ -1045,15 +1029,22 @@ pub(crate) enum CacheCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum BenchCmd {
-    /// Time an `@rpc` procedure, per origin.
+    /// Time a zk2 operation's replies, per replier key.
     ///
-    /// Latency is measured **per reply**, so a fast origin in a fan-out is not
-    /// charged the slowest one's round trip. Only procedures the registry
-    /// declares `idempotent = true` bench by default: a benchmark repeats, and
-    /// repeating a write into a live fleet is a different act from measuring
-    /// it. Exit 1 when any measured reply was an error envelope, 2 when
-    /// nobody answered.
-    Rpc(BenchRpcArgs),
+    /// Latency is measured **per reply**, where it arrives, on this tool's
+    /// clock (a round trip, never a stamp), and attributed by the key it
+    /// went on (spec §5.1 O3), so a fast replier in a fan-out is not charged
+    /// the slowest one's round trip. The calls go out as `call`'s do: one
+    /// address `BestMatching`, a `*` or an unbound parameter a fan-out
+    /// (`All`), only to an operation declaring `fanout = "allowed"` (O2).
+    /// Envelopes are a population of their own, unattributed; a call that
+    /// drew nothing is silence, counted and never averaged in (O5); each
+    /// token holder of the selection is tallied against the calls it sent no
+    /// value in. Only an operation declared `idempotent` benches by default:
+    /// a benchmark repeats, and repeating a write is a different act from
+    /// measuring it. Exit 0 values only, 1 an envelope among them, 2 no
+    /// value at all.
+    Call(BenchCallArgs),
 }
 
 #[derive(Subcommand)]
@@ -1763,27 +1754,6 @@ pub(crate) fn refuse_stream_json(matches: &clap::ArgMatches) {
     }
 }
 
-/// Whether the bus target was **typed on this command line** — the fact
-/// `gen --fault`'s second guard needs (#163). By the time the derive struct
-/// exists, clap has folded `ZENCTL_BASE` into `--base`, and an exported env
-/// var is exactly "whatever bus the shell was pointed at": the ambient
-/// default the guard refuses. Same `ValueSource` question as
-/// [`refuse_foreign_format`], asked at the same edge.
-pub(crate) fn gen_target_typed(matches: &clap::ArgMatches) -> bool {
-    use clap::parser::ValueSource;
-
-    let mut m = matches;
-    while let Some((_, sub)) = m.subcommand() {
-        m = sub;
-    }
-    ["base", "connect", "listen", "zenoh_config"]
-        .into_iter()
-        .any(|id| {
-            m.ids().any(|i| i.as_str() == id)
-                && m.value_source(id) == Some(ValueSource::CommandLine)
-        })
-}
-
 /// The `get` verb's flags — one struct the dispatcher hands over whole,
 /// destructured in the verb rather than in `run()` (#354). The raw form's,
 /// with `get state` beside it as a subcommand (#612, FJ5): the
@@ -2004,8 +1974,13 @@ pub(crate) struct FieldArgs {
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct RecordArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
+    /// Full wire selectors to capture, repeatable — this session is in no
+    /// namespace, so a selector is the key as the wire carries it
+    /// (`prod/zk2/**`). Default: the deployment's zk2 data, `<ns>/zk2/**`,
+    /// whose `**` reaches no verbatim chunk (`@stream`, `@state`, …): name
+    /// one to capture it (`prod/zk2/*/*/*/@stream/**`).
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selectors: Vec<String>,
     /// Output file. An existing file is refused (exit 2) unless
     /// --overwrite: a capture is the one artifact this verb exists to keep.
     #[arg(long, short = 'o', value_name = "FILE")]
@@ -2024,13 +1999,13 @@ pub(crate) struct RecordArgs {
     pub(crate) count: u64,
     /// Arm instead of record (#218): write a file only when this rule
     /// transitions to `firing`, with `--pre` seconds of retained traffic
-    /// before it. Repeatable; the watchdog's vocabulary — `rate-above
-    /// <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
-    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `doctor <CHECK-ID>`,
-    /// `origin-down <ORIGIN>`, `dropped`, `alert-firing <SEL>
-    /// [<MIN-SEVERITY>]`. The file is `.zrec` version 2
-    /// (RFC 13 §4.1): a state preamble, the pre-roll, the trigger record
-    /// where it fired, then `--post` seconds more.
+    /// before it. Repeatable; the zk2 conditions of the watchdog's
+    /// vocabulary — `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`,
+    /// `silent-for <SEL> <SECS>`, `dropped`, `doctor <CHECK-ID>` (zk2's
+    /// doctor, run in the namespace). The rules that judge v1's registry,
+    /// roster or alert plane are refused (exit 2). The file carries a state
+    /// preamble (the owners' own answer, spec §4.2 S4), the pre-roll, the
+    /// trigger record where it fired, then `--post` seconds more.
     #[arg(long, value_name = "RULE", requires = "pre")]
     pub(crate) on: Vec<String>,
     /// Seconds of traffic to retain before the trigger — the ring's age
@@ -2055,7 +2030,7 @@ pub(crate) struct RecordArgs {
     )]
     pub(crate) preamble: PreambleMode,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// `record --preamble`: what a triggered capture's state preamble is a
@@ -2260,42 +2235,85 @@ pub(crate) struct ReplayArgs {
     pub(crate) bus: BusArgs,
 }
 
-/// The `serve` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `serve` verb's flags (#612, FJ8a) — one struct the dispatcher hands
+/// over whole, destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct ServeArgs {
-    /// Key expression to serve (full wire form; a wildcard needs
-    /// --i-know).
-    #[arg(add = ArgValueCandidates::new(completion::keys))]
-    pub(crate) keyexpr: String,
-    /// Reply body: inline text, `@file`, or `-` for stdin (read once) —
-    /// through the same encode ladder as `pub`.
-    pub(crate) reply: Source,
-    /// Wire encoding to declare on replies. Defaults to the registry's
-    /// declared encoding when the keyexpr refines, else none.
-    #[arg(long)]
-    pub(crate) encoding: Option<String>,
-    /// Do not refuse a body the served schema rejects.
-    #[arg(long)]
-    pub(crate) no_validate: bool,
-    /// Reply the bytes verbatim: no schema lookup, no refusal.
-    #[arg(long)]
-    pub(crate) raw: bool,
-    /// Declare the queryable complete — a claim this responder holds
-    /// ALL the data the expression names. Needs --i-know; never on an
-    /// `@rpc` key (RFC 05 §2.1).
-    #[arg(long)]
-    pub(crate) complete: bool,
-    /// Exit after N queries (0 = until ctrl-c).
-    #[arg(long, value_name = "N", default_value_t = 0)]
-    pub(crate) count: usize,
-    /// Serve a wildcard key expression, or declare --complete: a mock that
-    /// answers real GETs in place of the bus's own answers. The refusal
-    /// you are overriding names its reason.
+    /// The address the mock owner runs at, `<system>/<service>`: yours to
+    /// name. One whose instance token is already present is refused
+    /// unless --i-know.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// The operation: its template (`diagnostics`), or `@op/<template>`.
+    pub(crate) operation: String,
+    /// The fixed reply: inline JSON, `@file`, or `-` for stdin (read once)
+    /// — the bytes as given for a raw response type — encoded as the
+    /// contract's response type, as `call` encodes a request. Omitted: a
+    /// synthesized response (--seed). Not with --refuse.
+    #[arg(value_name = "JSON|@FILE|-", conflicts_with = "refuse")]
+    pub(crate) reply: Option<Source>,
+    /// Refuse every call with this envelope code instead of replying
+    /// (spec §5.2).
+    #[arg(long, value_enum, value_name = "CODE")]
+    pub(crate) refuse: Option<RefuseCode>,
+    /// The refusal's message, for a human (never parsed).
+    #[arg(long, value_name = "TEXT", requires = "refuse")]
+    pub(crate) message: Option<String>,
+    /// The refusal's cause: required by `unavailable`, refused with any
+    /// other code (spec §5.2).
+    #[arg(long, value_enum, value_name = "CAUSE", requires = "refuse")]
+    pub(crate) cause: Option<CauseArg>,
+    /// A role binding, `ROLE=SYSTEM/SERVICE[,…]`, repeatable (R1): a
+    /// contract's required role must be bound, or a service does not
+    /// start.
+    #[arg(long = "bind", value_name = "ROLE=PROVIDERS")]
+    pub(crate) binds: Vec<String>,
+    /// The seed a synthesized reply is made with.
+    #[arg(long, default_value_t = 42)]
+    pub(crate) seed: u64,
+    /// Exit after N calls (default: until interrupted).
+    #[arg(long, value_name = "N")]
+    pub(crate) count: Option<u64>,
+    /// Stop after this many seconds (default: until interrupted).
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// Start beside an instance already running at the address: a second
+    /// answerer of its operations (P3) and a split-brain on every exclusive
+    /// resource (spec §6).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// The envelope codes a mock owner may refuse a call with (spec §5.2).
+/// `fanout_forbidden` is the runtime's own (O2), never a handler's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum RefuseCode {
+    #[value(name = "invalid_request")]
+    InvalidRequest,
+    #[value(name = "not_found")]
+    NotFound,
+    Unavailable,
+    Forbidden,
+    Busy,
+    Internal,
+    App,
+}
+
+/// An `unavailable` envelope's cause (spec §2.3, §5.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum CauseArg {
+    Build,
+    Config,
+    Capability,
 }
 
 /// The `scout` verb's flags — one struct the dispatcher hands over whole,
@@ -2495,22 +2513,28 @@ pub(crate) struct KeyIntersectsArgs {
     pub(crate) out: OutputArgs,
 }
 
-/// The `bench rpc` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `bench call` verb's flags (#612, FJ8a) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
-pub(crate) struct BenchRpcArgs {
-    /// Origin to target: a host id, `*` for the fleet, or `@catalog`.
-    pub(crate) origin: String,
-    /// Producer name, or `-` for a service origin (`@catalog`), which has no
-    /// producer chunk.
-    #[arg(value_parser = producer_slot_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: String,
-    /// Procedure path. `introspect` is the safe default: RFC 08 §6 makes
-    /// it a read every producer serves.
-    #[arg(default_value = "introspect", value_parser = procedure_arg,
-          add = ArgValueCandidates::new(completion::procedures))]
-    pub(crate) procedure: String,
+pub(crate) struct BenchCallArgs {
+    /// The service, `<system>/<service>`. A `*` in either position fans
+    /// each call out over every service it selects.
+    #[arg(value_name = "SYSTEM/SERVICE", add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: String,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// The operation: its template, or `@op/<template>`.
+    pub(crate) operation: String,
+    /// The request, as `call` takes it: inline JSON, `@file`, or `-` for
+    /// stdin. Omitted: `{}`, or no bytes for a raw type.
+    #[arg(value_name = "JSON|@FILE|-")]
+    pub(crate) request: Option<Source>,
+    /// A template parameter, `NAME=VALUE` with the value unslugged,
+    /// repeatable. A parameter not given is a wildcard: a fan-out.
+    #[arg(long = "param", value_name = "NAME=VALUE", value_parser = param_arg)]
+    pub(crate) params: Vec<(String, String)>,
     /// Calls to issue (default 100).
     //
     // `--calls`, not `--count` (#307): `--count` is a stop bound on a
@@ -2520,13 +2544,14 @@ pub(crate) struct BenchRpcArgs {
     /// Calls in flight at once (1 = strictly sequential).
     #[arg(long, default_value_t = 1)]
     pub(crate) concurrency: usize,
-    /// Bench a procedure the registry does not declare idempotent (with
-    /// `*`, one it does not declare at all). A declared write that may
-    /// not fan out stays refused under `*` (RFC 05 §2.1).
+    /// Bench an operation not declared `idempotent`: each call is a write,
+    /// repeated. A fan-out the operation forbids stays refused (O2).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `admin graph` verb's flags — one struct the dispatcher hands over whole,

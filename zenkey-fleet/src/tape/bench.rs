@@ -246,6 +246,25 @@ impl Query {
     }
 }
 
+/// Refuses a bench that would repeat a write — an operation not declared
+/// `idempotent`, unless `force` (O4's reasoning) — or measure nothing,
+/// before anything is asked. [`run_bench`] asks it first; a caller asks it
+/// before it opens a session.
+pub fn check_bench(revision: &Revision, plan: &CallPlan, calls: usize, force: bool) -> Result<()> {
+    if !plan.operation.idempotent && !force {
+        return Err(Error::unaskable(
+            format!("{} {}", revision.iface(), plan.name),
+            "is not idempotent, and a benchmark calls it again and again: that is a \
+             repeated write into a live deployment, not a measurement (O4). Pass --i-know \
+             to mean it",
+        ));
+    }
+    if calls == 0 {
+        return Err(Error::unaskable("--calls 0", "measures nothing"));
+    }
+    Ok(())
+}
+
 /// Runs the benchmark.
 pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchReport> {
     let BenchSpec {
@@ -257,18 +276,7 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
         timeout,
         force,
     } = spec;
-    let what = format!("{} {}", revision.iface(), plan.name);
-    if !plan.operation.idempotent && !force {
-        return Err(Error::unaskable(
-            what,
-            "is not idempotent, and a benchmark calls it again and again: that is a \
-             repeated write into a live deployment, not a measurement (O4). Pass --i-know \
-             to mean it",
-        ));
-    }
-    if calls == 0 {
-        return Err(Error::unaskable("--calls 0", "measures nothing"));
-    }
+    check_bench(revision, plan, calls, force)?;
     let keys = selectors(session, revision, plan)?;
     let fanout = plan.is_fanout();
     let query = Query {

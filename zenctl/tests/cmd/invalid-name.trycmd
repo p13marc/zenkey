@@ -14,24 +14,6 @@ the rule, before any session is opened. That is why none of these needs a bus.
 The list is every verb that takes one; a new one belongs here.
 
 ```console
-$ zenctl bench rpc h-0123456789ab MyApp
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk, nor `-` for a service origin — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl bench rpc h-0123456789ab probe Ping
-? 2
-error: invalid value 'Ping' for '[PROCEDURE]': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
 $ zenctl config get h-0123456789ab MyApp wlan0
 ? 2
 error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
@@ -157,28 +139,6 @@ For more information, try '--help'.
 
 ```
 
-```console
-$ zenctl gen --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-`-` is the one non-chunk a call's producer position admits: a service origin's
-`@rpc` has no producer chunk (RFC 06 §5), so `bench rpc @catalog - …` names
-none. Against a host or the fleet it is this tool's own refusal — still a 2,
-and still before a session.
-
-```console
-$ zenctl bench rpc '*' -
-? 2
-each call times out after 5.0s — a p99 at or near that number is measuring the timeout, not the fleet
-Error: producer `-` stands for no producer chunk, which only a service origin (`@…`) has (RFC 06 §5) — a host or the fleet needs the producer's name
-
-```
-
 zk2's names are refused at the same edge (#612, FJ4): a service address is
 `<system>/<service>`, each a plain chunk, and an interface is
 `<name>.v<major>`, optionally `@` a fingerprint or a prefix of one — lowercase
@@ -252,5 +212,32 @@ Error: MyHost/tc: binding "MyHost/tc" is not <system>/<service> (each a name or 
 $ zenctl watch 'host-a/*/x' tc.netif.v1 'bandwidth/{ns}/{iface}' --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: host-a/*/x: binding "host-a/*/x" is not <system>/<service> (each a name or *)
+
+```
+
+The mock owners (FJ8a) take the same address: `gen` and `serve` run at one
+service, parsed at the edge; `bench call` takes a pattern, as `call` does,
+and so does a `--bind` provider.
+
+```console
+$ zenctl gen MyHost/tc
+? 2
+error: invalid value 'MyHost/tc' for '<SYSTEM/SERVICE>': system "MyHost" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+For more information, try '--help'.
+
+$ zenctl serve host-a tc.netif.v1 diagnostics
+? 2
+error: invalid value 'host-a' for '<SYSTEM/SERVICE>': "host-a" is not a zk2 key: an address is <system>/<service>
+
+For more information, try '--help'.
+
+$ zenctl bench call MyHost/tc tc.netif.v1 diagnostics --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: MyHost/tc: binding "MyHost/tc" is not <system>/<service> (each a name or *)
+
+$ zenctl gen host-a/tc tc.netif.v1 --bind cmd=Host/x --dry-run
+? 2
+Error: Host/x: binding "Host/x" is not <system>/<service> (each a name or *)
 
 ```
