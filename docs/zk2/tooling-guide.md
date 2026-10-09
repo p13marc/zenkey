@@ -216,6 +216,14 @@ P3 (core §6, §11.1): a key is written only by the service that owns it.
   foreign keys. v1's `retire` has no zk2 meaning, and is gone.
 - **The one exception** is a replayer standing in for the owners it
   recorded, in a namespace of its own (§5).
+- **A mock owner is not an exception**: it *is* an owner. zenctl's `gen` and
+  `serve` (#612, FJ8a) bring up a real service at an address the operator
+  names, through the runtime's `ServiceBuilder` (descriptor, tokens, writers,
+  the core §8.2 order), so P3 holds by construction. They refuse an address
+  whose instance token is already present, which would be a second writer of
+  its keys, unless `--i-know`. Their descriptor's `meta` carries
+  `synthetic`, which is informative (core §3.3): a sample's attachment is
+  the contract's to type (core §2.3), so it cannot carry a marker.
 
 ## 5. Recording and replay
 
@@ -229,6 +237,13 @@ v1's `.zrec` format minimum (RFC 13 §4.1, on the `v1` branch) carries over:
   the file.
 - **Timestamps** are re-stamped on replay, deliberately: a replay is new
   traffic, and says so. The recorded stamp rides along, informatively.
+
+zenctl's `.zrec` is version 3 (#612, FJ8a). Its header adds `excluded`: the
+verbatim chunks (`@stream`, `@state`, `@op`, `@zk`, `@adv`) that no selector
+of the capture names, so the file cannot contain them whatever the bus
+carried (O5). Each row adds `qos_axes`, the sample's
+priority, congestion control, reliability and express as received, which a
+replay honours. Versions 1 and 2 still read.
 
 **A replayer stands in for the recorded owners** (r4 §4.1, spike S13). It
 republishes under the original addresses in a namespace of its own, a

@@ -1009,8 +1009,8 @@ mod tests {
     /// What `force` never moves: a declared — or defaulted — forbidden
     /// fan-out, and the convention's own writes. And what needs no force:
     /// a declared read, an allowed write, the convention's reads (with no
-    /// registry at all — `config get '*'` and `bench rpc '*'` of
-    /// introspect keep working), and a templated declaration the call fills.
+    /// registry at all — `config get '*'` of
+    /// introspect keeps working), and a templated declaration the call fills.
     #[test]
     fn force_moves_only_the_unknown() {
         for slices in [
