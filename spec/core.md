@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.14** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.15** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -9,7 +9,8 @@ implementing 0.7 found, a refused presence read first, in 0.9 the
 order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
 a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
 who may answer the admin space, in 0.13 how a far router is verified, and
-in 0.14 what access control measured).
+in 0.14 what access control measured, and in 0.15 what §11 needs to be built
+from).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -623,10 +624,17 @@ cannot tell under `Latest` which replier answered.
     router's storage manager runs, its value the storage's configuration
     with its `key_expr`.
 
+  **A storage** is an answer to the second selector whose key the selector
+  includes, ending `…/storage_manager/storages/<name>` (0.15, F-86). Other
+  answers arrive too, and are not storages. A router's admin space records
+  each queryable as `@/<zid>/router/queryable/<key expr>`, and the record
+  of a queryable ending in `**`, such as an owner's `…/state/**`,
+  intersects the selector and answers it.
+
   A storage whose `key_expr` intersects an owner's `state/**` or
   `@state/**` breaks S4. A router that answers the first selector and has
-  nothing under the second runs no storage. When no router answers the
-  first, the check is unobservable.
+  no storage answer runs no storage. When no router answers the first, the
+  check is unobservable.
 - **Who answered** (0.12, F-80).
   - **The problem.** Any session can declare a queryable under
     `@/<zid>/router`, a real router's zid included. The key names the zid
@@ -2250,14 +2258,28 @@ contributes through exactly four points:
 
 ### 11.1 Grant shapes
 
-Ownership (§6) reduces access control to three grant shapes:
+Ownership (§6) reduces access control to a few grant shapes.
+
+**The input** (0.15, F-82). A generator compiles a deployment:
+- its principals, each bound to a user name or a certificate CN, never a zid
+  (§11.3);
+- the services each principal runs, with the contracts they implement;
+- each holder's bindings: role, interface, providers, resources,
+  parameters (R2), and whether it reads with history;
+- each holder's calls: interface, providers, operations;
+- the services a tool inspects, and whether it reads the admin space;
+- the archives: what each records, and its peers;
+- the namespace (§1.6).
+
+The format is the generator's own. The reference reads an enrollment file
+(`examples/zk2/acl/*.enrollment.toml`, informative).
 
 | Grant | Rule |
 |---|---|
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (0.14, measured in spike S14). |
 | **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1, 0.8) and the descriptor's GET and subscription (§3.3, 0.14) on the `…/@zk/**` subtree of each provider they name. |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
-| **Tool** (0.14) | A principal with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. A tool drawing the graph (R3) reads descriptors through presence. |
+| **Tool** (0.14) | A principal with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. A tool drawing the graph (R3) reads descriptors through presence. A tool that checks S4 or runs a doctor (§4.2) also holds the **admin read** (0.15): `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
@@ -2309,6 +2331,34 @@ Ownership (§6) reduces access control to three grant shapes:
   `allow`, the members of a template that no other principal names stay
   readable. `deny` is the posture that holds such a grant exactly. A
   generator warns.
+- **Messages and flows** (0.15, F-83). §11.1 names actions; zenoh's access
+  control names messages on a flow. Under `deny`, each grant compiles to
+  these allow rules. Both implementations measured them on zenoh 1.10.1:
+
+  | Grant | Ingress (from the holder) | Egress (toward the holder) |
+  |---|---|---|
+  | Own | `put`, `delete`, `declare_queryable`, `reply`, `liveliness_token` | `query`, `declare_subscriber` |
+  | Fan-in (a provider, §11.2 above) | `reply` | `query`, `declare_subscriber` |
+  | Consume | `declare_subscriber`, `query` | `put`, `delete`, `reply` |
+  | History (§2.5) | `declare_subscriber`, `query`, `declare_liveliness_subscriber`, `liveliness_query` | `put`, `delete`, `reply`, `liveliness_token` |
+  | Presence | `declare_liveliness_subscriber`, `liveliness_query`, `query`, `declare_subscriber` | `liveliness_token`, `reply`, `put` |
+  | Call | `query` | `reply` |
+  | Contracts | `declare_queryable`, `reply`, `query` | `query`, `reply` |
+  | Admin read (Tool) | `query` | `reply` |
+
+  A liveliness read needs both of its rows. Without the egress
+  `liveliness_token`, a reader's liveliness GET returns nothing.
+- **The complement's key set** (0.15, F-85). Key expressions have no
+  negation. Under `allow`, a grant's complement is taken over the
+  deployment's own keys: each resource the enrolled services' contracts
+  declare, each service's `…/@zk/**`, and the contract keys. Keys no
+  contract declares stay open under `allow`.
+- **"Every principal" compiles into each principal's own policy** (0.15,
+  F-87). In zenoh 1.10.1, a subject that matches every session (one with
+  no attribute, or `link_protocols: ["tcp"]`) makes the per-user subjects
+  lose their denies. This was measured. The `@/**` queryable deny (§11.1)
+  is therefore a rule in each principal's policy, never one catch-all
+  subject's.
 
 `[Sc: security.md §2]`
 
