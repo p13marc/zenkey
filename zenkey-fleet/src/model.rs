@@ -46,18 +46,14 @@
 //! [`crate::judge`]'s.
 
 pub mod acl;
-pub mod alert;
 pub mod bounded;
 pub mod catalog;
 pub mod compat;
 pub mod diff;
 pub mod examples;
-pub mod export;
 pub mod facts;
-pub mod impact;
 pub mod jsonschema;
 pub mod lens;
-pub mod prom;
 pub mod registry;
 pub mod render;
 pub mod retain;

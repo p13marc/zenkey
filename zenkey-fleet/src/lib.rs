@@ -178,9 +178,6 @@ pub use judge::field::{
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::kind::{KeyKind, KindObservation, judge_kind};
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::probe::run_probe;
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
@@ -215,21 +212,16 @@ pub use bus::admin::{
     declared_entities, declared_entities_within, declared_entity_selectors, mesh_links,
     origin_attachments, render_dot, routers, state_coverage, storages, topology,
 };
-#[cfg(feature = "blob")]
-#[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
-pub use bus::blob::{BlobFetchSpec, FETCH_PRIORITY, blob_fetch, blob_probe, blob_tree_index};
-pub use bus::blob::{BlobTarget, blob_list, declared_by};
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
     StampProvenance, StreamItem, WatchId,
 };
 pub use bus::producer::{BringUp, LiveProducer, ReservedError, Responder};
 pub use bus::query::{
-    Answer, DEFAULT_MAX_REPLIES, FetchOutcome, FetchSpec, FetchedValue, FleetAnswer, GetOpts,
-    RegistrySweep, RepeatingQuery, RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample,
-    UnreadableReply, declare_repeating, declare_repeating_any, fetch_stored, fetch_value,
-    fleet_get, fleet_registry, fleet_registry_by_origin, fleet_registry_raw, snapshot_get,
-    state_snapshot,
+    Answer, DEFAULT_MAX_REPLIES, FleetAnswer, GetOpts, RegistrySweep, RepeatingQuery,
+    RepeatingRegistry, ServedSlice, SnapshotReplies, StateSample, UnreadableReply,
+    declare_repeating, declare_repeating_any, fleet_get, fleet_registry, fleet_registry_by_origin,
+    fleet_registry_raw, snapshot_get, state_snapshot,
 };
 pub use bus::roster::{
     BridgeMatch, RosterChange, RosterWatch, apply_token, bridge_resolve, roster, token_identity,
@@ -242,10 +234,9 @@ pub use bus::session::{
     open_reporting_within, open_with_config,
 };
 pub use bus::write::{
-    CallSpec, CallTarget, MatchingEvents, Publication, RetireClass, WireQos, WriteAct, call,
-    check_concrete, check_fanout, check_retire, declare_publication, declare_publication_with,
+    MatchingEvents, Publication, RetireClass, WireQos, WriteAct, check_concrete, check_retire,
+    declare_publication, declare_publication_with,
 };
-pub use judge::budget::BudgetObservation;
 pub use judge::common::EXPANSION_CAP;
 // zk2's doctor (#612, FJ6): the run, its two halves, and the delta a
 // notifier compares runs with.
@@ -255,7 +246,6 @@ pub use judge::doctor::{
     observe as observe_doctor, run_doctor,
 };
 pub use judge::doctor_delta::doctor_delta;
-pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
 // Types reachable *through* root-exported ones — a caller that matches on
 // `KeyShape::V1` or walks a `Skeleton` needs these, and had to spell a module
 // path to name them (#350).
@@ -331,17 +321,10 @@ pub use judge::field::DEFAULT_MAX_PATHS;
 // zk2's access control (spec §11, #612 FJ7): planned from an enrollment
 // and the contracts, checked against a router's config file, explained.
 pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5};
-pub use model::alert::alert_transition;
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
-pub use model::export::{
-    DEFAULT_MAX_SERIES, DoctorRun, ExportLedger, FIELD_CAP, FoldInputs, Observed, PayloadVerdict,
-    WILDCARD_EXCLUDES, excluded_by,
-};
 pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
-pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
-pub use model::prom::{exposition, metric_name};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
@@ -357,15 +340,13 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer, Coverage,
-    CoverageRow, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport, DriftVerdict,
-    EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot, FieldReport,
-    GenPlan, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement, LatencyReport,
-    LatencySummary, MeshLink, OriginAttachment, RecordReport, RenderSource, ReplayReport,
-    RouterInfo, SampleRow, SchemaDrift, SchemaServer, SeedCoverage, ServeSummary, ServedCall,
-    Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge,
-    TopologyNode, TopologyReport, TotalityGap, ValueSource, ZrecHeader, ZsnapHeader,
-    judgement_exit_code,
+    BenchReport, CollapsedProducer, Coverage, CoverageRow, DeclaredEntities, DeclaredEntity,
+    DoctorDelta, DoctorReport, DriftVerdict, EntityKind, ExpectReport, FieldReport, GenPlan,
+    GenPlanEntry, GenReport, HelloView, Judgement, LatencyReport, LatencySummary, MeshLink,
+    OriginAttachment, RecordReport, ReplayReport, RouterInfo, SampleRow, SchemaDrift, SchemaServer,
+    SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow,
+    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, TotalityGap,
+    ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -393,11 +374,6 @@ pub use tape::snapshot::{
     SnapshotSpec, Taken, ZSNAP_VERSION, ZsnapReader, ZsnapWriter, report_of as snapshot_report,
     take_snapshot,
 };
-/// The RFC 07 reference client, re-exported so a frontend, an example or a
-/// test cannot end up on a different version of it than the engine.
-#[cfg(feature = "blob")]
-#[cfg_attr(docsrs, doc(cfg(feature = "blob")))]
-pub use zblob;
 
 /// `Send` on the public futures, asserted at compile time (#346).
 ///

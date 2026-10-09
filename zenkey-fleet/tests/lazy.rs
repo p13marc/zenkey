@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::{FetchOutcome, Monitor, MonitorSpec, ValueSource};
+use zenkey_fleet::{Monitor, MonitorSpec};
 
 mod util;
 use util::peer_pair;
@@ -186,106 +186,4 @@ async fn a_failed_watch_takes_down_the_ones_that_came_up() {
         .expect("unmatching event within 5s")
         .expect("listener alive");
     assert!(!ev.matching(), "a failed window leaves nothing declared");
-}
-
-/// The fetch ladder reports its source: a queryable at the concrete key is
-/// `storage`; a live publisher only is `window`; nothing is an attributed
-/// `none`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fetch_value_reports_its_source() {
-    let (a, b) = peer_pair().await;
-
-    // Rung 1: a queryable standing at the concrete key (storage-shaped).
-    let _queryable = a
-        .declare_queryable("demo/fetch/stored")
-        .callback(|query| {
-            let q = query.clone();
-            tokio::spawn(async move {
-                q.reply("demo/fetch/stored", "stored-value").await.ok();
-            });
-        })
-        .await
-        .expect("queryable");
-    // Give the declaration a moment to propagate to the peer.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let out = zenkey_fleet::fetch_value(&b, "demo/fetch/stored", Default::default())
-        .await
-        .expect("fetch");
-    match out {
-        FetchOutcome::Value(v) => {
-            assert_eq!(v.source, ValueSource::Storage);
-            assert_eq!(v.payload.to_bytes().as_ref(), b"stored-value");
-        }
-        other => panic!("expected a stored value, got {other:?}"),
-    }
-
-    // Rung 3: only a live publisher — the window catches one.
-    let publisher = a
-        .declare_publisher("demo/fetch/live")
-        .await
-        .expect("publisher");
-    let pump = tokio::spawn(async move {
-        loop {
-            publisher.put("live-value").await.ok();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    });
-    let out = zenkey_fleet::fetch_value(&b, "demo/fetch/live", Default::default())
-        .await
-        .expect("fetch");
-    pump.abort();
-    match out {
-        FetchOutcome::Value(v) => assert_eq!(v.source, ValueSource::Window),
-        other => panic!("expected a windowed value, got {other:?}"),
-    }
-
-    // Nothing at all: an attributed non-verdict, fast-bounded for the test.
-    let spec = zenkey_fleet::FetchSpec {
-        get_timeout: Duration::from_millis(400),
-        window: Duration::from_millis(300),
-    };
-    let out = zenkey_fleet::fetch_value(&b, "demo/fetch/absent", spec)
-        .await
-        .expect("fetch");
-    match out {
-        FetchOutcome::None { attempted } => {
-            assert_eq!(attempted, ["get", "@adv cache", "subscribe window"]);
-        }
-        other => panic!("expected None, got {other:?}"),
-    }
-}
-
-/// The `@adv` cache rung: an AdvancedPublisher with a cache answers the
-/// `<key>/@adv/**` GET even with no storage and no live traffic.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fetch_value_reaches_the_advanced_cache() {
-    use zenoh_ext::AdvancedPublisherBuilderExt;
-
-    // An AdvancedPublisher requires session timestamping (its sequencing is
-    // timestamp-based), so the publisher side is the stamping listener; the
-    // fetching side stays the plain explorer session.
-    let (a, b) = util::timestamping_pair().await;
-    let publisher = a
-        .declare_publisher("demo/fetch/cached")
-        .cache(zenoh_ext::CacheConfig::default().max_samples(1))
-        .await
-        .expect("advanced publisher");
-    publisher.put("cached-value").await.expect("cached put");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let spec = zenkey_fleet::FetchSpec {
-        get_timeout: Duration::from_millis(800),
-        window: Duration::from_millis(300),
-    };
-    let out = zenkey_fleet::fetch_value(&b, "demo/fetch/cached", spec)
-        .await
-        .expect("fetch");
-    match out {
-        FetchOutcome::Value(v) => {
-            assert_eq!(v.source, ValueSource::Cache, "the @adv rung answered");
-            assert_eq!(v.payload.to_bytes().as_ref(), b"cached-value");
-        }
-        other => panic!("expected the cache to answer, got {other:?}"),
-    }
 }

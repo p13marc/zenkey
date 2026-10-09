@@ -271,152 +271,6 @@ host-c/tc holds the interface's token and sent no value in 98 call(s): refused o
     assert_eq!(lines[1]["row"], "replier");
 }
 
-/// Three `origins` outcomes, three sentences: answered-and-empty, not asked,
-/// and a real list.
-#[test]
-fn a_blob_list_tells_three_kinds_of_empty_apart() {
-    assert_data_eq!(
-        table(&fx::blob_list()),
-        str![[r#"
-declared @blob tiers:
-
-  logs      store     v2.0
-      endpoints  have, chunk
-      algo       blake3
-      origins    — (no liveliness token answered; silence is not a verdict — RFC 05 §3.1)
-  parallax  artifact  v1.3
-      endpoints  manifest
-      algo       blake3
-      reference  ArtifactRef  (carries the content root — RFC 07 §2.1)
-      encoding   application/octet-stream
-      origins    — (roster not asked)
-      build artifacts
-
-"#]]
-    );
-}
-
-#[test]
-fn a_blob_probe_reports_two_roots_as_a_finding() {
-    assert_data_eq!(
-        table(&fx::blob_probe()),
-        str![[r#"
-target  artifact/01jqz3demo0001  (tier artifact)
-
-asked:
-  v1/*/@blob/artifact/01jqz3demo0001/manifest
-  v1/*/@blob/artifact/01jqz3demo0001/have
-
-holders:
-
-  h-3fa9c2d41b7e  8/8 chunks · 65536 bytes · root 60e03a78c0e0…
-      v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/manifest
-  h-bbbbbbbbbbbb  3/8 chunks · no manifest reply
-      note: every chunk but no index
-      v1/h-bbbbbbbbbbbb/@blob/artifact/01jqz3demo0001/have
-
-"#]]
-    );
-    assert!(notes(&fx::blob_probe()).contains("distinct content roots"));
-    // A probe that was never issued must never read as "nobody holds it".
-    assert_data_eq!(
-        table(&fx::blob_probe_unissued()),
-        str![[r#"
-target  tree/deadbeef  (tier tree)
-
-"#]]
-    );
-    assert!(notes(&fx::blob_probe_unissued()).contains("not probed"));
-
-    // R7: a silent probe over zero registry slices names the third silence —
-    // "nobody declares this tier" was never established either.
-    let silent_no_registry = zenkey_fleet::report::BlobProbeReport {
-        holders: vec![],
-        answered: 0,
-        roots: vec![],
-        declared_by: vec![],
-        slices_considered: 0,
-        ..fx::blob_probe()
-    };
-    let n = notes(&silent_no_registry);
-    assert!(n.contains("no registry loaded"), "{n}");
-    // …while a silent probe with slices read keeps the two-silence wording:
-    // an empty declared_by over a real sweep IS "nobody declares it".
-    let silent_swept = zenkey_fleet::report::BlobProbeReport {
-        declared_by: vec![],
-        slices_considered: 11,
-        ..silent_no_registry
-    };
-    let n = notes(&silent_swept);
-    assert!(!n.contains("no registry loaded"), "{n}");
-    assert!(n.contains("no replies"), "{n}");
-}
-
-#[test]
-fn a_blob_tree_and_a_blob_fetch_are_one_ndjson_line_each() {
-    for out in [ndjson(&fx::blob_tree()), ndjson(&fx::blob_fetch())] {
-        assert_eq!(out.lines().count(), 1, "not a document:\n{out}");
-    }
-    assert_data_eq!(
-        table(&fx::blob_tree()),
-        str![[r#"
-tree/deadbeefcafe
-  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/tree/deadbeef/index)
-  index     12 entries, 9 file(s)
-  content   1048576 bytes in 40 distinct chunk(s)
-  priority  data_low/block/reliable
-  root      deadbeefcafe
-
-"#]]
-    );
-    assert_data_eq!(
-        table(&fx::blob_fetch()),
-        str![[r#"
-bundle.bin
-  from      h-3fa9c2d41b7e (v1/h-3fa9c2d41b7e/@blob/artifact/01jqz3demo0001/chunk)
-  bytes     65536 in 8 chunk(s), 2 resumed
-  priority  data_low/block/reliable
-  root      trust-on-first-use — this origin chose the content
-  retries                                                                        1
-
-"#]]
-    );
-    assert!(notes(&fx::blob_fetch()).contains("failed verification before disk"));
-}
-
-/// One reply, one error envelope, and the attachment clause (#237).
-#[test]
-fn a_call_renders_a_reply_and_an_error_envelope() {
-    let call = table(&fx::call_report());
-    assert_data_eq!(
-        call.clone(),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "count": 214
-}
-  attachment (18 B): {"trace":"abc123"}
-h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
-
-"#]]
-    );
-    assert!(call.contains("attachment (18 B)"), "the clause probe lost");
-
-    // R5: a silent call's note names the wait, and the document states it —
-    // it used to say "the timeout too short" about a timeout the report
-    // never carried (O5).
-    let silent = zenkey_fleet::report::CallReport {
-        answers: vec![],
-        ..fx::call_report()
-    };
-    let n = notes(&silent);
-    assert!(n.contains("within 5s"), "{n}");
-    let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
-    // `5.0`: the seconds unification (#218) — see the budget window above.
-    assert_eq!(envelope["timeout_s"], 5.0);
-}
-
 /// `check probe` over zk2 (#612, FJ8b): a consumer-shaped read of one
 /// resource, no longer a call. The three verdicts each have their own
 /// word, the presence read that attributes a silence is drawn only when it
@@ -515,44 +369,6 @@ fn a_probe_names_its_verdict_and_attributes_its_silence() {
             report.verdict
         );
     }
-}
-
-/// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
-/// line — a caller MUST NOT read a short page as the end — and `partial:
-/// true` with `next_cursor: null` is the contract violation the RFC says an
-/// observer MAY report. A caveat, never an exit code: `call` is an act, and
-/// both replies arrived.
-#[test]
-fn a_partial_page_says_stopped_early_and_a_null_cursor_is_a_caveat() {
-    let report = fx::call_report_partial_page();
-    let t = table(&report);
-    assert!(
-        t.contains(
-            "stopped early (partial=true, next_cursor=e-41, scanned=4096, \
-             covers_from=2026-09-06T10:00:00Z) — RFC 05 §3.2"
-        ),
-        "{t}"
-    );
-    assert!(
-        t.contains("stopped early (partial=true, next_cursor=null) — RFC 05 §3.2"),
-        "the optional fields are omitted when the wire omitted them:\n{t}"
-    );
-    assert_eq!(t.matches("stopped early").count(), 2, "{t}");
-
-    let n = notes(&report);
-    assert!(
-        n.contains(
-            "h-bbbbbbbbbbbb: partial=true with next_cursor=null — the reply says it \
-             stopped early and offers no way to continue (a contract violation) \
-             (RFC 05 §3.2)"
-        ),
-        "{n}"
-    );
-    assert!(
-        !n.contains("h-3fa9c2d41b7e: partial=true"),
-        "a cursor is a way on — no caveat for the first answer:\n{n}"
-    );
-    assert_eq!(report.exit_code(), 0, "a call is an act, not a judgement");
 }
 
 /// The field window (#223): per-path stats beside their findings, the path
@@ -1180,178 +996,6 @@ frontend  query  zk2/*/tc/tc.netif.v1/state/**
 // cannot see a `KeyRelation`, and it must not enable the `decode` feature
 // `GenReport` lives behind (#204).
 
-/// A read-back as a modem serves it: two groups of different classes, a
-/// write-only parameter, a value the producer has not read yet, one that
-/// differs from its startup file, and a change pending on the reach group.
-/// Built here: `zenkey-report-fixtures` pins `zenkey-fleet`'s report
-/// shapes, and this document is `zenkey::config`'s (RFC 05 §5.1).
-fn config_report() -> zenctl::render::ConfigReport {
-    use zenkey::config::{
-        ConfigGroup, ConfigSchema, ConfigView, ParamClass, ParamKind, ParamSpec, ParamValue,
-        PendingChange, ValueSource,
-    };
-    let dbm = ParamKind::Integer {
-        min: Some(0),
-        max: Some(30),
-        unit: Some("dBm".into()),
-    };
-    let schema = ConfigSchema::new()
-        .with(
-            ConfigGroup::new("radio", ParamClass::Reach, "the carrier")
-                .with(ParamSpec::new(
-                    "frequency_khz",
-                    ParamKind::Integer {
-                        min: Some(863_000),
-                        max: Some(870_000),
-                        unit: Some("kHz".into()),
-                    },
-                    "centre frequency",
-                ))
-                .with(ParamSpec::new("tx_power", dbm, "transmit power")),
-        )
-        .with(
-            ConfigGroup::new("access", ParamClass::Hot, "who may join")
-                .with(ParamSpec::new(
-                    "open",
-                    ParamKind::Bool,
-                    "accept unknown peers",
-                ))
-                .with(ParamSpec::new("psk", ParamKind::Text, "the shared key").sensitive()),
-        );
-    let mut view = ConfigView::of("rf0", &schema);
-    view.revision = 7;
-    view.pending = Some(PendingChange::new("chg-01j9", ["radio"]).until("2026-09-27T10:15:00Z"));
-    let radio = &mut view.groups[0];
-    radio.parameters[0].value = Some(ParamValue::Integer(868_100));
-    radio.parameters[0].source = Some(ValueSource::Runtime);
-    radio.parameters[0].startup = Some(ParamValue::Integer(868_300));
-    radio.parameters[1].value = Some(ParamValue::Integer(14));
-    radio.parameters[1].source = Some(ValueSource::File);
-    let access = &mut view.groups[1];
-    access.parameters[1].source = Some(ValueSource::File);
-    zenctl::render::ConfigReport {
-        key: "acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0".into(),
-        timeout_s: 5.0,
-        documents: vec![zenctl::render::ConfigDocument {
-            origin: "h-3fa9c2d41b7e".into(),
-            view,
-        }],
-        other: vec![],
-    }
-}
-
-#[test]
-fn a_config_read_back_draws_the_schema_beside_every_value() {
-    assert_data_eq!(
-        table(&config_report()),
-        str![[r#"
-h-3fa9c2d41b7e  rf0  revision 7  pending chg-01j9 on radio until 2026-09-27T10:15:00Z
-parameter      value                    source   kind                         description
-
-radio  (reach) the carrier
-frequency_khz  868100 (startup 868300)  runtime  integer 863000..=870000 kHz  centre frequency
-tx_power       14                       file     integer 0..=30 dBm           transmit power
-
-access  (hot) who may join
-open           —                        —        bool                         accept unknown peers
-psk            (write-only)             file     text                         the shared key
-
-"#]]
-    );
-    assert_data_eq!(
-        ndjson(&config_report()),
-        str![[r#"
-{"documents":1,"key":"acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0","other":0,"report":"config","timeout_s":5.0}
-{"class":"reach","description":"centre frequency","group":"radio","kind":"integer","max":870000,"min":863000,"name":"frequency_khz","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"runtime","startup":868300,"unit":"kHz","value":868100}
-{"class":"reach","description":"transmit power","group":"radio","kind":"integer","max":30,"min":0,"name":"tx_power","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","source":"file","unit":"dBm","value":14}
-{"class":"hot","description":"accept unknown peers","group":"access","kind":"bool","name":"open","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter"}
-{"class":"hot","description":"the shared key","group":"access","kind":"text","name":"psk","origin":"h-3fa9c2d41b7e","resource":"rf0","revision":7,"row":"parameter","sensitive":true,"source":"file"}
-{"deadline":"2026-09-27T10:15:00Z","groups":["radio"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"pending","token":"chg-01j9"}
-
-"#]]
-    );
-}
-
-/// RFC v1.50: the change `persist` takes with no token is named on the
-/// document's head line and as a `last_change` row.
-#[test]
-fn a_config_read_back_names_its_last_change() {
-    let mut r = config_report();
-    let view = &mut r.documents[0].view;
-    view.pending = None;
-    view.last_change = Some(zenkey::config::LastChange::new("chg-01j8", ["access"]));
-    let table = table(&r);
-    assert_eq!(
-        table.lines().next(),
-        Some("h-3fa9c2d41b7e  rf0  revision 7  last change chg-01j8 on access"),
-        "{table}"
-    );
-    let rows = ndjson(&r);
-    assert!(
-        rows.lines().any(|l| l
-            == r#"{"groups":["access"],"origin":"h-3fa9c2d41b7e","resource":"rf0","row":"last_change","token":"chg-01j8"}"#),
-        "{rows}"
-    );
-}
-
-/// The reply that is not a document is kept and drawn as a reply, and the
-/// caveat says so in every format; an empty report says silence.
-#[test]
-fn a_config_report_keeps_a_reply_that_is_not_a_document() {
-    use zenkey_fleet::report::{CallAnswer, CallError, CallOutcome};
-    let mut r = config_report();
-    r.documents.clear();
-    r.other.push(CallAnswer {
-        origin: "h-3fa9c2d41b7e".into(),
-        outcome: CallOutcome::Ok {
-            value: Some(
-                serde_json::json!({"token": "chg-01j9", "apply_at": "2026-09-27T10:14:30Z"}),
-            ),
-            text: None,
-        },
-        attachment: None,
-        attachment_bytes: None,
-    });
-    r.other.push(CallAnswer {
-        origin: "h-5c1d2e3f4a5b".into(),
-        outcome: CallOutcome::Err(CallError {
-            name: "error/busy".into(),
-            message: "a change is pending on this resource (token chg-0ff1)".into(),
-        }),
-        attachment: None,
-        attachment_bytes: None,
-    });
-    assert_data_eq!(
-        table(&r),
-        str![[r#"
-h-3fa9c2d41b7e:
-{
-  "apply_at": "2026-09-27T10:14:30Z",
-  "token": "chg-01j9"
-}
-h-5c1d2e3f4a5b: ✗ error/busy — a change is pending on this resource (token chg-0ff1)
-
-"#]]
-    );
-    assert_data_eq!(
-        notes(&r),
-        str![[r#"
-2 repl(y|ies) not shaped as a read-back document, shown as sent (RFC 05 §5.1)
-
-"#]]
-    );
-    let silent = zenctl::render::ConfigReport {
-        documents: vec![],
-        other: vec![],
-        ..config_report()
-    };
-    assert!(
-        notes(&silent).contains("no replies to"),
-        "{}",
-        notes(&silent)
-    );
-}
-
 #[test]
 fn a_key_relation_carries_its_convention_note_once() {
     let no = zenctl::render::KeyRelation {
@@ -1630,21 +1274,14 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "admin-graph",
         "admin-routers",
         "bench",
-        "blob-fetch",
-        "blob-list",
-        "blob-probe",
-        "blob-tree",
         "cache",
         "cache-action",
-        "call",
         "compat",
-        "config",
         "context",
         "context-action",
         "context-list",
         "doctor",
         "expect",
-        "export",
         "field",
         "gen",
         "gen-plan",
@@ -1750,11 +1387,6 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
     assert_eq!(s.window_s, Some(1.25));
 
-    // The exporter's scope is its selector, over the span it has been
-    // watching (taken_at - started_at).
-    let s = scoped(&fx::export_snapshot());
-    assert_eq!(s.asked, ["acme/v1/*/**"]);
-    assert_eq!(s.window_s, Some(120.0));
     // The doctor's scope is what it read: presence in the namespace, the
     // admin space in none.
     let s = scoped(&fx::doctor_report());
@@ -1766,8 +1398,6 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, None);
 
     // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
-    let s = scoped(&fx::call_report());
-    assert_eq!(s.window_s, Some(5.0));
     // A probe subscribes like a consumer, and reads presence only to
     // attribute a silence: both are what it asked.
     let s = scoped(&fx::probe_report());
@@ -1787,10 +1417,6 @@ fn every_observing_family_states_its_scope() {
     });
     assert_eq!(s.asked, ["acme/v1/**/state/**"]);
     scoped(&fx::bench_report());
-    // A config read is a GET: its key, over its wait.
-    let s = scoped(&config_report());
-    assert_eq!(s.asked, ["acme/v1/h-3fa9c2d41b7e/@rpc/modem/config/rf0"]);
-    assert_eq!(s.window_s, Some(5.0));
 
     // Sweeps: asked is the claim; a one-shot sweep has no window.
     scoped(&fx::scout_report());
@@ -1824,12 +1450,6 @@ fn every_observing_family_states_its_scope() {
     scoped(&zk2fx::catalog().graph());
     let s = scoped(&zk2fx::namespace_listing());
     assert_eq!(s.asked, ["**/zk2/*/*/@zk/instance/*"]);
-    let s = scoped(&fx::blob_probe());
-    assert_eq!(
-        s.asked.len(),
-        2,
-        "probe wide: both selectors state themselves"
-    );
 
     // And the deliberate negatives: replay *publishes*; it observes nothing,
     // so a scope claim would be an invented observation — and a snapshot
@@ -2116,91 +1736,6 @@ acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
 // ── The consumers join (#224) ─────────────────────────────────────────────
 
 // ── The metrics surface (#228) ───────────────────────────────────────────────
-
-/// `export --once`: series grouped by producer, an empty value cell where
-/// the state says the series stopped, and the state beside every row.
-#[test]
-fn an_export_snapshot_groups_series_by_producer_and_blanks_a_stopped_value() {
-    assert_data_eq!(
-        table(&fx::export_snapshot()),
-        str![[r#"
-series                                       labels                                        value  state        last seen   samples
-
-sysinfo  (telemetry)
-zenkey_subject_sysinfo_cpu_usage_percent     origin=h-3fa9c2d41b7e                        12.500  live         1700000119      240
-zenkey_subject_sysinfo_disk_used_bytes       origin=h-0000deadbeef mount=var-log                  origin_down  1700000040       80
-
-netlink  (telemetry)
-zenkey_subject_netlink_iface_rx_bytes_total  origin=h-3fa9c2d41b7e iface=eth0 field=rx            evicted      1700000100        5
-
-sysinfo  (state)
-zenkey_subject_sysinfo_health                origin=h-3fa9c2d41b7e field=uptime_s       4242.000  quiet        1700000060        4
-
-"#]]
-    );
-}
-
-/// The ndjson leads with the envelope — scopes, exclusions, the observer's
-/// counters as separate fields — then one tagged row per series.
-#[test]
-fn an_export_snapshots_ndjson_leads_with_the_envelope_then_tags_every_series() {
-    assert_data_eq!(
-        ndjson(&fx::export_snapshot()),
-        str![[r#"
-{"contract":{"payload_invalid":1,"payload_not_validated":128,"payload_valid":200,"qos_judged":320,"qos_mismatch":2,"qos_mismatch_by_subject":[{"n":2,"producer":"sysinfo","subject":"cpu/usage"}]},"doctor":{"findings":[{"check":"split-brain","severity":"error","subject":"host-a/tc tc.netif.v1"}],"ran_at_unix_s":1700000090},"excluded":["@rpc","@media","@blob","@adv","service origins"],"max_series":10000,"notes":[{"cite":"RFC 03 §4 D2","text":"a wildcard selector never crosses an `@`-chunk: @rpc, @media, @blob, @adv, service origins are excluded from this surface, not empty"},{"cite":"RFC 09 §5.1 O4","text":"3 distinct key(s) the registry does not declare are counted, never exported — the contract is the registry"},{"text":"128 sample(s) not validated (past the decode budget, or no schema) — a third population beside 200 valid and 1 invalid, never folded into a ratio"},{"text":"2 series stopped (evicted, origin_down or retired): each keeps its labels and state and exposes no value, so a scraper sees a named absence rather than a flat line"},{"text":"quiet is judged only for `state` subjects against their declared ttl_s; telemetry declares no period and is never called quiet"},{"cite":"RFC 09 §5.1 O7","text":"last seen is this observer's wall clock at arrival, never the producer's"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — every value is a lower bound while this moves"},{"cite":"RFC 09 §5.1 O6","text":"5 key(s) retired at the stats-table bound; their series read `evicted`"},{"cite":"RFC 09 §5.1 O6","text":"7 retained sample(s) dropped at the byte budget"},{"cite":"RFC 09 §5.1 O6","text":"11 retained sample(s) aged out of the retention window"},{"cite":"RFC 09 §5.1 O6","text":"13 key(s) retired because their watch was released"},{"cite":"RFC 09 §5.1 O6","text":"17 sample(s) coalesced between scrapes — only the newest value per series is exposed"},{"cite":"RFC 09 §5.1 O6","text":"4 sample(s) refused a series past the declared `cardinality` budget"},{"cite":"RFC 09 §5.1 O6","text":"1 field(s) refused a series past the per-subject field cap"}],"observer":{"coalesced":17,"dropped":3,"evicted_bytes":7,"evicted_keys":5,"expired":11,"unstamped":19,"unwatched":13},"registry":{"producers":2},"report":"export","scopes":["acme/v1/*/**"],"started_at_unix_s":1700000000,"suppressed":{"cardinality":4,"fields":1},"taken_at_unix_s":1700000120,"unregistered_keys":3}
-{"class":"telemetry","drop_exposed":2,"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage","kind":"gauge","last_seen_unix_s":1700000119,"name":"zenkey_subject_sysinfo_cpu_usage_percent","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":240,"state":"live","subject":"cpu/usage","unit":"percent","value":12.5}
-{"class":"telemetry","key":"acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used","labels":{"mount":"var-log"},"last_seen_unix_s":1700000040,"name":"zenkey_subject_sysinfo_disk_used_bytes","origin":"h-0000deadbeef","producer":"sysinfo","row":"series","samples":80,"state":"origin_down","subject":"disk/{mount}/used","unit":"bytes"}
-{"class":"telemetry","field":"rx","key":"acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes","kind":"counter","labels":{"iface":"eth0"},"last_seen_unix_s":1700000100,"name":"zenkey_subject_netlink_iface_rx_bytes_total","origin":"h-3fa9c2d41b7e","producer":"netlink","row":"series","samples":5,"state":"evicted","subject":"iface/{iface}/rx_bytes","unit":"bytes"}
-{"class":"state","field":"uptime_s","key":"acme/v1/h-3fa9c2d41b7e/state/sysinfo/health","last_seen_unix_s":1700000060,"name":"zenkey_subject_sysinfo_health","origin":"h-3fa9c2d41b7e","producer":"sysinfo","row":"series","samples":4,"state":"quiet","subject":"health","value":4242.0}
-
-"#]]
-    );
-}
-
-/// The honesty floor for the surface, asserted rather than snapshotted:
-/// every O6 population is its own bound note, never a sum; the three
-/// payload populations stay three; the unasked poles are coverage notes.
-#[test]
-fn an_export_snapshot_states_every_bound_by_kind_and_never_sums_them() {
-    let n = notes(&fx::export_snapshot());
-    for expected in [
-        "3 sample(s) dropped while behind",
-        "5 key(s) retired at the stats-table bound",
-        "7 retained sample(s) dropped at the byte budget",
-        "11 retained sample(s) aged out",
-        "13 key(s) retired because their watch was released",
-        "17 sample(s) coalesced between scrapes",
-        "4 sample(s) refused a series past the declared `cardinality` budget",
-        "1 field(s) refused a series past the per-subject field cap",
-    ] {
-        assert!(n.contains(expected), "missing `{expected}` in:\n{n}");
-    }
-    assert!(
-        !n.contains(" 23 ") && !n.contains(" 36 ") && !n.contains(" 56 "),
-        "no sum of the kinds:\n{n}"
-    );
-    assert!(
-        n.contains("128 sample(s) not validated") && n.contains("200 valid and 1 invalid"),
-        "{n}"
-    );
-    assert!(n.contains("2 series stopped"), "{n}");
-    assert!(
-        n.contains("@rpc, @media, @blob, @adv, service origins are excluded"),
-        "{n}"
-    );
-
-    // The unasked poles, on a snapshot that asked for nothing.
-    let mut bare = fx::export_snapshot();
-    bare.doctor = zenkey_fleet::report::Asked::NotAsked;
-    bare.registry = zenkey_fleet::report::Asked::NotAsked;
-    bare.contract.payload_valid = 0;
-    bare.contract.payload_invalid = 0;
-    let n = notes(&bare);
-    assert!(n.contains("doctor not asked"), "{n}");
-    assert!(n.contains("no registry loaded"), "{n}");
-    assert!(n.contains("payload verdicts not asked"), "{n}");
-    assert!(n.contains("RFC 09 §5.1 O4"), "{n}");
-}
 
 // ── zk2 (#612, FJ4) ────────────────────────────────────────────────────────
 //

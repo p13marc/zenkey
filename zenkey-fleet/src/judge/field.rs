@@ -32,13 +32,9 @@
 //!
 //! The path table is **bounded and reports what it dropped** (O6) — never a
 //! silent truncation. The judges are pure functions over the observation,
-//! the house pattern of [`crate::judge::condition`] (#227) and [`crate::judge::budget`]
-//! (#221): testable without a bus. Surfaces: `zenctl field <selector>
-//! [--for S]`, the doctor listen phase (#161) via the appended
-//! [`crate::report::V1CheckId`], and the Inspector's Fields section (#223,
-//! `zengui/src/view/fields.rs`) — the field table with per-field sparklines
-//! through `series.rs`/`spark.rs`, each stating that its window is the
-//! history ring's and not the observation's (#400).
+//! the house pattern of [`crate::judge::condition`] (#227): testable without
+//! a bus. Surfaces: `zenctl field <selector> [--for S]`, and — on the v1
+//! engine zengui still pins (#614) — the Inspector's Fields section (#223).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};

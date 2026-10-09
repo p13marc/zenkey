@@ -116,7 +116,7 @@ jobs:
       # exercises the criterion harness link, which --all-targets does not.
       - run: cargo bench --workspace --no-run --locked
 
-  # zenkey-fleet is published to crates.io advertising five feature axes, and
+  # zenkey-fleet is published to crates.io advertising four feature axes, and
   # nothing built it without them: `clippy`/`msrv` use --all-features and
   # `test` uses the defaults. The `[[bench]] required-features = ["decode"]`
   # line exists precisely so --no-default-features *skips* that target, and
@@ -130,10 +130,9 @@ jobs:
         with:
           cache-targets: false
       - run: cargo check -p zenkey-fleet --no-default-features --locked
-      # Each axis alone, not just the union: a `#[cfg(feature = "blob")]` item
+      # Each axis alone, not just the union: a `#[cfg(feature = "decode-cdr")]` item
       # that silently needs `decode` compiles under --all-features and breaks
       # for the consumer who asked for one of them.
-      - run: cargo check -p zenkey-fleet --no-default-features --features blob --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features decode --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features decode-protobuf --locked
       - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked

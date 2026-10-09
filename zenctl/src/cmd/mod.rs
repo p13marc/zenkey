@@ -17,15 +17,12 @@
 pub mod acl;
 pub mod admin;
 pub mod bench;
-pub mod blob;
 pub mod cache;
 pub mod call;
 pub mod compat;
-pub mod config;
 pub mod doctor;
 pub mod echo;
 pub mod expect;
-pub mod export;
 pub mod field;
 pub mod generate;
 pub mod get;
@@ -54,7 +51,7 @@ pub mod zk2;
 use anyhow::Result;
 
 use crate::Bus;
-use crate::cli::SelectorArgs;
+
 use crate::exit::unaskable;
 
 /// The raw-selector seam: every selector (or key) a user types, rather than
@@ -112,60 +109,6 @@ pub fn hint_off_base(sel: &str, args: &Bus) {
     if let Some(hint) = off_base_hint(sel, args.base()) {
         eprintln!("{hint}");
     }
-}
-
-/// Where a wire watcher looks: the typed selector, or the composed positions,
-/// or the base's whole `v1` subtree (#307).
-///
-/// The one resolution of [`SelectorArgs`], so that `echo`, `rate`, `record`,
-/// `field`, `check expect` and `why` cannot disagree about what "no selector"
-/// means. Clap has already refused the both-at-once shape. A typed selector
-/// that reads base-relative under a non-empty base gets the one-line
-/// [`off_base_hint`] (#512); composed ones are under the base by
-/// construction.
-pub fn selector_of(sel: &SelectorArgs, args: &Bus) -> Result<String> {
-    let selector = selector_unhinted(sel, args)?;
-    if sel.selector.is_some() {
-        hint_off_base(&selector, args);
-    }
-    Ok(selector)
-}
-
-/// [`selector_of`] without the hint — for `why`, whose `key-parse` rung
-/// already says the same thing as a finding, with its citation.
-pub fn selector_unhinted(sel: &SelectorArgs, args: &Bus) -> Result<String> {
-    match sel.selector.as_deref() {
-        // Typed selectors pass the raw seam (`$*` refusal, RFC 03 §2);
-        // composed ones cannot spell it.
-        Some(s) => Ok(raw_selector(s)?.to_string()),
-        None => compose_selector(
-            args,
-            sel.origin.as_deref(),
-            sel.class,
-            sel.producer.as_deref(),
-        ),
-    }
-}
-
-/// Compose a server-side selector from origin/class/producer positions
-/// (RFC 03: positions, not filters — never client-filter what the grammar
-/// can say). `None` positions wildcard.
-pub fn compose_selector(
-    args: &Bus,
-    origin: Option<&str>,
-    class: Option<zenkey::Class>,
-    producer: Option<&str>,
-) -> Result<String> {
-    // No validation here: `--class` is a `zenkey::Class` and clap rejected
-    // anything else at the edge, with the vocabulary in the message (#351).
-    let origin = origin.unwrap_or("*");
-    let class = class.map_or("*", zenkey::Class::chunk);
-    let rel = match producer {
-        Some(p) => format!("v1/{origin}/{class}/{p}/**"),
-        None if class == "*" => format!("v1/{origin}/**"),
-        None => format!("v1/{origin}/{class}/**"),
-    };
-    args.wire(rel)
 }
 
 /// How an output file is opened — decided before any session opens (#514).
@@ -276,48 +219,5 @@ mod tests {
         ] {
             assert_eq!(off_base_hint(sel, base), None, "{sel} under {base:?}");
         }
-    }
-
-    #[test]
-    fn compose_selector_places_positions() {
-        // No config file: `bus_of` resolves against an absent context, so
-        // this test no longer passes merely by pinning `base` and never
-        // letting the ladder reach its second rung (#209).
-        let args = crate::bus::tests::bus_of(Some("zs"));
-        assert_eq!(
-            compose_selector(&args, None, None, None).unwrap(),
-            "zs/v1/*/**"
-        );
-        assert_eq!(
-            compose_selector(
-                &args,
-                Some("h-3fa9c2d41b7e"),
-                Some(zenkey::Class::State),
-                None
-            )
-            .unwrap(),
-            "zs/v1/h-3fa9c2d41b7e/state/**"
-        );
-        assert_eq!(
-            compose_selector(&args, None, None, Some("tc")).unwrap(),
-            "zs/v1/*/*/tc/**"
-        );
-        // The rejection moved to the edge: `--class` is a `zenkey::Class`,
-        // so an unknown one never reaches this function — clap refuses it,
-        // naming the vocabulary once rather than in three places (#351).
-        let bad = "alerts".parse::<zenkey::Class>().unwrap_err().to_string();
-        assert!(bad.contains("telemetry, state, events"), "{bad}");
-        assert!(bad.contains("RFC 04 §1"), "{bad}");
-
-        // The empty base composes bare `v1/…` selectors (observer identity).
-        let args = crate::bus::tests::bus_of(Some(""));
-        assert_eq!(
-            compose_selector(&args, None, None, None).unwrap(),
-            "v1/*/**"
-        );
-        assert_eq!(
-            compose_selector(&args, None, Some(zenkey::Class::State), None).unwrap(),
-            "v1/*/state/**"
-        );
     }
 }

@@ -139,23 +139,6 @@ fn candidates(values: impl IntoIterator<Item = String>) -> Vec<CompletionCandida
     values.into_iter().map(CompletionCandidate::new).collect()
 }
 
-/// Producer (and service) names.
-pub fn producers() -> Vec<CompletionCandidate> {
-    producers_in(&cached())
-}
-
-fn producers_in(set: &SliceSet) -> Vec<CompletionCandidate> {
-    candidates(set.slices().iter().map(|s| s.name.clone()))
-}
-
-/// The three classes — a closed vocabulary (RFC 04 §1), so this one is exact
-/// rather than cached.
-pub fn classes() -> Vec<CompletionCandidate> {
-    // Read off the enum, like the QoS profiles below — a fourth hand-written
-    // copy of a three-token closed set was one too many (#351).
-    candidates(zenkey::Class::ALL.iter().map(|c| c.chunk().to_string()))
-}
-
 /// The five QoS profiles — likewise closed (RFC 04 §3), read off the enum so
 /// it cannot drift.
 pub fn qos_profiles() -> Vec<CompletionCandidate> {
@@ -163,20 +146,6 @@ pub fn qos_profiles() -> Vec<CompletionCandidate> {
         zenkey::qos::QosProfile::ALL
             .into_iter()
             .map(|p| p.name().to_string()),
-    )
-}
-
-/// The `@blob` tier tokens — a closed vocabulary (RFC 07 §2), so this needs no
-/// cache and cannot go stale.
-pub fn blob_tiers() -> Vec<CompletionCandidate> {
-    candidates(
-        [
-            zenkey::BlobTier::Artifact,
-            zenkey::BlobTier::Tree,
-            zenkey::BlobTier::Store,
-        ]
-        .into_iter()
-        .map(|t| t.chunk().to_string()),
     )
 }
 
@@ -431,18 +400,6 @@ mod tests {
             .collect();
         assert_eq!(qos.len(), zenkey::qos::QosProfile::ALL.len());
         assert!(qos.contains(&"sampled".to_string()));
-
-        let classes: Vec<String> = classes()
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(classes, ["events", "state", "telemetry"]);
-
-        let tiers: Vec<String> = blob_tiers()
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(tiers, ["artifact", "store", "tree"]);
     }
 
     /// No cache, no candidates — and above all, no panic and no bus. This is
@@ -455,10 +412,9 @@ mod tests {
     #[test]
     fn an_absent_cache_yields_nothing_rather_than_failing() {
         let empty = SliceSet::read_cache(std::path::Path::new("/nonexistent-zenctl-completion"));
-        assert!(producers_in(&empty).is_empty());
         assert!(keys_in(&empty).is_empty());
         // …while the closed vocabularies still answer: they were never cached.
-        assert!(!classes().is_empty());
+        assert!(!qos_profiles().is_empty());
     }
 
     /// And with a cache, the candidates are the cached names — including the
@@ -469,13 +425,6 @@ mod tests {
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixture-tests/registry");
         let set = SliceSet::from_dirs(&[dir]).expect("fixture registry");
-        let names: Vec<String> = producers_in(&set)
-            .iter()
-            .map(|c| c.get_value().to_string_lossy().to_string())
-            .collect();
-        assert!(names.contains(&"sysinfo".to_string()), "{names:?}");
-        assert!(names.contains(&"catalog".to_string()), "the service too");
-
         let keys: Vec<String> = keys_in(&set)
             .iter()
             .map(|c| c.get_value().to_string_lossy().to_string())

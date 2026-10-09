@@ -200,8 +200,7 @@ impl fmt::Display for CheckId {
 
 /// How bad a finding is: the ladder a `--fail-on` floor reads.
 ///
-/// Shared with v1's check vocabulary ([`crate::report::V1Finding`]), whose
-/// findings `field` and `check conform` still produce.
+/// Shared with `field`'s findings ([`crate::report::FieldFinding`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DoctorSeverity {

@@ -33,59 +33,6 @@ use zenkey_fleet::report::*;
 use zenkey_fleet::{Coverage, CoverageRow};
 use zenkey_report_fixtures as fx;
 
-/// Three states in one `Option<Vec<_>>`: absent = the roster was never asked
-/// (O4), `[]` = asked and nobody answered (RFC 05 §3.1), non-empty = alive.
-/// Collapsing the first two is the single easiest way to make this document
-/// lie.
-#[test]
-fn blob_origins_distinguish_not_asked_from_nobody_answered() {
-    let base = BlobTierRow {
-        producer: "artifacts".into(),
-        registry_version: "1.0".into(),
-        tier: "artifact".into(),
-        known_tier: true,
-        endpoints: vec!["manifest".into(), "slice".into()],
-        algo: None,
-        reference: Some("BlobRef".into()),
-        encoding: None,
-        since: None,
-        description: None,
-        origins: Asked::NotAsked,
-    };
-    let not_asked = serde_json::to_value(&base).unwrap();
-    assert_eq!(
-        not_asked,
-        json!({
-            "producer": "artifacts",
-            "registry_version": "1.0",
-            "tier": "artifact",
-            "known_tier": true,
-            "endpoints": ["manifest", "slice"],
-            "reference": "BlobRef",
-        }),
-        "roster not asked: the key is absent"
-    );
-
-    let asked_silent = BlobTierRow {
-        origins: Asked::Asked(vec![]),
-        ..base.clone()
-    };
-    assert_eq!(
-        serde_json::to_value(&asked_silent).unwrap()["origins"],
-        json!([]),
-        "asked, nobody answered: an empty list, which is not absence"
-    );
-
-    let alive = BlobTierRow {
-        origins: Asked::Asked(vec!["h-3fa9c2d41b7e".into()]),
-        ..base
-    };
-    assert_eq!(
-        serde_json::to_value(&alive).unwrap()["origins"],
-        json!(["h-3fa9c2d41b7e"])
-    );
-}
-
 /// The trickiest shape in the file: a `#[serde(flatten)]` over an adjacently
 /// tagged enum.
 ///
@@ -128,88 +75,6 @@ fn coverage_flattens_into_its_row_with_snake_case_tags() {
     assert_eq!(
         serde_json::to_value(Coverage::Partial("main@abc".into())).unwrap(),
         json!({"coverage": "partial", "storage": "main@abc"})
-    );
-}
-
-/// Every optional is a wire fact that is absent rather than null when it did
-/// not ride — and the outcome enum serializes to the exact shape the old
-/// `{ok, error: Option}` struct pinned here, so scripts keep parsing.
-#[test]
-fn a_call_answer_omits_every_part_the_wire_did_not_carry() {
-    let bare = CallAnswer {
-        origin: "h-3fa9c2d41b7e".into(),
-        outcome: CallOutcome::Ok {
-            value: None,
-            text: None,
-        },
-        attachment: None,
-        attachment_bytes: None,
-    };
-    assert_eq!(
-        serde_json::to_value(&bare).unwrap(),
-        json!({"origin": "h-3fa9c2d41b7e", "ok": true})
-    );
-
-    let failed = CallAnswer {
-        outcome: CallOutcome::Err(CallError {
-            name: "unsupported".into(),
-            message: "not built with that feature".into(),
-        }),
-        ..bare
-    };
-    assert_eq!(
-        serde_json::to_value(&failed).unwrap(),
-        json!({
-            "origin": "h-3fa9c2d41b7e",
-            "ok": false,
-            "error": {"name": "unsupported", "message": "not built with that feature"},
-        })
-    );
-
-    // The full shape, field order included: origin, ok, the outcome's own
-    // fields, the attachment pair, error last — byte-identical to what the
-    // derived struct serialized before the enum (C7).
-    let rich = CallAnswer {
-        origin: "h-3fa9c2d41b7e".into(),
-        outcome: CallOutcome::Ok {
-            value: Some(json!({"count": 214})),
-            text: None,
-        },
-        attachment: Some(json!({"trace": "abc123"})),
-        attachment_bytes: Some(18),
-    };
-    assert_eq!(
-        serde_json::to_string(&rich).unwrap(),
-        r#"{"origin":"h-3fa9c2d41b7e","ok":true,"value":{"count":214},"attachment":{"trace":"abc123"},"attachment_bytes":18}"#
-    );
-
-    // Silence is exit 2 and an empty answer list — never an error reply.
-    // R5: `timeout_s` is new in the report-honesty batch — the silence note
-    // named a timeout the document never stated. Additive; old consumers
-    // keep parsing.
-    let silent = CallReport {
-        key: "v1/*/@rpc/sysinfo/introspect".into(),
-        timeout_s: 5.0,
-        answers: vec![],
-    };
-    assert_eq!(silent.exit_code(), 2);
-    assert_eq!(
-        serde_json::to_value(&silent).unwrap(),
-        json!({
-            "key": "v1/*/@rpc/sysinfo/introspect",
-            // `5.0`, not `5`: since #218 every window/timeout in this surface
-            // is `f64` seconds, so an integral one renders with its point.
-            "timeout_s": 5.0,
-            "answers": [],
-        })
-    );
-    assert_eq!(
-        CallReport {
-            answers: vec![failed],
-            ..silent
-        }
-        .exit_code(),
-        1
     );
 }
 
@@ -355,81 +220,6 @@ fn the_three_state_verdicts_keep_their_third_state() {
     );
 }
 
-/// The `@blob` documents must serialize identically whether or not the binary
-/// was built with the transport — `report.rs`'s own header says so, and this
-/// file is compiled without the `blob` feature, which is the proof.
-#[test]
-fn a_blob_probe_reports_what_it_asked_and_what_answered() {
-    // R7: `slices_considered` is new in the report-honesty batch —
-    // BlobList's own solution, so an empty `declared_by` no longer conflates
-    // "no slice declares this tier" with "no registry was loaded" (O4).
-    // Additive and unconditional, like BlobList's.
-    let empty = BlobProbeReport {
-        target: "01hq9k".into(),
-        tier: "artifact".into(),
-        asked: vec!["v1/*/@blob/artifact/01hq9k/manifest".into()],
-        not_probed: None,
-        holders: vec![],
-        answered: 0,
-        roots: vec![],
-        declared_by: vec!["artifacts".into()],
-        slices_considered: 3,
-    };
-    assert_eq!(
-        serde_json::to_value(&empty).unwrap(),
-        json!({
-            "target": "01hq9k",
-            "tier": "artifact",
-            "asked": ["v1/*/@blob/artifact/01hq9k/manifest"],
-            "holders": [],
-            "answered": 0,
-            "roots": [],
-            "declared_by": ["artifacts"],
-            "slices_considered": 3,
-        }),
-        "asked but unanswered: the selector is on record, so silence is \
-         visibly a non-verdict rather than an absent question"
-    );
-    let no_registry = BlobProbeReport {
-        declared_by: vec![],
-        slices_considered: 0,
-        ..empty
-    };
-    let v = serde_json::to_value(&no_registry).unwrap();
-    assert!(
-        v.get("declared_by").is_none(),
-        "an empty capability list stays absent"
-    );
-    assert_eq!(
-        v["slices_considered"], 0,
-        "…and the zero slice count is what says it was never a verdict (R7)"
-    );
-
-    let holder = BlobHolder {
-        origin: "h-3fa9c2d41b7e".into(),
-        key: "v1/h-3fa9c2d41b7e/@blob/artifact/01hq9k/manifest".into(),
-        availability: None,
-        manifest: None,
-        note: Some("answered, said nothing readable".into()),
-        unreadable: None,
-        error: None,
-    };
-    assert_eq!(
-        serde_json::to_value(&holder).unwrap(),
-        json!({
-            "origin": "h-3fa9c2d41b7e",
-            "key": "v1/h-3fa9c2d41b7e/@blob/artifact/01hq9k/manifest",
-            "note": "answered, said nothing readable",
-        })
-    );
-
-    assert_eq!(
-        serde_json::to_value(BlobListSource::RegistryDirs).unwrap(),
-        json!("registry-dirs"),
-        "kebab here, snake elsewhere — pinned as it is (see #202's note)"
-    );
-}
-
 /// zk2's doctor (#612, FJ6): `doctor_report_json_shape_is_pinned` covers
 /// the document; this covers the severity vocabulary its findings branch
 /// on, one finding's shape, and the shared fixture's every verdict pole —
@@ -488,10 +278,9 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
 /// its wire string is written down here. A list of values would not do that;
 /// the `match` is the whole guard, and the values merely exercise it.
 ///
-/// Two vocabularies, deliberately, and documented rather than accidental:
-/// **snake_case** for the verdict and severity vocabularies, **kebab-case**
-/// for the blob plane's event and source tags, which shipped as a coherent
-/// pair. A third would be drift; a documented second is not.
+/// One vocabulary: **snake_case** for the verdict and severity tags. The
+/// blob plane's kebab-case pair, the documented second, left with `blob`
+/// (#612, FJ9).
 #[test]
 fn every_enum_in_the_surface_names_its_wire_vocabulary() {
     fn topic(v: &TopicVerdict) -> &'static str {
@@ -525,25 +314,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
             Coverage::Covered(_) => "covered",
             Coverage::Partial(_) => "partial",
             Coverage::Uncovered => "uncovered",
-        }
-    }
-    // The blob plane's pair: kebab, and staying kebab.
-    fn blob_source(v: &BlobListSource) -> &'static str {
-        match v {
-            BlobListSource::Bus => "bus",
-            BlobListSource::RegistryDirs => "registry-dirs",
-            BlobListSource::Union => "union",
-        }
-    }
-    fn blob_progress(v: &BlobProgress) -> &'static str {
-        match v {
-            BlobProgress::Started { .. } => "started",
-            BlobProgress::Resumed { .. } => "resumed",
-            BlobProgress::Chunk { .. } => "chunk",
-            BlobProgress::Verifying => "verifying",
-            BlobProgress::Completed { .. } => "completed",
-            BlobProgress::Cancelled { .. } => "cancelled",
-            BlobProgress::Failed { .. } => "failed",
         }
     }
 
@@ -593,38 +363,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         Coverage::Uncovered,
     ] {
         assert_eq!(wire(&v, "coverage"), coverage(&v));
-    }
-    for v in [
-        BlobListSource::Bus,
-        BlobListSource::RegistryDirs,
-        BlobListSource::Union,
-    ] {
-        assert_eq!(wire(&v, ""), blob_source(&v));
-    }
-    for v in [
-        BlobProgress::Started {
-            total_len: 1,
-            chunk_count: 1,
-        },
-        BlobProgress::Resumed {
-            received: 1,
-            total: 2,
-        },
-        BlobProgress::Chunk {
-            index: 0,
-            received: 1,
-            total: 2,
-            bytes_received: 3,
-        },
-        BlobProgress::Verifying,
-        BlobProgress::Completed { path: "p".into() },
-        BlobProgress::Cancelled {
-            received: 1,
-            total: 2,
-        },
-        BlobProgress::Failed { error: "e".into() },
-    ] {
-        assert_eq!(wire(&v, "event"), blob_progress(&v));
     }
 }
 
@@ -899,120 +637,4 @@ fn two_namespaces_compare_by_zk2_key() {
     assert!(!d.differs(), "{d:?}");
     assert_eq!(d.unchanged, 4);
     assert_eq!(judgement_exit_code(&d.to_judgement()), 0);
-}
-
-/// The exporter fold, whole: a stopped series has no `value`, a zero
-/// `drop_exposed` is absent, every observer counter is present, the doctor
-/// and registry poles are present because they were asked.
-#[test]
-fn an_export_snapshot_is_pinned() {
-    assert_eq!(
-        serde_json::to_value(fx::export_snapshot()).unwrap(),
-        json!({
-            "scopes": ["acme/v1/*/**"],
-            "excluded": ["@rpc", "@media", "@blob", "@adv", "service origins"],
-            "registry": {"producers": 2},
-            "max_series": 10000,
-            "started_at_unix_s": 1_700_000_000,
-            "taken_at_unix_s": 1_700_000_120,
-            "series": [
-                {
-                    "name": "zenkey_subject_sysinfo_cpu_usage_percent",
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage",
-                    "origin": "h-3fa9c2d41b7e",
-                    "producer": "sysinfo",
-                    "class": "telemetry",
-                    "subject": "cpu/usage",
-                    "kind": "gauge",
-                    "unit": "percent",
-                    "value": 12.5,
-                    "last_seen_unix_s": 1_700_000_119,
-                    "state": "live",
-                    "samples": 240,
-                    "drop_exposed": 2,
-                },
-                {
-                    "name": "zenkey_subject_sysinfo_disk_used_bytes",
-                    "key": "acme/v1/h-0000deadbeef/telemetry/sysinfo/disk/var-log/used",
-                    "origin": "h-0000deadbeef",
-                    "producer": "sysinfo",
-                    "class": "telemetry",
-                    "subject": "disk/{mount}/used",
-                    "labels": {"mount": "var-log"},
-                    "unit": "bytes",
-                    "last_seen_unix_s": 1_700_000_040,
-                    "state": "origin_down",
-                    "samples": 80,
-                },
-                {
-                    "name": "zenkey_subject_netlink_iface_rx_bytes_total",
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/netlink/iface/eth0/rx_bytes",
-                    "origin": "h-3fa9c2d41b7e",
-                    "producer": "netlink",
-                    "class": "telemetry",
-                    "subject": "iface/{iface}/rx_bytes",
-                    "labels": {"iface": "eth0"},
-                    "field": "rx",
-                    "kind": "counter",
-                    "unit": "bytes",
-                    "last_seen_unix_s": 1_700_000_100,
-                    "state": "evicted",
-                    "samples": 5,
-                },
-                {
-                    "name": "zenkey_subject_sysinfo_health",
-                    "key": "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
-                    "origin": "h-3fa9c2d41b7e",
-                    "producer": "sysinfo",
-                    "class": "state",
-                    "subject": "health",
-                    "field": "uptime_s",
-                    "value": 4242.0,
-                    "last_seen_unix_s": 1_700_000_060,
-                    "state": "quiet",
-                    "samples": 4,
-                },
-            ],
-            "observer": {
-                "dropped": 3,
-                "evicted_keys": 5,
-                "evicted_bytes": 7,
-                "expired": 11,
-                "unwatched": 13,
-                "coalesced": 17,
-                "unstamped": 19,
-            },
-            "contract": {
-                "qos_judged": 320,
-                "qos_mismatch": 2,
-                "qos_mismatch_by_subject": [{"producer": "sysinfo", "subject": "cpu/usage", "n": 2}],
-                "payload_valid": 200,
-                "payload_invalid": 1,
-                "payload_not_validated": 128,
-            },
-            "suppressed": {"cardinality": 4, "fields": 1},
-            "unregistered_keys": 3,
-            "doctor": {
-                "ran_at_unix_s": 1_700_000_090,
-                "findings": [
-                    {"check": "split-brain", "severity": "error", "subject": "host-a/tc tc.netif.v1"}
-                ],
-            },
-        })
-    );
-}
-
-/// The exposition is a pure function of the snapshot, pinned whole: the
-/// four evicted populations are four lines, the three verdicts three, a
-/// stopped series keeps its state line and has no value line, and nothing
-/// in it moves without traffic (no scrape time).
-#[test]
-fn the_exposition_of_the_fixture_is_pinned() {
-    let text = zenkey_fleet::exposition(&fx::export_snapshot());
-    let expected = include_str!("fixtures/export.prom");
-    assert_eq!(text, expected, "--- got ---\n{text}");
-    assert!(
-        !text.contains("1700000120"),
-        "the scrape time is the scraper's"
-    );
 }

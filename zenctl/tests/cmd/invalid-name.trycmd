@@ -1,98 +1,13 @@
-An argument that lands in a chunk position of a key — a producer, a procedure
-path, a config resource or group — is a name the grammar has to be able to
-spell (RFC 03 §2). The typed builders in `zenkey::selector` *assert* on an
-illegal chunk, which is right for the registry constants they were written for
-and wrong for a shell: v1's `zenctl service call h-0123456789ab MyApp foo`
-against a live bus panicked with **exit 101**, outside the 0/1/2 contract
-(#509). (`service call` is gone since FJ5: zk2's `call` takes an address and
-an interface, below.)
+An argument that names something in a zk2 key — a service address, an
+interface, a fingerprint — is a name the grammar has to be able to spell.
+Typed at a shell, an illegal one is a usage error: exit 2, naming the argument
+and the rule, before any session is opened (#509, kept through #612). That is
+why none of these needs a bus. The list is every verb that takes one; a new
+one belongs here.
 
-Every such argument now goes through one clap `value_parser` built on
-`zenkey::grammar::is_valid_plain_chunk` — the predicate the builders and the
-registry linter share — so it is a usage error: exit 2, naming the argument and
-the rule, before any session is opened. That is why none of these needs a bus.
-The list is every verb that takes one; a new one belongs here.
-
-```console
-$ zenctl config get h-0123456789ab MyApp wlan0
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config get h-0123456789ab probe Wlan0
-? 2
-error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config set h-0123456789ab MyApp wlan0 radio channel=6
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config set h-0123456789ab probe Wlan0 radio channel=6
-? 2
-error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config set h-0123456789ab probe wlan0 Radio channel=6
-? 2
-error: invalid value 'Radio' for '<GROUP>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config confirm h-0123456789ab MyApp wlan0 t-1
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config cancel h-0123456789ab probe Wlan0 t-1
-? 2
-error: invalid value 'Wlan0' for '<RESOURCE>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config persist h-0123456789ab MyApp wlan0 t-1
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl config extend h-0123456789ab MyApp wlan0 t-1 --by 30
-? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
+v1's chunk positions (a producer, a config resource or group, refused by
+`zenkey::grammar::is_valid_plain_chunk`) left with the verbs that took them —
+`config`, `blob list` and `check conform` (#612, FJ9).
 
 `check probe` and `check schema` name an interface since FJ8b (#612): the
 name is zk2's `<name>.v<major>`, refused by the parser like any other.
@@ -115,27 +30,9 @@ check probe: the question could not be asked — exit 2, the reserved non-verdic
 ```
 
 ```console
-$ zenctl check conform --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
-
-```
-
-```console
 $ zenctl check schema MyApp namespaces --from '{}'
 ? 2
 error: invalid value 'MyApp' for '<IFACE[@FP]>': interface "MyApp" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
-
-For more information, try '--help'.
-
-```
-
-```console
-$ zenctl blob list --producer MyApp
-? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
 
 For more information, try '--help'.
 

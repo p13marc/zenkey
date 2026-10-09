@@ -1,7 +1,7 @@
 //! Attachments are a wire fact and the engine carries them (#117): on the
-//! subscribe path (`SampleView`), the fan-in path (`FleetAnswer`), and the
-//! fetch ladder (`FetchedValue`) — refcounted like the payload, `None` when
-//! the wire carried none (absence is a fact too, never a default).
+//! subscribe path (`SampleView`) and the fan-in path (`FleetAnswer`) —
+//! refcounted like the payload, `None` when the wire carried none (absence
+//! is a fact too, never a default).
 //!
 //! Event-driven: the matching badge proves routability before publishing.
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
@@ -113,51 +113,4 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
     };
     let att = answers[0].attachment.as_ref().expect("attachment carried");
     assert_eq!(att.to_bytes().as_ref(), b"who-answered");
-}
-
-/// The fetch ladder's window rung carries the attachment too — what the
-/// zengui detail pane renders.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_fetched_value_carries_the_attachment() {
-    let (a, b) = peer_pair().await;
-
-    let publication = declare_publication(&a, KEY, QosProfile::Sampled, None)
-        .await
-        .expect("declare");
-    let matching = publication.matching_events().await.expect("events");
-
-    let fetch = tokio::spawn(async move {
-        zenkey_fleet::fetch_value(
-            &b,
-            KEY,
-            zenkey_fleet::FetchSpec {
-                // No storage in this fixture: keep the GET rungs short so the
-                // window rung (the one under test) opens quickly.
-                get_timeout: Duration::from_millis(300),
-                window: Duration::from_secs(5),
-            },
-        )
-        .await
-    });
-
-    // The fetch's window subscriber raises the badge; then publish into it.
-    assert!(
-        tokio::time::timeout(util::SETTLE, matching.recv())
-            .await
-            .expect("matching within 5s")
-            .expect("listener alive")
-    );
-    publication
-        .send(b"{\"v\":1}".to_vec(), Some(b"tag".to_vec()))
-        .await
-        .expect("send");
-
-    let outcome = fetch.await.expect("join").expect("fetch");
-    match outcome {
-        zenkey_fleet::FetchOutcome::Value(v) => {
-            let att = v.attachment.expect("attachment carried");
-            assert_eq!(att.to_bytes().as_ref(), b"tag");
-        }
-        other => panic!("expected a value, got {other:?}"),
-    }
 }

@@ -34,7 +34,6 @@
 //! §3.2, §4).
 
 pub mod admin;
-pub mod blob;
 pub mod consume;
 pub mod contracts;
 pub mod lens;

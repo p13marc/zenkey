@@ -214,7 +214,7 @@ clean-run:
 # Each published axis of zenkey-fleet, on its own (#204).
 features:
     cargo check -p zenkey-fleet --no-default-features --locked
-    for f in blob decode decode-protobuf decode-cdr validate-json; do \
+    for f in decode decode-protobuf decode-cdr validate-json; do \
         cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
     done
     cargo bench -p zenkey-fleet --no-default-features --no-run --locked

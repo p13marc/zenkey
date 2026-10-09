@@ -45,9 +45,6 @@ pub mod report;
 pub(crate) mod resolve;
 
 mod cmd;
-/// The one HTTP route `export` serves (#228), reachable so its test can bind
-/// it around a fixed body without a bus.
-pub use cmd::export::http as export_http;
 mod completion;
 mod context;
 
@@ -58,8 +55,8 @@ use anyhow::Result;
 /// past every way resolution can fail (#209).
 pub(crate) use crate::bus::Bus;
 use crate::cli::{
-    AclCmd, AdminCmd, BenchCmd, BlobCmd, CheckCmd, Cli, Command, ConfigCmd, GetSub, IfaceCmd,
-    KeyCmd, NamespaceCmd, SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
+    AclCmd, AdminCmd, BenchCmd, CheckCmd, Cli, Command, GetSub, IfaceCmd, KeyCmd, NamespaceCmd,
+    SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
 };
 
 /// Parse, through `get_matches` rather than `parse()`.
@@ -112,22 +109,10 @@ pub async fn run() -> Result<()> {
         Command::Iface(IfaceCmd::List(a)) => cmd::iface::list(a).await,
         Command::Iface(IfaceCmd::Show(a)) => cmd::iface::show(a).await,
         Command::Namespace(NamespaceCmd::List(a)) => cmd::namespace::list(a).await,
-        Command::Config(ConfigCmd::Get(a)) => cmd::config::get(a).await,
-        Command::Config(ConfigCmd::Set(a)) => cmd::config::set(a).await,
-        Command::Config(ConfigCmd::Confirm(a)) => cmd::config::confirm(a).await,
-        Command::Config(ConfigCmd::Cancel(a)) => cmd::config::cancel(a).await,
-        Command::Config(ConfigCmd::Extend(a)) => cmd::config::extend(a).await,
-        Command::Config(ConfigCmd::Persist(a)) => cmd::config::persist(a).await,
         Command::Schema(SchemaCmd::Show(a)) => cmd::schema::show(a).await,
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
         Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,
-        Command::Blob(BlobCmd::List(a)) => cmd::blob::list(a).await,
-        Command::Blob(BlobCmd::Locate { target, bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::blob::locate(&target, &bus).await
-        }
-        Command::Blob(BlobCmd::Fetch(a)) => cmd::blob::fetch(a).await,
         Command::Admin(AdminCmd::Routers { bus }) => {
             let bus = Bus::resolve(&bus)?;
             cmd::admin::routers(&bus).await
@@ -158,7 +143,6 @@ pub async fn run() -> Result<()> {
         },
         Command::Graph(a) => cmd::graph::run(a).await,
         Command::Compat(a) => cmd::compat::run(a).await,
-        Command::Export(a) => cmd::export::run(a).await,
         Command::Serve(a) => cmd::serve::run(a).await,
         Command::Gen(a) => cmd::generate::run(a).await,
         Command::Scout(a) => cmd::scout::run(a).await,

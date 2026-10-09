@@ -25,9 +25,7 @@ zenkey = { workspace = true, features = ["serde"] }
 # #98): the dynamic protobuf decoder existed since v1.5 and was compiled out
 # of every shipped explorer, so a protobuf subject rendered as a hex sniff and
 # could not be published to at all. `cdr` joins it for DDS / ROS 2 traffic.
-# `blob` is the same posture for the @blob transport (#58): the library stays
-# free of the hashing stack, and the explorer that has to fetch bytes pays.
-zenkey-fleet = { path = "../zenkey-fleet", features = ["blob", "decode-protobuf", "decode-cdr", "validate-json"] }
+zenkey-fleet = { path = "../zenkey-fleet", features = ["decode-protobuf", "decode-cdr", "validate-json"] }
 zenkey-explorer-config = { workspace = true }
 # zk2's session-free half (#612, FJ4): the key grammar, the contract
 # authoring format, bundles and the compatibility classifier `compat` runs —

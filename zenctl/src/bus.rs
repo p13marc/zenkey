@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
-use zenkey::RegistrySlice;
+
 use zenkey_explorer_config::StoredContext;
 
 use crate::cli::{BusArgs, NamespaceArgs, OutputArgs, SessionArgs};
@@ -112,12 +112,6 @@ impl Bus {
 
     pub(crate) fn registry_dirs(&self) -> Vec<PathBuf> {
         self.registry.clone()
-    }
-
-    /// Compose a base-relative key into the full wire key this un-namespaced
-    /// tool must actually use.
-    pub(crate) fn wire(&self, relative: impl AsRef<str>) -> Result<String> {
-        Ok(zenkey::grammar::with_base(self.base(), relative))
     }
 
     /// This invocation's resolved base, bound to a session — the bundle every
@@ -197,14 +191,6 @@ impl Bus {
                 Ok(None)
             }
         }
-    }
-
-    /// Registry slices from whichever source the flags select: local
-    /// `--registry` dirs when given (offline), otherwise the live bus
-    /// (RFC 08 §6 introspection). Both yield the same `Vec<RegistrySlice>`,
-    /// so every renderer is source-agnostic.
-    pub(crate) async fn slices(&self) -> Result<Vec<RegistrySlice>> {
-        Ok(self.slice_set().await?.slices().to_vec())
     }
 
     /// The same, as the fleet engine's indexed set (echo's decode path).

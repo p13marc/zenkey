@@ -37,11 +37,9 @@
 //! What a judge returns is a **report**, and every serialized report shape
 //! lives in [`crate::report`], not here (see that module's placement rule).
 
-pub mod budget;
 pub mod common;
 pub mod doctor;
 pub mod doctor_delta;
-pub mod self_stats;
 
 #[cfg(feature = "decode")]
 pub mod condition;
@@ -49,7 +47,5 @@ pub mod condition;
 pub mod expect;
 #[cfg(feature = "decode")]
 pub mod field;
-#[cfg(feature = "decode")]
-pub mod kind;
 #[cfg(feature = "decode")]
 pub mod probe;

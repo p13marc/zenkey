@@ -7,8 +7,7 @@
 //! was given (the `ANY_PORT`/`bound` pattern of `zenkey-fleet/tests/util/mod.rs`,
 //! which is not exported; #527), with no scouting and no external router, brought up the way
 //! RFC 04 §5 says a producer is: `introspect` (a real slice), `describe`
-//! (a schema for every type the slice names), a read procedure and the
-//! config double's procedures, all declared through [`BringUp`] — and only
+//! (a schema for every type the slice names), a read procedure, all declared through [`BringUp`] — and only
 //! then `alive`. It publishes one state key and one telemetry key, and
 //! answers a GET on the state key the way a storage would.
 //!
@@ -41,8 +40,6 @@ use std::time::{Duration, Instant};
 
 use zenkey_fleet::bus::producer::{BringUp, LiveProducer};
 use zenoh::Session;
-
-use crate::config_server::ConfigServer;
 
 /// How long a case waits before calling a hang a hang — the fleet suites'
 /// net (#371), and for the same reason: a net, never an assertion. Every
@@ -143,8 +140,6 @@ pub struct Extras {
 pub struct Bus {
     pub endpoint: String,
     pub base: String,
-    /// The config double the producer serves (RFC 05 §5.1, #500).
-    pub config: ConfigServer,
     session: Session,
     _live: Option<LiveProducer>,
     _mute: Option<zenoh::liveliness::LivelinessToken>,
@@ -200,7 +195,6 @@ impl Bus {
             .map(|l| l.to_string())
             .find(|l| l.starts_with("tcp/127.0.0.1:"))
             .expect("the producer listens on loopback");
-        let config = ConfigServer::fixture(PRODUCER);
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-home")
             .join(&base);
@@ -209,7 +203,6 @@ impl Bus {
             return Bus {
                 endpoint,
                 base,
-                config,
                 session,
                 _live: None,
                 _mute: None,
@@ -229,7 +222,6 @@ impl Bus {
         up.serve(&introspect).await.expect("introspect");
         up.serve(&describe).await.expect("describe");
         up.serve(&ping).await.expect("ping");
-        config.declare(&mut up, &rpc).await.expect("config");
 
         // The state key's last value, answered as a storage would.
         let health = key(&format!("v1/{HOST}/state/{PRODUCER}/health"));
@@ -248,10 +240,6 @@ impl Bus {
         let slice_type = zenkey::SliceFormat::Toml.media_type();
         let schemas = schema_set();
         for r in std::mem::take(&mut live.responders) {
-            if config.owns(r.key()) {
-                tasks.push(config.spawn(r));
-                continue;
-            }
             let (payload, encoding) = match r.key() {
                 k if k == introspect => (SLICE.to_string(), slice_type),
                 k if k == describe => (schemas.clone(), "application/json"),
@@ -314,7 +302,6 @@ impl Bus {
         Bus {
             endpoint,
             base,
-            config,
             session,
             _live: Some(live),
             _mute: mute,
