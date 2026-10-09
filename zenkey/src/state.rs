@@ -161,6 +161,8 @@ impl ClockGuard {
 #[derive(Debug, Clone)]
 struct Entry {
     value: Option<(Vec<u8>, Encoding)>,
+    /// The value's attachment (§2.3), answered with it (S2).
+    attachment: Option<Vec<u8>>,
     ts: Timestamp,
     at: Instant,
 }
@@ -179,11 +181,19 @@ impl Store {
         }
     }
 
-    fn put(&self, key: &OwnedKeyExpr, bytes: Vec<u8>, encoding: Encoding, ts: Timestamp) {
+    fn put(
+        &self,
+        key: &OwnedKeyExpr,
+        bytes: Vec<u8>,
+        encoding: Encoding,
+        attachment: Option<Vec<u8>>,
+        ts: Timestamp,
+    ) {
         self.map.lock().expect("not poisoned").insert(
             key.clone(),
             Entry {
                 value: Some((bytes, encoding)),
+                attachment,
                 ts,
                 at: Instant::now(),
             },
@@ -195,6 +205,7 @@ impl Store {
             key.clone(),
             Entry {
                 value: None,
+                attachment: None,
                 ts,
                 at: Instant::now(),
             },
@@ -215,6 +226,7 @@ impl Store {
                 Some((bytes, enc)) => q
                     .reply(key.clone(), bytes.clone())
                     .encoding(enc.clone())
+                    .attachment(e.attachment.clone())
                     .timestamp(e.ts)
                     .wait(),
                 None => q.reply_del(key.clone()).timestamp(e.ts).wait(),
@@ -259,15 +271,28 @@ impl StateWriter {
     /// Puts a value (already in the contract's type), stamped. Returns the
     /// stamp.
     pub async fn put(&self, payload: impl Into<ZBytes>) -> Result<Timestamp> {
+        self.put_with(payload, None::<ZBytes>).await
+    }
+
+    /// [`StateWriter::put`] with an attachment, encoded per the contract's
+    /// `attachment` type and `attachment_encoding` (§2.3, §7.2; #698). The
+    /// owner's GET answers carry it with the value (S2).
+    pub async fn put_with(
+        &self,
+        payload: impl Into<ZBytes>,
+        attachment: Option<impl Into<ZBytes>>,
+    ) -> Result<Timestamp> {
         let ts = self.minter.mint()?;
         let payload: ZBytes = payload.into();
+        let attachment: Option<ZBytes> = attachment.map(Into::into);
         self.store.put(
             &self.key,
             payload.to_bytes().into_owned(),
             self.writer.encoding().clone(),
+            attachment.as_ref().map(|a| a.to_bytes().into_owned()),
             ts,
         );
-        self.writer.put_stamped(payload, ts).await?;
+        self.writer.put_stamped(payload, attachment, ts).await?;
         Ok(ts)
     }
 
