@@ -164,12 +164,21 @@ def replier_of(reply: Any) -> str | None:
     ``@_unstable``, a marker only: the published wheel has it at run time.
     It is Rust's ``Reply::replier_id``, behind the ``unstable`` feature
     (Appendix B), so a binding built without it would have no attribute,
-    which reads as None here."""
+    which reads as None here. Appendix B (0.16): "a zenoh release that
+    removed or changed it would leave every admin answer unverified, and
+    the checks that read the admin space unobservable, never clean".
+    :data:`READ_REPLIER` False simulates that release."""
+    if not READ_REPLIER:
+        return None
     try:
         rid = getattr(reply, "replier_id", None)
         return None if rid is None else str(rid.zid)
     except Exception:  # noqa: BLE001 - an unstable accessor that fails is no id
         return None
+
+
+#: False simulates a binding without ``Reply.replier_id`` (Appendix B, 0.16).
+READ_REPLIER = True
 
 
 def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
@@ -579,6 +588,118 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     return out
 
 
+# -- §4.2 a tool's S1 check (0.16) -----------------------------------------------
+
+def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str | None,
+             timeout: float = GET_TIMEOUT_S, trust: bool = False) -> tuple[str, str]:
+    """§4.2 (0.16) "A tool's S1 check": "A tool that reads the admin space
+    … compares the owner's meta.zid with the verified routers' zids, by
+    value. When they match, the owner is its own router, and the tool
+    reports S1 unobservable for it, never clean."
+
+    Returns (verdict, why). The verdict is one of:
+    - ``unattributable``: no ``meta.zid`` (§3.3);
+    - ``unobservable``, in either of two cases:
+      - the owner is a verified router, its own;
+      - no admin answer is verified, so the owner may be a router this tool
+        cannot see. Appendix B leaves "the checks that read the admin space
+        unobservable, never clean" then (SPEC-FINDINGS F-89).
+    - ``clean`` when the stamp is the owner's (:func:`attribute_stamp`);
+    - ``finding`` when it is foreign, or missing.
+
+    The verified routers are 0.13's outward set. ``trust`` is 0.12's
+    operator alternative."""
+    meta = descriptor.get("meta")
+    zid = _zid_value(meta.get("zid") if isinstance(meta, dict) else None)
+    if zid is None:
+        return "unattributable", "the descriptor states no meta.zid (§3.3)"
+    records = [a for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout)
+               if a.ok and a.key is not None]
+    verified = verified_routers(session, records)
+    if trust:
+        verified |= {_zid_value(a.key.split("/")[1]) for a in records}
+    answered = [a for a in records if trust or unverified_why(a, verified) is None]
+    if zid in verified:
+        return "unobservable", "meta.zid is a verified router's zid: the owner is its own router"
+    if not answered:
+        return "unobservable", "no verified admin answer: the owner may be a router this tool cannot see"
+    who = attribute_stamp(stamp_id, descriptor)
+    if who == "owner":
+        return "clean", f"the stamp is the owner's, and meta.zid is none of {len(verified)} verified routers"
+    return "finding", f"the stamp is {who}"
+
+
+# -- §5.1 O3 judged from outside (0.16) ------------------------------------------
+
+def o3_verdict(result: CallResult, may_call: bool | None) -> tuple[str, str]:
+    """§5.1 (0.16): "A tool judging O3 from outside … holds a silence as a
+    finding only under grants that let it call: an access-control refusal
+    is silent too (O5, §11.3). It says so beside the finding."
+
+    ``may_call`` is whether the caller's grants let it make this call. No
+    tool observes its grants (§11.3), so it comes from the deployment's
+    configuration, here the generated grants (``acl.may_call``), or None
+    when unknown (SPEC-FINDINGS F-90). Returns (verdict, why): ``clean``,
+    ``finding`` or ``unjudged``."""
+    if not result.silent:
+        return "clean", f"answered: {len(result.replies)} replies"
+    if may_call is True:
+        return "finding", "silent, under grants that let this caller call (O3)"
+    if may_call is False:
+        return "unjudged", "silent, but the grants do not let this caller call: a refusal is silent too"
+    return "unjudged", "silent, and this caller's grants are unknown: a refusal is silent too"
+
+
+# -- §2.6 events replay, the consumer's bound (0.16) -----------------------------
+
+_CROCKFORD = "0123456789abcdefghjkmnpqrstvwxyz"
+
+
+def ulid_time_ms(ulid: str) -> int | None:
+    """The 48-bit millisecond time a lowercase ULID chunk carries (§1.2):
+    its first 10 Crockford base32 characters."""
+    if len(ulid) != 26:
+        return None
+    n = 0
+    for ch in ulid[:10]:
+        i = _CROCKFORD.find(ch)
+        if i < 0:
+            return None
+        n = n * 32 + i
+    return n
+
+
+def new_ulid(ms: int) -> str:
+    """A lowercase ULID chunk for the millisecond time ``ms``, random below."""
+    import secrets
+
+    n = (ms << 80) | secrets.randbits(80)
+    out = []
+    for _ in range(26):
+        out.append(_CROCKFORD[n & 31])
+        n >>= 5
+    return "".join(reversed(out))
+
+
+def replay_events(session: zenoh.Session, selector: str, retention_s: int,
+                  now_ms: int | None = None, timeout: float = GET_TIMEOUT_S) -> tuple[list[str], list[str]]:
+    """§2.6: "A consumer replays with a wildcard GET bounded by the
+    retention", and (0.16) "The retention is the bound a consumer applies
+    on replay": a union storage prunes nothing by retention. The GET asks
+    with ``_time``; since a backend may ignore it (the memory backend
+    does, spike S5), the consumer filters by the ULID's time (state.md §8).
+    Returns (kept keys, dropped keys)."""
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    bound = now_ms - retention_s * 1000
+    kept, dropped = [], []
+    for a in _answers(session, f"{selector}?_time=[now(-{retention_s}s)..]", zenoh.QueryTarget.ALL, timeout):
+        if not a.ok or a.key is None:
+            continue
+        t = ulid_time_ms(a.key.rsplit("/", 1)[-1])
+        (kept if t is not None and t >= bound else dropped).append(a.key)
+    return kept, dropped
+
+
 # -- §4 state, a consumer's GET --------------------------------------------------
 
 @dataclass
@@ -658,8 +779,11 @@ class CallResult:
 
     @property
     def silent(self) -> bool:
-        """O5: "MUST NOT treat an empty reply set as a verdict"."""
-        return not self.replies
+        """O5: "MUST NOT treat an empty reply set as a verdict". §5.1: "A
+        call that ends there with no value and no envelope is silent", "the
+        transport's own error reply included" (zenoh's `Timeout`, Appendix
+        B), so a transport reply does not make a call answered."""
+        return not any(r.kind in ("value", "envelope", "refused_envelope") for r in self.replies)
 
 
 def call(session: zenoh.Session, key: str, payload: bytes = b"", *, fanout: bool = False,

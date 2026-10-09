@@ -87,9 +87,10 @@ examples       97 passed     0 failed
 total         519 passed     0 failed
 ```
 
-The figures are against `core.md` 0.15, which adds no fixture. 0.10 added
+The figures are against `core.md` 0.16, which adds no fixture. 0.10 added
 `descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
-- Amendments 0.5 to 0.15 resolved F-01 to F-88. None is open.
+- Amendments 0.5 to 0.15 resolved F-01 to F-88. F-89 to F-91 are open
+  against 0.16.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -349,6 +350,32 @@ S4's storages read keeps only answers whose key the selector includes,
 ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
 `router/queryable/<…/state/**>` records intersect the selector.
 
+**Since 0.16** (run `0.16`, and the `acl` run under `deny`):
+- **A tool's S1 check (§4.2)** is `live.s1_check`. It compares `meta.zid`
+  with the verified routers' zids by value, then judges the stamp. Its
+  poles:
+  - an owner in client mode under a verified router is clean;
+  - an owner opened in router mode and linked to R1 (`Owner(router_connect=…)`)
+    is unobservable;
+  - a tool that verifies no router reports unobservable (F-89).
+- **O3 judged from outside (§5.1)** is `live.o3_verdict`, with the grants
+  taken from the deployment (`acl.may_call`, F-90).
+  - An ungranted call's silence is `unjudged`.
+  - A granted call is clean.
+  - A granted call an owner leaves unanswered is the finding.
+  - `CallResult.silent` no longer counts zenoh's `Timeout` error reply as
+    an answer (§5.1).
+- **U22's tokenless set** is `Owner(tokenless=…)`: `"token": false`, no
+  interface token. `archive.v1` in it is refused at start (§4.4, F-91).
+- **§2.6's replay bound** is `live.replay_events`. It GETs with `_time`
+  and filters by the ULID's time, so the consumer applies the retention
+  even against a storage that ignores `_time`. zenoh-python routers run no
+  storage manager, so the storage's own pruning is not measured.
+- **Appendix B.** `Reply.replier_id` is unstable in zenoh-python 1.10.1:
+  it is marked in the stub, and present at run time. With it absent
+  (simulated by `live.READ_REPLIER = False`), every admin answer is
+  unverified, and S4 and S1 are unobservable, never clean.
+
 **Known deviations:** none. The runner keeps the XFAIL/XPASS mechanism for
 a rule the owner example does not meet yet.
 
@@ -360,7 +387,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 223 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 232 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
@@ -476,7 +503,7 @@ impl/python/
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block
     acl_interop.py    §11       the access-control run (`--only acl`)
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan;
-                      rev/ holds bringup's minor 1
+                      rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 
 The JSON schemas are read from `spec/` at run time (`shape.py`), not copied.

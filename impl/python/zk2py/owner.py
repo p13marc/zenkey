@@ -223,7 +223,8 @@ class Owner:
                  capabilities: set[str] | None = None, unavailable: dict[str, str] | None = None,
                  withhold: set[str] | None = None, handlers: dict[str, Any] | None = None,
                  members: dict[str, list[dict[str, Any]]] | None = None, hold_s: float = 0.0,
-                 auth: tuple[str, str] | None = None):
+                 auth: tuple[str, str] | None = None, tokenless: set[str] | None = None,
+                 router_connect: str | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -242,7 +243,13 @@ class Owner:
         - ``hold_s``: how long each operation query stays open after its
           handler returns (operations.md §1).
         - ``auth``: a usrpwd (user, password), the principal it is bound to
-          as a client (§11.3)."""
+          as a client (§11.3).
+        - ``tokenless``: the interfaces of its tokenless set (§8.1, U22):
+          ``"token": false`` in the descriptor, and no interface token.
+          ``archive.v1`` is refused (§4.4, 0.16).
+        - ``router_connect``: as a router (no ``connect``), also link to that
+          router endpoint, so this owner's own session is a router of the
+          deployment (§4.2, "A tool's S1 check")."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -256,6 +263,8 @@ class Owner:
         self.members = dict(members or {})
         self.hold_s = hold_s
         self.auth = auth
+        self.tokenless = set(tokenless or ())
+        self.router_connect = router_connect
         self.port = None if connect else (port or free_loopback_port())
         self.endpoint = connect or f"tcp/127.0.0.1:{self.port}"
         #: core.md §1.2: 64 random bits, 16 lowercase hex digits.
@@ -333,6 +342,11 @@ class Owner:
             for role, req in c.canonical["requires"].items():
                 if not req["optional"] and not self.bindings.get(role):
                     raise OwnerRefused(f"{c.interface}: required role {role!r} is bound to nothing (§3.2)")
+        # §4.4 (0.16): "An archive MUST hold its archive.v1 interface token:
+        # it is never in the tokenless set." Refused before anything is
+        # declared, with step 2's refusals (SPEC-FINDINGS F-91).
+        if "archive.v1" in self.tokenless:
+            raise OwnerRefused("archive.v1 is never in the tokenless set: an archive is found by its token (§4.4)")
         return plan
 
     # -- bring-up (§8.2) --------------------------------------------------
@@ -349,6 +363,8 @@ class Owner:
         else:
             conf.insert_json5("mode", json.dumps("router"))
             conf.insert_json5("listen/endpoints", json.dumps([self.endpoint]))
+            if self.router_connect:
+                conf.insert_json5("connect/endpoints", json.dumps([self.router_connect]))
         conf.insert_json5("scouting/multicast/enabled", "false")
         # §4.3: "A session that serves state MUST enable Zenoh's HLC."
         conf.insert_json5("timestamping/enabled", "true")
@@ -423,7 +439,7 @@ class Owner:
         lv = s.liveliness()
         self._entities.append(lv.declare_token(self.instance_key))
         for c in self.contracts:
-            if any(status == "exposed" for _, status in plan[c.interface]):
+            if c.interface not in self.tokenless and any(status == "exposed" for _, status in plan[c.interface]):
                 fp16 = c.fingerprint.removeprefix("sha256:")[:16]
                 self._entities.append(lv.declare_token(
                     f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{self.instance}/{fp16}"))
@@ -441,7 +457,7 @@ class Owner:
             "instance": self.instance,
             "interfaces": [{
                 "iface": c.interface, "contract": c.fingerprint, "minor": c.minor or 0,
-                "token": True,
+                "token": c.interface not in self.tokenless,
                 "unavailable": [{"resource": f"{r['token']}/{r['template']}",
                                  "cause": self.unavailable[f"{r['token']}/{r['template']}"]}
                                 for r, status in plan[c.interface] if status == "listed"],

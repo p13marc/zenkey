@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Fourteen rounds.**
+**Fifteen rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -22,7 +22,9 @@ where that was not enough, or where the spec said two things.
 - F-82 to F-88 were found against 0.14, building access control from §11.
 - Amendments 0.5 to 0.15 resolved F-01 to F-88. Each entry carries a
   status line naming its amendment.
-- **Nothing new was found against 0.15** (see "At 0.15" at the end).
+- Nothing new was found against 0.15 (see "At 0.15").
+- **F-89 to F-91 are new**, found against 0.16, whose rules came from the
+  reference's tools rather than from zk2py (see "At 0.16" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -32,7 +34,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.15:** 88 entries, all resolved.
+**Counts at 0.16:** 91 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -72,11 +74,12 @@ where that was not enough, or where the spec said two things.
   "every principal" per policy. It fixed what a storage is (F-86) and
   security.md §3 step 3 (F-88). Each resolution follows zk2py's
   measurement or guess.
+- F-89 to F-91: **new**, 1 ambiguity, 2 gaps.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.15 | Location | In one line |
+| Id | Severity | Status at 0.16 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -166,6 +169,9 @@ by the spec section that now states the rule.
 | F-86 | gap (measured) | resolved by 0.15 | §4.2 "What the check reads" (0.11) | The storages selector intersects a router's `router/queryable/<…/state/**>` records, so with any owner present, "nothing under the second" never holds. |
 | F-87 | gap (measured) | resolved by 0.15 | §11.1 "denies it to every principal under allow" (0.12) | A subject matching every session undoes the per-user denies in zenoh 1.10.1; "every principal" must be compiled per policy. |
 | F-88 | contradiction | resolved by 0.15 | security.md §3 step 3, §11.3 (0.14) | Under `allow`, the grants cannot refuse a session that is no principal: it matches no subject, and gets everything. |
+| F-89 | ambiguity | **new** | §4.2 "A tool's S1 check" (0.16) | What S1 reads for a tool that verifies no router: clean by `meta.zid` alone, or unobservable? |
+| F-90 | gap | **new** | §5.1 O3 judged from outside (0.16), §11.3 | "Only under grants that let it call": a tool cannot observe its grants, and the spec does not say where it learns them. |
+| F-91 | gap | **new** | §4.4 "Found by its token" (0.16) | An archive "MUST hold its archive.v1 interface token", but no step refuses a tokenless one and no check reports it. |
 
 ---
 
@@ -2372,3 +2378,121 @@ What changed in zk2py:
   the inclusion test (`live.check_s4`).
 
 Implementing 0.15 raised no new question.
+
+## At 0.16 (#609)
+
+0.16 came from the reference's tools (`why`, `check conform`, `storage gen`,
+`admin graph`), which zk2py never saw. This round reads its rules
+cold. `just py-conformance` passes 519 of 519 (0.16 adds no fixture).
+`just py-live` passes 232 of 232, with no known deviation.
+
+**What zk2py built and showed:**
+- **A tool's S1 check (§4.2)** is `live.s1_check`. It compares `meta.zid`
+  with 0.13's outward set of verified routers, by value, then judges the
+  stamp.
+  - **An owner in client mode** under R1, which the tool verified, is
+    clean.
+  - **An owner whose own session is a router.** zk2py's owner opened in
+    router mode and linked to R1, so R1's document lists it as a router.
+    It is unobservable, neither clean nor a finding. The stamp alone would
+    have read it as the owner's.
+  - **Under `deny`**, the Tool, which holds the admin read, judges h1
+    clean. The caller, without the admin read, verifies no router and
+    reports unobservable (F-89).
+- **O3 judged from outside (§5.1)** is `live.o3_verdict`, with the grants
+  read from the deployment (`acl.may_call`) (F-90). Under `deny`:
+  - the consumer, without the Call grant, gets silence, which is
+    `unjudged`, not a finding;
+  - the caller, with it, is answered: clean;
+  - a granted call that `own-h2` holds past the caller's timeout is the
+    finding, said to hold under grants that let the caller call.
+  - **Building this exposed a bug in zk2py, not in the spec.**
+    `CallResult.silent` counted zenoh's `Timeout` error reply as an answer.
+    §5.1 says a call is silent with "no value and no envelope … the
+    transport's own error reply included". Fixed.
+- **§4.4 and U22.** zk2py's owner takes a tokenless set: `"token": false`
+  in the descriptor, no interface token, no D code. An owner configured
+  with `archive.v1` in it refuses to start and declares nothing. The test
+  uses a stand-in contract with that interface id
+  (`interop/stand-in/archive.v1.toml`), since the archive profile (#613) is
+  not specified. Where to refuse is not in the text (F-91).
+- **§2.6 retention.** zenoh-python routers carry no storage manager
+  (`"plugins": null`), so whether the storage manager prunes by retention
+  cannot be measured here. The text leaves the consumer's side to build,
+  and state.md §8 says how: filter by the ULID's time. `live.replay_events`
+  GETs with `_time=[now(-<retention>)..]` and filters by ULID. Against a
+  stand-in storage that answers all 1,000 occurrences, ignoring `_time` as
+  the memory backend does, it keeps exactly the 500 within the hour.
+- **Appendix B.** zenoh-python 1.10.1 exposes `Reply.replier_id`. Its
+  type stub marks it `@_unstable`, a marker only: the published wheel has
+  it at run time, an `EntityGlobalId` whose `zid` is the replier's.
+  - Without it, `live.replier_of` returns None, and every admin answer is
+    unverified ("no replier id").
+  - S4 is then unobservable, and so is S1 for an owner in client mode. The
+    run simulates this (`live.READ_REPLIER = False`) and checks both.
+
+### F-89 · ambiguity · §4.2 "A tool's S1 check" (0.16): a tool that verifies no router
+
+> "A tool that reads the admin space (§11.1, the admin read) compares the
+> owner's `meta.zid` with the verified routers' zids, by value. When they
+> match, the owner is its own router, and the tool reports S1 unobservable
+> for it, never clean."
+
+The rule says what a tool does when it reads the admin space. It is
+silent when the tool verifies no router: it lacks the admin read, the
+admin space is off, or no replier id is readable. Two readings:
+- **S1 is judged by `meta.zid` alone,** as before 0.16. An owner whose own
+  session is a router the tool cannot see then reads clean, the outcome
+  0.16 forbids.
+- **S1 is unobservable.** Appendix B points this way for one cause:
+  without the replier id, "the checks that read the admin space
+  unobservable, never clean". Whether S1 counts among those checks for a
+  tool that never read the admin space is not said.
+
+**Resolved:** a guess. zk2py's `s1_check` reports S1 unobservable when no
+admin answer is verified, whatever the cause ("the owner may be a router
+this tool cannot see"). Under `deny`, the caller, without the admin read,
+reports h1 unobservable, while the Tool reports it clean.
+
+### F-90 · gap · §5.1 (0.16) and §11.3: a tool's own grants
+
+> "A tool judging O3 from outside, as a conformance suite does, holds a
+> silence as a finding only under grants that let it call: an
+> access-control refusal is silent too (O5, §11.3). It says so beside the
+> finding."
+
+> §11.3: "the running configuration is not observable on the bus."
+
+To hold a silence as a finding "only under grants that let it call", a
+tool must know whether its grants let it call. It cannot observe them,
+and the spec does not say where it learns them: from the deployment's
+input, from the generated block, or from the operator. "It says so beside
+the finding" also has a second reading: count every silence as a finding,
+captioned with the condition, without knowing the grants. The two
+readings differ for the case 0.16 is about, a caller without the grant.
+**Resolved:** a guess. zk2py's `o3_verdict` takes `may_call` from the
+deployment's generated grants (`acl.may_call`), and reports a silence as:
+- a finding only when the grants let the caller call;
+- `unjudged` when they do not, or when they are unknown.
+
+### F-91 · gap · §4.4 (0.16): where an archive's tokenless configuration is refused
+
+> "An archive MUST hold its `archive.v1` interface token: it is never in
+> the tokenless set (§8.1)."
+
+> §8.1: "A deployment MAY configure an owner with interfaces for which it
+> holds no interface token."
+
+The MUST binds the archive. Yet the tokenless set is the deployment's
+configuration, and the core does not say what happens when that
+configuration names `archive.v1`. Only the CHANGELOG says the reference
+"refuses to start one". The core text leaves open:
+- whether the owner refuses to start, or holds the token and ignores the
+  configuration;
+- where a refusal sits in §8.2's bring-up;
+- whether a descriptor marking `archive.v1` `"token": false` is reported.
+  No D code names it, so a checker reading that descriptor says nothing.
+
+**Resolved:** zk2py's owner refuses to start, with step 2's other
+refusals, before anything is declared. Its descriptor checker is
+unchanged, because the D-code table has no code for this.

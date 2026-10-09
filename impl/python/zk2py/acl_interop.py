@@ -61,7 +61,7 @@ def deployment(repo) -> list:
 class World:
     """R1 with the generated block, the deployment's sessions, and S."""
 
-    def __init__(self, repo, block: dict[str, Any], workdir: str):
+    def __init__(self, repo, block: dict[str, Any], workdir: str, handlers: dict[str, dict] | None = None):
         import zenoh
 
         from . import live
@@ -94,7 +94,7 @@ class World:
                      for n in ("zk2py_echo", "zk2py_tc", "zk2py_bringup")]
         self.owners = {
             pid: Owner(system, "tc", contracts, connect=self.endpoint,
-                       auth=(USERS[pid], PASSWORD.format(USERS[pid])))
+                       auth=(USERS[pid], PASSWORD.format(USERS[pid])), handlers=(handlers or {}).get(pid))
             for pid, system in (("own-h1", "h1"), ("own-h2", "h2"))
         }
         self.contracts = {c.interface: c for c in contracts}
@@ -160,7 +160,7 @@ def run_python_acl(report, repo) -> None:
                         "inclusion under allow, and the generator warns complement_partial",
                  any("complement_partial" in x and "state/tracks/*" in x for x in warned)
                  and not allow.warnings, f"{len(warned)} warnings: {warned[:2]}")
-    _deny_full(report, repo, deny.block, workdir)
+    _deny_full(report, repo, deny, workdir)
     _deny_variant(report, repo, acl.generate(principals, "deny", reply_selectors=False).block, workdir, "reply")
     _deny_variant(report, repo, acl.generate(principals, "deny", egress_selectors=False).block, workdir, "egress")
     _allow_full(report, repo, allow.block, workdir)
@@ -184,11 +184,19 @@ def _forgeries(w: World) -> dict[str, Any]:
     return {"q": forged_q, "t": forged_t}
 
 
-def _deny_full(report, repo, block, workdir) -> None:
-    from . import live
+def _frozen_echo(call) -> None:
+    """own-h2's echo: answers, except a call whose request is ``freeze``,
+    which it holds past the caller's timeout, so the caller sees silence."""
+    if call.payload == b"freeze":
+        time.sleep(2.0)
+    call.reply(call.payload)
 
-    run = "acl: generated grants under deny (security.md §1, §3 step 3; core §11, 0.14)"
-    w = World(repo, block, workdir)
+
+def _deny_full(report, repo, gen, workdir) -> None:
+    from . import acl, live
+
+    run = "acl: generated grants under deny (security.md §1, §3 step 3; core §11, 0.14–0.16)"
+    w = World(repo, gen.block, workdir, handlers={"own-h2": {"@op/echo": _frozen_echo}})
     try:
         w.subscribe("consumer", "zk2/*/tc/zk2py_echo.v1/state/health", "named")
         w.subscribe("consumer", "zk2/h1/tc/zk2py_bringup.v1/state/health", "unnamed")
@@ -253,6 +261,34 @@ def _deny_full(report, repo, block, workdir) -> None:
                      and _codes(sets) == ["fanout_forbidden", "fanout_forbidden"], f"{_keys(diag)} {_codes(sets)}")
         # §3 step 3: S's queryable on R1's own key.
         _admin_spoof(report, run, w, "deny")
+        # §4.2 (0.16), a tool's S1 check, under the grants: the tool holds
+        # the admin read, the caller does not.
+        st = live.get_state(w.sessions["tool"], "zk2/h1/tc/zk2py_echo.v1/state/health")
+        stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
+        d = live.get_descriptor(w.sessions["tool"], h1.instance_key)
+        hdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+        by_tool = live.s1_check(w.sessions["tool"], hdoc, stamp)
+        by_caller = live.s1_check(w.sessions["caller"], hdoc, stamp)
+        report.check(run, "S1 from a tool (§4.2, 0.16): the Tool, with the admin read, judges h1 (a client of R1) "
+                          "clean; the caller, without it, verifies no router and reports S1 unobservable (F-89)",
+                     by_tool[0] == "clean" and by_caller[0] == "unobservable", f"tool {by_tool}; caller {by_caller}")
+        # §5.1 (0.16): O3 judged from outside, under the grants.
+        key = "zk2/h1/tc/zk2py_echo.v1/@op/echo"
+        ungranted = live.call(w.sessions["consumer"], key, b"ping")
+        granted = live.call(w.sessions["caller"], key, b"ping")
+        v_ungranted = live.o3_verdict(ungranted, acl.may_call(gen, "consumer", key))
+        v_granted = live.o3_verdict(granted, acl.may_call(gen, "caller", key))
+        report.check(run, "O3 from outside (§5.1, 0.16): the consumer, without the Call grant, gets silence, which "
+                          "is no O3 finding; the caller, with it, is answered: clean",
+                     ungranted.silent and v_ungranted[0] == "unjudged" and v_granted[0] == "clean",
+                     f"consumer {v_ungranted}; caller {v_granted}")
+        frozen_key = "zk2/h2/tc/zk2py_echo.v1/@op/echo"
+        frozen = live.call(w.sessions["caller"], frozen_key, b"freeze")
+        v_frozen = live.o3_verdict(frozen, acl.may_call(gen, "caller", frozen_key))
+        report.check(run, "O3 from outside: a granted call that own-h2 leaves unanswered past the caller's timeout "
+                          "is the finding, said beside it to hold under grants that let the caller call",
+                     frozen.silent and v_frozen[0] == "finding", str(v_frozen))
+        time.sleep(1.5)  # let own-h2's held call finish before the owners close
     finally:
         w.close()
 
