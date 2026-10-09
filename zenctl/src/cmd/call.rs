@@ -6,7 +6,8 @@
 //! before a session opens: an address that is not one, an operation the
 //! revision does not declare, a parameter its template does not have, a
 //! fan-out to an operation that forbids one (spec §5.1 O2), a request that
-//! does not encode as its type. Each is exit 2 (`crate::exit`).
+//! does not satisfy its JSON Schema type (§7.3, #671) or does not encode as
+//! its type. Each is exit 2 (`crate::exit`).
 //!
 //! The call itself is the runtime's (`zenkey_fleet::call_operation` over
 //! its `Client` and `Fleet`), and the exit code keeps v1's mapping: 0 a

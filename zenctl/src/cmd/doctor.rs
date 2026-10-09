@@ -97,28 +97,6 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
     crate::exit::verdict(&judgement)
 }
 
-/// The doctor a `doctor <CHECK-ID>` rule of `watchdog` or `record --on`
-/// runs (#612, FJ6): zk2's doctor reads the deployment through a session in
-/// its namespace — the verb's `--base` — beside the verb's own un-namespaced
-/// one, which reads the admin space. Opened only when a rule wants it.
-pub(crate) async fn bus_for_rules(
-    rules: &[zenkey_fleet::Condition],
-    args: &crate::Bus,
-    raw: &zenoh::Session,
-) -> Result<Option<DoctorBus>> {
-    if !rules
-        .iter()
-        .any(|r| matches!(r, zenkey_fleet::Condition::DoctorCheck { .. }))
-    {
-        return Ok(None);
-    }
-    Ok(Some(DoctorBus {
-        session: args.session_in(args.base()).await?,
-        raw: raw.clone(),
-        namespace: args.base().to_owned(),
-    }))
-}
-
 /// The `--fail-on` floor: warning unless told otherwise.
 fn floor(fail_on: Option<FailOn>) -> DoctorSeverity {
     match fail_on {

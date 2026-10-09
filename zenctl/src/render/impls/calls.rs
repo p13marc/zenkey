@@ -1,6 +1,7 @@
-//! v1's `@rpc` replies — `config`'s read-back and `check probe` — and one
-//! answer rendering for both. (`service call` and its `--trace` used it
-//! too, until FJ5 replaced them with zk2's `call`, #612.)
+//! v1's `@rpc` replies — `config`'s read-back — and one answer rendering.
+//! (`service call` and its `--trace` used it too, until FJ5 replaced them
+//! with zk2's `call`, #612; and `check probe`, until FJ8b re-cut it as a
+//! zk2 consumer.)
 //!
 //! `output::call` took the answer rendering as a closure, and both call sites
 //! wrote their own. They drifted: `service call`'s appended the reply
@@ -9,12 +10,12 @@
 //! which verb you reached for (#237).
 //!
 //! The closure was never a design point. It is a pure function of a
-//! `CallAnswer`, so it is one here, and `ProbeReport` composes `CallReport`'s
+//! `CallAnswer`, so it is one here, and `check probe`'s report composed `CallReport`'s
 //! rendering rather than re-entering the renderer with a hardcoded
 //! `Format::Table` — which is what `table(&self, t: &mut Table)` taking a sink
 //! is for.
 
-use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, PageSignal, ProbeReport};
+use zenkey_fleet::report::{CallAnswer, CallOutcome, CallReport, PageSignal};
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table};
 
@@ -151,56 +152,5 @@ impl Render for CallReport {
             asked: vec![self.key.clone()],
             window_s: Some(self.timeout_s),
         })
-    }
-}
-
-impl Render for ProbeReport {
-    const FAMILY: &'static str = "probe";
-
-    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut e = serde_json::Map::new();
-        e.insert("input".into(), self.input.clone().into());
-        e.insert("origin".into(), self.origin.clone().into());
-        e.insert("via".into(), self.via.clone().into());
-        e.insert("key".into(), self.call.key.clone().into());
-        // Inherited from the delegated call (R5), like the silence note.
-        e.insert("timeout_s".into(), self.call.timeout_s.into());
-        e
-    }
-
-    /// Delegated, and that is the fix for a second `check probe` defect: the old
-    /// ndjson emitted the whole report as one compact line, so the answers
-    /// were buried inside a nested object rather than being rows a consumer
-    /// could iterate.
-    fn rows(&self, out: &mut dyn FnMut(Row)) {
-        self.call.rows(out);
-    }
-
-    fn table(&self, t: &mut Table) {
-        t.line(format!(
-            "probe {} → origin {} (via {})",
-            self.input, self.origin, self.via
-        ));
-        self.call.table(t);
-    }
-
-    fn notes(&self) -> Vec<Note> {
-        let mut notes = self.call.notes();
-        if self.call.answers.is_empty() {
-            notes.push(
-                Note::coverage(
-                    "the origin resolved but did not answer — the probe reached a name, \
-                     not a responder; absence of replies and absence of callers must \
-                     not look alike",
-                )
-                .cite("RFC 09 §6"),
-            );
-        }
-        notes
-    }
-
-    /// Delegated, like the rendering: the probe's observation *is* the call.
-    fn scope(&self) -> Option<ObservedScope> {
-        self.call.scope()
     }
 }

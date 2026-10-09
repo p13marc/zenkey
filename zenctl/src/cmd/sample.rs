@@ -33,6 +33,18 @@ pub struct SampleLine<'a> {
     /// The QoS axes — a subscribe-path fact; `None` on a reply (#120).
     pub qos: Option<&'a str>,
     pub source: Option<&'a str>,
+    /// The key as zk2 resolution left it (#612, FJ8b): `%A`, `%i`, `%r`
+    /// expand from it, and `%K` is its namespace-relative key. `None` on
+    /// `get`'s v1 ladder, where those fields are empty.
+    pub zk2: Option<Zk2Positions<'a>>,
+}
+
+/// What `--fmt` can name of a zk2 key (#612, FJ8b).
+#[derive(Debug, Clone, Copy)]
+pub struct Zk2Positions<'a> {
+    /// The key relative to the stated namespace; `None` outside it.
+    pub relative: Option<&'a str>,
+    pub identity: &'a zenkey_fleet::report::KeyIdentity,
 }
 
 pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
@@ -48,8 +60,10 @@ pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
         attachment,
         qos,
         source,
+        zk2,
     } = *s;
     let parsed = zenkey::grammar::parse_full(base, wire_key);
+    let group = zk2.map(|z| &z.identity.group);
     let mut out = String::with_capacity(fmt.len() + value.len());
     let mut chars = fmt.chars();
     while let Some(c) = chars.next() {
@@ -99,8 +113,29 @@ pub fn format_sample(fmt: &str, s: &SampleLine<'_>) -> String {
                 }
             }
             Some('k') => out.push_str(wire_key),
-            Some('K') => {
-                out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
+            Some('K') => match zk2 {
+                Some(z) => out.push_str(z.relative.unwrap_or(wire_key)),
+                None => {
+                    out.push_str(zenkey::grammar::strip_base(base, wire_key).unwrap_or(wire_key))
+                }
+            },
+            Some('A') => {
+                if let Some(a) = group.and_then(|g| g.address()) {
+                    out.push_str(a);
+                }
+            }
+            Some('i') => {
+                if let Some(zenkey_fleet::report::KeyGroup::Resource { iface, .. }) = group {
+                    out.push_str(iface);
+                }
+            }
+            Some('r') => {
+                if let Some(zenkey_fleet::report::KeyGroup::Resource {
+                    resource: Some(r), ..
+                }) = group
+                {
+                    out.push_str(r);
+                }
             }
             Some('o') => {
                 if let Some(p) = &parsed {
@@ -313,6 +348,7 @@ mod tests {
                 attachment: None,
                 qos: None,
                 source: None,
+                zk2: None,
             },
         );
         assert_eq!(line, "eth0 up=true missing=[]");
@@ -334,6 +370,7 @@ mod tests {
                 attachment: None,
                 qos: None,
                 source: None,
+                zk2: None,
             },
         );
         assert_eq!(
@@ -356,6 +393,7 @@ mod tests {
                     attachment: None,
                     qos: None,
                     source: None,
+                    zk2: None,
                 },
             ),
             "%|v1/h-3fa9c2d41b7e/state/tc/x\t."
@@ -381,6 +419,7 @@ mod tests {
                     attachment: att,
                     qos: None,
                     source: None,
+                    zk2: None,
                 },
             )
         };
@@ -436,6 +475,7 @@ mod tests {
                 attachment: None,
                 qos: Some("data/drop/reliable"),
                 source: None,
+                zk2: None,
             },
         );
         assert_eq!(line, "data/drop/reliable|");

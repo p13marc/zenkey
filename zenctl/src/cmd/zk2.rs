@@ -314,6 +314,64 @@ pub fn every_revision(contracts: &ContractSet) -> Result<Vec<Arc<Revision>>> {
         .collect()
 }
 
+/// The presence read a raw observer resolves keys with (#612, FJ8b): every
+/// service in the namespace, its descriptors, and the revisions they name,
+/// retrieved into `store`. A read that could not be made is said once on
+/// stderr, and the observer goes on without one: every key then resolves
+/// to its address and no further, which each row says (O4).
+pub async fn read_lens(
+    dep: &Deployment,
+    session: &zenoh::Session,
+    store: &BundleStore,
+) -> Option<Catalog> {
+    match zenkey_fleet::read_lens(session, store, dep.timeout()).await {
+        Ok(catalog) => Some(catalog),
+        Err(e) => {
+            eprintln!(
+                "{}",
+                lens_unread_note(&zenkey_fleet::one_line(&e)).to_line()
+            );
+            None
+        }
+    }
+}
+
+/// The sentence a raw observer says when presence could not be read.
+pub fn lens_unread_note(reason: &str) -> crate::render::Note {
+    crate::render::Note::coverage(format!(
+        "presence could not be read ({reason}); continuing without it — a zk2 key \
+         resolves to its address and no further, and says so: not asked is not \
+         answered no"
+    ))
+    .cite("tooling guide O4")
+}
+
+/// The default wire selector of a raw observer: the deployment's zk2 data,
+/// `<ns>/zk2/**`, whose `**` reaches no verbatim chunk (O5).
+pub fn default_selector(namespace: &str) -> String {
+    zenkey::grammar::with_base(namespace, "zk2/**")
+}
+
+/// A typed wire selector through the raw seam, with the hint for a
+/// base-relative zk2 selector typed under a namespace — or the default.
+pub fn wire_selector(typed: Option<&str>, namespace: &str) -> Result<String> {
+    let Some(s) = typed else {
+        return Ok(default_selector(namespace));
+    };
+    let s = super::raw_selector(s)?;
+    if !namespace.is_empty() && zenkey::grammar::strip_base(namespace, s).is_none() {
+        let first = s.split(['/', '?']).next().unwrap_or_default();
+        if first == "zk2" {
+            eprintln!(
+                "hint: {s:?} does not sit under namespace {namespace:?} — selectors are wire \
+                 keys; did you mean {:?}?",
+                zenkey::grammar::with_base(namespace, s)
+            );
+        }
+    }
+    Ok(s.to_owned())
+}
+
 /// How a sentence names a namespace: `namespace "x"`, or the bus root.
 pub fn namespace_phrase(ns: &str) -> String {
     if ns.is_empty() {

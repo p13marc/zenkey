@@ -161,20 +161,6 @@ fn chunk_arg(s: &str) -> Result<String, String> {
     }
 }
 
-/// A procedure path: plain chunks joined by `/` (`artifact/status`).
-fn procedure_arg(s: &str) -> Result<String, String> {
-    match s
-        .split('/')
-        .find(|seg| !zenkey::grammar::is_valid_plain_chunk(seg))
-    {
-        None => Ok(s.to_string()),
-        Some(seg) => Err(format!(
-            "{seg:?} is not a plain chunk; a procedure path is plain chunks joined by `/` — \
-             {CHUNK_RULE}"
-        )),
-    }
-}
-
 /// How output is rendered: which format, and whether it may carry colour.
 ///
 /// One struct rather than two loose flags, and flattened everywhere either is
@@ -326,19 +312,28 @@ pub(crate) struct WhyArgs {
     pub(crate) bus: BusArgs,
 }
 
-/// The `echo` verb's flags — one struct, the `GenArgs` pattern, because the
-/// arm that destructured them inline was the single largest thing in `run()`.
+/// The `echo` verb's flags (#612, FJ8b) — one struct, the `GenArgs`
+/// pattern. A raw verb: the selector is a wire key, on a session in no
+/// namespace; `--namespace` says which deployment the keys are resolved
+/// against, through a second session in it.
 #[derive(clap::Args)]
 pub(crate) struct EchoArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
-    /// kcat-style format string: %k wire key, %K base-relative, %o origin,
-    /// %c class, %p producer, %s subject, %t type, %v value, %e encoding,
-    /// %l payload bytes, %n counter, %T timestamp, %a attachment (empty
-    /// when none arrived), %q QoS axes (priority/congestion/reliability,
-    /// +express — the wire's actual axes, #120), %S source zid:eid#sn
-    /// (empty when the publisher attaches no SourceInfo), %{a.b.c} a
-    /// decoded payload field by dot-path, %% literal percent.
+    /// Full wire selector to watch — this session is in no namespace, so a
+    /// selector is the key as the wire carries it (`prod/zk2/**`). Default:
+    /// the deployment's zk2 data, `<ns>/zk2/**`, whose `**` reaches no
+    /// verbatim chunk (`@stream`, `@state`, `@op`, `@zk`, `@adv`): name one
+    /// to see it (`prod/zk2/*/*/*/@stream/**`).
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selector: Option<String>,
+    /// kcat-style format string: %k wire key, %K the key relative to the
+    /// namespace, %A address, %i interface, %r resource (`<kind>/<template>`,
+    /// when a contract resolved it), %t declared type, %v value, %e
+    /// encoding, %l payload bytes, %n counter, %T timestamp, %a attachment
+    /// (empty when none arrived), %q QoS axes
+    /// (priority/congestion/reliability, +express — the wire's actual axes,
+    /// #120), %S source zid:eid#sn (empty when the publisher attaches no
+    /// SourceInfo), %{a.b.c} a decoded payload field by dot-path, %% literal
+    /// percent.
     #[arg(long)]
     pub(crate) fmt: Option<String>,
     /// Print raw payload bytes as hex instead of decoding.
@@ -350,20 +345,17 @@ pub(crate) struct EchoArgs {
     /// Append the live aggregate sample rate to each line.
     #[arg(long)]
     pub(crate) rate: bool,
-    /// Skip schema decode (structural rendering only).
+    /// Skip contract resolution: no presence read, no bundle retrieved,
+    /// every payload rendered structurally (and said to be).
     #[arg(long)]
     pub(crate) no_decode: bool,
     /// Stop after this many samples (0 = run until interrupted).
     #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) count: usize,
-    /// Seed current state before going live (RFC 04 §3.2, issue #92):
-    /// subscribe first, then pull publishers' caches and router storages
-    /// through one LWW merge; a boundary line marks where the seed ends
-    /// and live begins.
-    #[arg(long)]
-    pub(crate) seed: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `pub` verb's flags (issue #47) — one struct, the `GenArgs` pattern.
@@ -612,7 +604,9 @@ pub(crate) enum Command {
     /// The operation is resolved through its contract (the bundle the bus
     /// serves, or `--contracts`), and the request — JSON, or bytes for a raw
     /// type — is encoded as the operation's request type: JSON or CBOR for a
-    /// JSON Schema type, protobuf from its JSON form through the bundle's
+    /// JSON Schema type (checked against it first, §7.3: a request that
+    /// does not satisfy it is refused with its violations, exit 2, and
+    /// nothing is sent), protobuf from its JSON form through the bundle's
     /// descriptor set. One address is called on its concrete key (target
     /// BestMatching, consolidation None; spec §5.1 O1), and only an
     /// idempotent operation is retried, after silence (O4). A `*` in the
@@ -637,13 +631,20 @@ pub(crate) enum Command {
     /// samples, after `--for` seconds, or on ctrl-c, with a summary. Exit 0
     /// when a sample arrived, 2 when none did: silence is never a verdict.
     Watch(WatchArgs),
-    /// Subscribe and print decoded samples (on-bus).
+    /// Subscribe to wire keys and print every sample, decoded where it can be.
     ///
-    /// With a served `describe` schema (RFC 08 §7) payloads decode into
-    /// named fields; otherwise they render structurally, tagged with the
-    /// registry-declared type. --origin/--class/--producer compose the
-    /// selector server-side — never client-side filtering the grammar can
-    /// express by position.
+    /// RAW: a wire selector on a session in no namespace, so every key is
+    /// shown — another deployment's, v1's, rmw_zenoh's (the tooling guide's
+    /// O1). A key in the deployment's namespace (`--namespace`) that parses
+    /// as zk2 is resolved through presence and its contract — the provider,
+    /// the revision its descriptor names, the bundle (from `--contracts` or
+    /// its holders, spec §8.4), the resource — and its payload decoded as
+    /// the declared type (§7.2), a JSON Schema value also validated (§7.3).
+    /// Where the ladder stops, the payload renders structurally and the rung
+    /// is named (O2): not in this namespace, not a zk2 key, no provider, no
+    /// revision, contract unavailable, no resource; bytes that do not decode
+    /// are named as their declared type. `--format ndjson` is the row
+    /// dialect `pub --from ndjson` and `.zrec` read, with `identity` beside.
     Echo(EchoArgs),
     /// Publish a value to a key that no zk2 service owns.
     ///
@@ -656,26 +657,30 @@ pub(crate) enum Command {
     ///
     /// One verb, because they are one observation: `topic hz` and `topic bw`
     /// watched the same window through the same Monitor and differed only in
-    /// which column the table led with (#307).
+    /// which column the table led with (#307). RAW: a wire selector on a
+    /// session in no namespace; each key is resolved against the deployment
+    /// (`--namespace`) and the window is reported grouped by zk2 address and
+    /// resource, a key that is not this deployment's zk2 data in a group of
+    /// its own (O1). `--per-key` adds each concrete key. Keys the bounded
+    /// table retired are counted, never silently missing (O6).
     Rate(RateArgs),
-    /// Per-field statistics over a window: stuck, vanished and new fields.
+    /// Per-field statistics over a window: vanished and new fields.
     ///
-    /// Field intelligence (#223): per-dotted-path statistics — presence,
-    /// type stability, change count, numeric range, small-domain values —
-    /// plus the three findings per-sample validation cannot see.
-    ///
-    /// The stuck sensor that passes every check: a key publishing at its
-    /// declared rate with a perfectly valid payload whose temperature_c has
-    /// not moved in four hours. field-stuck flags a numeric unchanged over a
-    /// span long relative to the subject's declared ttl_s (an observation
-    /// with a stated window, never a verdict); field-vanished a path SEEN
-    /// then absent while later payloads still parse (a schema that declares
-    /// it optional reads Valid without it by construction); field-new a path
-    /// the served schema never declared — schema drift at field granularity.
-    /// The path table is bounded and reports what it dropped (RFC 09
-    /// §5.1 O6); with no registry loaded, stuck/new are unjudgeable and the
-    /// report says so (O4). Findings are output, not verdicts — exit 0
-    /// unless you opt in with `--fail-on`.
+    /// Field intelligence (#223; zk2's since #612, FJ8b): per-dotted-path
+    /// statistics over each payload decoded through its contract, as `echo`
+    /// decodes it — presence, type stability, change count, numeric range,
+    /// small-domain values — plus the findings per-sample validation cannot
+    /// see. field-vanished: a path SEEN then absent while later payloads
+    /// still decode (a type that declares it optional validates without it
+    /// by construction); field-new: a path the declared type never declares
+    /// — drift at field granularity, judged from the bundle's own type (a
+    /// JSON Schema's properties, a protobuf message's fields). field-stuck
+    /// needs a declared freshness, which is the freshness.v1 profile's
+    /// (#613): not asked, and the report says so. A key no contract resolves
+    /// is observed structurally and judged for nothing it would need a type
+    /// for (O4). The path table is bounded and reports what it dropped (O6).
+    /// Findings are output, not verdicts — exit 0 unless you opt in with
+    /// `--fail-on`.
     Field(FieldArgs),
     /// Capture wire selectors' traffic to a .zrec file.
     ///
@@ -703,11 +708,14 @@ pub(crate) enum Command {
     /// recorded (spike S13). A zk2 service's own key replayed where that
     /// service runs is refused unless --i-know (P3).
     Replay(ReplayArgs),
-    /// One merged ordering of a window's samples, a lane per origin.
+    /// One merged ordering of a window's samples, a lane per zk2 resource.
     ///
-    /// The fleet timeline (#216): lanes per origin/producer, the clock
-    /// stated per report and the stamper per lane — and DELIBERATELY NO
-    /// EDGES. A line between two lanes would claim a causality no observer on this
+    /// The fleet timeline (#216): a lane per zk2 address and resource (a
+    /// key outside the namespace, or not zk2, in a foreign lane, never
+    /// dropped), the clock stated per report and the stamper per lane —
+    /// each stamp the owner's own (its id the session zid the owner's
+    /// descriptor states as `meta.zid`), another clock's, or unattributable
+    /// (O7) — and DELIBERATELY NO EDGES. A line between two lanes would claim a causality no observer on this
     /// bus can establish. What it can say: on the arrival axis, when each
     /// sample was seen here; on the HLC axis (`--order hlc`), the
     /// happened-before of ONE stamping node, or a comparison of skewed wall
@@ -718,19 +726,22 @@ pub(crate) enum Command {
     /// zenoh, not empty. `--from <FILE>` reads a .zrec through the same
     /// projection, so live and replay render identically.
     Timeline(TimelineArgs),
-    /// Take a fleet snapshot to a .zsnap file, or compare two with `diff`.
+    /// Take a deployment's state to a .zsnap file, or compare two with `diff`.
     ///
-    /// The snapshot of RFC 13 §4.4: one fan-in GET per selector, folded
-    /// last-writer-wins per key, each row carrying what the observer could
-    /// establish: the exact payload, whose clock stamped it (O7), the registry
-    /// rung (O2), the three-valued verdict, and who HOLDS it — `live` (its
-    /// origin held an alive token during the collection, and whether the
-    /// replier was the stamper), `storage_only` (a value answered, nobody is
-    /// saying it now), or `unattributed` (the roster was not asked, or the key
-    /// names no origin). A snapshot is collected OVER a span, never at an
-    /// instant, and every rendering says so. Read, never replayed: seeding a
-    /// fleet from a file is `replay --seed-state`. Exit 0 wrote the file, 2
-    /// nobody answered (silence is not a snapshot).
+    /// The snapshot of RFC 13 §4.4, re-cut for zk2: the owners' current
+    /// state, one GET per selector — target All, consolidation Latest, the
+    /// owner alone answering (spec §4.2 S4), a reply on a wildcard key
+    /// discarded (R6) — each row carrying what the observer could establish:
+    /// the exact payload; its zk2 address and resource, or the rung its key
+    /// stopped at (O2); the payload against its declared type (valid,
+    /// invalid, undecodable, not checked); whose clock stamped it — the
+    /// owner's (its descriptor's `meta.zid`), another's, or unattributable
+    /// (O7); and who HOLDS it — `live` (its address held an instance token,
+    /// and whether the owner's session answered), `no_instance` (a value
+    /// answered and presence shows no instance), or `unattributed`. A
+    /// snapshot is collected OVER a span, never at an instant, and every
+    /// rendering says so. Exit 0 wrote the file, 2 nobody answered (silence
+    /// is not a snapshot).
     Snapshot(SnapshotArgs),
     /// The data-flow graph: each role bound to the providers it selects.
     ///
@@ -871,6 +882,8 @@ pub(crate) enum Command {
     /// ok / firing / unobservable — a drop under a completeness claim is
     /// "could not tell", never "ok", which is what keeps a 3am page honest.
     /// The first evaluation states each rule's baseline once, from null.
+    /// Selectors are wire keys; a payload, a QoS and an address are judged
+    /// against the deployment in `--namespace` (zk2's since #612, FJ8b).
     Watchdog(WatchdogArgs),
 
     // ── Meta ──────────────────────────────────────────────────────────────
@@ -902,13 +915,20 @@ pub(crate) enum Command {
 /// `crate::exit`.
 #[derive(Subcommand)]
 pub(crate) enum CheckCmd {
-    /// Wait for an expectation on the bus, exit-coded for CI.
+    /// Wait for an expectation on a zk2 resource, exit-coded for CI.
     ///
-    /// An await (#160). The subscriber is declared BEFORE the window opens (not-asked is not
-    /// "no", RFC 09 §5.1 O4). Exit 0 = met; 1 = not met on a clean
-    /// observation; 2 = the observation cannot carry the claim (drops under
-    /// a completeness claim, session failure). `--absent` is legitimate
-    /// ONLY because of that 2.
+    /// An await (#160), written over an address and a resource of its
+    /// contract (zk2's since #612, FJ8b): samples (`--at-least`,
+    /// `--absent`), rates (`--rate-min`, `--rate-max`), values
+    /// (`--valid-payload`: each payload conforms to its declared type),
+    /// QoS (`--qos declared`) and presence (`--present`: the address holds
+    /// the interface's token). The subscription is the runtime's consumer,
+    /// declared BEFORE the window opens (not-asked is not "no", O4); R6's
+    /// discards and unresolved samples are counted apart from the lag. Exit
+    /// 0 = met; 1 = not met on a clean observation; 2 = the observation
+    /// cannot carry the claim (drops under a completeness claim, a presence
+    /// read that timed out, session failure). `--absent` is legitimate ONLY
+    /// because of that 2.
     Expect(CheckExpectArgs),
     /// Cutover acceptance: the old key family is silent and the new one speaks.
     ///
@@ -939,14 +959,19 @@ pub(crate) enum CheckCmd {
         #[command(flatten)]
         bus: BusArgs,
     },
-    /// Cutover acceptance: probe one origin with concrete keys, as a consumer.
+    /// Read a zk2 resource as a consumer does; do values arrive in a window?
     ///
-    /// Half two of RFC 09 §6: a consumer-shaped, CONCRETE-KEY probe. "A probe
-    /// MUST build its keys the way the product builds them" — a `*`-origin
-    /// probe cannot catch a broken origin path. An origin id is called
-    /// directly; a hostname resolves through the RFC 06 §6 identity bridge
-    /// first, and the probe FAILS if the bridge yields nothing. Fanning out is
-    /// what `blob locate` does; this verb refuses to.
+    /// The consumer-shaped acceptance probe (zk2's since #612, FJ8b): "a
+    /// probe MUST build its keys the way the product builds them", and a
+    /// zk2 consumer binds a role to providers and reads through the
+    /// runtime's consumer (spec §3.2) — so this does exactly that, the
+    /// address as its binding, the template values as R2 bindings, a state
+    /// resource's current state read from its owner first (S4). The finding
+    /// is the NO: exit 0 a value that conforms to its declared type arrived;
+    /// 1 nothing usable arrived while a complete presence read shows a
+    /// provider holding its token, or no token visible to this reader, or
+    /// values arrived and none decoded as their type; 2 the presence read
+    /// timed out, or the probe could not stand up.
     Probe(CheckProbeArgs),
     /// Run a producer's registry as a conformance suite against the bus.
     ///
@@ -968,12 +993,15 @@ pub(crate) enum CheckCmd {
     /// is those files (the contract the build ships); without, what the
     /// fleet serves.
     Conform(CheckConformArgs),
-    /// Validate one payload against its schema, exit-coded for CI.
+    /// Check one payload against a type of a zk2 contract, exit-coded for CI.
     ///
-    /// No bus write (#159): 0 = valid, 1 = does not conform, 2 = could not
-    /// check. The schema comes from a live `describe` (give --producer) or an
-    /// offline SchemaSet JSON document (--schema-set; the registry TOMLs
-    /// carry type *names*, not shapes, so a directory alone cannot check).
+    /// No bus write (#159): 0 = it conforms, 1 = it does not, 2 = could not
+    /// check. The type is the revision's own (zk2's since #612, FJ8b), from
+    /// `--contracts` or retrieved from its holders (spec §8.4) — no session
+    /// when `--contracts` holds it. A JSON Schema type decodes as JSON or
+    /// CBOR and is validated against the type (§7.3); a protobuf type
+    /// decodes through the bundle's descriptor set (§7.2); a raw type
+    /// declares no structure and cannot be checked (exit 2).
     Schema(CheckSchemaArgs),
 }
 
@@ -1808,8 +1836,8 @@ pub(crate) enum GetSub {
     /// `--last-known <ARCHIVE>` asks an `archive.v1` service instead
     /// (S5): the value it recorded, its stamp, its type identity and whether
     /// alignment confirmed it — LAST-KNOWN, never current, and every
-    /// rendering says so. Exit codes: 0 an answer, 2 silence or a refused
-    /// input.
+    /// rendering says so — one member, or every member a parameter left out
+    /// selects. Exit codes: 0 an answer, 2 silence or a refused input.
     State(Box<StateGetArgs>),
 }
 
@@ -1845,8 +1873,8 @@ pub(crate) struct StateGetArgs {
     pub(crate) params: Vec<(String, String)>,
     /// Read LAST-KNOWN state from this archive (`<system>/<service>`, an
     /// `archive.v1` service) instead of asking the owner (S5). Never
-    /// current, and labelled so in every format; every parameter must be
-    /// given, since an archive is read one key at a time.
+    /// current, and labelled so in every format. A parameter not given is a
+    /// wildcard: every member the archive holds (#671).
     #[arg(long, value_name = "ARCHIVE", value_parser = addr_arg)]
     pub(crate) last_known: Option<zenkey_model::grammar::Addr>,
     #[command(flatten)]
@@ -1871,8 +1899,9 @@ pub(crate) struct CallArgs {
     pub(crate) operation: String,
     /// The request: inline JSON, `@file`, or `-` for stdin — the bytes as
     /// given for a raw request type. Omitted: `{}`, or no bytes for a raw
-    /// type. Encoded as the contract says, never checked against its JSON
-    /// Schema: the owner refuses what does not decode (`invalid_request`).
+    /// type. A JSON Schema request is checked against its type first
+    /// (spec §7.3) and refused with every violation, exit 2, before
+    /// anything is sent; then encoded as the contract says.
     #[arg(value_name = "JSON|@FILE|-")]
     pub(crate) request: Option<Source>,
     /// A template parameter, `NAME=VALUE` with the value unslugged,
@@ -1924,8 +1953,12 @@ pub(crate) struct WatchArgs {
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct RateArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
+    /// Full wire selector to watch — this session is in no namespace, so a
+    /// selector is the key as the wire carries it. Default: the deployment's
+    /// zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk
+    /// (`@stream`, `@state`, …): name one to see it.
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selector: Option<String>,
     /// Measurement window, seconds.
     #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
     pub(crate) for_secs: f64,
@@ -1942,19 +1975,27 @@ pub(crate) struct RateArgs {
     /// Also report observed pub→sub latency per key (implies --per-key):
     /// arrival wall-clock minus publisher HLC — contains clock skew, and
     /// is labeled as such; negative values are the skew evidence
-    /// (#119). Unstamped samples are counted, never treated as zero.
+    /// (#119). Unstamped samples are counted, never treated as zero, and
+    /// each stamper is named as the owner's clock (its descriptor's
+    /// `meta.zid`), another's, or unattributable (O7).
     #[arg(long)]
     pub(crate) latency: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `field` verb's flags — one struct the dispatcher hands over whole,
 /// destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct FieldArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
+    /// Full wire selector to watch — this session is in no namespace, so a
+    /// selector is the key as the wire carries it. Default: the deployment's
+    /// zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk
+    /// (`@stream`, `@state`, …): name one to see it.
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selector: Option<String>,
     /// Observation window, seconds.
     #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
     pub(crate) for_secs: f64,
@@ -1967,7 +2008,9 @@ pub(crate) struct FieldArgs {
     #[arg(long, value_enum, value_name = "SEVERITY")]
     pub(crate) fail_on: Option<FailOn>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `record` verb's flags — one struct the dispatcher hands over whole,
@@ -1999,13 +2042,13 @@ pub(crate) struct RecordArgs {
     pub(crate) count: u64,
     /// Arm instead of record (#218): write a file only when this rule
     /// transitions to `firing`, with `--pre` seconds of retained traffic
-    /// before it. Repeatable; the zk2 conditions of the watchdog's
-    /// vocabulary — `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`,
-    /// `silent-for <SEL> <SECS>`, `dropped`, `doctor <CHECK-ID>` (zk2's
-    /// doctor, run in the namespace). The rules that judge v1's registry,
-    /// roster or alert plane are refused (exit 2). The file carries a state
-    /// preamble (the owners' own answer, spec §4.2 S4), the pre-roll, the
-    /// trigger record where it fired, then `--post` seconds more.
+    /// before it. Repeatable; the watchdog's vocabulary — `rate-above <SEL>
+    /// <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
+    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `instance-gone
+    /// <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `dropped` — the rules that
+    /// read the deployment reading it in the namespace. The file carries a
+    /// state preamble (the owners' own answer, spec §4.2 S4), the pre-roll,
+    /// the trigger record where it fired, then `--post` seconds more.
     #[arg(long, value_name = "RULE", requires = "pre")]
     pub(crate) on: Vec<String>,
     /// Seconds of traffic to retain before the trigger — the ring's age
@@ -2029,6 +2072,10 @@ pub(crate) struct RecordArgs {
         requires = "on"
     )]
     pub(crate) preamble: PreambleMode,
+    /// With --on: revisions known offline, for the rules that judge a
+    /// payload or a QoS against its contract.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -2048,15 +2095,16 @@ pub(crate) enum PreambleMode {
     None,
 }
 
-/// The `timeline` verb's flags (#216) — one struct, the `GenArgs` pattern.
+/// The `timeline` verb's flags (#216; zk2's since #612, FJ8b) — one struct,
+/// the `GenArgs` pattern.
 #[derive(clap::Args)]
 pub(crate) struct TimelineArgs {
-    /// Full wire selectors to watch, one lane set per window — this session
-    /// is un-namespaced (RFC 09 §5). `**` never crosses an `@`-chunk, so a
-    /// `v1/**` window excludes the verbatim planes by construction and the
-    /// report says so (RFC 03 §4 D2). Not with --from.
-    #[arg(value_name = "SELECTOR", required_unless_present = "from",
-          add = ArgValueCandidates::new(completion::keys))]
+    /// Full wire selectors to watch — this session is in no namespace, so a
+    /// selector is the key as the wire carries it. Default: the deployment's
+    /// zk2 data, `<ns>/zk2/**`, whose `**` reaches no verbatim chunk
+    /// (`@stream`, `@state`, …) — excluded, not empty, and the report says
+    /// so (O5). Not with --from.
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selectors: Vec<String>,
     /// The passive window, seconds. Not with --from: a capture's span is in
     /// its rows.
@@ -2068,11 +2116,14 @@ pub(crate) struct TimelineArgs {
     pub(crate) order: OrderArg,
     /// Read the window from a .zrec capture instead of the bus — the same
     /// projection, so the same window rendered live and from its file is
-    /// identical. Keys are read under the capture's stated base.
+    /// identical. Keys are read under the capture's stated namespace, and
+    /// resolved through `--contracts` alone: a file names no owner.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["selectors", "for_secs"])]
     pub(crate) from: Option<PathBuf>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `export` verb's flags (#228) — one struct, the `GenArgs` pattern.
@@ -2127,43 +2178,56 @@ pub(crate) struct ExportArgs {
     pub(crate) bus: BusArgs,
 }
 
-/// The `replay` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `snapshot` verb's flags (zk2's since #612, FJ8b) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 pub(crate) struct SnapshotArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
+    /// Full wire selectors, repeatable — this session is in no namespace,
+    /// so a selector is the key as the wire carries it. Each is narrowed to
+    /// its state keys (only `state` and `@state` answer a GET, spec §1.3),
+    /// one GET each. Default: the deployment's zk2 data, `<ns>/zk2/**`,
+    /// which reaches every `state` key and no `@state` one (O5): name
+    /// `@state` to snapshot it.
+    #[arg(value_name = "SELECTOR", add = ArgValueCandidates::new(completion::keys))]
+    pub(crate) selectors: Vec<String>,
     /// Output file. Refused (exit 2) when nobody answered: a file of
-    /// silence would read as an empty fleet (RFC 05 §3.1). An existing file
-    /// is refused too (exit 2), before any session, unless --overwrite.
+    /// silence would read as an empty deployment. An existing file is
+    /// refused too (exit 2), before any session, unless --overwrite.
     #[arg(long, short = 'o', value_name = "FILE", required = true)]
     pub(crate) out: Option<String>,
     /// Replace an existing --out file instead of refusing it.
     #[arg(long)]
     pub(crate) overwrite: bool,
     /// Replies kept per selector; past it they are drained, counted, and
-    /// the header says how many (RFC 09 §5.1 O6).
+    /// the header says how many (O6).
     #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_MAX_REPLIES)]
     pub(crate) max_replies: usize,
-    /// Skip the liveliness roster. Cheaper, and every holder is then
-    /// `unattributed` — the file says so rather than guessing.
+    /// Skip the presence read. Cheaper, and then every holder is
+    /// `unattributed`, every stamp unattributable, and a key resolves past
+    /// its address only through --contracts — the file says so rather than
+    /// guessing.
     #[arg(long)]
-    pub(crate) no_roster: bool,
+    pub(crate) no_presence: bool,
     #[command(subcommand)]
     pub(crate) cmd: Option<SnapshotSub>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum SnapshotSub {
-    /// Compare two .zsnap files, offline.
+    /// Compare two .zsnap files by zk2 key, offline.
     ///
-    /// No bus. Both spans are stated, the facets (value, verdict, registration,
-    /// holder) stay apart, and an origin an alignment could not pair is listed,
-    /// never dropped. Exit 0 identical, 1 they differ, 2 a file could not be
-    /// read.
+    /// No bus. Each row's key is read relative to its own file's namespace,
+    /// so two deployments of the same services line up on the keys those
+    /// services publish (a key outside its file's namespace keeps its wire
+    /// spelling). Both spans are stated, and the facets (value, conformance,
+    /// holder) stay apart; between two namespaces a stamp that moved alone
+    /// is not a change — two deployments, two clocks. Exit 0 identical, 1
+    /// they differ, 2 a file could not be read.
     Diff(SnapshotDiffArgs),
 }
 
@@ -2173,16 +2237,6 @@ pub(crate) struct SnapshotDiffArgs {
     pub(crate) a: String,
     /// The later snapshot.
     pub(crate) b: String,
-    /// Align origins across deployments — by the `source` label their
-    /// health/sensor documents carry, then by producer set — and roll the
-    /// diff up per subject. Refuses (exit 2) over any origin it cannot
-    /// pair, and lists them.
-    #[arg(long)]
-    pub(crate) normalize_origins: bool,
-    /// An explicit origin pairing, `A=B` (a's origin = b's), repeatable;
-    /// decided before any automatic pairing. Requires --normalize-origins.
-    #[arg(long = "map", value_name = "A=B", requires = "normalize_origins")]
-    pub(crate) maps: Vec<String>,
     /// Field-level changes listed per key before the rest are counted.
     #[arg(long, value_name = "N", default_value_t = 20)]
     pub(crate) max_changes: usize,
@@ -2348,14 +2402,15 @@ pub(crate) struct ScoutArgs {
 pub(crate) struct WatchdogArgs {
     /// One rule (repeatable): `rate-above <SEL> <HZ>`,
     /// `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`,
-    /// `invalid-payload <SEL>`, `qos-mismatch <SEL>`,
-    /// `doctor <CHECK-ID>`, `origin-down <ORIGIN>`, `dropped`,
-    /// `alert-firing <SEL> [<MIN-SEVERITY>]` (info | warning | critical,
-    /// default warning). Selectors are full wire form (this session is
-    /// un-namespaced, RFC 09 §5); a doctor rule runs zk2's doctor once per
-    /// tick, its named checks only, through a second session opened in the
-    /// deployment's namespace (`--base`); an alert-firing rule asks the
-    /// alert plane once per tick.
+    /// `invalid-payload <SEL>` (a payload that does not decode as its
+    /// declared type, or fails its JSON Schema), `qos-mismatch <SEL>` (a
+    /// sample whose priority, congestion control or express differs from
+    /// its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (no
+    /// instance token visible to this reader, §8.1 — v1's origin-down),
+    /// `doctor <CHECK-ID>`, `dropped`. Selectors are wire keys (this
+    /// session is in no namespace); the rules that read the deployment read
+    /// it through a second session in its namespace (`--namespace`), once
+    /// per tick, beside the drain.
     #[arg(long = "rule", value_name = "RULE", required = true)]
     pub(crate) rules: Vec<String>,
     /// Seconds between evaluations — the one period flag (#307).
@@ -2367,23 +2422,38 @@ pub(crate) struct WatchdogArgs {
     #[arg(long, value_name = "N")]
     pub(crate) count: Option<u64>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
-/// The `check expect` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `check expect` verb's flags (zk2's since #612, FJ8b) — one struct the
+/// dispatcher hands over whole, destructured in the verb rather than in
+/// `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct CheckExpectArgs {
-    #[command(flatten)]
-    pub(crate) selector: SelectorArgs,
+    /// The service, `<system>/<service>`, either position `*`.
+    #[arg(value_name = "SYSTEM/SERVICE", add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: String,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// The stream, state or event resource whose samples are expected: its
+    /// template, or `<kind token>/<template>`. Omitted, only --present is
+    /// asked.
+    pub(crate) resource: Option<String>,
+    /// A template parameter, `NAME=VALUE` with the value unslugged,
+    /// repeatable. A parameter not given is a wildcard.
+    #[arg(long = "param", value_name = "NAME=VALUE", value_parser = param_arg)]
+    pub(crate) params: Vec<(String, String)>,
     /// Observation window, seconds.
     #[arg(long = "for", value_name = "SECS", default_value_t = 30.0)]
     pub(crate) for_secs: f64,
     /// Require at least N samples (default 1 unless --absent).
     //
     // `--at-least`, not `--count` (#307): `--count` is a stop bound
-    // everywhere else in the tool, and here it was an assertion — the
-    // one flag name that meant the opposite of itself.
+    // everywhere else in the tool, and here it was an assertion.
     #[arg(long, value_name = "N")]
     pub(crate) at_least: Option<u64>,
     /// Samples/second floor, measured over the full window.
@@ -2392,20 +2462,28 @@ pub(crate) struct CheckExpectArgs {
     /// Samples/second ceiling, measured over the full window.
     #[arg(long, value_name = "HZ")]
     pub(crate) rate_max: Option<f64>,
-    /// Require every observed payload to validate against its served
-    /// schema (#159). "Unknowable" fails the assertion, with the reason.
+    /// Require every observed payload to conform to its declared type: it
+    /// decodes as the type, and a JSON Schema value satisfies it (spec §7.2,
+    /// §7.3). "Not checked" fails the assertion, with the reason.
     #[arg(long)]
     pub(crate) valid_payload: bool,
-    /// Require observed wire QoS to match: `declared` (each subject's
-    /// registry profile) or one profile name for everything.
-    #[arg(long, value_name = "declared|PROFILE",
-          add = ArgValueCandidates::new(completion::qos_profiles))]
+    /// Require every observed sample to ride its resource's declared QoS:
+    /// priority, congestion control and express (spec §2.4).
+    #[arg(long, value_name = "declared", value_parser = ["declared"])]
     pub(crate) qos: Option<String>,
-    /// Assert silence: no sample may match within the window.
+    /// Assert silence: no sample may arrive within the window.
     #[arg(long, conflicts_with_all = ["at_least", "rate_min", "rate_max", "valid_payload", "qos"])]
     pub(crate) absent: bool,
+    /// Require the address to hold the interface's token within the window
+    /// (spec §8.1). A complete read with none is "no token visible to this
+    /// reader" (not met); one that ended at its timeout cannot carry it
+    /// (exit 2).
+    #[arg(long)]
+    pub(crate) present: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `check cutover` verb's flags — one struct the dispatcher hands over whole,
@@ -2452,45 +2530,86 @@ pub(crate) struct CheckConformArgs {
     pub(crate) bus: BusArgs,
 }
 
-/// The `check probe` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `check probe` verb's flags (zk2's since #612, FJ8b) — one struct the
+/// dispatcher hands over whole, destructured in the verb rather than in
+/// `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct CheckProbeArgs {
-    /// Origin id (`h-…`) or hostname (resolved via the bridge).
-    pub(crate) target: String,
-    /// Producer name.
-    #[arg(value_parser = chunk_arg, add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: String,
-    /// Procedure path, e.g. `introspect`.
-    #[arg(value_parser = procedure_arg, add = ArgValueCandidates::new(completion::procedures))]
-    pub(crate) procedure: String,
+    /// The provider, `<system>/<service>` — bound as a consumer binds a
+    /// role, either position `*`.
+    #[arg(value_name = "SYSTEM/SERVICE", add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: String,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one).
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// The stream, state or event resource: its template, or `<kind
+    /// token>/<template>`.
+    pub(crate) resource: String,
+    /// A template parameter, `NAME=VALUE` with the value unslugged,
+    /// repeatable (R2). A parameter not given is a wildcard.
+    #[arg(long = "param", value_name = "NAME=VALUE", value_parser = param_arg)]
+    pub(crate) params: Vec<(String, String)>,
+    /// How long a value has to arrive, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
+    pub(crate) for_secs: f64,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
-/// The `check schema` verb's flags — one struct the dispatcher hands over whole,
-/// destructured in the verb rather than in `run()` (#354).
+/// The `check schema` verb's flags (zk2's since #612, FJ8b) — one struct the
+/// dispatcher hands over whole, destructured in the verb rather than in
+/// `run()` (#354).
 #[derive(clap::Args)]
 pub(crate) struct CheckSchemaArgs {
-    /// Type name to validate against.
-    #[arg(long = "type", value_name = "TYPE", add = ArgValueCandidates::new(completion::types))]
-    pub(crate) type_name: String,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one):
+    /// the revision whose type the payload is checked against.
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// The resource: its template, or `<kind token>/<template>`.
+    pub(crate) resource: String,
+    /// Which of the resource's types: a sample's `type` or `attachment`, an
+    /// operation's `request`, `response`, `error` or `summary`.
+    #[arg(long, value_enum, default_value = "type")]
+    pub(crate) member: MemberArg,
     /// Payload: inline text, `@file`, or `-` for stdin.
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub(crate) from: Source,
-    /// Producer whose served `describe` carries the schema (live mode).
-    #[arg(long, value_parser = chunk_arg,
-          add = ArgValueCandidates::new(completion::producers))]
-    pub(crate) producer: Option<String>,
-    /// SchemaSet JSON document (RFC 08 §7) — offline mode, no session.
-    #[arg(long, value_name = "FILE")]
-    pub(crate) schema_set: Option<std::path::PathBuf>,
-    /// Wire encoding of the payload. Defaults to the schema kind's own
-    /// (json-schema → JSON, protobuf → protobuf, cdr → XCDR1).
-    #[arg(long)]
+    /// The payload's encoding (`application/json`, `application/cbor`,
+    /// `application/protobuf`). Default: the contract's.
+    #[arg(long, value_name = "ENCODING")]
     pub(crate) encoding: Option<String>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `check schema --member`: which of a resource's types (spec §7.1).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum MemberArg {
+    Type,
+    Attachment,
+    Request,
+    Response,
+    Error,
+    Summary,
+}
+
+impl From<MemberArg> for zenkey_fleet::Member {
+    fn from(m: MemberArg) -> zenkey_fleet::Member {
+        match m {
+            MemberArg::Type => zenkey_fleet::Member::Type,
+            MemberArg::Attachment => zenkey_fleet::Member::Attachment,
+            MemberArg::Request => zenkey_fleet::Member::Request,
+            MemberArg::Response => zenkey_fleet::Member::Response,
+            MemberArg::Error => zenkey_fleet::Member::Error,
+            MemberArg::Summary => zenkey_fleet::Member::Summary,
+        }
+    }
 }
 
 /// The `key includes` verb's flags — one struct the dispatcher hands over whole,

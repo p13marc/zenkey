@@ -10,7 +10,11 @@
 //! The subscription is the runtime's (`Consumer::for_tool`, via
 //! `zenkey_fleet::watch_resource`): it resolves at once, without presence
 //! (spec §3.2 R1, R5), and discards a sample put on a wildcard key (R6),
-//! which this verb counts and reports apart from what it lagged behind.
+//! which this verb counts and reports apart from what it lagged behind and
+//! from a sample whose key resolved to no member of the resource
+//! (`unresolved`, #671). Each sample carries its payload's conformance to
+//! the declared type and, when it differs, the QoS it rode against the
+//! resource's (spec §2.4, #612 FJ8b).
 //! It ends at `--count` samples, after `--for` seconds, or on ctrl-c, and
 //! exits 0 when a sample arrived, 2 when none did: silence is never a
 //! verdict (O5).
@@ -80,12 +84,21 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
-    let (mut received, mut discarded, mut lagged) = (0u64, 0u64, 0u64);
+    let (mut received, mut discarded, mut lagged, mut unresolved) = (0u64, 0u64, 0u64, 0u64);
+    let (mut qos_mismatched, mut nonconforming) = (0u64, 0u64);
     let ended = loop {
         tokio::select! {
             next = watch.next() => {
                 let Some(sample) = next else { break WatchEnd::Interrupted };
                 received += 1;
+                if sample.qos_mismatch.is_some() {
+                    qos_mismatched += 1;
+                }
+                if let zenkey_fleet::report::WatchEvent::Put { conformance, .. } = &sample.event
+                    && conformance.is_violation()
+                {
+                    nonconforming += 1;
+                }
                 sink.row("sample", serde_json::to_value(&sample)?)?;
                 for line in crate::render::sample_lines(&sample) {
                     sink.line(line)?;
@@ -103,11 +116,17 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
             } => break WatchEnd::Window,
             _ = &mut ctrl_c => break WatchEnd::Interrupted,
             _ = tick.tick() => {
-                counts(&mut sink, &watch, &mut discarded, &mut lagged)?;
+                counts(&mut sink, &watch, &mut discarded, &mut lagged, &mut unresolved)?;
             }
         }
     };
-    counts(&mut sink, &watch, &mut discarded, &mut lagged)?;
+    counts(
+        &mut sink,
+        &watch,
+        &mut discarded,
+        &mut lagged,
+        &mut unresolved,
+    )?;
     let summary = WatchSummary {
         address: target.address.clone(),
         iface: revision.iface().to_string(),
@@ -116,6 +135,9 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
         selectors: watch.selectors().to_vec(),
         received,
         discarded,
+        unresolved,
+        qos_mismatched,
+        nonconforming,
         lagged,
         elapsed_s: started.elapsed().as_secs_f64(),
         ended,
@@ -133,14 +155,30 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     Ok(())
 }
 
-/// Say when R6's discards or the lag moved: a row for a program, a line on
-/// stderr for a person.
+/// Say when R6's discards, the unresolved count or the lag moved: a row for
+/// a program, a line on stderr for a person.
 fn counts(
     sink: &mut Sink<'_>,
     watch: &zenkey_fleet::Watch,
     discarded: &mut u64,
     lagged: &mut u64,
+    unresolved: &mut u64,
 ) -> Result<()> {
+    let u = watch.unresolved();
+    if u > *unresolved {
+        sink.row(
+            "unresolved",
+            serde_json::json!({ "unresolved": u - *unresolved }),
+        )?;
+        if !sink.machine() {
+            eprintln!(
+                "-- {} sample(s) on a key that resolved to no member of the resource \
+                 (#671) --",
+                u - *unresolved
+            );
+        }
+        *unresolved = u;
+    }
     let (d, l) = (watch.discarded(), watch.lagged());
     if d > *discarded {
         sink.row(

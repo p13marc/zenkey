@@ -51,7 +51,7 @@ pub use impls::RateView;
 pub use impls::acts::{payload_text, sample_lines, summary_lines};
 pub use impls::local::{
     CacheAction, CacheReport, CachedSlice, ContextAction, ContextList, ContextRow, ContextShow,
-    GetReport, KeyCanon, KeyOp, KeyRelation, SchemaCheck, SchemaCheckVerdict,
+    GetReport, KeyCanon, KeyOp, KeyRelation,
 };
 pub use impls::observations::TopologyView;
 pub use impls::storage::refusal_notes;

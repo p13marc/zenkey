@@ -148,38 +148,6 @@ fn producers_in(set: &SliceSet) -> Vec<CompletionCandidate> {
     candidates(set.slices().iter().map(|s| s.name.clone()))
 }
 
-/// Declared payload type names, from every binding site.
-pub fn types() -> Vec<CompletionCandidate> {
-    types_in(&cached())
-}
-
-fn types_in(set: &SliceSet) -> Vec<CompletionCandidate> {
-    candidates(set.slices().iter().flat_map(|s| {
-        s.subjects
-            .iter()
-            .map(|d| d.type_name.clone())
-            .filter(|t| !t.is_empty())
-            .chain(s.procedures.iter().filter_map(|p| p.reply.clone()))
-            .chain(s.procedures.iter().filter_map(|p| p.request.clone()))
-            .chain(s.blob.iter().filter_map(|b| b.reference.clone()))
-            .collect::<Vec<_>>()
-    }))
-}
-
-/// Procedure paths, across producers.
-pub fn procedures() -> Vec<CompletionCandidate> {
-    procedures_in(&cached())
-}
-
-fn procedures_in(set: &SliceSet) -> Vec<CompletionCandidate> {
-    candidates(
-        set.slices()
-            .iter()
-            .flat_map(|s| s.procedures.iter().map(|p| p.path.clone()))
-            .collect::<Vec<_>>(),
-    )
-}
-
 /// The three classes — a closed vocabulary (RFC 04 §1), so this one is exact
 /// rather than cached.
 pub fn classes() -> Vec<CompletionCandidate> {
@@ -488,8 +456,6 @@ mod tests {
     fn an_absent_cache_yields_nothing_rather_than_failing() {
         let empty = SliceSet::read_cache(std::path::Path::new("/nonexistent-zenctl-completion"));
         assert!(producers_in(&empty).is_empty());
-        assert!(types_in(&empty).is_empty());
-        assert!(procedures_in(&empty).is_empty());
         assert!(keys_in(&empty).is_empty());
         // …while the closed vocabularies still answer: they were never cached.
         assert!(!classes().is_empty());

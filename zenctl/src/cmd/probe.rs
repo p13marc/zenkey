@@ -1,124 +1,81 @@
-//! `zenctl check probe` (issue #59): the RFC 09 §6 acceptance, half two — a
-//! **consumer-shaped, concrete-key** probe.
+//! `zenctl check probe` (#59; zk2's since #612, FJ8b): the consumer-shaped
+//! acceptance probe.
 //!
 //! > A probe MUST build its keys the way the product builds them.
 //!
-//! A `*`-origin probe cannot catch a broken origin path: the wildcard
-//! matches any origin, so a caller whose origin concept is garbage still
-//! gets replies. This probe resolves the identity the way a consumer must
-//! (RFC 06 §6 — an origin id passes through; a hostname goes through the
-//! health-document bridge) and then calls **origin-scoped**, through the
-//! same typed builders the products use. Every failure mode is distinct
-//! and cited, because "absence of replies and absence of *callers* must
-//! not look alike" (§6).
+//! v1's probe called one origin's procedure on a concrete key. A zk2
+//! consumer binds a role to providers and reads through the runtime's
+//! consumer (spec §3.2), so this probe reads one resource exactly that way —
+//! `Consumer::for_tool` with the address as its binding and the template
+//! values as R2 bindings, a state resource's current state from its owner
+//! first (S4) — and judges whether values arrive within the window
+//! ([`zenkey_fleet::run_probe`]). Silence is attributed through presence,
+//! never read as an answer: a provider that holds its token and sent
+//! nothing, and no token visible to this reader, are both the finding; a
+//! presence read that timed out is the reserved 2.
 
-use anyhow::{Result, bail};
+use anyhow::Result;
+use zenkey_fleet::{ExpectAim, ResolvedTarget};
+use zenkey_model::authoring::Kind;
 
-use crate::Bus;
+use crate::bus::Deployment;
+use crate::cmd::zk2;
 
 /// The verdict verb's name, spelled once (#355) — the dispatcher
 /// uses it too.
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("check probe");
 
 pub async fn run(cli: crate::cli::CheckProbeArgs) -> Result<()> {
-    let bus = ASKING.ask(Bus::resolve(&cli.bus));
-    let args = &bus;
+    let dep = ASKING.ask(Deployment::resolve(&cli.ns));
+    let contracts = ASKING.ask(zk2::load_contracts(&cli.contracts));
     let crate::cli::CheckProbeArgs {
-        target,
-        producer,
-        procedure,
-        bus: _,
+        address,
+        target: spec,
+        resource,
+        params,
+        for_secs,
+        contracts: _,
+        ns: _,
     } = cli;
-    let (target, producer, procedure) = (target.as_str(), producer.as_str(), procedure.as_str());
-    let session = args.session().await?;
-
-    let (host, via) = match zenkey::origin::HostId::parse(target) {
-        // The consumer already holds the origin — §6.2's preferred path.
-        Ok(id) => (id, "direct".to_string()),
-        Err(_) => {
-            // A human identity: resolve through the sanctioned bridge
-            // (health documents carry host_id beside source, §6.2).
-            let (matches, seen) = zenkey_fleet::bridge_resolve(
-                &args.fleet(&session),
-                producer,
-                target,
-                args.timeout(),
-            )
-            .await?;
-            match matches.len() {
-                0 => bail!(
-                    "the identity bridge yielded no origin for {target:?} \
-                     ({seen} health document(s) answered, none claiming it) — \
-                     the probe FAILS here by rule: \"absence of replies and \
-                     absence of callers must not look alike\" (RFC 09 §6). A \
-                     hostname is a display label, not an identity (RFC 06 \
-                     §6.1); if you hold the origin id, probe it directly."
-                ),
-                1 => {
-                    let m = &matches[0];
-                    eprintln!(
-                        "bridge: {target:?} → {} (claimed by {}, RFC 06 §6.2)",
-                        m.host_id.as_str(),
-                        m.key
-                    );
-                    (
-                        matches[0].host_id.clone(),
-                        format!("bridge:{}", matches[0].key),
-                    )
-                }
-                n => bail!(
-                    "hostname {target:?} is claimed by {n} distinct origins — \
-                     exactly the collision RFC 06 §6.2 warns about (a table \
-                     keyed on hostnames misroutes queries). Name one origin: {}",
-                    matches
-                        .iter()
-                        .map(|m| m.host_id.as_str().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }
-        }
+    let window = ASKING.ask(super::positive_secs("--for", for_secs));
+    let target = ASKING.ask(ResolvedTarget::parse(&address));
+    let values = zk2::bindings(&params);
+    let mut session = None;
+    let revision =
+        ASKING.ask(zk2::revision_at(&dep, &contracts, &spec, Some(&target), &mut session).await);
+    let r = ASKING.ask(zenkey_fleet::resolve_resource(
+        &revision,
+        &resource,
+        &[Kind::Stream, Kind::State, Kind::Event],
+    ));
+    ASKING.ask(zenkey_fleet::check_values(r, &values));
+    let session = match session {
+        Some(s) => s,
+        None => ASKING.ask(dep.session().await),
     };
-
-    // Origin-scoped, concrete-key, through the same typed builders the
-    // products use (zenkey::selector::rpc_at inside the engine's call).
-    let call = zenkey_fleet::call(
-        &args.fleet(&session),
-        zenkey_fleet::CallSpec {
-            target: &zenkey_fleet::CallTarget::Host(host.clone()),
-            producer,
-            procedure,
-            params: &[],
-            body: None,
-            attachment: None,
-            timeout: args.timeout(),
-            // Deliberately `None`, not a degraded fetch: the engine's `call`
-            // consults slices only for the registry-layer fanout guard, and
-            // that guard is gated on `CallTarget::Fleet` (`write.rs`). This
-            // target is always `Host`, so the slices could never be read —
-            // and buying them costs a full introspect fan-in, plus the union
-            // and its disagreement notes under `--registry`, on the one verb
-            // whose stated purpose is a cheap concrete-key probe (#245).
-            slices: None,
-            force: false,
+    eprintln!(
+        "{}: reading {} {} {} as a consumer for up to {for_secs}s",
+        ASKING.verb(),
+        target.address,
+        revision.iface(),
+        format_args!("{}/{}", r.token, r.template)
+    );
+    let report = match zenkey_fleet::run_probe(
+        &session,
+        ExpectAim {
+            revision: &revision,
+            target: &target,
+            resource: Some(r),
+            values: &values,
         },
+        window,
+        dep.timeout(),
     )
-    .await?;
-
-    let report = zenkey_fleet::report::ProbeReport {
-        input: target.to_string(),
-        origin: host.as_str().to_string(),
-        via,
-        call,
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => ASKING.unobservable(format_args!("the probe could not stand up: {e}")),
     };
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
-    // Distinct exits, distinct meanings (RFC 05 §3.1 / 09 §6): 1 = the
-    // origin answered with an error; 2 = the origin resolved but did not
-    // answer — the probe reached a *name*, not a *responder*, and that is
-    // its own finding, never folded into "no such origin".
-    let code = report.call.exit_code();
-    if code != 0 {
-        std::process::exit(code);
-    }
-    Ok(())
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    crate::exit::verdict(&report.verdict)
 }

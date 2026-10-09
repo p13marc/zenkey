@@ -28,35 +28,10 @@ use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelop
 
 // ── payloads ───────────────────────────────────────────────────────────────
 
-/// Why a payload fell to the structural ladder, in a few words.
+/// Why a payload fell to the structural ladder, in a few words: the
+/// engine's one spelling of each rung.
 pub fn unresolved_words(why: &Unresolved) -> String {
-    match why {
-        Unresolved::NotZk2 { detail } => format!("not a zk2 data key: {detail}"),
-        Unresolved::NoProvider => "no provider of this address in presence".into(),
-        Unresolved::NoRevision => "no descriptor named the provider's revision".into(),
-        Unresolved::Ambiguous { fingerprints } => format!(
-            "the provider names {} revisions and a data key names no instance",
-            fingerprints.len()
-        ),
-        Unresolved::ContractNotHeld { fingerprint } => {
-            format!("contract {} not held", short_fp(fingerprint))
-        }
-        Unresolved::ContractUnavailable { fingerprint, .. } => {
-            format!("contract {} unavailable (§8.4)", short_fp(fingerprint))
-        }
-        Unresolved::ContractUnreadable {
-            fingerprint,
-            detail,
-        } => {
-            format!("contract {} unreadable: {detail}", short_fp(fingerprint))
-        }
-        Unresolved::NoResource { fingerprint } => {
-            format!("no resource of {} matches the key", short_fp(fingerprint))
-        }
-        Unresolved::NoMember { resource, member } => {
-            format!("{resource} declares no {member}")
-        }
-    }
+    why.words()
 }
 
 /// One rendering, on one line: the declared type and the value, or what
@@ -457,14 +432,26 @@ pub fn sample_lines(s: &WatchSample) -> Vec<String> {
     match &s.event {
         WatchEvent::Put {
             payload,
+            conformance,
             attachment,
         } => {
             lines.push(format!("  {}", payload_text(payload)));
             if let Some(a) = attachment {
                 lines.push(format!("  attachment: {}", payload_text(a)));
             }
+            if let zenkey_fleet::report::Conformance::Invalid { violations } = conformance {
+                for v in violations {
+                    lines.push(format!("  invalid against its type: {v}"));
+                }
+            }
         }
         WatchEvent::Delete => lines.push("  <delete — not an empty value>".to_owned()),
+    }
+    if let Some(m) = &s.qos_mismatch {
+        lines.push(format!(
+            "  QoS not as declared (spec §2.4): {}",
+            m.summary()
+        ));
     }
     lines
 }
@@ -491,6 +478,25 @@ pub fn summary_lines(s: &WatchSummary) -> Vec<String> {
             s.discarded
         ));
     }
+    if s.unresolved > 0 {
+        lines.push(format!(
+            "{} sample(s) on a key that resolved to no member of the resource — the bus \
+             and the contract disagree (#671)",
+            s.unresolved
+        ));
+    }
+    if s.qos_mismatched > 0 {
+        lines.push(format!(
+            "{} sample(s) did not ride the resource's declared QoS (spec §2.4)",
+            s.qos_mismatched
+        ));
+    }
+    if s.nonconforming > 0 {
+        lines.push(format!(
+            "{} payload(s) failed their declared type (spec §7.2, §7.3)",
+            s.nonconforming
+        ));
+    }
     if s.lagged > 0 {
         lines.push(format!(
             "{} sample(s) dropped while this tool was behind: the count above is a \
@@ -502,4 +508,55 @@ pub fn summary_lines(s: &WatchSummary) -> Vec<String> {
         lines.push("nothing arrived: silence, never a verdict (spec §5.1 O5) — exit 2".to_owned());
     }
     lines
+}
+
+// ── check schema ───────────────────────────────────────────────────────────
+
+/// `check schema` (#612, FJ8b): one payload against one type of a revision.
+/// The verdict's word leads; the violations or the decode failure follow,
+/// one per line; the decoded value rides the document, not the table.
+impl Render for zenkey_fleet::report::PayloadCheck {
+    const FAMILY: &'static str = "schema-check";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        crate::render::envelope_of(self)
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, t: &mut Table) {
+        use zenkey_fleet::report::Conformance;
+        t.line(format!(
+            "{} {}@{} {} {}: {} ({} B{})",
+            self.declared,
+            self.iface,
+            short_fp(&self.fingerprint),
+            self.resource,
+            self.member,
+            match &self.conformance {
+                Conformance::Valid => "valid",
+                Conformance::Invalid { .. } => "invalid",
+                Conformance::Undecodable { .. } => "undecodable",
+                Conformance::NotChecked { .. } => "not checked",
+            },
+            self.size,
+            self.encoding
+                .as_deref()
+                .map(|e| format!(", read as {e}"))
+                .unwrap_or_default(),
+        ));
+        let mut g = Grid::unheaded(1);
+        match &self.conformance {
+            Conformance::Invalid { violations } => {
+                for v in violations {
+                    g.row([Cell::text(format!("  {v}"))]);
+                }
+            }
+            Conformance::Undecodable { reason, .. } | Conformance::NotChecked { reason } => {
+                g.row([Cell::text(format!("  {reason}"))]);
+            }
+            Conformance::Valid => {}
+        }
+        t.grid(g);
+    }
 }
