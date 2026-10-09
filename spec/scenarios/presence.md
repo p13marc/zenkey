@@ -63,7 +63,8 @@ needs a router that outlives the owner and a control:
 **Expected.**
 1. One reply, with `Encoding` `application/json`: a descriptor that
    validates against `descriptor.schema.json`. Its `profiles` is the union
-   of its contracts' `uses`, and every role is listed, an unbound optional
+   of its contracts' `uses`, with `hostid.v1` added when its system is
+   minted (core §3.3, 0.19). Every role is listed, an unbound optional
    one with `"bindings": []`.
 2. A new descriptor is put on the instance key. The gated resource's
    absence is implied by the missing capability, so it is not listed in

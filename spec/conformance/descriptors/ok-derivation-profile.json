@@ -1,0 +1,19 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "h-bbd1aa1db10b/navigation",
+ "instance": "3fa9c2d41b7e0014",
+ "interfaces": [
+  {
+   "iface": "nav.v2",
+   "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+   "minor": 1
+  }
+ ],
+ "profiles": [
+  "hostid.v1"
+ ],
+ "meta": {
+  "host": "bench-07",
+  "note": "the system is minted by hostid.v1, which nav.v2 does not use: a derivation-only profile is listed beside the contracts' uses (§3.3, §10, 0.19)"
+ }
+}

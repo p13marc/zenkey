@@ -3,6 +3,57 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.19 — 2026-10-09: profiles that only derive, and where profiles live (#719)
+
+`hostid.v1` is the first profile to be written (#613's first tier,
+decided on 2026-10-09). It defines no contract, no annotation and no kind:
+it says how a service derives its system name from the machine id. The
+core had no place for such a profile:
+- §3.3 said `profiles` is the union of the contracts' `uses`, so an
+  instance could not declare a profile that no contract uses;
+- §10 said a profile contributes through "exactly four points", without
+  saying it may use fewer;
+- nothing said where a profile's text lives.
+
+**Changed: rules stated.**
+- **Derivation-only profiles (§10).** A profile contributes through the
+  four points and through no other, and may use any of them. One that uses
+  point 4 alone is derivation-only. It adds nothing of its own to the bus:
+  what it derives goes where the core already puts it, and an instance
+  that follows it lists it in the descriptor's `profiles`.
+- **`profiles` (§3.3).** It lists the union of the contracts' `uses` and
+  the derivation-only profiles the instance follows. Today that is
+  `hostid.v1`, when the instance's system is minted.
+  - New fixture `descriptors/ok-derivation-profile`: a descriptor listing
+    `hostid.v1`, which no given contract uses, reports no code.
+  - Cascade 7 now says why the check cannot verify the union: it cannot see
+    which profiles an instance follows.
+- **Where profiles live (§10).** Each profile has a directory under
+  [`profiles/`](profiles/), with its text, its own changelog, fixtures and
+  scenarios. [`profiles/README.md`](profiles/README.md) is the index, the
+  template and the process. The first is `hostid.v1`, text 0.1, draft.
+- **Wording that follows.** §1.5 points at `hostid.v1`'s text.
+  `presence.md` §2's expectation of `profiles` follows §3.3. Appendix C
+  indexes the profiles' evidence.
+
+**Deliberately not changed.**
+- **No new D code.** A checker still reads `profiles` for its syntax
+  alone (D010). Whether a system is minted is the profile's question, and
+  `hostid.v1` §5 answers it from the listing.
+- **No registry of derivation-only profiles.** §3.3 names `hostid.v1` as
+  today's, and the core depends on no profile. So no lint refuses a
+  derivation-only profile in a contract's `uses`: the core cannot tell
+  which profiles derive. `hostid.v1` advises against it (§2.8), and its §5
+  reads such a listing as unobservable.
+- **`descriptor.schema.json`.** Its wording, "the profiles this instance
+  follows", already covers both halves of the union.
+- **`meta` stays informative.** `hostid.v1`'s `meta.host` is the core's own
+  member, recommended there and checked nowhere. A profile has no point
+  in `meta`.
+- **How a binding names a provider on its own system**
+  (`self.system/<service>`, decided with `hostid.v1`) is not in this
+  amendment. It comes with `hostid.v1`'s runtime (#719).
+
 ## 0.18 — 2026-10-09: two words 0.17 left loose (#716)
 
 The Python implementation read 0.17 cold (PR #715). Both runners passed,

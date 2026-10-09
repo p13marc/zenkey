@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.18** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.19** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -11,8 +11,9 @@ a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
 who may answer the admin space, in 0.13 how a far router is verified, and
 in 0.14 what access control measured, in 0.15 what §11 needs to be built
 from, in 0.16 what the tools' last verbs could not decide, in 0.17
-what a tool needs that it cannot read off the bus, and in 0.18 two words
-0.17 left loose).
+what a tool needs that it cannot read off the bus, in 0.18 two words
+0.17 left loose, and in 0.19 profiles that only derive, and where
+profiles live).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -187,7 +188,8 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
 | Host, process, build, zid | the runtime | the descriptor only |
 
 - **A single robot uses one constant system.** A fleet uses many, and
-  `hostid.v1` mints a system from a machine id where system = host.
+  `hostid.v1` mints a system from a machine id where system = host
+  ([`profiles/hostid/v1.md`](profiles/hostid/v1.md)).
 - **Device-as-service.** A process serving several devices MAY host one
   service per device. Each such service then has its own presence, exposure,
   capabilities and access-control prefix. It holds to about 5,000 devices
@@ -512,8 +514,14 @@ gate does not name.
     takes the need from the contract: a value that disagrees is not checked
     (0.11, below). `[F: descriptors/ok-optional-role,
     ok-optional-unchecked]`
-- **`profiles`** is the union of the `uses` of the contracts the instance
-  implements, sorted and deduplicated (§10 point 4).
+- **`profiles`** lists the profiles the instance follows, sorted and
+  deduplicated (§10 point 4). That is the union of two sets (0.19):
+  - the `uses` of the contracts the instance implements;
+  - the derivation-only profiles the instance follows (§10). Today that is
+    `hostid.v1`, listed by an instance whose system is minted
+    ([`profiles/hostid/v1.md`](profiles/hostid/v1.md) §2.8).
+
+  `[F: descriptors/ok-derivation-profile]`
 - **`meta`** is informative: host, process, build, and nothing in it is
   checked. One member is used (0.10): an owner SHOULD state its session's
   zid as `meta.zid`, as the reference does. A tool attributes a state
@@ -587,7 +595,10 @@ and reports these codes. `[F: descriptors/]`
      listed: a scenario checks it (`bindings.md §3`);
    - that a role `declared_by` an interface is in that contract's
      `[requires]`, and that `params` values fit the required interface;
-   - that `profiles` is the union of the contracts' `uses`;
+   - that `profiles` is the union of the contracts' `uses` and the
+     derivation-only profiles the instance follows: a checker cannot see
+     which profiles an instance follows (0.19), so a profile no given
+     contract uses is not a finding `[F: descriptors/ok-derivation-profile]`;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
      read it to order two revisions, §9.8), and `token` except on
      `archive.v1` (D011, cascade 6);
@@ -2293,7 +2304,7 @@ A **profile** is an independently versioned specification, such as
 here names a profile (`health.v1` for reporting, `link.v1` for face
 configuration, `archive.v1` for archives), it names the standard way to
 meet the rule, which the core states in its own terms. A profile
-contributes through exactly four points:
+contributes through these four points, and through no other:
 1. **A standard contract**: an interface it defines.
 2. **An annotation vocabulary.** Keys are `<profile>.<key>`. A contract
    that uses one MUST list the profile in `uses`, which is fingerprinted.
@@ -2307,7 +2318,29 @@ contributes through exactly four points:
 3. **A registered verbatim kind**, such as `@blob`, at position 5. This
    point is reserved: this version refuses such keys (§1.2), and a later
    version defines their form.
-4. **The descriptor's `profiles` list.**
+4. **The descriptor's `profiles` list** (§3.3).
+
+**Derivation-only profiles** (0.19). A profile uses any of the four points,
+and states which. One that uses point 4 alone is **derivation-only**:
+- it defines how a participant derives something it puts on the bus, and
+  no contract, annotation or kind. `hostid.v1` derives a system name from
+  the machine id;
+- it adds nothing of its own to the bus: what it derives goes where the
+  core already puts it (a system name at position 2), and an instance that
+  follows it lists it in the descriptor's `profiles` (§3.3);
+- a contract's `uses` names vocabularies (point 2), so it has no reason to
+  be there. No lint refuses one, since the core does not know which
+  profiles derive: the profile says what such a listing means for it.
+
+The core still depends on none. §3.3 names `hostid.v1` as today's
+derivation-only profile, and a checker reads `profiles` for its syntax
+alone (D010). `[F: descriptors/ok-derivation-profile]`
+
+**Where profiles live** (0.19). Each profile has a directory under
+[`profiles/`](profiles/): its text, one file per wire major
+(`hostid/v1.md`), its own `CHANGELOG.md`, its fixtures and its scenarios.
+[`profiles/README.md`](profiles/README.md) holds the index, the template
+every profile follows, and the process.
 
 ---
 
@@ -2564,6 +2597,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
+| `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)
