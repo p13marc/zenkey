@@ -36,6 +36,9 @@ Options:
           
           [default: 10000]
 
+      --trust-admin-space
+          Trust every answer from the routers' admin space. Without it, an answer counts only when it is verifiably a router's own, from a router this session is connected to: any session can answer under `@/<zid>/router` (spec §4.2, 0.12). Pass it only when the deployment's grants deny `@/**` queryables to every principal (§11.1)
+
       --check <CHECK-ID>
           Ask only this check (repeatable); every other is not asked
 

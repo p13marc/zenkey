@@ -492,6 +492,13 @@ pub(crate) struct DoctorArgs {
     /// against (spec §8.3: about 10–15k tokens per domain).
     #[arg(long, value_name = "N", default_value_t = zenkey_fleet::DEFAULT_PRESENCE_BUDGET)]
     pub(crate) presence_budget: usize,
+    /// Trust every answer from the routers' admin space. Without it, an
+    /// answer counts only when it is verifiably a router's own, from a router
+    /// this session is connected to: any session can answer under
+    /// `@/<zid>/router` (spec §4.2, 0.12). Pass it only when the deployment's
+    /// grants deny `@/**` queryables to every principal (§11.1).
+    #[arg(long)]
+    pub(crate) trust_admin_space: bool,
     /// Ask only this check (repeatable); every other is not asked.
     #[arg(long = "check", value_name = "CHECK-ID", value_parser = check_id,
           conflicts_with = "skip", add = ArgValueCandidates::new(completion::check_ids))]

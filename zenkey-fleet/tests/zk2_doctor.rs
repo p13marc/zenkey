@@ -618,6 +618,19 @@ async fn a_storage_on_owners_state_and_a_version_skew_are_findings() {
             .is_ok_and(|s| s.len() == 2)
     })
     .await;
+    // A raw session plays `f00d`'s documents, which is what F-80 says any
+    // session can do: untrusted, they decide nothing (§4.2, 0.12).
+    let r = doctor(&on, &admin).await;
+    assert!(
+        verdict(&r, CheckId::StorageOnState)
+            .verdict
+            .is_unobservable()
+    );
+    assert!(unseen(&r, CheckId::StorageOnState).contains("f00d"));
+    // Trusted on the operator's word (grants deny `@/**` queryables to
+    // every principal, §11.1), they are read as a router's.
+    let mut admin = admin;
+    admin.trust_admin = true;
     let r = doctor(&on, &admin).await;
     let f = found(&r, CheckId::StorageOnState, "mine@f00d");
     assert!(f.evidence.contains("acme/zk2/*/*/*/state/**"), "{f:?}");
@@ -852,4 +865,50 @@ async fn a_bound_role_is_clean_while_its_provider_is_present() {
         "a required manifest role (§3.3, 0.10)"
     );
     assert!(f.evidence.contains("host-a/tc"), "{f:?}");
+}
+
+/// Core §4.2 (0.12, F-80): any session can answer the admin space, a real
+/// router's own key included, and the doctor trusts only a reply whose
+/// replier id is the router its key names. With the router's admin space
+/// off, the spoof is the only answer, and S4 stays unobservable, naming the
+/// spoofer; with it on, the router answers too, and the spoof still keeps
+/// the verdict from clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_admin_answer_a_router_did_not_send_is_never_trusted() {
+    for admin_on in [false, true] {
+        let (r, ep) = router(admin_on).await;
+        let owners = client(&ep).await;
+        let tool = client(&ep).await;
+        let spoofer = client(&ep).await;
+        let _services = tcgui(&owners).await;
+        settled(&tool, &TCGUI).await;
+        let rz = r.zid().to_string();
+        let _doc = admin_doc(
+            &spoofer,
+            &format!("@/{rz}/router"),
+            json!({"plugins": null}),
+        )
+        .await;
+        eventually("the spoofed document answers", || async {
+            zenkey_fleet::admin_get(&tool, &format!("@/{rz}/router"), T)
+                .await
+                .is_ok_and(|e| !e.is_empty())
+        })
+        .await;
+        let r = doctor(
+            &bus(&tool, &tool, ""),
+            &spec(&[CheckId::StorageOnState, CheckId::AdminUnreachable]),
+        )
+        .await;
+        let s4 = verdict(&r, CheckId::StorageOnState);
+        assert!(s4.verdict.is_unobservable(), "admin {admin_on}: {s4:#?}");
+        let why = unseen(&r, CheckId::StorageOnState);
+        assert!(
+            why.contains(&spoofer.zid().to_string()),
+            "admin {admin_on}: names the spoofer: {why}"
+        );
+        if admin_on {
+            assert!(clean(&r, CheckId::AdminUnreachable).contains("1 router(s)"));
+        }
+    }
 }
