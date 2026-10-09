@@ -2333,8 +2333,9 @@ and states which. One that uses point 4 alone is **derivation-only**:
   profiles derive: the profile says what such a listing means for it.
 
 The core still depends on none. §3.3 names `hostid.v1` as today's
-derivation-only profile, and a checker reads `profiles` for its syntax
-alone (D010). `[F: descriptors/ok-derivation-profile]`
+derivation-only profile, and a checker reads `profiles` for its form
+alone: each entry `<name>.v<major>`, none repeated (D010).
+`[F: descriptors/ok-derivation-profile]`
 
 **Where profiles live** (0.19). Each profile has a directory under
 [`profiles/`](profiles/): its text, one file per wire major

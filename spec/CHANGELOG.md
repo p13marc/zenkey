@@ -37,8 +37,8 @@ core had no place for such a profile:
   indexes the profiles' evidence.
 
 **Deliberately not changed.**
-- **No new D code.** A checker still reads `profiles` for its syntax
-  alone (D010). Whether a system is minted is the profile's question, and
+- **No new D code.** A checker still reads `profiles` for its form alone
+  (D010). Whether a system is minted is the profile's question, and
   `hostid.v1` §5 answers it from the listing.
 - **No registry of derivation-only profiles.** §3.3 names `hostid.v1` as
   today's, and the core depends on no profile. So no lint refuses a
