@@ -227,9 +227,29 @@ impl Bus {
         let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         argv.extend(["-c".into(), self.endpoint.clone()]);
         let home = self.home.clone();
-        tokio::task::spawn_blocking(move || run(&argv, &home, memlock_kib))
+        tokio::task::spawn_blocking(move || run(&argv, &home, memlock_kib, None))
             .await
             .expect("the zenctl runner")
+    }
+
+    /// [`Bus::zenctl`] with `stdin` piped in (FJ8a: `pub --from ndjson`).
+    async fn zenctl_stdin(&self, args: &[&str], stdin: &str) -> Run {
+        let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        argv.extend(["-c".into(), self.endpoint.clone()]);
+        let home = self.home.clone();
+        let stdin = stdin.as_bytes().to_vec();
+        tokio::task::spawn_blocking(move || run(&argv, &home, None, Some(stdin)))
+            .await
+            .expect("the zenctl runner")
+    }
+
+    /// `zenctl <args>` in the background: a mock owner (`gen`, `serve`)
+    /// that runs while a case asks it things (FJ8a).
+    fn spawn(&self, args: &[&str]) -> tokio::task::JoinHandle<Run> {
+        let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        argv.extend(["-c".into(), self.endpoint.clone()]);
+        let home = self.home.clone();
+        tokio::task::spawn_blocking(move || run(&argv, &home, None, None))
     }
 
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way.
@@ -278,8 +298,8 @@ impl std::fmt::Display for Run {
 /// drained on threads of their own, killed at [`RUN_LIMIT`]. Under a
 /// memlock limit, through `sh` and `ulimit -l` — lowering a soft limit
 /// needs no privilege.
-fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>) -> Run {
-    use std::io::Read as _;
+fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>, stdin: Option<Vec<u8>>) -> Run {
+    use std::io::{Read as _, Write as _};
     let zenctl = env!("CARGO_BIN_EXE_zenctl");
     let mut command = match memlock_kib {
         Some(kib) => {
@@ -301,11 +321,21 @@ fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>) -> Run {
         .env("ZENKEY_EXPLORER_CONFIG_DIR", home)
         .env("NO_COLOR", "1")
         .env("RUST_LOG", "off")
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn zenctl");
+    if let Some(bytes) = stdin {
+        // Written whole, then closed: the end of stdin is the end of the
+        // pipe the verb reads.
+        let mut pipe = child.stdin.take().expect("stdin");
+        pipe.write_all(&bytes).expect("write stdin");
+    }
     let drain = |mut pipe: Box<dyn std::io::Read + Send>| {
         std::thread::spawn(move || {
             let mut s = String::new();
@@ -1952,4 +1982,493 @@ async fn the_local_memlock_and_the_presence_budget_are_judged() {
     let budget = check_row(&doc, "presence-over-budget");
     assert_eq!(budget["findings"][0]["severity"], "warning", "{run}");
     assert_eq!(budget["findings"][0]["subject"], "presence domain");
+}
+
+// ── FJ8a: writes and captures ──────────────────────────────────────────────
+
+/// Every JSON document on a stdout that holds several (`gen` prints its
+/// plan, then its report).
+fn documents(s: &str) -> Vec<Value> {
+    serde_json::Deserializer::from_str(s)
+        .into_iter::<Value>()
+        .map(|d| d.expect("a JSON document"))
+        .collect()
+}
+
+/// Every ndjson line of a stream, by its `row` tag.
+fn stream_rows<'a>(lines: &'a [Value], tag: &str) -> Vec<&'a Value> {
+    lines.iter().filter(|l| l["row"] == tag).collect()
+}
+
+fn ndjson_lines(run: &Run) -> Vec<Value> {
+    run.stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one JSON object per line"))
+        .collect()
+}
+
+/// `gen` (FJ8a) is a mock owner the deployment sees: presence lists it, its
+/// descriptor carries the synthetic marker in `meta`, `watch` decodes every
+/// sample through the contract the mock itself serves (§8.4) with no R6
+/// discard and no rung short of a value, and `get state` reads the mock's
+/// own stamp (S1). A second mock at the address is refused — the live half
+/// of the guard `mock-owner.trycmd` cannot reach.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_brings_up_a_visible_owner_that_watch_and_get_state_read() {
+    let bus = Bus::bare(None).await;
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path").to_owned();
+    let mock = bus.spawn(&[
+        "gen",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--contracts",
+        &netif,
+        "--member",
+        "bandwidth/{ns}/{iface}=default/eth0",
+        "--rate",
+        "20",
+        "--duration",
+        "12",
+        "--format",
+        "json",
+    ]);
+    wait_for(&bus, &["host-a/tc"]).await;
+
+    let show = bus
+        .until(&["service", "show", "host-a/tc", "--format", "json"], |r| {
+            r.code == 0
+        })
+        .await;
+    let doc = show.json();
+    let d = &doc["rows"][0]["descriptor"]["descriptor"];
+    assert_eq!(d["meta"]["synthetic"]["synthetic"], true, "{show}");
+    assert_eq!(d["meta"]["synthetic"]["tool"], "zenctl gen");
+    let zid = d["meta"]["zid"]
+        .as_str()
+        .expect("the owner's zid")
+        .to_owned();
+
+    let summary_of = |r: &Run| -> Option<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["row"] == "summary")
+    };
+    let run = bus
+        .until(
+            &[
+                "watch",
+                "host-a/tc",
+                "tc.netif.v1",
+                "bandwidth/{ns}/{iface}",
+                "--count",
+                "5",
+                "--for",
+                "5",
+                "--format",
+                "ndjson",
+            ],
+            |r| r.code == 0 && summary_of(r).is_some_and(|s| s["received"] == 5),
+        )
+        .await;
+    exits(&run, 0);
+    let lines = ndjson_lines(&run);
+    for s in stream_rows(&lines, "sample") {
+        assert_eq!(
+            s["key"],
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"
+        );
+        assert_eq!(s["payload"]["as"], "value", "decoded, not a fallback: {s}");
+        assert_eq!(s["payload"]["declared"], "json:BandwidthUpdate");
+    }
+    let summary = summary_of(&run).expect("a summary");
+    assert_eq!(summary["discarded"], 0, "no sample on a wildcard key (R6)");
+    assert_eq!(summary["lagged"], 0);
+
+    let run = bus
+        .until(
+            &[
+                "get",
+                "state",
+                "host-a/tc",
+                "tc.netif.v1",
+                "namespaces",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&run, 0);
+    let row = &run.json()["rows"][0];
+    assert_eq!(row["state"], "value", "{run}");
+    assert_eq!(row["payload"]["declared"], "json:Namespaces");
+    assert_eq!(
+        u128::from_str_radix(row["timestamp"]["clock"].as_str().expect("a clock"), 16).unwrap(),
+        u128::from_str_radix(&zid, 16).unwrap(),
+        "the mock's own stamp (S1)"
+    );
+
+    let again = bus
+        .zenctl(&[
+            "gen",
+            "host-a/tc",
+            "tc.netif.v1",
+            "--contracts",
+            &netif,
+            "--duration",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&again, 2);
+    assert!(again.stderr.contains("is running already"), "{again}");
+    assert!(again.stderr.contains("--i-know"), "{again}");
+
+    let generated = mock.await.expect("the gen runner");
+    exits(&generated, 0);
+    let docs = documents(&generated.stdout);
+    assert_eq!(docs[0]["report"], "gen-plan", "{generated}");
+    assert_eq!(docs[1]["report"], "gen");
+    assert!(docs[1]["sent"].as_u64() > Some(10), "{generated}");
+    assert_eq!(docs[1]["failed"], 0, "{generated}");
+}
+
+/// `serve` (FJ8a) answers `call` with its fixed reply and logs the call:
+/// its key, the request decoded through the bundle, the answer. A second
+/// mock at the address is refused while the first serves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn serve_answers_a_call_and_logs_it() {
+    let bus = Bus::bare(None).await;
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path").to_owned();
+    let serve = bus.spawn(&[
+        "serve",
+        "host-a/tc",
+        "tc.netif.v1",
+        "diagnostics",
+        r#"{"ok": true, "served_by": "mock"}"#,
+        "--contracts",
+        &netif,
+        "--count",
+        "1",
+        "--for",
+        "40",
+        "--format",
+        "ndjson",
+    ]);
+    wait_for(&bus, &["host-a/tc"]).await;
+
+    let refused = bus
+        .zenctl(&[
+            "serve",
+            "host-a/tc",
+            "tc.netif.v1",
+            "diagnostics",
+            "--contracts",
+            &netif,
+            "--count",
+            "1",
+        ])
+        .await;
+    exits(&refused, 2);
+    assert!(refused.stderr.contains("is running already"), "{refused}");
+
+    let call = bus
+        .until(
+            &[
+                "call",
+                "host-a/tc",
+                "tc.netif.v1",
+                "diagnostics",
+                r#"{"scope": "all"}"#,
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0,
+        )
+        .await;
+    exits(&call, 0);
+    let doc = call.json();
+    assert_eq!(doc["answer"], "value", "{call}");
+    assert_eq!(
+        doc["reply"]["value"],
+        json!({"ok": true, "served_by": "mock"})
+    );
+
+    let served = serve.await.expect("the serve runner");
+    exits(&served, 0);
+    let lines = ndjson_lines(&served);
+    let calls = stream_rows(&lines, "call");
+    assert_eq!(calls.len(), 1, "{served}");
+    let c = calls[0];
+    assert_eq!(c["key"], "zk2/host-a/tc/tc.netif.v1/@op/diagnostics");
+    assert_eq!(c["concrete"], true);
+    assert_eq!(c["operation"], "@op/diagnostics");
+    assert_eq!(c["request"]["as"], "value", "{c}");
+    assert_eq!(c["request"]["declared"], "json:DiagnosticsRequest");
+    assert_eq!(c["request"]["value"], json!({"scope": "all"}));
+    assert_eq!(c["answer"], "reply");
+    let summary = stream_rows(&lines, "summary");
+    assert_eq!(summary[0]["ended"], "count");
+    assert_eq!(summary[0]["calls"], 1);
+}
+
+/// `record` then `replay --namespace` (FJ8a, the tooling guide's §5): a
+/// version-3 capture of an owner's stream at the bus root — its header
+/// naming what the selector excludes, each row its QoS axes — republished
+/// into namespace `replay` reaches a consumer there on the original
+/// address, with the owner's QoS.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn record_then_replay_into_a_namespace_round_trips() {
+    let mut bus = Bus::bare(None).await;
+    let owner = netif_owner(&bus).await;
+    let writer = owner
+        .writer(
+            &iface("tc.netif.v1"),
+            "stream/bandwidth/{ns}/{iface}",
+            &member("default", "eth0"),
+        )
+        .await
+        .expect("a stream writer");
+    bus.services.push(owner);
+    bus.keep(Task(tokio::spawn(async move {
+        let mut n = 0u64;
+        loop {
+            n += 1;
+            let _ = writer.put_value(&json!({"rx_bps": n, "tx_bps": n})).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/tc"]).await;
+
+    let file = bus.home.join("owner.zrec");
+    let file = file.to_str().expect("a UTF-8 path").to_owned();
+    let run = bus
+        .until(
+            &[
+                "record",
+                "zk2/host-a/tc/tc.netif.v1/stream/**",
+                "-o",
+                &file,
+                "--overwrite",
+                "--count",
+                "5",
+                "--for",
+                "10",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 0 && r.json()["samples"] == 5,
+        )
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["header"]["zrec"], 3);
+    assert_eq!(doc["header"]["base"], "");
+    assert_eq!(
+        doc["header"]["selectors"],
+        json!(["zk2/host-a/tc/tc.netif.v1/stream/**"])
+    );
+    assert_eq!(
+        doc["header"]["excluded"],
+        json!(["@stream", "@state", "@op", "@zk", "@adv"])
+    );
+    let text = std::fs::read_to_string(&file).expect("the capture");
+    let rows: Vec<Value> = text
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).expect("a row"))
+        .collect();
+    assert_eq!(rows.len(), 5, "{text}");
+    for r in &rows {
+        assert_eq!(
+            r["key"],
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"
+        );
+        assert!(r["bytes"].is_string(), "lossless: {r}");
+        assert_eq!(
+            r["qos_axes"], "data/drop/best_effort",
+            "the stream's QoS (§2.4)"
+        );
+    }
+
+    let in_replay = client(&bus.endpoint, Some("replay")).await;
+    let heard = in_replay
+        .declare_subscriber("zk2/host-a/tc/tc.netif.v1/stream/**")
+        .await
+        .expect("a consumer in `replay`");
+    let deadline = Instant::now() + SETTLE;
+    let (run, sample) = loop {
+        let run = bus
+            .zenctl(&["replay", &file, "--namespace", "replay", "--format", "json"])
+            .await;
+        let got = tokio::time::timeout(Duration::from_millis(500), heard.recv_async()).await;
+        if let Ok(Ok(sample)) = got {
+            break (run, sample);
+        }
+        assert!(Instant::now() < deadline, "nothing reached `replay`\n{run}");
+    };
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["published"], 5, "{run}");
+    assert_eq!(doc["refused"], 0);
+    assert_eq!(doc["header"]["zrec"], 3);
+    assert_eq!(
+        sample.key_expr().as_str(),
+        "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0"
+    );
+    assert_eq!(sample.priority(), zenoh::qos::Priority::Data);
+    assert_eq!(
+        sample.congestion_control(),
+        zenoh::qos::CongestionControl::Drop
+    );
+}
+
+/// `bench call` (FJ8a): a fan-out's value replies attributed by key, a
+/// refusal a population of its own, a token holder that sent nothing
+/// tallied; then a call to a frozen service, whose silence is counted and
+/// never averaged in — exit 2, no value measured.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bench_call_attributes_replies_by_key_and_counts_silence_apart() {
+    let mut bus = Bus::bare(None).await;
+    tc_instance(&mut bus, "h1/tc", Tc::default()).await;
+    tc_instance(
+        &mut bus,
+        "h2/tc",
+        Tc {
+            busy: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    tc_instance(
+        &mut bus,
+        "h3/tc",
+        Tc {
+            frozen: true,
+            ..Tc::default()
+        },
+    )
+    .await;
+    wait_for(&bus, &["h1/tc", "h2/tc", "h3/tc"]).await;
+    let tc = scenario_path("tc.v1");
+    let tc = tc.to_str().expect("a UTF-8 path").to_owned();
+
+    let run = bus
+        .until(
+            &[
+                "bench",
+                "call",
+                "*/tc",
+                "tc.v1",
+                "diagnostics",
+                "--calls",
+                "3",
+                "--timeout",
+                "2",
+                "--contracts",
+                &tc,
+                "--format",
+                "json",
+            ],
+            |r| r.code == 1 && r.json()["refusals"]["count"] == 3,
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["report"], "bench");
+    assert_eq!(doc["mode"], "fanout");
+    assert_eq!(doc["clock"], "round_trip");
+    let repliers = doc["rows"].as_array().expect("rows");
+    assert_eq!(repliers.len(), 1, "{run}");
+    assert_eq!(repliers[0]["address"], "h1/tc");
+    assert_eq!(repliers[0]["key"], "zk2/h1/tc/tc.v1/@op/diagnostics");
+    assert_eq!(repliers[0]["replies"], 3);
+    assert_eq!(doc["refusals"]["codes"], json!({"busy": 3}));
+    assert_eq!(doc["silent"], 0, "every call drew a value");
+    let holders: Vec<(&str, u64)> = doc["presence"]["holders"]
+        .as_array()
+        .expect("holders")
+        .iter()
+        .map(|h| {
+            (
+                h["address"].as_str().expect("an address"),
+                h["without_value"].as_u64().expect("a count"),
+            )
+        })
+        .collect();
+    assert_eq!(holders, [("h1/tc", 0), ("h2/tc", 3), ("h3/tc", 3)]);
+
+    let run = bus
+        .zenctl(&[
+            "bench",
+            "call",
+            "h3/tc",
+            "tc.v1",
+            "diagnostics",
+            "--calls",
+            "2",
+            "--timeout",
+            "1",
+            "--contracts",
+            &tc,
+            "--format",
+            "json",
+        ])
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["mode"], "concrete");
+    assert_eq!(doc["silent"], 2, "{run}");
+    assert!(doc["rows"].as_array().is_none_or(Vec::is_empty));
+    assert_eq!(doc["completed"], 2);
+}
+
+/// `pub --from ndjson` (FJ8a): a row whose key a zk2 service owns is
+/// refused as `pub` refuses it, counted, and never written; a foreign row is
+/// written, with the QoS axes it recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pub_from_ndjson_refuses_an_owned_row_and_writes_a_foreign_one() {
+    let bus = Bus::bare(None).await;
+    let at_root = client(&bus.endpoint, None).await;
+    let foreign = at_root
+        .declare_subscriber("legacy/**")
+        .await
+        .expect("a consumer of the foreign key");
+    let owned = at_root
+        .declare_subscriber("zk2/**")
+        .await
+        .expect("a consumer of zk2 keys");
+    let rows = concat!(
+        r#"{"key":"zk2/host-a/tc/tc.netif.v1/state/namespaces","value":[]}"#,
+        "\n",
+        r#"{"key":"legacy/temperature","value":21,"qos_axes":"interactive_high/block/reliable"}"#,
+        "\n",
+    );
+    let deadline = Instant::now() + SETTLE;
+    let (run, sample) = loop {
+        let run = bus.zenctl_stdin(&["pub", "--from", "ndjson"], rows).await;
+        let got = tokio::time::timeout(Duration::from_millis(500), foreign.recv_async()).await;
+        if let Ok(Ok(sample)) = got {
+            break (run, sample);
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the foreign row never arrived\n{run}"
+        );
+    };
+    exits(&run, 1);
+    assert!(run.stderr.contains("1 refused row(s)"), "{run}");
+    assert!(run.stderr.contains("(P3, spec §6)"), "{run}");
+    assert_eq!(sample.key_expr().as_str(), "legacy/temperature");
+    assert_eq!(sample.payload().to_bytes().as_ref(), b"21");
+    assert_eq!(sample.priority(), zenoh::qos::Priority::InteractiveHigh);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        owned.try_recv().ok().flatten().is_none(),
+        "the owned row was never written"
+    );
 }
