@@ -274,7 +274,9 @@ lands at the bus root, where no consumer of the deployment listens.
 - **Profile-backed checks** stay dark until their profiles exist (#613).
   These are kinds and budgets, alerts, configuration, blobs and export, and
   `field-stuck`, which judges against a declared freshness (`freshness.v1`).
-  A tool says *not asked*, never *clean*.
+  A tool says *not asked*, never *clean*. `freshness.v1` exists since #720:
+  `check conform`'s `freshness` case asks it, and `field-stuck` is still to
+  be ported onto it.
 - **Origin alignment** (RFC 13 §4.4's `--normalize-origins`) has nothing to
   align: a zk2 key names its system and service, so two deployments compare
   by key, each file's namespace stripped. Their two clocks are still never
