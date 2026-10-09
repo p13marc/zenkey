@@ -705,6 +705,14 @@ impl Subscription {
         }
     }
 
+    /// Per stamping clock (a stamp's id), the offset of the delivery whose
+    /// stamp came closest to this host's clock at receipt: the receipt
+    /// minus the stamp (`freshness.v1` §2.6, ground 2).
+    #[must_use]
+    pub fn clock_offsets(&self) -> BTreeMap<String, StampAge> {
+        self.seen.clocks.lock().expect("not poisoned").clone()
+    }
+
     /// Whether this host's clock is trusted to `delta` against `clock`, a
     /// stamp's id (`freshness.v1` §2.6, ground 2): a delivery stamped by it
     /// arrived with its stamp within `delta` of this host's clock.
