@@ -148,7 +148,10 @@ pub fn render_with(
         .iter()
         .filter(|r| r.token == kind)
         .collect();
-    let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+    let refs: Vec<&str> = crate::model::lens::template_chunks(kind, &chunks)
+        .iter()
+        .map(String::as_str)
+        .collect();
     let Some((i, values)) = resolve(candidates.iter().map(|r| &r.template), &refs) else {
         return fallback(Unresolved::NoResource { fingerprint });
     };

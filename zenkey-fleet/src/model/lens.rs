@@ -218,7 +218,10 @@ impl<'a> Lens<'a> {
             .enumerate()
             .filter(|(_, r)| r.token == kind)
             .collect();
-        let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+        let refs: Vec<&str> = template_chunks(kind, &chunks)
+            .iter()
+            .map(String::as_str)
+            .collect();
         let Some((i, values)) = resolve(candidates.iter().map(|(_, r)| &r.template), &refs) else {
             return stop(
                 group(None),
@@ -414,6 +417,17 @@ impl<'a> Lens<'a> {
             Ok(addr) => catalog.owner_zids(&addr),
             Err(_) => BTreeSet::new(),
         }
+    }
+}
+
+/// The resource chunks a template is matched against (§2.6): an event
+/// key's last chunk is the occurrence's ULID, which "a reader strips before
+/// resolving the template"; every other kind's chunks are the template's
+/// own (#702, which found event keys resolving to no resource here).
+pub fn template_chunks(kind: zenkey_model::grammar::KindToken, chunks: &[String]) -> &[String] {
+    match (kind, chunks.split_last()) {
+        (zenkey_model::grammar::KindToken::Events, Some((_ulid, template))) => template,
+        _ => chunks,
     }
 }
 
@@ -887,6 +901,39 @@ mod tests {
         );
         let m = qos_mismatch(&declared, &other).expect("a mismatch");
         assert_eq!(m.differs, ["priority", "express"]);
+    }
+
+    /// An event key resolves to its template with its ULID chunk stripped
+    /// (§2.6), through the lens and through `render_with` alike (#702).
+    #[test]
+    fn an_event_key_resolves_without_its_ulid() {
+        let l = zenkey_model::contract::load_str(
+            "[interface]\nname = \"m\"\nmajor = 1\n\
+             [resources.\"link/{iface}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             params = { iface = \"string\" }\ncardinality = 8\nrate = \"rare\"\nretention = \"1d\"\n",
+            std::path::Path::new("."),
+            None,
+        );
+        let rev = Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::File,
+        );
+        let fp = rev.fingerprint().to_string();
+        let mut set = ContractSet::new();
+        set.insert(rev.clone());
+        let cat = catalog(&fp, None);
+        let key = "zk2/lab/m/m.v1/events/link/eth0/01jqz3m6v2b8d9e0f1g2h3j4k5";
+        let r = Lens::new("", Some(&cat), &set)
+            .resolve(key)
+            .resolved
+            .expect("an event key resolves");
+        assert_eq!(r.resource_name(), "events/link/{iface}");
+        assert_eq!(r.values["iface"], ["eth0"]);
+        let rendered = crate::model::render::render_with(&rev, key, Member::Type, None, b"up");
+        assert_eq!(
+            rendered.resource.expect("resolved").resource,
+            "events/link/{iface}"
+        );
     }
 
     /// Whose clock: the owner's by value, another's, or nobody named one.
