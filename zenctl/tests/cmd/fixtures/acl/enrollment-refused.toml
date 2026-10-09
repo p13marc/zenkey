@@ -1,0 +1,19 @@
+# One backend enrolled, and two principals the plan cannot place: one bound
+# by a zid, one running a service the file does not declare (acl-gen.trycmd).
+
+[[principal]]
+user     = "tc-h1"
+services = ["h1/tc"]
+
+[[principal]]
+id       = "bench-rig"
+zid      = "a1b2c3d4"
+services = ["h1/tc"]
+
+[[principal]]
+user     = "ghost"
+services = ["h9/tc"]
+
+[[service]]
+address    = "h1/tc"
+implements = ["tc.netif.v1"]

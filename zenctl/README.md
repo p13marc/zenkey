@@ -126,9 +126,9 @@ it cannot drift from what zenctl parses:
 
 Keep it `0600` — it can hold a password. A file that sets a session
 `namespace` is refused: an explorer that stripped keys would be lying about the
-wire (RFC 09 §5). The router's side of the same certificates — its
-`access_control` block, keyed on the client certificate's CN — is what
-`zenctl acl gen` writes.
+wire (RFC 09 §5). The router's side of the same credentials — its
+`access_control` block, keyed on each principal's certificate CN or usrpwd
+user — is what `zenctl acl gen` writes.
 
 **2. A named context**, so no command line has to carry the base and the file:
 
@@ -342,8 +342,9 @@ included).
 cover) · `zenctl storage gen --deployment storages.toml --json5` (the
 `plugins.storage_manager` block, lifespans derived from the registry's
 `ttl_s`; `--check` compares a live router) · `zenctl acl gen --enrollment
-enroll.toml --json5` (the `access_control` block, one principal per
-certificate CN; `--check` likewise).
+enroll.toml --contracts <dir> --json5` (zk2's `access_control` block,
+compiled from the contracts and the enrollment's principals, bindings and
+calls; `--check` compares a router's config file).
 
 **The tool itself.**
 `zenctl context …` (named connection contexts, above) · `zenctl cache
@@ -689,6 +690,40 @@ and `--transitions` re-runs and prints only what changed.
 The v1 doctor — `introspect` fanned across the fleet and diffed against the
 `--registry` TOMLs (RFC 08 §6) — is `check conform`'s now, producer by
 producer.
+
+## `acl gen` — access control from the contracts
+
+`acl gen` (#612, FJ7) compiles zk2's three grant shapes (spec §11.1) into a
+router's `access_control` block. Its inputs are offline: the contracts
+(`--contracts`, authoring files or a `.history` root) and an **enrollment**
+naming each principal (a usrpwd user or a certificate CN, never a zid), the
+services, archives and tools it runs, their bindings and the operations they
+call. `examples/zk2/acl/` holds the walkthrough's and the tcgui pilot's.
+
+| grant | what it compiles to |
+|---|---|
+| Own | put, delete, serve and declare tokens under the service's prefix, each verbatim subtree spelled out (`**` never crosses one); its `@adv` subtrees where its contracts declare history; interest in its own keys on egress |
+| Consume | subscribe or GET on what the bindings name, `@adv` where read with history, liveliness reads on each provider's `@zk` (0.8) |
+| Call | query on the specific `…/@op/<op>` keys, and the same liveliness reads |
+| fan-in | each consumer or caller selector over what a provider serves, on that provider's egress and its ingress reply (§11.2: egress is checked against the selector itself) |
+
+Under `--default-permission allow` zenoh evaluates no allow rule, so each
+grant becomes denies of its complement, enumerated from the contracts, and
+every principal is denied queryables in the admin space (#684). With
+`--face constrained --attach client|south-region --far <principal>`, the far
+side's policy carries the `@zk` and `@stream` denies (§8.5), and a south
+region adds the near router's `gateway.south`; `--attach router` is refused,
+because a deny on a router-to-router link lets the denied key strings cross.
+
+```
+$ zenctl acl gen --enrollment examples/zk2/acl/tcgui.enrollment.toml \
+    --contracts examples/zk2/.history --json5 > router-acl.json5
+$ zenctl acl gen … --check --against router.json5      # exit 0 / 1 / 2
+$ zenctl acl gen … --explain tcgui-frontend 'zk2/*/tc/tc.netif.v1/state/**' query
+```
+
+A principal the plan cannot place is refused by name with its reason, never
+dropped: exit 1. Regenerate on every contract revision (§11.2).
 
 ## Things it will not do, on purpose
 

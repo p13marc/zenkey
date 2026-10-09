@@ -1,0 +1,63 @@
+# The tcgui pilot's access control (spec §11; #612, FJ7): two backends and the
+# frontend, every one a client principal of one router, bound by usrpwd user
+# name. The shape is shapes.md #1: a backend per host (`h-<12hex>/tc`), the
+# frontend a pure consumer on its workstation's host id, bound to `*/tc`
+# (../tcgui/frontend.bindings.toml, whose bindings this repeats).
+#
+#   zenctl acl gen --enrollment examples/zk2/acl/tcgui.enrollment.toml \
+#                  --contracts examples/zk2/tcgui --json5
+
+[[principal]]
+user     = "tc-h-3fa9c2d41b7e"
+services = ["h-3fa9c2d41b7e/tc"]
+
+[[principal]]
+user     = "tc-h-20609002f7b6"
+services = ["h-20609002f7b6/tc"]
+
+[[principal]]
+user     = "tcgui-frontend"
+services = ["h-0123456789ab/tcgui-frontend"]
+
+# The backends: Own on their prefix. They bind nothing.
+[[service]]
+address    = "h-3fa9c2d41b7e/tc"
+implements = ["tc.netif.v1", "tc.netem.v1", "tc.scenario.v1"]
+
+[[service]]
+address    = "h-20609002f7b6/tc"
+implements = ["tc.netif.v1", "tc.netem.v1", "tc.scenario.v1"]
+
+# The frontend: a pure consumer (an instance token, no interface). Each role
+# names every resource of its interface, so it is granted the interface's
+# prefixes, one per kind token: the fan-in GET over `zk2/*/tc/tc.netif.v1/state/**`
+# is one selector the grant includes.
+[[service]]
+address = "h-0123456789ab/tcgui-frontend"
+
+[service.bindings.netif]
+interface = "tc.netif.v1"
+providers = ["*/tc"]
+
+[service.bindings.netem]
+interface = "tc.netem.v1"
+providers = ["*/tc"]
+
+[service.bindings.scenario]
+interface = "tc.scenario.v1"
+providers = ["*/tc"]
+
+# What it calls: every operation of the three interfaces, on any backend. A
+# wildcard call reaches a backend only for `diagnostics` (fanout = "allowed");
+# every other operation refuses it (O2), and the grant lets that refusal back.
+[[service.calls]]
+interface = "tc.netif.v1"
+providers = ["*/tc"]
+
+[[service.calls]]
+interface = "tc.netem.v1"
+providers = ["*/tc"]
+
+[[service.calls]]
+interface = "tc.scenario.v1"
+providers = ["*/tc"]

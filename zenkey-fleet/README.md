@@ -63,6 +63,10 @@ it goes to `report/`, by the rule that module's docs state.
   long-running projection shares: the O6 ceiling with its eviction ledger,
   the retention budget, and "up to N examples, and the count of what they
   stand for". Plus `facts`, `project`, `skeleton`, `diff`.
+- **`acl`** — zk2's access control (spec §11, #612 FJ7): an enrollment and
+  the contracts in, a router's `access_control` block out (`plan_acl`), in
+  either posture and with a constrained face; `check_acl` against a router's
+  config file, `explain_acl` per direction, `to_json5` for zenohd.
 
 ## `judge/` — verdicts
 

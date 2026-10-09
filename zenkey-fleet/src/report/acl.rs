@@ -1,208 +1,226 @@
-//! The ACL plan (RFC 09 §3, #392): what an enrollment file asks for, what
-//! the registry narrows it to, and how a router's configured block compares.
+//! The zk2 access-control plan (spec §11, #612 FJ7): what an enrollment
+//! asks for, the router block it compiles to, and how a router's configured
+//! block compares.
 //!
-//! Four documents cross the wire here. [`Enrollment`] comes *in* — the small
-//! TOML an operator writes binding certificate CNs to roles and origins
-//! (RFC 03 §4 D6) — and it is here rather than beside the planner because a
-//! `Deserialize` shape is somebody else's file format, which is the
-//! placement rule's whole test. [`AclPlan`] goes *out* as the plan,
-//! [`AclCheck`] as the verdict of `--check`, [`AclExplain`] as `--explain`'s
-//! answer; [`AclConfigDoc`] is the `access_control` block as zenoh's own
+//! Five documents cross the wire here. [`Enrollment`] comes *in*: the TOML
+//! a deployment writes, binding transport identities (certificate CNs,
+//! usrpwd user names) to the services, archives and tools they run, with
+//! each one's bindings and calls. It is here rather than beside the planner
+//! because a `Deserialize` shape is somebody else's file format, which is
+//! the placement rule's whole test. [`AclPlan`] goes *out* as the plan,
+//! [`AclCheck`] as `--check`'s verdict, [`AclExplain`] as `--explain`'s
+//! answer, and [`AclConfigDoc`] is the `access_control` block as zenoh's own
 //! loader parsed it, the observed side of a check.
 //!
-//! The rule/subject/policy vocabulary below is **zenoh 1.10's**, verbatim:
-//! `zenoh-config-1.10.0/src/lib.rs` — `AclConfig` (`enabled`,
+//! The rule, subject and policy vocabulary is **zenoh 1.10's**, verbatim:
+//! `zenoh-config-1.10.1/src/lib.rs`, `AclConfig` (`enabled`,
 //! `default_permission`, `rules`, `subjects`, `policies`), `AclConfigRule`
-//! (`id`, `key_exprs`, `messages`, `flows`, `permission`), `AclMessage`
-//! (the nine snake_case message kinds), `InterceptorFlow`
-//! (`egress`/`ingress`), `AclConfigSubjects` (`id`, `cert_common_names`,
-//! `zids`, …) and `AclConfigPolicyEntry` (`id`, `rules`, `subjects`). A
-//! rule with `flows` absent applies in both directions. The planner itself
-//! is [`crate::model::acl`]; nothing here computes.
+//! (`id`, `key_exprs`, `messages`, `flows`, `permission`), `AclMessage` (the
+//! nine snake_case message kinds), `InterceptorFlow` (`egress`, `ingress`),
+//! `AclConfigSubjects` and `AclConfigPolicyEntry`; the gateway's is
+//! `zenoh-config-1.10.1/src/gateway.rs`. The planner is
+//! [`crate::model::acl`]; nothing here computes.
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::asked::Asked;
 use super::judgement::Judgement;
 
 // ── The enrollment file ───────────────────────────────────────────────────
 
-/// The enrollment file `zenctl acl gen --enrollment` reads (#392).
+/// The enrollment file `zenctl acl gen --enrollment` reads (spec §11).
 ///
-/// One `[[principal]]` per transport identity, each bound to a role and —
-/// for a host — to the origin it may act as (RFC 03 §4 D6: without this
-/// binding, D6 is a hygiene boundary, not a security one). Everything the
-/// router needs beyond that is derived.
+/// A **principal** is a transport identity: a certificate CN or a usrpwd
+/// user name, never a zid (§11.3: `zids` subjects are unauthenticated). It
+/// runs **services** (Own on each, plus what their bindings consume and the
+/// operations they call), **archives** (Own, plus Consume on what they
+/// record, §4.4) and **tools** (bindings and calls, with no address of their
+/// own). The services, archives and tools are declared once and named by
+/// the principals that run them, so two principals can run one service and
+/// one principal can run many (device-as-service, §1.5).
+///
+/// A binding's shape is the tcgui frontend's (`examples/zk2/tcgui/
+/// frontend.bindings.toml`, R1): a role, the interface, the providers, and
+/// R2's parameter bindings. A role the contract declares in `[requires]`
+/// takes its interface and resources from there.
 ///
 /// ```toml
-/// base = "zensight"                      # optional; default = --base / context / ""
-///
-/// [fleet]
-/// catalog_adv = true                     # the catalog runs the advanced tier:
-///                                        # spell @catalog/**/@adv/** explicitly
-/// salt = "zensight-host-id-v1"           # the app's RFC 06 §1 origin salt —
-///                                        # needed only where a host gives machine_id
+/// namespace = "fleet-a"                      # optional; default --namespace / context / ""
 ///
 /// [[principal]]
-/// cn = "h-3fa9c2d41b7e"                  # the mTLS certificate CN
-/// role = "host"                          # host | catalog | console | desired-author | watch
-/// origin = "h-3fa9c2d41b7e"              # or machine_id = "<32 hex>" (+ fleet.salt);
-///                                        # both given must agree, or the principal is refused
-/// adv = true                             # uses the @adv sidecars (RFC 04 §3.3)
-/// blob_seed = true                       # seeds the router @blob store (RFC 07 §2)
-/// media = true                           # publishes @media streams (RFC 07 §1)
+/// user     = "thruster-l"                    # a usrpwd user name …
+/// # cn     = "thruster-l.vehicle-01"         # … or the mTLS certificate CN (both: zenoh ANDs them)
+/// services = ["vehicle-01/thruster-l"]
 ///
-/// [[principal]]
-/// cn = "zensight-catalog"
-/// role = "catalog"                       # origin defaults to @catalog
+/// [[service]]
+/// address    = "vehicle-01/thruster-l"
+/// implements = ["thruster.v1"]               # its contracts: history, and the allow posture's complement
 ///
-/// [[principal]]
-/// cn = "zensight-console"
-/// role = "console"
-/// adv = true
-/// remote_actions = false                 # true drops the no-remote-actions deny
+/// [service.bindings.cmd]                     # the role thruster.v1 requires
+/// providers = ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"]
 ///
-/// [[principal]]
-/// cn = "zensight-desired"
-/// role = "desired-author"
-/// origin = "@desired"                    # its own service origin (RFC 07 §3)
+/// [[service]]
+/// address = "vehicle-01/executor"
+/// [service.bindings.plan]                    # a role of the component's own manifest
+/// interface = "mission_plan.v1"
+/// providers = ["ground/fleet-mgr"]
+/// params    = { vehicle = "self.system" }    # R2
 ///
-/// [[principal]]
-/// cn = "zensight-watch"
-/// role = "watch"                         # read-only: data classes, catalog, RPC reads
+/// [[service.calls]]
+/// interface  = "nav.v2"
+/// providers  = ["vehicle-01/navigation"]
+/// operations = ["set_origin"]                # default: every operation of the interface
 ///
-/// [[principal]]
-/// user = "ops"                           # a zenoh usrpwd user name, in place of cn
-/// role = "console"
-/// writes = ["modem/config/*/*/set"]      # per-resource write grants (RFC 09 §3)
+/// [[archive]]
+/// address = "vehicle-01/archive"
+/// records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
+/// peers   = ["ground/archive"]
+///
+/// [[tool]]
+/// name = "ops"
+/// [tool.bindings.netif]
+/// interface = "tc.netif.v1"
+/// providers = ["*/tc"]
 /// ```
-///
-/// A principal is bound by `cn`, `user`, or both — zenoh ANDs a subject's
-/// properties; `zid` stands in only under `--allow-zid-subjects`. Under `acl gen --face` (RFC 09 §4, v1.49) only a `user`
-/// console or watch is planned — an operator on the far side of the link,
-/// authenticated by the face's `usrpwd`; every other principal is refused
-/// with its reason.
-///
-/// A `zid = "…"` in place of `cn` is accepted only under
-/// `--allow-zid-subjects`: zenoh's own config says a ZID "is not backed by
-/// an authentication mechanism … can be useful for prototyping but should
-/// not be used in production" (`zenoh-1.10.0/DEFAULT_CONFIG.json5`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Enrollment {
-    /// The deployment base (RFC 03 §1.1). `None` = take the observer's
-    /// resolved `--base`, the empty base being the bus-root deployment.
-    pub base: Option<String>,
-    #[serde(default)]
-    pub fleet: FleetSpec,
+    /// The deployment namespace (§1.6): the router sees every key with it in
+    /// front. `None` takes the resolved `--namespace`, the empty namespace
+    /// being the bus-root deployment.
+    pub namespace: Option<String>,
     #[serde(default)]
     pub principal: Vec<PrincipalSpec>,
-}
-
-/// The `[fleet]` table: what holds for the deployment rather than for one
-/// principal.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FleetSpec {
-    /// The catalog runs the advanced tier, so its sidecars live under a
-    /// verbatim `@adv` suffix `**` cannot reach past `@catalog` — every rule
-    /// that names `**/@adv/**` gets a `@catalog/**/@adv/**` sibling.
     #[serde(default)]
-    pub catalog_adv: bool,
-    /// The application's origin salt (RFC 06 §1), for principals that give
-    /// a `machine_id` rather than an `origin`.
-    pub salt: Option<String>,
+    pub service: Vec<ServiceSpec>,
+    #[serde(default)]
+    pub archive: Vec<ArchiveSpec>,
+    #[serde(default)]
+    pub tool: Vec<ToolSpec>,
 }
 
 /// One enrolled transport identity.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrincipalSpec {
-    /// The certificate common name — backed by the mTLS handshake
-    /// (RFC 03 §4 D6).
-    pub cn: Option<String>,
-    /// A zenoh id, for prototyping only (`--allow-zid-subjects`).
-    pub zid: Option<String>,
-    /// A zenoh `usrpwd` user name (v1.49): the identity a transport
-    /// authenticated with user and password — `usernames` in the subject.
-    /// The one binding a constrained face plans (RFC 09 §4).
-    pub user: Option<String>,
-    /// The subject id in the emitted config. Defaults to the CN (or the
-    /// user, or the zid).
+    /// The subject id in the emitted config. Defaults to the user name, else
+    /// the CN.
     pub id: Option<String>,
-    pub role: Role,
-    /// The origin this principal acts as: `h-…` for a host, `@…` for a
-    /// service. Defaults to `@catalog` for a catalog and `@desired` for a
-    /// desired-author; required (or derived) for a host.
-    pub origin: Option<String>,
-    /// The host's `/etc/machine-id`, from which the origin is *computed*
-    /// with the RFC 06 §1 derivation and `fleet.salt`.
-    pub machine_id: Option<String>,
-    /// The principal uses the `@adv` sidecars (RFC 04 §3.3).
+    /// The certificate common name, backed by the mTLS handshake.
+    pub cn: Option<String>,
+    /// A zenoh usrpwd user name.
+    pub user: Option<String>,
+    /// A zenoh id. Parsed only to be **refused** with its reason (§11.3):
+    /// a zid is not backed by authentication.
+    pub zid: Option<String>,
+    /// The `[[service]]` addresses this principal runs.
     #[serde(default)]
-    pub adv: bool,
-    /// The host seeds the router `@blob` content store (RFC 07 §2).
+    pub services: Vec<String>,
+    /// The `[[archive]]` addresses this principal runs.
     #[serde(default)]
-    pub blob_seed: bool,
-    /// The host publishes `@media` streams (RFC 07 §1).
+    pub archives: Vec<String>,
+    /// The `[[tool]]` names this principal runs.
     #[serde(default)]
-    pub media: bool,
-    /// A console that may invoke write procedures: drops the
-    /// `no-remote-actions` deny. A watch is read-only by definition and
-    /// refuses this.
-    #[serde(default)]
-    pub remote_actions: bool,
-    /// Per-resource write grants (RFC 09 §3, v1.43): `<producer>/<procedure>`
-    /// patterns under `@rpc/`, each including whole declared writes — every
-    /// `{var}` a `*`. Each is allowed, and the deny is **carved** to the
-    /// declared writes no grant includes — which needs the registry; without
-    /// one the deny stays whole and the plan says so. A pattern narrower
-    /// than the declared write it falls in cannot carve it and is not
-    /// emitted (v1.49). A watch refuses this.
-    #[serde(default)]
-    pub writes: Vec<String>,
+    pub tools: Vec<String>,
 }
 
-/// The roles RFC 09 §3's grant matrix knows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Role {
-    /// A sensor host: publishes its own origin, serves its own `@rpc`.
-    #[default]
-    Host,
-    /// The catalog service: owns `@catalog`, takes in every host's data.
-    Catalog,
-    /// The operator console: reads every plane, acts only through RPC.
-    Console,
-    /// A constrained link's face (RFC 09 §4, v1.43): selected by transport,
-    /// never enrolled — an enrollment naming it is refused; `acl gen --face`
-    /// plans it from the registry's exposure markers.
-    Link,
-    /// A desired-state author: writes one service origin's `state`
-    /// subtree and nothing else (RFC 07 §3).
-    DesiredAuthor,
-    /// A read-only observer (an explorer, a watchdog): the data classes,
-    /// the catalog, RPC reads — never `@media`, never `@blob`, never a
-    /// write.
-    Watch,
+/// One service of the deployment (§1.5): its address, the interfaces it
+/// implements, its bindings (R1, R2) and the operations it calls.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceSpec {
+    /// `<system>/<service>`.
+    pub address: String,
+    /// The interfaces it implements, `<name>.v<major>`; none for a pure
+    /// consumer. What its contracts say decides whether it uses advanced
+    /// publication (§2.5), which roles it must bind (§3.2), which wildcard
+    /// selectors its egress grant carries (§11.2: only those over what it
+    /// serves), and, under the allow posture, the complement another
+    /// principal is denied.
+    #[serde(default)]
+    pub implements: Vec<String>,
+    /// Role → binding.
+    #[serde(default)]
+    pub bindings: BTreeMap<String, BindingSpec>,
+    /// The operations it calls.
+    #[serde(default)]
+    pub calls: Vec<CallsSpec>,
 }
 
-impl Role {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Role::Host => "host",
-            Role::Catalog => "catalog",
-            Role::Console => "console",
-            Role::DesiredAuthor => "desired-author",
-            Role::Watch => "watch",
-            Role::Link => "link",
-        }
-    }
+/// An archive (§4.4): Own on its prefix, Consume on what it records.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveSpec {
+    /// `<system>/<service>`.
+    pub address: String,
+    /// The origin selectors it records: zk2 keys or key expressions over an
+    /// owner's state, positions 2 and 3 naming the owner (`*` allowed).
+    #[serde(default)]
+    pub records: Vec<String>,
+    /// The archives on the owners' side it aligns from (§4.4), by address.
+    #[serde(default)]
+    pub peers: Vec<String>,
+}
+
+/// A tool: bindings and calls, and no address of its own. A tool appears
+/// in no binding graph (it holds no instance token), and `self.system` /
+/// `self.service` mean nothing to it (R2).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSpec {
+    /// A plain chunk, naming the tool in rule ids.
+    pub name: String,
+    #[serde(default)]
+    pub bindings: BTreeMap<String, BindingSpec>,
+    #[serde(default)]
+    pub calls: Vec<CallsSpec>,
+}
+
+/// One role's binding (R1, R2).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BindingSpec {
+    /// The required interface. Taken from the contract's `[requires.<role>]`
+    /// when the holder implements one that declares the role; required
+    /// otherwise (a role of the component's own manifest, §3.1).
+    pub interface: Option<String>,
+    /// Service addresses, exact (`vehicle-01/teleop`) or wildcard
+    /// (`vehicle-01/*`, `*/tc`).
+    #[serde(default)]
+    pub providers: Vec<String>,
+    /// The resources consumed, by template. Default: the contract's
+    /// requirement, else every stream, state and event resource.
+    pub resources: Option<Vec<String>>,
+    /// R2: template parameter → value, `self.system` or `self.service`.
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
+    /// The consumer reads with history (§2.5): it is granted the `@adv`
+    /// subtrees of the resources that declare `history`.
+    #[serde(default)]
+    pub history: bool,
+}
+
+/// The operations one holder calls on one interface (§11.1 Call).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CallsSpec {
+    pub interface: String,
+    /// The services called, exact or wildcard. A wildcard is a fan-out
+    /// (O2, O6) only to an operation declared `fanout = "allowed"`; any
+    /// other one refuses it, and the grant lets that refusal through.
+    #[serde(default)]
+    pub providers: Vec<String>,
+    /// Operation templates. Default: every operation of the interface.
+    pub operations: Option<Vec<String>>,
+    /// Template parameter → value, as a binding's (R2).
+    #[serde(default)]
+    pub params: BTreeMap<String, String>,
 }
 
 // ── zenoh 1.10's vocabulary ───────────────────────────────────────────────
 
-/// `AclMessage` as zenoh 1.10 spells it (`zenoh-config-1.10.0/src/lib.rs`).
+/// `AclMessage` as zenoh 1.10 spells it (`zenoh-config-1.10.1/src/lib.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AclMessage {
@@ -245,7 +263,7 @@ impl AclMessage {
         }
     }
 
-    /// The snake_case token back to the kind — what `--explain` reads.
+    /// The snake_case token back to the kind, which `--explain` reads.
     pub fn parse(token: &str) -> Option<AclMessage> {
         AclMessage::ALL.into_iter().find(|m| m.as_str() == token)
     }
@@ -268,7 +286,8 @@ impl AclFlow {
     }
 }
 
-/// `Permission` as zenoh 1.10 spells it.
+/// `Permission` as zenoh 1.10 spells it: a rule's permission, and the
+/// block's `default_permission` (the posture, §11.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AclPermission {
@@ -287,53 +306,40 @@ impl AclPermission {
 
 // ── The plan ──────────────────────────────────────────────────────────────
 
-/// `zenctl acl gen`: the `access_control` block, with every rule carrying
-/// the matrix row it instantiates and the fact it exists for.
+/// `zenctl acl gen`: the `access_control` block, every rule naming the grant
+/// it instantiates and the spec fact it exists for.
 #[derive(Debug, Clone, Serialize)]
 pub struct AclPlan {
-    /// The base every key expression below was composed under.
-    pub base: String,
-    /// `deny` for the principal plan — the recipe has no allow-by-default
-    /// form (RFC 09 §3 fact 4). `allow` for a constrained face (RFC 09 §4,
-    /// v1.43): the permission is node-global, so a face-scoped deny has to
-    /// live under a permissive default or it would black-hole every other
-    /// face.
+    /// The namespace every key expression below starts with (§1.6); empty
+    /// for the bus-root deployment.
+    pub namespace: String,
+    /// The posture (§11.2): `deny`, where grants are allows (RECOMMENDED),
+    /// or `allow`, where each grant is compiled into denies of its
+    /// complement.
     pub default_permission: AclPermission,
-    /// What the registry said, when one was asked. **Absent** when none
-    /// was: the planes are then what the enrollment claims and the write set
-    /// is the convention's `set` leaf, unnarrowed (RFC 13 §3 O4).
-    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
-    pub registry: Asked<AclRegistryFacts>,
+    /// The contract revisions the plan was compiled from, as
+    /// `<iface>@sha256:<hex>`, sorted. Under `allow` the complement is
+    /// these revisions' resources: a later revision's new ones are not
+    /// denied until the plan is regenerated (§11.2).
+    pub contracts: Vec<String>,
+    /// The constrained face this block also guards (§8.5), when one was
+    /// planned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face: Option<AclFace>,
     pub rules: Vec<AclRule>,
     pub subjects: Vec<AclSubject>,
     pub policies: Vec<AclPolicy>,
-    /// A constrained face's `downsampling` rules (RFC 09 §4, v1.43); empty
-    /// for the principal plan, whose subjects are identities.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub downsampling: Vec<AclDownsample>,
+    /// The near router's `gateway` block, for a far router attached in a
+    /// south region (§8.5, U23).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<AclGateway>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<AclWarning>,
-    /// Principals the plan left out, and why. A refused principal is
-    /// **omitted** from `subjects` and `policies` and named here — the plan
+    /// Principals the plan could not place, and why. A refused principal is
+    /// **omitted** from `subjects` and `policies` and named here: the plan
     /// is still emitted around it, and the verb exits 1 for it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub refusals: Vec<AclRefusal>,
-}
-
-/// The registry, as the plan read it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AclRegistryFacts {
-    pub slices: usize,
-    /// Host producers declaring `[[media]]`.
-    pub media_producers: Vec<String>,
-    /// Host producers declaring `[[blob]]`.
-    pub blob_producers: Vec<String>,
-    /// Every `kind = "write"` procedure, as `producer/path`.
-    pub write_procedures: Vec<String>,
-    /// The writes declared `sensitive = true` (RFC 08 §2, v1.43), as
-    /// `producer/path`: denied to every principal until a grant names one.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub sensitive_procedures: Vec<String>,
 }
 
 /// One rule, as `AclConfigRule` will carry it.
@@ -341,71 +347,105 @@ pub struct AclRegistryFacts {
 pub struct AclRule {
     pub id: String,
     pub permission: AclPermission,
-    /// `None` = both directions (zenoh: `flows` absent).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flows: Option<Vec<AclFlow>>,
+    /// Always spelled: zenoh warns about a rule without `flows` and reads it
+    /// as both.
+    pub flows: Vec<AclFlow>,
     pub messages: Vec<AclMessage>,
     pub key_exprs: Vec<String>,
-    /// The RFC 09 §3 matrix row this instantiates.
-    pub purpose: String,
-    /// The fact it exists for.
+    /// The grant shape this rule instantiates (§11.1, §11.2, §8.5).
+    pub grant: AclGrantKind,
+    /// The service, archive or tool whose grant it is (`<system>/<service>`,
+    /// or `tool.<name>`), or the principal whose complement it denies.
+    /// Absent on a rule every principal shares.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holder: Option<String>,
+    /// The spec fact it exists for.
     pub cite: String,
+}
+
+/// The closed vocabulary of grant shapes a rule instantiates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AclGrantKind {
+    /// Own (§11.1): writes, queryables and tokens under the service's
+    /// prefix and its verbatim subtrees; and on egress, the interest in its
+    /// own keys.
+    Own,
+    /// §11.2: the consumer and caller selectors that intersect a provider's
+    /// keys without being included in them, granted on the provider's
+    /// egress (egress is checked by inclusion against the selector).
+    FanIn,
+    /// §11.2: the same selectors, for the provider's ingress `reply`,
+    /// refusals included.
+    FanInReply,
+    /// Consume (§11.1): subscribe or GET on what the bindings name.
+    Consume,
+    /// Consume's `@adv` subtrees, for a consumer that reads with history
+    /// (§2.5, §11.1).
+    History,
+    /// Consume and Call (0.8): liveliness reads on the `@zk` subtree of each
+    /// service named (§8.1).
+    Presence,
+    /// Call (§11.1): query on specific `…/@op/<op>` keys.
+    Call,
+    /// Contract bundles are open (§11.1).
+    Contracts,
+    /// Under `allow` (§11.2): another service's writes, serving and tokens,
+    /// denied.
+    DenyWrite,
+    /// Under `allow`: the reads a principal's grants do not name, denied on
+    /// ingress.
+    DenyRead,
+    /// Under `allow`: the same complement, denied on egress toward the
+    /// principal, which a wildcard selector does not escape: puts, tokens
+    /// and value replies are checked against their own concrete keys.
+    DenyReceive,
+    /// Under `allow` (#684, F-80): no principal declares a queryable in the
+    /// routers' admin space, `@/**`, which the routers serve themselves.
+    DenyAdminSpace,
+    /// A far router in a south region (§8.5, U23): this router's queryables
+    /// over what the far side may query, declared toward it, without which
+    /// it routes no query here (measured, #612 FJ7).
+    FaceDeclarations,
+    /// A constrained face (§8.5): no `@zk` traffic across it.
+    FacePresence,
+    /// A constrained face (§8.5): no `@stream` keys across it.
+    FaceStream,
+}
+
+impl AclGrantKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AclGrantKind::Own => "own",
+            AclGrantKind::FanIn => "fan_in",
+            AclGrantKind::FanInReply => "fan_in_reply",
+            AclGrantKind::Consume => "consume",
+            AclGrantKind::History => "history",
+            AclGrantKind::Presence => "presence",
+            AclGrantKind::Call => "call",
+            AclGrantKind::Contracts => "contracts",
+            AclGrantKind::DenyWrite => "deny_write",
+            AclGrantKind::DenyRead => "deny_read",
+            AclGrantKind::DenyReceive => "deny_receive",
+            AclGrantKind::DenyAdminSpace => "deny_admin_space",
+            AclGrantKind::FaceDeclarations => "face_declarations",
+            AclGrantKind::FacePresence => "face_presence",
+            AclGrantKind::FaceStream => "face_stream",
+        }
+    }
 }
 
 /// One subject, as `AclConfigSubjects` will carry it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AclSubject {
     pub id: String,
-    pub role: Role,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cert_common_names: Vec<String>,
-    /// Prototyping only (`--allow-zid-subjects`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub zids: Vec<String>,
-    /// zenoh `usrpwd` user names (v1.49).
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub usernames: Vec<String>,
-    /// A constrained face (RFC 09 §4, v1.43) is selected by its transport,
-    /// never by an identity: the link protocols and interfaces that pick it.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub link_protocols: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub interfaces: Vec<String>,
-}
-
-/// One `downsampling` rule of a constrained face (RFC 09 §4, v1.43): a
-/// `link`-exposed subject crossing at most `freq` times a second, egress
-/// puts only — dropping on ingress saves no airtime.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct AclDownsample {
-    pub key_expr: String,
-    pub freq: f64,
-}
-
-/// A constrained face to plan (RFC 09 §4, v1.43): which transport selects
-/// it, and what a `link`-exposed subject may cost on it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FaceSpec {
-    /// The subject id the face is emitted under.
-    pub id: String,
-    /// `link_protocols` of the zenoh subject — a unixsock-stream link
-    /// reports no interface name in zenoh 1.10, so a modem lane is selected
-    /// by protocol.
-    pub link_protocols: Vec<String>,
-    /// `interfaces` of the zenoh subject.
-    pub interfaces: Vec<String>,
-    /// What a `link`-exposed subject may cost.
-    pub interval: LinkInterval,
-}
-
-/// The rate a constrained face affords a `link`-exposed subject.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkInterval {
-    /// No rate is affordable (a billed satellite channel): `link` subjects
-    /// are denied like `host` ones, and no downsampling block is emitted.
-    None,
-    /// At most one sample every this many seconds, per subject.
-    EverySecs(u64),
+    /// What it runs: service and archive addresses, `tool.<name>`. Not a
+    /// zenoh field: the JSON5 block carries it as a comment.
+    pub runs: Vec<String>,
 }
 
 /// One policy, as `AclConfigPolicyEntry` will carry it.
@@ -416,12 +456,75 @@ pub struct AclPolicy {
     pub subjects: Vec<String>,
 }
 
-/// One thing the plan wants said beside a principal or the fleet.
+/// The constrained face planned with the block (§8.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AclFace {
+    pub attach: FaceAttach,
+    /// The far side's principal: the gateway session, or the far router.
+    pub far: String,
+    /// The far router's `region_name`, for a south region.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+}
+
+/// How the far side of a constrained face attaches (§8.5, U23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaceAttach {
+    /// One far-side session, or a gateway session, as a client of the near
+    /// router: it receives only the declarations its interests ask for.
+    Client,
+    /// A far router in a south region of the near router (`gateway.south`):
+    /// declarations cross on interest, as to a client.
+    SouthRegion,
+    /// A far router linked router to router. **Never planned**: a deny there
+    /// hides the declarations from the far side, but their key strings still
+    /// cross (§8.5, §11.3). Here so the refusal can name it.
+    Router,
+}
+
+impl FaceAttach {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FaceAttach::Client => "client",
+            FaceAttach::SouthRegion => "south-region",
+            FaceAttach::Router => "router",
+        }
+    }
+}
+
+/// The near router's `gateway` block, as `GatewayConf` will carry it
+/// (`zenoh-config-1.10.1/src/gateway.rs`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AclGateway {
+    /// One entry per south subregion; a remote takes the first whose
+    /// filters match it.
+    pub south: Vec<GatewaySouth>,
+}
+
+/// One south subregion: a remote matches it when it matches any filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GatewaySouth {
+    pub filters: Vec<GatewayFilter>,
+}
+
+/// One filter: a remote matches it when it matches every field given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GatewayFilter {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub region_names: Vec<String>,
+}
+
+/// One thing the plan wants said beside a principal or a holder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AclWarning {
     pub kind: AclWarningKind,
+    /// The principal, service, archive or tool it is about, when it is about
+    /// one.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub principal: Option<String>,
+    pub about: Option<String>,
     pub text: String,
     pub cite: String,
 }
@@ -430,64 +533,53 @@ pub struct AclWarning {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AclWarningKind {
-    /// No registry was asked, so `no-remote-actions` denies the
-    /// convention's `set` leaf rather than the declared write set.
-    WriteSetNotNarrowed,
-    /// The registry declares no write procedure at all; the deny is
-    /// omitted because zenoh refuses an empty `key_exprs`.
-    NoWriteProcedures,
-    /// The enrollment claims a plane no host producer in the registry
-    /// declares; the plane's rule is omitted.
-    PlaneNotDeclared,
-    /// A `zids` subject, admitted under `--allow-zid-subjects`.
-    ZidSubject,
-    /// A role the fleet has none of — a console-less or catalog-less fleet
-    /// is legal, but rarely what was meant.
-    RoleAbsent,
-    /// A principal's `writes` grant was asked without a registry: the deny
-    /// is the unnarrowed leaf, nothing can be carved from it, so the grant
-    /// is not emitted and the deny stays whole (v1.43).
-    GrantNotNarrowed,
-    /// A `writes` pattern intersects no declared write procedure (v1.43).
-    GrantMatchesNothing,
-    /// A `writes` pattern is narrower than the declared write it falls in
-    /// (v1.49): no finite deny includes every key of that write but the
-    /// grant's, so the deny keeps it whole and the grant is not emitted.
-    GrantCannotCarve,
-    /// On a constrained face: entries that cross because they are `fleet`
-    /// or declare no exposure — said, not denied (v1.43).
-    FaceCrosses,
-    /// On a constrained face: a `link`- or `fleet`-exposed procedure is cut
-    /// with the plane, because a plane is denied whole (fact 6) (v1.43).
-    FaceCutsPlane,
-    /// On a constrained face: two `link` subjects' patterns intersect and
-    /// would share one downsampling timer (v1.43).
-    FaceRulesIntersect,
+    /// The posture is `allow`: the facts it rests on are stated (§11.2,
+    /// §11.3).
+    AllowPosture,
+    /// A service implements a contract whose required role the enrollment
+    /// leaves unbound: the owner will not start (§3.2).
+    RoleUnbound,
+    /// A binding or call names an exact provider no `[[service]]` or
+    /// `[[archive]]` declares: it gets no Own grant from this plan.
+    ProviderNotEnrolled,
+    /// A binding or call names an enrolled provider whose `implements` does
+    /// not list the interface.
+    ProviderDoesNotImplement,
+    /// A service, archive or tool no placed principal runs: none of its
+    /// grants is emitted.
+    NotRun,
+    /// `history = true` on a binding none of whose resources declares
+    /// `history`: no `@adv` subtree is granted.
+    HistoryNotDeclared,
+    /// `implements` names an interface whose contract was not given: the
+    /// service's `@adv` subtrees and, under `allow`, its complement are not
+    /// known from it.
+    ContractNotGiven,
+    /// Under `allow`: part of a surface is granted and the rest cannot be
+    /// denied by inclusion (§11.3), so the members no other principal is
+    /// granted stay readable.
+    ComplementPartial,
 }
 
 impl AclWarningKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            AclWarningKind::WriteSetNotNarrowed => "write_set_not_narrowed",
-            AclWarningKind::NoWriteProcedures => "no_write_procedures",
-            AclWarningKind::PlaneNotDeclared => "plane_not_declared",
-            AclWarningKind::ZidSubject => "zid_subject",
-            AclWarningKind::RoleAbsent => "role_absent",
-            AclWarningKind::GrantNotNarrowed => "grant_not_narrowed",
-            AclWarningKind::GrantMatchesNothing => "grant_matches_nothing",
-            AclWarningKind::GrantCannotCarve => "grant_cannot_carve",
-            AclWarningKind::FaceCrosses => "face_crosses",
-            AclWarningKind::FaceCutsPlane => "face_cuts_plane",
-            AclWarningKind::FaceRulesIntersect => "face_rules_intersect",
+            AclWarningKind::AllowPosture => "allow_posture",
+            AclWarningKind::RoleUnbound => "role_unbound",
+            AclWarningKind::ProviderNotEnrolled => "provider_not_enrolled",
+            AclWarningKind::ProviderDoesNotImplement => "provider_does_not_implement",
+            AclWarningKind::NotRun => "not_run",
+            AclWarningKind::HistoryNotDeclared => "history_not_declared",
+            AclWarningKind::ContractNotGiven => "contract_not_given",
+            AclWarningKind::ComplementPartial => "complement_partial",
         }
     }
 }
 
-/// One principal the plan refused to enrol.
+/// One principal the plan refused to place.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AclRefusal {
-    /// The principal as the file named it: its id, CN, user or zid, or its
-    /// index.
+    /// The principal as the file named it: its id, user or CN, zid, or index.
     pub principal: String,
     pub reason: String,
     pub cite: String,
@@ -495,18 +587,14 @@ pub struct AclRefusal {
 
 // ── The observed block ────────────────────────────────────────────────────
 
-/// The `access_control` block as zenoh's own loader parsed it — the observed
+/// The `access_control` block as zenoh's own loader parsed it: the observed
 /// side of `--check --against <router.json5>`.
 ///
-/// Field for field `AclConfig` (`zenoh-config-1.10.0/src/lib.rs`), so what
+/// Field for field `AclConfig` (`zenoh-config-1.10.1/src/lib.rs`), so what
 /// is compared is what `zenohd` would run. Read from the router's config
-/// **file**, because zenoh 1.10's admin space does not serve it: the
-/// adminspace registers GET handlers for the root document, `metrics`,
-/// `linkstate`, `subscriber`, `publisher`, `queryable`, `querier`, `token`,
-/// `route/successor` and `plugins` — `config/**` is a *subscriber* for
-/// runtime edits, never a queryable, and the root document carries no
-/// `access_control` (`zenoh-1.10.0/src/net/runtime/adminspace.rs`,
-/// `add_handler!` and `local_data`).
+/// **file**: zenoh 1.10's admin space serves no GET under `config/**` (a
+/// subscriber there takes runtime edits; `zenoh-1.10.1/src/net/runtime/
+/// adminspace.rs`), so the running block is not observable (§11.3).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AclConfigDoc {
     #[serde(default)]
@@ -527,7 +615,7 @@ fn deny() -> String {
 
 /// zenoh serializes an absent list as `null` (`rules: Option<Vec<_>>`,
 /// `flows: Option<NEVec<_>>`), and serde's `default` covers a *missing*
-/// field only — a `null` into a `Vec` is an error. Read both as empty.
+/// field only: a `null` into a `Vec` is an error. Read both as empty.
 fn null_as_empty<'de, D, T>(d: D) -> std::result::Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -550,9 +638,8 @@ pub struct AclRuleDoc {
     pub permission: String,
 }
 
-/// `AclConfigSubjects`, as parsed — every property zenoh 1.10 knows, so a
-/// check can compare the ones the plan carries and name the ones it does
-/// not.
+/// `AclConfigSubjects`, as parsed: every property zenoh 1.10 knows, so a
+/// check compares the ones the plan carries and names the ones it does not.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AclSubjectDoc {
     pub id: String,
@@ -585,20 +672,16 @@ pub struct AclPolicyDoc {
 /// block a router would run.
 #[derive(Debug, Clone, Serialize)]
 pub struct AclCheck {
-    pub base: String,
-    /// Where the observed block came from (RFC 13 §3 O5).
+    pub namespace: String,
+    /// Where the observed block came from.
     pub against: String,
     pub planned_rules: usize,
     pub observed_rules: usize,
     pub planned_subjects: usize,
     pub observed_subjects: usize,
     pub findings: Vec<AclFinding>,
-    /// The interest-propagation probe — whether a consumer's declared
-    /// interest reaches the publishers' faces. **Not asked**: the fact is
-    /// observable only from the publisher's side (its matching listener,
-    /// RFC 07 §1), and a check that reads a config file has no publisher to
-    /// ask; faking it from the consumer side would be a verdict on nothing.
-    pub interest_probe: Judgement,
+    /// The claim judged is *the block differs from the plan*: a finding is
+    /// `established`, a block carrying the plan whole is `not_established`.
     pub judgement: Judgement,
 }
 
@@ -606,8 +689,8 @@ pub struct AclCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AclFinding {
     pub kind: AclFindingKind,
-    /// The rule, subject or policy id concerned — or the CN, for
-    /// `unknown_cn`.
+    /// The rule, subject or policy id concerned; the identity, for
+    /// `unknown_identity`; `gateway.south`, for `gateway_differs`.
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub planned: Option<String>,
@@ -618,29 +701,32 @@ pub struct AclFinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AclFindingKind {
-    /// `enabled: false` — the block is there and does nothing.
+    /// `enabled: false`: the block is there and does nothing.
     Disabled,
     DefaultPermissionDiffers,
     /// Planned, and the block does not carry it.
     RuleMissing,
     /// Configured, and the plan does not name it.
     RuleExtra,
-    /// Same id, different permission, flows, messages or key expressions.
+    /// Same id, a different permission, flows, messages or key expressions.
     RuleDiffers,
     SubjectMissing,
     SubjectExtra,
     /// Same id, a different value of a property the plan carries.
     SubjectDiffers,
-    /// A configured subject bound by a property the plan does not carry
-    /// for it (`interfaces`, `usernames`, `link_protocols`) — on a subject
-    /// the plan does not know, any of them.
+    /// A configured subject bound by a property the plan never carries
+    /// (`zids`, `interfaces`, `link_protocols`), or by one it does not carry
+    /// for that subject.
     SubjectUnplannedProperty,
     /// A planned policy (rule set × subject set) the block does not carry.
     PolicyMissing,
     /// A configured policy the plan does not carry.
     PolicyExtra,
-    /// A configured CN the enrollment does not know.
-    UnknownCn,
+    /// A configured CN or user name the enrollment does not know.
+    UnknownIdentity,
+    /// The near router's `gateway.south` does not place the far region as
+    /// planned (§8.5).
+    GatewayDiffers,
 }
 
 impl AclFindingKind {
@@ -657,7 +743,8 @@ impl AclFindingKind {
             AclFindingKind::SubjectUnplannedProperty => "subject_unplanned_property",
             AclFindingKind::PolicyMissing => "policy_missing",
             AclFindingKind::PolicyExtra => "policy_extra",
-            AclFindingKind::UnknownCn => "unknown_cn",
+            AclFindingKind::UnknownIdentity => "unknown_identity",
+            AclFindingKind::GatewayDiffers => "gateway_differs",
         }
     }
 }
@@ -665,15 +752,16 @@ impl AclFindingKind {
 // ── --explain ─────────────────────────────────────────────────────────────
 
 /// `zenctl acl gen --explain <principal> <key> <message>`: does this
-/// principal hold this grant, via which rules, in which direction.
+/// principal hold this message on this key, via which rules, in which
+/// direction.
 #[derive(Debug, Clone, Serialize)]
 pub struct AclExplain {
     pub principal: String,
     pub key: String,
     pub message: AclMessage,
-    pub base: String,
-    /// One answer per direction — a grant that holds on ingress and not on
-    /// egress is exactly the fact-4 failure mode.
+    pub namespace: String,
+    /// One answer per direction: a grant that holds on ingress and not on
+    /// egress is exactly how a fan-in fails (§11.2).
     pub ingress: AclDirection,
     pub egress: AclDirection,
 }
@@ -683,10 +771,10 @@ pub struct AclExplain {
 pub struct AclDirection {
     pub decision: AclDecision,
     /// Every rule of the principal's policies whose messages carry the kind
-    /// and whose key expressions include the key, in this direction — deny
-    /// and allow both, so the reader sees what deny beat.
+    /// and whose key expressions include the key, in this direction: deny
+    /// and allow both, so the reader sees what a deny beat.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub via: Vec<AclGrant>,
+    pub via: Vec<AclVia>,
     pub reason: String,
 }
 
@@ -698,8 +786,7 @@ pub enum AclDecision {
     Denied,
     /// No rule of the principal's includes it: `default_permission: deny`.
     DeniedByDefault,
-    /// No rule of the face's includes it, and the face's block runs
-    /// `default_permission: allow` (RFC 09 §4, v1.43): it crosses.
+    /// No deny of the principal's includes it: `default_permission: allow`.
     AllowedByDefault,
 }
 
@@ -716,12 +803,12 @@ impl AclDecision {
 
 /// One rule that includes the key for the message kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct AclGrant {
+pub struct AclVia {
     pub rule: String,
     pub permission: AclPermission,
     /// The key expression of the rule that includes the key.
     pub key_expr: String,
-    pub purpose: String,
+    pub grant: AclGrantKind,
 }
 
 #[cfg(test)]
@@ -729,58 +816,79 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The enrollment parses as its doc comment shows it, and a typo is a
+    /// refusal, not a silently ignored intent.
     #[test]
     fn the_enrollment_file_parses_as_documented() {
         let e: Enrollment = toml::from_str(
             r#"
-base = "zensight"
-
-[fleet]
-catalog_adv = true
-salt = "example-salt-v1"
+namespace = "fleet-a"
 
 [[principal]]
-cn = "h-3fa9c2d41b7e"
-role = "host"
-origin = "h-3fa9c2d41b7e"
-adv = true
-blob_seed = true
-media = true
+user     = "thruster-l"
+services = ["vehicle-01/thruster-l"]
 
-[[principal]]
-cn = "zensight-console"
-role = "console"
-remote_actions = true
+[[service]]
+address    = "vehicle-01/thruster-l"
+implements = ["thruster.v1"]
 
-[[principal]]
-cn = "zensight-desired"
-role = "desired-author"
-origin = "@desired"
+[service.bindings.cmd]
+providers = ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"]
+
+[[service]]
+address = "vehicle-01/executor"
+[service.bindings.plan]
+interface = "mission_plan.v1"
+providers = ["ground/fleet-mgr"]
+params    = { vehicle = "self.system" }
+
+[[service.calls]]
+interface  = "nav.v2"
+providers  = ["vehicle-01/navigation"]
+operations = ["set_origin"]
+
+[[archive]]
+address = "vehicle-01/archive"
+records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
+peers   = ["ground/archive"]
+
+[[tool]]
+name = "ops"
+[tool.bindings.netif]
+interface = "tc.netif.v1"
+providers = ["*/tc"]
+history   = true
 "#,
         )
         .unwrap();
-        assert_eq!(e.base.as_deref(), Some("zensight"));
-        assert!(e.fleet.catalog_adv);
-        assert_eq!(e.fleet.salt.as_deref(), Some("example-salt-v1"));
-        assert_eq!(e.principal.len(), 3);
-        assert_eq!(e.principal[0].role, Role::Host);
-        assert!(e.principal[0].adv && e.principal[0].blob_seed && e.principal[0].media);
-        assert_eq!(e.principal[1].role, Role::Console);
-        assert!(e.principal[1].remote_actions);
-        assert_eq!(e.principal[2].role, Role::DesiredAuthor);
-        assert_eq!(e.principal[2].origin.as_deref(), Some("@desired"));
-
-        // A typo is a refusal, not a silently ignored intent.
-        let bad = toml::from_str::<Enrollment>(
-            "[[principal]]\ncn = \"x\"\nrole = \"host\"\norigins = \"h-1\"\n",
+        assert_eq!(e.namespace.as_deref(), Some("fleet-a"));
+        assert_eq!(e.principal[0].user.as_deref(), Some("thruster-l"));
+        assert_eq!(e.principal[0].services, ["vehicle-01/thruster-l"]);
+        assert_eq!(e.service.len(), 2);
+        assert_eq!(e.service[0].implements, ["thruster.v1"]);
+        let cmd = &e.service[0].bindings["cmd"];
+        assert_eq!(cmd.interface, None);
+        assert_eq!(cmd.providers.len(), 3);
+        let plan = &e.service[1].bindings["plan"];
+        assert_eq!(plan.params["vehicle"], "self.system");
+        assert_eq!(
+            e.service[1].calls[0].operations.as_deref().unwrap(),
+            ["set_origin"]
         );
-        assert!(bad.is_err());
-        let bad = toml::from_str::<Enrollment>("[[principal]]\ncn = \"x\"\nrole = \"operator\"\n");
-        assert!(bad.is_err());
+        assert_eq!(e.archive[0].peers, ["ground/archive"]);
+        assert!(e.tool[0].bindings["netif"].history);
+
+        for bad in [
+            "[[principal]]\nuser = \"x\"\nservice = [\"a/b\"]\n",
+            "[[service]]\naddress = \"a/b\"\n[service.bindings.r]\nprovider = [\"a/c\"]\n",
+            "[[principal]]\nuser = \"x\"\nrole = \"host\"\n",
+        ] {
+            assert!(toml::from_str::<Enrollment>(bad).is_err(), "{bad}");
+        }
     }
 
     /// The nine message kinds spell exactly what zenoh 1.10's `AclMessage`
-    /// spells (`zenoh-config-1.10.0/src/lib.rs`), and round-trip.
+    /// spells, and round-trip.
     #[test]
     fn the_message_vocabulary_is_zenohs() {
         let spelled: Vec<serde_json::Value> = AclMessage::ALL
@@ -818,111 +926,124 @@ origin = "@desired"
     #[test]
     fn the_plan_pins_its_shape() {
         let plan = AclPlan {
-            base: "zensight".into(),
+            namespace: "fleet-a".into(),
             default_permission: AclPermission::Deny,
-            registry: Asked::NotAsked,
+            contracts: vec!["tc.netif.v1@sha256:00".into()],
+            face: None,
             rules: vec![AclRule {
-                id: "host-data-h-3fa9c2d41b7e".into(),
+                id: "own-in:h1/tc".into(),
                 permission: AclPermission::Allow,
-                flows: Some(vec![AclFlow::Ingress]),
-                messages: vec![
-                    AclMessage::Put,
-                    AclMessage::Delete,
-                    AclMessage::LivelinessToken,
-                ],
-                key_exprs: vec!["zensight/v1/h-3fa9c2d41b7e/**".into()],
-                purpose: "host-data".into(),
-                cite: "RFC 09 §3 fact 1".into(),
+                flows: vec![AclFlow::Ingress],
+                messages: vec![AclMessage::Put, AclMessage::Delete],
+                key_exprs: vec!["fleet-a/zk2/h1/tc/**".into()],
+                grant: AclGrantKind::Own,
+                holder: Some("h1/tc".into()),
+                cite: "§11.1 Own".into(),
             }],
             subjects: vec![AclSubject {
-                id: "h-3fa9c2d41b7e".into(),
-                role: Role::Host,
-                cert_common_names: vec!["h-3fa9c2d41b7e".into()],
-                zids: vec![],
-                usernames: vec![],
-                link_protocols: vec![],
-                interfaces: vec![],
+                id: "tc-h1".into(),
+                cert_common_names: vec![],
+                usernames: vec!["tc-h1".into()],
+                runs: vec!["h1/tc".into()],
             }],
-            downsampling: vec![],
             policies: vec![AclPolicy {
-                id: "h-3fa9c2d41b7e".into(),
-                rules: vec!["host-data-h-3fa9c2d41b7e".into(), "interest-prop".into()],
-                subjects: vec!["h-3fa9c2d41b7e".into()],
+                id: "tc-h1".into(),
+                rules: vec!["own-in:h1/tc".into()],
+                subjects: vec!["tc-h1".into()],
             }],
+            gateway: None,
             warnings: vec![AclWarning {
-                kind: AclWarningKind::WriteSetNotNarrowed,
-                principal: None,
-                text: "no registry asked".into(),
-                cite: "RFC 13 §3 O4".into(),
+                kind: AclWarningKind::RoleUnbound,
+                about: Some("h1/tc".into()),
+                text: "unbound".into(),
+                cite: "§3.2".into(),
             }],
             refusals: vec![AclRefusal {
                 principal: "principal #2".into(),
-                reason: "a host needs origin or machine_id".into(),
-                cite: "RFC 03 §4 D6".into(),
+                reason: "a zid".into(),
+                cite: "§11.3".into(),
             }],
         };
         assert_eq!(
             serde_json::to_value(&plan).unwrap(),
             json!({
-                "base": "zensight",
+                "namespace": "fleet-a",
                 "default_permission": "deny",
+                "contracts": ["tc.netif.v1@sha256:00"],
                 "rules": [{
-                    "id": "host-data-h-3fa9c2d41b7e",
+                    "id": "own-in:h1/tc",
                     "permission": "allow",
                     "flows": ["ingress"],
-                    "messages": ["put", "delete", "liveliness_token"],
-                    "key_exprs": ["zensight/v1/h-3fa9c2d41b7e/**"],
-                    "purpose": "host-data",
-                    "cite": "RFC 09 §3 fact 1",
+                    "messages": ["put", "delete"],
+                    "key_exprs": ["fleet-a/zk2/h1/tc/**"],
+                    "grant": "own",
+                    "holder": "h1/tc",
+                    "cite": "§11.1 Own",
                 }],
                 "subjects": [{
-                    "id": "h-3fa9c2d41b7e",
-                    "role": "host",
-                    "cert_common_names": ["h-3fa9c2d41b7e"],
+                    "id": "tc-h1",
+                    "usernames": ["tc-h1"],
+                    "runs": ["h1/tc"],
                 }],
                 "policies": [{
-                    "id": "h-3fa9c2d41b7e",
-                    "rules": ["host-data-h-3fa9c2d41b7e", "interest-prop"],
-                    "subjects": ["h-3fa9c2d41b7e"],
+                    "id": "tc-h1",
+                    "rules": ["own-in:h1/tc"],
+                    "subjects": ["tc-h1"],
                 }],
                 "warnings": [{
-                    "kind": "write_set_not_narrowed",
-                    "text": "no registry asked",
-                    "cite": "RFC 13 §3 O4",
+                    "kind": "role_unbound",
+                    "about": "h1/tc",
+                    "text": "unbound",
+                    "cite": "§3.2",
                 }],
                 "refusals": [{
                     "principal": "principal #2",
-                    "reason": "a host needs origin or machine_id",
-                    "cite": "RFC 03 §4 D6",
+                    "reason": "a zid",
+                    "cite": "§11.3",
                 }],
             }),
-            "a not-asked registry is absent; a flowless rule omits `flows`; \
-             empty zids are absent"
+            "no face, no gateway: absent; empty CNs: absent"
         );
 
-        // With a registry asked and a flowless rule.
+        // A south-region face, and a shared rule without a holder.
         let mut plan = plan;
-        plan.registry = Asked::Asked(AclRegistryFacts {
-            slices: 2,
-            media_producers: vec!["parallax".into()],
-            blob_producers: vec![],
-            write_procedures: vec!["systemd/action/set".into()],
-            sensitive_procedures: vec![],
+        plan.face = Some(AclFace {
+            attach: FaceAttach::SouthRegion,
+            far: "ground".into(),
+            region: Some("ground".into()),
         });
-        plan.rules[0].flows = None;
+        plan.gateway = Some(AclGateway {
+            south: vec![
+                GatewaySouth {
+                    filters: vec![GatewayFilter {
+                        modes: vec!["peer".into(), "client".into()],
+                        region_names: vec![],
+                    }],
+                },
+                GatewaySouth {
+                    filters: vec![GatewayFilter {
+                        modes: vec![],
+                        region_names: vec!["ground".into()],
+                    }],
+                },
+            ],
+        });
+        plan.rules[0].holder = None;
         plan.warnings.clear();
         plan.refusals.clear();
         let v = serde_json::to_value(&plan).unwrap();
         assert_eq!(
-            v["registry"],
-            json!({
-                "slices": 2,
-                "media_producers": ["parallax"],
-                "blob_producers": [],
-                "write_procedures": ["systemd/action/set"],
-            })
+            v["face"],
+            json!({"attach": "south_region", "far": "ground", "region": "ground"})
         );
-        assert!(v["rules"][0].get("flows").is_none());
+        assert_eq!(
+            v["gateway"],
+            json!({"south": [
+                {"filters": [{"modes": ["peer", "client"]}]},
+                {"filters": [{"region_names": ["ground"]}]},
+            ]})
+        );
+        assert!(v["rules"][0].get("holder").is_none());
         assert!(v.get("warnings").is_none());
         assert!(v.get("refusals").is_none());
     }
@@ -936,16 +1057,21 @@ origin = "@desired"
             "default_permission": "deny",
             "rules": [{
                 "id": "r1",
-                "key_exprs": ["zensight/v1/**"],
+                "key_exprs": ["zk2/**"],
                 "messages": ["put"],
                 "permission": "allow",
             }],
-            "subjects": [{ "id": "s1", "cert_common_names": ["h-1"] }],
+            "subjects": [{ "id": "s1", "usernames": ["u1"] }],
             "policies": [{ "rules": ["r1"], "subjects": ["s1"] }],
         }))
         .unwrap();
         assert!(doc.enabled);
         assert_eq!(doc.rules[0].flows, None);
+        assert_eq!(doc.policies[0].id, None);
+        assert_eq!(
+            doc.subjects[0].usernames.as_deref(),
+            Some(&["u1".to_string()][..])
+        );
         // What zenoh's loader hands back for an empty block: nulls, not
         // absences.
         let empty: AclConfigDoc = serde_json::from_value(json!({
@@ -954,17 +1080,12 @@ origin = "@desired"
         }))
         .unwrap();
         assert!(empty.rules.is_empty() && empty.subjects.is_empty() && empty.policies.is_empty());
-        assert_eq!(doc.policies[0].id, None);
-        assert_eq!(
-            doc.subjects[0].cert_common_names.as_deref(),
-            Some(&["h-1".to_string()][..])
-        );
     }
 
     #[test]
     fn the_check_pins_its_shape() {
         let check = AclCheck {
-            base: "zensight".into(),
+            namespace: String::new(),
             against: "router.json5".into(),
             planned_rules: 3,
             observed_rules: 2,
@@ -972,17 +1093,16 @@ origin = "@desired"
             observed_subjects: 1,
             findings: vec![AclFinding {
                 kind: AclFindingKind::RuleMissing,
-                id: "interest-prop".into(),
-                planned: Some("egress declare_subscriber …".into()),
+                id: "fan-in:h1/tc".into(),
+                planned: Some("allow egress query zk2/*/tc/**".into()),
                 observed: None,
             }],
-            interest_probe: Judgement::NotAsked,
             judgement: Judgement::Established,
         };
         assert_eq!(
             serde_json::to_value(&check).unwrap(),
             json!({
-                "base": "zensight",
+                "namespace": "",
                 "against": "router.json5",
                 "planned_rules": 3,
                 "observed_rules": 2,
@@ -990,10 +1110,9 @@ origin = "@desired"
                 "observed_subjects": 1,
                 "findings": [{
                     "kind": "rule_missing",
-                    "id": "interest-prop",
-                    "planned": "egress declare_subscriber …",
+                    "id": "fan-in:h1/tc",
+                    "planned": "allow egress query zk2/*/tc/**",
                 }],
-                "interest_probe": { "answer": "not_asked" },
                 "judgement": { "answer": "established" },
             })
         );
@@ -1002,27 +1121,19 @@ origin = "@desired"
     #[test]
     fn the_explain_pins_its_shape() {
         let explain = AclExplain {
-            principal: "zensight-console".into(),
-            key: "zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set".into(),
+            principal: "frontend".into(),
+            key: "zk2/*/tc/tc.netif.v1/state/**".into(),
             message: AclMessage::Query,
-            base: "zensight".into(),
+            namespace: String::new(),
             ingress: AclDirection {
-                decision: AclDecision::Denied,
-                via: vec![
-                    AclGrant {
-                        rule: "no-remote-actions".into(),
-                        permission: AclPermission::Deny,
-                        key_expr: "zensight/v1/*/@rpc/*/**/set".into(),
-                        purpose: "no-remote-actions".into(),
-                    },
-                    AclGrant {
-                        rule: "ops-sub".into(),
-                        permission: AclPermission::Allow,
-                        key_expr: "zensight/v1/*/@rpc/**".into(),
-                        purpose: "ops-sub".into(),
-                    },
-                ],
-                reason: "deny wins".into(),
+                decision: AclDecision::Allowed,
+                via: vec![AclVia {
+                    rule: "consume-in:ops/frontend".into(),
+                    permission: AclPermission::Allow,
+                    key_expr: "zk2/*/tc/tc.netif.v1/state/**".into(),
+                    grant: AclGrantKind::Consume,
+                }],
+                reason: "consume-in:ops/frontend includes it".into(),
             },
             egress: AclDirection {
                 decision: AclDecision::DeniedByDefault,
@@ -1033,27 +1144,19 @@ origin = "@desired"
         assert_eq!(
             serde_json::to_value(&explain).unwrap(),
             json!({
-                "principal": "zensight-console",
-                "key": "zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set",
+                "principal": "frontend",
+                "key": "zk2/*/tc/tc.netif.v1/state/**",
                 "message": "query",
-                "base": "zensight",
+                "namespace": "",
                 "ingress": {
-                    "decision": "denied",
-                    "via": [
-                        {
-                            "rule": "no-remote-actions",
-                            "permission": "deny",
-                            "key_expr": "zensight/v1/*/@rpc/*/**/set",
-                            "purpose": "no-remote-actions",
-                        },
-                        {
-                            "rule": "ops-sub",
-                            "permission": "allow",
-                            "key_expr": "zensight/v1/*/@rpc/**",
-                            "purpose": "ops-sub",
-                        },
-                    ],
-                    "reason": "deny wins",
+                    "decision": "allowed",
+                    "via": [{
+                        "rule": "consume-in:ops/frontend",
+                        "permission": "allow",
+                        "key_expr": "zk2/*/tc/tc.netif.v1/state/**",
+                        "grant": "consume",
+                    }],
+                    "reason": "consume-in:ops/frontend includes it",
                 },
                 "egress": {
                     "decision": "denied_by_default",

@@ -1,7 +1,0 @@
-# A constrained face's enrollment (RFC 09 §4): the face is selected by its
-# transport and planned from the registry's `exposure` markers, so all this
-# file has to say is the base. A face router runs `default_permission:
-# "allow"` and cannot also run the principal plan, so the fleet's
-# certificate principals do not belong here — `acl gen --face` refuses them.
-
-base = "zensight"

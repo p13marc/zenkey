@@ -1,0 +1,178 @@
+# The walkthroughs' access control (docs/zk2/architecture.md §4; spec §11;
+# #612, FJ7), as vehicle-01's router sees them: one principal per vehicle
+# service, each a client of the router, and the ground segment as one more
+# principal, `ground`, which runs everything on the ground side. Over a
+# constrained face (§8.5) `ground` is the far router, or the gateway session:
+#
+#   zenctl acl gen --enrollment examples/zk2/acl/walkthrough.enrollment.toml \
+#                  --contracts examples/zk2/walkthrough --json5
+#   … --face constrained --attach south-region --far ground --region ground
+#
+# Access control is enforced per hop (§11.3): the ground router's own block
+# enrolls the ground services one by one, and vehicle-01 as one principal.
+
+# ── 4.2 the control loop ───────────────────────────────────────────────────
+
+[[principal]]
+user     = "thruster-l"
+services = ["vehicle-01/thruster-l"]
+
+[[principal]]
+user     = "thruster-r"
+services = ["vehicle-01/thruster-r"]
+
+[[principal]]
+user     = "teleop"
+services = ["vehicle-01/teleop"]
+
+[[principal]]
+user     = "autopilot"
+services = ["vehicle-01/autopilot"]
+
+[[principal]]
+user     = "safety"
+services = ["vehicle-01/safety"]
+
+[[service]]
+address    = "vehicle-01/thruster-l"
+implements = ["thruster.v1"]
+
+# The role thruster.v1 requires: its interface (twist_cmd.v1) and resources
+# (`cmd`) come from the contract's [requires.cmd], so the binding names the
+# providers alone, in priority order (arbitration.v1).
+[service.bindings.cmd]
+providers = ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"]
+
+[[service]]
+address    = "vehicle-01/thruster-r"
+implements = ["thruster.v1"]
+
+[service.bindings.cmd]
+providers = ["vehicle-01/safety", "vehicle-01/teleop", "vehicle-01/autopilot"]
+
+[[service]]
+address    = "vehicle-01/teleop"
+implements = ["twist_cmd.v1"]
+
+[[service]]
+address    = "vehicle-01/autopilot"
+implements = ["twist_cmd.v1"]
+
+[[service]]
+address    = "vehicle-01/safety"
+implements = ["twist_cmd.v1"]
+
+# ── navigation ─────────────────────────────────────────────────────────────
+
+[[principal]]
+user     = "navigation"
+services = ["vehicle-01/navigation"]
+
+[[service]]
+address    = "vehicle-01/navigation"
+implements = ["nav.v2", "health.v1"]
+
+# ── 4.1 the perception pipeline ────────────────────────────────────────────
+
+[[principal]]
+user     = "cam-front"
+services = ["vehicle-01/cam-front"]
+
+[[principal]]
+user     = "detector"
+services = ["vehicle-01/detector"]
+
+[[principal]]
+user     = "tracker"
+services = ["vehicle-01/tracker"]
+
+[[service]]
+address    = "vehicle-01/cam-front"
+implements = ["camera.v1"]
+
+# detections.v1 requires camera.v1's `image`, an explicit stream: the grant
+# names its verbatim `@stream` key, which no ambient selector reaches (§1.3).
+[[service]]
+address    = "vehicle-01/detector"
+implements = ["detections.v1"]
+
+[service.bindings.input]
+providers = ["vehicle-01/cam-front"]
+
+# A role of the tracker's own manifest, bound to every detector on the
+# vehicle: a wildcard at the service position, so each detector's egress
+# grant carries the tracker's selector (§11.2).
+[[service]]
+address = "vehicle-01/tracker"
+
+[service.bindings.sources]
+interface = "detections.v1"
+providers = ["vehicle-01/*"]
+
+# ── 4.3 commanding an intermittently connected vehicle ─────────────────────
+
+[[principal]]
+user     = "executor"
+services = ["vehicle-01/executor"]
+
+[[principal]]
+user     = "archive"
+archives = ["vehicle-01/archive"]
+
+# R2: `{vehicle} = self.system` binds the executor to its own plan,
+# plans/vehicle-01, and to no other vehicle's.
+[[service]]
+address = "vehicle-01/executor"
+
+[service.bindings.plan]
+interface = "mission_plan.v1"
+providers = ["ground/fleet-mgr"]
+params    = { vehicle = "self.system" }
+
+# The vehicle's archive records its plan against link loss, and aligns from
+# the ground's archive while the fleet manager is absent (§4.4).
+[[archive]]
+address = "vehicle-01/archive"
+records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
+peers   = ["ground/archive"]
+
+# ── the ground segment ─────────────────────────────────────────────────────
+
+[[principal]]
+user     = "ground"
+services = ["ground/fleet-mgr"]
+archives = ["ground/archive"]
+tools    = ["ops"]
+
+[[service]]
+address    = "ground/fleet-mgr"
+implements = ["mission_plan.v1"]
+
+[[archive]]
+address = "ground/archive"
+records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*"]
+
+# The operators' console: it reads the vehicle's navigation and thrusters,
+# and calls what it may: the thrusters' arm and disarm, navigation's
+# set_origin. Nothing else on the vehicle is callable from the ground.
+[[tool]]
+name = "ops"
+
+[tool.bindings.nav]
+interface = "nav.v2"
+providers = ["vehicle-01/navigation"]
+
+[tool.bindings.thrusters]
+interface = "thruster.v1"
+providers = ["vehicle-01/*"]
+resources = ["status"]
+
+[[tool.calls]]
+interface  = "thruster.v1"
+providers  = ["vehicle-01/thruster-l", "vehicle-01/thruster-r"]
+operations = ["arm", "disarm"]
+
+[[tool.calls]]
+interface  = "nav.v2"
+providers  = ["vehicle-01/navigation"]
+operations = ["set_origin"]

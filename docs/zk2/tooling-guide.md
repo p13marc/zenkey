@@ -103,7 +103,7 @@ zk2's instances, each normative where it lives:
     exactly like a selector no token matches (0.8). So a tool words absence
     as what its reader could see: "no token visible to this reader".
     Absence is a verdict only under grants that let the reader see presence
-    (§11.1).
+    (§11.1). `zenctl acl gen` grants every Consume and Call those reads.
 - **State (core §4.2, S4–S6).** Silence from the owner's GET is not "no
   value". A tool that then reads an archive presents the answer as
   **last-known**, never current, and says which archive answered.

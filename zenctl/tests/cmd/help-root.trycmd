@@ -33,7 +33,7 @@ Commands:
   schema       Payload schemas, as a contract's bundle carries them
   namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
-  acl          Router access control, generated from an enrollment file
+  acl          Router access control, generated from an enrollment and the contracts
   blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
@@ -102,7 +102,7 @@ Commands:
   schema       Payload schemas, as a contract's bundle carries them
   namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
-  acl          Router access control, generated from an enrollment file
+  acl          Router access control, generated from an enrollment and the contracts
   blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon

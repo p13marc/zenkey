@@ -1,16 +1,16 @@
-Router access control (RFC 09 §3, #392): a noun, because a grant is
-something declared — and the one verb under it plans, checks and explains.
+Router access control (zk2 spec §11; #612, FJ7): a noun, because a grant is
+something declared, and the one verb under it plans, checks and explains.
 
 ```console
 $ zenctl acl --help
-Router access control, generated from an enrollment file.
+Router access control, generated from an enrollment and the contracts.
 
-RFC 09 §3's grant matrix, generated from an enrollment file (#392).
+zk2's grant shapes (spec §11), compiled from an enrollment and the contracts into a router's `access_control` block (#612).
 
 Usage: zenctl acl <COMMAND>
 
 Commands:
-  gen   Generate the router's `access_control` block from an enrollment file
+  gen   Generate the router's `access_control` block from an enrollment
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -21,120 +21,139 @@ Options:
 
 ```console
 $ zenctl acl gen --help
-Generate the router's `access_control` block from an enrollment file
+Generate the router's `access_control` block from an enrollment
 
-CN ↔ role ↔ origin, one `[[principal]]` each (RFC 09 §3).
+zk2's three grant shapes (spec §11.1), compiled per principal from
+the enrollment and the contracts (`--contracts`):
 
-Four facts of zenoh ACL shape every rule, and each is a way a
-hand-written block fails silently: matching is keyexpr INCLUSION and
-`**` never crosses `@rpc`/`@media`/`@blob` (one rule per plane); `*`
-never covers `@catalog` (its own rule); rules alone are refused —
-subjects and policies are required; under default deny every
-DECLARATION needs allowing too. A fifth, from the reference
-deployment: a consumer's declares are checked on egress toward the
-publisher's face, so every publishing policy carries a shared
-egress-only `interest-prop` rule. With `--registry`, the planes are
-narrowed to what host producers declare and `no-remote-actions`
-denies exactly the declared write procedures; without one the plan
-says what it could not narrow. Field names are zenoh 1.10's
-(zenoh-config-1.10.0/src/lib.rs). Exit 1 when a principal was
-refused.
+  Own      put, delete, serve and declare tokens under the service's
+           prefix, each verbatim subtree spelled out (`**` never
+           crosses one): */@stream/**, */@state/**, */@op/**, @zk/**;
+           and the @adv subtrees where its contracts declare history
+  Consume  subscribe or GET on what its bindings name (R1, R2), the
+           @adv subtrees where it reads with history, and liveliness
+           reads on each provider's @zk/** (0.8)
+  Call     query on the specific …/@op/<op> keys, and the same
+           liveliness reads on each service called
 
-The enrollment file:
+Egress is checked by inclusion against the query's or subscription's
+own key (§11.2): every consumer or caller selector over what a
+provider serves joins its egress grant, and its ingress reply. Contract
+bundles are open. Under --default-permission allow, zenoh evaluates no
+allow rule, so each grant compiles into denies of its complement,
+enumerated from the contracts. Every rule names its grant and the fact
+it exists for. A principal the plan cannot place is refused, never
+dropped: exit 1.
 
-  base = "zensight"                 # optional; default --base
-  [fleet]
-  catalog_adv = true                # spell @catalog/**/@adv/**
-  salt = "zensight-host-id-v1"      # for machine_id → origin (RFC 06 §1)
+The enrollment file (examples/zk2/acl/ holds two):
+
+  namespace = "fleet-a"                  # optional; default --namespace
   [[principal]]
-  cn = "h-3fa9c2d41b7e"             # the certificate CN
-  role = "host"                     # host | catalog | console | desired-author | watch
-  origin = "h-3fa9c2d41b7e"         # or machine_id = "<32 hex>"; both must agree
-  adv = true                        # @adv sidecars
-  blob_seed = true                  # seeds the router @blob store
-  media = true                      # publishes @media
-  [[principal]]
-  cn = "zensight-console"
-  role = "console"
-  remote_actions = false            # true drops the no-remote-actions deny
-  [[principal]]
-  user = "ops"                      # a zenoh usrpwd user, in place of cn
-  role = "console"
-  writes = ["modem/config/*/*/set"] # per-resource write grants
+  user     = "thruster-l"                # a usrpwd user, or cn = "…"; never a zid
+  services = ["vehicle-01/thruster-l"]   # and archives = […], tools = […]
+  [[service]]
+  address    = "vehicle-01/thruster-l"
+  implements = ["thruster.v1"]
+  [service.bindings.cmd]                 # a role; interface and resources
+  providers = ["vehicle-01/teleop"]      #   from the contract's [requires]
+  [[service]]
+  address = "vehicle-01/executor"
+  [service.bindings.plan]
+  interface = "mission_plan.v1"          # a role of its own manifest
+  providers = ["ground/fleet-mgr"]
+  params    = { vehicle = "self.system" }
+  [[service.calls]]
+  interface  = "nav.v2"
+  providers  = ["vehicle-01/navigation"]
+  operations = ["set_origin"]            # default: every operation
+  [[archive]]
+  address = "vehicle-01/archive"
+  records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"]
+  peers   = ["ground/archive"]
+  [[tool]]
+  name = "ops"                           # bindings and calls, no address
 
 Usage: zenctl acl gen [OPTIONS] --enrollment <FILE>
 
 Options:
       --enrollment <FILE>
-          The enrollment file (TOML): CN or user ↔ role ↔ origin, one [[principal]] each. See `zenctl acl gen --help` for the shape
+          The enrollment file (TOML): principals, the services, archives and tools they run, their bindings and calls. See `zenctl acl gen --help` for the shape
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --default-permission <PERMISSION>
+          The router's default_permission (spec §11.2): `deny`, where grants are allow rules (RECOMMENDED), or `allow`, where zenoh evaluates no allow rule and each grant compiles into denies of its complement
+          
+          [default: deny]
+          [alias: --posture]
+          [possible values: deny, allow]
 
       --json5
-          Emit the router's `access_control` JSON5 block on stdout, a comment per rule naming its matrix row and its fact — pipe it into the router config. A foreign schema, so `--format` has no say over it
+          Emit the router config fragment on stdout: the `access_control` block, a comment per rule naming its grant and its fact, and for a south region the `gateway` block. A foreign schema, zenoh's, so `--format` has no say over it
 
       --check
-          Compare the plan against a router config file (`--against`): missing, extra and changed rules, subjects and policies, a CN the enrollment does not know. Exit 0 identical / 1 findings / 2 not asked.
+          Compare the plan against a router config file (`--against`): missing, extra and changed rules, subjects and policies, an identity the enrollment does not know, a south region not placed. Exit 0 identical / 1 findings / 2 not asked.
           
-          A file, not the admin space: zenoh 1.10 serves no GET on `@/<zid>/router/config/**` (it only subscribes to it for runtime edits), so the running block is not observable from the bus.
+          A file, not the bus: access control is enforced per hop and the running configuration is not observable (spec §11.3).
 
       --against <FILE>
           With --check: the router's JSON5 config file, read through zenoh's own loader so what is compared is what zenohd would run
 
       --explain <PRINCIPAL> <KEY> <MESSAGE>
-          Does PRINCIPAL (a subject id, CN or user) hold MESSAGE on KEY, via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0
-
-      --allow-zid-subjects
-          Admit `zid = "…"` subjects. Prototyping only: a ZID is not backed by authentication, and zenoh's own config says so
+          Does PRINCIPAL (a subject id, user or CN) hold MESSAGE on KEY (the wire key, namespace included), via which rules, in which direction? Inclusion by zenoh-keyexpr. Exit 0
 
       --face <constrained>
-          Plan a constrained face instead of the principals (RFC 09 §4): the `access_control` and `downsampling` blocks that keep the registry's `host`-exposed surfaces off one link and cap the `link`-exposed ones. Needs `--registry` — the markers are the registry's — and a `--link-protocol` or `--link-interface` to select the face. A `user` console or watch in the enrollment is planned onto the face (v1.49); every other principal is refused
+          Guard a constrained face too (spec §8.5): the far principal's policy carries the `@zk` and `@stream` denies, and loses its presence and contract grants (bindings resolve statically there, R7)
 
           Possible values:
-          - constrained: A bandwidth-limited leaf: radio, cell, tactical, satellite
+          - constrained: A bandwidth-limited link: radio, cell, tactical, satellite
 
-      --link-protocol <PROTOCOL>
-          With --face: a link protocol that selects the face (`unixsock-stream`, `tcp`, …), repeatable. A unixsock-stream link reports no interface name in zenoh 1.10, so a modem lane is selected this way
+      --attach <ATTACHMENT>
+          With --face: how the far side attaches. `client`: one far-side or gateway session, a client of this router. `south-region`: a far router in a south region of this one (`gateway.south`; needs --region). `router` is refused: a deny on a router-to-router link hides the declarations but lets their key strings cross
 
-      --link-interface <IFACE>
-          With --face: an interface that selects the face (`wlan0`), repeatable
+          Possible values:
+          - client:       One far-side session, or a gateway session, as a client
+          - south-region: A far router in a south region of this router
+          - router:       A far router linked router to router: refused, with why
 
-      --link-interval <SECS|none>
-          With --face: what a `link`-exposed subject may cost — at most one sample every SECS per subject (a `downsampling` rule each), or `none` when no rate is affordable (a billed channel), which keeps the `link` subjects home too. Required with --face, because the default is allow
+      --far <PRINCIPAL>
+          With --face: the far side's principal (its id, user or CN): the gateway session, or the far router
 
-      --base <BASE>
-          The deployment base — the first chunk(s) of every key on the wire.
+      --region <NAME>
+          With --attach south-region: the far router's `region_name`, which this router's `gateway.south` lists
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
           
-          Applications set this as their Zenoh session `namespace` and never spell it. `zenctl` deliberately does **not**: a debug tool runs un-namespaced so it sees the wire as it really is, including traffic from outside the deployment (RFC 09 §5) — which is what lets it spot a leak. So it has to be told what the base is. Resolution: flag > env > active context (`zenctl context …`) > empty — the base-less bus-root deployment, the RFC v1.6 default, whose wire keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2 services use.
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
           
           [env: ZENCTL_BASE=]
+          [alias: --base]
 
       --context <NAME>
           Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
 
-      --registry <DIR>
-          Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with the live bus as a union (RFC 08 §6.1): a producer's served slice wins, these files fill the gaps, and a disagreement is reported — never silently overwritten. With the bus unreachable they answer alone
-
   -c, --connect <CONNECT>
           Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
           
-          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through (RFC 09 §5). An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse — no `tcp/`, say — is refused by name (exit 2).
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
 
   -l, --listen <LISTEN>
-          Endpoint to listen on, repeatable.
-          
-          Listening makes the session a zenoh peer — reachable, and part of the mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
+          Endpoint to listen on, repeatable — which makes the session a peer
 
       --scouting
-          Enable multicast scouting.
-          
-          OFF by default — with a --zenoh-config too, unless the file itself states `scouting.multicast.enabled` — and you should think before turning it on: a scouting explorer joins whatever mesh it can find, which is how a throwaway session ends up talking to a production fleet.
+          Enable multicast scouting (off by default, and think first)
 
       --timeout <SECS>
-          Seconds to wait for replies (default 5; a context may override the default). Reply-wait only: a passive observation window is `--for`
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
 
       --zenoh-config <FILE>
-          Zenoh JSON5 config file (#122): the passthrough that reaches a secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base layer; --connect/--listen/--scouting apply on top when given (flag > env > context > file). A file that sets a session namespace is refused — explorers run un-namespaced (RFC 09 §5).
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
           
-          Only what the file states counts: one that does not name `mode` gets the explorer's client session (a peer when it listens), and one that does not name `scouting.multicast.enabled` gets multicast off — zenoh's own defaults (peer, multicast on) do not leak in.
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
           
           [env: ZENCTL_ZENOH_CONFIG=]
 

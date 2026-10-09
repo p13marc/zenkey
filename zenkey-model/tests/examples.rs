@@ -12,7 +12,8 @@ fn examples() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
 }
 
-/// Every contract file: `*.toml`, except deployment files (`*.bindings.toml`).
+/// Every contract file: `*.toml`, except deployment files (`*.bindings.toml`,
+/// and the access-control enrollments, `*.enrollment.toml`, #612 FJ7).
 fn contract_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(dir).unwrap().flatten() {
@@ -22,6 +23,7 @@ fn contract_files(dir: &Path) -> Vec<PathBuf> {
         } else if let Some(n) = p.file_name().and_then(|n| n.to_str())
             && n.ends_with(".toml")
             && !n.ends_with(".bindings.toml")
+            && !n.ends_with(".enrollment.toml")
         {
             out.push(p);
         }

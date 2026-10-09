@@ -1,92 +1,37 @@
-//! A face principal, judged by zenoh itself (RFC 09 §4, v1.49; #529).
+//! A constrained face, planned and run (spec §8.5, U23; #612, FJ7).
 //!
-//! The planner's unit tests judge a plan by keyexpr inclusion over the plan
-//! — the planner's own reading of zenoh. This suite does not trust that
-//! reading. It renders a face block with a `user` principal, pastes it into
-//! a real router's config beside a `usrpwd` dictionary, and asks the
-//! router: an operator on the face's transport, authenticated as the
-//! granted user, calls the granted write and gets the answer; the same
-//! operator calling a write it was not granted, another user, and a peer
-//! with no user at all get nothing.
+//! The walkthrough's vehicle router holds the plan of
+//! `examples/zk2/acl/walkthrough.enrollment.toml` with the ground segment as
+//! its far side, in both attachments: a far router in a south region
+//! (`--face constrained --attach south-region --far ground --region
+//! ground`), which names its region, authenticates to the vehicle router as
+//! the `ground` principal and serves a ground client of its own; and one
+//! ground session as a client (`--attach client`). What is asked of the
+//! running routers is what the unit tests can only read off the block:
+//! zenoh accepts the near router's `gateway.south`, the data the ground is
+//! granted crosses, and presence does not (the `@zk` deny on the face).
 //!
-//! The design rests on two facts read from
-//! `zenoh-1.10.0/src/net/routing/interceptor/` — a transport matches every
-//! subject whose properties match, and across those subjects **any allow
-//! wins** — and this is the test that fails if either stops being true.
-//! The face's transport is `unixsock-stream`, as on the reference adopter's
-//! modem lane; the queryable sits on a loopback tcp link the face does not
-//! select, as the adopter's driver does on its host bus.
+//! Measured here, and the reason for the plan's `face-declarations` rule: a
+//! far router learns of the vehicle's queryables by declaration, and routes
+//! a query there only for one it has learnt, so the queryables over what the
+//! far side may query are declared toward it. Without the rule, its GET gets
+//! no reply. A client needs none: it sends every query to its router.
 
 mod util;
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use zenkey_fleet::report::{FaceSpec, LinkInterval, PrincipalSpec, Role};
+use util::zk2::{T, eventually};
+use zenkey_fleet::report::{AclFace, AclPermission, AclPlan, Enrollment, FaceAttach};
+use zenkey_fleet::{AclOptions, ContractSet, acl_plan_json5, plan_acl};
+use zenoh::Wait;
+use zenoh::query::{ConsolidationMode, QueryTarget};
 
-/// A radio driver's slice: every procedure `host`, so the face denies the
-/// `@rpc` plane whole, and two writes — one to grant, one not to.
-const MODEM: &str = r#"
-[registry]
-version = "1.0"
-app = "acme"
-convention = 1
-
-[producer]
-name = "modem"
-
-[[subject]]
-path = "{device}/tx_sdus_total"
-class = "telemetry"
-type = "C"
-cardinality = 4
-exposure = "host"
-
-[[procedure]]
-path = "introspect"
-kind = "read"
-reply = "RegistrySlice"
-exposure = "host"
-
-[[procedure]]
-path = "config/{device}/power/set"
-kind = "write"
-reply = "ConfigView"
-cardinality = 4
-exposure = "host"
-
-[[procedure]]
-path = "config/{device}/persist"
-kind = "write"
-reply = "Ack"
-cardinality = 4
-exposure = "host"
-"#;
-
-const GRANTED: &str = "v1/h-0123456789ab/@rpc/modem/config/rf0/power/set";
-const NOT_GRANTED: &str = "v1/h-0123456789ab/@rpc/modem/config/rf0/persist";
-const READ: &str = "v1/h-0123456789ab/@rpc/modem/introspect";
-/// A `host` counter, served as a query so the face's class deny is judged
-/// by the same instrument as the plane's.
-const TELEMETRY: &str = "v1/h-0123456789ab/telemetry/modem/rf0/tx_sdus_total";
-
-/// A wait for a reply that is expected **not** to come. A net in the other
-/// direction from [`util::SETTLE`]: too short and a slow router reads as a
-/// deny, so the granted calls are asked first and with the long net — a
-/// deny is only believed once the same session has been answered.
-const SILENCE: Duration = Duration::from_millis(1500);
-
-/// A wait for replies that are expected to come, asked after the session
-/// has been answered once — the queryables are known by then.
-const ANSWER: Duration = Duration::from_secs(3);
-
-fn sorted(keys: &[&str]) -> Vec<String> {
-    let mut out: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
-    out.sort();
-    out
-}
+const STATUS: &str = "zk2/vehicle-01/navigation/nav.v2/state/status";
+const INSTANCE: &str = "zk2/vehicle-01/navigation/@zk/instance/00000000000000a1";
 
 fn scratch(name: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
     static NTH: AtomicU64 = AtomicU64::new(0);
     std::env::temp_dir().join(format!(
         "zenkey-acl-face-{}-{}-{name}",
@@ -95,285 +40,221 @@ fn scratch(name: &str) -> std::path::PathBuf {
     ))
 }
 
-/// The face block for one `user = "ops"` console granted the power write.
-fn face_block() -> String {
-    let slices = zenkey_fleet::SliceSet::from_slices(vec![
-        zenkey::parse_slice(MODEM).expect("fixture slice"),
-    ]);
-    let plan = zenkey_fleet::plan_face(
-        &slices,
-        "",
-        &FaceSpec {
-            id: "constrained-link".into(),
-            link_protocols: vec!["unixsock-stream".into()],
-            interfaces: Vec::new(),
-            interval: LinkInterval::None,
-        },
-        &[PrincipalSpec {
-            user: Some("ops".into()),
-            role: Role::Console,
-            writes: vec!["modem/config/*/power/set".into()],
-            ..Default::default()
-        }],
-    );
-    assert!(plan.refusals.is_empty(), "{:?}", plan.refusals);
-    zenkey_fleet::acl_plan_json5(&plan)
-}
-
-/// A router holding the face block, listening on a unix socket (the face)
-/// and on loopback tcp (the host bus). With `dictionary`, it authenticates
-/// every link by usrpwd.
-async fn router(sock: &std::path::Path, dictionary: Option<&std::path::Path>) -> zenoh::Session {
-    node("router", sock, dictionary).await
-}
-
-/// The face's node in `mode` — `peer` is the reference adopter's zenohd.
-async fn node(
-    mode: &str,
-    sock: &std::path::Path,
-    dictionary: Option<&std::path::Path>,
-) -> zenoh::Session {
-    let auth = match dictionary {
-        Some(d) => format!(
-            "transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", \
-             dictionary_file: {:?} }} }} }},",
-            d.display().to_string()
-        ),
-        None => String::new(),
-    };
-    let text = format!(
-        "{{\n  mode: {mode:?},\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
-         listen: {{ endpoints: [\"unixsock-stream/{}\", \"{}\"] }},\n  {auth}\n{}}}\n",
-        sock.display(),
-        util::ANY_PORT,
-        face_block()
-    );
-    let config = zenoh::Config::from_json5(&text)
-        .unwrap_or_else(|e| panic!("the router config does not parse: {e}\n{text}"));
-    zenoh::open(config).await.expect("router")
-}
-
-/// A client on `endpoint`, presenting `user` when given.
-async fn client(endpoint: &str, user: Option<&str>) -> zenoh::Result<zenoh::Session> {
-    session("client", endpoint, user).await
-}
-
-/// A session of `mode` on `endpoint`, presenting `user` when given.
-async fn session(mode: &str, endpoint: &str, user: Option<&str>) -> zenoh::Result<zenoh::Session> {
-    let mut cfg = zenoh::Config::default();
-    cfg.insert_json5("mode", &format!("{mode:?}")).unwrap();
-    cfg.insert_json5("scouting/gossip/enabled", "false")
+fn base(mode: &str) -> zenoh::Config {
+    let mut c = zenoh::Config::default();
+    c.insert_json5("mode", &format!("{mode:?}")).unwrap();
+    c.insert_json5("scouting/multicast/enabled", "false")
         .unwrap();
-    cfg.insert_json5("scouting/multicast/enabled", "false")
-        .unwrap();
-    cfg.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
-        .unwrap();
-    if let Some(u) = user {
-        cfg.insert_json5(
-            "transport/auth/usrpwd",
-            &format!("{{ user: \"{u}\", password: \"{u}-pw\" }}"),
-        )
-        .unwrap();
-    }
-    zenoh::open(cfg).await
+    c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+    c
 }
 
-/// The driver's side: one queryable per key, each answering on its own key
-/// whatever the query spelled — so a wildcard's replies are concrete, as a
-/// served procedure's are.
-async fn serve(session: &zenoh::Session) -> Vec<zenoh::query::Queryable<()>> {
-    let mut out = Vec::new();
-    for key in [GRANTED, NOT_GRANTED, READ, TELEMETRY] {
-        out.push(
-            session
-                .declare_queryable(key)
-                .callback(move |q| {
-                    tokio::spawn(async move {
-                        let _ = q.reply(key, "ok").await;
-                    });
-                })
-                .await
-                .expect("queryable"),
-        );
-    }
-    out
+fn usrpwd(c: &mut zenoh::Config, user: &str, dictionary: Option<&std::path::Path>) {
+    let dict = dictionary.map_or(String::new(), |d| {
+        format!(", dictionary_file: {:?}", d.display().to_string())
+    });
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        &format!("{{ user: \"{user}\", password: \"{user}-pw\"{dict} }}"),
+    )
+    .unwrap();
 }
 
-/// The keys that answered a GET on `selector` within `wait`.
-async fn answered(session: &zenoh::Session, selector: &str, wait: Duration) -> Vec<String> {
-    let replies = session
+/// The value replies to a GET.
+async fn values(s: &zenoh::Session, selector: &str) -> usize {
+    let rx = s
         .get(selector)
-        .timeout(wait)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(T)
         .await
-        .expect("get is sent");
-    let mut keys = Vec::new();
-    while let Ok(reply) = replies.recv_async().await {
-        if let Ok(sample) = reply.result() {
-            keys.push(sample.key_expr().to_string());
-        }
+        .expect("a get is sent");
+    let mut n = 0;
+    while let Ok(r) = rx.recv_async().await {
+        n += usize::from(r.result().is_ok());
     }
-    keys.sort();
-    keys
+    n
 }
 
-/// The granted call, retried until the queryable's declaration has reached
-/// the router — the one wait whose end is an answer rather than a silence.
-async fn granted_answers(session: &zenoh::Session) -> bool {
-    let deadline = tokio::time::Instant::now() + util::SETTLE;
-    while tokio::time::Instant::now() < deadline {
-        if answered(session, GRANTED, Duration::from_secs(2)).await == [GRANTED] {
-            return true;
-        }
-    }
-    false
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_granted_user_calls_the_granted_write_and_nothing_else_crosses() {
-    let sock = scratch("face.sock");
-    let dict = scratch("usrpwd.txt");
-    std::fs::write(
-        &dict,
-        "router:router-pw\ndriver:driver-pw\nops:ops-pw\nintruder:intruder-pw\n",
+fn face_plan(attach: FaceAttach) -> AclPlan {
+    let examples = util::zk2::examples();
+    let enrollment: Enrollment = toml::from_str(
+        &std::fs::read_to_string(examples.join("acl/walkthrough.enrollment.toml")).unwrap(),
     )
     .unwrap();
-    let r = router(&sock, Some(&dict)).await;
-    let host_bus = util::bound(&r).await;
-    let face = format!("unixsock-stream/{}", sock.display());
-
-    let driver = client(&host_bus, Some("driver")).await.expect("driver");
-    let _queryables = serve(&driver).await;
-    assert!(
-        granted_answers(&driver).await,
-        "the host bus is not the face"
-    );
-    assert_eq!(answered(&driver, TELEMETRY, ANSWER).await, [TELEMETRY]);
-
-    let ops = client(&face, Some("ops")).await.expect("ops on the face");
-    assert!(
-        granted_answers(&ops).await,
-        "ops, authenticated on the face, calls the granted write — its subject's allow wins \
-         over the face subject's deny-rpc"
-    );
-    assert!(
-        answered(&ops, NOT_GRANTED, SILENCE).await.is_empty(),
-        "a write ops was not granted stays denied: its subject repeats the carve"
-    );
-    assert!(
-        answered(&ops, TELEMETRY, SILENCE).await.is_empty(),
-        "a `host` counter stays home for ops too: its subject repeats every face deny, \
-         because an allow beside them would win"
-    );
-    assert_eq!(
-        answered(&ops, READ, ANSWER).await,
-        [READ],
-        "a console on the face reads the @rpc plane — the console's write shape, not a \
-         blanket deny"
-    );
-    // RFC 09 §3 fact 6, pinned: a query broader than the carve is included
-    // by no deny of ops's subject and crosses; the refusal of a broadcast
-    // write is the server's (RFC 05 §2.1, #472), which this test double
-    // does not implement.
-    assert_eq!(
-        answered(&ops, "v1/*/@rpc/**", ANSWER).await,
-        sorted(&[GRANTED, NOT_GRANTED, READ]),
-        "a wildcard query is not covered by narrower denies (fact 6)"
-    );
-
-    let intruder = client(&face, Some("intruder"))
-        .await
-        .expect("another user on the face");
-    for key in [GRANTED, NOT_GRANTED, READ, TELEMETRY, "v1/*/@rpc/**"] {
-        assert!(
-            answered(&intruder, key, SILENCE).await.is_empty(),
-            "another user matches only the face's subject: {key} stays home"
-        );
-    }
-
-    // A dictionary refuses a link without credentials outright: on a usrpwd
-    // face there is no anonymous session for the ACL to judge.
-    assert!(
-        client(&face, None).await.is_err(),
-        "a router holding a dictionary refuses an unauthenticated link"
-    );
-
-    drop((ops, intruder, driver, r));
-    let _ = std::fs::remove_file(&dict);
-    let _ = std::fs::remove_file(&sock);
-}
-
-/// The same block on a router with no dictionary: a peer has no user, so
-/// only the face's subject matches its link, and the whole plane stays
-/// home — the user's subject widens nothing for anyone else.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn without_a_user_only_the_face_subject_matches() {
-    let sock = scratch("face.sock");
-    let r = router(&sock, None).await;
-    let host_bus = util::bound(&r).await;
-    let face = format!("unixsock-stream/{}", sock.display());
-
-    let driver = client(&host_bus, None).await.expect("driver");
-    let _queryables = serve(&driver).await;
-    // The host bus is not the face: the call answers there, which is what
-    // makes the silences below a deny rather than a missing queryable.
-    let local = client(&host_bus, None).await.expect("a local caller");
-    assert!(
-        granted_answers(&local).await,
-        "the host bus is not the face"
-    );
-
-    let anonymous = client(&face, None).await.expect("a peer on the face");
-    for key in [GRANTED, NOT_GRANTED, READ, TELEMETRY, "v1/*/@rpc/**"] {
-        assert!(
-            answered(&anonymous, key, SILENCE).await.is_empty(),
-            "no user: {key} stays home"
-        );
-    }
-
-    drop((anonymous, local, driver, r));
-    let _ = std::fs::remove_file(&sock);
-}
-
-/// The adopter's shape: its zenohd is a peer, the driver its client, and
-/// the far side a peer too — and between two peers a call crosses only if
-/// the queryable's *declaration* crossed first: `declare_queryable` egress
-/// toward the face, which the face denies on the plane and the user's
-/// subject carves with the call. (Against a router node the declaration
-/// does not matter — a peer sends its queries to its router — which is why
-/// this case is not the first test's with another mode.)
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_peer_on_the_face_learns_the_granted_queryable_and_calls_it() {
-    let sock = scratch("face.sock");
-    let dict = scratch("usrpwd.txt");
-    std::fs::write(
-        &dict,
-        "router:router-pw\ndriver:driver-pw\nops:ops-pw\nintruder:intruder-pw\n",
+    let (contracts, _) = ContractSet::load_path(&examples.join("walkthrough"));
+    let plan = plan_acl(
+        &enrollment,
+        &contracts,
+        &AclOptions {
+            default_permission: AclPermission::Deny,
+            face: Some(AclFace {
+                attach,
+                far: "ground".into(),
+                region: (attach == FaceAttach::SouthRegion).then(|| "ground".to_owned()),
+            }),
+            ..AclOptions::default()
+        },
     )
     .unwrap();
-    let r = node("peer", &sock, Some(&dict)).await;
-    let host_bus = util::bound(&r).await;
-    let face = format!("unixsock-stream/{}", sock.display());
-    let driver = client(&host_bus, Some("driver")).await.expect("driver");
-    let _queryables = serve(&driver).await;
-    assert!(
-        granted_answers(&driver).await,
-        "the host bus is not the face"
-    );
+    assert!(plan.refusals.is_empty(), "{:#?}", plan.refusals);
+    plan
+}
 
-    let ops = session("peer", &face, Some("ops"))
-        .await
-        .expect("ops, a peer");
-    assert!(
-        granted_answers(&ops).await,
-        "the granted call crosses to a peer"
-    );
-    assert!(answered(&ops, NOT_GRANTED, SILENCE).await.is_empty());
-    let intruder = session("peer", &face, Some("intruder"))
-        .await
-        .expect("another peer");
-    assert!(answered(&intruder, GRANTED, SILENCE).await.is_empty());
+/// What crosses to the ground.
+#[derive(Debug, PartialEq, Eq)]
+struct Across {
+    /// Navigation's status, a state the ground's ops tool may GET.
+    status: usize,
+    /// Navigation's tokens, read by liveliness.
+    tokens: usize,
+    /// Navigation's descriptor, a GET under `@zk`.
+    descriptor: usize,
+}
 
-    drop((ops, intruder, driver, r));
+/// The vehicle router holding `plan`, navigation a client of it, and the
+/// ground on its far side as `attach` says; what the ground then sees.
+async fn across(plan: &AclPlan, attach: FaceAttach) -> Across {
+    let dict = scratch("near.txt");
+    std::fs::write(
+        &dict,
+        "router:router-pw\nnavigation:navigation-pw\nground:ground-pw\n",
+    )
+    .unwrap();
+    let text = format!(
+        "{{\n  mode: \"router\",\n  scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"{}\"] }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", dictionary_file: {:?} }} }} }},\n{}}}\n",
+        util::ANY_PORT,
+        dict.display().to_string(),
+        acl_plan_json5(plan)
+    );
+    let near = zenoh::open(
+        zenoh::Config::from_json5(&text)
+            .unwrap_or_else(|e| panic!("the near router's config does not parse: {e}\n{text}")),
+    )
+    .await
+    .expect("the near router accepts the plan, gateway.south included");
+    let near_ep = util::bound(&near).await;
+
+    let mut c = base("client");
+    c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
+        .unwrap();
+    usrpwd(&mut c, "navigation", None);
+    let nav = zenoh::open(c).await.expect("navigation connects");
+    let _token = nav.liveliness().declare_token(INSTANCE).await.unwrap();
+    let _status = nav
+        .declare_queryable(STATUS)
+        .callback(|q| {
+            let _ = q.reply(STATUS, "ok").wait();
+        })
+        .await
+        .unwrap();
+
+    let far_dict = scratch("far.txt");
+    let (_far, ground) = match attach {
+        FaceAttach::SouthRegion => {
+            // The ground router names its region and is the `ground`
+            // principal to the vehicle router. A router presenting usrpwd
+            // credentials checks them on its own links too, so it holds a
+            // dictionary: the vehicle router's, and its client's.
+            std::fs::write(&far_dict, "router:router-pw\nops:ops-pw\n").unwrap();
+            let mut c = base("router");
+            c.insert_json5("region_name", "\"ground\"").unwrap();
+            c.insert_json5("listen/endpoints", &format!("[\"{}\"]", util::ANY_PORT))
+                .unwrap();
+            c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
+                .unwrap();
+            usrpwd(&mut c, "ground", Some(&far_dict));
+            let far = zenoh::open(c).await.expect("the ground router");
+            let far_ep = util::bound(&far).await;
+            let mut c = base("client");
+            c.insert_json5("connect/endpoints", &format!("[\"{far_ep}\"]"))
+                .unwrap();
+            usrpwd(&mut c, "ops", None);
+            (Some(far), zenoh::open(c).await.expect("a ground client"))
+        }
+        _ => {
+            let mut c = base("client");
+            c.insert_json5("connect/endpoints", &format!("[\"{near_ep}\"]"))
+                .unwrap();
+            usrpwd(&mut c, "ground", None);
+            (None, zenoh::open(c).await.expect("the ground session"))
+        }
+    };
+
+    // The control, on the vehicle side: the near router holds the token.
+    eventually("the vehicle router holds navigation's token", || async {
+        zk2::presence::liveliness_read(&near, "zk2/vehicle-01/navigation/@zk/**", T)
+            .await
+            .unwrap()
+            .keys
+            .len()
+            == 1
+    })
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let mut status = 0;
+    while status == 0 && tokio::time::Instant::now() < deadline {
+        status = values(&ground, STATUS).await;
+    }
+    let read = zk2::presence::liveliness_read(&ground, "zk2/vehicle-01/navigation/@zk/**", T)
+        .await
+        .unwrap();
+    assert!(read.complete, "a refused read is complete (§8.1): {read:?}");
+    let descriptor = values(&ground, INSTANCE).await;
     let _ = std::fs::remove_file(&dict);
-    let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_file(&far_dict);
+    Across {
+        status,
+        tokens: read.keys.len(),
+        descriptor,
+    }
+}
+
+const CROSSES: Across = Across {
+    status: 1,
+    tokens: 0,
+    descriptor: 0,
+};
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_far_router_south_gets_its_data_and_no_presence() {
+    let plan = face_plan(FaceAttach::SouthRegion);
+    assert!(plan.gateway.is_some());
+    assert_eq!(across(&plan, FaceAttach::SouthRegion).await, CROSSES);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_far_session_as_a_client_gets_its_data_and_no_presence() {
+    let plan = face_plan(FaceAttach::Client);
+    assert!(plan.gateway.is_none());
+    assert!(
+        !plan
+            .rules
+            .iter()
+            .any(|r| r.id.starts_with("face-declarations:"))
+    );
+    assert_eq!(across(&plan, FaceAttach::Client).await, CROSSES);
+}
+
+/// The control for `face-declarations`: without it, the far router never
+/// learns of navigation's queryable, and its GET gets no reply.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn without_the_declarations_a_far_router_routes_no_query() {
+    let mut plan = face_plan(FaceAttach::SouthRegion);
+    let id = "face-declarations:ground";
+    assert!(plan.rules.iter().any(|r| r.id == id));
+    for p in &mut plan.policies {
+        p.rules.retain(|r| r != id);
+    }
+    plan.rules.retain(|r| r.id != id);
+    assert_eq!(
+        across(&plan, FaceAttach::SouthRegion).await,
+        Across {
+            status: 0,
+            tokens: 0,
+            descriptor: 0
+        }
+    );
 }
