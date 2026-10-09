@@ -14,9 +14,12 @@ and counting (D000–D011; D006 alone is a warning), and "Cascades and scope":
 4. an interface listed twice is otherwise checked like the first;
 5. an interface none of the given contracts declares is checked for syntax
    only; one given at other fingerprints only is D004;
-6. deliberately not checked: ``cause`` against gates, R3's completeness,
+6. (0.18) D011 reads an entry's ``iface`` and ``token`` only: cascades 3
+   and 5 do not suppress it;
+7. deliberately not checked: ``cause`` against gates, R3's completeness,
    ``declared_by`` against the contract's ``[requires]``, ``params``
-   values, ``profiles`` against the ``uses``, ``minor`` and ``token``.
+   values, ``profiles`` against the ``uses``, ``minor``, ``token`` except
+   on ``archive.v1``, and a role's ``optional`` against its contract.
 
 This module follows that text. Before 0.5 these meanings were derived from
 the fixtures (SPEC-FINDINGS F-04, F-05).
@@ -79,16 +82,15 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         ifaces.append(iface)
         # Cascade 3: a malformed fingerprint is checked no further (no D004),
         # but its interface still counts for declared_by.
+        # Cascade 6 (0.18): "D011 reads an entry's iface and token, and
+        # nothing else. It is reported for every entry whose iface is
+        # archive.v1, whether or not that contract is given, and whatever its
+        # contract says: cascades 3 and 5 do not suppress it."
+        if iface == "archive.v1" and entry.get("token") is False:
+            codes.append("D011")
         if FINGERPRINT.fullmatch(entry["contract"]) is None:
             codes.append("D003")
             continue
-        # D011 (0.17): "an interface entry for archive.v1 is marked
-        # "token": false: an archive is never tokenless (§4.4)", per entry.
-        # It needs no contract (descriptors/d011-tokenless-archive gives
-        # none), so it is checked with the syntax, after cascades 2 and 3
-        # (SPEC-FINDINGS F-92).
-        if iface == "archive.v1" and entry.get("token") is False:
-            codes.append("D011")
         # Cascade 5: an interface none of the given contracts declares is
         # checked for syntax only.
         contract = held_contracts.get(iface)
