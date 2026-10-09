@@ -37,7 +37,12 @@ fn enrollment(name: &str) -> Enrollment {
     toml::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-fn plan(name: &str, dir: &str, default_permission: AclPermission, face: Option<AclFace>) -> AclPlan {
+fn plan(
+    name: &str,
+    dir: &str,
+    default_permission: AclPermission,
+    face: Option<AclFace>,
+) -> AclPlan {
     plan_acl(
         &enrollment(name),
         &contracts(dir),

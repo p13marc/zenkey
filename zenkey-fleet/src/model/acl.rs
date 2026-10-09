@@ -380,7 +380,9 @@ fn resource_pattern(
     for seg in r.template.segments() {
         chunks.push(match seg {
             Segment::Literal(l) => l.clone(),
-            Segment::Param(n) => params.get(n).map_or_else(|| "*".to_owned(), |v| chunk_slug(v)),
+            Segment::Param(n) => params
+                .get(n)
+                .map_or_else(|| "*".to_owned(), |v| chunk_slug(v)),
             Segment::Rest(n) => params
                 .get(n)
                 .map_or_else(|| "**".to_owned(), |v| chunk_slug(v)),
@@ -417,7 +419,8 @@ impl<'c> Contracts<'c> {
         let mut any = false;
         for r in self.set.of_iface(iface) {
             any = true;
-            self.used.insert(format!("{}@{}", r.iface(), r.fingerprint()));
+            self.used
+                .insert(format!("{}@{}", r.iface(), r.fingerprint()));
             for res in &r.contract().resources {
                 if !out
                     .iter()
@@ -589,7 +592,9 @@ fn resolve_params(
             ("self.system" | "self.service", None) => {
                 return Err(refused(
                     "R2",
-                    format!("{what}: params {k:?} = {v:?} needs a service of its own; a tool has none"),
+                    format!(
+                        "{what}: params {k:?} = {v:?} needs a service of its own; a tool has none"
+                    ),
                 ));
             }
             (other, _) => other.to_owned(),
@@ -615,12 +620,8 @@ fn parse_providers(list: &[String], what: &str) -> std::result::Result<Vec<Provi
 }
 
 fn parse_iface(s: &str, what: &str) -> std::result::Result<IfaceId, Refused> {
-    IfaceId::from_str(s).map_err(|e| {
-        refused(
-            "§1.2",
-            format!("{what}: {s:?} is not an interface id: {e}"),
-        )
-    })
+    IfaceId::from_str(s)
+        .map_err(|e| refused("§1.2", format!("{what}: {s:?} is not an interface id: {e}")))
 }
 
 /// One role's binding compiled into `h` (§11.1 Consume).
@@ -721,10 +722,7 @@ fn compile_binding(
                 }
             }
             for t in tokens {
-                push_unique(
-                    &mut h.data,
-                    format!("zk2/{addr}/{iface}/{}/**", t.as_str()),
-                );
+                push_unique(&mut h.data, format!("zk2/{addr}/{iface}/{}/**", t.as_str()));
                 if spec.history && consumed.iter().any(|r| r.token == t && has_history(r)) {
                     push_unique(
                         &mut h.history,
@@ -855,10 +853,7 @@ fn roles_of(
 /// presence alone. `None` when a contract it implements was not given: its
 /// Own patterns then stand in, for the fan-in and the allow posture's
 /// complement alike.
-fn surfaces_of(
-    addr: &str,
-    implements: &[(IfaceId, Option<Vec<Resource>>)],
-) -> Option<Vec<String>> {
+fn surfaces_of(addr: &str, implements: &[(IfaceId, Option<Vec<Resource>>)]) -> Option<Vec<String>> {
     let mut out = Vec::new();
     for (iface, resources) in implements {
         for r in resources.as_ref()? {
@@ -909,7 +904,10 @@ fn compile_service(
         compile_binding(&mut h, dep, contracts, Some(addr), role, b, roles.get(role))?;
     }
     for (role, req) in &roles {
-        let bound = spec.bindings.get(role).is_some_and(|b| !b.providers.is_empty());
+        let bound = spec
+            .bindings
+            .get(role)
+            .is_some_and(|b| !b.providers.is_empty());
         if !req.optional && !bound {
             h.warn(
                 AclWarningKind::RoleUnbound,
@@ -1709,9 +1707,12 @@ fn place(
             format!("subject id {id:?} is enrolled twice; zenoh refuses a repeated id"),
         ));
     }
-    for ident in [user.map(|u| format!("user {u}")), cn.map(|c| format!("cn {c}"))]
-        .into_iter()
-        .flatten()
+    for ident in [
+        user.map(|u| format!("user {u}")),
+        cn.map(|c| format!("cn {c}")),
+    ]
+    .into_iter()
+    .flatten()
     {
         if seen_identities.contains(&ident) {
             return Err(refused(
@@ -1721,36 +1722,35 @@ fn place(
         }
     }
     let mut runs = Vec::new();
-    let lookup = |label: String, what: &str, runs: &mut Vec<String>| {
-        match holders.get(&label) {
-            None => Err(refused(
-                "§11.1",
-                format!("it runs {what} {label:?}, which the enrollment does not declare"),
-            )),
-            Some(Err(r)) => Err(Refused {
-                reason: format!("it runs {label}, which cannot be planned: {}", r.reason),
-                cite: r.cite,
-            }),
-            Some(Ok(h)) => {
-                let expected = match what {
-                    "service" => HolderKind::Service,
-                    "archive" => HolderKind::Archive,
-                    _ => HolderKind::Tool,
-                };
-                if h.kind != expected {
-                    return Err(refused(
-                        "§11.1",
-                        format!("{label} is not a {what}"),
-                    ));
-                }
-                if !runs.contains(&label) {
-                    runs.push(label);
-                }
-                Ok(())
+    let lookup = |label: String, what: &str, runs: &mut Vec<String>| match holders.get(&label) {
+        None => Err(refused(
+            "§11.1",
+            format!("it runs {what} {label:?}, which the enrollment does not declare"),
+        )),
+        Some(Err(r)) => Err(Refused {
+            reason: format!("it runs {label}, which cannot be planned: {}", r.reason),
+            cite: r.cite,
+        }),
+        Some(Ok(h)) => {
+            let expected = match what {
+                "service" => HolderKind::Service,
+                "archive" => HolderKind::Archive,
+                _ => HolderKind::Tool,
+            };
+            if h.kind != expected {
+                return Err(refused("§11.1", format!("{label} is not a {what}")));
             }
+            if !runs.contains(&label) {
+                runs.push(label);
+            }
+            Ok(())
         }
     };
-    let address = |s: &str| Addr::from_str(s).map(|a| a.to_string()).unwrap_or_else(|_| s.to_owned());
+    let address = |s: &str| {
+        Addr::from_str(s)
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| s.to_owned())
+    };
     for s in &p.services {
         lookup(address(s), "service", &mut runs)?;
     }
@@ -1797,12 +1797,7 @@ fn fan_in<'a>(h: &Holder, all: impl Iterator<Item = &'a Holder>) -> Vec<String> 
         }
         // Presence reads are answered by the routers, which hold every token
         // (Appendix B): they never travel toward the provider.
-        for sel in other
-            .data
-            .iter()
-            .chain(&other.history)
-            .chain(&other.calls)
-        {
+        for sel in other.data.iter().chain(&other.history).chain(&other.calls) {
             let touches = h.serves().iter().any(|o| intersects(o, sel));
             let inside = h.own.iter().any(|o| includes(o, sel));
             if touches && !inside {
@@ -2088,13 +2083,21 @@ fn planned_rule_shape(r: &AclRule) -> String {
     rule_shape(r.permission.as_str(), Some(&flows), &messages, &r.key_exprs)
 }
 
+/// A `gateway.south` list in comparable form: per subregion, its filters'
+/// (modes, region names).
+type South = Vec<Vec<(BTreeSet<String>, BTreeSet<String>)>>;
+
 /// The south subregions a `gateway` value carries, as filters of modes and
 /// region names; `None` for the `auto` preset or anything else.
-fn observed_south(gateway: Option<&serde_json::Value>) -> Option<Vec<Vec<(BTreeSet<String>, BTreeSet<String>)>>> {
+fn observed_south(gateway: Option<&serde_json::Value>) -> Option<South> {
     let south = gateway?.get("south")?.as_array()?;
     let strings = |v: Option<&serde_json::Value>| -> BTreeSet<String> {
         v.and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default()
     };
     Some(
@@ -2329,19 +2332,24 @@ pub fn check_acl(
     }
 
     if let Some(gw) = &plan.gateway {
-        let planned: Vec<Vec<(BTreeSet<String>, BTreeSet<String>)>> = gw
+        let planned: South = gw
             .south
             .iter()
             .map(|s| {
                 s.filters
                     .iter()
-                    .map(|f| (set(f.modes.iter().map(String::as_str)), set(f.region_names.iter().map(String::as_str))))
+                    .map(|f| {
+                        (
+                            set(f.modes.iter().map(String::as_str)),
+                            set(f.region_names.iter().map(String::as_str)),
+                        )
+                    })
                     .collect()
             })
             .collect();
         let seen = observed_south(gateway);
         if seen.as_ref() != Some(&planned) {
-            let show = |v: &Vec<Vec<(BTreeSet<String>, BTreeSet<String>)>>| {
+            let show = |v: &South| {
                 v.iter()
                     .map(|s| {
                         s.iter()
@@ -2499,8 +2507,10 @@ pub fn explain_acl(
                         .find(|e| keyexpr::new(e.as_str()).is_ok_and(|ke| ke.intersects(k)))
                     {
                         near.push(format!("{} ({e})", r.id));
-                    } else if let Some(e) =
-                        r.key_exprs.iter().find(|e| stops_at_a_verbatim_chunk(e, key))
+                    } else if let Some(e) = r
+                        .key_exprs
+                        .iter()
+                        .find(|e| stops_at_a_verbatim_chunk(e, key))
                     {
                         shadowed.push(format!("{} ({e})", r.id));
                     }
@@ -2621,9 +2631,8 @@ mod tests {
     }
 
     fn enrollment(name: &str) -> Enrollment {
-        let text =
-            std::fs::read_to_string(examples().join(format!("acl/{name}.enrollment.toml")))
-                .unwrap();
+        let text = std::fs::read_to_string(examples().join(format!("acl/{name}.enrollment.toml")))
+            .unwrap();
         toml::from_str(&text).unwrap()
     }
 
@@ -3189,7 +3198,9 @@ type = { raw = "text/plain" }
         .unwrap();
         let read = &rule_of(&plan, "deny-read:executor-1").key_exprs;
         assert!(
-            read.contains(&"zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-02".to_owned())
+            read.contains(
+                &"zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-02".to_owned()
+            )
         );
         assert!(
             !read

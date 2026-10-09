@@ -328,9 +328,7 @@ pub use judge::why::{StoredLookup, StoredValue, WhyInputs, WhySpec, WireWatch, r
 // crate that also has `schema_drift` and `slice::diff` reads as *the* diff.
 // zk2's access control (spec §11, #612 FJ7): planned from an enrollment
 // and the contracts, checked against a router's config file, explained.
-pub use model::acl::{
-    AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5,
-};
+pub use model::acl::{AclOptions, check_acl, explain_acl, plan_acl, to_json5 as acl_plan_json5};
 pub use model::alert::alert_transition;
 pub use model::diff::{ByteDiff, Change, ValueDiff, byte_diff, diff as value_diff};
 pub use model::export::{

@@ -1315,8 +1315,12 @@ pub fn acl_plan() -> AclPlan {
         ],
         ..Default::default()
     };
-    zenkey_fleet::plan_acl(&enrollment, &contracts, &zenkey_fleet::AclOptions::default())
-        .expect("the fixture enrollment plans")
+    zenkey_fleet::plan_acl(
+        &enrollment,
+        &contracts,
+        &zenkey_fleet::AclOptions::default(),
+    )
+    .expect("the fixture enrollment plans")
 }
 
 /// The same plan with one principal refused: a zid, which nothing
@@ -1325,8 +1329,7 @@ pub fn acl_plan_refused() -> AclPlan {
     let mut plan = acl_plan();
     plan.refusals.push(AclRefusal {
         principal: "bench-rig".into(),
-        reason: "zid \"a1b2c3\": a zid is not backed by authentication, so it binds nothing"
-            .into(),
+        reason: "zid \"a1b2c3\": a zid is not backed by authentication, so it binds nothing".into(),
         cite: "§11.3: `zids` subjects are unauthenticated".into(),
     });
     plan
@@ -1339,8 +1342,8 @@ pub fn acl_check() -> AclCheck {
     AclCheck {
         namespace: String::new(),
         against: "router.json5".into(),
-        planned_rules: 20,
-        observed_rules: 19,
+        planned_rules: 18,
+        observed_rules: 17,
         planned_subjects: 3,
         observed_subjects: 4,
         findings: vec![
@@ -1367,10 +1370,10 @@ pub fn acl_check() -> AclCheck {
 pub fn acl_check_clean() -> AclCheck {
     AclCheck {
         findings: vec![],
-        observed_rules: 20,
+        observed_rules: 18,
         observed_subjects: 3,
         judgement: Judgement::NotEstablished {
-            reason: "router.json5 carries the plan whole: 20 rule(s), 3 subject(s), 3 polic(y/ies), enabled, default deny".into(),
+            reason: "router.json5 carries the plan whole: 18 rule(s), 3 subject(s), 3 polic(y/ies), enabled, default deny".into(),
         },
         ..acl_check()
     }
