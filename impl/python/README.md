@@ -80,17 +80,17 @@ contracts      96 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    37 passed     0 failed
+descriptors    38 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         518 passed     0 failed
+total         519 passed     0 failed
 ```
 
-The figures are against `core.md` 0.10, whose one new fixture is
-`descriptors/ok-optional-role`.
-- Amendments 0.5 to 0.9 resolved F-01 to F-76. F-77 to F-79 are open
-  against 0.10.
+The figures are against `core.md` 0.11. 0.10 added
+`descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
+- Amendments 0.5 to 0.11 resolved F-01 to F-79. F-80 is open against
+  0.11.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -267,11 +267,18 @@ Four more runs:
 - **The tool rules, where the bus shows them** (run `tool-rules`, beside
   the S1 run):
   - `live.attribute_stamp` attributes a state stamp by `meta.zid`: `owner`,
-    `foreign` or `unattributable`. Hex spellings are compared as numbers
-    (F-78).
-  - `live.check_s4` reads `@/*/router`. With the admin space off, the
-    check is unobservable. With it on, read-only, a router running no
-    plugin is clean (F-79).
+    `foreign` or `unattributable`. Since 0.11, zids compare by value only,
+    and a `meta.zid` that is not hex is unattributable.
+  - `live.check_s4` reads 0.11's two selectors, `@/*/router` and
+    `@/*/router/**/storage_manager/storages/**`, with `plugins` beside
+    them.
+    - With the admin space off, the check is unobservable.
+    - With it on, read-only, a router with no storage is clean.
+    - A stand-in admin record shows the storages read: `telemetry/**` is
+      clean, and `zk2/**` breaks S4.
+    - An answer counts as a router's only when its id is one of the
+      session's own routers, so a client answering `@/*/router` changes
+      nothing (F-80).
   - `live.presence_faults` reads presence shapes twice, a grace apart. A
     stray token removed within the grace passes, and one kept is a fault.
   - `compat.classify_pair` orders two revisions met on the bus by their
@@ -289,7 +296,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 190 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 194 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
