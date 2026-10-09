@@ -1229,95 +1229,136 @@ pub fn storage_explain_none() -> StorageExplain {
     }
 }
 
-// ── acl gen (#392) ────────────────────────────────────────────────────────
+// ── acl gen (#612, FJ7) ───────────────────────────────────────────────────
 
-/// The plan of a small fleet — one host on every plane, a catalog on the
-/// advanced tier, a console, a watch — with no registry asked, so the
-/// write set is the convention's unnarrowed `set` leaf and the plan says so.
-/// Built through the planner itself rather than by hand: what the corpora
-/// pin is what the verb draws.
+/// The interface the ACL fixtures plan over: one state template, one
+/// operation, typed so the contract needs no schema file.
+const ACL_TC: &str = r#"[interface]
+name = "tc.netif"
+major = 1
+minor = 0
+
+[resources."interfaces/{iface}"]
+kind = "state"
+type = { raw = "application/json" }
+params = { iface = "string" }
+cardinality = 64
+
+[resources."interfaces/{iface}/set"]
+kind = "operation"
+request = "google.protobuf.Empty"
+response = "google.protobuf.Empty"
+params = { iface = "string" }
+cardinality = 64
+"#;
+
+/// Two tc backends and a frontend bound to `*/tc` that calls them, planned
+/// under deny: Own, the fan-in egress the frontend's wildcard selectors
+/// need, Consume, Call, presence, and the open contract bundles. Built
+/// through the planner itself rather than by hand: what the corpora pin is
+/// what the verb draws.
 pub fn acl_plan() -> AclPlan {
-    let enrollment: Enrollment = Enrollment {
-        base: Some("zensight".into()),
-        fleet: FleetSpec {
-            catalog_adv: true,
-            salt: None,
-        },
+    let contract = zenkey_model::contract::load_str(ACL_TC, std::path::Path::new("."), None)
+        .contract
+        .expect("the fixture contract loads");
+    let mut contracts = zenkey_fleet::ContractSet::new();
+    contracts.insert(zenkey_fleet::Revision::from_contract(
+        contract,
+        ContractSource::File,
+    ));
+    let backend = |host: &str| ServiceSpec {
+        address: format!("{host}/tc"),
+        implements: vec!["tc.netif.v1".into()],
+        ..Default::default()
+    };
+    let enrollment = Enrollment {
+        namespace: None,
         principal: vec![
             PrincipalSpec {
-                cn: Some(ORIGIN.into()),
-                role: Role::Host,
-                origin: Some(ORIGIN.into()),
-                adv: true,
-                blob_seed: true,
-                media: true,
+                user: Some("tc-h1".into()),
+                services: vec!["h1/tc".into()],
                 ..Default::default()
             },
             PrincipalSpec {
-                cn: Some("zensight-catalog".into()),
-                role: Role::Catalog,
+                user: Some("tc-h2".into()),
+                services: vec!["h2/tc".into()],
                 ..Default::default()
             },
             PrincipalSpec {
-                cn: Some("zensight-console".into()),
-                role: Role::Console,
-                adv: true,
-                ..Default::default()
-            },
-            PrincipalSpec {
-                cn: Some("zensight-watch".into()),
-                role: Role::Watch,
+                cn: Some("frontend.ops".into()),
+                id: Some("frontend".into()),
+                services: vec!["ops/frontend".into()],
                 ..Default::default()
             },
         ],
+        service: vec![
+            backend("h1"),
+            backend("h2"),
+            ServiceSpec {
+                address: "ops/frontend".into(),
+                bindings: [(
+                    "netif".to_string(),
+                    BindingSpec {
+                        interface: Some("tc.netif.v1".into()),
+                        providers: vec!["*/tc".into()],
+                        ..Default::default()
+                    },
+                )]
+                .into(),
+                calls: vec![CallsSpec {
+                    interface: "tc.netif.v1".into(),
+                    providers: vec!["*/tc".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
     };
-    zenkey_fleet::plan_acl(
-        &enrollment,
-        "zensight",
-        None,
-        zenkey_fleet::AclOptions::default(),
-    )
+    zenkey_fleet::plan_acl(&enrollment, &contracts, &zenkey_fleet::AclOptions::default())
+        .expect("the fixture enrollment plans")
 }
 
-/// The same plan with one principal refused: a host enrolled with neither
-/// origin nor machine-id.
+/// The same plan with one principal refused: a zid, which nothing
+/// authenticates.
 pub fn acl_plan_refused() -> AclPlan {
     let mut plan = acl_plan();
     plan.refusals.push(AclRefusal {
-        principal: "bare-host".into(),
-        reason: "a host needs `origin` or `machine_id`".into(),
-        cite: "RFC 03 §4 D6".into(),
+        principal: "bench-rig".into(),
+        reason: "zid \"a1b2c3\": a zid is not backed by authentication, so it binds nothing"
+            .into(),
+        cite: "§11.3: `zids` subjects are unauthenticated".into(),
     });
     plan
 }
 
-/// A check with two findings: the shared `interest-prop` rule missing (the
-/// fifth fact's failure, exactly) and a CN the enrollment never enrolled.
+/// A check with two findings: a backend's fan-in egress grant missing (a
+/// fan-in GET then gets 0 replies, §11.2) and a user the enrollment never
+/// enrolled.
 pub fn acl_check() -> AclCheck {
     AclCheck {
-        base: "zensight".into(),
+        namespace: String::new(),
         against: "router.json5".into(),
-        planned_rules: 15,
-        observed_rules: 10,
-        planned_subjects: 4,
-        observed_subjects: 5,
+        planned_rules: 20,
+        observed_rules: 19,
+        planned_subjects: 3,
+        observed_subjects: 4,
         findings: vec![
             AclFinding {
                 kind: AclFindingKind::RuleMissing,
-                id: "interest-prop".into(),
+                id: "fan-in:h1/tc".into(),
                 planned: Some(
-                    "allow egress declare_liveliness_subscriber,declare_subscriber,liveliness_query,query zensight/v1/**".into(),
+                    "allow egress declare_subscriber,query zk2/*/tc/tc.netif.v1/state/**".into(),
                 ),
                 observed: None,
             },
             AclFinding {
-                kind: AclFindingKind::UnknownCn,
-                id: "stranger.example".into(),
+                kind: AclFindingKind::UnknownIdentity,
+                id: "user stranger".into(),
                 planned: None,
                 observed: Some("bound by subject \"stranger\"".into()),
             },
         ],
-        interest_probe: Judgement::NotAsked,
         judgement: Judgement::Established,
     }
 }
@@ -1326,22 +1367,23 @@ pub fn acl_check() -> AclCheck {
 pub fn acl_check_clean() -> AclCheck {
     AclCheck {
         findings: vec![],
-        observed_rules: 15,
-        observed_subjects: 4,
+        observed_rules: 20,
+        observed_subjects: 3,
         judgement: Judgement::NotEstablished {
-            reason: "router.json5 carries the plan whole: 15 rule(s), 4 subject(s), 4 polic(y/ies), enabled, default deny".into(),
+            reason: "router.json5 carries the plan whole: 20 rule(s), 3 subject(s), 3 polic(y/ies), enabled, default deny".into(),
         },
         ..acl_check()
     }
 }
 
-/// The console asking a write procedure: denied on ingress by the deny that
-/// beat `ops-sub`, and nothing at all on egress.
+/// The frontend's fan-in GET over every backend's interfaces: allowed on
+/// ingress by its Consume grant, and denied on egress, where no rule of its
+/// own includes it (egress toward a provider is the provider's subject's).
 pub fn acl_explain() -> AclExplain {
     zenkey_fleet::explain_acl(
         &acl_plan(),
-        "zensight-console",
-        "zensight/v1/h-3fa9c2d41b7e/@rpc/systemd/action/set",
+        "frontend",
+        "zk2/*/tc/tc.netif.v1/state/**",
         AclMessage::Query,
     )
     .expect("an enrolled principal and a valid key")

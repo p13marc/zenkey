@@ -257,6 +257,7 @@ mod tests {
             } else if name.starts_with(prefix)
                 && name.ends_with(".toml")
                 && !name.ends_with(".bindings.toml")
+                && !name.ends_with(".enrollment.toml")
             {
                 out.push(p);
             }

@@ -37,3 +37,7 @@ base64 = { workspace = true }
 # `HostId::parse` for the explicit pairs, and nothing that needs the zenoh
 # stack — same discipline as the line above: no default features.
 zenkey = { version = "=0.11.1", default-features = false }
+# The ACL plan's contract (#612, FJ7), loaded from its authoring text so the
+# plan is the planner's own. The model crate is session-free: it requests no
+# feature of zenkey-fleet and pulls no zenoh session.
+zenkey-model = { path = "../zenkey-model" }
