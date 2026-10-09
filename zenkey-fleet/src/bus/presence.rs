@@ -4,7 +4,7 @@
 //! **Every liveliness GET this crate issues goes through
 //! [`liveliness_read`]**, v1's roster sweeps included, the way every fleet
 //! GET goes through [`crate::bus::query::fleet_get`]. It runs on the
-//! runtime's unbounded handler ([`zk2::presence::liveliness_read`]): zenoh's
+//! runtime's unbounded handler ([`zenkey::presence::liveliness_read`]): zenoh's
 //! default 256-slot handler hangs a liveliness GET on a session that also
 //! holds a liveliness subscriber, at every size measured from 996 tokens
 //! (zenoh#2678, spike S2), and this crate's sessions hold one whenever a
@@ -45,8 +45,8 @@ pub async fn liveliness_read(
     session: &Session,
     selector: &str,
     timeout: Duration,
-) -> Result<zk2::presence::PresenceRead> {
-    zk2::presence::liveliness_read(session, selector, timeout)
+) -> Result<zenkey::presence::PresenceRead> {
+    zenkey::presence::liveliness_read(session, selector, timeout)
         .await
         .map_err(|e| Error::bus("liveliness get", selector, e))
 }
@@ -122,7 +122,7 @@ pub async fn describe(session: &Session, observed: &mut Observed, timeout: Durat
             let session = session.clone();
             tasks.spawn(async move {
                 let read =
-                    match zk2::presence::descriptor(&session, &addr, &instance, timeout).await {
+                    match zenkey::presence::descriptor(&session, &addr, &instance, timeout).await {
                         Ok(found) => DescriptorRead::from(found),
                         Err(e) => DescriptorRead::Failed(e.to_string()),
                     };

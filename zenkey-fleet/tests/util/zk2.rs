@@ -79,8 +79,8 @@ pub fn iface(s: &str) -> IfaceId {
     s.parse().expect("an interface")
 }
 
-pub fn config(address: &str) -> zk2::ServiceConfig {
-    zk2::ServiceConfig::new(addr(address))
+pub fn config(address: &str) -> zenkey::ServiceConfig {
+    zenkey::ServiceConfig::new(addr(address))
 }
 
 /// Polls `f` until it holds, failing after [`super::SETTLE`].

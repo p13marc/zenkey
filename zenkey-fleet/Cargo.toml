@@ -1,6 +1,6 @@
 [package]
 name = "zenkey-fleet"
-description = "Fleet engine for keyspace-v2 Zenoh tooling: disciplined fan-in queries, liveliness roster, registry-slice sets, schema-aware decode, live key-tree monitoring — the shared core of zenctl and zengui"
+description = "Fleet engine for zk2 Zenoh tooling: disciplined fan-in queries, presence, contract-resolved decode through a lens, live key-tree monitoring, recording and replay — the shared core of the zk2 explorers"
 readme = "README.md"
 keywords = ["zenoh", "keyspace", "explorer", "fleet"]
 categories = ["network-programming", "development-tools"]
@@ -15,34 +15,18 @@ edition.workspace = true
 repository.workspace = true
 authors.workspace = true
 
-[features]
-default = ["decode"]
-decode = ["zenkey/decode"]
-# The codec itself lives in zenkey. prost-reflect is a plain dependency
-# since FJ4: zk2's `schema show` reads a bundle's descriptor sets, and
-# zenkey-model already links it, so it costs nothing.
-decode-protobuf = ["zenkey/decode-protobuf"]
-decode-cdr = ["zenkey/decode-cdr"]
-# Real JSON Schema validation behind decode verdicts (#159) — forwarded so
-# both explorers judge payloads, while a bare library consumer pays nothing.
-validate-json = ["zenkey/validate-json"]
+# No feature axes since FJ9 (#612): the v1 decode seam and its codec
+# features left with the v1 dependency, and zk2's decode
+# (`zenkey_model::decode`) is unconditional.
 
-# docs.rs builds once per published version and cannot be re-run for it, so
-# the feature-gated surface has to be right *before* the publish, not after
-# (#325). `all-features` documents every axis; the two rustdoc flags annotate
-# each item with the feature that gates it, which is the half a reader
-# actually needs — otherwise a `#[cfg(feature = "blob")]` item reads as
-# unconditionally available.
+# `--generate-link-to-definition` for docs.rs, which builds on nightly.
 [package.metadata.docs.rs]
-all-features = true
 rustdoc-args = ["--cfg", "docsrs", "-Zunstable-options", "--generate-link-to-definition"]
 
 [dependencies]
-zenkey = { workspace = true, features = ["schema"] }
-# The zk2 runtime and model (#612, FJ3), beside the v1 library above until
-# FJ9 drops the v1 pin. The alias names the generation, not the crate: both
-# packages are called `zenkey`, and the runtime takes the name back at FJ9.
-zk2 = { package = "zenkey", path = "../zenkey" }
+# The zk2 runtime (#612, FJ3). It took the name back at FJ9, when the v1
+# library this crate used to pin from crates.io (`zenkey =0.11.1`) left.
+zenkey = { path = "../zenkey" }
 zenkey-model = { path = "../zenkey-model" }
 # gen's descriptor-driven synthesis (#162), and the descriptor sets zk2's
 # `schema show` reads (FJ4).
@@ -96,22 +80,7 @@ tokio = { workspace = true, features = ["test-util"] }
 # The engine's hot paths are benched here rather than in a consumer, because
 # they are the paths BOTH explorers run per sample and per tick (#44).
 criterion = { workspace = true }
-# Fixture payloads for the decode benches; the crate itself does not need it.
-serde_json = { workspace = true }
-ciborium = { workspace = true }
-# Fixture descriptor sets for the codec round-trip test (#97) — built through
-# prost-types rather than hand-encoded bytes, so the fixture stays readable.
-prost-reflect = { workspace = true }
-# The codec registration lives in zenkey, so enabling it here turns the
-# protobuf decoder on for *this crate's tests* without touching what the
-# library ships. `cargo test -p zenkey-fleet` then covers `tests/codec.rs`
-# on its own, instead of only when a frontend happens to unify the feature in.
-zenkey = { workspace = true, features = ["decode-protobuf", "decode-cdr", "validate-json"] }
 
 [[bench]]
 name = "fleet"
 harness = false
-# The `decode/*` benches need the decode seam; `decode` is on by default, and
-# naming it here means `--no-default-features` skips the target rather than
-# failing to compile it.
-required-features = ["decode"]

@@ -1016,7 +1016,7 @@ fn compile_archive(
             format!("zk2/{}/{}/@zk/**", chunks[1], chunks[2]),
         );
         for peer in &peers {
-            push_unique(&mut h.data, canon(zk2::archive::archive_key(peer, r)));
+            push_unique(&mut h.data, canon(zenkey::archive::archive_key(peer, r)));
         }
     }
     for peer in &peers {

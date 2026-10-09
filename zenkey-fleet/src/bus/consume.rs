@@ -60,9 +60,9 @@ pub fn stamp(t: &zenoh::time::Timestamp) -> Stamp {
     }
 }
 
-fn runtime(op: &'static str, target: &str, e: zk2::Error) -> Error {
+fn runtime(op: &'static str, target: &str, e: zenkey::Error) -> Error {
     match e {
-        zk2::Error::Contract(_) | zk2::Error::NoResource { .. } | zk2::Error::Key(_) => {
+        zenkey::Error::Contract(_) | zenkey::Error::NoResource { .. } | zenkey::Error::Key(_) => {
             Error::unaskable(target, e.to_string())
         }
         other => Error::bus(op, target, other),
@@ -101,7 +101,7 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
         values,
         timeout,
     } = read;
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let address = owner.to_string();
     let one = all_bound(r, values);
     let params = if one {
@@ -109,7 +109,7 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
     } else {
         r2_params(values)?
     };
-    let consumer = zk2::consumer::Consumer::for_tool(
+    let consumer = zenkey::consumer::Consumer::for_tool(
         session,
         revision.shared_contract(),
         &[&address],
@@ -131,11 +131,11 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
         .await
         .map_err(|e| runtime("get", &address, e))?;
     let mut rows: Vec<StateRow> = match got {
-        zk2::state::StateGet::Silent => Vec::new(),
-        zk2::state::StateGet::Answered(current) => current
+        zenkey::state::StateGet::Silent => Vec::new(),
+        zenkey::state::StateGet::Answered(current) => current
             .into_iter()
             .map(|c| match c {
-                zk2::state::Current::Value { key, sample } => StateRow {
+                zenkey::state::Current::Value { key, sample } => StateRow {
                     timestamp: sample.timestamp().map(stamp),
                     value: StateValue::Value {
                         payload: Box::new(payload(revision, &key, &sample, Member::Type)),
@@ -144,7 +144,7 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
                     confirmed: None,
                     identity: None,
                 },
-                zk2::state::Current::Deleted { key, timestamp } => StateRow {
+                zenkey::state::Current::Deleted { key, timestamp } => StateRow {
                     key,
                     value: StateValue::Deleted,
                     timestamp: timestamp.as_ref().map(stamp),
@@ -204,13 +204,13 @@ pub async fn last_known(
         values,
         timeout,
     } = read;
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     if !all_bound(r, values) {
         return last_known_pattern(session, revision, owner, r, values, archive, timeout).await;
     }
     let origin = member_key(owner, revision, r, values)?;
-    let selector = zk2::archive::archive_key(archive, &origin);
-    let got = zk2::archive::last_known(session, archive, &origin, timeout)
+    let selector = zenkey::archive::archive_key(archive, &origin);
+    let got = zenkey::archive::last_known(session, archive, &origin, timeout)
         .await
         .map_err(|e| runtime("get", &selector, e))?;
     let rows = got
@@ -243,9 +243,9 @@ async fn last_known_pattern(
     archive: &Addr,
     timeout: Duration,
 ) -> Result<StateReport> {
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let address = owner.to_string();
-    let consumer = zk2::consumer::Consumer::for_tool(
+    let consumer = zenkey::consumer::Consumer::for_tool(
         session,
         revision.shared_contract(),
         &[&address],
@@ -261,8 +261,8 @@ async fn last_known_pattern(
     let mut rows = Vec::new();
     let mut selectors = Vec::new();
     for pattern in &patterns {
-        let selector = zk2::archive::archive_key(archive, pattern);
-        let got = zk2::archive::last_known_all(session, archive, pattern, timeout)
+        let selector = zenkey::archive::archive_key(archive, pattern);
+        let got = zenkey::archive::last_known_all(session, archive, pattern, timeout)
             .await
             .map_err(|e| runtime("get", &selector, e))?;
         selectors.push(selector);
@@ -285,7 +285,7 @@ async fn last_known_pattern(
 
 /// One archive record as a state row: last-known, with whether alignment
 /// confirmed it and its type identity (§4.4).
-fn last_known_row(revision: &Revision, lk: zk2::archive::LastKnown) -> StateRow {
+fn last_known_row(revision: &Revision, lk: zenkey::archive::LastKnown) -> StateRow {
     let value = match &lk.value {
         Some(bytes) => {
             let encoding = lk.encoding.as_ref().map(ToString::to_string);
@@ -334,7 +334,7 @@ pub const WATCH_BUFFER: usize = 4096;
 /// A subscription through a tool's consumer, delivering rendered samples.
 /// Dropping it undeclares it.
 pub struct Watch {
-    sub: zk2::consumer::Subscription,
+    sub: zenkey::consumer::Subscription,
     rx: tokio::sync::mpsc::Receiver<WatchSample>,
     lagged: Arc<AtomicU64>,
     selectors: Vec<String>,
@@ -351,12 +351,16 @@ pub async fn watch(
     r: &Resource,
     values: &Bindings,
 ) -> Result<Watch> {
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let address = target.address.as_str();
     let params = r2_params(values)?;
-    let consumer =
-        zk2::consumer::Consumer::for_tool(session, revision.shared_contract(), &[address], &params)
-            .map_err(|e| runtime("subscribe", address, e))?;
+    let consumer = zenkey::consumer::Consumer::for_tool(
+        session,
+        revision.shared_contract(),
+        &[address],
+        &params,
+    )
+    .map_err(|e| runtime("subscribe", address, e))?;
     let selectors = consumer
         .selectors(&name)
         .map_err(|e| runtime("subscribe", address, e))?
@@ -370,7 +374,7 @@ pub async fn watch(
     // against it as it arrives.
     let declared = declared_qos(r);
     let sub = consumer
-        .subscribe(&name, move |d: zk2::consumer::Delivery| {
+        .subscribe(&name, move |d: zenkey::consumer::Delivery| {
             let key = d.sample.key_expr().as_str().to_owned();
             let event = match d.sample.kind() {
                 SampleKind::Delete => WatchEvent::Delete,

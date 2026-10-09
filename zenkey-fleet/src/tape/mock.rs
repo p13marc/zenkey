@@ -34,12 +34,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use zenkey::operation::OperationServer;
+use zenkey::{Call, Implementation, OpError, ServiceBuilder, ServiceConfig};
 use zenkey_model::contract::{Body, Resource};
 use zenkey_model::grammar::{Addr, ZkKey, parse};
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::Session;
-use zk2::operation::OperationServer;
-use zk2::{Call, Implementation, OpError, ServiceBuilder, ServiceConfig};
 
 use crate::model::catalog::Revision;
 use crate::model::render::{Member, render_resource};
@@ -262,7 +262,7 @@ pub(crate) async fn serve_answer(
     tally: Arc<AtomicU64>,
     log: Option<tokio::sync::mpsc::UnboundedSender<ServedCall>>,
 ) -> Result<OperationServer> {
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let iface = revision.iface().clone();
     let rev = Arc::clone(revision);
     let resource = r.clone();
@@ -284,7 +284,7 @@ pub(crate) async fn serve_answer(
                         if let Some(s) = summary {
                             call.summary(s.clone()).await?;
                         }
-                        Ok::<_, zk2::Error>(())
+                        Ok::<_, zenkey::Error>(())
                     }
                     .await;
                     match sent {
@@ -356,7 +356,7 @@ fn served(rev: &Revision, r: &Resource, call: &Call, n: u64, answer: ServedAnswe
     ServedCall {
         n,
         iface: rev.iface().to_string(),
-        operation: zk2::implementation::resource_name(r),
+        operation: zenkey::implementation::resource_name(r),
         key: key.clone(),
         concrete: call.is_concrete(),
         bound: call.bound().clone(),
@@ -379,13 +379,15 @@ fn served(rev: &Revision, r: &Resource, call: &Call, n: u64, answer: ServedAnswe
 
 /// A runtime error, in the crate's terms: a contract the mock breaks is the
 /// caller's input; anything else is the bus.
-pub(crate) fn runtime_error(revision: &Revision, e: zk2::Error) -> Error {
+pub(crate) fn runtime_error(revision: &Revision, e: zenkey::Error) -> Error {
     match e {
-        zk2::Error::Contract(_)
-        | zk2::Error::NoResource { .. }
-        | zk2::Error::Key(_)
-        | zk2::Error::NotExposed(_)
-        | zk2::Error::Gated { .. } => Error::unaskable(revision.iface().to_string(), e.to_string()),
+        zenkey::Error::Contract(_)
+        | zenkey::Error::NoResource { .. }
+        | zenkey::Error::Key(_)
+        | zenkey::Error::NotExposed(_)
+        | zenkey::Error::Gated { .. } => {
+            Error::unaskable(revision.iface().to_string(), e.to_string())
+        }
         other => Error::bus("mock owner", revision.iface().to_string(), other),
     }
 }
@@ -409,7 +411,7 @@ pub struct Served {
     // Servers first: fields drop in declaration order, and a server
     // outliving its service would answer for an instance with no token.
     servers: Vec<OperationServer>,
-    service: zk2::Service,
+    service: zenkey::Service,
     calls: tokio::sync::mpsc::UnboundedReceiver<ServedCall>,
     tally: Arc<AtomicU64>,
 }
@@ -435,7 +437,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
     let chosen = contract
         .resources
         .iter()
-        .find(|r| zk2::implementation::resource_name(r) == operation)
+        .find(|r| zenkey::implementation::resource_name(r) == operation)
         .ok_or_else(|| {
             Error::unaskable(
                 &operation,
@@ -466,7 +468,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
     let only = format!("this mock (zenctl serve) serves {operation} alone");
     let mut state = false;
     for r in &contract.resources {
-        let name = zk2::implementation::resource_name(r);
+        let name = zenkey::implementation::resource_name(r);
         if name == operation || (r.optional && gated_out(r, &held)) {
             continue;
         }

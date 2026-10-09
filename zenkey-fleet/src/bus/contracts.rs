@@ -2,7 +2,7 @@
 //! verified, cached, and handed out as revisions.
 //!
 //! A [`BundleStore`] retrieves through the runtime's own
-//! [`zk2::retrieval::fetch_bundle`] — target `BestMatching`, then `All`,
+//! [`zenkey::retrieval::fetch_bundle`] — target `BestMatching`, then `All`,
 //! consolidation `None`, each reply verified as it arrives and the first
 //! valid one taken (§8.4, §9.6) — so a tool and a service follow one
 //! implementation of the rule. What it adds is what a long-running tool
@@ -142,9 +142,9 @@ impl BundleStore {
         }
         self.inner.retrievals.fetch_add(1, Ordering::Relaxed);
         let retrieved =
-            zk2::retrieval::fetch_bundle(session, iface, fingerprint, self.inner.timeout).await;
+            zenkey::retrieval::fetch_bundle(session, iface, fingerprint, self.inner.timeout).await;
         let state = match retrieved {
-            Ok(zk2::retrieval::Retrieved::Bundle(bundle, _)) => {
+            Ok(zenkey::retrieval::Retrieved::Bundle(bundle, _)) => {
                 match Revision::from_bundle(*bundle, ContractSource::Bus) {
                     Ok(r) => ContractState::Held(Arc::new(r)),
                     Err(e) => ContractState::Unreadable {
@@ -152,7 +152,7 @@ impl BundleStore {
                     },
                 }
             }
-            Ok(zk2::retrieval::Retrieved::Unavailable { refused }) => {
+            Ok(zenkey::retrieval::Retrieved::Unavailable { refused }) => {
                 ContractState::Unavailable { refused }
             }
             Err(e) => {
@@ -171,7 +171,7 @@ impl BundleStore {
 
     /// The contract of `(iface, fingerprint)`, shared, when it can be had:
     /// what a tool's consumer or client is built on
-    /// ([`zk2::consumer::Consumer::for_tool`], [`zk2::Client::new`]).
+    /// ([`zenkey::consumer::Consumer::for_tool`], [`zenkey::Client::new`]).
     /// `None` is unavailable or unreadable; [`BundleStore::fetch`] says
     /// which.
     pub async fn contract(

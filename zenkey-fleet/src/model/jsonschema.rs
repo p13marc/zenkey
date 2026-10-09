@@ -9,8 +9,8 @@
 //! named type goes).
 //!
 //! Neither walker is a JSON Schema implementation and neither should become
-//! one — validation is `zenkey::schema::validate`'s job, against the real
-//! `jsonschema` crate. What lives here is only the pointer resolution both
+//! one — validation belongs to a real JSON Schema implementation. What
+//! lives here is only the pointer resolution both
 //! walkers need, kept in one place so they cannot disagree about what a
 //! `$ref` means.
 

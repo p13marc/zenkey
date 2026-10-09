@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use serde_json::json;
+use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::model::render::Member;
 use zenkey_fleet::model::stats::{RateAsk, rate_report};
 use zenkey_fleet::report::{
@@ -27,7 +28,6 @@ use zenkey_fleet::{
 };
 use zenkey_model::authoring::Kind;
 use zenkey_model::template::Bindings;
-use zk2::{Implementation, Service, ServiceBuilder};
 
 mod util;
 use util::zk2::{T, client, config, eventually, example, iface, router};
@@ -67,7 +67,7 @@ async fn owner(session: &zenoh::Session) -> Service {
     b.implement(Implementation::new(example("tcgui/tc.netif.v1")))
         .expect("implement");
     for r in &example("tcgui/tc.netif.v1").resources {
-        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+        let _ = b.expose(&netif, &zenkey::implementation::resource_name(r));
     }
     b.serve_state(&netif).expect("serve state");
     b.start().await.expect("the owner")

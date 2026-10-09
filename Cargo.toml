@@ -154,12 +154,13 @@ json5 = "1.0"
 serde_yaml = "0.9"
 
 # Internal
-# The strangler layout (#615). `main` is the zk2 line. The v1 tools
-# (zenkey-fleet, zenctl, zengui, zenwatch) build against the v1 libraries
-# pinned from crates.io until each one is ported. The v1 sources live on the
-# `v1` branch, which releases 0.14.x patches. zk2 re-creates these crate
-# names at 0.20.0; two `zenkey` packages coexist then, because 0.x minors
-# are semver-incompatible.
+# The strangler layout (#615). `main` is the zk2 line. The v1 tools still
+# on it (zengui, zenwatch) build against the v1 libraries pinned from
+# crates.io until #614 ports them; zenctl and the in-tree zenkey-fleet left
+# them at FJ9 (#612) and depend on the zk2 crates by path. The v1 sources
+# live on the `v1` branch, which releases 0.14.x patches. zk2 re-creates
+# these crate names at 0.20.0; two `zenkey` packages coexist then, because
+# 0.x minors are semver-incompatible.
 zenkey = { version = "=0.11.1" }
 zenkey-build = { version = "=0.11.1" }
 # zengui and zenwatch keep the v1 engine from crates.io (#612, FJ1), the same

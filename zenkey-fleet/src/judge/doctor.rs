@@ -19,7 +19,7 @@
 //! **What reading presence costs a verdict** (§8.1). Two presence reads,
 //! [`DoctorSpec::grace`] apart, feed the checks that ask whether something
 //! *lasts*: split-brain (§6's own procedure, through the runtime's
-//! [`zk2::ownership::compare`]) and token-missing, whose findings must hold
+//! [`zenkey::ownership::compare`]) and token-missing, whose findings must hold
 //! in both reads, because start-up and a re-mint pass through the same
 //! shapes for a moment. A read that ended at its timeout can miss a token
 //! and never invents one, so an absence it would claim is left unjudged;
@@ -300,10 +300,10 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         stamps: p.stamps,
         memlock: spec
             .asks(CheckId::ShmMemlockLow)
-            .then(|| match zk2::shm::memlock() {
-                zk2::shm::Memlock::Limited(l) => Memlock::Limited(l),
-                zk2::shm::Memlock::Unlimited => Memlock::Unlimited,
-                zk2::shm::Memlock::Unknown => Memlock::Unknown,
+            .then(|| match zenkey::shm::memlock() {
+                zenkey::shm::Memlock::Limited(l) => Memlock::Limited(l),
+                zenkey::shm::Memlock::Unlimited => Memlock::Unlimited,
+                zenkey::shm::Memlock::Unknown => Memlock::Unknown,
             }),
     }
 }
@@ -920,7 +920,7 @@ fn incomplete(what: &str) -> Unjudged {
 
 // ─── the checks that read presence ──────────────────────────────────────────
 
-/// §6, through the runtime's own diagnosis ([`zk2::ownership::compare`])
+/// §6, through the runtime's own diagnosis ([`zenkey::ownership::compare`])
 /// over the two reads, the served descriptors and the held contracts.
 fn split_brain(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::SplitBrain;
@@ -939,8 +939,8 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
         })
         .collect();
     let refs: Vec<&Contract> = held.iter().map(|c| &**c).collect();
-    let d = zk2::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
-    let candidates = zk2::ownership::candidates(&before.tokens, &p.after.tokens).len();
+    let d = zenkey::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
+    let candidates = zenkey::ownership::candidates(&before.tokens, &p.after.tokens).len();
     let findings = d
         .findings
         .iter()
@@ -1014,7 +1014,7 @@ enum Need {
 fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::BindingUnsatisfied;
     let descriptors = p.descriptors();
-    let edges: BTreeSet<(String, String)> = zk2::presence::edges(&descriptors, &p.after.tokens)
+    let edges: BTreeSet<(String, String)> = zenkey::presence::edges(&descriptors, &p.after.tokens)
         .into_iter()
         .map(|e| (e.consumer, e.role))
         .collect();
@@ -1066,9 +1066,9 @@ fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
             let hidden: Vec<String> = undescribed
                 .iter()
                 .filter(|a| {
-                    r.bindings
-                        .iter()
-                        .any(|b| zk2::consumer::Provider::parse(b).is_ok_and(|pat| pat.matches(a)))
+                    r.bindings.iter().any(|b| {
+                        zenkey::consumer::Provider::parse(b).is_ok_and(|pat| pat.matches(a))
+                    })
                 })
                 .map(ToString::to_string)
                 .collect();
@@ -2071,7 +2071,7 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
 fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
     const C: CheckId = CheckId::ShmMemlockLow;
     const MIB: u64 = 1024 * 1024;
-    let floor = zk2::shm::MEMLOCK_FLOOR;
+    let floor = zenkey::shm::MEMLOCK_FLOOR;
     match obs.memlock {
         None => CheckReport::not_asked(C),
         Some(Memlock::Limited(l)) if l < floor => CheckReport::of(
@@ -2886,7 +2886,7 @@ mod tests {
         let f = found(&at(Memlock::Limited(64 * 1024))).clone();
         assert_eq!(f.severity, DoctorSeverity::Info);
         assert!(f.evidence.contains("64 KiB"), "{f:?}");
-        clean(&at(Memlock::Limited(zk2::shm::MEMLOCK_FLOOR)));
+        clean(&at(Memlock::Limited(zenkey::shm::MEMLOCK_FLOOR)));
         clean(&at(Memlock::Unlimited));
         // An unreadable limit is not an unlimited one (#677).
         assert!(unseen(&at(Memlock::Unknown)).contains("could not be read"));

@@ -209,14 +209,11 @@ fmt:
 clean-run:
     rm -rf {{rundir}}
 
-# `--all-features` cannot see a feature that silently depends on another one.
-# Each published axis of zenkey-fleet, on its own (#204).
+# `--all-features` cannot see a build without one (#204). zenkey-fleet has had
+# no feature axes since FJ9 (#612); the axis left is zenkey's `zenoh`, without
+# which the runtime is the session-free half a contract crate builds on.
 features:
-    cargo check -p zenkey-fleet --no-default-features --locked
-    for f in decode decode-protobuf decode-cdr validate-json; do \
-        cargo check -p zenkey-fleet --no-default-features --features "$f" --locked; \
-    done
-    cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+    cargo check -p zenkey@0.20.0 --no-default-features --locked
     ./scripts/check-model-zenoh-free.sh
 
 # Builds target/py-venv with the standard library only (no ensurepip

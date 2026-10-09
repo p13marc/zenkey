@@ -84,10 +84,10 @@ fn classify(revision: &Revision, plan: &CallPlan, replies: Vec<Timed>) -> CallOu
                     None => out.discarded += 1,
                 }
             }
-            Err(e) => match zk2::client::classify(&e) {
-                zk2::client::ErrorReply::Envelope(env) => out.refusals.push((env.code, at)),
-                zk2::client::ErrorReply::Malformed(_) => out.malformed += 1,
-                zk2::client::ErrorReply::Transport(_) => out.transport += 1,
+            Err(e) => match zenkey::client::classify(&e) {
+                zenkey::client::ErrorReply::Envelope(env) => out.refusals.push((env.code, at)),
+                zenkey::client::ErrorReply::Malformed(_) => out.malformed += 1,
+                zenkey::client::ErrorReply::Transport(_) => out.transport += 1,
             },
         }
     }
@@ -144,10 +144,10 @@ fn latency(mut samples: Vec<Duration>) -> Option<Latency> {
 fn selectors(session: &Session, revision: &Revision, plan: &CallPlan) -> Result<Vec<OwnedKeyExpr>> {
     let contract = revision.shared_contract();
     let address = plan.target.address.as_str();
-    let refuse = |e: zk2::Error| Error::unaskable(address, e.to_string());
+    let refuse = |e: zenkey::Error| Error::unaskable(address, e.to_string());
     match &plan.target.concrete {
         Some(addr) if !plan.is_fanout() => {
-            let client = zk2::Client::new(session, contract, &[address]).map_err(refuse)?;
+            let client = zenkey::Client::new(session, contract, &[address]).map_err(refuse)?;
             Ok(vec![
                 client
                     .key(addr, &plan.name, &plan.values)
@@ -155,7 +155,7 @@ fn selectors(session: &Session, revision: &Revision, plan: &CallPlan) -> Result<
                     .into_keyexpr(),
             ])
         }
-        _ => zk2::Fleet::new(session, contract, &[address])
+        _ => zenkey::Fleet::new(session, contract, &[address])
             .and_then(|f| f.selectors(&plan.name, &plan.values))
             .map_err(refuse),
     }
@@ -287,12 +287,12 @@ pub async fn run_bench(session: &Session, spec: BenchSpec<'_>) -> Result<BenchRe
         } else {
             QueryTarget::BestMatching
         },
-        encoding: zk2::writer::wire_encoding(
+        encoding: zenkey::writer::wire_encoding(
             &plan.operation.request,
             plan.operation.encoding,
             &plan.values,
         ),
-        priority: zk2::qos::priority(plan.operation.priority),
+        priority: zenkey::qos::priority(plan.operation.priority),
         request: ZBytes::from(request),
         timeout,
     };

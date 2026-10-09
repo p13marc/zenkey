@@ -113,11 +113,11 @@ jobs:
       # exercises the criterion harness link, which --all-targets does not.
       - run: cargo bench --workspace --no-run --locked
 
-  # zenkey-fleet is published to crates.io advertising four feature axes, and
-  # nothing built it without them: `clippy`/`msrv` use --all-features and
-  # `test` uses the defaults. The `[[bench]] required-features = ["decode"]`
-  # line exists precisely so --no-default-features *skips* that target, and
-  # that path had never been executed (#204).
+  # `clippy`/`msrv` use --all-features and `test` uses the defaults, so
+  # nothing else builds a crate *without* a feature (#204). zenkey-fleet's
+  # five axes left with the v1 decode seam at FJ9 (#612); the axis left is
+  # zenkey's `zenoh`, without which the runtime is the session-free half a
+  # contract crate builds on.
   features:
     runs-on: ubuntu-24.04
     steps:
@@ -126,15 +126,7 @@ jobs:
       - uses: https://github.com/Swatinem/rust-cache@v2.9.2
         with:
           cache-targets: false
-      - run: cargo check -p zenkey-fleet --no-default-features --locked
-      # Each axis alone, not just the union: a `#[cfg(feature = "decode-cdr")]` item
-      # that silently needs `decode` compiles under --all-features and breaks
-      # for the consumer who asked for one of them.
-      - run: cargo check -p zenkey-fleet --no-default-features --features decode --locked
-      - run: cargo check -p zenkey-fleet --no-default-features --features decode-protobuf --locked
-      - run: cargo check -p zenkey-fleet --no-default-features --features decode-cdr --locked
-      - run: cargo check -p zenkey-fleet --no-default-features --features validate-json --locked
-      - run: cargo bench -p zenkey-fleet --no-default-features --no-run --locked
+      - run: cargo check -p zenkey@0.20.0 --no-default-features --locked
       # zenkey-model is session-free (#608): zenoh-keyexpr, and no other
       # zenoh crate.
       - run: ./scripts/check-model-zenoh-free.sh

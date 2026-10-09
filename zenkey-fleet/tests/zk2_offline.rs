@@ -8,11 +8,11 @@ use std::path::Path;
 mod util;
 use util::zk2::{T, example, examples, iface};
 
+use zenkey::Implementation;
 use zenkey_fleet::bus::contracts::BundleStore;
 use zenkey_fleet::model::catalog::{ContractSet, Contracts};
 use zenkey_fleet::model::render::{Member, render_with};
 use zenkey_fleet::report::{ContractSource, Rendered};
-use zk2::Implementation;
 
 /// The committed history verifies, and holds the current revision of every
 /// walkthrough and tcgui contract, read back from its bundle alone.

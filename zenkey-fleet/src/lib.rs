@@ -2,8 +2,8 @@
 //!
 //! The core of `zenctl`: everything a bus explorer needs that is not
 //! presentation, in five layers — see **The map** below. It reads a zk2
-//! deployment through the zk2 runtime (`zenkey` 0.20, the `zk2` dependency)
-//! and its session-free model (`zenkey-model`): presence from instance and
+//! deployment through the zk2 runtime (`zenkey` 0.20, by path) and its
+//! session-free model (`zenkey-model`): presence from instance and
 //! interface tokens, descriptors, contract bundles retrieved by fingerprint,
 //! and every payload rendered through the contract that declares it.
 //!

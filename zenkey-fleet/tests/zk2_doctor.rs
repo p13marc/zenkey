@@ -22,14 +22,14 @@ mod util;
 use util::zk2::{T, client, client_ns, config, eventually, example, iface};
 
 use serde_json::{Value, json};
+use zenkey::model::descriptor::Cause;
+use zenkey::model::template::Bindings;
+use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::report::{CheckId, CheckReport, DoctorReport, DoctorSeverity, Judgement};
 use zenkey_fleet::{BundleStore, DoctorBus, DoctorSpec, run_doctor};
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Contract, load_path};
 use zenoh::Wait;
-use zk2::model::descriptor::Cause;
-use zk2::model::template::Bindings;
-use zk2::{Implementation, Service, ServiceBuilder};
 
 /// The two presence reads' spacing in these cases: above the sub-second
 /// overlap of a re-mint (§6), short enough to keep the suite quick.
@@ -84,14 +84,18 @@ fn load(text: &str) -> Contract {
 }
 
 /// Brings up `cfg` implementing every contract, every resource exposed.
-async fn bring_up(session: &zenoh::Session, cfg: zk2::ServiceConfig, cs: &[Contract]) -> Service {
+async fn bring_up(
+    session: &zenoh::Session,
+    cfg: zenkey::ServiceConfig,
+    cs: &[Contract],
+) -> Service {
     let mut b = ServiceBuilder::new(session, cfg);
     for c in cs {
         let id = c.iface.clone();
         let names: Vec<String> = c
             .resources
             .iter()
-            .map(zk2::implementation::resource_name)
+            .map(zenkey::implementation::resource_name)
             .collect();
         b.implement(Implementation::new(c.clone()))
             .expect("implement");
@@ -161,7 +165,7 @@ fn unseen(r: &DoctorReport, id: CheckId) -> String {
 /// service is up when presence says so, not when `start()` returned.
 async fn tokens(tool: &zenoh::Session, selector: &str, n: usize) {
     eventually(&format!("{n} token(s) on {selector}"), || async {
-        zk2::presence::liveliness_keys(tool, selector, T)
+        zenkey::presence::liveliness_keys(tool, selector, T)
             .await
             .is_ok_and(|k| k.len() == n)
     })
@@ -321,7 +325,7 @@ async fn split_brain_is_diagnosed_as_operations_8_runs_it() {
         )
         .expect("set is optional");
     for r in &rep.resources {
-        let name = zk2::implementation::resource_name(r);
+        let name = zenkey::implementation::resource_name(r);
         if name != "@op/interfaces/{if}/set" {
             let _ = replica.expose(&iface("tc.v1"), &name);
         }
@@ -656,7 +660,7 @@ async fn a_storage_on_owners_state_and_a_version_skew_are_findings() {
 /// clean.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_archive_serving_unconfirmed_keys_is_unaligned() {
-    use zk2::archive::{Archive, ArchiveConfig, Recorded};
+    use zenkey::archive::{Archive, ArchiveConfig, Recorded};
     let (_r, ep) = router(false).await;
     let (owners, tool, archiving) = (client(&ep).await, client(&ep).await, client(&ep).await);
     let netif = example("tcgui/tc.netif.v1");
@@ -682,7 +686,7 @@ async fn an_archive_serving_unconfirmed_keys_is_unaligned() {
     for r in &netif.resources {
         let _ = b.expose(
             &iface("tc.netif.v1"),
-            &zk2::implementation::resource_name(r),
+            &zenkey::implementation::resource_name(r),
         );
     }
     b.serve_state(&iface("tc.netif.v1")).expect("serve state");
@@ -740,7 +744,7 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
     for r in &netif.resources {
         let _ = b.expose(
             &iface("tc.netif.v1"),
-            &zk2::implementation::resource_name(r),
+            &zenkey::implementation::resource_name(r),
         );
     }
     b.serve_state(&iface("tc.netif.v1")).expect("serve state");

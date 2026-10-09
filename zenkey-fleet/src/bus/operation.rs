@@ -10,9 +10,9 @@
 //! payload through the revision in hand ([`crate::model::render`]).
 //!
 //! **Silence is attributed through presence** (O5). For one address the
-//! runtime reads it ([`zk2::Client::attribute`]); for a fan-out or a
+//! runtime reads it ([`zenkey::Client::attribute`]); for a fan-out or a
 //! many-reply call it reads the selection's interface tokens too —
-//! [`zk2::Fleet::presence`] and [`zk2::Client::presence`] (#671), whose
+//! [`zenkey::Fleet::presence`] and [`zenkey::Client::presence`] (#671), whose
 //! `complete` says whether every read behind it finished — and this module
 //! lists who holds a token and sent no value: each refused or was silent,
 //! which no caller can tell apart, because a `reply_err` carries no key
@@ -49,9 +49,9 @@ pub struct OperationCall<'a> {
 
 /// A runtime error, in the crate's terms: a contract the call breaks is
 /// the caller's input; anything else is the bus.
-fn runtime(op: &'static str, target: &str, e: zk2::Error) -> Error {
+fn runtime(op: &'static str, target: &str, e: zenkey::Error) -> Error {
     match e {
-        zk2::Error::Contract(_) | zk2::Error::NoResource { .. } | zk2::Error::Key(_) => {
+        zenkey::Error::Contract(_) | zenkey::Error::NoResource { .. } | zenkey::Error::Key(_) => {
             Error::unaskable(target, e.to_string())
         }
         other => Error::bus(op, target, other),
@@ -74,7 +74,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
     let name = plan.name.as_str();
     let (mode, selectors, answer) = match &plan.target.concrete {
         Some(addr) if !plan.is_fanout() => {
-            let client = zk2::Client::new(session, contract, &[address])
+            let client = zenkey::Client::new(session, contract, &[address])
                 .map_err(|e| runtime("call", address, e))?
                 .with_timeout(timeout)
                 .with_retries(retries);
@@ -103,7 +103,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
             (CallMode::Concrete, vec![key], answer)
         }
         _ => {
-            let fleet = zk2::Fleet::new(session, contract, &[address])
+            let fleet = zenkey::Fleet::new(session, contract, &[address])
                 .map_err(|e| runtime("call", address, e))?
                 .with_timeout(timeout);
             let selectors = fleet
@@ -141,18 +141,18 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
 }
 
 /// A one-reply call's outcome (O5): four cases, kept apart.
-fn one_reply(revision: &Revision, r: &Resource, outcome: zk2::Outcome) -> OperationAnswer {
+fn one_reply(revision: &Revision, r: &Resource, outcome: zenkey::Outcome) -> OperationAnswer {
     match outcome {
-        zk2::call::Outcome::Value(a) => OperationAnswer::Value {
+        zenkey::call::Outcome::Value(a) => OperationAnswer::Value {
             reply: reply(revision, &a, Member::Response),
         },
-        zk2::call::Outcome::Refused(env) => OperationAnswer::Refused {
+        zenkey::call::Outcome::Refused(env) => OperationAnswer::Refused {
             envelope: envelope_view(revision, r, &env),
         },
-        zk2::call::Outcome::Malformed(m) => OperationAnswer::Malformed {
+        zenkey::call::Outcome::Malformed(m) => OperationAnswer::Malformed {
             malformed: malformed(&m),
         },
-        zk2::call::Outcome::NoAnswer(s) => OperationAnswer::Silent {
+        zenkey::call::Outcome::NoAnswer(s) => OperationAnswer::Silent {
             silence: SilenceView {
                 attempts: s.attempts,
                 transport: s.transport,
@@ -163,8 +163,8 @@ fn one_reply(revision: &Revision, r: &Resource, outcome: zk2::Outcome) -> Operat
 }
 
 /// The runtime's attribution, as the report spells it.
-pub fn attribution(a: zk2::call::Attribution) -> PresenceAttribution {
-    use zk2::call::Attribution as A;
+pub fn attribution(a: zenkey::call::Attribution) -> PresenceAttribution {
+    use zenkey::call::Attribution as A;
     match a {
         A::Present => PresenceAttribution::Present,
         A::InstanceOnly => PresenceAttribution::InstanceOnly,
@@ -175,7 +175,7 @@ pub fn attribution(a: zk2::call::Attribution) -> PresenceAttribution {
 }
 
 /// One reply, rendered through the contract's `member` type.
-fn reply(revision: &Revision, a: &zk2::client::Answer, member: Member) -> PayloadRendering {
+fn reply(revision: &Revision, a: &zenkey::client::Answer, member: Member) -> PayloadRendering {
     let encoding = a.sample.encoding().to_string();
     render_with(
         revision,
@@ -195,7 +195,7 @@ fn envelope_view(revision: &Revision, r: &Resource, env: &Envelope) -> EnvelopeV
     }
 }
 
-fn malformed(m: &zk2::call::Malformed) -> MalformedReply {
+fn malformed(m: &zenkey::call::Malformed) -> MalformedReply {
     MalformedReply {
         encoding: m.encoding.clone(),
         error: m.error.to_string(),
@@ -207,7 +207,7 @@ fn malformed(m: &zk2::call::Malformed) -> MalformedReply {
 fn replies_view(
     revision: &Revision,
     r: &Resource,
-    replies: zk2::client::Replies,
+    replies: zenkey::client::Replies,
     presence: SelectionPresence,
 ) -> RepliesView {
     let declared = replies.summary_declared;
@@ -252,8 +252,8 @@ fn replies_view(
 fn selection_presence(
     address: &str,
     revision: &Revision,
-    replies: &zk2::client::Replies,
-    present: zk2::Result<zk2::client::Present>,
+    replies: &zenkey::client::Replies,
+    present: zenkey::Result<zenkey::client::Present>,
 ) -> SelectionPresence {
     let (system, service) = address.split_once('/').unwrap_or((address, "*"));
     let selector = format!("zk2/{system}/{service}/@zk/alive/{}/**", revision.iface());

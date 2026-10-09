@@ -70,7 +70,7 @@ impl Resolved {
 
     /// `<kind token>/<template>`.
     pub fn resource_name(&self) -> String {
-        zk2::implementation::resource_name(self.resource())
+        zenkey::implementation::resource_name(self.resource())
     }
 }
 
@@ -228,7 +228,7 @@ impl<'a> Lens<'a> {
             );
         };
         let index = candidates[i].0;
-        let name = zk2::implementation::resource_name(&revision.contract().resources[index]);
+        let name = zenkey::implementation::resource_name(&revision.contract().resources[index]);
         Resolution {
             identity: KeyIdentity {
                 group: group(Some(name)),
@@ -520,7 +520,7 @@ pub fn check_payload(
     bytes: &[u8],
 ) -> std::result::Result<crate::report::PayloadCheck, String> {
     let bundle = revision.bundle();
-    let name = zk2::implementation::resource_name(resource);
+    let name = zenkey::implementation::resource_name(resource);
     let ty = decode::type_of(
         bundle,
         resource.token.as_str(),

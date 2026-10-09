@@ -153,7 +153,7 @@ pub async fn run_probe(
         address: target.address.clone(),
         iface: revision.iface().to_string(),
         fingerprint: revision.fingerprint().to_string(),
-        resource: zk2::implementation::resource_name(r),
+        resource: zenkey::implementation::resource_name(r),
         selectors,
         window_s: window.as_secs_f64(),
         elapsed_s: opened.elapsed().as_secs_f64(),

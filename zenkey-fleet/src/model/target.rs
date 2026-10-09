@@ -38,7 +38,7 @@ pub struct Target {
 impl Target {
     /// Parses `<system>/<service>`, either position `*`.
     pub fn parse(address: &str) -> Result<Target> {
-        zk2::consumer::Provider::parse(address)
+        zenkey::consumer::Provider::parse(address)
             .map_err(|e| Error::unaskable(address, strip_contract(&e.to_string())))?;
         let concrete = if address.contains('*') {
             None
@@ -68,7 +68,7 @@ impl Target {
 
     /// Whether `addr` is one of the services this target names.
     pub fn matches(&self, addr: &Addr) -> bool {
-        zk2::consumer::Provider::parse(&self.address).is_ok_and(|p| p.matches(addr))
+        zenkey::consumer::Provider::parse(&self.address).is_ok_and(|p| p.matches(addr))
     }
 }
 
@@ -213,7 +213,7 @@ pub fn plan_call(
         target,
         resource: r.clone(),
         operation: op.clone(),
-        name: zk2::implementation::resource_name(r),
+        name: zenkey::implementation::resource_name(r),
         values,
         unbound,
     };
@@ -295,7 +295,7 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
 /// fixed reply (#612, FJ8a). Not checked against its JSON Schema either: a
 /// mock that answers what its schema refuses is the operator's to mean.
 pub fn encode_response(revision: &Revision, r: &Resource, input: &[u8]) -> Result<Vec<u8>> {
-    let name = zk2::implementation::resource_name(r);
+    let name = zenkey::implementation::resource_name(r);
     let Body::Operation(op) = &r.body else {
         return Err(Error::unaskable(&name, "not an operation"));
     };
@@ -334,8 +334,8 @@ fn encode_as(
     match ty {
         TypeId::Raw { .. } => Ok(input.to_vec()),
         TypeId::JsonSchema { .. } => {
-            use zk2::codec::Codec as _;
-            zk2::codec::Json::<serde_json::Value>::encode(&json()?, encoding)
+            use zenkey::codec::Codec as _;
+            zenkey::codec::Json::<serde_json::Value>::encode(&json()?, encoding)
                 .map_err(|e| Error::unaskable(what, e))
         }
         TypeId::Protobuf { name, schema } => {
@@ -364,7 +364,7 @@ fn encode_as(
             let msg = DynamicMessage::deserialize(desc, &value).map_err(|e| {
                 Error::unaskable(what, format!("not a {name} in its JSON form: {e}"))
             })?;
-            Ok(zk2::prost::Message::encode_to_vec(&msg))
+            Ok(zenkey::prost::Message::encode_to_vec(&msg))
         }
     }
 }
