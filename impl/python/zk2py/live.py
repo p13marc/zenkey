@@ -635,63 +635,84 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
 # -- hostid.v1 §2.12: two sessions on one address of a minted system ---------------
 
 def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0) -> tuple[str, str, list]:
-    """hostid.v1 §2.12, and §5's last question: "Do two sessions claim one
-    address of a minted system?" A tool "reads the instance tokens of an
+    """hostid.v1 §2.12 (0.2), and §5's last question: "Do two sessions claim
+    one address of a minted system?" A tool "reads the instance tokens of an
     address … twice, a grace apart, and the descriptor of each instance.
-    Counting only instances whose descriptors list hostid.v1: when each read
-    shows instances stating at least two different meta.zid (compared by
-    value, core §3.3), not necessarily the same instances in both reads,
-    that is a finding whose cause is undecided."
+    Counting only instances whose system is known to be minted, by §5's
+    first question (yes: the descriptor lists hostid.v1, and no contract the
+    instance implements lists it in uses): when each read shows counted
+    instances stating at least two different meta.zid … that is a finding
+    whose cause is undecided."
 
-    Returns (answer, why, reads), the answer one of:
-    - ``finding``: its cause undecided; it names none (a collision, a
-      cloned machine id, a second process);
-    - ``no``: one read, ended by the routers' final reply and with every
-      descriptor in it read, shows the counted instances stating at most one
-      meta.zid;
+    The contracts an instance implements are read by the fingerprints its
+    descriptor names (core §8.4). Returns (answer, why, reads), the answer
+    one of:
+    - ``finding``, its cause undecided, naming none;
+    - ``no``: one read, ended by the routers' final reply, with every
+      descriptor in it read, shows the counted instances stating at most
+      one meta.zid, "and no instance in it lists hostid.v1 without being
+      counted";
     - ``not this profile's``: no instance of the address lists hostid.v1;
-    - ``unobservable``: otherwise. A descriptor could not be read, or a
-      counted instance states no meta.zid, or a read timed out.
+    - ``unobservable``: otherwise. A descriptor could not be read, a counted
+      instance states no meta.zid, an instance lists hostid.v1 while the
+      first question is unobservable for it, or a read timed out.
 
-    Each read is (complete, [(instance, descriptor or None)]), so a caller
-    can show each instance's meta.host beside a finding.
+    Each read is (complete, [(instance, descriptor or None, first answer)])."""
+    from . import hostid
 
-    Counting follows §2.12 as written, by the listing alone: it does not
-    apply §5's caveat for a contract that lists hostid.v1 in ``uses``
-    (SPEC-FINDINGS F-97)."""
+    contracts: dict[tuple[str, str], set[str] | None] = {}
+
+    def uses_of(doc: dict[str, Any]) -> set[str] | None:
+        out: set[str] = set()
+        for e in doc.get("interfaces") or []:
+            key = (str(e.get("iface")), str(e.get("contract")))
+            if key not in contracts:
+                r = retrieve_bundle(session, *key)
+                contracts[key] = set(r.verified.contract.get("uses") or []) if r.verified else None
+            if contracts[key] is None:
+                return None
+            out |= contracts[key]
+        return out
+
     reads = []
     for i in range(2):
         if i:
             time.sleep(grace_s)
         pres = list_presence(session, f"zk2/{address}/@zk/instance/*")
-        docs = []
+        rows = []
         for inst in pres.instances:
             got = [a for a in get_descriptor(session, f"zk2/{address}/@zk/instance/{inst['instance']}") if a.ok]
             try:
                 doc = json.loads(got[0].payload) if len(got) == 1 else None
             except ValueError:
                 doc = None
-            docs.append((inst["instance"], doc))
-        reads.append((pres.complete, docs))
+            first = hostid.minted_by_listing(doc, uses_of(doc))[0] if doc is not None else "unread"
+            rows.append((inst["instance"], doc, first))
+        reads.append((pres.complete, rows))
 
-    def counted(docs):
-        return [d for _, d in docs if d is not None and "hostid.v1" in (d.get("profiles") or [])]
+    def counted(rows):
+        return [d for _, d, first in rows if first == "yes"]
 
-    def zids(docs):
-        return {_zid_value((d.get("meta") or {}).get("zid")) for d in counted(docs)} - {None}
+    def zids(rows):
+        return {_zid_value((d.get("meta") or {}).get("zid")) for d in counted(rows)} - {None}
 
-    if all(len(zids(docs)) >= 2 for _, docs in reads):
+    def lists(d):
+        return d is not None and "hostid.v1" in (d.get("profiles") or [])
+
+    if all(len(zids(rows)) >= 2 for _, rows in reads):
         return "finding", ("in both reads the counted instances state at least two meta.zid: its cause is "
                            "undecided (a collision, a cloned machine id, or a second process)"), reads
-    for complete, docs in reads:
-        every_read = all(d is not None for _, d in docs)
-        every_zid = all(_zid_value((d.get("meta") or {}).get("zid")) is not None for d in counted(docs))
-        if complete and every_read and every_zid and counted(docs) and len(zids(docs)) <= 1:
-            return "no", "one complete read, every descriptor read, shows at most one meta.zid", reads
-    if all(all(d is not None for _, d in docs) and not counted(docs) for _, docs in reads):
+    if all(all(d is not None and not lists(d) for _, d, _ in rows) for _, rows in reads):
         return "not this profile's", "no instance of the address lists hostid.v1", reads
+    for complete, rows in reads:
+        every_read = all(d is not None for _, d, _ in rows)
+        every_zid = all(_zid_value((d.get("meta") or {}).get("zid")) is not None for d in counted(rows))
+        uncounted = [d for _, d, first in rows if lists(d) and first != "yes"]
+        if complete and every_read and every_zid and not uncounted and counted(rows) and len(zids(rows)) <= 1:
+            return "no", "one complete read, every descriptor read, shows at most one meta.zid", reads
     return "unobservable", ("the finding is not established, and a descriptor could not be read, a counted "
-                            "instance states no meta.zid, or a read timed out"), reads
+                            "instance states no meta.zid, an instance lists hostid.v1 while whether it is "
+                            "minted is unobservable, or a read timed out"), reads
 
 
 # -- §5.1 O3 judged from outside (0.16, 0.17)--------------------------------------

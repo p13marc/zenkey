@@ -1,5 +1,5 @@
-"""``hostid.v1``: a system minted from the machine id (profile text 0.1,
-draft, written against core 0.19; ``spec/profiles/hostid/v1.md``).
+"""``hostid.v1``: a system minted from the machine id (profile text 0.2,
+draft, written against core 0.20; ``spec/profiles/hostid/v1.md``).
 
 The session-free half:
 - :func:`derive`, §2.1 with the salt of §2.2;
@@ -13,9 +13,9 @@ The runtime half, offline:
   spelling ``address = "@hostid.v1/<service>"`` (§2.3).
 
 The paths a runtime names are the absolute ones of §2.4, whatever the
-root. The root is a seam, not a chroot: an absolute symbolic link inside it
-resolves against the real ``/`` (SPEC-FINDINGS F-94), so a test makes
-relative links.
+root. Under a root other than ``/``, every path resolves as a chroot would
+(§2.4 "Under a root", 0.2): an absolute link target starts at the root, and
+``..`` stops there. Under ``/``, the operating system resolves them.
 
 An input is opened with ``O_NONBLOCK``: §2.4 makes a FIFO unreadable, but
 opening one for reading waits for a writer, so a runtime that opened first
@@ -181,8 +181,44 @@ class Runtime:
         self.reads: list[str] = []
 
     def at(self, path: str) -> str:
-        """``path`` (absolute, §2.4's) under the root."""
+        """``path`` (absolute, §2.4's) under the root, unresolved."""
         return os.path.join(self.root, path.lstrip("/"))
+
+    def resolve(self, path: str) -> str:
+        """§2.4 "Under a root" (0.2): resolve ``path`` under the root "as a
+        chroot would: a symbolic link's absolute target starts at that
+        directory, and .. never climbs above it". Under ``/`` the operating
+        system resolves it. Raises the error of the component that fails:
+        ``ENOENT`` for a missing one (a dangling link included),
+        ``ENOTDIR``, ``EACCES``, or ``ELOOP`` past 40 links."""
+        if os.path.realpath(self.root) == "/":
+            return path
+        pending = [c for c in path.split("/") if c]
+        done: list[str] = []
+        links = 0
+        while pending:
+            c = pending.pop(0)
+            if c == ".":
+                continue
+            if c == "..":
+                if done:
+                    done.pop()
+                continue
+            here = os.path.join(self.root, *done, c)
+            st = os.lstat(here)
+            if stat.S_ISLNK(st.st_mode):
+                links += 1
+                if links > 40:
+                    raise OSError(errno.ELOOP, os.strerror(errno.ELOOP), path)
+                target = os.readlink(here)
+                if target.startswith("/"):
+                    done = []
+                pending = [x for x in target.split("/") if x] + pending
+                continue
+            if pending and not stat.S_ISDIR(st.st_mode):
+                raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), path)
+            done.append(c)
+        return os.path.join(self.root, *done)
 
     def say(self, message: str) -> None:
         self.logs.append(message)
@@ -226,7 +262,14 @@ class Runtime:
                 raise ConfigError(f"hostid.ephemeral = {str(ephemeral).lower()} differs from the "
                                   f"process's setting, {str(self.ephemeral_setting).lower()}, fixed by the "
                                   "first service that asked (§2.3)")
-            return Resolved(self.mint(self.ephemeral_setting).system, service, True)
+            minted = self.mint(self.ephemeral_setting)
+            if minted.ephemeral:
+                # §2.6 (0.2): "At every start of a service whose system is
+                # ephemeral, the runtime logs that the system is ephemeral,
+                # with every path it tried and its outcome."
+                self.say(f"hostid.v1: {service}'s system {minted.system} is ephemeral, for this run only: "
+                         + "; ".join(str(x) for x in minted.outcomes))
+            return Resolved(minted.system, service, True)
         if system.startswith("@"):
             raise ConfigError(f"system position {system!r}: only {ASK} asks for a minted system (§2.3)")
         if table is not None:
@@ -239,9 +282,9 @@ class Runtime:
 
     def mint(self, ephemeral: bool = False) -> Minted:
         """The process's system (§2.7): minted on the first call, then the
-        same "whatever the inputs say by then". A failure is not a mint:
-        nothing is kept, and the next service that asks reads the inputs
-        again (SPEC-FINDINGS F-95)."""
+        same "whatever the inputs say by then". §2.7 (0.2): "A failure
+        mints nothing … a later service that asks reads the inputs again,
+        from the first". The setting the first ask fixed stays (§2.3)."""
         if self.minted is None:
             self.minted = self._mint(ephemeral)
         return self.minted
@@ -271,18 +314,21 @@ class Runtime:
             # system from them by §2.1, and writes them nowhere."
             system = derive(self._random(16).hex() + "\n")
             assert system is not None
-            self.say("hostid.v1: the system is ephemeral, for this run only: "
-                     + "; ".join(str(x) for x in outcomes))
             return Minted(system, True, outcomes)
         raise HostidError(outcomes, "no input yields an id, and the shared file was not created"
-                          if o.outcome == NOT_CREATED else f"the shared file holds no id ({o.outcome})")
+                          if o.outcome == NOT_CREATED else f"the shared file yields no id ({o.outcome})")
 
     # -- §2.4 reading an input ---------------------------------------------
 
     def _read(self, path: str, note: str | None = None) -> tuple[Outcome, str | None]:
         """One input: an id, absent, refused, or unreadable (§2.4)."""
         self.reads.append(path)
-        real = self.at(path)
+        try:
+            real = self.resolve(path)
+        except FileNotFoundError:
+            return Outcome(path, ABSENT, note=note), None
+        except OSError as e:
+            return Outcome(path, UNREADABLE, _os_error(e), note), None
         try:
             # O_NONBLOCK: opening a FIFO for reading would otherwise wait for
             # a writer; a FIFO is unreadable once it is open (below).
@@ -296,8 +342,10 @@ class Runtime:
             if stat.S_ISDIR(st.st_mode):
                 return Outcome(path, UNREADABLE, f"EISDIR: {os.strerror(errno.EISDIR)}", note), None
             if not stat.S_ISREG(st.st_mode):
-                return Outcome(path, UNREADABLE, "not a regular file once symbolic links are followed",
-                               note), None
+                # §2.6 (0.2): the error is the operating system's "where there
+                # is one: an input that is not a regular file has none".
+                return Outcome(path, UNREADABLE, None,
+                               "not a regular file once symbolic links are followed"), None
             os.set_blocking(fd, True)
             data = b""
             while len(data) <= MAX_BYTES:
@@ -368,9 +416,10 @@ class Runtime:
                 o, system = self._read(SHARED, note="written by another racer")
                 if system is not None:
                     return o, system
-                if o.outcome == ABSENT:
-                    return Outcome(SHARED, NOT_CREATED, "EEXIST, then absent",
-                                   "the winner's file was gone (SPEC-FINDINGS F-96)"), None
+                # §2.5 step 4 (0.2): "A final file absent here was created,
+                # then removed before it was read: it is not "not created",
+                # and the ephemeral rung does not replace it." It is named
+                # with its outcome, absent, and fails closed.
                 return o, None
             try:
                 dfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
