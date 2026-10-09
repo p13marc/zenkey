@@ -351,11 +351,17 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                  str([(r["role"], r.get("bindings"), r.get("params")) for r in doc.get("requires", [])]))
     _roles_optional(report, run, doc, by_iface)
     _meta_zid(report, run, doc)
-    # §3.3 (0.5): "profiles is the union of the uses of the contracts the
-    # instance implements, sorted and deduplicated".
-    uses = sorted({u for c in by_iface.values() for u in c.canonical["uses"]})
-    report.check(run, "profiles is the union of the contracts' uses (§3.3)", doc.get("profiles") == uses,
-                 f"{doc.get('profiles')} vs {uses}")
+    # §3.3 (0.19): "the union of two sets: the uses of the contracts the
+    # instance implements; the derivation-only profiles the instance
+    # follows", which today is hostid.v1 "listed by an instance whose system
+    # is minted". The runner configured this system, so it knows: a literal
+    # one adds nothing, and @hostid.v1 adds hostid.v1 (hostid.v1 §2.3, §2.8).
+    minted = system == "@hostid.v1"
+    profiles = sorted({u for c in by_iface.values() for u in c.canonical["uses"]}
+                      | ({"hostid.v1"} if minted else set()))
+    report.check(run, "profiles is the union of the contracts' uses and, for a minted system, hostid.v1 "
+                      f"(§3.3, 0.19; this system is {'minted' if minted else 'literal'})",
+                 doc.get("profiles") == profiles, f"{doc.get('profiles')} vs {profiles}")
 
     # -- retrieval (§8.4) -------------------------------------------------
     # 0.8 "From a token to a fingerprint": the token's fp16 is not enough to

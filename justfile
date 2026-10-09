@@ -238,3 +238,12 @@ py-live:
     cargo build -q -p zenkey --example owner --example consume
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.live_interop
+
+# The Python implementation's hostid.v1 scenarios (spec/profiles/hostid/
+# scenarios.md), in temporary roots, with an in-process zenoh-python router:
+# no Rust build.
+py-hostid:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 impl/python/bootstrap.py target/py-venv > /dev/null
+    PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.hostid_scenarios

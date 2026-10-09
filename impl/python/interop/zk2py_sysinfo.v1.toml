@@ -1,0 +1,17 @@
+# zk2py's `sysinfo` for the hostid.v1 scenarios (spec/profiles/hostid/
+# scenarios.md, "The service"): one interface whose resources are all of
+# plain kinds, so that `zk2/**` sees everything the owner writes. It must
+# load with no finding at all.
+[interface]
+name    = "zk2py_sysinfo"
+major   = 1
+minor   = 0
+summary = "zk2py's sysinfo for the hostid.v1 scenarios"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.cpu]
+kind = "stream"
+type = { raw = "text/plain" }

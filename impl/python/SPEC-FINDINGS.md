@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Seventeen rounds.**
+**Eighteen rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -26,7 +26,10 @@ where that was not enough, or where the spec said two things.
 - F-92 and F-93 were found against 0.17.
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. Each entry carries a
   status line naming its amendment.
-- **Nothing new was found against 0.18** (see "At 0.18" at the end).
+- Nothing new was found against 0.18 (see "At 0.18").
+- **F-94 to F-97 are new**, found against `hostid.v1`'s text 0.1, the first
+  profile, read cold with core 0.19 (see "At 0.19: hostid.v1 0.1" at the
+  end). From here, an entry's location says which text it is against.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -36,7 +39,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.18:** 93 entries, all resolved.
+**Counts at 0.19:** 97 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -84,11 +87,12 @@ where that was not enough, or where the spec said two things.
   - F-92 went against zk2py's placement of D011, after cascade 3. The new
     fixture `d011-bad-fingerprint` failed until D011 moved before it.
   - F-93 confirmed zk2py's reading.
+- F-94 to F-97: **new**, against `hostid.v1` 0.1: 2 gaps, 2 ambiguities.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.18 | Location | In one line |
+| Id | Severity | Status at 0.19 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -183,6 +187,10 @@ by the spec section that now states the rule.
 | F-91 | gap | resolved by 0.17 | §4.4 "Found by its token" (0.16) | An archive "MUST hold its archive.v1 interface token", but no step refuses a tokenless one and no check reports it. |
 | F-92 | contradiction | resolved by 0.18 | §3.3 D011 against "Cascades and scope" (0.17) | Cascade 6 still lists `token` as deliberately unchecked, and no cascade places D011. |
 | F-93 | ambiguity | resolved by 0.18 | §4.2 "A tool's S1 check" (0.17) against "Who answered" (0.13) | "Verified" is two things: a connected router is verified (0.13), yet "verified at least one router" must mean an answer. |
+| F-94 | gap | **new** | hostid.v1 0.1, scenarios.md "A root"; §2.4 | A root as a seam: an absolute symbolic link in it resolves outside the root, which no step says how to treat. |
+| F-95 | ambiguity | **new** | hostid.v1 0.1 §2.3, §2.7 | When the first service's mint fails closed, is the setting fixed, and does a later service read the inputs again? |
+| F-96 | gap | **new** | hostid.v1 0.1 §2.5 step 4, §2.6 | `EEXIST`, then the winner's file absent: is that "not created", which the ephemeral rung replaces? |
+| F-97 | ambiguity | **new** | hostid.v1 0.1 §2.12 against §5 | §2.12 counts every instance that lists `hostid.v1`; §5 holds such a listing unobservable when a contract uses it. |
 
 ---
 
@@ -2612,3 +2620,158 @@ What changed in zk2py:
   rather than "verified" routers. Its logic is unchanged.
 
 Implementing 0.18 raised no new question.
+
+## At 0.19: hostid.v1 0.1 (#609)
+
+Core 0.19 makes room for derivation-only profiles, and `hostid.v1` (text
+0.1, draft) is the first profile. zk2py read both cold, with the Rust
+runtime for hostid (chunk PB) being written at the same time. This round
+built no Rust and ran no `just py-live`.
+
+**`just py-conformance`: 565 of 565.**
+- `descriptors/ok-derivation-profile` passes unchanged: zk2py's checker reads
+  `profiles` for its form alone (D010).
+- A new family, `hostid`, runs every file under
+  `spec/profiles/hostid/conformance/`, as `profiles/README.md` asks of the
+  second implementation. An unknown file there is a failure.
+  - `vectors.json`: 28 cases, from §2.1 alone.
+  - `shapes.json`: 14 cases, from §2.11 alone.
+
+  All 42 passed the first time.
+
+**The runtime half, offline** (`zk2py.hostid`). `Runtime(root)` is one
+process's runtime over an injectable root:
+- the input ladder of §2.4: absent, refused, unreadable (fails closed), and
+  a non-regular file, read with a 4,096-byte bound;
+- the shared file of §2.5:
+  - a temporary file created exclusively, `fchmod` 0644, `fsync`;
+  - then `link(2)`, a `fsync` of the directory, and the temporary file
+    unlinked on every path;
+  - `EEXIST` reads the winner's file as an input;
+- `HostidError`, which names every path with its outcome and the OS error;
+- the ephemeral opt-in, which replaces only "not created", and is logged;
+- minting once per run, with the setting fixed by the first service that
+  asks;
+- §2.3's spelling, `address = "@hostid.v1/<service>"` and
+  `hostid = { ephemeral = true }`, with its configuration errors.
+
+zk2py's owner resolves `@hostid.v1` before its session opens. When the
+system is minted, its descriptor lists `hostid.v1` and states `meta.host`
+(§2.8, §2.13). For a tool, `hostid.minted_by_listing` answers §5's first
+question, and `live.hostid_collision` §2.12's finding.
+
+**The scenarios** (`python -m zk2py.hostid_scenarios`, `just py-hostid`):
+29 of 29, in temporary roots. Where a section expects observations on the
+bus, the bus is an in-process zenoh-python router R1 with zk2py's owners and
+tool as its clients, not `py-live`'s Rust owner.
+- **§1, the input order:** all five steps, and the privacy check over every
+  sample, reply, token and descriptor the tool received.
+- **§2, the racers,** as processes, which the text allows besides threads.
+  - 16 spawned once, released by one barrier each round.
+  - 100 rounds with no `var/lib/zk2`, and 100 with it present and empty.
+  - Every round had one winner, one file of 32 hex digits and a newline, and
+    no temporary file left. Every racer held the file's system.
+  - 232 and 215 racers lost at `link(2)` with `EEXIST`, so the race path ran.
+  - The 200 systems were distinct.
+- **§3, fail closed:** all five steps, unprivileged. The runner is uid 1000:
+  `chmod` makes the unwritable directory and the unreadable file, and
+  `link(2)`'s `EPERM` is the runtime's seam. Each error names its paths with
+  their outcomes, and through R1 no token or descriptor appears, where the
+  control's does.
+- **§4, ephemeral:** all five steps.
+- **§5, once per run:** all five steps, with one caveat. zk2py's owner has
+  no re-mint (core §8.1), so a new owner of the same address in the same
+  process stands in for one. The new instance token appears before the old
+  one goes, and the system is unchanged.
+- **§6, a tool:** all four steps.
+  - Two hosts from one image is the finding, its cause undecided.
+  - The control is two systems, and no finding.
+  - A missing `meta.zid` is unobservable.
+  - A literal `h-` name is not minted.
+
+**zk2py's live runner, against core 0.19.** `live_interop.py` asserted that
+the Rust owner's `profiles` equals its contracts' `uses`. 0.19 makes that
+true only for a literal system. The runner now expects the union, with
+`hostid.v1` when the system it configured is `@hostid.v1`. Its runs
+configure literal systems, so the expectation is unchanged for them.
+
+**An implementation note, not a finding.** §2.4 makes a FIFO unreadable.
+Opening one for reading waits for a writer, so a runtime that opens and
+then checks hangs there. zk2py opens inputs with `O_NONBLOCK`. That is a
+lesson for a guide (`profiles/README.md`: "Lessons go to guides, not
+MUSTs").
+
+### F-94 · gap · hostid.v1 0.1, scenarios.md "A root", and §2.4: a root as a seam, and symbolic links
+
+> scenarios.md: "It runs each service against a root, a directory standing
+> in for `/`, through a mount namespace, a chroot or a seam of the runtime
+> under test."
+
+> §2.4: "Symbolic links are followed: `/var/lib/dbus/machine-id` is often a
+> link to `/etc/machine-id`."
+
+A mount namespace or a chroot resolves an absolute link inside the root. A
+seam does not, and the text offers seams to a runner. Under a seam, the
+common link `/var/lib/dbus/machine-id -> /etc/machine-id` reads the real
+host's machine id. A test that builds that link would then pass or fail on
+the host it runs on. No step uses a link, so nothing shows it yet. The
+text does not say whether a seam must resolve links inside the root, nor
+that links are out of a seam's reach.
+**Resolved:** zk2py's root is a seam that does not resolve links in it. Its
+docstring says so, and a test that needs a link makes a relative one.
+
+### F-95 · ambiguity · hostid.v1 0.1 §2.3 and §2.7: when the first mint fails
+
+> §2.7: "A process MUST mint its system at most once, when it starts the
+> first service that asks for a minted system".
+
+> §2.3: "One process, one setting. … It is fixed by the first service that
+> asks for a minted system".
+
+When the first service that asks fails closed (§2.6), nothing is minted.
+Two questions follow, and the text answers neither:
+- **The inputs.** May a later service of the same process read them again
+  and mint, or is the process's one chance spent? Minting at the second
+  service still mints "at most once", but not "when it starts the first
+  service".
+- **The setting.** Is it fixed by the first service, which never started, or
+  by the first that minted?
+
+No scenario runs a second service after a failure.
+**Resolved:** a guess. In zk2py the first service that asks fixes the
+setting, and a failure is not kept: a later service reads the inputs again.
+
+### F-96 · gap · hostid.v1 0.1 §2.5 step 4 and §2.6: the winner's file, gone
+
+> §2.5: "on `EEXIST`, another racer won. The runtime reads the final file …
+> and uses its content as an input (§2.4): an id, or, if it is now refused,
+> absent or unreadable, a failure (§2.6)."
+
+> §2.6: "Ephemeral … replaces exactly one refusal: every input gave no id,
+> and the shared file was not created."
+
+A refused or unreadable winner's file is what §2.6 calls a shared file
+that holds no id, or an unreadable input. Both fail closed, ephemeral or
+not. An absent one (removed between the winner's `link(2)` and this read)
+is neither, and it is not plainly "not created" either: a file was created,
+by another racer. So whether the ephemeral rung replaces it is not said.
+**Resolved:** a guess. zk2py reports it as "not created" (`EEXIST, then
+absent`), which the ephemeral rung replaces, since this runtime created no
+file and none is there.
+
+### F-97 · ambiguity · hostid.v1 0.1 §2.12 against §5: who is counted
+
+> §2.12: "Counting only instances whose descriptors list `hostid.v1`".
+
+> §5, the first question: "Yes: Its descriptor lists `hostid.v1`, and no
+> contract it implements lists it in `uses` … Unobservable: … a contract it
+> implements lists `hostid.v1` in `uses`."
+
+§2.12's count takes every instance that lists `hostid.v1`. §5 holds a
+listing ambiguous when a contract the instance implements uses
+`hostid.v1`, because core §3.3 then lists it for a literal system too.
+§2.12 does not apply that caveat, so its finding can count an instance that
+§5 cannot call minted. §2.8 makes such a contract a SHOULD NOT, so the case
+is rare. But §2.12 and §5 answer the same question, and differently.
+**Resolved:** a guess. zk2py's `hostid_collision` counts by the listing
+alone, as §2.12 is written, and does not fetch the instances' contracts.

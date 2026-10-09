@@ -68,6 +68,7 @@ case name. It exits with:
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
+| hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
 
 The result at the time of writing:
@@ -80,21 +81,24 @@ contracts      96 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    41 passed     0 failed
+descriptors    42 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         522 passed     0 failed
+hostid         42 passed     0 failed
+total         565 passed     0 failed
 ```
 
-The figures are against `core.md` 0.18. Four releases added descriptor
-fixtures:
+The figures are against `core.md` 0.19 and `hostid.v1` 0.1. Five releases
+added descriptor fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
 - 0.17, `d011-tokenless-archive` and `ok-archive`;
-- 0.18, `d011-bad-fingerprint`.
+- 0.18, `d011-bad-fingerprint`;
+- 0.19, `ok-derivation-profile`.
 
-- Amendments 0.5 to 0.18 resolved F-01 to F-93. None is open.
+- Amendments 0.5 to 0.18 resolved F-01 to F-93. F-94 to F-97 are open,
+  all against `hostid.v1` 0.1.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -423,6 +427,44 @@ owner example`. Exit codes are as for the static runner. `--only <run>`
 
 The live findings are F-46 to F-55 in `SPEC-FINDINGS.md`.
 
+## hostid.v1 (profile text 0.1, core 0.19)
+
+```bash
+just py-hostid
+```
+
+`hostid.v1` is the first profile (`spec/profiles/hostid/`). zk2py takes it
+in as described below.
+- **The `hostid` conformance family:** §2.1's derivation and §2.11's
+  shape, 42 of 42.
+- **The runtime half, `zk2py.hostid.Runtime(root)`,** one per process, over
+  an injectable root, so that nothing touches `/etc`:
+  - the input ladder of §2.4: absent, refused, unreadable, and a 4,096-byte
+    bound;
+  - the shared file of §2.5: an exclusive temporary file, `fchmod` 0644,
+    `fsync`, `link(2)`, a directory `fsync`, and the temporary file always
+    unlinked;
+  - `HostidError`, naming every path with its outcome;
+  - the ephemeral opt-in;
+  - minting once per run;
+  - §2.3's `address = "@hostid.v1/<service>"` with its configuration errors.
+
+  Its seams are `link` and `random_bytes`.
+- **The owner:** given `hostid=Runtime(...)` and the system `@hostid.v1`,
+  it mints before its session opens. Its descriptor then lists `hostid.v1`
+  and states `meta.host`.
+- **The tool:** `hostid.minted_by_listing` answers §5's first question, and
+  `live.hostid_collision` §2.12's finding.
+- **`python -m zk2py.hostid_scenarios`** runs scenarios.md §1 to §6 in
+  temporary roots, 29 of 29.
+  - §2's racers are 16 processes.
+  - §3's root-only cases come from `chmod`, since the runner is no root, and
+    from the `link` seam.
+  - Where a section expects the bus, it uses an in-process zenoh-python
+    router, with no Rust owner.
+  - §5's re-mint is a new owner in the same process, since zk2py's owner
+    has no re-mint.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -512,7 +554,9 @@ impl/python/
     live_interop.py             the live runner, with the Rust owner and consume examples
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block
     acl_interop.py    §11       the access-control run (`--only acl`)
-  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan;
+    hostid.py         hostid.v1 the derivation, the shape, the runtime over a root
+    hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
+  interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

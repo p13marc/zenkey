@@ -632,7 +632,69 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
     return "clean", f"the stamp is the owner's, and meta.zid is none of {len(known)} known routers"
 
 
-# -- §5.1 O3 judged from outside (0.16, 0.17) --------------------------------------
+# -- hostid.v1 §2.12: two sessions on one address of a minted system ---------------
+
+def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0) -> tuple[str, str, list]:
+    """hostid.v1 §2.12, and §5's last question: "Do two sessions claim one
+    address of a minted system?" A tool "reads the instance tokens of an
+    address … twice, a grace apart, and the descriptor of each instance.
+    Counting only instances whose descriptors list hostid.v1: when each read
+    shows instances stating at least two different meta.zid (compared by
+    value, core §3.3), not necessarily the same instances in both reads,
+    that is a finding whose cause is undecided."
+
+    Returns (answer, why, reads), the answer one of:
+    - ``finding``: its cause undecided; it names none (a collision, a
+      cloned machine id, a second process);
+    - ``no``: one read, ended by the routers' final reply and with every
+      descriptor in it read, shows the counted instances stating at most one
+      meta.zid;
+    - ``not this profile's``: no instance of the address lists hostid.v1;
+    - ``unobservable``: otherwise. A descriptor could not be read, or a
+      counted instance states no meta.zid, or a read timed out.
+
+    Each read is (complete, [(instance, descriptor or None)]), so a caller
+    can show each instance's meta.host beside a finding.
+
+    Counting follows §2.12 as written, by the listing alone: it does not
+    apply §5's caveat for a contract that lists hostid.v1 in ``uses``
+    (SPEC-FINDINGS F-97)."""
+    reads = []
+    for i in range(2):
+        if i:
+            time.sleep(grace_s)
+        pres = list_presence(session, f"zk2/{address}/@zk/instance/*")
+        docs = []
+        for inst in pres.instances:
+            got = [a for a in get_descriptor(session, f"zk2/{address}/@zk/instance/{inst['instance']}") if a.ok]
+            try:
+                doc = json.loads(got[0].payload) if len(got) == 1 else None
+            except ValueError:
+                doc = None
+            docs.append((inst["instance"], doc))
+        reads.append((pres.complete, docs))
+
+    def counted(docs):
+        return [d for _, d in docs if d is not None and "hostid.v1" in (d.get("profiles") or [])]
+
+    def zids(docs):
+        return {_zid_value((d.get("meta") or {}).get("zid")) for d in counted(docs)} - {None}
+
+    if all(len(zids(docs)) >= 2 for _, docs in reads):
+        return "finding", ("in both reads the counted instances state at least two meta.zid: its cause is "
+                           "undecided (a collision, a cloned machine id, or a second process)"), reads
+    for complete, docs in reads:
+        every_read = all(d is not None for _, d in docs)
+        every_zid = all(_zid_value((d.get("meta") or {}).get("zid")) is not None for d in counted(docs))
+        if complete and every_read and every_zid and counted(docs) and len(zids(docs)) <= 1:
+            return "no", "one complete read, every descriptor read, shows at most one meta.zid", reads
+    if all(all(d is not None for _, d in docs) and not counted(docs) for _, docs in reads):
+        return "not this profile's", "no instance of the address lists hostid.v1", reads
+    return "unobservable", ("the finding is not established, and a descriptor could not be read, a counted "
+                            "instance states no meta.zid, or a read timed out"), reads
+
+
+# -- §5.1 O3 judged from outside (0.16, 0.17)--------------------------------------
 
 def o3_verdict(result: CallResult, may_call: bool | None, present: bool | None = None) -> tuple[str, str]:
     """§5.1 O3 judged from outside (0.16, 0.17). "No tool can observe its
