@@ -164,6 +164,9 @@
     "ok-minimal": {
       "codes": []
     },
+    "ok-optional-role": {
+      "codes": []
+    },
     "ok-tokenless": {
       "codes": []
     },

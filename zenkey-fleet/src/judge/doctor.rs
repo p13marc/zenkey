@@ -231,9 +231,10 @@ pub struct StateStamps {
 pub enum Memlock {
     /// The soft limit, in bytes.
     Limited(u64),
-    /// Unlimited — or unreadable, which `zenkey::shm::memlock_limit` does
-    /// not tell apart.
+    /// No limit.
     Unlimited,
+    /// The limit could not be read (#677): the check is unobservable.
+    Unknown,
 }
 
 // ─── the run ────────────────────────────────────────────────────────────────
@@ -283,7 +284,11 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         stamps: p.stamps,
         memlock: spec
             .asks(CheckId::ShmMemlockLow)
-            .then(|| zk2::shm::memlock_limit().map_or(Memlock::Unlimited, Memlock::Limited)),
+            .then(|| match zk2::shm::memlock() {
+                zk2::shm::Memlock::Limited(l) => Memlock::Limited(l),
+                zk2::shm::Memlock::Unlimited => Memlock::Unlimited,
+                zk2::shm::Memlock::Unknown => Memlock::Unknown,
+            }),
     }
 }
 
@@ -911,9 +916,8 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
 enum Need {
     Required,
     Optional,
-    /// The descriptor does not say: a role a component's own manifest
-    /// declares carries no `optional` (§3.3), or its contract could not
-    /// be read.
+    /// The descriptor does not say: its declaring contract could not be
+    /// read, or declares no such role.
     Unknown(String),
 }
 
@@ -1034,11 +1038,13 @@ fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
 
 fn need_of(p: &Presence<'_>, d: &Descriptor, r: &zenkey_model::descriptor::RequireEntry) -> Need {
     let Some(by) = &r.declared_by else {
-        return Need::Unknown(
-            "its component's manifest declares it, and a descriptor carries no `optional` \
-             for such a role (§3.3)"
-                .into(),
-        );
+        // A role the component's manifest declares states its own need
+        // (§3.3, 0.10): `optional`, absent being required.
+        return if r.optional {
+            Need::Optional
+        } else {
+            Need::Required
+        };
     };
     let Some(entry) = d.interfaces.iter().find(|e| &e.iface == by) else {
         return Need::Unknown(format!(
@@ -1982,12 +1988,12 @@ fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
                 floor / MIB
             ),
         ),
-        Some(Memlock::Unlimited) => CheckReport::of(
+        Some(Memlock::Unlimited) => {
+            CheckReport::of(C, vec![], vec![], "RLIMIT_MEMLOCK is unlimited")
+        }
+        Some(Memlock::Unknown) => CheckReport::unobservable(
             C,
-            vec![],
-            vec![],
-            "RLIMIT_MEMLOCK is unlimited, as zenkey::shm reads it (it reads an unreadable \
-             limit the same way)",
+            "RLIMIT_MEMLOCK could not be read on this host (getrlimit failed)",
         ),
     }
 }
@@ -2231,6 +2237,24 @@ mod tests {
                "bindings": bindings})
     }
 
+    /// [`bound`] with the consumer's manifest role stated optional (§3.3,
+    /// 0.10).
+    fn bound_optional(c: &Contract, to: &[&str]) -> Observed {
+        let mut r = role(None, to);
+        r["optional"] = json!(true);
+        observed(
+            &[
+                inst("h1/tc", A),
+                alive("h1/tc", "tc.v1", A, c),
+                inst("ws/gui", B),
+            ],
+            vec![
+                (("h1/tc", A), descriptor("h1/tc", A, &[entry(c)], &[])),
+                (("ws/gui", B), descriptor("ws/gui", B, &[], &[r])),
+            ],
+        )
+    }
+
     /// The tc provider `h1/tc` and a consumer `ws/gui` whose role `netif`
     /// is bound to `to`, declared by `gui.v1` when `by_contract`.
     fn bound(c: &Contract, g: Option<&Contract>, to: &[&str]) -> Observed {
@@ -2257,13 +2281,19 @@ mod tests {
         // Satisfied by the provider's token.
         let o = obs(bound(&c, None, &["*/tc"]), &[&c], &[]);
         assert!(clean(&check(&o, CheckId::BindingUnsatisfied)).starts_with("1 bound role"));
-        // A manifest role selecting nothing: its need cannot be told.
+        // A manifest role selecting nothing: required unless its entry says
+        // `optional` (§3.3, 0.10).
         let o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
         let r = check(&o, CheckId::BindingUnsatisfied);
         let f = found(&r);
         assert_eq!(f.subject, "ws/gui netif");
-        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert_eq!(f.severity, DoctorSeverity::Error);
         assert!(f.evidence.contains("visible to this reader"), "{f:?}");
+        let o = obs(bound_optional(&c, &["h9/tc"]), &[&c], &[]);
+        assert_eq!(
+            found(&check(&o, CheckId::BindingUnsatisfied)).severity,
+            DoctorSeverity::Info
+        );
         // A run that asked no check comparing two reads took one: its read
         // is complete, and the finding stands.
         let mut o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
@@ -2702,5 +2732,7 @@ mod tests {
         assert!(f.evidence.contains("64 KiB"), "{f:?}");
         clean(&at(Memlock::Limited(zk2::shm::MEMLOCK_FLOOR)));
         clean(&at(Memlock::Unlimited));
+        // An unreadable limit is not an unlimited one (#677).
+        assert!(unseen(&at(Memlock::Unknown)).contains("could not be read"));
     }
 }

@@ -48,7 +48,9 @@ pub struct Descriptor {
     /// The profiles this instance follows, as `<name>.v<major>`.
     #[serde(default)]
     pub profiles: Vec<String>,
-    /// Host, process, build, zid: informative, never interpreted.
+    /// Host, process, build: informative, never interpreted. `zid` is the
+    /// owner's session zid, which an owner SHOULD state: a tool attributes
+    /// a state stamp to the owner by it (§3.3, 0.10; S1).
     #[serde(default)]
     pub meta: BTreeMap<String, Value>,
 }
@@ -116,6 +118,17 @@ pub struct RequireEntry {
     /// `self.system`, `self.service`, or a value.
     #[serde(default)]
     pub params: BTreeMap<String, String>,
+    /// Whether the role is optional: the instance works without a provider
+    /// (§3.2, 0.10). Written only when `true`; absent is required. A role a
+    /// contract declares is optional as that contract says; one the
+    /// component's manifest declares, as the manifest says.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub optional: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Parses and checks a descriptor. `contracts` are the contracts it is

@@ -1,12 +1,13 @@
 # zk2 core specification
 
-**Version 0.9** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.10** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
 operations runtime's decisions and the codegen's gaps, in 0.8 what
-implementing 0.7 found, a refused presence read first, and in 0.9 the
-order of an owner's refusals and a scenario 0.8 got wrong).
+implementing 0.7 found, a refused presence read first, in 0.9 the
+order of an owner's refusals and a scenario 0.8 got wrong, and in 0.10 what
+a doctor can and cannot decide).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -493,8 +494,19 @@ gate does not name.
   `declared_by`. A role declared by the component's manifest names `null`.
   A role the configuration leaves unbound is listed with `"bindings": []`
   (§3.2). `[F: descriptors/d009-*]`
+  - **`optional`** (0.10) is `true` for a role the instance works without,
+    and absent otherwise: absent is required. For a role a contract
+    declares, it repeats that contract's `[requires]`. For a manifest role
+    it is the only place a tool learns the role's need, which is why it was
+    added. `[F: descriptors/ok-optional-role]`
 - **`profiles`** is the union of the `uses` of the contracts the instance
   implements, sorted and deduplicated (§10 point 4).
+- **`meta`** is informative: host, process, build, and nothing in it is
+  checked. One member is used (0.10): an owner SHOULD state its session's
+  zid as `meta.zid`, as the reference does. A tool attributes a state
+  stamp to its owner by comparing the stamp's id with it (S1, §4.2,
+  "Observing S1"). Without it, a stamp's clock is unattributable, never
+  foreign.
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
@@ -550,7 +562,8 @@ and reports these codes. `[F: descriptors/]`
    - that a role `declared_by` an interface is in that contract's
      `[requires]`, and that `params` values fit the required interface;
    - that `profiles` is the union of the contracts' `uses`;
-   - `minor`, an integer from 0 to 2^64−1 that nothing reads, and `token`.
+   - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
+     read it to order two revisions, §9.8), and `token`.
 
 ---
 
@@ -586,6 +599,10 @@ and reports these codes. `[F: descriptors/]`
 
 A **tool** checks S4 against the routers' storage admin space. A consumer
 cannot tell under `Latest` which replier answered.
+- **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
+  deployment that wants S4 checked enables it, read-only, for the tools'
+  principals (0.10). Without it, a tool reports the check unobservable,
+  never clean.
 
 **Observing S1.** An owner's stamp is told from a router's by its id: the
 owner's session's zid, against the router's (§4.1). Where the owner's
@@ -718,6 +735,11 @@ section is what the core requires of it.
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
   (`desired.v1`) uses both.
+- **What a tool can see** (0.10). An archive publishes no alignment status
+  at this version: not when it last aligned, from where, or how many
+  attempts it made. A tool sees each key's `confirmed` and nothing more, so
+  an archive that holds nothing reads as aligned, and a tool says so. An
+  alignment status is profile work (#613).
 
 `[Sc: state.md §4–§6, §9]`
 
@@ -1193,6 +1215,13 @@ Liveliness tokens carry no payload; everything is in the key.
     zenoh-python 1.10.1, one ended at its timeout with 257 of 2,002 tokens,
     and silently. zenoh-python has no unbounded handler, so a callback is
     the way there. `[Sc: presence.md §4]`
+  - **A fault read from presence shapes holds in two reads** (0.10). A
+    tool that decides a fault from the shape of presence (two holders, §6;
+    a token its descriptor does not list, or an exposed interface with no
+    token) MUST see it in two reads a grace apart, the grace longer than
+    the deployment's longest re-mint overlap. Start-up, re-mint and
+    teardown pass through such shapes briefly, by design. §6 states the
+    rule for split-brain, and it holds for every such shape.
   - A tool SHOULD treat a liveliness GET that ended at its timeout, rather
     than at the routers' final reply, as possibly incomplete: silence is not
     a verdict (O5). In zenoh 1.10.1 the difference shows: a GET that
@@ -1287,6 +1316,12 @@ A deployment SHOULD keep a domain within about 10–15k tokens, which kept
 discovery within 2–4 s in spike S2. At 50k tokens, discovery took 46–49 s or
 never finished. The budget is shared with every other declaration, which
 spike S2 did not measure.
+
+**What a tool can count** (0.10): liveliness tokens, the only declarations
+a reader can list, and of those only the ones its selectors and grants
+reach. Another application's tokens under its own verbatim chunks are out
+of reach, and so are subscribers and queryables. A tool's count is a lower
+bound of the domain's declarations, and it reports it as one.
 
 ### 8.4 Contract retrieval
 
@@ -1882,7 +1917,13 @@ role, writer or reader, never a swap of old and new:
 - for requests, the caller writes and the owner reads.
 
 The classifier compares each earlier revision to the candidate, never the
-reverse. Each rule below is a transition from the earlier revision to the
+reverse.
+- **On the bus, revisions carry no order** (0.10). A bundle keeps no
+  `minor` (§9.5), and two providers can serve two revisions side by side.
+  A tool that classifies them against each other MAY take the order from
+  the `minor` their descriptors state, when the two differ. Otherwise it
+  classifies both ways: the pair is clean only when both directions are
+  compatible, a finding when neither is, and undecided when they disagree. Each rule below is a transition from the earlier revision to the
 candidate, and its class already accounts for an old reader of a new writer
 and a new reader of an old writer: that is what "both directions" means.
 
@@ -2259,6 +2300,7 @@ Appendix B. These are the ones the rules above cite:
 - `BestMatching` reaches the nearest `complete` queryable on each router.
 - Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
   beyond the HLC delta (500 ms).
+- The admin space is disabled by default (`adminspace.enabled: false`).
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
 - A reply error carries a payload and an encoding, and no key expression.
