@@ -4,6 +4,32 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-09: where an ephemeral start is logged (#726)
+
+The Python implementation's live round against 0.2 (PR #725, F-99) drove
+the reference owner example as a black box. It found no trace of an
+ephemeral start: the runtime logged it, but the example sent its logs
+nowhere. The text had said "logs" without saying where.
+
+**Changed: a rule stated.**
+- **Where it is logged (§2.6; scenarios §4 expected 1).** It goes wherever
+  the process's operational logs go, at its warning level or the
+  equivalent. A scenario reads it there, through a log capture in process,
+  or the process's own log output for a black-box runner. A process that
+  discards its logs has still logged.
+- The reference owner example now writes the runtime's logs to stderr
+  (warnings by default, `RUST_LOG` to change it), so a black-box runner
+  can see the warning.
+
+**Deliberately not changed.**
+- **No sink is named.** A profile cannot choose where a process's logs go.
+  Naming stderr or syslog would bind every runtime to one deployment
+  style.
+- **No bus signal.** An ephemeral system is already visible on the bus:
+  the descriptor lists `hostid.v1`, and the system changes across restarts.
+  A dedicated report would be `health.v1`'s, if anything.
+- No derived value changes.
+
 ## 0.2 — 2026-10-09: what a cold read and the runtime left open (#719, PB)
 
 The Python implementation read 0.1 cold (PR #723) and reported four

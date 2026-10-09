@@ -171,7 +171,10 @@ calling the runtime's minting with nothing cached between the threads
 **Expected.**
 1. Both runs start. Each system is in the minted shape, and the two
    differ. Each descriptor lists `hostid.v1`. Each start logs that the
-   system is ephemeral, and names the three paths with their outcomes.
+   system is ephemeral, and names the three paths with their outcomes, in
+   the runtime's log as the process sees it (§2.6, 0.3): a log capture in
+   process, or the process's own log output for a runner that drives it
+   as a black box.
    Nothing is written under the root.
 2. Both services have the same system.
 3. `a` starts. `b` does not, as a configuration error (§2.3), and declares

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.21** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.22** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -14,8 +14,9 @@ from, in 0.16 what the tools' last verbs could not decide, in 0.17
 what a tool needs that it cannot read off the bus, in 0.18 two words
 0.17 left loose, in 0.19 profiles that only derive, and where
 profiles live, in 0.20 a provider on the service's own system, the
-order of `profiles`, and a derived address, and in 0.21 the first
-vocabulary a profile publishes, `freshness.v1`'s, and a re-put).
+order of `profiles`, and a derived address, in 0.21 the first
+vocabulary a profile publishes, `freshness.v1`'s, with a re-put, and in
+0.22 one major of a profile per contract).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1697,7 +1698,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 |---|---|---|
 | E000 | not TOML 1.0 (1.1-only syntax and integers beyond 64 bits included), or outside the format's shape (§9.1) | once; stops the load |
 | E001 | the interface name is not one or more `.`-joined segments `[a-z][a-z0-9_]*`, or it ends in, or is, a segment `v<digits>` | once |
-| E002 | a `uses` entry is not `<name>.v<major>` | per entry |
+| E002 | a `uses` entry is not `<name>.v<major>`; or two entries name one profile at two majors (0.22): an annotation key names its profile without a major (§10 point 2) | per entry; once per profile listed at more than one major |
 | E010 | a template is empty, has an empty segment, a literal that is not a plain chunk or starts with `x-`, a parameter name not `[a-z][a-z0-9_]*`, a repeated parameter, or a rest parameter that is not last | per resource; stops that resource's other checks |
 | E011 | a template parameter missing from `params`, or a `params` entry the template lacks | per parameter |
 | E012 | a `path` parameter that is not a rest parameter, or a rest parameter that is not `path` | per parameter |
@@ -2382,6 +2383,11 @@ contributes through these four points, and through no other:
    ([`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4).
    What a published vocabulary defines (`views.v1`'s documents among them,
    §9.6) is the profile's, not the core's.
+   **One major per contract** (0.22). A key names its profile without a
+   major, so a contract uses one major of a profile: two in one `uses` is
+   E002. `[F: contracts/e002-two-majors]` Two contracts of one instance may
+   use two majors of it, so a descriptor's `profiles` can list both
+   (§3.3).
 3. **A registered verbatim kind**, such as `@blob`, at position 5. This
    point is reserved: this version refuses such keys (§1.2), and a later
    version defines their form.
