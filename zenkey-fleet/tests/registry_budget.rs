@@ -12,8 +12,9 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::report::{DoctorSeverity, V1CheckId, V1DoctorReport, V1Finding};
-use zenkey_fleet::{Fleet, GetOpts, V1DoctorSpec, declare_responder, fleet_get, run_v1_doctor};
+use zenkey_fleet::judge::registry_checks::{RegistryRun, RegistrySpec, run as registry_checks};
+use zenkey_fleet::report::{DoctorSeverity, V1CheckId, V1Finding};
+use zenkey_fleet::{Fleet, GetOpts, declare_responder, fleet_get};
 
 mod util;
 use util::peer_pair;
@@ -53,8 +54,8 @@ class = "state"
 type = "Health"
 "#;
 
-fn spec() -> V1DoctorSpec {
-    V1DoctorSpec {
+fn spec() -> RegistrySpec {
+    RegistrySpec {
         deep: true,
         sample: None,
         timeout: Duration::from_millis(500),
@@ -104,18 +105,18 @@ async fn serve_health(
     task
 }
 
-async fn doctor(client: &zenoh::Session, slice: &str) -> V1DoctorReport {
+async fn doctor(client: &zenoh::Session, slice: &str) -> RegistryRun {
     let local = zenkey::parse_slice(slice).expect("slice");
-    run_v1_doctor(
+    registry_checks(
         &Fleet::new(client, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(),
     )
     .await
-    .expect("run_v1_doctor")
+    .expect("the registry checks")
 }
 
-fn budget_findings(report: &V1DoctorReport) -> Vec<&V1Finding> {
+fn budget_findings(report: &RegistryRun) -> Vec<&V1Finding> {
     report
         .findings
         .iter()

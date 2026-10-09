@@ -1,12 +1,13 @@
-//! The doctor engine (#55) against a real bus: findings come out typed, with
-//! their stable check ids and RFC citations — the same structs both
-//! frontends render.
+//! v1's registry checks (#55), the ones `check conform` projects, against a
+//! real bus: the served-vs-declared slice diff, with its stable check ids and
+//! RFC citations. They were the doctor's until #612's FJ6; zk2's doctor has
+//! its own suite (`tests/zk2_doctor.rs`).
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
 use std::time::Duration;
 
-use zenkey_fleet::{V1DoctorSpec, run_v1_doctor};
+use zenkey_fleet::judge::registry_checks::{RegistrySpec, run as registry_checks};
 
 mod util;
 use util::peer_pair;
@@ -41,8 +42,8 @@ class = "telemetry"
 type = "TelemetryPoint"
 "#;
 
-fn spec() -> V1DoctorSpec {
-    V1DoctorSpec {
+fn spec() -> RegistrySpec {
+    RegistrySpec {
         deep: false,
         sample: None,
         timeout: Duration::from_secs(2),
@@ -51,8 +52,7 @@ fn spec() -> V1DoctorSpec {
 }
 
 /// A producer serving a slice that disagrees with the local registry yields
-/// `slice-sync` error findings citing RFC 08 §6 — and the run's coverage
-/// summary counts what was actually asked.
+/// `slice-sync` error findings citing RFC 08 §6.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     let (a, b) = peer_pair().await;
@@ -81,21 +81,25 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     // token and the introspect answers.
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_v1_doctor(
+            let report = registry_checks(
                 &zenkey_fleet::Fleet::new(&b, ""),
                 Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
                 &spec(),
             )
             .await
-            .expect("run_v1_doctor");
-            if report.live_producers >= 1 && report.introspect_answered >= 1 {
+            .expect("the registry checks");
+            if report
+                .findings
+                .iter()
+                .any(|f| f.check == zenkey_fleet::report::V1CheckId::SliceSync)
+            {
                 break report;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("fleet should become visible within 10s");
+    .expect("the introspect should answer within 10s");
 
     let sync: Vec<_> = report
         .findings
@@ -118,75 +122,10 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     );
 }
 
-/// A live token whose producer answers no introspect is an
-/// `introspect-coverage` error — alive ⇒ callable (RFC 04 §5), never a
-/// boot-race excuse.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_mute_live_producer_is_a_coverage_finding() {
-    let (a, b) = peer_pair().await;
-
-    let _token = a
-        .liveliness()
-        .declare_token("v1/h-eeeeeeeeeeee/state/mute/alive")
-        .await
-        .expect("token");
-
-    let report = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
-                .await
-                .expect("run_v1_doctor");
-            if report.live_producers >= 1 {
-                break report;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("the token should become visible within 10s");
-
-    assert!(
-        report.findings.iter().any(|f| f.check
-            == zenkey_fleet::report::V1CheckId::IntrospectCoverage
-            && f.citation.as_deref() == Some("RFC 04 §5")),
-        "a mute live producer must be a coverage finding, got: {:?}",
-        report.findings
-    );
-    // A token on the roster is something in scope: the run is a verdict.
-    assert_eq!(report.unobservable, None);
-}
-
-/// #510: a bus with nothing on it — no token, no router answering, no
-/// answer of any kind — is a run that judged nothing. The report says so
-/// with its reason, and its judgement is `Unobservable` under every
-/// threshold: the coverage check compares 0 with 0 and must not read as a
-/// healthy fleet.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_empty_bus_is_a_run_that_judged_nothing() {
-    use zenkey_fleet::report::DoctorSeverity;
-    let (_a, b) = peer_pair().await;
-    let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, "acme"), None, &spec())
-        .await
-        .expect("run_v1_doctor");
-    assert_eq!((report.live_producers, report.routers), (0, 0));
-    let why = report.unobservable.as_deref().expect("judged nothing");
-    assert!(
-        why.contains("nothing in scope") && why.contains("\"acme\""),
-        "{why}"
-    );
-    for threshold in [None, Some(DoctorSeverity::Error)] {
-        assert!(
-            report.judgement(threshold).is_unobservable(),
-            "{threshold:?}"
-        );
-    }
-}
-
-/// A live producer that *answers* introspect with a slice this build cannot
-/// read is not mute (#491): with no `--registry`, the wildcard sweep counts
-/// it as answered — no `introspect-coverage` finding — and files the same
-/// `slice-parse` the served-vs-declared diff would, naming the encoding
-/// (RFC 08 §6, v1.44; RFC 13 §3 O4).
+/// A producer that *answers* introspect with a slice this build cannot read
+/// is not silent (#491): with no registry given, the wildcard sweep files
+/// the same `slice-parse` the served-vs-declared diff would, naming the
+/// encoding (RFC 08 §6, v1.44; RFC 13 §3 O4).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unreadable_introspect_is_a_parse_finding_not_silence() {
     let (a, b) = peer_pair().await;
@@ -212,27 +151,23 @@ async fn an_unreadable_introspect_is_a_parse_finding_not_silence() {
 
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
+            let report = registry_checks(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
                 .await
-                .expect("run_v1_doctor");
-            if report.live_producers >= 1 && report.introspect_answered >= 1 {
+                .expect("the registry checks");
+            if report
+                .findings
+                .iter()
+                .any(|f| f.check == zenkey_fleet::report::V1CheckId::SliceParse)
+            {
                 break report;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("the token and the reply should become visible within 10s");
+    .expect("the reply should become visible within 10s");
 
     use zenkey_fleet::report::V1CheckId;
-    assert!(
-        !report
-            .findings
-            .iter()
-            .any(|f| f.check == V1CheckId::IntrospectCoverage),
-        "it answered, so it is not a coverage finding: {:?}",
-        report.findings
-    );
     let parse: Vec<_> = report
         .findings
         .iter()

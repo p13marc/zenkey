@@ -10,13 +10,14 @@
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
-use zenkey_fleet::{Fleet, V1DoctorSpec, declare_publication, run_v1_doctor};
+use zenkey_fleet::judge::registry_checks::{RegistrySpec, run as registry_checks};
+use zenkey_fleet::{Fleet, declare_publication};
 
 mod util;
 use util::peer_pair;
 
-fn spec(listen_s: u64) -> V1DoctorSpec {
-    V1DoctorSpec {
+fn spec(listen_s: u64) -> RegistrySpec {
+    RegistrySpec {
         deep: false,
         sample: None,
         timeout: Duration::from_millis(500),
@@ -87,13 +88,13 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let t1 = keep_publishing(wrong_qos, b"{}", None);
     let t2 = keep_publishing(unregistered, b"{}", None);
 
-    let report = run_v1_doctor(
+    let report = registry_checks(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_v1_doctor");
+    .expect("the registry checks");
     t1.abort();
     t2.abort();
 
@@ -176,13 +177,13 @@ async fn delete_tombstones_are_not_judged_as_payloads() {
         }
     });
 
-    let report = run_v1_doctor(
+    let report = registry_checks(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_v1_doctor");
+    .expect("the registry checks");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");
@@ -246,13 +247,13 @@ async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
         ));
     }
 
-    let report = run_v1_doctor(
+    let report = registry_checks(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_v1_doctor");
+    .expect("the registry checks");
     for t in tasks {
         t.abort();
     }

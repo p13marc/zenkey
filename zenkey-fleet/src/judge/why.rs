@@ -13,7 +13,7 @@
 //! ## The rungs
 //!
 //! Ten rungs, in the order a fact weakens the ones below it. The id
-//! vocabulary is **stable API** in the [`crate::report::V1CheckId`] tradition:
+//! vocabulary is **stable API** in the [`crate::report::CheckId`] tradition:
 //! scripts key on ids, the GUI will key deltas on them, additions append and
 //! nothing renames. The full set is [`crate::report::RungId::ALL`].
 //!

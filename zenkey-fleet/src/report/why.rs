@@ -12,7 +12,7 @@ use crate::judge::why::is_cause;
 
 /// Every rung the `why` ladder can put, in ladder order.
 ///
-/// The same promise as [`V1CheckId`](crate::report::V1CheckId), for the same
+/// The same promise as [`CheckId`](crate::report::CheckId), for the same
 /// reason: scripts key on these ids and the GUI renders them, so new rungs
 /// append and nothing renames one. It carries its own question, because the
 /// question is *serialized beside the id* — they are one fact, and keeping
@@ -251,7 +251,7 @@ mod rung_id_tests {
 
     /// The id vocabulary is API: additions append, nothing renames. If this
     /// test fails you are renaming a shipped rung id — don't (the
-    /// [`V1CheckId`](crate::report::V1CheckId) discipline, applied here).
+    /// [`CheckId`](crate::report::CheckId) discipline, applied here).
     #[test]
     fn rung_ids_are_stable() {
         assert_eq!(

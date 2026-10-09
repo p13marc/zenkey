@@ -56,8 +56,11 @@
 //! the reads through a contract: `operation` (a call, its answer and its
 //! silence — v1's `call` is the `@rpc` plane), `state` (the owner's current
 //! state or an archive's last-known one, never confused) and `watch` (a
-//! subscription's samples and how it ended). Their type names do not
-//! collide with v1's, so the flat namespace holds both generations.
+//! subscription's samples and how it ended). FJ6 gave zk2 the `doctor`
+//! domain (one verdict per check, `CheckId`, `DoctorReport`); v1's check
+//! vocabulary, which `field` and `check conform` still produce, moved to
+//! `v1_checks` under v1 names (`V1CheckId`, `V1Finding`). Their type names do
+//! not collide, so the flat namespace holds both generations.
 
 mod acl;
 mod admin;

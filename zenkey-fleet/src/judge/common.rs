@@ -26,7 +26,7 @@ use crate::SliceSet;
 use crate::model::facts::{KeyFacts, KeyShape, OriginKind};
 
 // The stable id vocabularies used to live here as two `[&str; N]`. They are
-// `report::V1CheckId` and `report::RungId` now (#347) — serde-pinned wire
+// `report::CheckId`, `report::V1CheckId` and `report::RungId` now (#347) — serde-pinned wire
 // shapes, so `CLAUDE.md`'s placement rule puts them under `report/`, with
 // their stability tests beside them.
 

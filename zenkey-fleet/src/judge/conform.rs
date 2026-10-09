@@ -24,11 +24,11 @@
 //!    is met and **exempt**, with the kind binding judged, and from any
 //!    other is not met; every other refusal is a reply, and met.
 //!    **Silence from a rostered origin is not met** — alive ⇒ callable
-//!    (RFC 13 §2, the doctor's `introspect-coverage` for one producer) —
+//!    (RFC 13 §2, the check v1's doctor called `introspect-coverage`) —
 //!    while silence from an `--origin` the roster does not show is
 //!    unknowable.
-//! 2. **The observer's checks, projected.** One doctor run scoped to the
-//!    producer (`run_doctor_inner`), whose findings map by
+//! 2. **The observer's checks, projected.** One run of v1's registry checks
+//!    (`judge::registry_checks`), scoped to the producer, whose findings map by
 //!    [`V1CheckId`] onto assertions (`project_conform`, pure): slice sync,
 //!    describe totality, schema drift, and — with a `--for` window — each
 //!    declared subject's presence and what rode on it; with `--deep`,
@@ -55,12 +55,14 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::producer::ReservedError;
 use crate::bus::query::{Answer, read_introspect};
 use crate::bus::write::{CallSpec, CallTarget};
-use crate::judge::registry_checks::{DoctorInternals, V1DoctorSpec, run_doctor_inner};
+use crate::judge::registry_checks::{
+    RegistryInternals, RegistryRun, RegistrySpec, run_with_internals,
+};
 use crate::model::facts::{KeyFacts, KeyShape, Registration};
 use crate::model::registry::{SliceSet, SliceSource};
 use crate::report::{
     Assertion, AssertionState, CallOutcome, ConformReport, ConformSource, ConformSummary,
-    ConformVerdict, DoctorSeverity, V1CheckId, V1DoctorReport, V1Finding,
+    ConformVerdict, DoctorSeverity, V1CheckId, V1Finding,
 };
 use crate::{Error, Result};
 
@@ -196,10 +198,10 @@ pub async fn run_conform(
 
     // --- the observer's checks, scoped to this producer -----------------
     let locals = SliceSet::from_slices(vec![slice.clone()]);
-    let (doctor, internals) = run_doctor_inner(
+    let (doctor, internals) = run_with_internals(
         fleet,
         Some(&locals),
-        &V1DoctorSpec {
+        &RegistrySpec {
             deep: spec.deep,
             sample: None,
             timeout: spec.timeout,
@@ -898,7 +900,7 @@ fn attribute<'r>(
     slice: &RegistrySlice,
     base: &str,
     slices: &SliceSet,
-    report: &'r V1DoctorReport,
+    report: &'r RegistryRun,
     origin: Option<&str>,
 ) -> Attributed<'r> {
     let mut out = Attributed::default();
@@ -1010,8 +1012,8 @@ fn project_conform(
     slice: &RegistrySlice,
     base: &str,
     slices: &SliceSet,
-    report: &V1DoctorReport,
-    internals: &DoctorInternals,
+    report: &RegistryRun,
+    internals: &RegistryInternals,
     origin: Option<&str>,
     caps: &BTreeMap<String, Capabilities>,
 ) -> Vec<Assertion> {
@@ -1797,7 +1799,7 @@ when = ["config:wifi"]
         .expect("slice");
         let set = SliceSet::from_slices(vec![slice.clone()]);
         let origin = "h-3fa9c2d41b7e";
-        let report = V1DoctorReport {
+        let report = RegistryRun {
             findings: vec![V1Finding {
                 severity: DoctorSeverity::Info,
                 check: V1CheckId::CardinalityOverDeclared,
@@ -1805,13 +1807,6 @@ when = ["config:wifi"]
                 evidence: "exempt: rest-variable".into(),
                 citation: None,
             }],
-            synced: crate::report::Asked::Asked(vec![]),
-            introspect_answered: 1,
-            live_producers: 1,
-            describe_served: 1,
-            describe_missing: 0,
-            routers: 0,
-            router_version: None,
             deep: false,
             observation: Some(crate::report::ObservationSummary {
                 window_s: 2.0,
@@ -1820,12 +1815,10 @@ when = ["config:wifi"]
                 keys_seen: 2,
                 dropped: 0,
                 synthetic_marked: 0,
-                field_paths_dropped: 0,
                 facts_evicted: 0,
             }),
-            unobservable: None,
         };
-        let mut internals = DoctorInternals::default();
+        let mut internals = RegistryInternals::default();
         internals.described.insert("demo".into());
         internals
             .introspected

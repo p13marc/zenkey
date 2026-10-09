@@ -1,42 +1,63 @@
-//! The doctor checks as engine functions (#55): every finding both frontends
-//! render comes from here — `zenctl doctor` orchestrates and renders, the
-//! zengui doctor panel calls the same [`run_v1_doctor`] and renders the same
-//! [`V1DoctorReport`]. A check that lives in one frontend is a check the other
-//! frontend's user never sees (RFC 08 §6.1's argument, applied to ourselves).
+//! v1's registry checks (#55, #222), which `check conform` projects.
 //!
-//! Check ids are **stable API**: scripts key on them (`--format json`), the
-//! GUI keys deltas on them. New checks add ids; nothing renames one. The full
-//! set is pinned in [`crate::report::V1CheckId`].
+//! Until #612's FJ6 these were `doctor`; zk2's doctor is
+//! [`crate::judge::doctor`] now, and judges a deployment against the core
+//! rather than against a registry. What is left here is exactly what
+//! `check conform`'s suite is a projection of (`judge::conform`): the
+//! served-vs-declared slice diff (`slice-sync`, `slice-parse`), describe
+//! totality and schema drift (RFC 08 §7), freshness against `ttl_s` and the
+//! declared `[budget]` under `deep`, and the listen phase's payload, QoS,
+//! unregistered-traffic, rate, kind and cardinality judgements. The checks
+//! conform never read — introspect coverage, the admin space, describe
+//! coverage, unstamped state, storage coverage, the stamper, field
+//! intelligence — left with the doctor verb. They read the v1 registry
+//! ([`SliceSet`](crate::model::registry::SliceSet)), and go with it (FJ9).
+//!
+//! [`run`] is public for the suites that pin these checks against a bus;
+//! nothing at the crate root names it, because no verb but `check conform`
+//! runs it.
 
 use std::time::Duration;
 
 use crate::Result;
+use zenkey::RegistrySlice;
 use zenkey::grammar::with_base;
-use zenkey::{Declared, RegistrySlice};
 
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
-use crate::report::{DoctorSeverity, DriftVerdict, V1CheckId, V1DoctorReport, V1Finding};
+use crate::report::{DoctorSeverity, DriftVerdict, ObservationSummary, V1CheckId, V1Finding};
 
-/// What a doctor run should cost.
+/// What a registry-check run should cost.
 #[derive(Debug, Clone)]
-pub struct V1DoctorSpec {
+pub struct RegistrySpec {
     /// Run the deep checks too (per-family state snapshots for freshness,
-    /// storage-coverage join) — real query load, opt-in.
+    /// the declared budget against the health document) — real query load,
+    /// opt-in.
     pub deep: bool,
     /// At most this many state samples drained per family in the deep
-    /// checks (`--sample N`) — bounds the sweep's cost, not just its output.
-    /// `None` = unbounded.
+    /// checks — bounds the sweep's cost, not just its output. `None` =
+    /// unbounded.
     pub sample: Option<usize>,
     /// Per-query timeout.
     pub timeout: Duration,
     /// Listen passively to the data planes for this long after the GET
-    /// fan-in (`--for`, #161) and judge what rides: decode/validity,
-    /// declared-vs-observed QoS, unregistered traffic, over-rate events.
-    /// `None` = the phase does not run and the report carries no
-    /// observation section.
+    /// fan-in (#161) and judge what rides: decode/validity,
+    /// declared-vs-observed QoS, unregistered traffic, over-rate events,
+    /// kind and cardinality. `None` = the phase does not run and the run
+    /// carries no observation.
     pub listen: Option<Duration>,
+}
+
+/// What one run found, and what its listen window watched. Not a wire
+/// shape: `check conform` reports it through its own assertions.
+#[derive(Debug, Clone, Default)]
+pub struct RegistryRun {
+    pub findings: Vec<V1Finding>,
+    /// The listen phase's scope and costs; `None` when it did not run.
+    pub observation: Option<ObservationSummary>,
+    /// Whether the deep checks ran.
+    pub deep: bool,
 }
 
 fn finding(
@@ -55,34 +76,31 @@ fn finding(
     }
 }
 
-/// Run every check against the live fleet and report typed findings.
+/// Run every registry check against the live fleet.
 ///
-/// `locals` is the caller's registry (loaded from `--registry` dirs or GUI
-/// settings). `None` means none was loaded: the served-vs-declared diff is
-/// skipped and only bus-derived checks run, and the report says so rather
-/// than reading in sync (O4 — "not asked" must not render as "clean").
+/// `locals` is the caller's registry. `None` means none was loaded: the
+/// served-vs-declared diff is not asked, and what the fleet serves is
+/// judged instead.
 ///
 /// `Option<&SliceSet>` and not `&[RegistrySlice]`: this is the engine's
-/// standing shape for "a registry, or honestly none" (`facts.rs` states it as
-/// policy), an empty slice could not tell the two apart, and the set arrives
-/// already indexed — doctor used to rebuild one from a clone of every slice
-/// halfway through the run.
-pub async fn run_v1_doctor(
+/// standing shape for "a registry, or honestly none" (`facts.rs` states it
+/// as policy), and an empty slice could not tell the two apart.
+pub async fn run(
     fleet: &crate::Fleet<'_>,
     locals: Option<&crate::model::registry::SliceSet>,
-    spec: &V1DoctorSpec,
-) -> Result<V1DoctorReport> {
-    Ok(run_doctor_inner(fleet, locals, spec).await?.0)
+    spec: &RegistrySpec,
+) -> Result<RegistryRun> {
+    Ok(run_with_internals(fleet, locals, spec).await?.0)
 }
 
-/// What one doctor run saw that its [`V1DoctorReport`] does not carry (#222)
-/// — the conformance suite's inputs beside the findings, never a wire
-/// shape. `check conform` projects a scoped doctor run onto its assertions
-/// ([`crate::judge::conform`]), and a finding says what is *wrong*; what
-/// was *seen* clean is here, so a met assertion names its evidence rather
-/// than inferring it from a silence of findings.
+/// What one run saw that its [`RegistryRun`] does not carry (#222) — the
+/// conformance suite's inputs beside the findings. `check conform` projects
+/// a scoped run onto its assertions ([`crate::judge::conform`]), and a
+/// finding says what is *wrong*; what was *seen* clean is here, so a met
+/// assertion names its evidence rather than inferring it from a silence of
+/// findings.
 #[derive(Debug, Default)]
-pub(crate) struct DoctorInternals {
+pub(crate) struct RegistryInternals {
     /// `(origin, producer)` pairs whose `introspect` answered the
     /// served-vs-declared GET — what makes an absent `slice-sync` finding a
     /// met assertion rather than an unasked one.
@@ -93,7 +111,7 @@ pub(crate) struct DoctorInternals {
     /// the origins it rode from and how many samples. Filled beside the
     /// cardinality refine, from the same resolved facts.
     pub(crate) seen: std::collections::BTreeMap<(String, String), SeenFamily>,
-    /// `(producer, declared path)` → state samples the `--deep` freshness
+    /// `(producer, declared path)` → state samples the deep freshness
     /// sweep read for it. Absent is "the sweep did not reach it".
     pub(crate) fresh_read: std::collections::BTreeMap<(String, String), usize>,
 }
@@ -105,26 +123,22 @@ pub(crate) struct SeenFamily {
     pub(crate) samples: u64,
 }
 
-/// [`run_v1_doctor`], with the [`DoctorInternals`] beside the report. One run,
-/// two readers: the public verb keeps its shape, and the conformance suite
-/// reads the same observation instead of a second copy of the checks.
-pub(crate) async fn run_doctor_inner(
+/// [`run`], with the [`RegistryInternals`] beside the findings. One run, two
+/// readers: the suites read the findings, and the conformance suite reads
+/// the same observation instead of a second copy of the checks.
+pub(crate) async fn run_with_internals(
     fleet: &crate::Fleet<'_>,
     locals: Option<&crate::model::registry::SliceSet>,
-    spec: &V1DoctorSpec,
-) -> Result<(V1DoctorReport, DoctorInternals)> {
+    spec: &RegistrySpec,
+) -> Result<(RegistryRun, RegistryInternals)> {
     let (session, base) = (fleet.session(), fleet.base());
-    let mut internals = DoctorInternals::default();
+    let mut internals = RegistryInternals::default();
 
     // A registry that declares nothing answers no question this run asks, so
-    // it takes the same path as none at all — normalised once, here, rather
-    // than at each of the four places that branch on it below.
+    // it takes the same path as none at all — normalised once, here.
     let locals = locals.filter(|set| !set.slices().is_empty());
-    let roster = crate::bus::roster::roster(fleet, spec.timeout).await?;
 
     let mut findings: Vec<V1Finding> = Vec::new();
-    let mut synced: Vec<String> = Vec::new();
-    let mut answered = 0usize;
 
     // --- served-vs-declared diff (RFC 08 §6) --------------------------
     for local in locals.iter().flat_map(|set| set.slices()) {
@@ -134,7 +148,6 @@ pub(crate) async fn run_doctor_inner(
             let Answer::Value(bytes) = &answer.answer else {
                 continue;
             };
-            answered += 1;
             internals
                 .introspected
                 .insert((answer.origin.clone(), local.name.clone()));
@@ -155,38 +168,27 @@ pub(crate) async fn run_doctor_inner(
                     continue;
                 }
             };
-            let diff = zenkey::slice::diff(&served, local);
-            if diff.is_empty() {
-                synced.push(format!(
-                    "{}/{} (registry {})",
-                    answer.origin, local.name, served.version
+            for f in &zenkey::slice::diff(&served, local) {
+                findings.push(finding(
+                    DoctorSeverity::Error,
+                    V1CheckId::SliceSync,
+                    format!("{}/{}", answer.origin, local.name),
+                    f.summary(),
+                    Some("RFC 08 §6"),
                 ));
-            } else {
-                for f in &diff {
-                    findings.push(finding(
-                        DoctorSeverity::Error,
-                        V1CheckId::SliceSync,
-                        format!("{}/{}", answer.origin, local.name),
-                        f.summary(),
-                        Some("RFC 08 §6"),
-                    ));
-                }
             }
         }
     }
 
-    // One declared registry sweep (#37) serves both fallbacks below —
-    // doctor used to fan the identical wildcard GETs twice per run.
+    // With no registry given, what the fleet serves is the registry judged:
+    // one declared sweep (#37).
     let sweep = if locals.is_none() {
         let repeating = RepeatingRegistry::declare(fleet, spec.timeout).await?;
         let swept = repeating.sweep().await?;
         repeating.undeclare().await?;
-        // An answer that did not read is still an answer (#491): it counts
-        // toward coverage below — it was not silence — and is the same
+        // An answer that did not read is still an answer (#491): the same
         // `slice-parse` finding the served-vs-declared diff files, naming
-        // the encoding (RFC 08 §6, v1.44; RFC 13 §3 O4). Before, this path
-        // dropped it, and `introspect-coverage` called the producer silent.
-        answered = swept.served.len() + swept.unreadable.len();
+        // the encoding (RFC 08 §6, v1.44; RFC 13 §3 O4).
         for u in &swept.unreadable {
             findings.push(finding(
                 DoctorSeverity::Error,
@@ -206,52 +208,6 @@ pub(crate) async fn run_doctor_inner(
         None
     };
 
-    // The roster is what makes silence legible (RFC 05 §3.1): a producer
-    // that holds an `alive` token but did not answer `introspect` is a bug,
-    // because producers MUST declare their @rpc queryables *before* their
-    // token — "alive ⇒ callable" (RFC 04 §5). Coverage is judged over the
-    // producers that were actually *asked*: with `--registry` covering a
-    // subset, a live producer outside the locals was never queried, and
-    // "not asked" must not render as "did not answer" (RFC 09 §5.1 O4).
-    let live: usize = roster.values().map(Vec::len).sum();
-    findings.extend(judge_introspect_coverage(
-        &roster,
-        locals.map(crate::model::registry::SliceSet::slices),
-        answered,
-    ));
-
-    // --- admin reachability ------------------------------------------
-    let routers = crate::routers(session, spec.timeout)
-        .await
-        .unwrap_or_default();
-    let mut router_version = None;
-    if routers.is_empty() {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            V1CheckId::AdminUnreachable,
-            "mesh",
-            "no routers answered @/*/router (peer-only mesh, or the admin space is \
-             disabled) — storage/version checks skipped",
-            None,
-        ));
-    } else {
-        let versions: std::collections::BTreeSet<&str> = routers
-            .iter()
-            .filter_map(|r| r.version.as_deref())
-            .collect();
-        if versions.len() > 1 {
-            findings.push(finding(
-                DoctorSeverity::Error,
-                V1CheckId::RouterVersionSkew,
-                "mesh",
-                format!("router version skew across the mesh: {versions:?}"),
-                None,
-            ));
-        } else {
-            router_version = versions.iter().next().map(|v| v.to_string());
-        }
-    }
-
     // --- schema conformance (RFC 08 §7) ------------------------------
     // Which slices to judge: the locals when given, else what the fleet
     // serves (the sweep above).
@@ -269,22 +225,18 @@ pub(crate) async fn run_doctor_inner(
     // One sweep, kept whole (#410): every answer attributed to the host that
     // gave it, because `describe` fans in across every host running a
     // producer and keeping one of them was how a schema disagreement came
-    // to name a producer and never a host (#398). The same helper serves
-    // `interface show --schema`, so the two no longer each hold a copy of
-    // "do these carriers agree".
+    // to name a producer and never a host (#398).
     let describes = crate::bus::describe::describe_sweep(fleet, &slice_set, spec.timeout).await?;
     // One per producer, for the consumers whose question *is* the producer:
-    // totality, the listen phase's store, the served count, and the field
-    // table's declared-path join. Where several hosts answered this is the
-    // first of them — arrival order, which is not a fact about the fleet, and
-    // is why the drift check below reads the attributed list instead (#398).
+    // totality and the listen phase's store. Where several hosts answered
+    // this is the first of them — arrival order, which is not a fact about
+    // the fleet, and is why the drift check below reads the attributed list
+    // instead (#398).
     let described: Vec<(String, zenkey::schema::SchemaSet)> = describes.first_per_producer();
-    let undescribed = describes.undescribed.len();
     internals
         .described
         .extend(described.iter().map(|(producer, _)| producer.clone()));
-    // Totality through the one engine implementation (`totality_gaps`) —
-    // doctor used to carry a parallel referenced-names path.
+    // Totality through the one engine implementation (`totality_gaps`).
     for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
         findings.push(finding(
             DoctorSeverity::Error,
@@ -340,23 +292,10 @@ pub(crate) async fn run_doctor_inner(
             Some("RFC 08 §7"),
         ));
     }
-    if undescribed > 0 {
-        findings.push(finding(
-            DoctorSeverity::Info,
-            V1CheckId::DescribeMissing,
-            "fleet",
-            format!(
-                "{undescribed} producer(s) serve no describe (a SHOULD; generic tools \
-                 render their payloads structurally)"
-            ),
-            Some("RFC 08 §7"),
-        ));
-    }
 
-    // --- deep: freshness + storage coverage --------------------------
+    // --- deep: freshness and the declared budget ----------------------
     if spec.deep {
         let now = std::time::SystemTime::now();
-        let mut unstamped = 0usize;
         for slice in slice_set.slices() {
             for subject in &slice.subjects {
                 let (Some(ttl), true) = (subject.ttl_s, subject.class.is(&zenkey::Class::State))
@@ -381,19 +320,26 @@ pub(crate) async fn run_doctor_inner(
                     .fresh_read
                     .entry((slice.name.clone(), subject.path.clone()))
                     .or_default() += samples.len();
-                let (family_findings, family_unstamped) = judge_state_samples(&samples, ttl, now);
-                findings.extend(family_findings);
-                unstamped += family_unstamped;
+                findings.extend(judge_state_samples(&samples, ttl, now));
             }
         }
         // Declared `[budget]` versus the health document's `self_stats`
-        // (#391, RFC 08 §2 v1.32, RFC 04 §1.2). Under `--deep` because a
-        // health fetch costs the data plane, and RFC 13 §3 asks for that
-        // explicitly rather than folded into an ambient run (its frugality
-        // note); a slice without a budget is not asked, and issues no GET.
+        // (#391, RFC 08 §2 v1.32, RFC 04 §1.2). Under `deep` because a
+        // health fetch costs the data plane (RFC 13 §3's frugality note); a
+        // slice without a budget is not asked, and issues no GET.
         // `state_snapshot` carries no payload, so this is a `fleet_get` with
         // the reply bytes read structurally — the listen phase's reading.
-        for slice in slice_set.slices().iter().filter(|s| s.budget.is_some()) {
+        let budgeted: Vec<&RegistrySlice> = slice_set
+            .slices()
+            .iter()
+            .filter(|s| s.budget.is_some())
+            .collect();
+        let roster = if budgeted.is_empty() {
+            Default::default()
+        } else {
+            crate::bus::roster::roster(fleet, spec.timeout).await?
+        };
+        for slice in budgeted {
             let selector = match &slice.service_origin {
                 Some(origin) => with_base(base, format!("v1/{origin}/state/health")),
                 None => with_base(base, format!("v1/*/state/{}/health", slice.name)),
@@ -426,45 +372,6 @@ pub(crate) async fn run_doctor_inner(
                 slice, &read, asked,
             ));
         }
-        if unstamped > 0 {
-            findings.push(finding(
-                DoctorSeverity::Warning,
-                V1CheckId::UnstampedState,
-                "fleet",
-                format!(
-                    "{unstamped} state sample(s) carry no HLC timestamp — the deployment \
-                     lacks timestamping, which LWW requires; freshness is unjudgeable \
-                     for them"
-                ),
-                Some("RFC 04 §4"),
-            ));
-        }
-        let storages = crate::storages(session, spec.timeout)
-            .await
-            .unwrap_or_default();
-        let coverage = crate::state_coverage(&slice_set, base, &storages);
-        let uncovered: Vec<&crate::CoverageRow> = coverage
-            .iter()
-            .filter(|r| r.coverage == crate::Coverage::Uncovered)
-            .collect();
-        if !uncovered.is_empty() {
-            findings.push(finding(
-                DoctorSeverity::Info,
-                V1CheckId::StorageCoverage,
-                "fleet",
-                format!(
-                    "{} state famil(y|ies) have no storage coverage (volatile seeding \
-                     may ride the advanced-pub/sub cache): {}",
-                    uncovered.len(),
-                    uncovered
-                        .iter()
-                        .map(|r| format!("{}/{}", r.producer, r.path))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-                Some("RFC 04 §3.5"),
-            ));
-        }
     }
 
     // --- listen: judge what actually rides (#161) --------------------
@@ -480,13 +387,12 @@ pub(crate) async fn run_doctor_inner(
             }
             // And sealed for the window (#337): the GET phase asked every
             // producer the registry names, so a miss inside the window is a
-            // producer that served nothing — already counted as
-            // `describe_missing`. Left unsealed, that miss is a `describe`
-            // GET awaited inside the drain loop, re-asked every time its
-            // backoff expires, with nobody attending the broadcast.
+            // producer that served nothing. Left unsealed, that miss is a
+            // `describe` GET awaited inside the drain loop, re-asked every
+            // time its backoff expires, with nobody attending the broadcast.
             let _sealed = store.seal();
             let (listen_findings, summary, seen) =
-                observe_traffic(fleet, &slice_set, &store, &described, window).await?;
+                observe_traffic(fleet, &slice_set, &store, window).await?;
             findings.extend(listen_findings);
             internals.seen = seen;
             Some(summary)
@@ -494,47 +400,12 @@ pub(crate) async fn run_doctor_inner(
         None => None,
     };
 
-    // An empty scope judged nothing (#510). With no producer on the roster
-    // and no router answering, every check above ran over nothing:
-    // `introspect-coverage` compares 0 with 0, and the one finding left is
-    // the Info `admin-unreachable`. That is the report a wrong endpoint or a
-    // wrong base produces, and it read as a healthy fleet. Anything that did
-    // answer or ride — an introspect without a token, a describe, a state
-    // read, a sample in the window — is something judged, and keeps the run
-    // a verdict.
-    let fresh_read: usize = internals.fresh_read.values().sum();
-    let heard = observation.as_ref().map_or(0, |o| o.samples);
-    let unobservable = (live == 0
-        && routers.is_empty()
-        && answered == 0
-        && described.is_empty()
-        && fresh_read == 0
-        && heard == 0)
-        .then(|| {
-            format!(
-                "nothing in scope: no producer holds an alive token under the base {base:?} \
-                 and no router answered the admin space — a run over an empty bus judged \
-                 nothing, which is not a healthy fleet (RFC 13 §1.2)"
-            )
-        });
-
-    let report = V1DoctorReport {
+    let run = RegistryRun {
         findings,
-        // `None` when no local registry was given: the served-vs-declared
-        // diff never ran, and the report must say so rather than looking
-        // like "ran, none in sync" (RFC 09 §5.1 O4, review finding R1).
-        synced: locals.is_some().then_some(synced).into(),
-        introspect_answered: answered,
-        live_producers: live,
-        describe_served: described.len(),
-        describe_missing: undescribed,
-        routers: routers.len(),
-        router_version,
-        deep: spec.deep,
         observation,
-        unobservable,
+        deep: spec.deep,
     };
-    Ok((report, internals))
+    Ok((run, internals))
 }
 
 /// How many decode attempts each key gets during the listen window — the
@@ -592,7 +463,6 @@ async fn observe_traffic(
     fleet: &crate::Fleet<'_>,
     slices: &crate::model::registry::SliceSet,
     store: &crate::model::decode::SchemaStore,
-    described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(
     Vec<V1Finding>,
@@ -652,11 +522,6 @@ async fn observe_traffic(
     let started = tokio::time::Instant::now();
     let deadline = started + window;
 
-    // Field intelligence (#223): per-dotted-path stats over the structural
-    // value — sync and schema-free, so it rides every sample within the
-    // decode budget's reach and beyond.
-    let mut fields =
-        crate::judge::field::FieldObservation::new(crate::judge::field::DEFAULT_MAX_PATHS);
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
     let mut synthetic: u64 = 0;
@@ -672,8 +537,6 @@ async fn observe_traffic(
     // Per-family event counts: (family subject, declared rate) → what was
     // seen and what was declared.
     let mut event_counts: BTreeMap<(String, String), RateWindow> = BTreeMap::new();
-    // Stamping nodes that are not the publisher (#213): zid → samples.
-    let mut foreign_stampers: BTreeMap<String, u64> = BTreeMap::new();
     // Declared versus observed `kind` (#422): per key, with the producers
     // whose `alive` token is currently down — a `NodeUp` that follows one
     // is a cycle; a lone `NodeUp` (history replaying the tokens that are
@@ -706,38 +569,21 @@ async fn observe_traffic(
                 {
                     synthetic += 1;
                 }
-                // Who stamped it (#213). A router doing the timestamping is
-                // not a fault — it is a deployment choice — but it silently
-                // changes what every latency in this suite measures, so it is
-                // worth saying out loud once.
-                if let Some(crate::StampProvenance::Foreign { stamper }) = s.stamped_by {
-                    *foreign_stampers.entry(stamper.to_string()).or_default() += 1;
-                }
                 // A tombstone is a retirement, not a document (RFC 04 §1.2):
                 // a Delete carries no payload to read, decode, or validate,
-                // so the field and payload ladders skip it — judging the
-                // empty body as a value manufactures `payload-undecodable`
-                // out of a correct retirement (zensight#830). Everything
-                // that is a wire fact about the publisher — QoS axes,
-                // registration, stamping — still applies and stays judged.
+                // so the payload ladders skip it — judging the empty body as
+                // a value manufactures `payload-undecodable` out of a correct
+                // retirement (zensight#830). Everything that is a wire fact
+                // about the publisher — QoS axes, registration — still
+                // applies and stays judged.
                 let is_put = s.kind == zenoh::sample::SampleKind::Put;
-                // Same bound as `run_field`'s drain (#346): the parse is
-                // per sample by design, so the payload size is what has to be
-                // bounded, and the skip is counted rather than read as an
-                // absent document.
+                // The structural document the kind judge reads; `None` for
+                // an oversized or undecodable body (#346's bound: the parse
+                // is per sample, so the payload size is what is bounded).
                 let bytes = s.payload.to_bytes();
-                // The structural document, read once for the field ladder
-                // and the kind judge alike; `None` for an oversized or
-                // undecodable body, which each of them counts as unread.
-                let mut doc = None;
-                if is_put {
-                    if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
-                        fields.observe_unread(&s.key);
-                    } else {
-                        doc = crate::model::decode::structural_value(&bytes);
-                        fields.observe(&s.key, started.elapsed().as_secs_f64(), doc.as_ref());
-                    }
-                }
+                let doc = (is_put && bytes.len() <= crate::model::decode::OBSERVE_LIMIT)
+                    .then(|| crate::model::decode::structural_value(&bytes))
+                    .flatten();
                 facts_cache.ensure(base, &s.key, Some(slices));
                 let facts = facts_cache.get(&s.key).expect("just ensured this key");
                 match &facts.registration {
@@ -933,27 +779,6 @@ async fn observe_traffic(
     }
     emit_capped(&mut findings, ex, V1CheckId::PayloadInvalid, SAME_FINDING);
     findings.extend(judge_qos_observed(&qos_bad));
-    if !foreign_stampers.is_empty() {
-        let mut named: Vec<String> = foreign_stampers
-            .iter()
-            .map(|(zid, n)| format!("{zid} ({n} sample(s))"))
-            .collect();
-        named.sort();
-        findings.push(finding(
-            DoctorSeverity::Info,
-            V1CheckId::TimestampStampedElsewhere,
-            "fleet".to_string(),
-            format!(
-                "HLCs on this bus are stamped by {} node(s) that are not the publishing \
-                 session — a deployment with router-side timestamping, which is legal and \
-                 common. Latency measured from these stamps is stamper→observer, not \
-                 publisher→observer: {}",
-                foreign_stampers.len(),
-                named.join(", ")
-            ),
-            Some("RFC 09 §5.1 O7"),
-        ));
-    }
     let mut ex = Examples::new(FINDING_CAP);
     for (key, n) in &unregistered {
         ex.push_with(|| {
@@ -1001,14 +826,6 @@ async fn observe_traffic(
     findings.extend(judge_cardinality(slices, &budgets, window_s));
     findings.extend(crate::judge::kind::judge_kind(&kinds, window_s));
 
-    // Field intelligence (#223): the three field-granular checks, judged
-    // with what is known per key — declared `ttl_s`/type from the resolved
-    // facts, declared paths from the describe sets the GET phase gathered.
-    let field_ctx = field_context_from(slices, described, &facts_cache);
-    findings.extend(crate::judge::field::judge_fields(
-        &fields, window_s, &field_ctx,
-    ));
-
     Ok((
         findings,
         crate::report::ObservationSummary {
@@ -1018,52 +835,10 @@ async fn observe_traffic(
             keys_seen,
             dropped,
             synthetic_marked: synthetic,
-            // The per-path table is bounded like every other table here, and
-            // its cost is a wire fact (RFC 09 §5.1 O6).
-            field_paths_dropped: fields.dropped_paths(),
             facts_evicted: facts_cache.evicted(),
         },
         seen,
     ))
-}
-
-/// The per-key context the field judges need (#223), built from the listen
-/// phase's resolved facts and the already-gathered describe sets — pure, so
-/// the join is testable without a bus.
-fn field_context_from(
-    slices: &crate::model::registry::SliceSet,
-    described: &[(String, zenkey::schema::SchemaSet)],
-    facts: &crate::model::facts::FactsCache,
-) -> std::collections::BTreeMap<String, crate::judge::field::KeyFieldContext> {
-    use std::collections::BTreeMap;
-
-    let mut declared_cache: BTreeMap<(String, String), Option<crate::judge::field::DeclaredPaths>> =
-        BTreeMap::new();
-    let mut ctx = BTreeMap::new();
-    for (key, f) in facts.iter() {
-        let mut c = crate::judge::field::KeyFieldContext::default();
-        if let crate::model::facts::Registration::Registered(sf) = &f.registration {
-            c.ttl_s = sf.ttl_s;
-            c.type_name = Some(sf.type_name.clone());
-            if let Some(producer) = crate::judge::common::producer_of(f, Some(slices))
-                && !sf.type_name.is_empty()
-            {
-                let declared = declared_cache
-                    .entry((producer.clone(), sf.type_name.clone()))
-                    .or_insert_with(|| {
-                        described
-                            .iter()
-                            .find(|(name, _)| *name == producer)
-                            .and_then(|(_, set)| set.get(&sf.type_name))
-                            .and_then(|schema| schema.json_document())
-                            .and_then(crate::judge::field::DeclaredPaths::from_json_schema)
-                    });
-                c.declared = declared.clone();
-            }
-        }
-        ctx.insert(key.to_string(), c);
-    }
-    ctx
 }
 
 /// The `qos-observed-mismatch` findings from the listen window's per-key
@@ -1106,115 +881,36 @@ fn judge_qos_observed(
     findings
 }
 
-/// Judge introspect coverage — "alive ⇒ callable" (RFC 04 §5) — against the
-/// producers that were actually asked. Pure, so the O4 boundary is testable
-/// without a bus.
-///
-/// `locals: Some` is the `--registry` run: only the producers the local
-/// slices name were queried, so only those count toward coverage — a live
-/// producer whose slice a *partial* registry does not carry was never asked,
-/// and counting it as "did not answer" would be a false finding (RFC 09
-/// §5.1 O4; deep-review D3). `None` is the wildcard sweep, where every
-/// roster producer was in the fan-in. Either way the evidence states the
-/// scope it checked.
-///
-/// Matching follows the roster's own conventions: an instance suffix shares
-/// its base slice (`sysinfo-2` → `sysinfo`, RFC 03 §1.5), and a service
-/// origin's token names the service as its producer (RFC 06 §5), matched by
-/// the slice's declared origin or name.
-fn judge_introspect_coverage(
-    roster: &std::collections::BTreeMap<String, Vec<String>>,
-    locals: Option<&[RegistrySlice]>,
-    answered: usize,
-) -> Option<V1Finding> {
-    let live: usize = roster.values().map(Vec::len).sum();
-
-    let (in_scope, scope) = match locals {
-        None => (
-            live,
-            "scope: the whole roster (fleet-wide wildcard sweep)".to_string(),
-        ),
-        Some(locals) => {
-            let named = |origin: &str, producer: &str| {
-                let base_name = zenkey::grammar::Producer::parse_chunk(producer)
-                    .map(|p| p.name().to_string())
-                    .unwrap_or_else(|_| producer.to_string());
-                locals.iter().any(|l| {
-                    l.name == base_name
-                        || l.service_origin.as_ref().map(Declared::token) == Some(origin)
-                })
-            };
-            let in_scope: usize = roster
-                .iter()
-                .map(|(origin, producers)| producers.iter().filter(|p| named(origin, p)).count())
-                .sum();
-            let mut names: Vec<&str> = locals.iter().map(|l| l.name.as_str()).collect();
-            names.sort_unstable();
-            names.dedup();
-            let not_asked = live - in_scope;
-            (
-                in_scope,
-                format!(
-                    "scope: the producer(s) the local registry names ({}); {} other \
-                     live producer(s) were not asked and are not counted (O4)",
-                    names.join(", "),
-                    not_asked
-                ),
-            )
-        }
-    };
-    (answered < in_scope).then(|| {
-        finding(
-            DoctorSeverity::Error,
-            V1CheckId::IntrospectCoverage,
-            "fleet",
-            format!(
-                "{} of {} live producer(s) in scope did not answer introspect — \
-                 alive ⇒ callable, so this is a finding, not a boot race; {scope}",
-                in_scope - answered,
-                in_scope
-            ),
-            Some("RFC 04 §5"),
-        )
-    })
-}
-
 /// Judge one state family's samples against its declared ttl — pure, so the
-/// freshness math is testable without a bus. Returns the stale findings and
-/// the count of unstamped samples (aggregated by the caller into the one
-/// `unstamped-state` finding).
+/// freshness math is testable without a bus. An unstamped sample has no age
+/// to judge, and is not judged.
 fn judge_state_samples(
     samples: &[crate::StateSample],
     ttl: i64,
     now: std::time::SystemTime,
-) -> (Vec<V1Finding>, usize) {
+) -> Vec<V1Finding> {
     let mut findings = Vec::new();
-
-    let mut unstamped = 0usize;
-
     for sample in samples {
-        match sample.timestamp {
-            Some(ts) => {
-                let stamped = ts.get_time().to_system_time();
-                if let Ok(age) = now.duration_since(stamped)
-                    && age.as_secs() as i64 > ttl
-                {
-                    findings.push(finding(
-                        DoctorSeverity::Error,
-                        V1CheckId::StaleState,
-                        sample.key.clone(),
-                        format!(
-                            "{}s old against ttl {ttl}s (refresh <= ttl/2)",
-                            age.as_secs()
-                        ),
-                        Some("RFC 04 §1.2"),
-                    ));
-                }
-            }
-            None => unstamped += 1,
+        let Some(ts) = sample.timestamp else {
+            continue;
+        };
+        let stamped = ts.get_time().to_system_time();
+        if let Ok(age) = now.duration_since(stamped)
+            && age.as_secs() as i64 > ttl
+        {
+            findings.push(finding(
+                DoctorSeverity::Error,
+                V1CheckId::StaleState,
+                sample.key.clone(),
+                format!(
+                    "{}s old against ttl {ttl}s (refresh <= ttl/2)",
+                    age.as_secs()
+                ),
+                Some("RFC 04 §1.2"),
+            ));
         }
     }
-    (findings, unstamped)
+    findings
 }
 
 /// Judge every declared `{var}` family's key population against its declared
@@ -1478,93 +1174,6 @@ mod tests {
         );
     }
 
-    fn roster_of(entries: &[(&str, &[&str])]) -> std::collections::BTreeMap<String, Vec<String>> {
-        entries
-            .iter()
-            .map(|(origin, producers)| {
-                (
-                    origin.to_string(),
-                    producers.iter().map(|p| p.to_string()).collect(),
-                )
-            })
-            .collect()
-    }
-
-    fn slice_named(name: &str) -> RegistrySlice {
-        zenkey::parse_slice(&format!(
-            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
-             [producer]\nname = \"{name}\"\n"
-        ))
-        .expect("fixture slice parses")
-    }
-
-    /// Deep-review D3: with `--registry` covering a subset of the fleet, a
-    /// live producer the locals do not name was never asked — so it must not
-    /// count as "did not answer" (O4). One local slice, answered by its one
-    /// origin, beside an extra live producer: no finding.
-    #[test]
-    fn a_partial_registry_does_not_count_unasked_producers_against_coverage() {
-        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
-        let locals = [slice_named("sysinfo")];
-        assert_eq!(
-            judge_introspect_coverage(&roster, Some(&locals), 1),
-            None,
-            "the un-asked producer is out of scope, not silent"
-        );
-    }
-
-    /// …and when an in-scope producer really did not answer, the finding
-    /// fires and its evidence states the scope it checked — including that
-    /// the out-of-scope producer was not counted. An instance suffix shares
-    /// its base slice (RFC 03 §1.5), so `sysinfo-2` is in scope too.
-    #[test]
-    fn introspect_coverage_evidence_states_its_scope() {
-        let roster = roster_of(&[
-            ("h-aaaaaaaaaaaa", &["sysinfo", "extra"]),
-            ("h-bbbbbbbbbbbb", &["sysinfo-2"]),
-        ]);
-        let locals = [slice_named("sysinfo")];
-        let f = judge_introspect_coverage(&roster, Some(&locals), 1).expect("a finding");
-        assert_eq!(f.check, V1CheckId::IntrospectCoverage);
-        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
-        assert!(
-            f.evidence.contains("the local registry names (sysinfo)"),
-            "{}",
-            f.evidence
-        );
-        assert!(
-            f.evidence
-                .contains("1 other live producer(s) were not asked"),
-            "{}",
-            f.evidence
-        );
-    }
-
-    /// A service origin's token names the service as its producer (RFC 06
-    /// §5); a local slice matches it by declared origin.
-    #[test]
-    fn a_service_slice_scopes_its_origin_into_coverage() {
-        let roster = roster_of(&[("@catalog", &["catalog"]), ("h-aaaaaaaaaaaa", &["extra"])]);
-        let locals = [zenkey::parse_slice(
-            "[registry]\nversion = \"1.0\"\napp = \"t\"\nconvention = 1\n\
-             [service]\nname = \"catalog\"\norigin = \"@catalog\"\n",
-        )
-        .expect("service slice parses")];
-        assert_eq!(judge_introspect_coverage(&roster, Some(&locals), 1), None);
-        let f = judge_introspect_coverage(&roster, Some(&locals), 0).expect("a finding");
-        assert!(f.evidence.contains("1 of 1"), "{}", f.evidence);
-    }
-
-    /// The wildcard sweep keeps the whole roster in scope, and says so.
-    #[test]
-    fn the_wildcard_sweep_judges_the_whole_roster() {
-        let roster = roster_of(&[("h-aaaaaaaaaaaa", &["sysinfo", "extra"])]);
-        let f = judge_introspect_coverage(&roster, None, 1).expect("a finding");
-        assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
-        assert!(f.evidence.contains("whole roster"), "{}", f.evidence);
-        assert_eq!(judge_introspect_coverage(&roster, None, 2), None);
-    }
-
     #[test]
     fn freshness_judgement_is_pure_and_ttl_bound() {
         let now = std::time::SystemTime::now();
@@ -1595,7 +1204,7 @@ mod tests {
                 payload_len: 2,
             },
         ];
-        let (findings, unstamped) = judge_state_samples(&samples, 30, now);
+        let findings = judge_state_samples(&samples, 30, now);
         assert_eq!(
             findings.len(),
             1,
@@ -1603,6 +1212,11 @@ mod tests {
         );
         assert_eq!(findings[0].check, V1CheckId::StaleState);
         assert!(findings[0].subject.contains("h-bbbbbbbbbbbb"));
-        assert_eq!(unstamped, 1, "the unstamped sample is counted, not judged");
+        assert!(
+            findings
+                .iter()
+                .all(|f| !f.subject.contains("h-cccccccccccc")),
+            "the unstamped sample has no age to judge"
+        );
     }
 }

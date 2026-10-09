@@ -714,7 +714,6 @@ pub fn conform_report() -> ConformReport {
             keys_seen: 2,
             dropped: 3,
             synthetic_marked: 40,
-            field_paths_dropped: 0,
             facts_evicted: 0,
         }),
         deep: false,
