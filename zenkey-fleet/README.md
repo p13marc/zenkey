@@ -66,8 +66,11 @@ it goes to `report/`, by the rule that module's docs state.
 
 ## `judge/` — verdicts
 
-`doctor`, `expect`, `condition`, `field`, `why`, `cutover`, `retired`,
-`budget`, and `common` — the vocabulary they share: the stable check- and
+`doctor` (zk2's: a deployment against the core, thirteen checks, each a
+verdict in the judgement shape, #612 FJ6) and its `doctor_delta`, `expect`,
+`condition`, `conform` and the v1 `registry_checks` it projects, `field`,
+`why`, `cutover`, `retired`, `budget`, and `common` — the vocabulary they
+share: the stable check- and
 rung-id registries, the RFC 09 §5.3 synthetic marker, the definition of "the
 new plane", the passive-observation scopes, and the caps on how many
 offenders a report names.
