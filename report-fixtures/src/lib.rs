@@ -186,42 +186,53 @@ pub fn doctor_report() -> DoctorReport {
     }
 }
 
-/// A `zenctl field` window (#223): one frozen numeric flagged stuck, one
-/// healthy small-domain path beside it, and a path table that hit its bound
-/// — the report must carry the bound's cost, not just its rows.
+/// A `zenctl field` window (#223; zk2's since #612, FJ8b): one path the
+/// declared type never declares (`field-new`), one declared small-domain
+/// path beside it, one key no contract resolved, and a path table that hit
+/// its bound — the report must carry the bound's cost, not just its rows.
 pub fn field_report() -> FieldReport {
-    let key = format!("v1/{ORIGIN}/state/sysinfo/health");
+    let key = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0".to_owned();
     FieldReport {
-        selector: "v1/*/state/sysinfo/health".into(),
+        selector: "zk2/*/tc/tc.netif.v1/state/**".into(),
         window_s: 30.0,
+        lens: LensScope {
+            namespace: String::new(),
+            presence: Some(LensPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                services: 1,
+            }),
+            contracts: 1,
+        },
         samples: 42,
-        keys_seen: 1,
+        keys_seen: 2,
         dropped: 0,
         undocumented: 2,
         unread: 0,
-        registry_loaded: true,
+        unresolved: 3,
         paths: 2,
         max_paths: 2,
         paths_dropped: 3,
         paths_dropped_examples: vec![format!("{key} · debug.trace")],
-        facts_evicted: 0,
         rows: vec![
             FieldRow {
                 key: key.clone(),
-                path: "temperature_c".into(),
+                path: "mtu".into(),
+                declared: Some(true),
                 seen: 40,
                 documents: 40,
                 kinds: vec!["number".into()],
                 changes: 0,
                 last_change_s: None,
-                min: Some(21.5),
-                max: Some(21.5),
-                last: Some(21.5),
-                values: Some(vec!["21.5".into()]),
+                min: Some(1500.0),
+                max: Some(1500.0),
+                last: Some(1500.0),
+                values: Some(vec!["1500".into()]),
             },
             FieldRow {
                 key: key.clone(),
-                path: "status".into(),
+                path: "driver_hint".into(),
+                declared: Some(false),
                 seen: 40,
                 documents: 40,
                 kinds: vec!["string".into()],
@@ -230,19 +241,16 @@ pub fn field_report() -> FieldReport {
                 min: None,
                 max: None,
                 last: None,
-                values: Some(vec!["\"degraded\"".into(), "\"ok\"".into()]),
+                values: Some(vec!["\"e1000\"".into(), "\"virtio\"".into()]),
             },
         ],
-        findings: vec![V1Finding {
+        findings: vec![FieldFinding {
             severity: DoctorSeverity::Warning,
-            check: V1CheckId::FieldStuck,
-            subject: format!("{key} · temperature_c"),
-            evidence: "value 21.5 unchanged across 40 sample(s) spanning 29.5s — at \
-                       least 3× the declared ttl_s 5s — while the key kept publishing. \
-                       An observation over this 30s window, not a verdict: a \
-                       constant-by-design field always reads this way"
+            check: FieldCheck::New,
+            subject: format!("{key} · driver_hint"),
+            evidence: "present in 40 of 40 document sample(s) but never declared by the \
+                       contract's type json:NetworkInterface — drift at field granularity"
                 .into(),
-            citation: Some("RFC 04 §1.2".into()),
         }],
     }
 }
@@ -585,14 +593,37 @@ pub fn call_report_partial_page() -> CallReport {
     }
 }
 
-/// The same call, reached through a bridge — the resolution provenance is
-/// what `check probe` adds over `service call` (RFC 06 §6.2).
+/// A probe that heard nothing from a provider presence shows up (#612,
+/// FJ8b): attributable silence, the finding.
 pub fn probe_report() -> ProbeReport {
     ProbeReport {
-        input: "web-07".into(),
-        origin: ORIGIN.into(),
-        via: format!("bridge:v1/{ORIGIN}/state/sysinfo/health"),
-        call: call_report(),
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: format!("sha256:{}", "ab".repeat(32)),
+        resource: "state/interfaces/{ns}/{iface}".into(),
+        selectors: vec!["zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*".into()],
+        window_s: 5.0,
+        elapsed_s: 5.0,
+        current: Some(ProbeCurrent {
+            answered: 0,
+            conforming: 0,
+            error: None,
+        }),
+        received: 0,
+        conforming: 0,
+        nonconforming: 0,
+        keys_seen: 0,
+        lagged: 0,
+        discarded: 2,
+        unresolved: 1,
+        first: None,
+        presence: Some(ExpectPresence {
+            selector: "zk2/host-a/tc/@zk/alive/tc.netif.v1/**".into(),
+            holders: vec!["host-a/tc".into()],
+            complete: true,
+            error: None,
+        }),
+        verdict: Judgement::Established,
     }
 }
 
@@ -676,14 +707,25 @@ pub fn retired_report() -> RetiredReport {
 /// verdict, not a milder failure (O6).
 pub fn expect_report() -> ExpectReport {
     ExpectReport {
-        selector: "acme/v1/**/state/**".into(),
+        address: "*/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: format!("sha256:{}", "ab".repeat(32)),
+        resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+        selectors: vec!["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*".into()],
         window_s: 5.0,
         ended_early: false,
         samples: 120,
         keys_seen: 4,
         dropped: 17,
+        discarded: 3,
+        unresolved: 2,
         rate_hz: Some(24.0),
-        violations: vec!["v1/h-3fa9c2d41b7e/state/sysinfo/health: qos data/drop".into()],
+        presence: None,
+        violations: vec![
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: priority declared data, \
+             observed real_time"
+                .into(),
+        ],
         violations_total: 9,
         unmet: vec!["17 sample(s) were dropped while behind".into()],
         verdict: ExpectVerdict::Impaired,
@@ -806,11 +848,41 @@ pub fn replay_report() -> ReplayReport {
 }
 
 /// A rate report with the key table bounded and hit — the O6 count that a
-/// trailing envelope used to lose to `| head`.
+/// trailing envelope used to lose to `| head` — grouped by zk2 address and
+/// resource, a foreign key in a group of its own (#612, FJ8b).
 pub fn rate_report() -> RateReport {
+    let stream = KeyGroup::Resource {
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        token: "stream".into(),
+        resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+    };
     RateReport {
-        selector: "acme/v1/**".into(),
+        selector: "zk2/**".into(),
         window_s: 10.0,
+        lens: LensScope {
+            namespace: String::new(),
+            presence: Some(LensPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                services: 1,
+            }),
+            contracts: 1,
+        },
+        groups: vec![
+            RateGroup {
+                group: stream.clone(),
+                keys: 2,
+                count: 100,
+                bytes: 4_050,
+            },
+            RateGroup {
+                group: KeyGroup::NotZk2,
+                keys: 1,
+                count: 20,
+                bytes: 80,
+            },
+        ],
         total_count: 9_600,
         total_bytes: 528_000,
         keys: 50_000,
@@ -822,20 +894,38 @@ pub fn rate_report() -> RateReport {
             // report-level siblings — this fixture is a `--loss --latency`
             // run where nothing was stamped.
             RateRow {
-                key: format!("v1/{ORIGIN}/telemetry/sysinfo/disk/var-log/used"),
+                key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+                identity: KeyIdentity {
+                    group: stream.clone(),
+                    values: [
+                        ("iface".to_owned(), vec!["eth0".to_owned()]),
+                        ("ns".to_owned(), vec!["default".to_owned()]),
+                    ]
+                    .into(),
+                    unresolved: None,
+                },
                 count: 50,
                 bytes: 2_250,
                 sn_gaps: Asked::Asked(0),
                 latency: None,
                 unstamped: Asked::Asked(50),
+                clocks: Asked::Asked(Default::default()),
             },
             RateRow {
-                key: format!("v1/{ORIGIN}/state/sysinfo/health"),
-                count: 50,
-                bytes: 1_800,
+                key: "rt/chatter".into(),
+                identity: KeyIdentity {
+                    group: KeyGroup::NotZk2,
+                    values: Default::default(),
+                    unresolved: Some(Unresolved::NotZk2 {
+                        detail: "it does not start with zk2/".into(),
+                    }),
+                },
+                count: 20,
+                bytes: 80,
                 sn_gaps: Asked::Asked(0),
                 latency: None,
                 unstamped: Asked::Asked(0),
+                clocks: Asked::Asked(Default::default()),
             },
         ],
     }
@@ -1430,9 +1520,23 @@ pub fn acl_explain() -> AclExplain {
 // ── The fleet timeline (#216) ─────────────────────────────────────────────
 
 fn timeline_lane() -> LaneId {
-    LaneId::Origin {
-        origin: ORIGIN.into(),
-        producer: Some("sysinfo".into()),
+    LaneId::Resource {
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        token: "stream".into(),
+        resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+    }
+}
+
+fn timeline_lens() -> LensScope {
+    LensScope {
+        namespace: "acme".into(),
+        presence: Some(LensPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            services: 1,
+        }),
+        contracts: 1,
     }
 }
 
@@ -1452,19 +1556,20 @@ fn timeline_sample(
         t_us,
         hlc: hlc.map(|(n, s)| format!("{n}/{s}")),
         stamped_by: hlc.map(|(_, s)| s.to_string()),
-        provenance: hlc.map(|_| Provenance::Unattributable),
+        provenance: hlc.map(|_| Provenance::Owner),
         kind: RowKind::Put,
     }
 }
 
-const TL_A: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu";
-const TL_B: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem";
+const TL_A: &str = "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+const TL_B: &str = "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1";
 const TL_PLAIN: &str = "plain/key";
 
-/// A ten-second window on the arrival axis: two stamped samples from one
-/// producer that arrived in the *opposite* order to their HLCs, an
-/// unstamped sample in its own lane, and a drop of 3 between the second
-/// and third — the reorder is visible against [`timeline_report_hlc`].
+/// A ten-second window on the arrival axis: two samples of one resource,
+/// stamped by its owner's clock (its descriptor's `meta.zid`), that arrived
+/// in the *opposite* order to their HLCs, an unstamped sample in its own
+/// lane, and a drop of 3 between the second and third — the reorder is
+/// visible against [`timeline_report_hlc`].
 pub fn timeline_report_arrival() -> TimelineReport {
     let lane = timeline_lane();
     TimelineReport {
@@ -1472,9 +1577,10 @@ pub fn timeline_report_arrival() -> TimelineReport {
         axis: AxisLabel::Arrival {
             clock: ARRIVAL_CLOCK,
         },
-        scopes: vec!["acme/v1/**".into()],
+        scopes: vec!["acme/zk2/**".into()],
         window_s: Some(10.0),
         source: TimelineSource::Live,
+        lens: timeline_lens(),
         lanes: vec![
             LaneSummary {
                 lane: lane.clone(),
@@ -1483,9 +1589,9 @@ pub fn timeline_report_arrival() -> TimelineReport {
                 last_t_us: 2_000,
                 stampers: ["33".to_string()].into_iter().collect(),
                 provenance: ProvenanceCounts {
-                    self_stamped: 0,
-                    foreign: 0,
-                    unattributable: 2,
+                    owner: 2,
+                    other: 0,
+                    unattributable: 0,
                 },
             },
             LaneSummary {
@@ -1552,9 +1658,10 @@ pub fn timeline_report_hlc() -> TimelineReport {
                 stamper: "33".into(),
             },
         },
-        scopes: vec!["acme/v1/**".into()],
+        scopes: vec!["acme/zk2/**".into()],
         window_s: Some(10.0),
         source: TimelineSource::Live,
+        lens: timeline_lens(),
         lanes: vec![LaneSummary {
             lane: lane.clone(),
             samples: 2,
@@ -1562,9 +1669,9 @@ pub fn timeline_report_hlc() -> TimelineReport {
             last_t_us: 2_000,
             stampers: ["33".to_string()].into_iter().collect(),
             provenance: ProvenanceCounts {
-                self_stamped: 0,
-                foreign: 0,
-                unattributable: 2,
+                owner: 2,
+                other: 0,
+                unattributable: 0,
             },
         }],
         sn_lane: SnLaneReport::Unavailable {
@@ -1588,153 +1695,176 @@ pub fn timeline_report_hlc() -> TimelineReport {
     }
 }
 
-// ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
+// ─── snapshots (RFC 13 §4.4, #219; zk2's since #612, FJ8b) ────────────────
 
-/// The second origin the two-origin snapshots below carry.
-pub const ORIGIN_B: &str = "h-9b2e4c7a1d05";
-
-fn zsnap_header(collected_at: &str, span: f64, answered: u64, superseded: u64) -> ZsnapHeader {
+fn zsnap_header(
+    base: &str,
+    collected_at: &str,
+    span: f64,
+    answered: u64,
+    superseded: u64,
+) -> ZsnapHeader {
     ZsnapHeader {
-        zsnap: 1,
-        selectors: vec!["acme/v1/**".into()],
-        base: "acme".into(),
+        zsnap: 2,
+        selectors: vec![format!("{base}/zk2/*/*/*/state/**")],
+        base: base.into(),
         collected_at: collected_at.into(),
         collection_span_s: span,
         asked: 1,
         answered,
         elided: 0,
         errors: 0,
+        discarded: 0,
         superseded,
-        roster: Asked::Asked(2),
+        presence: Some(LensPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            services: 2,
+        }),
     }
 }
 
-fn snapshot_row(key: &str, bytes: &str, holder: Holder) -> SnapshotRow {
+/// A resolved state key's identity.
+fn state_identity(address: &str, resource: &str, values: &[(&str, &str)]) -> KeyIdentity {
+    KeyIdentity {
+        group: KeyGroup::Resource {
+            address: address.into(),
+            iface: "tc.netif.v1".into(),
+            token: "state".into(),
+            resource: Some(resource.into()),
+        },
+        values: values
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), vec![(*v).to_owned()]))
+            .collect(),
+        unresolved: None,
+    }
+}
+
+fn snapshot_row(key: &str, identity: KeyIdentity, bytes: &str, holder: Holder) -> SnapshotRow {
     SnapshotRow {
         key: key.into(),
+        identity,
         delete: false,
         bytes: Some(bytes.into()),
         encoding: Some("application/json".into()),
         timestamp: Some("7f3b2a1c00000001/ab12".into()),
-        stamper: Some(StamperWire::Unattributable { id: "ab12".into() }),
-        source: None,
+        stamper: Some(StamperWire::Owner { id: "ab12".into() }),
         source_zid: Some("ab12".into()),
-        registration: RegistrationWire::Registered,
-        verdict: VerdictWire::Valid,
+        conformance: Conformance::Valid,
         holder,
     }
 }
 
-/// Two origins under `acme`, five rows: a live host answering its own
-/// health, a live host's telemetry answered by a storage, a second host
-/// remembered only by a storage, a tombstone, and a leaked non-v1 key
-/// (O1). The `state/sysinfo/health` bodies carry `source` and `host_id` —
-/// the labels an origin alignment can read (chunk DD).
+/// Two services under `acme`, four rows: an owner answering its own
+/// namespaces, an interface whose payload fails its type, a deletion within
+/// the owner's window, and an address no instance holds — answered anyway,
+/// which S4 forbids. Every holder and stamper kind is there.
 pub fn snapshot() -> Snapshot {
+    let live = |by| Holder::Live {
+        address: "host-a/tc".into(),
+        answered_by: by,
+    };
     Snapshot {
-        header: zsnap_header("2026-09-06T00:00:00Z", 1.25, 6, 1),
+        header: zsnap_header("acme", "2026-10-09T00:00:00Z", 1.25, 5, 1),
         rows: vec![
             snapshot_row(
-                "acme/plain/leak",
-                "bGVha2Vk",
-                Holder::Unattributed {
-                    reason: "the key names no origin: not a v1 key".into(),
-                },
+                "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+                state_identity(
+                    "host-a/tc",
+                    "state/interfaces/{ns}/{iface}",
+                    &[("ns", "default"), ("iface", "eth0")],
+                ),
+                "eyJuYW1lIjoiZXRoMCIsImlzX3VwIjoieWVzIn0=",
+                live(AnsweredBy::Owner),
             )
-            .into_leak(),
-            snapshot_row(
-                "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
-                "eyJzb3VyY2UiOiJub2RlLWEiLCJob3N0X2lkIjoiaC0zZmE5YzJkNDFiN2UiLCJzdGF0dXMiOiJvayJ9",
-                Holder::Live {
-                    origin: ORIGIN.into(),
-                    answered_by: AnsweredBy::Stamper,
-                },
-            ),
-            snapshot_row(
-                "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used",
-                "eyJ2YWx1ZSI6NDEuMCwidW5pdCI6InBlcmNlbnQifQ==",
-                Holder::Live {
-                    origin: ORIGIN.into(),
-                    answered_by: AnsweredBy::Other,
-                },
-            ),
+            .nonconforming(),
             SnapshotRow {
                 delete: true,
                 bytes: None,
                 encoding: None,
-                verdict: VerdictWire::NotValidated {
-                    reason: "tombstone".into(),
+                conformance: Conformance::NotChecked {
+                    reason: "a deletion carries no value".into(),
                 },
                 ..snapshot_row(
-                    "acme/v1/h-9b2e4c7a1d05/state/logs/rotated",
+                    "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9",
+                    state_identity(
+                        "host-a/tc",
+                        "state/interfaces/{ns}/{iface}",
+                        &[("ns", "default"), ("iface", "eth9")],
+                    ),
                     "",
-                    Holder::StorageOnly {
-                        origin: ORIGIN_B.into(),
-                    },
+                    live(AnsweredBy::Owner),
                 )
             },
             snapshot_row(
-                "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health",
-                "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJkZWdyYWRlZCJ9",
-                Holder::StorageOnly {
-                    origin: ORIGIN_B.into(),
-                },
+                "acme/zk2/host-a/tc/tc.netif.v1/state/namespaces",
+                state_identity("host-a/tc", "state/namespaces", &[]),
+                "WyJkZWZhdWx0Il0=",
+                live(AnsweredBy::Owner),
             ),
+            SnapshotRow {
+                stamper: Some(StamperWire::Other { id: "cd34".into() }),
+                source_zid: Some("cd34".into()),
+                ..snapshot_row(
+                    "acme/zk2/host-b/tc/tc.netif.v1/state/namespaces",
+                    state_identity("host-b/tc", "state/namespaces", &[]),
+                    "WyJkZWZhdWx0Il0=",
+                    Holder::NoInstance {
+                        address: "host-b/tc".into(),
+                    },
+                )
+            },
         ],
     }
 }
 
-/// The leaked row's non-v1 facets, applied after the shared constructor.
-trait IntoLeak {
-    fn into_leak(self) -> SnapshotRow;
+/// A row's payload failing its type, applied after the shared constructor.
+trait Nonconforming {
+    fn nonconforming(self) -> SnapshotRow;
 }
 
-impl IntoLeak for SnapshotRow {
-    fn into_leak(mut self) -> SnapshotRow {
-        self.encoding = Some("text/plain".into());
-        self.timestamp = None;
-        self.stamper = None;
-        self.registration = RegistrationWire::NotV1;
-        self.verdict = VerdictWire::NotValidated {
-            reason: "no_schema".into(),
+impl Nonconforming for SnapshotRow {
+    fn nonconforming(mut self) -> SnapshotRow {
+        self.conformance = Conformance::Invalid {
+            violations: vec!["/is_up: expected boolean".into()],
         };
         self
     }
 }
 
-/// The same fleet five minutes on: the disk value moved, the second host
-/// came up and recovered, the tombstoned key is gone, and the second host
-/// grew a telemetry key. The leaked key is untouched.
+/// The same deployment five minutes on: `eth0` was fixed and conforms, the
+/// deletion aged out of the owner's window, `host-b/tc` came back, and a new
+/// interface appeared.
 pub fn snapshot_b() -> Snapshot {
     let mut b = snapshot();
-    b.header = zsnap_header("2026-09-06T00:05:00Z", 0.8, 5, 0);
+    b.header = zsnap_header("acme", "2026-10-09T00:05:00Z", 0.8, 4, 0);
     b.rows.retain(|r| !r.delete);
     for row in &mut b.rows {
-        match row.key.as_str() {
-            "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used" => {
-                row.bytes = Some("eyJ2YWx1ZSI6NDIuMCwidW5pdCI6InBlcmNlbnQifQ==".into());
-                row.timestamp = Some("7f3b2a1c00000002/ab12".into());
-            }
-            "acme/v1/h-9b2e4c7a1d05/state/sysinfo/health" => {
-                row.bytes = Some(
-                    "eyJzb3VyY2UiOiJub2RlLWIiLCJob3N0X2lkIjoiaC05YjJlNGM3YTFkMDUiLCJzdGF0dXMiOiJvayJ9"
-                        .into(),
-                );
-                row.timestamp = Some("7f3b2a1c00000002/cd34".into());
-                row.holder = Holder::Live {
-                    origin: ORIGIN_B.into(),
-                    answered_by: AnsweredBy::Unknown,
-                };
-            }
-            _ => {}
+        if row.key.ends_with("/default/eth0") {
+            row.bytes = Some("eyJuYW1lIjoiZXRoMCIsImlzX3VwIjp0cnVlfQ==".into());
+            row.timestamp = Some("7f3b2a1c00000002/ab12".into());
+            row.conformance = Conformance::Valid;
+        }
+        if row.key.contains("/host-b/") {
+            row.stamper = Some(StamperWire::Owner { id: "cd34".into() });
+            row.holder = Holder::Live {
+                address: "host-b/tc".into(),
+                answered_by: AnsweredBy::Owner,
+            };
         }
     }
     b.rows.push(snapshot_row(
-        "acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used",
-        "eyJ2YWx1ZSI6Ny41LCJ1bml0IjoicGVyY2VudCJ9",
+        "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1",
+        state_identity(
+            "host-a/tc",
+            "state/interfaces/{ns}/{iface}",
+            &[("ns", "default"), ("iface", "eth1")],
+        ),
+        "eyJuYW1lIjoiZXRoMSIsImlzX3VwIjpmYWxzZX0=",
         Holder::Live {
-            origin: ORIGIN_B.into(),
-            answered_by: AnsweredBy::Unknown,
+            address: "host-a/tc".into(),
+            answered_by: AnsweredBy::Owner,
         },
     ));
     b.rows.sort_by(|x, y| x.key.cmp(&y.key));
@@ -1742,20 +1872,21 @@ pub fn snapshot_b() -> Snapshot {
 }
 
 /// What taking [`snapshot`] reported: written to a file, every holder
-/// counted.
+/// counted, and the one payload that failed its type.
 pub fn snapshot_report() -> SnapshotReport {
     SnapshotReport {
         header: snapshot().header,
-        out: Some("fleet.zsnap".into()),
-        live: 2,
-        storage_only: 2,
-        unattributed: 1,
+        out: Some("deployment.zsnap".into()),
+        live: 3,
+        no_instance: 1,
+        unattributed: 0,
+        nonconforming: 1,
         incomplete: Vec::new(),
     }
 }
 
 /// [`snapshot`] against [`snapshot_b`], through the engine's own comparison
-/// at its default bounds — no origin alignment asked.
+/// at its default bounds.
 pub fn snapshot_diff() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(
         &snapshot(),
@@ -1764,211 +1895,24 @@ pub fn snapshot_diff() -> SnapshotDiff {
     )
 }
 
-// ─── two deployments, one diff (#220) ────────────────────────────────────
-
-/// The two origins of the *other* deployment in the pairs below: the same
-/// fleet as [`snapshot_pair_renamed`]'s `a`, every origin re-minted.
-pub const ORIGIN_C: &str = "h-c0ffee00c0de";
-pub const ORIGIN_D: &str = "h-0badcafe1234";
-
-/// One host of a two-deployment fixture: its health document (the identity
-/// bridge, `host_id` naming the origin it sits under and `source` naming
-/// the host), one telemetry key, and any extra producers.
-fn fleet_host(
-    base: &str,
-    origin: &str,
-    label: &str,
-    extra: &[&str],
-    stamp: &str,
-) -> Vec<SnapshotRow> {
-    use base64::Engine as _;
-    let b64 = |body: String| base64::engine::general_purpose::STANDARD.encode(body);
-    let key = |rel: &str| format!("{base}/v1/{origin}/{rel}");
-    let live = Holder::Live {
-        origin: origin.into(),
-        answered_by: AnsweredBy::Stamper,
-    };
-    let mut rows = vec![
-        snapshot_row(
-            &key("state/sysinfo/health"),
-            &b64(format!(
-                r#"{{"host_id":"{origin}","source":"{label}","status":"ok"}}"#
-            )),
-            live.clone(),
-        ),
-        snapshot_row(
-            &key("telemetry/sysinfo/disk/var-log/used"),
-            &b64(r#"{"value":41.0,"unit":"percent"}"#.into()),
-            live.clone(),
-        ),
-    ];
-    for p in extra {
-        rows.push(snapshot_row(
-            &key(&format!("state/{p}/rotated")),
-            &b64(r#"{"count":3}"#.into()),
-            live.clone(),
-        ));
+/// [`snapshot`] against itself moved to another namespace: the zk2 keys
+/// line up across the two, and the two deployments' clocks are not compared
+/// — nothing differs.
+pub fn snapshot_diff_namespaces() -> SnapshotDiff {
+    let a = snapshot();
+    let mut b = snapshot();
+    b.header = zsnap_header("staging", "2026-10-09T01:00:00Z", 0.9, 5, 1);
+    for row in &mut b.rows {
+        row.key = row.key.replacen("acme/", "staging/", 1);
+        row.timestamp = row.timestamp.as_ref().map(|t| t.replace("/ab12", "/ef56"));
     }
-    for r in &mut rows {
-        r.timestamp = Some(stamp.into());
-    }
-    rows
+    zenkey_fleet::diff_snapshots(&a, &b, zenkey_fleet::DiffOpts::default())
 }
 
-/// A two-host fleet under `base`: `web` (`sysinfo` only) and `db`
-/// (`sysinfo` + `logs`), plus a leaked bus-root key both deployments carry
-/// — under no base, so it compares verbatim on both sides (O1).
-fn fleet(base: &str, web: &str, db: &str, labels: (&str, &str), stamp: &str, at: &str) -> Snapshot {
-    let mut rows = fleet_host(base, web, labels.0, &[], stamp);
-    rows.extend(fleet_host(base, db, labels.1, &["logs"], stamp));
-    rows.push(
-        snapshot_row(
-            "plain/leak",
-            "bGVha2Vk",
-            Holder::Unattributed {
-                reason: "the key names no origin: not a v1 key".into(),
-            },
-        )
-        .into_leak(),
-    );
-    rows.sort_by(|x, y| x.key.cmp(&y.key));
-    let n = rows.len() as u64;
-    Snapshot {
-        header: ZsnapHeader {
-            selectors: vec![format!("{base}/v1/**")],
-            base: base.into(),
-            ..zsnap_header(at, 0.9, n, 0)
-        },
-        rows,
-    }
-}
-
-/// The acceptance pair (#220): one fleet, two deployments. `a` is `prod`
-/// with [`ORIGIN`] (`web`) and [`ORIGIN_B`] (`db`); `b` is `stg` with
-/// [`ORIGIN_C`] and [`ORIGIN_D`] under the same labels — different base,
-/// different origins, different clocks, the same values. Verbatim they
-/// share nothing; aligned they diff to zero.
-pub fn snapshot_pair_renamed() -> (Snapshot, Snapshot) {
-    (
-        fleet(
-            "prod",
-            ORIGIN,
-            ORIGIN_B,
-            ("web", "db"),
-            "7f3b2a1c00000001/ab12",
-            "2026-09-06T00:00:00Z",
-        ),
-        fleet(
-            "stg",
-            ORIGIN_C,
-            ORIGIN_D,
-            ("web", "db"),
-            "7f3b2a1c00000009/ef56",
-            "2026-09-06T00:05:00Z",
-        ),
-    )
-}
-
-/// The pair the alignment must refuse: `b`'s two hosts both call
-/// themselves `node`, and both publish only `sysinfo` — no label and no
-/// producer set tells them apart. `a` is [`snapshot_pair_renamed`]'s.
-pub fn snapshot_pair_ambiguous() -> (Snapshot, Snapshot) {
-    let (a, _) = snapshot_pair_renamed();
-    let mut rows = fleet_host("stg", ORIGIN_C, "node", &[], "7f3b2a1c00000009/ef56");
-    rows.extend(fleet_host(
-        "stg",
-        ORIGIN_D,
-        "node",
-        &[],
-        "7f3b2a1c00000009/ef56",
-    ));
-    rows.sort_by(|x, y| x.key.cmp(&y.key));
-    let n = rows.len() as u64;
-    let b = Snapshot {
-        header: ZsnapHeader {
-            selectors: vec!["stg/v1/**".into()],
-            base: "stg".into(),
-            ..zsnap_header("2026-09-06T00:05:00Z", 0.9, n, 0)
-        },
-        rows,
-    };
-    (a, b)
-}
-
-/// The renamed pair with no health documents on either side: the label
-/// was never asked, and the two distinct producer sets are the only
-/// evidence left.
-pub fn snapshot_pair_unlabelled() -> (Snapshot, Snapshot) {
-    let (mut a, mut b) = snapshot_pair_renamed();
-    for s in [&mut a, &mut b] {
-        s.rows.retain(|r| !r.key.ends_with("/health"));
-        s.header.answered = s.rows.len() as u64;
-    }
-    (a, b)
-}
-
-/// [`snapshot_pair_renamed`] aligned: two pairs on their labels, nothing
-/// unpaired, zero differences — exit 0, with every subject rolled up.
-pub fn snapshot_diff_aligned() -> SnapshotDiff {
-    let (a, b) = snapshot_pair_renamed();
-    let plan = zenkey_fleet::plan_map(
-        &zenkey_fleet::origin_profiles(&a),
-        &zenkey_fleet::origin_profiles(&b),
-        &[],
-    )
-    .unwrap();
-    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
-}
-
-/// [`snapshot_pair_ambiguous`] with one explicit `--map`: the pair the
-/// operator stated rides as `explicit`, and the alignment still cannot
-/// place `a`'s `db` or `b`'s second `node` — so the comparison is refused,
-/// the two unpaired origins listed, never dropped (RFC 13 §4.4), and the
-/// roll-up not asked. Exit 2.
-pub fn snapshot_diff_unmapped() -> SnapshotDiff {
-    let (a, b) = snapshot_pair_ambiguous();
-    let plan = zenkey_fleet::plan_map(
-        &zenkey_fleet::origin_profiles(&a),
-        &zenkey_fleet::origin_profiles(&b),
-        &[(
-            zenkey::origin::HostId::parse(ORIGIN).unwrap(),
-            zenkey::origin::HostId::parse(ORIGIN_C).unwrap(),
-        )],
-    )
-    .unwrap();
-    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
-}
-
-/// [`snapshot_pair_ambiguous`] with both pairs stated: the comparison
-/// runs, and the subject roll-up says where the deployments disagree —
-/// every health document (the labels differ), and `logs` only in `a`.
-/// Exit 1.
-pub fn snapshot_diff_normalized() -> SnapshotDiff {
-    let (a, b) = snapshot_pair_ambiguous();
-    let plan = zenkey_fleet::plan_map(
-        &zenkey_fleet::origin_profiles(&a),
-        &zenkey_fleet::origin_profiles(&b),
-        &[
-            (
-                zenkey::origin::HostId::parse(ORIGIN).unwrap(),
-                zenkey::origin::HostId::parse(ORIGIN_C).unwrap(),
-            ),
-            (
-                zenkey::origin::HostId::parse(ORIGIN_B).unwrap(),
-                zenkey::origin::HostId::parse(ORIGIN_D).unwrap(),
-            ),
-        ],
-    )
-    .unwrap();
-    zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default())
-}
-
-/// [`snapshot`] against itself: the clean answer, exit 0.
+/// [`snapshot`] against itself: identical on every facet.
 pub fn snapshot_diff_identity() -> SnapshotDiff {
     zenkey_fleet::diff_snapshots(&snapshot(), &snapshot(), zenkey_fleet::DiffOpts::default())
 }
-
-// ── The metrics surface (#228) ──────────────────────────────────────────────
 
 /// One exporter fold with every honesty pole exercised at once: a live
 /// series, a `{var}` series whose origin went down (no value, labels kept), a

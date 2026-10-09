@@ -251,9 +251,35 @@ pub fn plan_call(
 /// descriptor set; a raw type's bytes as given. `input` is what the caller
 /// typed: JSON text, except for a raw type.
 ///
-/// The value is not checked against its JSON Schema: the owner refuses a
-/// request that does not decode as `invalid_request` (§5.1).
+/// A JSON Schema request is checked against its type first, with
+/// `zenkey_model::validate` (#671; the §7.3 subset), and refused with every
+/// violation before anything is sent: a caller MUST NOT depend on an
+/// owner's refusal of what the schema refuses (§5.1, "The request"), and a
+/// writer sends only what its schema declares (§9.8).
 pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Result<Vec<u8>> {
+    if let TypeId::JsonSchema { .. } = &plan.operation.request
+        && let Ok(value) = serde_json::from_slice::<serde_json::Value>(input)
+        && let Some(ty) = zenkey_model::decode::type_of(
+            revision.bundle(),
+            plan.resource.token.as_str(),
+            plan.resource.template.as_str(),
+            "request",
+        )
+        && let Err(violations) = zenkey_model::validate::validate(revision.bundle(), ty, &value)
+    {
+        return Err(Error::unaskable(
+            format!("the request for {}", plan.name),
+            format!(
+                "does not satisfy {} (spec §7.3); nothing was sent:\n  {}",
+                zenkey_model::decode::declared(ty),
+                violations
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n  ")
+            ),
+        ));
+    }
     encode_as(
         revision,
         &plan.operation.request,

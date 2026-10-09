@@ -1,14 +1,22 @@
 //! The rate plane: per-key throughput and the latency populations behind
 //! it, kept apart because a stamped and an unstamped sample do not measure
-//! the same thing (#119).
+//! the same thing (#119). Since #612 (FJ8b) every key carries its zk2
+//! identity and the window is also reported grouped by address and
+//! resource ([`RateGroup`]), the unit a zk2 service publishes as.
+
+use std::collections::BTreeMap;
 
 use super::asked::Asked;
+use super::observe::{KeyGroup, KeyIdentity, LensScope};
+use super::timeline::Provenance;
 use serde::Serialize;
 
 /// One key's measured traffic over a `rate` window.
 #[derive(Debug, Clone, Serialize)]
 pub struct RateRow {
     pub key: String,
+    /// How far the key resolved (the tooling guide's O2).
+    pub identity: KeyIdentity,
     pub count: u64,
     pub bytes: u64,
     /// Source-sequence gaps. `NotAsked` = `--loss` was not asked — the same
@@ -33,6 +41,24 @@ pub struct RateRow {
     /// not asked (R3, matching #238's fix for `latency` itself).
     #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
     pub unstamped: Asked<u64>,
+    /// Whose clock each stamper of the latency is (the tooling guide's O7):
+    /// the owner's — the session zid its descriptor states as `meta.zid` —
+    /// another clock's, or unattributable. Asked with `--latency`; empty
+    /// when no sample was stamped.
+    #[serde(skip_serializing_if = "Asked::is_not_asked", default)]
+    pub clocks: Asked<BTreeMap<String, Provenance>>,
+}
+
+/// One group of keys over a `rate` window: a zk2 address and resource, or
+/// the keys that are not this deployment's zk2 data, together.
+#[derive(Debug, Clone, Serialize)]
+pub struct RateGroup {
+    #[serde(flatten)]
+    pub group: KeyGroup,
+    /// Distinct keys in the group (members of a templated resource).
+    pub keys: usize,
+    pub count: u64,
+    pub bytes: u64,
 }
 
 /// The `rate` report (issue #46) — measured counts plus the
@@ -41,8 +67,14 @@ pub struct RateRow {
 /// have.
 #[derive(Debug, Clone, Serialize)]
 pub struct RateReport {
+    /// The wire selector watched, on a session in no namespace.
     pub selector: String,
     pub window_s: f64,
+    /// What the keys were resolved with.
+    pub lens: LensScope,
+    /// The window grouped by zk2 address and resource, by count
+    /// descending: every retained key is in exactly one group.
+    pub groups: Vec<RateGroup>,
     /// Rows are present only for a `--per-key` run, sorted by count
     /// descending.
     #[serde(skip_serializing_if = "Vec::is_empty")]

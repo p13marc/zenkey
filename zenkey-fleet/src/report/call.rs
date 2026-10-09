@@ -191,20 +191,6 @@ impl CallReport {
     }
 }
 
-/// The `zenctl probe` report (issue #59; RFC 09 §6 half two): how the
-/// identity resolved, and what the origin-scoped concrete-key call said.
-#[derive(Debug, Clone, Serialize)]
-pub struct ProbeReport {
-    /// What the operator typed (an origin id or a human label).
-    pub input: String,
-    /// The origin actually called.
-    pub origin: String,
-    /// `direct`, or `bridge:<key>` naming the self-certifying health
-    /// document that resolved it (RFC 06 §6.2).
-    pub via: String,
-    pub call: CallReport,
-}
-
 /// Which rung of the fetch ladder produced a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

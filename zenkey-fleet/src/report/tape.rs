@@ -222,6 +222,12 @@ pub struct SampleRow {
     /// [`SampleRow::origin`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
+    /// The key as zk2 resolution left it (#612, FJ8b; the tooling guide's
+    /// O2): its address and resource, or the rung it stopped at — outside
+    /// the namespace, not a zk2 key, no provider, no contract. Written by
+    /// `echo`; a `.zrec` row carries no resolution, and a reader ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<super::KeyIdentity>,
     /// Microseconds since the capture epoch: the **observer's arrival
     /// clock**, and the only thing replay paces by (RFC 09 §5.2). A live
     /// stream has no epoch to be relative to, so it omits this.

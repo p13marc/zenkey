@@ -4,21 +4,31 @@
 //! observation surface: `expect` (one window), `doctor --for` (five
 //! checks), `cutover` (silence). This module is the one **closed vocabulary**
 //! they were each a spelling of: [`Condition`], evaluated to three states,
-//! never two (RFC 09 §5.1 O4/O6) — `ok` / `firing` / **`unobservable`**. The
-//! third state is the reason this exists: an alerting tool that cannot say
-//! *"I could not tell"* is the one that pages at 3am for a dropped buffer. A
-//! drop under a completeness claim yields `unobservable`, never `ok`.
+//! never two (O4/O6) — `ok` / `firing` / **`unobservable`**. The third state
+//! is the reason this exists: an alerting tool that cannot say *"I could not
+//! tell"* is the one that pages at 3am for a dropped buffer. A drop under a
+//! completeness claim yields `unobservable`, never `ok`.
 //!
 //! The vocabulary is deliberately closed — no expressions, no templating, no
 //! rules engine. A new condition is a new variant, argued for the way a new
 //! doctor check id is.
 //!
+//! **zk2** (#612, FJ8b). The selectors are wire keys, watched on a session
+//! in no namespace, and every condition that needs to know what a key *is*
+//! reads it through the raw observers' [`Lens`]: `invalid-payload` decodes
+//! a payload through its contract and checks it against its declared type
+//! (spec §7.2, §7.3); `qos-mismatch` compares the QoS a sample rode with
+//! the one its resource declares (§2.4); `instance-gone` — v1's
+//! `origin-down`, renamed for what it asks in zk2 — reads an address's
+//! instance tokens (§8.1); `doctor` runs FJ6's doctor. The rules that read
+//! v1's alert plane are dark until zk2's alerts profile exists (#613).
+//!
 //! The semantic core is three tiny rules — [`judge_shortfall`],
 //! [`judge_excess`], [`judge_silence`] — shared with [`crate::judge::expect`], so
 //! the watchdog and the CI assertion cannot drift about what a drop means.
-//! Since RFC 13 (v1.24; the material was RFC 09 §5.1 pre-v1.24) the rules
-//! speak the four-pole [`Judgement`] core, and [`CondState`] is this
-//! module's serde-stable **wire projection** of it — see its mapping doc.
+//! The rules speak the four-pole [`Judgement`] core, and [`CondState`] is
+//! this module's serde-stable **wire projection** of it — see its mapping
+//! doc.
 //!
 //! [`watchdog`] is the continuous observer over the vocabulary:
 //! **foreground, explicitly launched, single-purpose, one process per
@@ -32,18 +42,20 @@ use std::time::Duration;
 
 use crate::{Error, Result};
 
+use crate::bus::contracts::BundleStore;
 use crate::bus::monitor::SampleView;
-use crate::bus::query::FleetAnswer;
 use crate::judge::doctor::DoctorBus;
-use crate::model::decode::SchemaStore;
-use crate::model::registry::SliceSet;
-use crate::report::{CheckId, DoctorReport};
+use crate::model::catalog::{Catalog, ContractSet};
+use crate::model::lens::{Lens, observed_qos, qos_mismatch};
+use crate::model::render::Member;
+use crate::model::target::Target;
+use crate::report::{CheckId, Conformance, DoctorReport};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
 use sipper::{Straw, sipper};
 
-/// The closed condition vocabulary (#227), over the existing observation
-/// surface. Each variant names what *firing* means; the drop rules are in
-/// the judge functions this module documents.
+/// The closed condition vocabulary (#227), over the observation surface.
+/// Each variant names what *firing* means; the drop rules are in the judge
+/// functions this module documents.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Condition {
     /// Samples on `selector` rode above `hz` over the evaluation window.
@@ -60,100 +72,39 @@ pub enum Condition {
     /// provable only over a drop-free span at least `for_s` long (O6), and
     /// only once the observer has watched that long (O4).
     SilentFor { selector: String, for_s: f64 },
-    /// An observed payload on `selector` did not reach [`crate::Verdict::Valid`]
-    /// (#159) — `Invalid` and `NotValidated` both count: asking for validity
-    /// and getting "unknowable" is not valid. Scoped to what was observed
-    /// and checked; the `ok` state claims "nothing checked failed", never
-    /// "nothing invalid rode" — the drop count rides in the evidence.
+    /// An observed payload on `selector` failed its declared type: bytes
+    /// that do not decode as it, or a JSON Schema value that does not
+    /// satisfy it (spec §7.2, §7.3). Firing on positive evidence; `ok`
+    /// claims "nothing checked failed", never "nothing invalid rode" — the
+    /// drop count rides the evidence. A window in which nothing could be
+    /// checked (no sample, or no contract resolved one) is unobservable,
+    /// with why.
     InvalidPayload { selector: String },
-    /// An observed sample on `selector` did not ride its registry-declared
-    /// QoS profile (RFC 04 §3). Same per-observed-sample scope as
-    /// [`Condition::InvalidPayload`]; samples with no declared profile are
-    /// unjudgeable and counted in the evidence, not the state.
+    /// An observed sample on `selector` rode a priority, congestion control
+    /// or express other than its resource declares (spec §2.4: an owner
+    /// MUST publish with it). Same per-observed-sample scope as
+    /// [`Condition::InvalidPayload`]; a window with nothing judged is
+    /// unobservable.
     QosMismatch { selector: String },
     /// A check of zk2's doctor established a finding (the stable
     /// [`crate::report::CheckId`] vocabulary, #612 FJ6). A check the run
     /// could not establish, and a failed run, are unobservable — never `ok`.
-    /// The doctor reads the deployment through a session in its namespace,
-    /// which the runner is given ([`WatchdogSpec::doctor`]).
     DoctorCheck { check: CheckId },
-    /// The origin holds no `alive` token on the liveliness roster
-    /// (RFC 04 §5). A roster that could not be asked is unobservable —
-    /// silence is not a verdict (RFC 05 §3.1).
-    OriginDown { origin: String },
-    /// The observer itself dropped samples this window (RFC 09 §5.1 O6) —
-    /// self-knowledge, so never unobservable.
+    /// The address — `<system>/<service>`, either position `*` — holds no
+    /// instance token visible to this reader (spec §8.1): zk2's spelling of
+    /// v1's `origin-down`. A read that ended at its timeout is unobservable;
+    /// a read access control refused is complete and empty, like absence,
+    /// so the evidence says what this reader could see (0.8).
+    InstanceGone { address: String },
+    /// The observer itself dropped samples this window (O6) — self-knowledge,
+    /// so never unobservable.
     Dropped,
-    /// At least one alert document at or above `min` is firing under
-    /// `selector` on the alert plane (RFC 04 §1.2, `…/state/*/alert/*`) —
-    /// what the sensors already judged, seen by the watchdog (#463). Asked
-    /// by a GET once per tick, never a subscription: a firing alert is
-    /// republished only on a content change, so a subscribe-only rule
-    /// started mid-outage would report `ok` forever — the bug this rule
-    /// exists to catch, rebuilt inside it. One state per rule (a count and
-    /// the first), like [`Condition::DoctorCheck`]; a notifier that routes
-    /// each alert is `zenwatch`'s `alerts` rule. Content-agnostic: the
-    /// sensor made the judgement, this reports that one exists. An ask that
-    /// failed is unobservable — silence is not a verdict.
-    AlertFiring { selector: String, min: AlertFloor },
-}
-
-/// The severity floor of an [`Condition::AlertFiring`] rule: an ordered
-/// compare over the three severities the alert plane speaks
-/// (`info < warning < critical`), default `warning`. A document whose
-/// `severity` is missing or outside the three is counted only under the
-/// `info` floor — the lowest bar admits every firing document; a higher one
-/// admits only what says it clears it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum AlertFloor {
-    Info,
-    Warning,
-    Critical,
-}
-
-impl AlertFloor {
-    pub const ALL: [AlertFloor; 3] = [AlertFloor::Info, AlertFloor::Warning, AlertFloor::Critical];
-
-    pub fn parse(token: &str) -> Option<AlertFloor> {
-        AlertFloor::ALL.into_iter().find(|f| f.as_str() == token)
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AlertFloor::Info => "info",
-            AlertFloor::Warning => "warning",
-            AlertFloor::Critical => "critical",
-        }
-    }
-
-    /// Whether a document's `severity` clears this floor.
-    fn admits(self, severity: Option<&str>) -> bool {
-        match severity.and_then(AlertFloor::parse) {
-            Some(s) => s >= self,
-            None => self == AlertFloor::Info,
-        }
-    }
-}
-
-impl std::fmt::Display for AlertFloor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// One tick's ask of the alert plane for one `alert-firing` selector
-/// (#463): the answers, or why there are none.
-#[derive(Debug, Clone)]
-pub struct AlertAsk {
-    pub selector: String,
-    pub outcome: std::result::Result<Vec<FleetAnswer>, String>,
 }
 
 /// The rule grammar, spelled once for the parse error and the docs.
 const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
-     doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | \
-     alert-firing <SEL> [<MIN-SEVERITY>]";
+     doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped";
 
 impl Condition {
     /// Parse one rule: whitespace-separated, kind first (Zenoh key
@@ -217,32 +168,27 @@ impl Condition {
                 };
                 Condition::DoctorCheck { check }
             }
-            ["origin-down", origin] => Condition::OriginDown {
-                origin: origin.to_string(),
-            },
-            ["dropped"] => Condition::Dropped,
-            ["alert-firing", sel] => Condition::AlertFiring {
-                selector: sel.to_string(),
-                min: AlertFloor::Warning,
-            },
-            ["alert-firing", sel, floor] => {
-                let Some(min) = AlertFloor::parse(floor) else {
-                    return Err(Error::unaskable(
-                        format!("alert-firing {floor:?}"),
-                        format!(
-                            "is not a severity floor — one of {}",
-                            AlertFloor::ALL
-                                .iter()
-                                .map(|f| f.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                    ));
-                };
-                Condition::AlertFiring {
-                    selector: sel.to_string(),
-                    min,
+            ["instance-gone", address] => {
+                Target::parse(address)?;
+                Condition::InstanceGone {
+                    address: address.to_string(),
                 }
+            }
+            ["dropped"] => Condition::Dropped,
+            ["origin-down", ..] => {
+                return Err(Error::unaskable(
+                    format!("{rule:?}"),
+                    "v1's origin-down read v1's liveliness roster; in zk2 it is \
+                     instance-gone <SYSTEM/SERVICE>: an address with no instance token \
+                     visible to this reader (spec §8.1)",
+                ));
+            }
+            ["alert-firing", ..] => {
+                return Err(Error::unaskable(
+                    format!("{rule:?}"),
+                    "alert-firing read v1's alert plane; zk2's alerts are a profile \
+                     still to come (#613), so the rule is dark",
+                ));
             }
             _ => {
                 return Err(Error::unaskable(
@@ -268,31 +214,34 @@ impl Condition {
         }
     }
 
-    /// Judge one observation window. `None` for the conditions that are not
-    /// window-scoped ([`Condition::DoctorCheck`], [`Condition::OriginDown`]).
     /// Judge this condition against everything one tick observed.
     ///
-    /// **The single entry point**, and why `run_watchdog` has no `expect`s
-    /// left (#352). The three judges below each returned `None` for the
-    /// variants they do not own, which forced the caller to assert a
-    /// partition the compiler could not see — four times, every one
-    /// discharging the same claim. This match *is* the partition, and each
-    /// arm hands its judge exactly the evidence that judge needs, so none of
-    /// them has a `None` to return.
+    /// **The single entry point** (#352): this match *is* the partition,
+    /// and each arm hands its judge exactly the evidence that judge needs.
     pub fn judge(&self, ev: &TickEvidence<'_>) -> Eval {
         match self {
             Condition::DoctorCheck { check } => judge_doctor_check(*check, ev.doctor),
-            Condition::OriginDown { origin } => judge_origin_down(origin, ev.roster),
-            Condition::AlertFiring { selector, min } => {
-                judge_alert_firing(ev.base, selector, *min, ev.alerts)
-            }
-            _ => self.judge_window_total(ev.window),
+            Condition::InstanceGone { address } => judge_instance_gone(address, ev.instances),
+            _ => self.judge_window_total(ev.window, ev.examples),
         }
     }
 
+    /// Judge one observation window. `None` for the conditions that are not
+    /// window-scoped ([`Condition::DoctorCheck`],
+    /// [`Condition::InstanceGone`]).
     pub fn judge_window(&self, w: &CondWindow) -> Option<Eval> {
+        self.judge_window_with(w, &WindowExamples::default())
+    }
+
+    /// [`judge_window`](Self::judge_window), with the window's examples:
+    /// the first failure and the first sample that could not be checked,
+    /// which the evidence names.
+    pub fn judge_window_with(&self, w: &CondWindow, ex: &WindowExamples) -> Option<Eval> {
         let synth = if w.synthetic > 0 {
-            format!("; {} synthetic-marked (RFC 09 §5.3)", w.synthetic)
+            format!(
+                "; {} from a mock owner (its descriptor's meta.synthetic)",
+                w.synthetic
+            )
         } else {
             String::new()
         };
@@ -300,6 +249,11 @@ impl Condition {
             w.samples as f64 / w.window_s
         } else {
             0.0
+        };
+        let unchecked = |what: &str| match (&ex.unchecked, w.samples) {
+            (_, 0) => format!("no sample on the selector this window: nothing to {what}"),
+            (Some(why), n) => format!("{n} sample(s), none could be {what}ed: {why}"),
+            (None, n) => format!("{n} sample(s), none {what}ed this window"),
         };
         Some(match self {
             Condition::RateAbove { hz, .. } => {
@@ -362,35 +316,66 @@ impl Condition {
                 };
                 Eval { state, evidence }
             }
-            Condition::InvalidPayload { .. } => Eval {
-                state: if w.invalid > 0 {
-                    CondState::Firing
+            Condition::InvalidPayload { .. } => {
+                if w.invalid > 0 {
+                    Eval {
+                        state: CondState::Firing,
+                        evidence: format!(
+                            "{} of {} checked sample(s) failed their declared type; first: {} \
+                             ({} observed, {} dropped{synth})",
+                            w.invalid,
+                            w.checked,
+                            ex.failure.as_deref().unwrap_or("—"),
+                            w.samples,
+                            w.dropped
+                        ),
+                    }
+                } else if w.checked > 0 {
+                    Eval {
+                        state: CondState::Ok,
+                        evidence: format!(
+                            "{} checked sample(s), none failed its declared type ({} observed, \
+                             {} dropped{synth})",
+                            w.checked, w.samples, w.dropped
+                        ),
+                    }
                 } else {
-                    CondState::Ok
-                },
-                evidence: format!(
-                    "{} of {} checked sample(s) did not reach Valid ({} observed, \
-                     {} dropped{synth})",
-                    w.invalid, w.checked, w.samples, w.dropped
-                ),
-            },
-            Condition::QosMismatch { .. } => Eval {
-                state: if w.qos_mismatched > 0 {
-                    CondState::Firing
+                    Eval {
+                        state: CondState::Unobservable,
+                        evidence: format!("{}{synth}", unchecked("check")),
+                    }
+                }
+            }
+            Condition::QosMismatch { .. } => {
+                if w.qos_mismatched > 0 {
+                    Eval {
+                        state: CondState::Firing,
+                        evidence: format!(
+                            "{} of {} judged sample(s) did not ride their declared QoS; first: \
+                             {} ({} observed, {} dropped{synth})",
+                            w.qos_mismatched,
+                            w.qos_judged,
+                            ex.failure.as_deref().unwrap_or("—"),
+                            w.samples,
+                            w.dropped
+                        ),
+                    }
+                } else if w.qos_judged > 0 {
+                    Eval {
+                        state: CondState::Ok,
+                        evidence: format!(
+                            "{} judged sample(s) rode their declared priority, congestion \
+                             control and express ({} observed, {} dropped{synth})",
+                            w.qos_judged, w.samples, w.dropped
+                        ),
+                    }
                 } else {
-                    CondState::Ok
-                },
-                evidence: format!(
-                    "{} of {} judged sample(s) did not ride their declared profile \
-                     ({} observed, {} with no declared profile to judge, \
-                     {} dropped{synth})",
-                    w.qos_mismatched,
-                    w.qos_judged,
-                    w.samples,
-                    w.samples.saturating_sub(w.qos_judged),
-                    w.dropped
-                ),
-            },
+                    Eval {
+                        state: CondState::Unobservable,
+                        evidence: format!("{}{synth}", unchecked("judg")),
+                    }
+                }
+            }
             Condition::Dropped => Eval {
                 state: if w.dropped > 0 {
                     CondState::Firing
@@ -402,60 +387,20 @@ impl Condition {
                     w.dropped, w.window_s
                 ),
             },
-            Condition::DoctorCheck { .. }
-            | Condition::OriginDown { .. }
-            | Condition::AlertFiring { .. } => return None,
+            Condition::DoctorCheck { .. } | Condition::InstanceGone { .. } => return None,
         })
     }
 
-    /// [`judge_window`](Self::judge_window) for the variants that *have* a
-    /// window — total, because [`judge`](Self::judge) has already routed the
-    /// other two elsewhere.
-    fn judge_window_total(&self, w: &CondWindow) -> Eval {
-        debug_assert!(
-            !matches!(
-                self,
-                Condition::DoctorCheck { .. } | Condition::OriginDown { .. }
-            ),
-            "judge() routes these two to their own evidence"
-        );
-        self.judge_window(w).unwrap_or_else(|| Eval {
+    /// [`judge_window_with`](Self::judge_window_with) for the variants that
+    /// *have* a window — total, because [`judge`](Self::judge) has already
+    /// routed the other two elsewhere.
+    fn judge_window_total(&self, w: &CondWindow, ex: &WindowExamples) -> Eval {
+        self.judge_window_with(w, ex).unwrap_or_else(|| Eval {
             // Unreachable through `judge`; if some future variant reaches it,
             // "I have no window for this" is the honest answer, not a panic
             // in a watchdog that is supposed to keep running.
             state: CondState::Unobservable,
             evidence: "this rule is not judged against a sample window".into(),
-        })
-    }
-
-    /// Judge a roster ask. `None` unless this is [`Condition::OriginDown`].
-    /// `Err` is the ask failing, which is unobservable — silence is not a
-    /// verdict (RFC 05 §3.1).
-    pub fn judge_roster(
-        &self,
-        roster: Result<&BTreeMap<String, Vec<String>>, &str>,
-    ) -> Option<Eval> {
-        let Condition::OriginDown { origin } = self else {
-            return None;
-        };
-        Some(match roster {
-            Err(e) => Eval {
-                state: CondState::Unobservable,
-                evidence: format!("the roster could not be asked: {e}"),
-            },
-            Ok(r) => match r.get(origin) {
-                Some(producers) => Eval {
-                    state: CondState::Ok,
-                    evidence: format!(
-                        "{origin} holds an alive token ({} producer(s))",
-                        producers.len()
-                    ),
-                },
-                None => Eval {
-                    state: CondState::Firing,
-                    evidence: format!("{origin} holds no alive token (RFC 04 §5)"),
-                },
-            },
         })
     }
 
@@ -525,11 +470,8 @@ impl std::fmt::Display for Condition {
             Condition::InvalidPayload { selector } => write!(f, "invalid-payload {selector}"),
             Condition::QosMismatch { selector } => write!(f, "qos-mismatch {selector}"),
             Condition::DoctorCheck { check } => write!(f, "doctor {check}"),
-            Condition::OriginDown { origin } => write!(f, "origin-down {origin}"),
+            Condition::InstanceGone { address } => write!(f, "instance-gone {address}"),
             Condition::Dropped => write!(f, "dropped"),
-            Condition::AlertFiring { selector, min } => {
-                write!(f, "alert-firing {selector} {min}")
-            }
         }
     }
 }
@@ -624,22 +566,19 @@ pub fn judge_silence(ev: SilenceEvidence) -> Judgement {
     }
 }
 
-/// Everything one watchdog tick observed, in the three shapes the conditions
-/// are judged against.
+/// Everything one watchdog tick observed, in the shapes the conditions are
+/// judged against.
 ///
-/// `doctor` and `roster` are `Option` because a tick only runs those asks if
-/// some rule wants them — and "not run this tick" is *unobservable*, which is
-/// the honest reading and the one the caller used to assert away with
-/// `.expect("a doctor rule ran the doctor")` (#352).
+/// `doctor` and `instances` are `Option` because a tick only runs those
+/// asks if some rule wants them — and "not run this tick" is
+/// *unobservable*, which is the honest reading (#352).
 pub struct TickEvidence<'e> {
     pub window: &'e CondWindow,
+    pub examples: &'e WindowExamples,
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
-    pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
-    /// This tick's alert-plane asks, one per distinct `alert-firing`
-    /// selector; `None` when no rule wanted one (#463).
-    pub alerts: Option<&'e [AlertAsk]>,
-    /// The deployment base the alert keys are read under.
-    pub base: &'e str,
+    /// This tick's presence asks, one per distinct `instance-gone` address;
+    /// `None` when no rule wanted one.
+    pub instances: Option<&'e [InstanceAsk]>,
 }
 
 /// Judge one doctor check against this tick's run — total, and total in the
@@ -661,7 +600,7 @@ pub fn judge_doctor_check(check: CheckId, outcome: Option<Result<&DoctorReport, 
 /// namespace, and a runner given none cannot ask it.
 pub(crate) async fn tick_doctor(
     bus: Option<&DoctorBus>,
-    store: &crate::bus::contracts::BundleStore,
+    store: &BundleStore,
     spec: &crate::judge::doctor::DoctorSpec,
 ) -> std::result::Result<DoctorReport, String> {
     match bus {
@@ -670,122 +609,93 @@ pub(crate) async fn tick_doctor(
     }
 }
 
-/// Judge one origin against this tick's roster ask — likewise total.
-pub fn judge_origin_down(
-    origin: &str,
-    roster: Option<Result<&BTreeMap<String, Vec<String>>, &str>>,
-) -> Eval {
-    let Some(roster) = roster else {
-        return Eval {
-            state: CondState::Unobservable,
-            evidence: "the roster was not asked this tick".into(),
-        };
-    };
-    Condition::OriginDown {
-        origin: origin.to_string(),
-    }
-    .judge_roster(roster)
-    .expect("an OriginDown is judged by the roster")
+/// One tick's presence ask for one `instance-gone` address (spec §8.1).
+#[derive(Debug, Clone)]
+pub struct InstanceAsk {
+    pub address: String,
+    pub outcome: std::result::Result<InstanceRead, String>,
 }
 
-/// Judge one `alert-firing` rule against this tick's alert-plane asks
-/// (#463) — likewise total. Each answer is one live alert document (a GET
-/// returns no tombstones, so a resolved alert simply stops answering);
-/// its `severity`, `rule` and `summary` are lifted the way `zenwatch`'s
-/// `alerts` rule lifts them ([`crate::alert_transition`]), and nothing else
-/// in it is read. The state is a count against the floor; the evidence
-/// names the count and the first, so the line says what is wrong without
-/// the watchdog knowing what a unit or a port is.
-pub fn judge_alert_firing(
-    base: &str,
-    selector: &str,
-    min: AlertFloor,
-    asks: Option<&[AlertAsk]>,
-) -> Eval {
+/// What one read of an address's instance tokens found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstanceRead {
+    /// The instance keys holding a token, base-relative.
+    pub instances: Vec<String>,
+    /// `false` when the read ended at its timeout: an instance it did not
+    /// see may be there.
+    pub complete: bool,
+}
+
+/// One tick's instance asks: one liveliness read per distinct address, on a
+/// session in the namespace, through the crate's chokepoint (§8.1).
+pub(crate) async fn tick_instances(
+    bus: Option<&DoctorBus>,
+    addresses: &[String],
+    timeout: Duration,
+) -> Vec<InstanceAsk> {
+    let mut out = Vec::with_capacity(addresses.len());
+    for address in addresses {
+        let outcome = match bus {
+            None => Err("no session in the deployment's namespace was given".to_owned()),
+            Some(bus) => {
+                let selector = format!("zk2/{address}/@zk/instance/*");
+                crate::bus::presence::liveliness_read(&bus.session, &selector, timeout)
+                    .await
+                    .map(|r| InstanceRead {
+                        instances: r.keys,
+                        complete: r.complete,
+                    })
+                    .map_err(|e| crate::one_line(&e))
+            }
+        };
+        out.push(InstanceAsk {
+            address: address.clone(),
+            outcome,
+        });
+    }
+    out
+}
+
+/// Judge one `instance-gone` rule against this tick's presence asks — total.
+pub fn judge_instance_gone(address: &str, asks: Option<&[InstanceAsk]>) -> Eval {
     let Some(asks) = asks else {
         return Eval {
             state: CondState::Unobservable,
-            evidence: "the alert plane was not asked this tick".into(),
+            evidence: "presence was not read this tick".into(),
         };
     };
-    let Some(ask) = asks.iter().find(|a| a.selector == selector) else {
+    let Some(ask) = asks.iter().find(|a| a.address == address) else {
         return Eval {
             state: CondState::Unobservable,
-            evidence: format!("no ask ran for {selector} this tick"),
+            evidence: format!("no presence read ran for {address} this tick"),
         };
     };
-    let answers = match &ask.outcome {
-        Err(e) => {
-            return Eval {
-                state: CondState::Unobservable,
-                evidence: format!("the alert plane could not be asked: {e}"),
-            };
-        }
-        Ok(a) => a,
-    };
-    let mut documents = 0usize;
-    let mut unreadable = 0usize;
-    let mut firing = 0usize;
-    let mut first: Option<String> = None;
-    for answer in answers {
-        let crate::bus::query::Answer::Value(bytes) = &answer.answer else {
-            unreadable += 1;
-            continue;
-        };
-        let doc = crate::model::decode::structural_value(&bytes.to_bytes());
-        let transition = crate::model::alert::alert_transition(
-            base,
-            &answer.key,
-            zenoh::sample::SampleKind::Put,
-            doc.as_ref()
-                .map(|v| (crate::report::RenderSource::Structural, v)),
-            None,
-            "",
-        );
-        let Some(t) = transition else {
-            // Not an alert key at all — the selector was wider than the
-            // plane. Counted, not judged.
-            unreadable += 1;
-            continue;
-        };
-        documents += 1;
-        if !min.admits(t.severity.as_deref()) {
-            continue;
-        }
-        firing += 1;
-        if first.is_none() {
-            let mut line = format!("{}/{}", t.origin, t.producer);
-            if let Some(rule) = &t.rule {
-                line.push(' ');
-                line.push_str(rule);
-            }
-            if let Some(summary) = &t.summary {
-                line.push_str(" — ");
-                line.push_str(summary);
-            }
-            first = Some(line);
-        }
-    }
-    let skipped = if unreadable > 0 {
-        format!("; {unreadable} answer(s) not alert documents")
-    } else {
-        String::new()
-    };
-    if firing == 0 {
-        Eval {
+    match &ask.outcome {
+        Err(e) => Eval {
+            state: CondState::Unobservable,
+            evidence: format!("the presence read could not be made: {e}"),
+        },
+        Ok(r) if !r.instances.is_empty() => Eval {
             state: CondState::Ok,
             evidence: format!(
-                "no alert firing at >= {min} ({documents} document(s) read{skipped})"
+                "{address} holds {} instance token(s) (spec §8.1)",
+                r.instances.len()
             ),
-        }
-    } else {
-        Eval {
+        },
+        Ok(r) if !r.complete => Eval {
+            state: CondState::Unobservable,
+            evidence: format!(
+                "the presence read ended at its timeout and saw no instance of {address}: \
+                 possibly incomplete (spec §8.1)"
+            ),
+        },
+        Ok(_) => Eval {
             state: CondState::Firing,
             evidence: format!(
-                "{firing} alert(s) firing at >= {min}; first: {}{skipped}",
-                first.unwrap_or_default()
+                "no instance token of {address} visible to this reader, in a complete read \
+                 (spec §8.1; a refused read is empty too)"
             ),
-        }
+        },
     }
 }
 
@@ -793,11 +703,6 @@ pub fn judge_alert_firing(
 
 /// What one evaluation window observed on one condition's selector — the
 /// facts, separated from the judgement so the judgement is pure.
-///
-/// `CondWindow` and not `Window`: this type is re-exported at the crate root
-/// beside `BudgetWindow` and `RecordBounds`, and a bare `Window` there reads
-/// as *the* window of an engine that has several. Nothing serializes the
-/// name (the type carries no `Serialize`), so the rename is Rust-side only.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CondWindow {
     /// The span this window judges, seconds.
@@ -815,18 +720,29 @@ pub struct CondWindow {
     pub last_sample_ago_s: Option<f64>,
     /// Seconds since the last stream drop; `None` = the stream never dropped.
     pub last_drop_ago_s: Option<f64>,
-    /// Samples whose payload did not reach `Valid`, among those checked.
+    /// Samples whose payload failed its declared type, among those checked.
     pub invalid: u64,
-    /// Samples actually decode-checked (a budget bounds the cost).
+    /// Samples actually checked against their declared type (a budget
+    /// bounds the cost, and an unresolved key cannot be).
     pub checked: u64,
     /// Samples that did not ride their declared QoS, among those judged.
     pub qos_mismatched: u64,
-    /// Samples with a declared profile to judge against.
+    /// Samples with a declared QoS to judge against.
     pub qos_judged: u64,
-    /// Samples carrying the RFC 09 §5.3 synthetic-traffic marker — generated
-    /// traffic judged as real would be a self-inflicted page, so every
-    /// evidence line carries the count.
+    /// Samples from an address whose descriptor carries a mock owner's
+    /// synthetic marker — generated traffic judged as real would be a
+    /// self-inflicted page, so every evidence line carries the count.
     pub synthetic: u64,
+}
+
+/// What one window's evidence names beside its counts: the first failure,
+/// and why a sample could not be checked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowExamples {
+    /// The first sample that failed — its key and what failed.
+    pub failure: Option<String>,
+    /// Why the first sample that could not be checked was not.
+    pub unchecked: Option<String>,
 }
 
 /// One evaluation: the three-valued state, and the evidence for it.
@@ -841,13 +757,7 @@ pub struct Eval {
 /// `None` — transitions, not states.
 #[derive(Debug, Clone)]
 pub struct RuleState {
-    /// The condition itself, not its `Display`.
-    ///
-    /// It used to hold the rendered string and clone it into every
-    /// transition, with the two representations kept equal only by a
-    /// round-trip test — a second representation of a value that was
-    /// `Clone` and in scope (#352). The rendering happens where the
-    /// `Transition` is built, once, from the one source.
+    /// The condition itself, not its `Display` (#352).
     rule: Condition,
     state: Option<CondState>,
 }
@@ -892,8 +802,6 @@ impl RuleState {
 /// a doctor that could not run has not said the deployment is healthy.
 #[derive(Debug, Clone)]
 pub struct DoctorWatch {
-    /// One state per check. A `Vec<(Condition, RuleState)>` until #352 — the
-    /// condition was in both halves of the pair.
     checks: Vec<RuleState>,
 }
 
@@ -947,22 +855,16 @@ pub struct WatchdogSpec {
     pub tick: Duration,
     /// Stop after this many ticks; `None` = run until the caller stops it.
     pub ticks: Option<u64>,
-    /// Per-ask timeout for the roster and doctor conditions.
+    /// Per-ask timeout for the presence, contract and doctor asks.
     pub timeout: Duration,
-    /// Where a `doctor <CHECK-ID>` rule's doctor reads (#612, FJ6): zk2's
-    /// doctor reads the deployment through a session in its namespace, which
-    /// the watchdog's own session is not. `None` makes every doctor rule
-    /// unobservable, saying why.
-    pub doctor: Option<DoctorBus>,
 }
 
-/// How many decode attempts each key gets per tick under an
-/// `invalid-payload` rule — the same budget the doctor listen phase runs,
-/// for the same reason: a watchdog must not become a load test.
+/// How many payload checks each key gets per tick under an
+/// `invalid-payload` rule: a watchdog must not become a load test.
 const DECODE_BUDGET: u8 = 2;
 
 /// What one tick counted on one rule's selector.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 struct TickCounters {
     samples: u64,
     invalid: u64,
@@ -970,15 +872,10 @@ struct TickCounters {
     qos_mismatched: u64,
     qos_judged: u64,
     synthetic: u64,
+    examples: WindowExamples,
 }
 
-/// One rule's whole per-run state, together.
-///
-/// This was four `Vec`s held in lockstep by index — `states`,
-/// `keyexprs`, `counters`, `last_sample` — across a hundred and thirty
-/// lines, with nothing structurally preventing them from disagreeing in
-/// length, and a `counters.fill(default())` reset that could silently
-/// miss one of them (#352).
+/// One rule's whole per-run state, together (#352).
 struct RuleRuntime {
     rule: Condition,
     /// The rule's selector, compiled once for sample attribution.
@@ -989,64 +886,63 @@ struct RuleRuntime {
 }
 
 /// The sweep a tick ran beside its drain, as the rules see it: the doctor
-/// run and the roster ask, each `None` when no rule wanted it — which is
-/// *unobservable* for the rules that would have needed it, the honest
-/// reading (#352).
+/// run and the presence asks, each `None` when no rule wanted it — which is
+/// *unobservable* for the rules that would have needed it (#352).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SweepOutcome<'e> {
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
-    pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
-    /// The alert-plane asks, one per distinct `alert-firing` selector
-    /// (#463); `None` when no rule wanted one.
-    pub alerts: Option<&'e [AlertAsk]>,
+    pub instances: Option<&'e [InstanceAsk]>,
 }
 
 /// A set of rules judged tick by tick over **one** event stream — the
 /// watchdog's per-tick body, lifted out of [`watchdog`] so a second driver
 /// can run it (#218).
 ///
-/// The driver owns the stream, the drain loop and the sweep; this owns
-/// everything the rules know: per-rule counters, the last sample and drop
-/// instants, the per-tick decode budget, and the transition detectors. Feed
-/// it every sample ([`observe_sample`](Self::observe_sample)) and every drop
-/// ([`observe_drop`](Self::observe_drop)) the stream yields, then
-/// [`evaluate`](Self::evaluate) once per tick and get back only what changed.
+/// The driver owns the stream, the drain loop, the sweep and the lens; this
+/// owns everything the rules know: per-rule counters, the last sample and
+/// drop instants, the per-tick check budget, and the transition detectors.
+/// Feed it every sample ([`observe_sample`](Self::observe_sample)) through
+/// the lens the driver holds, every drop
+/// ([`observe_drop`](Self::observe_drop)), then
+/// [`evaluate`](Self::evaluate) once per tick and get back only what
+/// changed.
 ///
 /// **Why the seam exists.** A trigger capture (`zenctl record --on`) must
 /// judge *the same event stream it records*: one subscription, one drop
-/// ledger. Had the capture run a watchdog of its own beside its recorder,
-/// the drops the judge saw and the drops in the file would have been two
-/// different facts about two different observers — and a `{"dropped": n}`
-/// in the file would say nothing about whether the rule that fired was
-/// judged over a clean window. With the body a value, the recorder drains
-/// one stream and hands every item to both the ring and the rules.
+/// ledger. With the body a value, the recorder drains one stream and hands
+/// every item to both the ring and the rules.
 ///
 /// Sample attribution is by key-expression intersection against each rule's
-/// selector; a sample whose key does not parse as one counts for no rule.
-/// Time is `tokio::time::Instant`, so a driver under paused time judges
-/// exact windows.
-pub struct RuleSet<'a> {
+/// selector. Time is `tokio::time::Instant`, so a driver under paused time
+/// judges exact windows.
+pub struct RuleSet {
     rules: Vec<RuleRuntime>,
     /// The distinct selectors the rules observe, in first-seen order.
     watched: Vec<String>,
-    base: &'a str,
-    slices: Option<&'a SliceSet>,
     started: tokio::time::Instant,
     last_eval: tokio::time::Instant,
     last_drop: Option<tokio::time::Instant>,
     dropped_tick: u64,
-    decode_budget: BTreeMap<String, u8>,
+    budget: BTreeMap<String, u8>,
     ticks: u64,
     transitions: u64,
 }
 
-impl<'a> RuleSet<'a> {
+/// What one sample said to the rules that judge it — worked out once, the
+/// first time a rule needs it.
+#[derive(Default)]
+struct Verdicts {
+    checked: Option<Option<(Conformance, String)>>,
+    qos: Option<std::result::Result<Option<String>, String>>,
+}
+
+impl RuleSet {
     /// Compile the rules. Fails on a selector that is not a key expression —
     /// before anything is declared, so the `?` has nothing to tear down
     /// (#336). The watch clock starts here: [`CondWindow::observed_s`] is
     /// measured from construction, so build the set right before the
     /// subscriptions are declared.
-    pub fn new(rules: &[Condition], base: &'a str, slices: Option<&'a SliceSet>) -> Result<Self> {
+    pub fn new(rules: &[Condition]) -> Result<Self> {
         let compiled = rules
             .iter()
             .map(|rule| {
@@ -1077,13 +973,11 @@ impl<'a> RuleSet<'a> {
         Ok(RuleSet {
             rules: compiled,
             watched,
-            base,
-            slices,
             started: now,
             last_eval: now,
             last_drop: None,
             dropped_tick: 0,
-            decode_budget: BTreeMap::new(),
+            budget: BTreeMap::new(),
             ticks: 0,
             transitions: 0,
         })
@@ -1120,120 +1014,117 @@ impl<'a> RuleSet<'a> {
         spec
     }
 
-    /// Some rule judges the liveliness roster, so the driver owes one ask
-    /// per tick.
-    pub fn wants_roster(&self) -> bool {
-        self.rules
-            .iter()
-            .any(|r| matches!(r.rule, Condition::OriginDown { .. }))
-    }
-
-    /// Some rule judges the alert plane, so the driver owes one GET per
-    /// distinct selector per tick (#463).
-    pub fn wants_alerts(&self) -> bool {
-        self.rules
-            .iter()
-            .any(|r| matches!(r.rule, Condition::AlertFiring { .. }))
-    }
-
-    /// The distinct `alert-firing` selectors, in rule order — what the
-    /// driver asks each tick.
-    pub fn alert_selectors(&self) -> Vec<String> {
+    /// The distinct `instance-gone` addresses, in rule order — what the
+    /// driver reads each tick. Empty when no rule wants presence.
+    pub fn instance_addresses(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for r in &self.rules {
-            if let Condition::AlertFiring { selector, .. } = &r.rule
-                && !out.iter().any(|s| s == selector)
+            if let Condition::InstanceGone { address } = &r.rule
+                && !out.iter().any(|a| a == address)
             {
-                out.push(selector.clone());
+                out.push(address.clone());
             }
         }
         out
     }
 
-    /// Some rule judges payload validity, so the driver owes a warmed,
-    /// sealed schema store (#337) and a decode per
-    /// [`wants_verdict`](Self::wants_verdict).
-    pub fn wants_decode(&self) -> bool {
-        self.rules
-            .iter()
-            .any(|r| matches!(r.rule, Condition::InvalidPayload { .. }))
+    /// Some rule reads what a key *is* — its contract, its declared QoS —
+    /// so the driver owes a lens: a presence read and the revisions it
+    /// names, refreshed beside the drain.
+    pub fn wants_lens(&self) -> bool {
+        self.rules.iter().any(|r| {
+            matches!(
+                r.rule,
+                Condition::InvalidPayload { .. } | Condition::QosMismatch { .. }
+            )
+        })
     }
 
-    /// Whether this sample should be decoded before it is observed: an
-    /// `invalid-payload` rule matches its key and the key's per-tick decode
-    /// budget has room. Spends the budget — ask once per sample, then hand
-    /// the verdict to [`observe_sample`](Self::observe_sample). The decode
-    /// stays the driver's, because it is async and this is not.
-    pub fn wants_verdict(&mut self, s: &SampleView) -> bool {
-        let Ok(key) = zenoh::key_expr::KeyExpr::try_from(s.key.as_str()) else {
-            return false;
-        };
-        let matched = self.rules.iter().any(|rt| {
-            matches!(rt.rule, Condition::InvalidPayload { .. })
-                && rt.keyexpr.as_ref().is_some_and(|sel| sel.intersects(&key))
-        });
-        if !matched {
-            return false;
-        }
-        let budget = self.decode_budget.entry(s.key.clone()).or_default();
-        if *budget < DECODE_BUDGET {
-            *budget += 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Count one observed sample against every rule its key matches.
-    /// `verdict` is the decode the driver ran when
-    /// [`wants_verdict`](Self::wants_verdict) said so; `None` means the
-    /// sample was not checked, which is counted as exactly that.
-    pub fn observe_sample(
-        &mut self,
-        s: &SampleView,
-        facts_cache: &mut crate::model::facts::FactsCache,
-        verdict: Option<&crate::Verdict>,
-    ) {
+    /// Count one observed sample against every rule its key matches,
+    /// judging it through `lens` for the rules that need to: its payload
+    /// against its declared type (budgeted per key per tick), its QoS
+    /// against its resource's.
+    pub fn observe_sample(&mut self, s: &SampleView, lens: &Lens<'_>) {
         let Ok(key) = zenoh::key_expr::KeyExpr::try_from(s.key.as_str()) else {
             return;
         };
-        let synthetic = s
-            .attachment
-            .as_ref()
-            .is_some_and(|a| crate::judge::common::is_synthetic_marker(&a.to_bytes()));
         let now = tokio::time::Instant::now();
+        let mut verdicts = Verdicts::default();
+        let mut synthetic: Option<bool> = None;
+        let mut budget = None;
         for rt in self.rules.iter_mut() {
             let Some(sel) = &rt.keyexpr else { continue };
             if !sel.intersects(&key) {
                 continue;
             }
             rt.counters.samples += 1;
-            if synthetic {
+            let synth = *synthetic.get_or_insert_with(|| {
+                lens.identity(&s.key)
+                    .address()
+                    .is_some_and(|a| lens.is_synthetic(a))
+            });
+            if synth {
                 rt.counters.synthetic += 1;
             }
             rt.last_sample = Some(now);
             match &rt.rule {
                 Condition::InvalidPayload { .. } => {
-                    // An `invalid-payload` rule counts every not-`Valid`
-                    // verdict the same way, so with no registry loaded
-                    // `NoRegistry` (#246) changes no transition — only the
-                    // reason the sample was not validated.
-                    if let Some(v) = verdict {
-                        rt.counters.checked += 1;
-                        if !matches!(v, crate::Verdict::Valid) {
-                            rt.counters.invalid += 1;
+                    let allowed = *budget.get_or_insert_with(|| {
+                        let b = self.budget.entry(s.key.clone()).or_default();
+                        if *b < DECODE_BUDGET {
+                            *b += 1;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if !allowed {
+                        continue;
+                    }
+                    let checked = verdicts.checked.get_or_insert_with(|| check(s, lens));
+                    match checked {
+                        Some((c, line)) if c.is_checked() => {
+                            rt.counters.checked += 1;
+                            if c.is_violation() {
+                                rt.counters.invalid += 1;
+                                rt.counters
+                                    .examples
+                                    .failure
+                                    .get_or_insert_with(|| line.clone());
+                            }
+                        }
+                        Some((_, why)) => {
+                            rt.counters
+                                .examples
+                                .unchecked
+                                .get_or_insert_with(|| why.clone());
+                        }
+                        None => {
+                            rt.counters
+                                .examples
+                                .unchecked
+                                .get_or_insert_with(|| "a deletion carries no value".into());
                         }
                     }
                 }
                 Condition::QosMismatch { .. } => {
-                    facts_cache.ensure(self.base, &s.key, self.slices);
-                    let facts = facts_cache.get(&s.key).expect("just ensured this key");
-                    if let crate::model::facts::Registration::Registered(sf) = &facts.registration
-                        && let Some(profile) = sf.declared_qos()
-                    {
-                        rt.counters.qos_judged += 1;
-                        if !s.qos_matches(profile) {
-                            rt.counters.qos_mismatched += 1;
+                    let qos = verdicts.qos.get_or_insert_with(|| qos(s, lens));
+                    match qos {
+                        Ok(mismatch) => {
+                            rt.counters.qos_judged += 1;
+                            if let Some(line) = mismatch {
+                                rt.counters.qos_mismatched += 1;
+                                rt.counters
+                                    .examples
+                                    .failure
+                                    .get_or_insert_with(|| line.clone());
+                            }
+                        }
+                        Err(why) => {
+                            rt.counters
+                                .examples
+                                .unchecked
+                                .get_or_insert_with(|| why.clone());
                         }
                     }
                 }
@@ -1242,8 +1133,8 @@ impl<'a> RuleSet<'a> {
         }
     }
 
-    /// The stream dropped `n` samples here (RFC 09 §5.1 O6): unattributable
-    /// to any one selector, so it taints every completeness claim this tick.
+    /// The stream dropped `n` samples here (O6): unattributable to any one
+    /// selector, so it taints every completeness claim this tick.
     pub fn observe_drop(&mut self, n: u64) {
         self.dropped_tick += n;
         self.last_drop = Some(tokio::time::Instant::now());
@@ -1276,22 +1167,19 @@ impl<'a> RuleSet<'a> {
             };
             let eval = rt.rule.judge(&TickEvidence {
                 window: &window,
+                examples: &rt.counters.examples,
                 doctor: sweep.doctor,
-                roster: sweep.roster,
-                alerts: sweep.alerts,
-                base: self.base,
+                instances: sweep.instances,
             });
             if let Some(transition) = rt.state.observe(eval, at) {
                 out.push(transition);
             }
         }
-        // One reset, over one collection — the four-`Vec` version had a
-        // `counters.fill(..)` that could miss a sibling (#352).
         for rt in self.rules.iter_mut() {
             rt.counters = TickCounters::default();
         }
         self.dropped_tick = 0;
-        self.decode_budget.clear();
+        self.budget.clear();
         self.ticks += 1;
         self.transitions += out.len() as u64;
         self.last_eval = now;
@@ -1303,9 +1191,7 @@ impl<'a> RuleSet<'a> {
         self.ticks
     }
 
-    /// When the last tick closed (construction, before the first): the
-    /// driver's next deadline is measured from here, so a slow consumer of
-    /// the transitions widens the next window rather than skipping one.
+    /// When the last tick closed (construction, before the first).
     pub fn last_eval(&self) -> tokio::time::Instant {
         self.last_eval
     }
@@ -1332,143 +1218,118 @@ impl<'a> RuleSet<'a> {
     }
 }
 
+/// One sample's payload against its declared type, through the lens: the
+/// conformance, and one line naming the key and what failed — or why it
+/// could not be checked. `None` for a deletion, which carries no value.
+fn check(s: &SampleView, lens: &Lens<'_>) -> Option<(Conformance, String)> {
+    if s.kind == zenoh::sample::SampleKind::Delete {
+        return None;
+    }
+    let encoding = (!s.encoding.is_empty()).then_some(s.encoding.as_str());
+    let c = lens.check(&s.key, Member::Type, encoding, &s.payload.to_bytes());
+    let line = match &c.conformance {
+        Conformance::Invalid { violations } => {
+            format!("{}: {}", s.key, violations.join("; "))
+        }
+        Conformance::Undecodable { declared, reason } => {
+            format!("{}: does not decode as {declared}: {reason}", s.key)
+        }
+        Conformance::NotChecked { reason } => reason.clone(),
+        Conformance::Valid => String::new(),
+    };
+    Some((c.conformance, line))
+}
+
+/// One sample's QoS against its resource's (§2.4): `Ok(None)` when it rode
+/// what was declared, `Ok(Some(line))` naming the axes that differ, `Err`
+/// with why there was nothing to judge against.
+fn qos(s: &SampleView, lens: &Lens<'_>) -> std::result::Result<Option<String>, String> {
+    let declared = lens.declared_qos(&s.key).map_err(|why| why.words())?;
+    let observed = observed_qos(s.priority, s.congestion_control, s.express);
+    Ok(qos_mismatch(&declared, &observed).map(|m| format!("{}: {}", s.key, m.summary())))
+}
+
 /// Watch the rules and yield one [`Transition`] per genuine change, none per
 /// unchanged tick. The subscriber set is declared before the first window
 /// opens (O4); every selector rule is judged per tick over the measured
-/// window, doctor and roster rules by one ask per tick each.
+/// window, doctor and `instance-gone` rules by one ask per tick each.
 ///
-/// A driver over [`RuleSet`] (#218): this function owns the monitor, the
-/// drain loop and the per-tick sweep; the rules' state is the set's.
+/// The selectors are wire keys, watched on `bus.raw` (no namespace); the
+/// lens, the presence asks and the doctor read through `bus.session`, in
+/// the namespace (#612, FJ8b). Revisions in `offline` are never retrieved;
+/// every other revision a descriptor names is retrieved into `store`.
 ///
-/// A [`Straw`] rather than a [`Stream`](futures_core::Stream) (#397), because
-/// a watchdog run is a sequence **and** a final value: transitions while it
-/// runs, a [`WatchdogSummary`] when it stops, and the acknowledged monitor
-/// teardown (#207/#336) in between. A bare `Stream` has room for the first
-/// only — which is why this stayed a callback through #343, and why the
-/// callback could not fail: `emit` was infallible by construction, so a
-/// caller whose emission *could* fail had to stash the error and answer for
-/// it after the run. Dropping it instead let `zenctl watchdog` finish clean
-/// having emitted nothing (#360).
-///
-/// Drive it with `sip` for the transitions and `await` for the summary:
+/// A [`Straw`] rather than a `Stream` (#397), because a watchdog run is a
+/// sequence **and** a final value: transitions while it runs, a
+/// [`WatchdogSummary`] when it stops, and the acknowledged monitor teardown
+/// (#207/#336) in between.
 ///
 /// ```ignore
-/// let mut run = watchdog(&fleet, slices, &store, &spec).pin();
+/// let mut run = watchdog(&bus, &store, &contracts, &spec).pin();
 /// while let Some(transition) = run.sip().await {
 ///     writeln!(out, "{}", serde_json::to_string(&transition)?)?;
 /// }
 /// let summary = run.await?;
 /// ```
-///
-/// The summary is the *output*, not an item, so a consumer that stops sipping
-/// early and awaits still gets the teardown — there is no `finish` to forget.
 pub fn watchdog<'a>(
-    fleet: &'a crate::Fleet<'a>,
-    slices: Option<&'a SliceSet>,
-    store: &'a SchemaStore,
+    bus: &'a DoctorBus,
+    store: &'a BundleStore,
+    offline: &'a ContractSet,
     spec: &'a WatchdogSpec,
 ) -> impl Straw<WatchdogSummary, Transition, Error> + 'a {
     sipper(async move |mut sender: sipper::Sender<Transition>| {
         use crate::{FleetEvent, StreamItem};
 
-        let (session, base) = (fleet.session(), fleet.base());
-
         // Compiled *before* the monitor exists, so the `?` has nothing to tear
         // down (#336).
-        let mut rules = RuleSet::new(&spec.rules, base, slices)?;
-        let (wants_doctor, wants_roster, wants_decode, wants_alerts) = (
-            rules.wants_doctor(),
-            rules.wants_roster(),
-            rules.wants_decode(),
-            rules.wants_alerts(),
-        );
-        let alert_selectors = rules.alert_selectors();
-        // The doctor rules' doctor: only the checks they name, and one
-        // contract store for the run, whose verified bundles outlive a tick.
+        let mut rules = RuleSet::new(&spec.rules)?;
+        let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
+        let addresses = rules.instance_addresses();
         let doctor_spec = rules.doctor_spec(spec.timeout);
-        let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
 
-        // Warmed before the first tick and sealed for the run (#337): a decode
-        // inside the drain loop must never become a `describe` GET, because
-        // nothing attends the broadcast while one is in flight and the tick's
-        // verdict is about the window that lost the samples. zenctl hands this
-        // store over cold. Each tick's sweep re-warms whatever is still
-        // unserved — from beside the drain, where waiting costs nothing.
-        if wants_decode {
-            crate::model::decode::prewarm(fleet, store, slices).await;
-        }
-        let _sealed = store.seal();
+        // The lens before the first window (#337's rule, kept): a check
+        // inside the drain loop must never become a presence read or a
+        // retrieval, because nothing attends the broadcast while one is in
+        // flight. Each tick's sweep re-reads it beside the drain.
+        let mut catalog: Option<Catalog> = if wants_lens {
+            crate::bus::lens::read(&bus.session, store, spec.timeout)
+                .await
+                .ok()
+        } else {
+            None
+        };
 
         // Declared before the window opens — not-asked must never read as "no".
-        let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
+        let monitor = crate::Monitor::start(&bus.raw, crate::MonitorSpec::default()).await?;
         let mut events = monitor.events();
         let monitor = monitor.watching(rules.watched()).await?;
-
-        // Bounded (#107): the watchdog runs until stopped, so an unbounded
-        // per-key map here is a leak on any bus with churning keys. Evictions
-        // ride the summary (O6).
-        let mut facts_cache = crate::model::facts::FactsCache::default();
 
         let mut closed = false;
         loop {
             let deadline = rules.last_eval() + spec.tick;
-            // The tick's bus work runs **beside** the drain, not after it (#338).
-            //
-            // A roster GET, a registry sweep, per-producer describes and state
-            // snapshots take seconds, and every one of them used to happen with
-            // the drain loop stopped — so the broadcast overflowed, and because
-            // `dropped_tick` was reset immediately afterwards, the loss was
-            // billed to the *following* window. In the one tool whose entire
-            // product is a per-window verdict.
-            //
-            // Now the sweep is a future the drain selects on: sampling never
-            // stops, and a sweep that outlives the tick period simply widens this
-            // window — `window_s` is measured from the last evaluation, never
-            // assumed — so the drops land in the tick that incurred them.
+            // The tick's bus work runs **beside** the drain, not after it
+            // (#338): a sweep that outlives the tick period widens this
+            // window — `window_s` is measured, never assumed — so drops land
+            // in the tick that incurred them.
             let sweep = async {
                 let doctor = if wants_doctor {
-                    Some(tick_doctor(spec.doctor.as_ref(), &bundles, &doctor_spec).await)
+                    Some(tick_doctor(Some(bus), store, &doctor_spec).await)
                 } else {
                     None
                 };
-                let roster = if wants_roster {
-                    Some(
-                        crate::bus::roster::roster(fleet, spec.timeout)
-                            .await
-                            .map_err(|e| e.to_string()),
-                    )
-                } else {
+                let instances = if addresses.is_empty() {
                     None
+                } else {
+                    Some(tick_instances(Some(bus), &addresses, spec.timeout).await)
                 };
-                // The alert plane (#463): one bounded GET per distinct
-                // selector, beside the roster ask. A GET, not a subscription
-                // — a firing alert is republished only on a content change.
-                let alerts = if wants_alerts {
-                    let mut asks = Vec::with_capacity(alert_selectors.len());
-                    for selector in &alert_selectors {
-                        let outcome = crate::bus::query::fleet_get(
-                            fleet,
-                            selector,
-                            &crate::bus::query::GetOpts::new(spec.timeout),
-                        )
+                let lens = if wants_lens {
+                    crate::bus::lens::read(&bus.session, store, spec.timeout)
                         .await
-                        .map_err(|e| e.to_string());
-                        asks.push(AlertAsk {
-                            selector: selector.clone(),
-                            outcome,
-                        });
-                    }
-                    Some(asks)
+                        .ok()
                 } else {
                     None
                 };
-                // The schema warming rides here too (#337): still-unserved
-                // producers are re-asked at the store's own backoff, off the
-                // drain loop.
-                if wants_decode {
-                    crate::model::decode::prewarm(fleet, store, slices).await;
-                }
-                (doctor, roster, alerts)
+                (doctor, instances, lens)
             };
             let mut sweep = std::pin::pin!(sweep);
             let mut swept = None;
@@ -1478,35 +1339,22 @@ pub fn watchdog<'a>(
             while !closed {
                 let item = tokio::select! {
                     item = events.recv() => item,
-                    // The tick cannot close before its own sweep has landed, and
-                    // the drain keeps running until it does.
-                    outcome = &mut sweep, if swept.is_none() => {
-                        swept = Some(outcome);
+                    // The tick cannot close before its own sweep has landed,
+                    // and the drain keeps running until it does.
+                    (doctor, instances, lens) = &mut sweep, if swept.is_none() => {
+                        if let Some(c) = lens {
+                            catalog = Some(c);
+                        }
+                        swept = Some((doctor, instances));
                         continue;
                     }
                     () = &mut tick_over, if swept.is_some() => break,
                 };
                 match item {
                     Some(StreamItem::Event(FleetEvent::Sample(s))) => {
-                        // Decode once per sample (budgeted per key per tick),
-                        // shared by every invalid-payload rule the key matches.
-                        let verdict = if rules.wants_verdict(&s) {
-                            Some(
-                                crate::model::decode::decode_sample(
-                                    fleet,
-                                    store,
-                                    slices,
-                                    &s.key,
-                                    Some(&s.encoding),
-                                    &s.payload.to_bytes(),
-                                )
-                                .await
-                                .verdict,
-                            )
-                        } else {
-                            None
-                        };
-                        rules.observe_sample(&s, &mut facts_cache, verdict.as_ref());
+                        let lens =
+                            Lens::new(&bus.namespace, catalog.as_ref(), store).offline(offline);
+                        rules.observe_sample(&s, &lens);
                     }
                     Some(StreamItem::Dropped(n)) => rules.observe_drop(n),
                     Some(_) => {}
@@ -1514,13 +1362,15 @@ pub fn watchdog<'a>(
                 }
             }
 
-            // Evaluate the tick over the measured window, then say only what
-            // changed. The sweep has already landed unless the stream closed
-            // under it — in which case there is nothing left to drain, and
-            // awaiting it here costs the tick nothing.
-            let (doctor_outcome, roster_outcome, alert_asks) = match swept {
+            let (doctor_outcome, instance_asks) = match swept {
                 Some(outcome) => outcome,
-                None => sweep.await,
+                None => {
+                    let (doctor, instances, lens) = sweep.await;
+                    if let Some(c) = lens {
+                        catalog = Some(c);
+                    }
+                    (doctor, instances)
+                }
             };
             let now = tokio::time::Instant::now();
             let at = crate::tape::record::rfc3339_now();
@@ -1531,19 +1381,14 @@ pub fn watchdog<'a>(
                     doctor: doctor_outcome
                         .as_ref()
                         .map(|o| o.as_ref().map_err(String::as_str)),
-                    roster: roster_outcome
-                        .as_ref()
-                        .map(|o| o.as_ref().map_err(String::as_str)),
-                    alerts: alert_asks.as_deref(),
+                    instances: instance_asks.as_deref(),
                 },
             );
             for transition in transitions {
                 // Awaits, where the callback returned: the consumer's write
-                // now happens *here*, so its error returns from where it
-                // happened instead of being stashed for after the run (#360).
-                // The emission point is the tick evaluation — the drain loop
-                // above has already ended for this tick — so a slow consumer
-                // widens the next window rather than stalling a drain (#338).
+                // happens *here*, so its error returns from where it
+                // happened (#360), and a slow consumer widens the next window
+                // rather than stalling a drain (#338).
                 sender.send(transition).await;
             }
             if closed || spec.ticks.is_some_and(|n| rules.ticks() >= n) {
@@ -1555,7 +1400,6 @@ pub fn watchdog<'a>(
         Ok(WatchdogSummary {
             ticks: rules.ticks(),
             transitions: rules.transitions(),
-            facts_evicted: facts_cache.evicted(),
             firing,
             unobservable,
         })
@@ -1599,166 +1443,51 @@ mod tests {
 
     /// Every variant's canonical spelling parses back to itself, and a rule
     /// outside the vocabulary is an error that names the vocabulary — closed
-    /// means closed.
+    /// means closed. v1's two rules that read v1's planes are refused with
+    /// where their question went.
     #[test]
     fn the_vocabulary_round_trips_and_is_closed() {
         let rules = [
-            "rate-above v1/*/telemetry/** 5",
-            "rate-below v1/h-aaaaaaaaaaaa/state/p/health 0.5",
-            "silent-for v1/*/events/** 30",
-            "invalid-payload v1/*/state/**",
-            "qos-mismatch v1/*/telemetry/**",
+            "rate-above prod/zk2/*/*/*/stream/** 5",
+            "rate-below prod/zk2/host-a/tc/tc.netif.v1/state/namespaces 0.5",
+            "silent-for prod/zk2/** 30",
+            "invalid-payload prod/zk2/**",
+            "qos-mismatch prod/zk2/*/tc/**",
             "doctor split-brain",
-            "origin-down h-aaaaaaaaaaaa",
+            "instance-gone host-a/tc",
+            "instance-gone */tc",
             "dropped",
-            "alert-firing v1/*/state/*/alert/* critical",
         ];
         for rule in rules {
             let parsed = Condition::parse(rule).expect(rule);
             assert_eq!(parsed.to_string(), rule, "canonical spelling round-trips");
         }
-        // The floor defaults to `warning`, and the canonical spelling says so.
-        let bare = Condition::parse("alert-firing v1/*/state/*/alert/*").expect("bare");
-        assert_eq!(
-            bare,
-            Condition::AlertFiring {
-                selector: "v1/*/state/*/alert/*".into(),
-                min: AlertFloor::Warning
-            }
-        );
-        assert_eq!(
-            bare.to_string(),
-            "alert-firing v1/*/state/*/alert/* warning"
-        );
-        let err = Condition::parse("alert-firing v1/*/state/*/alert/* urgent").unwrap_err();
-        assert!(err.to_string().contains("info, warning, critical"), "{err}");
+        let err = Condition::parse("origin-down h-aaaaaaaaaaaa").unwrap_err();
+        assert!(err.to_string().contains("instance-gone"), "{err}");
+        let err = Condition::parse("alert-firing v1/*/state/*/alert/*").unwrap_err();
+        assert!(err.to_string().contains("#613"), "{err}");
+        let err = Condition::parse("instance-gone Host A").unwrap_err();
+        assert!(err.to_string().contains("not a rule"), "{err}");
+        let err = Condition::parse("instance-gone host-a").unwrap_err();
+        assert!(err.is_unaskable(), "{err}");
         let err = Condition::parse("if rate > 5 then page").unwrap_err();
         assert!(err.to_string().contains("closed"), "{err}");
         assert!(err.to_string().contains("rate-above"), "{err}");
-        // A doctor rule outside the stable check-id vocabulary is refused at
-        // parse, naming the vocabulary.
         let err = Condition::parse("doctor no-such-check").unwrap_err();
         assert!(err.to_string().contains("split-brain"), "{err}");
     }
 
-    fn alert_answer(key: &str, doc: &str) -> FleetAnswer {
-        FleetAnswer {
-            origin: key.split('/').nth(1).unwrap_or("").to_string(),
-            key: key.to_string(),
-            encoding: Some("application/json".into()),
-            attachment: None,
-            timestamp: None,
-            answer: crate::bus::query::Answer::Value(zenoh::bytes::ZBytes::from(doc.as_bytes())),
-        }
-    }
-
-    /// #463: one state per rule — a count against the floor and the first
-    /// document named; a tombstone never answers a GET, so "resolved" is
-    /// simply an answer that stopped coming.
-    #[test]
-    fn alert_firing_counts_against_the_floor_and_names_the_first() {
-        let sel = "v1/*/state/*/alert/*";
-        let asks = [AlertAsk {
-            selector: sel.into(),
-            outcome: Ok(vec![
-                alert_answer(
-                    "v1/h-3fa9c2d41b7e/state/systemd/alert/aaaaaaaaaaaaaaaa",
-                    r#"{"severity":"critical","rule":"expect-service-active","summary":"expected service forgejo.service active"}"#,
-                ),
-                alert_answer(
-                    "v1/h-3fa9c2d41b7e/state/netlink/alert/bbbbbbbbbbbbbbbb",
-                    r#"{"severity":"info","rule":"link_flap","message":"eth0 flapped"}"#,
-                ),
-                // Not an alert document at all: the selector was wider than the plane.
-                alert_answer("v1/h-3fa9c2d41b7e/state/netlink/health", r#"{"ok":true}"#),
-            ]),
-        }];
-        let e = judge_alert_firing("", sel, AlertFloor::Critical, Some(&asks));
-        assert_eq!(e.state, CondState::Firing);
-        assert!(
-            e.evidence.starts_with(
-                "1 alert(s) firing at >= critical; first: h-3fa9c2d41b7e/systemd \
-                 expect-service-active — expected service forgejo.service active"
-            ),
-            "{}",
-            e.evidence
-        );
-        assert!(
-            e.evidence.contains("1 answer(s) not alert documents"),
-            "{}",
-            e.evidence
-        );
-        // The default floor admits the critical one only; `info` admits both.
-        assert_eq!(
-            judge_alert_firing("", sel, AlertFloor::Warning, Some(&asks)).state,
-            CondState::Firing
-        );
-        let all = judge_alert_firing("", sel, AlertFloor::Info, Some(&asks));
-        assert!(
-            all.evidence.starts_with("2 alert(s) firing at >= info"),
-            "{}",
-            all.evidence
-        );
-        // Nothing firing above the floor is `ok`, with the documents counted.
-        let quiet = [AlertAsk {
-            selector: sel.into(),
-            outcome: Ok(vec![alert_answer(
-                "v1/h-3fa9c2d41b7e/state/netlink/alert/bbbbbbbbbbbbbbbb",
-                r#"{"severity":"info","rule":"link_flap"}"#,
-            )]),
-        }];
-        let e = judge_alert_firing("", sel, AlertFloor::Warning, Some(&quiet));
-        assert_eq!(e.state, CondState::Ok);
-        assert_eq!(
-            e.evidence,
-            "no alert firing at >= warning (1 document(s) read)"
-        );
-        // Not asked, or asked and failed: unobservable, never ok.
-        assert_eq!(
-            judge_alert_firing("", sel, AlertFloor::Warning, None).state,
-            CondState::Unobservable
-        );
-        let failed = [AlertAsk {
-            selector: sel.into(),
-            outcome: Err("timed out".into()),
-        }];
-        let e = judge_alert_firing("", sel, AlertFloor::Warning, Some(&failed));
-        assert_eq!(e.state, CondState::Unobservable);
-        assert!(e.evidence.contains("timed out"), "{}", e.evidence);
-    }
-
-    /// A document with no readable severity clears only the `info` floor.
-    #[test]
-    fn a_severity_the_plane_does_not_speak_clears_only_the_lowest_floor() {
-        assert!(AlertFloor::Info.admits(None));
-        assert!(AlertFloor::Info.admits(Some("weird")));
-        assert!(!AlertFloor::Warning.admits(None));
-        assert!(AlertFloor::Warning.admits(Some("warning")));
-        assert!(AlertFloor::Warning.admits(Some("critical")));
-        assert!(!AlertFloor::Critical.admits(Some("warning")));
-    }
-
     /// The acceptance rule of #227: a drop under a completeness claim yields
-    /// `unobservable`, **never** `ok` — across all three core judges, now
-    /// spoken in the [`Judgement`] core and projected onto [`CondState`]
-    /// (RFC 13, v1.24).
+    /// `unobservable`, **never** `ok` — across all three core judges.
     #[test]
     fn a_drop_under_a_completeness_claim_is_unobservable_never_ok() {
         let wire = CondState::from;
-        // Excess: the "did not exceed" side counts what did not happen.
         assert!(judge_excess(false, 1).is_unobservable());
         assert_eq!(wire(judge_excess(false, 0)), CondState::Ok);
-        // …while firing is positive evidence, conclusive under drops.
         assert_eq!(judge_excess(true, 7), Judgement::Established);
-        // Shortfall: the drops could have carried the difference.
         assert!(judge_shortfall(true, 1).is_unobservable());
         assert_eq!(judge_shortfall(true, 0), Judgement::Established);
-        // …while "enough seen" is conclusive: a drop only hides more.
         assert_eq!(wire(judge_shortfall(false, 9)), CondState::Ok);
-        // Silence: unprovable over a dropped or unwatched span. Named fields
-        // rather than three bare `bool`s, which is the whole of #349 — read
-        // the old spelling `judge_silence(false, true, false)` and say which
-        // one was the drop.
         let silence = |sample_within, span_observed, drop_free| {
             judge_silence(SilenceEvidence {
                 sample_within,
@@ -1772,10 +1501,7 @@ mod tests {
         assert_eq!(wire(silence(true, true, false)), CondState::Ok);
     }
 
-    /// The wire projection's documented mapping, polarity note included:
-    /// `NotEstablished` (established-clean) is `ok`, `Established` (the
-    /// condition holds) is `firing`, and **both** unestablished poles land
-    /// on `unobservable` — the wire cannot say more (RFC 13, v1.24).
+    /// The wire projection's documented mapping, polarity note included.
     #[test]
     fn cond_state_is_the_documented_projection_of_the_judgement_core() {
         assert_eq!(CondState::from(Judgement::Established), CondState::Firing);
@@ -1854,10 +1580,105 @@ mod tests {
         assert_eq!(rule.judge_window(&spoken).unwrap().state, CondState::Ok);
     }
 
-    /// The synthetic-traffic marker count (RFC 09 §5.3, the #162 rider)
-    /// rides every window evidence line when present.
+    /// `invalid-payload` and `qos-mismatch` have three poles each: a
+    /// failure checked is firing and names it; checks that all passed are
+    /// ok; and a window with nothing checked is unobservable, with why —
+    /// never ok (O4).
     #[test]
-    fn synthetic_marked_samples_are_said_out_loud() {
+    fn a_payload_or_qos_rule_with_nothing_checked_is_unobservable() {
+        let window = |samples, checked, invalid| CondWindow {
+            window_s: 5.0,
+            observed_s: 5.0,
+            samples,
+            checked,
+            invalid,
+            qos_judged: checked,
+            qos_mismatched: invalid,
+            ..CondWindow::default()
+        };
+        for rule in ["invalid-payload k/**", "qos-mismatch k/**"] {
+            let rule = Condition::parse(rule).unwrap();
+            let failing = WindowExamples {
+                failure: Some("k/a: the first failure".into()),
+                unchecked: None,
+            };
+            let fired = rule.judge_window_with(&window(4, 4, 1), &failing).unwrap();
+            assert_eq!(fired.state, CondState::Firing);
+            assert!(
+                fired.evidence.contains("k/a: the first failure"),
+                "{}",
+                fired.evidence
+            );
+            let clean = rule
+                .judge_window_with(&window(4, 4, 0), &WindowExamples::default())
+                .unwrap();
+            assert_eq!(clean.state, CondState::Ok, "{}", clean.evidence);
+            let blind = WindowExamples {
+                failure: None,
+                unchecked: Some("no provider of this address in presence".into()),
+            };
+            let none = rule.judge_window_with(&window(4, 0, 0), &blind).unwrap();
+            assert_eq!(none.state, CondState::Unobservable);
+            assert!(none.evidence.contains("no provider"), "{}", none.evidence);
+            let quiet = rule
+                .judge_window_with(&window(0, 0, 0), &WindowExamples::default())
+                .unwrap();
+            assert_eq!(quiet.state, CondState::Unobservable);
+            assert!(quiet.evidence.contains("no sample"), "{}", quiet.evidence);
+        }
+    }
+
+    /// `instance-gone`: an instance holds `ok`, a complete empty read is
+    /// firing worded as what this reader could see, an incomplete one and a
+    /// failed one are unobservable, and a tick that did not ask is too.
+    #[test]
+    fn instance_gone_reads_presence_three_ways() {
+        let ask = |instances: Vec<String>, complete: bool| InstanceAsk {
+            address: "host-a/tc".into(),
+            outcome: Ok(InstanceRead {
+                instances,
+                complete,
+            }),
+        };
+        let up = [ask(
+            vec!["zk2/host-a/tc/@zk/instance/8f3a5c2e9b1d4f70".into()],
+            true,
+        )];
+        assert_eq!(
+            judge_instance_gone("host-a/tc", Some(&up)).state,
+            CondState::Ok
+        );
+        let gone = [ask(vec![], true)];
+        let e = judge_instance_gone("host-a/tc", Some(&gone));
+        assert_eq!(e.state, CondState::Firing);
+        assert!(
+            e.evidence.contains("visible to this reader"),
+            "{}",
+            e.evidence
+        );
+        let partial = [ask(vec![], false)];
+        assert_eq!(
+            judge_instance_gone("host-a/tc", Some(&partial)).state,
+            CondState::Unobservable
+        );
+        let failed = [InstanceAsk {
+            address: "host-a/tc".into(),
+            outcome: Err("no session".into()),
+        }];
+        assert_eq!(
+            judge_instance_gone("host-a/tc", Some(&failed)).state,
+            CondState::Unobservable
+        );
+        assert_eq!(
+            judge_instance_gone("host-a/tc", None).state,
+            CondState::Unobservable
+        );
+    }
+
+    /// A mock owner's samples (its descriptor's `meta.synthetic`) ride every
+    /// window evidence line when present.
+    #[test]
+    fn synthetic_samples_are_said_out_loud() {
         let rule = Condition::parse("rate-above k/** 0.1").unwrap();
         let w = CondWindow {
             window_s: 10.0,
@@ -1868,7 +1689,7 @@ mod tests {
         };
         let eval = rule.judge_window(&w).unwrap();
         assert!(
-            eval.evidence.contains("3 synthetic-marked"),
+            eval.evidence.contains("3 from a mock owner"),
             "{}",
             eval.evidence
         );
@@ -1883,8 +1704,6 @@ mod tests {
             state,
             evidence: "e".into(),
         };
-        // The condition itself, not its rendering — which is the point of
-        // #352: the two can no longer disagree.
         let mut rs = RuleState::new(Condition::Dropped);
         let first = rs.observe(eval(CondState::Ok), "t0").expect("baseline");
         assert_eq!(first.rule, "dropped", "the transition renders its rule");
@@ -1898,9 +1717,7 @@ mod tests {
         assert!(rs.observe(eval(CondState::Firing), "t4").is_none());
     }
 
-    /// The ndjson shape of a transition is a wire contract for scripts:
-    /// `{"rule","from","to","at","evidence"}`, states snake_case, `from`
-    /// null on the baseline.
+    /// The ndjson shape of a transition is a wire contract for scripts.
     #[test]
     fn transition_json_shape_is_pinned() {
         let t = Transition {
@@ -1930,10 +1747,7 @@ mod tests {
         assert_eq!(json["to"], "firing");
     }
 
-    /// `doctor --transitions`'s delta: the first run is a full baseline (every
-    /// stable check id, once), an identical second run says nothing, a new
-    /// finding transitions exactly its check — and a failed run flips every
-    /// check to unobservable, never ok.
+    /// `doctor --transitions`'s delta.
     #[test]
     fn doctor_watch_reports_deltas_not_states() {
         let mut watch = DoctorWatch::new();
@@ -1942,31 +1756,22 @@ mod tests {
         assert_eq!(baseline.len(), CheckId::ALL.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
-
         assert!(
             watch.observe(Ok(&clean), "t1").is_empty(),
             "an unchanged run emits nothing"
         );
-
         let drifted = report_with(&[CheckId::SplitBrain, CheckId::SplitBrain]);
         let changes = watch.observe(Ok(&drifted), "t2");
         assert_eq!(changes.len(), 1, "only the changed check transitions");
         assert_eq!(changes[0].rule, "doctor split-brain");
         assert_eq!(changes[0].to, CondState::Firing);
         assert!(changes[0].evidence.contains("2 finding(s)"));
-
         let failed = watch.observe(Err("session lost"), "t3");
-        assert_eq!(
-            failed.len(),
-            CheckId::ALL.len(),
-            "a failed run is unobservable for every check — never ok"
-        );
+        assert_eq!(failed.len(), CheckId::ALL.len());
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));
     }
 
-    /// #510: a run that judged nothing is unobservable for every check —
-    /// the empty bus is not a clean baseline, and a fleet that comes back
-    /// reads `observable` again through the ordinary path.
+    /// #510: a run that judged nothing is unobservable for every check.
     #[test]
     fn an_empty_scope_is_unobservable_for_every_check() {
         let mut watch = DoctorWatch::new();

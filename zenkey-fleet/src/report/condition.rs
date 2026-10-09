@@ -85,14 +85,6 @@ pub struct Transition {
 pub struct WatchdogSummary {
     pub ticks: u64,
     pub transitions: u64,
-    /// Key projections the bounded facts cache retired to stay within its
-    /// bound (RFC 09 §5.1 O6). The watchdog is the run-forever mode, so its
-    /// per-key cache is a [`crate::model::facts::FactsCache`], not a map that grows
-    /// one entry per distinct key ever seen — and a bound must count what it
-    /// cost. An evicted key re-observed is re-projected identically (the
-    /// projection is a pure function of key and slice set), so evictions
-    /// cost recompute, never a changed verdict.
-    pub facts_evicted: u64,
     /// The rules whose last evaluation was `firing`, in their canonical
     /// spelling (#511) — what a bounded run *ended* on, which the
     /// transition stream only says to a reader who replays all of it.
@@ -137,14 +129,13 @@ mod tests {
         WatchdogSummary {
             ticks: 2,
             transitions: 3,
-            facts_evicted: 0,
             firing: firing.iter().map(|r| r.to_string()).collect(),
             unobservable: unobservable.iter().map(|r| r.to_string()).collect(),
         }
     }
 
     /// The summary's wire shape, pinned now that it carries the end states
-    /// (#511) — appended after the three counters it always had.
+    /// (#511) — appended after the counters it always had.
     #[test]
     fn watchdog_summary_json_shape_is_pinned() {
         assert_eq!(
@@ -152,7 +143,6 @@ mod tests {
             serde_json::json!({
                 "ticks": 2,
                 "transitions": 3,
-                "facts_evicted": 0,
                 "firing": ["rate-above v1/** 5"],
                 "unobservable": ["dropped"],
             })

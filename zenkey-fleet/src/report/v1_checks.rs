@@ -39,11 +39,6 @@ pub enum V1CheckId {
     /// Key-population budgets (#221): declared `cardinality` vs the observed
     /// expansion count, per origin. `{path...}` families are exempt and say so.
     CardinalityOverDeclared,
-    // Field intelligence (#223): per-dotted-path judgement over a window —
-    // the failure modes per-sample validation cannot see.
-    FieldVanished,
-    FieldStuck,
-    FieldNew,
     /// Declared versus observed (#422, RFC 08 §2 v1.32, RFC 13 §3): a
     /// self-describing payload's tag disagrees with the subject's declared
     /// `kind`, or a `counter` decreased within one origin's series with no
@@ -58,7 +53,7 @@ pub enum V1CheckId {
 
 impl V1CheckId {
     /// Every check id.
-    pub const ALL: [V1CheckId; 16] = [
+    pub const ALL: [V1CheckId; 13] = [
         V1CheckId::SliceParse,
         V1CheckId::SliceSync,
         V1CheckId::DescribeTotality,
@@ -70,9 +65,6 @@ impl V1CheckId {
         V1CheckId::UnregisteredTraffic,
         V1CheckId::RateOverDeclared,
         V1CheckId::CardinalityOverDeclared,
-        V1CheckId::FieldVanished,
-        V1CheckId::FieldStuck,
-        V1CheckId::FieldNew,
         V1CheckId::KindMismatch,
         V1CheckId::BudgetExceeded,
     ];
@@ -91,9 +83,6 @@ impl V1CheckId {
             V1CheckId::UnregisteredTraffic => "unregistered-traffic",
             V1CheckId::RateOverDeclared => "rate-over-declared",
             V1CheckId::CardinalityOverDeclared => "cardinality-over-declared",
-            V1CheckId::FieldVanished => "field-vanished",
-            V1CheckId::FieldStuck => "field-stuck",
-            V1CheckId::FieldNew => "field-new",
             V1CheckId::KindMismatch => "kind-mismatch",
             V1CheckId::BudgetExceeded => "budget-exceeded",
         }
@@ -203,9 +192,6 @@ mod tests {
                 "unregistered-traffic",
                 "rate-over-declared",
                 "cardinality-over-declared",
-                "field-vanished",
-                "field-stuck",
-                "field-new",
                 "kind-mismatch",
                 "budget-exceeded",
             ]

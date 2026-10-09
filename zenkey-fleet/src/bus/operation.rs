@@ -11,18 +11,18 @@
 //!
 //! **Silence is attributed through presence** (O5). For one address the
 //! runtime reads it ([`zk2::Client::attribute`]); for a fan-out or a
-//! many-reply call this module reads the selection's interface tokens
-//! through the crate's one liveliness chokepoint
-//! ([`crate::bus::presence::liveliness_read`]), and lists who holds a token
-//! and sent no value: each refused or was silent, which no caller can tell
-//! apart, because a `reply_err` carries no key (§5.1, "Attribution").
+//! many-reply call it reads the selection's interface tokens too —
+//! [`zk2::Fleet::presence`] and [`zk2::Client::presence`] (#671), whose
+//! `complete` says whether every read behind it finished — and this module
+//! lists who holds a token and sent no value: each refused or was silent,
+//! which no caller can tell apart, because a `reply_err` carries no key
+//! (§5.1, "Attribution").
 
 use std::collections::BTreeSet;
 use std::time::Duration;
 
 use zenkey_model::contract::{Replies as RepliesKind, Resource};
 use zenkey_model::envelope::Envelope;
-use zenkey_model::grammar::{ZkKey, parse};
 use zenoh::Session;
 
 use crate::model::catalog::Revision;
@@ -89,7 +89,7 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
                     .await
                     .map_err(|e| runtime("call", &key, e))?;
                 let presence =
-                    selection_presence(session, address, revision, &replies, timeout).await;
+                    selection_presence(address, revision, &replies, client.presence(timeout).await);
                 OperationAnswer::Replies {
                     replies: replies_view(revision, &plan.resource, replies, presence),
                 }
@@ -116,7 +116,8 @@ pub async fn call(session: &Session, c: OperationCall<'_>) -> Result<OperationRe
                 .call(name, &plan.values, request)
                 .await
                 .map_err(|e| runtime("call", address, e))?;
-            let presence = selection_presence(session, address, revision, &replies, timeout).await;
+            let presence =
+                selection_presence(address, revision, &replies, fleet.presence(timeout).await);
             (
                 CallMode::Fanout,
                 selectors,
@@ -245,15 +246,14 @@ fn replies_view(
 }
 
 /// Who in the selection holds the interface's token and sent no value
-/// (§5.1, "Attribution"): one liveliness read of the selection's interface
-/// tokens, through the crate's chokepoint. A read that fails is said, never
-/// read as nobody.
-async fn selection_presence(
-    session: &Session,
+/// (§5.1, "Attribution"), from the runtime's own presence read of the
+/// selection (#671): its providers, and whether every read behind them
+/// completed. A read that fails is said, never read as nobody.
+fn selection_presence(
     address: &str,
     revision: &Revision,
     replies: &zk2::client::Replies,
-    timeout: Duration,
+    present: zk2::Result<zk2::client::Present>,
 ) -> SelectionPresence {
     let (system, service) = address.split_once('/').unwrap_or((address, "*"));
     let selector = format!("zk2/{system}/{service}/@zk/alive/{}/**", revision.iface());
@@ -262,19 +262,12 @@ async fn selection_presence(
         .iter()
         .map(|p| p.addr.to_string())
         .collect();
-    match crate::bus::presence::liveliness_read(session, &selector, timeout).await {
-        Ok(read) => {
-            let holders: BTreeSet<String> = read
-                .keys
-                .iter()
-                .filter_map(|k| match parse(k) {
-                    Ok(ZkKey::Alive { addr, .. }) => Some(addr.to_string()),
-                    _ => None,
-                })
-                .collect();
+    match present {
+        Ok(p) => {
+            let holders: BTreeSet<String> = p.providers.iter().map(ToString::to_string).collect();
             SelectionPresence {
                 selector,
-                complete: read.complete,
+                complete: p.complete,
                 unheard: holders.difference(&heard).cloned().collect(),
                 error: None,
             }
@@ -283,7 +276,7 @@ async fn selection_presence(
             selector,
             complete: false,
             unheard: Vec::new(),
-            error: Some(crate::one_line(&e)),
+            error: Some(e.to_string()),
         },
     }
 }

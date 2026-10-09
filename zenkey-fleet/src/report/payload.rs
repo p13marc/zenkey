@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One sample's rendering.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -76,11 +76,25 @@ pub enum Rendered {
 }
 
 /// Why a sample was not decoded through a contract. Tagged `reason`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+///
+/// One variant per rung of the tooling guide's O2 ladder, so a script
+/// branches on the rung, never on prose. Read back as well as written: a
+/// `.zsnap` row carries it (#612, FJ8b).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum Unresolved {
+    /// Rung 1: the wire key does not sit under the stated namespace. A raw
+    /// verb sees full keys; one outside the namespace is another
+    /// deployment's, or none, and is not attributed by guessing (O3).
+    NotInNamespace { namespace: String },
     /// The key is not a zk2 data key (the bus is shared, §1.7).
     NotZk2 { detail: String },
+    /// A zk2 control key (`@zk`, §1.1): an instance, a token, a member or a
+    /// contract bundle. A zk2 key, and no contract types its payload.
+    ControlKey { form: String },
+    /// Rung 3 was not asked: no presence read stood behind this rendering,
+    /// so no provider, and no revision, could be found for the key (O4).
+    PresenceNotRead,
     /// Presence shows no instance of this address providing the interface.
     NoProvider,
     /// A provider is present, and no descriptor named its revision: a
@@ -103,6 +117,62 @@ pub enum Unresolved {
     /// The resource has no such member (an attachment it does not declare,
     /// a `request` asked of a stream).
     NoMember { resource: String, member: String },
+    /// The decode was not asked (`--no-decode`): the bytes are rendered
+    /// structurally on purpose, and no verdict is claimed about them (O4).
+    DecodeNotAsked,
+}
+
+impl Unresolved {
+    /// The rung, in a few words: one spelling for every frontend and for
+    /// the engine's own reasons (a `not_checked` conformance, a field the
+    /// declared paths could not judge).
+    pub fn words(&self) -> String {
+        let short = |fp: &str| {
+            let hex = fp.strip_prefix("sha256:").unwrap_or(fp);
+            match hex.get(..16) {
+                Some(head) if hex.len() > 16 => format!("sha256:{head}…"),
+                _ => fp.to_owned(),
+            }
+        };
+        match self {
+            Unresolved::NotInNamespace { namespace } if namespace.is_empty() => {
+                "not under the bus-root deployment's keys".into()
+            }
+            Unresolved::NotInNamespace { namespace } => {
+                format!("not in namespace {namespace:?}")
+            }
+            Unresolved::NotZk2 { detail } => format!("not a zk2 data key: {detail}"),
+            Unresolved::ControlKey { form } => {
+                format!("a zk2 control key (@zk/{form}): no contract types it")
+            }
+            Unresolved::PresenceNotRead => {
+                "presence was not read, so no revision is named for the key".into()
+            }
+            Unresolved::NoProvider => "no provider of this address in presence".into(),
+            Unresolved::NoRevision => "no descriptor named the provider's revision".into(),
+            Unresolved::Ambiguous { fingerprints } => format!(
+                "the provider names {} revisions and a data key names no instance",
+                fingerprints.len()
+            ),
+            Unresolved::ContractNotHeld { fingerprint } => {
+                format!("contract {} not held", short(fingerprint))
+            }
+            Unresolved::ContractUnavailable { fingerprint, .. } => {
+                format!("contract {} unavailable (§8.4)", short(fingerprint))
+            }
+            Unresolved::ContractUnreadable {
+                fingerprint,
+                detail,
+            } => format!("contract {} unreadable: {detail}", short(fingerprint)),
+            Unresolved::NoResource { fingerprint } => {
+                format!("no resource of {} matches the key", short(fingerprint))
+            }
+            Unresolved::NoMember { resource, member } => {
+                format!("{resource} declares no {member}")
+            }
+            Unresolved::DecodeNotAsked => "decoding was not asked".into(),
+        }
+    }
 }
 
 #[cfg(test)]

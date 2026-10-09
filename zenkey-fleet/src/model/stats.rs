@@ -710,3 +710,98 @@ mod tests {
         assert!(both.caveat().contains("kept apart"), "{}", both.caveat());
     }
 }
+
+/// What a `rate` run asked for (#612, FJ8b).
+#[derive(Debug, Clone)]
+pub struct RateAsk {
+    /// The wire selector watched.
+    pub selector: String,
+    pub window_s: f64,
+    /// Report each concrete key (`--per-key`).
+    pub per_key: bool,
+    /// Source-sequence gaps (`--loss`).
+    pub loss: bool,
+    /// Latency populations and whose clocks (`--latency`).
+    pub latency: bool,
+}
+
+/// The `rate` report over a stats table, every key resolved through `lens`
+/// and grouped by zk2 address and resource (#612, FJ8b). The groups cover
+/// the retained keys; a key the bound retired is in `evicted`, and in no
+/// group (O6).
+pub fn rate_report(
+    stats: &StatsTable,
+    ask: &RateAsk,
+    lens: &crate::model::lens::Lens<'_>,
+) -> crate::report::RateReport {
+    use std::collections::BTreeMap;
+
+    use crate::report::{Asked, KeyGroup, RateGroup, RateReport, RateRow};
+
+    let (total_count, total_bytes, _) = stats.totals();
+    let mut groups: BTreeMap<KeyGroup, RateGroup> = BTreeMap::new();
+    let mut rows = Vec::new();
+    for (key, s) in stats.iter() {
+        let identity = lens.identity(key);
+        let g = groups
+            .entry(identity.group.clone())
+            .or_insert_with(|| RateGroup {
+                group: identity.group.clone(),
+                keys: 0,
+                count: 0,
+                bytes: 0,
+            });
+        g.keys += 1;
+        g.count += s.count;
+        g.bytes += s.bytes;
+        if ask.per_key {
+            let latency = ask.latency.then(|| s.latency()).flatten();
+            let clocks: Asked<BTreeMap<String, crate::report::Provenance>> = ask
+                .latency
+                .then(|| {
+                    latency
+                        .iter()
+                        .flat_map(|l| l.stampers.iter())
+                        .map(|stamper| {
+                            (
+                                stamper.clone(),
+                                lens.provenance(identity.address(), stamper),
+                            )
+                        })
+                        .collect()
+                })
+                .into();
+            rows.push(RateRow {
+                key: key.to_string(),
+                identity,
+                count: s.count,
+                bytes: s.bytes,
+                // R3 (#238's twin): only when asked.
+                sn_gaps: ask.loss.then_some(s.sn_gaps).into(),
+                // #238: only when asked, with the O7 caveat beside it.
+                latency,
+                unstamped: ask.latency.then_some(s.unstamped).into(),
+                clocks,
+            });
+        }
+    }
+    rows.sort_by_key(|r| std::cmp::Reverse(r.count));
+    let mut groups: Vec<RateGroup> = groups.into_values().collect();
+    groups.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.group.cmp(&b.group)));
+    RateReport {
+        selector: ask.selector.clone(),
+        window_s: ask.window_s,
+        lens: lens.scope(),
+        groups,
+        rows,
+        total_count,
+        total_bytes,
+        keys: stats.len(),
+        evicted: stats.evicted(),
+        max_keys: stats.max_keys(),
+        sn_gaps: ask
+            .loss
+            .then(|| stats.iter().map(|(_, s)| s.sn_gaps).sum())
+            .into(),
+    }
+}

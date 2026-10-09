@@ -11,8 +11,7 @@
 //! window of samples becomes a lane-partitioned ordering on a stated clock
 //! ([`timeline`]), a fan-in's
 //! replies become snapshot rows ([`snapshot`]), two snapshots become one
-//! comparison ([`snapshot_diff`]), two deployments' hosts become one
-//! alignment ([`origin_map`]), and a stream of
+//! comparison by zk2 key ([`snapshot_diff`]), and a stream of
 //! described samples becomes a metrics surface whose blind spots are series
 //! of their own ([`export`], [`prom`]).
 //!
@@ -24,7 +23,10 @@
 //! verb aims at — an address or a pattern, a resource, the values given, a
 //! call's plan and its request's bytes, and whether a wire key is a
 //! service's own (P3) — is settled here before anything is sent
-//! ([`target`], FJ5). Bytes no
+//! ([`target`], FJ5). A raw observer's wire key is resolved rung by rung
+//! through a namespace, a presence read and the contracts in hand
+//! ([`lens`], FJ8b): its address and resource, its payload checked against
+//! the declared type, its stamp attributed to its owner. Bytes no
 //! schema reaches fall to the structural ladder ([`structural`]), which
 //! v1's decode seam and zk2's rendering share.
 //!
@@ -54,7 +56,7 @@ pub mod export;
 pub mod facts;
 pub mod impact;
 pub mod jsonschema;
-pub mod origin_map;
+pub mod lens;
 pub mod prom;
 pub mod registry;
 pub mod render;

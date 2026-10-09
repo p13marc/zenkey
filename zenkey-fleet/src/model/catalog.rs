@@ -864,6 +864,21 @@ impl Contracts for ContractSet {
     }
 }
 
+/// A zid by its value (§3.3, 0.11): zenoh writes it as lowercase hex
+/// without leading zeros, and another writer may not, so two spellings of
+/// one id compare equal here. Text that is not hex is kept as written, and
+/// so matches only itself.
+pub fn zid_value(z: &str) -> String {
+    let t = z.trim().to_ascii_lowercase();
+    if t.is_empty() || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return z.to_owned();
+    }
+    match t.trim_start_matches('0') {
+        "" => "0".to_owned(),
+        v => v.to_owned(),
+    }
+}
+
 // ─── the catalog ────────────────────────────────────────────────────────────
 
 /// One instance, as its tokens and descriptor show it.
@@ -962,6 +977,55 @@ impl Catalog {
     /// Whether the presence read completed before its timeout (§8.1).
     pub fn complete(&self) -> bool {
         self.complete
+    }
+
+    /// The liveliness selector the read was made with, base-relative.
+    pub fn selector(&self) -> &str {
+        &self.selector
+    }
+
+    /// How many services the read saw.
+    pub fn service_count(&self) -> usize {
+        self.services.len()
+    }
+
+    /// Whether some instance of `addr` holds its instance token in this
+    /// read (§8.1).
+    pub fn has_instance(&self, addr: &Addr) -> bool {
+        self.services
+            .get(addr)
+            .is_some_and(|instances| instances.values().any(|i| i.instance_token))
+    }
+
+    /// Whether a descriptor of `addr` carries the synthetic marker a mock
+    /// owner puts in `meta` (`gen`, `serve`; #612, FJ8a): traffic made to be
+    /// judged, which a judge says out loud rather than paging on.
+    pub fn is_synthetic(&self, addr: &Addr) -> bool {
+        self.services
+            .get(addr)
+            .into_iter()
+            .flat_map(|instances| instances.values())
+            .filter_map(|i| i.descriptor.as_ref()?.descriptor())
+            .any(|d| match d.meta.get("synthetic") {
+                Some(serde_json::Value::Bool(b)) => *b,
+                Some(serde_json::Value::Object(m)) => m.get("synthetic") == Some(&true.into()),
+                _ => false,
+            })
+    }
+
+    /// The session zids `addr`'s descriptors state as `meta.zid`, each by
+    /// its value ([`zid_value`]): whose clock is the owner's (§3.3, 0.10).
+    /// Empty when no descriptor of `addr` names one, and then a stamp's
+    /// clock is unattributable, never foreign.
+    pub fn owner_zids(&self, addr: &Addr) -> BTreeSet<String> {
+        self.services
+            .get(addr)
+            .into_iter()
+            .flat_map(|instances| instances.values())
+            .filter_map(|i| i.descriptor.as_ref()?.descriptor())
+            .filter_map(|d| d.meta.get("zid").and_then(|v| v.as_str()))
+            .map(zid_value)
+            .collect()
     }
 
     /// Every service address seen, sorted.

@@ -59,6 +59,7 @@ use crate::bus::admin::{
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
 use crate::judge::common::FINDING_CAP;
+use crate::model::catalog::zid_value;
 use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Revision};
 use crate::model::examples::Examples;
 use crate::report::{
@@ -1700,21 +1701,6 @@ fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
         )
     };
     CheckReport::of(C, findings, undecided, clean)
-}
-
-/// A zid by its value (§3.3, 0.11): zenoh writes it as lowercase hex without
-/// leading zeros, and another writer may not, so two spellings of one id
-/// compare equal here. Text that is not hex is kept as written, and so
-/// matches only itself.
-fn zid_value(z: &str) -> String {
-    let t = z.trim().to_ascii_lowercase();
-    if t.is_empty() || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return z.to_owned();
-    }
-    match t.trim_start_matches('0') {
-        "" => "0".to_owned(),
-        v => v.to_owned(),
-    }
 }
 
 /// §4.2 S1–S2: each owner's state replies, by the clock that stamped them,
