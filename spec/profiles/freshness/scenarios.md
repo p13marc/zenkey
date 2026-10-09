@@ -122,12 +122,13 @@ after it). §6 is a tool's, and the reference tool runs it
 ## §3 Never stale (§2.3)
 
 **Steps.**
-1. The owner puts `intent` = `i` once. S listens 5 s.
-2. G GETs `intent` 5 s after the put, and judges the reply with no
+1. The owner puts `intent` = `i` once. S listens 3 s, longer than any
+   horizon of the contract.
+2. G GETs `intent` 3 s after the put, and judges the reply with no
    measurement and no word from the deployment: its clock is not trusted.
 
 **Expected.**
-1. S receives `intent` once, and no re-put. S judges it fresh at 5 s:
+1. S receives `intent` once, and no re-put. S judges it fresh at 3 s:
    never stale.
 2. G judges it fresh, though it cannot age the reply: ttl 0 needs no
    clock.
