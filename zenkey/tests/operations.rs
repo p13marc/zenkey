@@ -1502,3 +1502,60 @@ async fn a_many_handler_that_sends_nothing_completes() {
     assert_eq!(count(&ran), 1, "the handler ran");
     assert!(replies.is_empty(), "zero values, no envelope: {replies:?}");
 }
+
+/// #698 (O3, O6): `Fleet::call_timed` gives each reply's arrival, attributed
+/// by key, as `Fleet::call` files it; and a tool running its own query files
+/// each reply with `Replies::push`, getting the same attribution.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fan_out_is_timed_reply_by_reply_and_a_tool_can_file_its_own() {
+    let (_r1, ep) = router(None).await;
+    let (s1, s2, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let (_a, _as, _) = tc_service(&s1, "h1/tc", Behaviour::default()).await;
+    let (_b, _bs, _) = tc_service(&s2, "h2/tc", Behaviour::default()).await;
+    wait_present(&tool, "*/tc", 2).await;
+    let fleet = Fleet::new(&tool, tc_contract(), &["h1/tc", "h2/tc"]).unwrap();
+    let (replies, arrivals) = fleet
+        .call_timed(
+            DIAGNOSTICS,
+            &Bindings::new(),
+            serde_json::to_vec(&json!({})).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replies.values().count(), 2);
+    assert_eq!(arrivals.len(), 2, "{arrivals:?}");
+    let keys: BTreeSet<String> = arrivals
+        .iter()
+        .map(|a| {
+            assert_eq!(a.kind, zenkey::ReplyKind::Value);
+            assert!(a.after > Duration::ZERO);
+            a.key.clone().expect("a value has its key")
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "zk2/h1/tc/tc.v1/@op/diagnostics".to_owned(),
+            "zk2/h2/tc/tc.v1/@op/diagnostics".to_owned(),
+        ]
+        .into()
+    );
+
+    // A tool's own query, filed with the runtime's push.
+    let contract = tc_contract();
+    let r = contract
+        .resources
+        .iter()
+        .find(|r| zenkey::implementation::resource_name(r) == DIAGNOSTICS)
+        .unwrap()
+        .clone();
+    let zenkey::model::contract::Body::Operation(op) = &r.body else {
+        panic!("an operation")
+    };
+    let mut mine = zenkey::client::Replies::for_operation(op);
+    for reply in fan(&tool, "zk2/*/tc/tc.v1/@op/diagnostics", b"{}").await {
+        mine.push(reply, &contract.iface, &r);
+    }
+    assert_eq!(mine.repliers.len(), 2);
+    assert!(mine.refusals.is_empty() && mine.malformed.is_empty());
+}

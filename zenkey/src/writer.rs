@@ -189,11 +189,12 @@ impl Writer {
     pub(crate) async fn put_stamped(
         &self,
         payload: ZBytes,
+        attachment: Option<ZBytes>,
         ts: zenoh::time::Timestamp,
     ) -> Result<()> {
         match &self.inner {
-            Inner::Plain(p) => p.put(payload).timestamp(ts).await,
-            Inner::Advanced(p) => p.put(payload).timestamp(ts).await,
+            Inner::Plain(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
+            Inner::Advanced(p) => p.put(payload).attachment(attachment).timestamp(ts).await,
         }
         .map_err(zenoh)
     }
@@ -276,9 +277,32 @@ impl EventWriter {
     /// Publishes one occurrence whose ULID carries `at`: for an owner that
     /// relays occurrences it observed earlier.
     pub async fn put_at(&self, payload: impl Into<ZBytes>, at: SystemTime) -> Result<String> {
+        self.put_at_with(payload, None::<ZBytes>, at).await
+    }
+
+    /// [`EventWriter::put`] with an attachment, encoded per the contract's
+    /// `attachment` type and `attachment_encoding` (§2.3, §7.2; #698).
+    pub async fn put_with(
+        &self,
+        payload: impl Into<ZBytes>,
+        attachment: Option<impl Into<ZBytes>>,
+    ) -> Result<String> {
+        self.put_at_with(payload, attachment, SystemTime::now())
+            .await
+    }
+
+    /// [`EventWriter::put_at`] with an attachment (§2.3; #698).
+    pub async fn put_at_with(
+        &self,
+        payload: impl Into<ZBytes>,
+        attachment: Option<impl Into<ZBytes>>,
+        at: SystemTime,
+    ) -> Result<String> {
         let key = format!("{}/{}", self.prefix, ulid(at));
+        let attachment: Option<ZBytes> = attachment.map(Into::into);
         self.session
             .put(&key, payload)
+            .attachment(attachment)
             .encoding(self.encoding.clone())
             .reliability(self.reliability)
             .congestion_control(self.congestion)
