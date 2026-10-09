@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.13** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.14** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -8,8 +8,8 @@ operations runtime's decisions and the codegen's gaps, in 0.8 what
 implementing 0.7 found, a refused presence read first, in 0.9 the
 order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
 a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
-who may answer the admin space, and in 0.13 how a far router is
-verified).
+who may answer the admin space, in 0.13 how a far router is verified, and
+in 0.14 what access control measured).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -1461,7 +1461,16 @@ only the two facts.
   `[Sc: constrained.md §4]`
 - **`@stream` keys SHOULD be denied across the face** unless `link.v1`
   downsamples them. A named key's frames are queued, not dropped, and every
-  request waits behind them.
+  request waits behind them. `link.v1`'s exceptions are its own (#613). The
+  reference generator denies `@stream` wholesale at this version.
+- **A far router in a south region needs declarations sent toward it**
+  (0.14, measured). It learns of queryables only from the declarations the
+  near router sends it, so the far side's principal MUST be granted
+  `declare_queryable` on egress for what its side may query. Without that
+  grant, its queries are never routed.
+- **Access control is per hop** (§11.3). The near router sees the far
+  router as one principal, carrying the union of the grants the far side's
+  sessions need.
 
 ---
 
@@ -2245,9 +2254,10 @@ Ownership (§6) reduces access control to three grant shapes:
 
 | Grant | Rule |
 |---|---|
-| **Own** | A service principal puts, deletes, declares queryables and declares tokens under `zk2/<system>/<service>/**`. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus liveliness reads (GETs and subscriptions) on the `…/@zk/**` subtree of each provider they name (§8.1, 0.8). |
-| **Call** | Query on specific `…/@op/<op>` keys, plus liveliness reads on the `…/@zk/**` subtree of each service whose operations it calls (§8.1, 0.8). |
+| **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (0.14, measured in spike S14). |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1, 0.8) and the descriptor's GET and subscription (§3.3, 0.14) on the `…/@zk/**` subtree of each provider they name. |
+| **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
+| **Tool** (0.14) | A principal with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. A tool drawing the graph (R3) reads descriptors through presence. |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
@@ -2257,7 +2267,25 @@ Ownership (§6) reduces access control to three grant shapes:
   answered"). `[Sc: security.md §3]`
 - **There are no cross-principal write grants.**
 - **An archive principal** has Own on its own prefix, plus Consume on what it
-  records.
+  records, on each peer archive's form of it (§4.4), and presence on the
+  owners and peers it reads (0.14).
+- **The descriptor rides presence** (0.14). It shares the `@zk` subtree
+  with the tokens, so the grant that reads one reads the other. A consumer
+  resolves a token's `fp16` through it (§8.4), and a refused descriptor
+  read is as silent as a refused token read.
+- **History** (§2.5): a consumer's advanced subscriber MUST NOT declare a
+  subscriber-detection token, because the token would sit under the
+  provider's prefix, which no grant gives it. Its history grant covers
+  publisher detection (liveliness reads of the `@adv` subtree) and the
+  cache's queries. The reference consumer declares no advanced subscriber.
+- **A union storage** (§2.6) serves `…/events/**` under other services'
+  keys. That is the one cross-principal serving grant: Consume on what it
+  stores, plus `declare_queryable` and `reply` on those keys. A deployment
+  names it explicitly. The reference generator does not emit it at this
+  version.
+- **The namespace** (§1.6): grant key expressions carry the deployment's
+  namespace, because the router sees full keys. The admin space (`@/**`)
+  carries none.
 
 `[Sc: security.md §1]`
 
@@ -2268,10 +2296,19 @@ Ownership (§6) reduces access control to three grant shapes:
 - **Under `allow`**, Zenoh does not evaluate allow rules. A grant compiles
   into denies of its complement, regenerated on every contract revision.
 - **Egress is checked by inclusion** against the query's or subscription's
-  own key expression. A generator MUST therefore add every consumer
-  selector that intersects a provider's keys to that provider's egress
-  grant. It MUST also grant the same selectors for the provider's ingress
-  `reply`, refusals included.
+  own key expression. A generator MUST therefore add to a provider's egress
+  grant every consumer selector that intersects what the provider serves.
+- **A value reply is checked against its own key, an error reply against
+  the query's** (0.14). This was measured on zenoh 1.10.1. S14's "a reply
+  is checked against the query's key" holds only for refusals, which carry
+  no key (§5.2).
+  - So a provider's value replies pass through its Own grant.
+  - A generator MUST grant the consumer selectors above for the provider's
+    ingress `reply` too, so that its refusals reach the caller.
+- **An R2-narrowed grant has no complement by inclusion** (0.14). Under
+  `allow`, the members of a template that no other principal names stay
+  readable. `deny` is the posture that holds such a grant exactly. A
+  generator warns.
 
 `[Sc: security.md §2]`
 
@@ -2294,6 +2331,17 @@ Ownership (§6) reduces access control to three grant shapes:
   so a reader the grants refuse attributes silence to absence.
 - Any session can answer under `@/**`, a router's own keys included,
   unless the grants deny it (§4.2, "Who answered").
+- **Under `allow`, a wildcard call is in no deny** (0.14, measured). A
+  `fanout = "allowed"` operation executes on every provider for a
+  principal never granted it; only its answers are denied. Under `allow`,
+  an operation that must not run for everyone MUST be `fanout =
+  "forbidden"`, which its server refuses (O2), or the deployment runs
+  `deny`.
+- **Under `allow`, an ungranted wildcard GET gets nothing back** (0.14,
+  measured): each value reply is denied by its own key.
+- **A session that matches no subject gets no policy**, so it gets
+  `default_permission`, which under `allow` is everything. A deployment
+  under `allow` MUST refuse unauthenticated sessions at the link.
 
 ---
 

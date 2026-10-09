@@ -127,11 +127,21 @@ const HISTORY_OUT: [AclMessage; 4] = [
     AclMessage::Reply,
     AclMessage::LivelinessToken,
 ];
-const PRESENCE_IN: [AclMessage; 2] = [
+/// Presence and the descriptor (§11.1, 0.14): the liveliness reads 0.8
+/// added, and the descriptor's GET and subscription (§3.3), which share the
+/// `@zk` subtree. A consumer resolves a token's `fp16` through the
+/// descriptor (§8.4), and a tool draws the graph from it (R3).
+const PRESENCE_IN: [AclMessage; 4] = [
     AclMessage::DeclareLivelinessSubscriber,
     AclMessage::LivelinessQuery,
+    AclMessage::Query,
+    AclMessage::DeclareSubscriber,
 ];
-const PRESENCE_OUT: [AclMessage; 1] = [AclMessage::LivelinessToken];
+const PRESENCE_OUT: [AclMessage; 3] = [
+    AclMessage::LivelinessToken,
+    AclMessage::Reply,
+    AclMessage::Put,
+];
 const DENY_READ: [AclMessage; 4] = [
     AclMessage::DeclareSubscriber,
     AclMessage::Query,
@@ -235,10 +245,12 @@ const CITE_HISTORY_IN: &str = "§11.1 Consume, §2.5: the `@adv` subtrees of wha
      history, where the advanced subscriber queries the publisher's cache and watches its token";
 const CITE_HISTORY_OUT: &str = "§11.1 Consume, §2.5, egress: the history replies, heartbeats and \
      publisher tokens under those subtrees";
-const CITE_PRESENCE_IN: &str = "§11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` \
-     subtree of each service named. A refused read is answered complete and empty, so a \
-     reader the grants refuse would attribute silence to absence (§11.3)";
-const CITE_PRESENCE_OUT: &str = "§11.1 (0.8), §8.1, egress: the tokens those reads receive";
+const CITE_PRESENCE_IN: &str = "§11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads \
+     and the descriptor's GET and subscription on the `@zk` subtree of each service named. A \
+     refused read is answered complete and empty, so a reader the grants refuse would \
+     attribute silence to absence (§11.3)";
+const CITE_PRESENCE_OUT: &str = "§11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the \
+     descriptors those reads receive";
 const CITE_CALL_IN: &str = "§11.1 Call: query on the specific `…/@op/<op>` keys called";
 const CITE_CALL_OUT: &str = "§11.1 Call, egress: the replies, a server's refusal included \
      (O2, O3)";
