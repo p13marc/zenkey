@@ -40,6 +40,7 @@
 pub mod budget;
 pub mod common;
 pub mod cutover;
+pub mod doctor;
 pub mod doctor_delta;
 pub mod retired;
 pub mod self_stats;

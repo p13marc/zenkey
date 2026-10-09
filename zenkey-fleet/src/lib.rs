@@ -240,7 +240,14 @@ pub use bus::write::{
 };
 pub use judge::budget::BudgetObservation;
 pub use judge::common::{EXPANSION_CAP, data_plane_scopes, new_prefix};
-pub use judge::doctor_delta::v1_doctor_delta;
+// zk2's doctor (#612, FJ6): the run, its two halves, and the delta a
+// notifier compares runs with.
+pub use judge::doctor::{
+    AdminSpace, ArchiveKeys, DEFAULT_GRACE, DEFAULT_PRESENCE_BUDGET, DOMAIN_SELECTORS, DoctorBus,
+    DoctorObservation, DoctorSpec, DomainTokens, Memlock, StateStamps, judge as judge_doctor,
+    observe as observe_doctor, run_doctor,
+};
+pub use judge::doctor_delta::doctor_delta;
 pub use judge::self_stats::{SelfStats, TableStats, judge_self_stats, read_self_stats};
 // Types reachable *through* root-exported ones — a caller that matches on
 // `KeyShape::V1` or walks a `Skeleton` needs these, and had to spell a module
@@ -351,16 +358,17 @@ pub use model::tree::KeyTreeSnapshot;
 pub use report::{
     AlertState, AlertTransition, AliasDoc, BenchReport, CallReport, CollapsedProducer,
     ConformReport, Coverage, CoverageRow, CutoverReport, DeclaredEntities, DeclaredEntity,
-    DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind, ExpectReport, ExportSnapshot,
-    Fault, FieldReport, GenPlanEntry, GenReport, HelloView, ImpactReport, Judgement, LatencyReport,
-    LatencySummary, MeshLink, OriginAttachment, RecordReport, RenderSource, ReplayReport,
-    RetiredReport, RouterInfo, Rung, RungAnswer, SampleRow, SchemaDrift, SchemaServer,
-    SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow, StorageInfo, TimelineReport,
-    TopologyEdge, TopologyNode, TopologyReport, TotalityGap, V1DoctorDelta, V1DoctorReport,
-    ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader, judgement_exit_code,
+    DoctorDelta, DoctorReport, DriftVerdict, EdgeDoc, EdgeEnd, EdgeKind, EntityDoc, EntityKind,
+    ExpectReport, ExportSnapshot, Fault, FieldReport, GenPlanEntry, GenReport, HelloView,
+    ImpactReport, Judgement, LatencyReport, LatencySummary, MeshLink, OriginAttachment,
+    RecordReport, RenderSource, ReplayReport, RetiredReport, RouterInfo, Rung, RungAnswer,
+    SampleRow, SchemaDrift, SchemaServer, SeedCoverage, Snapshot, SnapshotDiff, SnapshotReport,
+    SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport,
+    TotalityGap, V1DoctorReport, ValueSource, WhyReport, WhyVerdict, ZrecHeader, ZsnapHeader,
+    judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
-/// themselves — a caller that can spell `run_v1_doctor` can spell what it hands
+/// themselves — a caller that can spell `run_doctor` can spell what it hands
 /// back. The rest of `report` (rows, cells, verdict enums) stays behind
 /// `zenkey_fleet::report::*`: it is the rendering vocabulary, and lifting all
 /// of it here would make this block a second copy of that module.

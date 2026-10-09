@@ -9,6 +9,7 @@
 use std::fmt;
 
 use super::asked::{Asked, u64_is_zero};
+use super::doctor::DoctorSeverity;
 use super::judgement::Judgement;
 use serde::{Deserialize, Serialize};
 
@@ -130,43 +131,6 @@ impl fmt::Display for V1CheckId {
     }
 }
 
-/// How bad a doctor finding is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DoctorSeverity {
-    /// A contract violation — the fleet disagrees with the RFCs or with
-    /// itself.
-    Error,
-    /// Suspicious but explainable — judgement is degraded, not wrong.
-    Warning,
-    /// Worth knowing; not a defect.
-    Info,
-}
-
-impl DoctorSeverity {
-    /// The wire token, exactly as it serializes.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DoctorSeverity::Error => "error",
-            DoctorSeverity::Warning => "warning",
-            DoctorSeverity::Info => "info",
-        }
-    }
-
-    /// Whether this severity reaches `floor` — `Error` reaches every floor,
-    /// `Info` only its own. The ladder a severity threshold reads (#510).
-    pub fn reaches(self, floor: DoctorSeverity) -> bool {
-        fn rank(s: DoctorSeverity) -> u8 {
-            match s {
-                DoctorSeverity::Error => 2,
-                DoctorSeverity::Warning => 1,
-                DoctorSeverity::Info => 0,
-            }
-        }
-        rank(self) >= rank(floor)
-    }
-}
-
 /// One machine-readable doctor finding (issue #46): what check fired, on
 /// what, with the evidence and the normative citation — the shape the GUI
 /// doctor panel renders as-is.
@@ -185,29 +149,6 @@ pub struct V1Finding {
     /// operational judgement rather than a normative clause).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub citation: Option<String>,
-}
-
-/// What one doctor run says relative to the previous one (#389): findings
-/// keyed on `(check, subject)`, so evidence and severity drift count as
-/// unchanged. Computed by [`crate::v1_doctor_delta`]; rendered by the GUI
-/// panel and routed by a notifier's `doctor` rule.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct V1DoctorDelta {
-    /// Findings present now and absent from the previous run.
-    pub new: Vec<V1Finding>,
-    /// Findings present in the previous run and gone now.
-    pub fixed: Vec<V1Finding>,
-    /// Findings present in both runs.
-    pub unchanged: usize,
-}
-
-impl V1DoctorDelta {
-    /// Whether `f` is one of the new findings, by its key.
-    pub fn is_new(&self, f: &V1Finding) -> bool {
-        self.new
-            .iter()
-            .any(|n| n.check == f.check && n.subject == f.subject)
-    }
 }
 
 /// The full doctor run: findings plus the coverage summary that makes an

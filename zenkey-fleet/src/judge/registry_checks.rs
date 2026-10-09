@@ -19,10 +19,6 @@ use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
 use crate::report::{DoctorSeverity, DriftVerdict, V1CheckId, V1DoctorReport, V1Finding};
 
-// The run-over-run comparison lives beside the doctor by name; it is
-// ungated (no session, no decode) and so has a file of its own.
-pub use crate::judge::doctor_delta::v1_doctor_delta;
-
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
 pub struct V1DoctorSpec {

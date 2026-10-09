@@ -17,7 +17,8 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::asked::{Asked, u64_is_zero};
-use super::v1_checks::{DoctorSeverity, V1CheckId};
+use super::doctor::DoctorSeverity;
+use super::v1_checks::V1CheckId;
 
 /// One snapshot of the exporter's ledger, folded at scrape time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
