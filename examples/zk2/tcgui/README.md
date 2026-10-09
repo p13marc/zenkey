@@ -9,7 +9,7 @@ blob tier), mapped here onto zk2.
 
 | zk2 concept | tcgui |
 |---|---|
-| `system` | the backend host's id, `h-<12hex>`, minted by `hostid.v1` (v1's derivation, unchanged) |
+| `system` | the backend host's id, `h-<12hex>`, minted by [`hostid.v1`](../../../spec/profiles/hostid/v1.md): v1's construction with zk2's one salt (D26), so the value is not v1's origin. Its Appendix B maps tcgui's v1 origins. |
 | `service` | `tc`, one per host |
 | interfaces | `tc.netif.v1`, `tc.netem.v1`, `tc.scenario.v1`, `health.v1` (from [`../walkthrough/`](../walkthrough/health.v1.toml)) |
 | the frontend | a pure consumer on the operator's workstation: an instance token, no interface token. It binds each interface as a role to `*/tc`, every system's tc service, so the wildcard sits at the system position ([`frontend.bindings.toml`](frontend.bindings.toml)) |
