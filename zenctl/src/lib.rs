@@ -115,6 +115,7 @@ pub async fn run() -> Result<()> {
         Command::Key(KeyCmd::Includes(a)) => cmd::key::includes(a),
         Command::Key(KeyCmd::Intersects(a)) => cmd::key::intersects(a),
         Command::Key(KeyCmd::Canon { expr, out }) => cmd::key::canon(&expr, out.format, out.color),
+        Command::Hostid(a) => cmd::hostid::run(a),
         Command::Bench(BenchCmd::Call(a)) => cmd::bench::call(a).await,
 
         // ── Wire verbs ───────────────────────────────────────────────────

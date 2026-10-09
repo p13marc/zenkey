@@ -291,7 +291,9 @@ its bundle) · `zenctl graph` (the binding graph, `--dot` for Graphviz) ·
 breaking) · `zenctl admin routers|graph` (zenoh's admin space: routers and
 peers with version and locators; the mesh, `--dot` for Graphviz) · `zenctl
 scout` (raw scouting Hellos) · `zenctl key includes|intersects|canon`
-(key-expression algebra, offline).
+(key-expression algebra, offline) · `zenctl hostid` (this host's system as
+`hostid.v1` mints it from the machine id, read-only; `--machine-id` for a
+given id, `--v1-salt` for the v1 origins of the migration table).
 
 **Watch — live traffic.**
 `zenctl get <selector>` (a fan-in GET, every reply attributed to its key;
@@ -504,6 +506,7 @@ zenctl pub k '{"v":1}' --attachment meta        # attachments ship and render (#
 zenctl scout                            # raw Hellos: zid/whatami/locators (multicast ON here)
 zenctl serve host-a/tc tc.netif.v1 diagnostics @reply.json --contracts tc.netif.v1.toml   # a mock owner of one operation; logs every call
 zenctl key intersects 'zk2/**' 'zk2/host-a/cam/video.v1/@stream/frames'  # keyexpr algebra, no session; cites D2/D4 on a no
+zenctl hostid --v1-salt tcgui-host-id-v1   # the system @hostid.v1/<service> gets here, and the v1 origin it replaces
 zenctl echo --format ndjson > f         # …and back: zenctl pub --from ndjson < f (one row shape, both directions)
 zenctl record --namespace acme -o bus.zrec --for 10  # capture: same row shape + header + pacing + in-file drop ledger
 zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is publishing, and re-stamped old data wins LWW (RFC 09 §5.2)

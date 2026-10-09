@@ -477,3 +477,90 @@ impl Render for CacheAction {
         })]
     }
 }
+
+/// One input `hostid` read, in order, and what it came to
+/// (`spec/profiles/hostid/v1.md` §2.4–§2.6).
+#[derive(Debug, Clone, Serialize)]
+pub struct HostIdInput {
+    /// The absolute path of §2.4, whatever root was read.
+    pub path: String,
+    /// `id`, `absent` or `refused`: the outcomes a system is minted past.
+    pub outcome: String,
+}
+
+/// The v1 origin the same id derived under one v1 salt (Appendix B).
+#[derive(Debug, Clone, Serialize)]
+pub struct V1Origin {
+    pub salt: String,
+    /// Absent where no v1 application read the input the id came from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+}
+
+/// What `zenctl hostid` found: the system a service on this host asking
+/// for `@hostid.v1/<service>` would get, and how (#719).
+#[derive(Debug, Clone, Serialize)]
+pub struct HostIdReport {
+    /// `h-` and 12 hex digits (§2.1).
+    pub system: String,
+    /// The input the id came from, or `--machine-id`.
+    pub from: String,
+    /// The salt it is derived with: always `zk2-hostid-v1` (§2.2).
+    pub salt: String,
+    #[serde(skip)]
+    pub inputs: Vec<HostIdInput>,
+    #[serde(skip)]
+    pub v1: Vec<V1Origin>,
+}
+
+impl Render for HostIdReport {
+    const FAMILY: &'static str = "hostid";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        envelope_of(self)
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for i in &self.inputs {
+            out(Row::of("input", i));
+        }
+        for v in &self.v1 {
+            out(Row::of("v1_origin", v));
+        }
+    }
+
+    /// The system first, alone on its line: `zenctl hostid --format table
+    /// | head -1` is the answer.
+    fn table(&self, t: &mut Table) {
+        t.line(&self.system);
+        let mut g = Grid::unheaded(2);
+        g.row([Cell::text("from"), Cell::text(&self.from)]);
+        g.row([Cell::text("salt"), Cell::text(&self.salt)]);
+        for i in &self.inputs {
+            g.row([Cell::text(format!("  {}", i.path)), Cell::text(&i.outcome)]);
+        }
+        for v in &self.v1 {
+            g.row([
+                Cell::text(format!("v1 {}", v.salt)),
+                Cell::text(v.origin.as_deref().unwrap_or("no mapping")),
+            ]);
+        }
+        t.grid(g);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        if self.v1.iter().any(|v| v.origin.is_none()) {
+            notes.push(Note::caveat(
+                "the id came from the shared file, which no v1 application read: \
+                 this host's v1 origins have no mapping by derivation",
+            ));
+        } else if !self.v1.is_empty() && self.from == "/var/lib/dbus/machine-id" {
+            notes.push(Note::caveat(
+                "v1's zenkey read /etc/machine-id alone, and only tcgui's own ladder read \
+                 /var/lib/dbus/machine-id: the origins hold for tcgui",
+            ));
+        }
+        notes
+    }
+}

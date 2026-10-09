@@ -28,6 +28,7 @@ pub mod field;
 pub mod generate;
 pub mod get;
 pub mod graph;
+pub mod hostid;
 pub mod iface;
 pub mod key;
 pub mod namespace;

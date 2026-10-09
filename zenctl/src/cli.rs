@@ -512,6 +512,21 @@ pub(crate) enum Command {
     /// No session is opened. RFC 03 §4's footguns, diagnosed.
     #[command(subcommand)]
     Key(KeyCmd),
+    /// This host's system, as hostid.v1 mints it from the machine id.
+    ///
+    /// The system a service on this host gets when it asks for
+    /// `@hostid.v1/<service>` (spec/profiles/hostid/v1.md): the inputs read in
+    /// order, `/etc/machine-id`, `/var/lib/dbus/machine-id`, then the shared
+    /// file `/var/lib/zk2/hostid`, and the system derived from the first that
+    /// holds a machine id (§2.1–§2.4). No session is opened and nothing is
+    /// written: where a service would create the shared file, this says so
+    /// instead. No machine id is ever printed. `--machine-id` derives from a
+    /// given id instead; each `--v1-salt` adds the v1 origin the same id had
+    /// under that v1 application's salt, for the migration table (Appendix
+    /// B). Exit 0 with a system; 2 when the host has no id a service could
+    /// use, each path named with its outcome, or when `--machine-id` is not a
+    /// machine id.
+    Hostid(HostidArgs),
     /// Measure how a deployment answers its operations.
     #[command(subcommand)]
     Bench(BenchCmd),
@@ -2413,6 +2428,25 @@ impl From<MemberArg> for zenkey_fleet::Member {
             MemberArg::Summary => zenkey_fleet::Member::Summary,
         }
     }
+}
+
+/// `zenctl hostid`'s flags (#719).
+#[derive(clap::Args)]
+pub(crate) struct HostidArgs {
+    /// Derive from this machine id (32 hex digits) instead of reading the
+    /// host's.
+    #[arg(long, value_name = "HEX")]
+    pub(crate) machine_id: Option<String>,
+    /// Add the v1 origin the same id had under this v1 salt, such as
+    /// `tcgui-host-id-v1`. Repeatable.
+    #[arg(long, value_name = "SALT")]
+    pub(crate) v1_salt: Vec<String>,
+    /// Read the inputs under this directory instead of `/`, its links
+    /// resolved in it (hostid.v1 §2.4): the seam the tests use.
+    #[arg(long, value_name = "DIR", hide = true)]
+    pub(crate) root: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    pub(crate) out: OutputArgs,
 }
 
 /// The `key includes` verb's flags — one struct the dispatcher hands over whole,
