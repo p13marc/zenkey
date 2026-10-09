@@ -87,10 +87,10 @@ examples       97 passed     0 failed
 total         519 passed     0 failed
 ```
 
-The figures are against `core.md` 0.11. 0.10 added
+The figures are against `core.md` 0.12, which adds no fixture. 0.10 added
 `descriptors/ok-optional-role`, and 0.11 added `ok-optional-unchecked`.
-- Amendments 0.5 to 0.11 resolved F-01 to F-79. F-80 is open against
-  0.11.
+- Amendments 0.5 to 0.12 resolved F-01 to F-80. F-81 is open against
+  0.12.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -274,11 +274,19 @@ Four more runs:
     them.
     - With the admin space off, the check is unobservable.
     - With it on, read-only, a router with no storage is clean.
-    - A stand-in admin record shows the storages read: `telemetry/**` is
-      clean, and `zk2/**` breaks S4.
-    - An answer counts as a router's only when its id is one of the
-      session's own routers, so a client answering `@/*/router` changes
-      nothing (F-80).
+    - **Who answered (0.12).** An answer counts only when its replier id
+      (`Reply.replier_id`, which zenoh-python 1.10.1 exposes) is the zid
+      its key names, and that zid is a router of the session, or the
+      session itself.
+      - Any other answer is unverified, listed with why, and never makes
+        the check clean or broken.
+      - `trust=True` is the operator's alternative.
+      - security.md §3 steps 1–2 run with the admin space off and on: the
+        spoof on R1's own key stays unverified.
+    - A client playing a storage manager is the spoof too. Trusted,
+      `telemetry/**` is clean and `zk2/**` breaks S4.
+    - With two linked routers, a client tool's S4 is never clean (F-81),
+      and a peer tool connected to both is.
   - `live.presence_faults` reads presence shapes twice, a grace apart. A
     stray token removed within the grace passes, and one kept is a fault.
   - `compat.classify_pair` orders two revisions met on the bus by their
@@ -296,7 +304,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 194 passed, 0 failed, 0 known deviations of the Rust
+Result: `live interop: 197 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.

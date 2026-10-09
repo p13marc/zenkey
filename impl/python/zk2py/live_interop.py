@@ -1455,13 +1455,16 @@ def run_python_fanout(report: Report) -> None:
 
 
 def run_python_tool_rules(report: Report) -> None:
-    """The rules 0.10 and 0.11 state for a tool, where the bus shows them:
+    """The rules 0.10 to 0.12 state for a tool, where the bus shows them:
     - S4 needs the admin space (§4.2): off, the check is unobservable; on,
       read-only, it reads 0.11's two selectors, and a router with nothing
-      under the storages selector runs no storage. A stand-in admin record
-      (queryables the runner declares) shows the storages read: one on
-      ``telemetry/**`` is clean, one on ``zk2/**`` breaks S4. A client
-      answering ``@/*/router`` is not taken for a router (F-80);
+      under the storages selector runs no storage. An answer counts only
+      when its replier id is the zid its key names, a router this session
+      is connected to (0.12). security.md §3 steps 1-2: a client answering
+      on R1's own key, with the admin space off and on, stays unverified.
+      A storage manager played from a client is unverified too; trusted by
+      the operator, one on ``telemetry/**`` is clean and one on ``zk2/**``
+      breaks S4;
     - a fault read from presence shapes holds in two reads a grace apart
       (§8.1): a shape gone by the second read passes, one still there is a
       fault;
@@ -1473,80 +1476,139 @@ def run_python_tool_rules(report: Report) -> None:
     from .contract import load_contract
     from .owner import Owner as PyOwner
 
-    run = "zk2py tool rules (0.10, 0.11): S4's admin space, presence shapes, revisions on the bus"
-    # S4 (§4.2, 0.10 and 0.11; Appendix B).
+    run = "zk2py tool rules (0.10 to 0.12): S4's admin space, presence shapes, revisions on the bus"
+    # S4 (§4.2, 0.10 to 0.12; Appendix B), and security.md §3 steps 1-2.
     import zenoh
+
+    def spoof(session, key: str, doc: dict[str, Any]):
+        """A client's queryable answering ``key`` with ``doc``: the spoof."""
+        return session.declare_queryable(key, zenoh.handlers.Callback(
+            lambda q: q.reply(key, json.dumps(doc), encoding="application/json")))
 
     for admin in (False, True):
         r, endpoint, zid = _r1(adminspace=admin)
         try:
             tool = live.open_client(endpoint)
+            s = live.open_client(endpoint)
             try:
-                s4 = live.check_s4(tool)
+                plain = live.check_s4(tool)
                 if admin:
-                    report.check(run, "S4 with R1's admin space on, read-only: R1 answers @/*/router, has nothing "
-                                      "under …/storage_manager/storages/**, and its plugins agree (none): clean",
-                                 s4.verdict == "clean" and s4.routers == [zid] and not s4.storages
-                                 and s4.plugins == {zid: None}, s4.detail)
-                    # A stand-in for a router that runs storages: the
-                    # runner's own queryables on a router record and two
-                    # storage records, under an id no session has.
+                    report.check(run, "S4, R1's admin space on, read-only: R1 answers under its own replier id, "
+                                      "verified; nothing under …/storage_manager/storages/**; plugins agree: clean",
+                                 plain.verdict == "clean" and plain.routers == [zid] and not plain.unverified
+                                 and not plain.storages and plain.plugins == {zid: None}, plain.detail)
+                else:
+                    report.check(run, "S4, R1's admin space off, zenoh 1.10.1's default: no answer, unobservable, "
+                                      "never clean", plain.verdict == "unobservable" and not plain.unverified
+                                 and not plain.routers, plain.detail)
+                # security.md §3: S, a client and no router, answers on R1's
+                # own key.
+                own = f"@/{zid}/router"
+                q = spoof(s, own, {"plugins": None})
+                time.sleep(0.3)
+                try:
+                    answers = [(a.key, a.replier) for a in live._answers(tool, live.S4_ROUTERS,
+                                                                           zenoh.QueryTarget.ALL, 1.0) if a.ok]
+                    spoofed = live.check_s4(tool)
+                finally:
+                    q.undeclare()
+                s_zid = str(s.zid())
+                if admin:
+                    report.check(run, "security.md §3 step 2: R1 answers too, under its own replier id, and is "
+                                      "verified; S's answer on R1's key carries S's replier id, unverified, so the "
+                                      "check is not clean either",
+                                 sorted(answers) == sorted([(own, zid), (own, s_zid)])
+                                 and spoofed.routers == [zid]
+                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.verdict == "unobservable",
+                                 f"answers {answers}; {spoofed.verdict}: {spoofed.detail}")
+                else:
+                    report.check(run, "security.md §3 step 1: S's answer arrives on R1's own key, the only answer, "
+                                      "its replier id S's zid, not R1's; held unverified: unobservable, never clean",
+                                 answers == [(own, s_zid)] and s_zid != zid and not spoofed.routers
+                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.verdict == "unobservable",
+                                 f"answers {answers}, R1 {zid}; {spoofed.verdict}: {spoofed.detail}")
+                if admin:
+                    # A storage manager played from a raw session, as 0.12
+                    # says the reference's own live test does: a spoof, so
+                    # unverified unless the operator trusts every answer.
                     fake = "1234567890abcdef"
-                    records = {f"@/{fake}/router": {"plugins": {"storage_manager": {}}}}
-                    helper = live.open_client(endpoint)
-                    held = []
+                    base = f"@/{fake}/router/status/plugins/storage_manager/storages"
+                    held = [spoof(s, f"@/{fake}/router", {"plugins": {"storage_manager": {}}}),
+                            spoof(s, f"{base}/telemetry", {"key_expr": "telemetry/**", "volume": "memory"})]
                     try:
-                        for name, kexpr in (("telemetry", "telemetry/**"), ("all", "zk2/**")):
-                            records[f"@/{fake}/router/status/plugins/storage_manager/storages/{name}"] = \
-                                {"key_expr": kexpr, "volume": "memory"}
-                        for key, doc in records.items():
-                            if key.endswith("/all"):
-                                continue
-                            held.append(helper.declare_queryable(key, zenoh.handlers.Callback(
-                                lambda q, k=key, d=doc: q.reply(k, json.dumps(d), encoding="application/json"))))
                         time.sleep(0.3)
-                        quiet = live.check_s4(tool)
-                        key = f"@/{fake}/router/status/plugins/storage_manager/storages/all"
-                        held.append(helper.declare_queryable(key, zenoh.handlers.Callback(
-                            lambda q: q.reply(key, json.dumps(records[key]), encoding="application/json"))))
+                        quiet_trusted = live.check_s4(tool, trust=True)
+                        held.append(spoof(s, f"{base}/all", {"key_expr": "zk2/**", "volume": "memory"}))
                         time.sleep(0.3)
                         loud = live.check_s4(tool)
+                        loud_trusted = live.check_s4(tool, trust=True)
                     finally:
                         for h in held:
                             h.undeclare()
-                        helper.close()
-                    report.check(run, "S4, a stand-in router running a storage on telemetry/**: read through the "
-                                      "storages selector, it touches no owner's state: clean",
-                                 quiet.verdict == "clean" and [s[2] for s in quiet.storages] == ["telemetry/**"],
-                                 f"{quiet.verdict}: {quiet.detail}")
-                    report.check(run, "S4, the same router adding a storage on zk2/**: it intersects owners' "
-                                      "state/**, so S4 is broken (§4.2, 0.11)",
-                                 loud.verdict == "broken" and sorted(s[2] for s in loud.storages if s[3]) == ["zk2/**"],
-                                 f"{loud.verdict}: {loud.detail}")
-                else:
-                    report.check(run, "S4 with R1's admin space off, zenoh 1.10.1's default: unobservable, never "
-                                      "clean", s4.verdict == "unobservable" and not s4.routers, s4.detail)
-                    # SPEC-FINDINGS F-80: a client session answering
-                    # @/<id>/router, while R1's admin space is off.
-                    fake = "fedcba9876543210"
-                    other = live.open_client(endpoint)
-                    try:
-                        q = other.declare_queryable(f"@/{fake}/router", zenoh.handlers.Callback(
-                            lambda qq: qq.reply(f"@/{fake}/router", json.dumps({"plugins": None}),
-                                                encoding="application/json")))
-                        time.sleep(0.3)
-                        spoofed = live.check_s4(tool)
-                        q.undeclare()
-                    finally:
-                        other.close()
-                    report.check(run, "S4, admin space off and a client session answering @/*/router: its id is "
-                                      "none of this session's routers, so still unobservable (F-80)",
-                                 spoofed.verdict == "unobservable" and spoofed.unverified == [fake],
-                                 f"{spoofed.verdict}: {spoofed.detail}")
+                    report.check(run, "a storage on zk2/** played from a client session: its answers are "
+                                      "unverified, so they never break S4 and never let it be clean (§4.2, 0.12)",
+                                 loud.verdict == "unobservable" and not loud.storages
+                                 and len(loud.unverified) == 3, f"{loud.verdict}: {loud.detail}")
+                    report.check(run, "trusted by the operator (0.12): the storage on telemetry/** leaves S4 "
+                                      "clean, and the one on zk2/** breaks it",
+                                 quiet_trusted.verdict == "clean"
+                                 and [x[2] for x in quiet_trusted.storages] == ["telemetry/**"]
+                                 and loud_trusted.verdict == "broken"
+                                 and [x[2] for x in loud_trusted.storages if x[3]] == ["zk2/**"],
+                                 f"{quiet_trusted.verdict} | {loud_trusted.verdict}: {loud_trusted.detail}")
             finally:
+                s.close()
                 tool.close()
         finally:
             r.close()
+
+    # Two linked routers, both admin spaces on (SPEC-FINDINGS F-81): a
+    # client tool is connected to one router only (Appendix B), so the far
+    # router's own, honest answer is unverified; a peer connected to both
+    # verifies both.
+    from .owner import free_loopback_port
+
+    ra, ep_a, za = _r1(adminspace=True)
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("connect/endpoints", json.dumps([ep_a]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("adminspace", json.dumps({"enabled": True, "permissions": {"read": True, "write": False}}))
+    rb = zenoh.open(conf)
+    zb = str(rb.zid())
+    try:
+        client = live.open_client(ep_a)
+        pconf = zenoh.Config()
+        pconf.insert_json5("mode", json.dumps("peer"))
+        pconf.insert_json5("connect/endpoints", json.dumps([ep_a, f"tcp/127.0.0.1:{port}"]))
+        pconf.insert_json5("scouting/multicast/enabled", "false")
+        peer = zenoh.open(pconf)
+        try:
+            deadline = time.monotonic() + 5.0
+            far = live.check_s4(client)
+            while time.monotonic() < deadline and len(far.routers) + len(far.unverified) < 2:
+                time.sleep(0.2)
+                far = live.check_s4(client)
+            both = live.check_s4(peer)
+            report.check(run, "two linked routers, a client tool on one: the far router's answer carries its own "
+                              "replier id, yet is unverified (not a router of this session), so S4 is never "
+                              "clean (F-81)",
+                         far.routers == [za] and far.unverified == [(f"@/{zb}/router", zb,
+                                                                     "not a router of this session")]
+                         and far.verdict == "unobservable", f"{far.verdict}: {far.detail}")
+            report.check(run, "the same deployment, a peer tool connected to both routers: both verified, clean",
+                         sorted(both.routers) == sorted([za, zb]) and not both.unverified
+                         and both.verdict == "clean", f"{both.verdict}: {both.detail}")
+        finally:
+            peer.close()
+            client.close()
+    finally:
+        rb.close()
+        ra.close()
 
     r1, r1_endpoint, _ = _r1()
     owners: list[Any] = []

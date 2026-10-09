@@ -148,6 +148,25 @@ class Answer:
     payload: bytes
     has_timestamp: bool = False
     has_attachment: bool = False
+    #: the zid of the session that sent the reply, "whatever key the reply
+    #: is on" (Appendix B, 0.12), or None when it cannot be read
+    replier: str | None = None
+
+
+def replier_of(reply: Any) -> str | None:
+    """A reply's replier id, as a zid's text, or None.
+
+    zenoh-python 1.10.1 exposes ``Reply.replier_id``, an ``EntityGlobalId``
+    whose ``zid`` is the replying session's. Its type stub marks it
+    ``@_unstable``, a marker only: the published wheel has it at run time.
+    It is Rust's ``Reply::replier_id``, behind the ``unstable`` feature
+    (Appendix B), so a binding built without it would have no attribute,
+    which reads as None here."""
+    try:
+        rid = getattr(reply, "replier_id", None)
+        return None if rid is None else str(rid.zid)
+    except Exception:  # noqa: BLE001 - an unstable accessor that fails is no id
+        return None
 
 
 def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
@@ -173,10 +192,10 @@ def _answers(session: zenoh.Session, selector: str, target: zenoh.QueryTarget,
         if item.ok is not None:
             s = item.ok
             yield Answer(True, str(s.key_expr), str(s.encoding), s.payload.to_bytes(),
-                         s.timestamp is not None, s.attachment is not None)
+                         s.timestamp is not None, s.attachment is not None, replier_of(item))
         else:
             e = item.err
-            yield Answer(False, None, str(e.encoding), e.payload.to_bytes())
+            yield Answer(False, None, str(e.encoding), e.payload.to_bytes(), replier=replier_of(item))
 
 
 # -- §3.3 the descriptor ---------------------------------------------------------
@@ -374,7 +393,7 @@ def _zid_value(text: Any) -> int | None:
     return int(text, 16)
 
 
-# -- §4.2 S4, through the routers' admin space (0.10, 0.11) -----------------------
+# -- §4.2 S4, through the routers' admin space (0.10 to 0.12) ---------------------
 
 #: §4.2 (0.11) "What the check reads".
 S4_ROUTERS = "@/*/router"
@@ -385,23 +404,50 @@ S4_STATE = ("zk2/*/*/*/state/**", "zk2/*/*/*/@state/**")
 
 @dataclass
 class S4Reading:
-    """A tool's S4 check (§4.2): ``clean``, ``broken`` (a storage answers
-    on owners' state) or ``unobservable`` ("Without it, a tool reports the
-    check unobservable, never clean")."""
+    """A tool's S4 check (§4.2): ``clean``, ``broken`` (a verified storage
+    answers on owners' state) or ``unobservable`` ("Without it, a tool
+    reports the check unobservable, never clean"; and an unverified answer
+    "never contributes to a clean verdict", 0.12)."""
 
     verdict: str
+    #: the routers whose answer is verified (0.12, "Who answered")
     routers: list[str] = field(default_factory=list)
-    #: (router zid, storage key, its key_expr, whether it intersects owners' state)
+    #: (router zid, storage key, its key_expr, intersects owners' state?)
+    #: for each verified storage
     storages: list[tuple[str, str, Any, bool]] = field(default_factory=list)
-    #: each answering router's `plugins`, read beside the storages
+    #: each verified router's `plugins`, read beside the storages
     plugins: dict[str, Any] = field(default_factory=dict)
-    #: answering ids that are none of the routers this session is connected
-    #: to: a session can answer @/*/router too (SPEC-FINDINGS F-80)
-    unverified: list[str] = field(default_factory=list)
+    #: (key, replier id or None, why) for every answer not verified: unjudged
+    unverified: list[tuple[str, str | None, str]] = field(default_factory=list)
+    #: the operator told the tool to trust every answer (0.12)
+    trusted: bool = False
     detail: str = ""
 
 
-def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S) -> S4Reading:
+def unverified_why(session: zenoh.Session, a: Answer) -> str | None:
+    """§4.2 (0.12) "Who answered": "A tool counts an answer as a router's
+    only when the reply's replier id is the zid the key names, and that zid
+    is a router its session is connected to, or the session itself." Both
+    are compared by value (0.11).
+
+    None when the answer is verified, else why not:
+    - ``no replier id``: the binding gives none, so every answer is held;
+    - ``replier is not the key's zid``: a session answering under another's
+      key, the spoof;
+    - ``not a router of this session``: the replier is the key's zid, but
+      no router this session is connected to (a router further away, which
+      a client, connected to one endpoint, can never verify: SPEC-FINDINGS
+      F-81)."""
+    if a.key is None or a.replier is None:
+        return "no replier id"
+    named = _zid_value(a.key.split("/")[1])
+    if named is None or _zid_value(a.replier) != named:
+        return "replier is not the key's zid"
+    mine = {_zid_value(str(z)) for z in session.info.routers_zid()} | {_zid_value(str(session.zid()))}
+    return None if named in mine else "not a router of this session"
+
+
+def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool = False) -> S4Reading:
     """§4.2 (0.11): "The reference reads two selectors: @/*/router, the
     routers that answer; @/*/router/**/storage_manager/storages/**, one key
     per storage a router's storage manager runs, its value the storage's
@@ -410,40 +456,48 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S) -> S4Readin
     first selector and has nothing under the second runs no storage. When
     no router answers the first, the check is unobservable."
 
-    Beside them, each router record's ``plugins`` is kept: one with no
-    plugin runs no storage manager, which must agree with an empty second
-    read. A storage whose configuration has no readable ``key_expr`` makes
-    the check unobservable rather than clean.
+    0.12 "Who answered": each answer, router record or storage, counts only
+    when :func:`unverified_why` finds nothing. "Any other answer is unverified, and an
+    unverified answer never contributes to a clean verdict." zk2py holds
+    one as unjudged: it never breaks S4 and never lets it be clean.
+    ``trust`` is the operator's alternative: "An operator MAY tell a tool to
+    trust every answer when the deployment's grants deny @/** queryables to
+    every principal".
 
-    zk2py adds one condition (SPEC-FINDINGS F-80): any session can declare
-    a queryable on ``@/<id>/router``, so an answer is taken as a router's
-    only when its id is one of the routers this session is connected to
-    (``session.info.routers_zid()``, compared by value). Without one, the
-    check is unobservable. Storages listed under an unverified id still
-    count: they can only make the verdict worse."""
-    out = S4Reading("unobservable")
+    Beside the selectors, each verified router record's ``plugins`` is
+    kept. A verified storage whose configuration has no readable
+    ``key_expr`` makes the check unobservable rather than clean."""
+    out = S4Reading("unobservable", trusted=trust)
+    answered = 0
     for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
+        answered += 1
+        why = None if trust else unverified_why(session, a)
+        if why is not None:
+            out.unverified.append((a.key, a.replier, why))
+            continue
         zid = a.key.split("/")[1]
+        if zid in out.routers:
+            continue  # the same record by another path (a peer reaches a router twice)
         out.routers.append(zid)
         try:
             doc = json.loads(a.payload)
             out.plugins[zid] = doc.get("plugins") if isinstance(doc, dict) else "unreadable"
         except ValueError:
             out.plugins[zid] = "unreadable"
-    if not out.routers:
+    if not answered:
         out.detail = f"no router answered {S4_ROUTERS}: the admin space is off"
-        return out
-    mine = {_zid_value(str(z)) for z in session.info.routers_zid()}
-    out.unverified = [z for z in out.routers if _zid_value(z) not in mine]
-    if len(out.unverified) == len(out.routers):
-        out.detail = (f"no router this session is connected to answered {S4_ROUTERS}; the answers from "
-                      f"{out.unverified} cannot be told from a session's")
         return out
     unreadable = []
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
+            continue
+        why = None if trust else unverified_why(session, a)
+        if why is not None:
+            out.unverified.append((a.key, a.replier, why))
+            continue
+        if any(s[1] == a.key for s in out.storages):
             continue
         try:
             conf = json.loads(a.payload)
@@ -459,12 +513,16 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S) -> S4Readin
     if broken:
         out.verdict = "broken"
         out.detail = f"a storage answers on owners' state: {[(z, k) for z, _, k, _ in broken]}"
+    elif not out.routers:
+        out.detail = f"no answer to {S4_ROUTERS} is verified: {out.unverified}"
+    elif out.unverified:
+        out.detail = f"verified {out.routers}, but unverified answers stand beside them: {out.unverified}"
     elif unreadable:
         out.detail = f"storages whose key_expr cannot be read: {unreadable}"
     else:
         out.verdict = "clean"
-        out.detail = (f"{len(out.routers)} router(s), {len(out.storages)} storage(s), none on owners' state; "
-                      f"plugins {out.plugins}; unverified {out.unverified}")
+        out.detail = (f"{len(out.routers)} verified router(s), {len(out.storages)} storage(s), none on owners' "
+                      f"state; plugins {out.plugins}" + ("; every answer trusted" if trust else ""))
     return out
 
 
