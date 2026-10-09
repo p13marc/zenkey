@@ -165,6 +165,34 @@ class Owner:
             return None
 
 
+def _roles_optional(report: Report, run: str, doc: dict[str, Any], by_iface: dict[str, Any]) -> None:
+    """§3.3 (0.10): ``optional`` "is true for a role the instance works
+    without, and absent otherwise … For a role a contract declares, it
+    repeats that contract's [requires]"."""
+    got, want = {}, {}
+    for r in doc.get("requires", []):
+        c = by_iface.get(r.get("declared_by"))
+        if c is None or r.get("role") not in c.canonical["requires"]:
+            continue
+        got[r["role"]] = r.get("optional", "absent")
+        want[r["role"]] = True if c.canonical["requires"][r["role"]]["optional"] else "absent"
+    report.check(run, "each contract role's `optional`: true when the contract's role is optional, absent "
+                      "otherwise (§3.3, 0.10)", got == want, f"descriptor {got}, contracts {want}")
+
+
+def _meta_zid(report: Report, run: str, doc: dict[str, Any]) -> None:
+    """§3.3 (0.10): "an owner SHOULD state its session's zid as meta.zid";
+    (0.11) "An owner SHOULD write meta.zid as zenoh writes it": lowercase
+    hexadecimal without leading zeros, at most 32 digits (Appendix B)."""
+    import re
+
+    zid = doc.get("meta", {}).get("zid") if isinstance(doc.get("meta"), dict) else None
+    report.check(run, "the descriptor states meta.zid as zenoh writes it: lowercase hex, no leading zero, at "
+                      "most 32 digits (§3.3, 0.10, 0.11)",
+                 isinstance(zid, str) and re.fullmatch(r"[1-9a-f][0-9a-f]{0,31}", zid) is not None,
+                 f"meta {doc.get('meta')}")
+
+
 def _corrupt(bundle_bytes: bytes) -> bytes:
     """A bundle that fails verification at step 9 (``schema_hash``), or at
     step 12 for a contract with no artifact: what a corrupt holder sends."""
@@ -319,6 +347,8 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                      for r in doc.get("requires", []))
     report.check(run, "unbound roles are listed with bindings [] and params {} (§3.2)", unbound_ok,
                  str([(r["role"], r.get("bindings"), r.get("params")) for r in doc.get("requires", [])]))
+    _roles_optional(report, run, doc, by_iface)
+    _meta_zid(report, run, doc)
     # §3.3 (0.5): "profiles is the union of the uses of the contracts the
     # instance implements, sorted and deduplicated".
     uses = sorted({u for c in by_iface.values() for u in c.canonical["uses"]})
@@ -389,7 +419,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
 
     # -- state and operations (§4, §5) ------------------------------------
     if "zk2py_echo.v1" in by_iface:
-        _state_and_calls(report, run, session, system, svc, doc.get("meta", {}).get("zid"), None)
+        _state_and_calls(report, run, session, system, svc, doc, None)
 
     # -- presence at scale (presence.md §4) -------------------------------
     if scale > 0:
@@ -441,15 +471,18 @@ def _scale_check(report: Report, run: str, session, endpoint: str, system: str, 
 def run_rust_behind_r1(report: Report, exe: Path) -> None:
     """The Rust owner example as a client of a router R1 of the runner's
     (``--connect``), the setup state.md §1 asks for (F-69): the value it
-    holds from the start is stamped with its own session's zid, not R1's.
-    It also serves ``zk2py_tc.v1``, whose operations are templated: O1 and
-    §8.2 "Exposed" want a queryable over each template, which the example
-    does not declare (a known deviation, below)."""
+    holds from the start is stamped with its own session's zid, not R1's,
+    and that zid is its descriptor's ``meta.zid`` (§3.3, 0.10). It also
+    serves ``zk2py_tc.v1``, whose operations are templated (§5.1), and
+    ``zs.thresholds.v1``, whose role ``desired`` is optional: its
+    descriptor says so (``optional: true``, 0.10)."""
     from . import live
+    from .contract import load_contract
 
     service = "vehicle-02/tc"
     system, svc = service.split("/")
-    paths = [REPO / ECHO, REPO / TC]
+    paths = [REPO / ECHO, REPO / TC, REPO / THRESHOLDS]
+    by_iface = {c.interface: c for c in (load_contract(p) for p in paths)}
     run = f"{service} ← {', '.join(p.name for p in paths)} (the owner example behind R1)"
     r1, r1_endpoint, r1_zid = _r1()
     try:
@@ -463,22 +496,33 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
             selector = f"zk2/{system}/{svc}/@zk/**"
             deadline = time.monotonic() + PRESENCE_WAIT_S
             pres = live.list_presence(tool, selector)
-            while time.monotonic() < deadline and not (pres.instances and len(pres.alive) == 2):
+            n = len(paths)
+            while time.monotonic() < deadline and not (pres.instances and len(pres.alive) == n):
                 time.sleep(0.05)
                 pres = live.list_presence(tool, selector)
-            if not report.check(run, "presence through R1: one instance token, two interface tokens",
-                                len(pres.instances) == 1 and len(pres.alive) == 2 and pres.complete,
+            if not report.check(run, f"presence through R1: one instance token, {n} interface tokens",
+                                len(pres.instances) == 1 and len(pres.alive) == n and pres.complete,
                                 pres.reading):
                 return
             instance_key = f"zk2/{system}/{svc}/@zk/instance/{pres.instances[0]['instance']}"
             d = live.get_descriptor(tool, instance_key)
             doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+            _meta_zid(report, run, doc)
+            _roles_optional(report, run, doc, by_iface)
             zid = doc.get("meta", {}).get("zid")
             st = live.get_state(tool, f"zk2/{system}/{svc}/zk2py_echo.v1/state/health")
-            report.check(run, "state.md §1 through R1: the value held from the start carries the owner "
-                              "session's zid (the descriptor's meta.zid), not R1's",
-                         [(r.payload, r.stamp_id) for r in st.replies] == [(b"ok", zid)] and zid != r1_zid,
-                         f"{[(r.payload, r.stamp_id) for r in st.replies]}, owner {zid}, R1 {r1_zid}")
+            who = [live.attribute_stamp(r.stamp_id, doc) for r in st.replies]
+            report.check(run, "state.md §1 through R1: the value held from the start is attributed to the owner "
+                              "by meta.zid (§3.3, 0.10), and that zid is not R1's",
+                         [r.payload for r in st.replies] == [b"ok"] and who == ["owner"] and zid != r1_zid,
+                         f"{[(r.payload, r.stamp_id) for r in st.replies]} {who}, meta.zid {zid}, R1 {r1_zid}")
+            # §3.3 (0.11): "A tool MUST compare two zids by value". The same
+            # zid in capitals, padded to 32 digits, is another text.
+            respelled = str(zid).upper().rjust(32, "0")
+            again = [live.attribute_stamp(r.stamp_id, {"meta": {"zid": respelled}}) for r in st.replies]
+            report.check(run, "by value, not text: meta.zid respelled in capitals and padded to 32 digits still "
+                              "attributes the stamp to the owner (§3.3, 0.11)",
+                         again == ["owner"] and respelled != zid, f"{respelled} → {again}")
             base = f"zk2/{system}/{svc}/zk2py_tc.v1/@op"
             diag = live.call(tool, f"{base}/diagnostics", b"x")
             report.check(run, "a parameterless operation answers through R1 (O3)",
@@ -571,15 +615,19 @@ NEEDS = "impl/python/interop/zk2py_needs.v1.toml"
 BRINGUP = "impl/python/interop/zk2py_bringup.v1.toml"
 TC = "impl/python/interop/zk2py_tc.v1.toml"
 SCAN = "impl/python/interop/zk2py_scan.v1.toml"
+BRINGUP_V1_1 = "impl/python/interop/rev/zk2py_bringup.v1.toml"
+THRESHOLDS = "examples/zk2/zensight/zs.thresholds.v1.toml"
 DEFAULT_CONSUME = REPO / "target" / "debug" / "examples" / "consume"
 
 
-def _state_and_calls(report: Report, run: str, session, system: str, svc: str, owner_zid: str | None,
+def _state_and_calls(report: Report, run: str, session, system: str, svc: str, owner_doc: dict[str, Any],
                      expect_typed: str | None) -> None:
     """The consumer's and the caller's side, against an owner serving
     ``zk2py_echo.v1``: a state GET per S4, calls per O1–O5, envelopes per
-    §5.2. ``expect_typed`` is the code the owner gives ``@op/typed``'s
-    malformed request, or None to accept any valid envelope."""
+    §5.2. ``owner_doc`` is the owner's descriptor, by whose ``meta.zid`` a
+    stamp is attributed (0.10). ``expect_typed`` is the code the owner
+    gives ``@op/typed``'s malformed request, or None to accept any valid
+    envelope."""
     from . import live
 
     base = f"zk2/{system}/{svc}/zk2py_echo.v1"
@@ -591,9 +639,10 @@ def _state_and_calls(report: Report, run: str, session, system: str, svc: str, o
                  f"{[(r.key, r.payload, r.deleted) for r in st.replies]} {st.errors}")
     if ok:
         r = st.replies[0]
-        report.check(run, "the value is stamped by the owner (S1, S2): the stamp's id is its session's zid",
-                     r.stamp is not None and (owner_zid is None or r.stamp_id == owner_zid),
-                     f"stamp {r.stamp}, owner zid {owner_zid}")
+        who = live.attribute_stamp(r.stamp_id, owner_doc)
+        report.check(run, "the value is stamped by the owner (S1, S2): attributed by the descriptor's meta.zid "
+                          "(§3.3, 0.10)", who == "owner",
+                     f"{who}: stamp {r.stamp}, meta {owner_doc.get('meta')}")
         report.check(run, "the value carries its media type as its Encoding (§7.2)", r.encoding == "text/plain",
                      r.encoding)
     sel = live.get_state(session, f"{base}/state/*")
@@ -670,17 +719,19 @@ def run_python_owner(report: Report, consume: Path) -> None:
             report.check(run, "its descriptor: one reply, application/json, no timestamp or attachment (§3.3)",
                          ok, str([(a.ok, a.encoding, a.has_timestamp) for a in answers]))
             fp = None
+            doc: dict[str, Any] = {}
             if ok:
                 codes = check_descriptor(answers[0].payload, [contract])
                 report.check(run, "its descriptor has no D code", codes == [], str(codes))
-                fp = live.fingerprint_of(json.loads(answers[0].payload), "zk2py_echo.v1",
-                                         pres.alive[0]["fp16"] if pres.alive else None)
+                doc = json.loads(answers[0].payload)
+                _meta_zid(report, run, doc)
+                fp = live.fingerprint_of(doc, "zk2py_echo.v1", pres.alive[0]["fp16"] if pres.alive else None)
             r = live.retrieve_bundle(session, "zk2py_echo.v1", fp) if fp else None
             report.check(run, "its bundle, retrieved per §8.4 by the descriptor's fingerprint, verifies and is "
                               "the build's bytes",
                          r is not None and r.available and r.data == bundle.build(contract),
                          _describe(r) if r else f"no fingerprint from the token's fp16 and the descriptor")
-            _state_and_calls(report, run, session, system, svc, str(owner.session.zid()), "invalid_request")
+            _state_and_calls(report, run, session, system, svc, doc, "invalid_request")
         finally:
             session.close()
 
@@ -714,6 +765,7 @@ def run_python_refusal(report: Report) -> None:
 
     from . import live
     from .contract import load_contract
+    from .descriptor import check_descriptor
     from .owner import Owner as PyOwner, OwnerRefused
 
     system, svc = "py-site", "needs"
@@ -746,6 +798,15 @@ def run_python_refusal(report: Report) -> None:
                     time.sleep(0.05)
                 report.check(run, "the control shows its instance token to the watcher within 1 s",
                              any(k == control.instance_key for _, k in seen), str(seen))
+                if label.startswith("step 4"):
+                    # §3.3 (0.10): a required role bound, an optional one
+                    # unbound: `optional` on the second only.
+                    d = live.get_descriptor(watcher, control.instance_key)
+                    cdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+                    report.check(run, "the control's descriptor has no D code against zk2py_needs.v1",
+                                 bool(cdoc) and check_descriptor(d[0].payload, [contract]) == [],
+                                 f"{len(d)} replies")
+                    _roles_optional(report, run, cdoc, {contract.interface: contract})
                 control.close()
                 deadline = time.monotonic() + 5.0
                 while time.monotonic() < deadline and \
@@ -774,9 +835,11 @@ def run_python_refusal(report: Report) -> None:
         r1.close()
 
 
-def _r1(timestamping: bool = True):
+def _r1(timestamping: bool = True, adminspace: bool = False):
     """A router of the runner's own, which outlives every owner it serves
-    (presence.md §2, state.md §1): (session, endpoint, zid)."""
+    (presence.md §2, state.md §1): (session, endpoint, zid). ``adminspace``
+    enables its admin space, read-only, as §4.2 (0.10) asks of a deployment
+    that wants S4 checked."""
     import zenoh
 
     from .owner import free_loopback_port
@@ -787,6 +850,9 @@ def _r1(timestamping: bool = True):
     conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
     conf.insert_json5("scouting/multicast/enabled", "false")
     conf.insert_json5("timestamping/enabled", "true" if timestamping else "false")
+    if adminspace:
+        conf.insert_json5("adminspace", json.dumps({"enabled": True,
+                                                    "permissions": {"read": True, "write": False}}))
     r1 = zenoh.open(conf)
     return r1, f"tcp/127.0.0.1:{port}", str(r1.zid())
 
@@ -841,6 +907,15 @@ def run_python_s1(report: Report) -> None:
             cid = [None if x.timestamp is None else str(x.timestamp).split("/", 1)[1] for x in control]
             report.check(run, "the control: an unstamped put through R1 arrives with R1's zid",
                          cid == [r1_zid], f"{cid} vs {r1_zid}")
+            # §3.3 (0.10): a tool attributes a stamp by the descriptor's
+            # meta.zid, read from the bus.
+            d = live.get_descriptor(consumer, owner.instance_key)
+            doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+            mine = [live.attribute_stamp(i, doc) for i in ids]
+            theirs = [live.attribute_stamp(i, doc) for i in cid]
+            report.check(run, "by the descriptor's meta.zid, a tool attributes the three samples to the owner, "
+                              "and the control's stamp as foreign (§3.3, 0.10)",
+                         mine == ["owner"] * 3 and theirs == ["foreign"], f"{mine} {theirs}")
             # Step 3 (0.8, F-73): only the order is observable from
             # outside; the tick is not.
             v3 = owner.set_state(key, b"v3")
@@ -1379,6 +1454,237 @@ def run_python_fanout(report: Report) -> None:
         r1.close()
 
 
+def run_python_tool_rules(report: Report) -> None:
+    """The rules 0.10 to 0.12 state for a tool, where the bus shows them:
+    - S4 needs the admin space (§4.2): off, the check is unobservable; on,
+      read-only, it reads 0.11's two selectors, and a router with nothing
+      under the storages selector runs no storage. An answer counts only
+      when its replier id is the zid its key names, a router this session
+      is connected to (0.12). security.md §3 steps 1-2: a client answering
+      on R1's own key, with the admin space off and on, stays unverified.
+      A storage manager played from a client is unverified too; trusted by
+      the operator, one on ``telemetry/**`` is clean and one on ``zk2/**``
+      breaks S4;
+    - a fault read from presence shapes holds in two reads a grace apart
+      (§8.1): a shape gone by the second read passes, one still there is a
+      fault;
+    - revisions carry no order on the bus (§9.8): two owners serve two
+      revisions side by side, and a tool orders them by the minor their
+      descriptors state, or classifies both ways."""
+    from . import bundle, live
+    from .compat import classify_pair
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    run = "zk2py tool rules (0.10 to 0.12): S4's admin space, presence shapes, revisions on the bus"
+    # S4 (§4.2, 0.10 to 0.12; Appendix B), and security.md §3 steps 1-2.
+    import zenoh
+
+    def spoof(session, key: str, doc: dict[str, Any]):
+        """A client's queryable answering ``key`` with ``doc``: the spoof."""
+        return session.declare_queryable(key, zenoh.handlers.Callback(
+            lambda q: q.reply(key, json.dumps(doc), encoding="application/json")))
+
+    for admin in (False, True):
+        r, endpoint, zid = _r1(adminspace=admin)
+        try:
+            tool = live.open_client(endpoint)
+            s = live.open_client(endpoint)
+            try:
+                plain = live.check_s4(tool)
+                if admin:
+                    report.check(run, "S4, R1's admin space on, read-only: R1 answers under its own replier id, "
+                                      "verified; nothing under …/storage_manager/storages/**; plugins agree: clean",
+                                 plain.verdict == "clean" and plain.routers == [zid] and not plain.unverified
+                                 and not plain.storages and plain.plugins == {zid: None}, plain.detail)
+                else:
+                    report.check(run, "S4, R1's admin space off, zenoh 1.10.1's default: no answer, unobservable, "
+                                      "never clean", plain.verdict == "unobservable" and not plain.unverified
+                                 and not plain.routers, plain.detail)
+                # security.md §3: S, a client and no router, answers on R1's
+                # own key.
+                own = f"@/{zid}/router"
+                q = spoof(s, own, {"plugins": None})
+                time.sleep(0.3)
+                try:
+                    answers = [(a.key, a.replier) for a in live._answers(tool, live.S4_ROUTERS,
+                                                                           zenoh.QueryTarget.ALL, 1.0) if a.ok]
+                    spoofed = live.check_s4(tool)
+                finally:
+                    q.undeclare()
+                s_zid = str(s.zid())
+                if admin:
+                    report.check(run, "security.md §3 step 2: R1 answers too, under its own replier id, and is "
+                                      "verified; S's answer on R1's key carries S's replier id, unverified, so the "
+                                      "check is not clean either",
+                                 sorted(answers) == sorted([(own, zid), (own, s_zid)])
+                                 and spoofed.routers == [zid]
+                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.verdict == "unobservable",
+                                 f"answers {answers}; {spoofed.verdict}: {spoofed.detail}")
+                else:
+                    report.check(run, "security.md §3 step 1: S's answer arrives on R1's own key, the only answer, "
+                                      "its replier id S's zid, not R1's; held unverified: unobservable, never clean",
+                                 answers == [(own, s_zid)] and s_zid != zid and not spoofed.routers
+                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.verdict == "unobservable",
+                                 f"answers {answers}, R1 {zid}; {spoofed.verdict}: {spoofed.detail}")
+                if admin:
+                    # A storage manager played from a raw session, as 0.12
+                    # says the reference's own live test does: a spoof, so
+                    # unverified unless the operator trusts every answer.
+                    fake = "1234567890abcdef"
+                    base = f"@/{fake}/router/status/plugins/storage_manager/storages"
+                    held = [spoof(s, f"@/{fake}/router", {"plugins": {"storage_manager": {}}}),
+                            spoof(s, f"{base}/telemetry", {"key_expr": "telemetry/**", "volume": "memory"})]
+                    try:
+                        time.sleep(0.3)
+                        quiet_trusted = live.check_s4(tool, trust=True)
+                        held.append(spoof(s, f"{base}/all", {"key_expr": "zk2/**", "volume": "memory"}))
+                        time.sleep(0.3)
+                        loud = live.check_s4(tool)
+                        loud_trusted = live.check_s4(tool, trust=True)
+                    finally:
+                        for h in held:
+                            h.undeclare()
+                    report.check(run, "a storage on zk2/** played from a client session: its answers are "
+                                      "unverified, so they never break S4 and never let it be clean (§4.2, 0.12)",
+                                 loud.verdict == "unobservable" and not loud.storages
+                                 and len(loud.unverified) == 3, f"{loud.verdict}: {loud.detail}")
+                    report.check(run, "trusted by the operator (0.12): the storage on telemetry/** leaves S4 "
+                                      "clean, and the one on zk2/** breaks it",
+                                 quiet_trusted.verdict == "clean"
+                                 and [x[2] for x in quiet_trusted.storages] == ["telemetry/**"]
+                                 and loud_trusted.verdict == "broken"
+                                 and [x[2] for x in loud_trusted.storages if x[3]] == ["zk2/**"],
+                                 f"{quiet_trusted.verdict} | {loud_trusted.verdict}: {loud_trusted.detail}")
+            finally:
+                s.close()
+                tool.close()
+        finally:
+            r.close()
+
+    # Two linked routers, both admin spaces on (SPEC-FINDINGS F-81): a
+    # client tool is connected to one router only (Appendix B), so the far
+    # router's own, honest answer is unverified; a peer connected to both
+    # verifies both.
+    from .owner import free_loopback_port
+
+    ra, ep_a, za = _r1(adminspace=True)
+    port = free_loopback_port()
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
+    conf.insert_json5("connect/endpoints", json.dumps([ep_a]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("adminspace", json.dumps({"enabled": True, "permissions": {"read": True, "write": False}}))
+    rb = zenoh.open(conf)
+    zb = str(rb.zid())
+    try:
+        client = live.open_client(ep_a)
+        pconf = zenoh.Config()
+        pconf.insert_json5("mode", json.dumps("peer"))
+        pconf.insert_json5("connect/endpoints", json.dumps([ep_a, f"tcp/127.0.0.1:{port}"]))
+        pconf.insert_json5("scouting/multicast/enabled", "false")
+        peer = zenoh.open(pconf)
+        try:
+            deadline = time.monotonic() + 5.0
+            far = live.check_s4(client)
+            while time.monotonic() < deadline and len(far.routers) + len(far.unverified) < 2:
+                time.sleep(0.2)
+                far = live.check_s4(client)
+            both = live.check_s4(peer)
+            report.check(run, "two linked routers, a client tool on one: the far router's answer carries its own "
+                              "replier id, yet is unverified (not a router of this session), so S4 is never "
+                              "clean (F-81)",
+                         far.routers == [za] and far.unverified == [(f"@/{zb}/router", zb,
+                                                                     "not a router of this session")]
+                         and far.verdict == "unobservable", f"{far.verdict}: {far.detail}")
+            report.check(run, "the same deployment, a peer tool connected to both routers: both verified, clean",
+                         sorted(both.routers) == sorted([za, zb]) and not both.unverified
+                         and both.verdict == "clean", f"{both.verdict}: {both.detail}")
+        finally:
+            peer.close()
+            client.close()
+    finally:
+        rb.close()
+        ra.close()
+
+    r1, r1_endpoint, _ = _r1()
+    owners: list[Any] = []
+    try:
+        tool = live.open_client(r1_endpoint)
+        helper = live.open_client(r1_endpoint)
+        try:
+            # Presence shapes (§8.1): an owner, then an interface token its
+            # descriptor does not list, under its instance.
+            system, svc = "py-site", "shapes"
+            owner = PyOwner(system, svc, [load_contract(REPO / ECHO)], connect=r1_endpoint)
+            owner.start()
+            owners.append(owner)
+            sel = f"zk2/{system}/{svc}/@zk/**"
+            _wait_alive(tool, sel, 1)
+            steady, passing = live.presence_faults(tool, sel)
+            report.check(run, "presence shapes, steady: no fault and nothing passing", not steady and not passing,
+                         f"faults {steady}, passing {passing}")
+            stray = f"zk2/{system}/{svc}/@zk/alive/zk2py_probe.v1/{owner.instance}/{'0' * 16}"
+            token = helper.liveliness().declare_token(stray)
+            time.sleep(0.2)
+            timer = threading.Timer(live.SHAPE_GRACE_S / 2, token.undeclare)
+            timer.start()
+            faults, passing = live.presence_faults(tool, sel)
+            timer.join()
+            report.check(run, "a token the descriptor does not list, gone within the grace: seen once, so it "
+                              "passes, never a fault (§8.1, 0.10)",
+                         not faults and passing == {(owner.instance_key, "unlisted", "zk2py_probe.v1")},
+                         f"faults {faults}, passing {passing}")
+            token = helper.liveliness().declare_token(stray)
+            time.sleep(0.2)
+            faults, passing = live.presence_faults(tool, sel)
+            token.undeclare()
+            report.check(run, "the same token still there a grace later: seen in both reads, a fault",
+                         faults == {(owner.instance_key, "unlisted", "zk2py_probe.v1")} and not passing,
+                         f"faults {faults}, passing {passing}")
+
+            # Revisions on the bus (§9.8): zk2py_bringup.v1 at minor 0 and 1.
+            a = PyOwner(system, "rev-a", [load_contract(REPO / BRINGUP)], connect=r1_endpoint)
+            b = PyOwner(system, "rev-b", [load_contract(REPO / BRINGUP_V1_1)], connect=r1_endpoint)
+            for o in (a, b):
+                o.start()
+                owners.append(o)
+            seen = f"zk2/{system}/*/@zk/alive/zk2py_bringup.v1/**"
+            _wait_alive(tool, seen, 2)
+            pres = live.list_presence(tool, seen)
+            revs = []
+            for tok in sorted(pres.alive, key=lambda t: t["service"]):
+                d = live.get_descriptor(tool, f"zk2/{tok['system']}/{tok['service']}/@zk/instance/{tok['instance']}")
+                doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+                fp = live.fingerprint_of(doc, "zk2py_bringup.v1", tok["fp16"])
+                got = live.retrieve_bundle(tool, "zk2py_bringup.v1", fp) if fp else None
+                minor = next((e.get("minor") for e in doc.get("interfaces", [])
+                              if e.get("iface") == "zk2py_bringup.v1"), None)
+                if got is not None and got.verified is not None:
+                    revs.append((tok["service"], minor, bundle.revision(got.verified)))
+            if report.check(run, "two providers serve two revisions of zk2py_bringup.v1, each bundle retrieved "
+                                 "by its descriptor's fingerprint", len(revs) == 2
+                            and len({id(r[2]) for r in revs}) == 2,
+                            str([(s, m) for s, m, _ in revs])):
+                (_, ma, ra), (_, mb, rb) = revs
+                ordered = classify_pair(ra, rb, ma, mb)
+                both = classify_pair(ra, rb)
+                report.check(run, "ordered by the minor the descriptors state (0 → 1): compatible (§9.8, 0.10)",
+                             ordered == ("compatible", "ordered by minor 0 → 1"), str(ordered))
+                report.check(run, "without that order, both ways: compatible one way, breaking the other, so "
+                                  "undecided", both[0] == "undecided", str(both))
+        finally:
+            helper.close()
+            tool.close()
+    finally:
+        for o in owners:
+            o.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -1394,7 +1700,7 @@ def main(argv: list[str] | None = None) -> int:
         "rust-behind-r1": lambda r: run_rust_behind_r1(r, args.owner),
         "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
         "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
-        "o1": run_python_o1, "fanout": run_python_fanout,
+        "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
                     help="run only these runs, the ones behind a router of the runner's (repeatable), "

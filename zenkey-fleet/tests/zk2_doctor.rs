@@ -38,7 +38,16 @@ const GRACE: Duration = Duration::from_millis(600);
 /// A router on an ephemeral port, its admin space on or off (zenoh's
 /// default is off: the deployment an explorer most often meets).
 async fn router(admin: bool) -> (zenoh::Session, String) {
+    router_to(admin, None).await
+}
+
+/// [`router`], linked to `upstream` when given.
+async fn router_to(admin: bool, upstream: Option<&str>) -> (zenoh::Session, String) {
     let mut c = zenoh::Config::default();
+    if let Some(up) = upstream {
+        c.insert_json5("connect/endpoints", &format!("[\"{up}\"]"))
+            .expect("config");
+    }
     for (k, v) in [
         ("scouting/multicast/enabled", "false"),
         ("scouting/gossip/enabled", "false"),
@@ -348,7 +357,7 @@ async fn tcgui(owners: &zenoh::Session) -> Vec<Service> {
     );
     gui.require("netif", iface("tc.netif.v1"), false);
     gui.require("netem", iface("tc.netem.v1"), false);
-    gui.require("scenario", iface("tc.scenario.v1"), false);
+    gui.require("scenario", iface("tc.scenario.v1"), true);
     vec![a, b, gui.start().await.expect("the frontend")]
 }
 
@@ -385,8 +394,8 @@ async fn a_conforming_deployment_is_clean_and_an_unreachable_admin_space_is_no_v
     );
     assert_eq!(
         f.severity,
-        DoctorSeverity::Warning,
-        "a manifest role's need is not in its descriptor"
+        DoctorSeverity::Info,
+        "an optional manifest role, as its descriptor says (§3.3, 0.10)"
     );
     assert_eq!(verdict(&r, CheckId::BindingUnsatisfied).findings.len(), 1);
     // The admin space is off: a finding worth knowing, and no verdict on S4.
@@ -405,10 +414,11 @@ async fn a_conforming_deployment_is_clean_and_an_unreachable_admin_space_is_no_v
     let scope = r.scope.presence.as_option().expect("presence was read");
     assert_eq!(scope.services, 3);
     assert!(scope.complete);
-    // The binding's warning is the run's finding; under `--fail-on error`
-    // the unobservable admin checks make it no verdict.
+    // The optional binding's info is the run's finding under `--fail-on
+    // info`; above that, the unobservable admin checks make it no verdict.
     let exit = |floor| zenkey_fleet::judgement_exit_code(&r.judgement(floor));
-    assert_eq!(exit(DoctorSeverity::Warning), 1);
+    assert_eq!(exit(DoctorSeverity::Info), 1);
+    assert_eq!(exit(DoctorSeverity::Warning), 2);
     assert_eq!(exit(DoctorSeverity::Error), 2);
 
     // §8.3, against a budget this deployment is over.
@@ -617,6 +627,19 @@ async fn a_storage_on_owners_state_and_a_version_skew_are_findings() {
             .is_ok_and(|s| s.len() == 2)
     })
     .await;
+    // A raw session plays `f00d`'s documents, which is what F-80 says any
+    // session can do: untrusted, they decide nothing (§4.2, 0.12).
+    let r = doctor(&on, &admin).await;
+    assert!(
+        verdict(&r, CheckId::StorageOnState)
+            .verdict
+            .is_unobservable()
+    );
+    assert!(unseen(&r, CheckId::StorageOnState).contains("f00d"));
+    // Trusted on the operator's word (grants deny `@/**` queryables to
+    // every principal, §11.1), they are read as a router's.
+    let mut admin = admin;
+    admin.trust_admin = true;
     let r = doctor(&on, &admin).await;
     let f = found(&r, CheckId::StorageOnState, "mine@f00d");
     assert!(f.evidence.contains("acme/zk2/*/*/*/state/**"), "{f:?}");
@@ -845,6 +868,105 @@ async fn a_bound_role_is_clean_while_its_provider_is_present() {
     tokens(&tool, "zk2/host-a/tc/@zk/instance/*", 0).await;
     let r = doctor(&bus(&tool, &tool, ""), &only).await;
     let f = found(&r, CheckId::BindingUnsatisfied, "ws-01/gui netif");
-    assert_eq!(f.severity, DoctorSeverity::Warning);
+    assert_eq!(
+        f.severity,
+        DoctorSeverity::Error,
+        "a required manifest role (§3.3, 0.10)"
+    );
     assert!(f.evidence.contains("host-a/tc"), "{f:?}");
+}
+
+/// Core §4.2 (0.12, F-80): any session can answer the admin space, a real
+/// router's own key included, and the doctor trusts only a reply whose
+/// replier id is the router its key names. With the router's admin space
+/// off, the spoof is the only answer, and S4 stays unobservable, naming the
+/// spoofer; with it on, the router answers too, and the spoof still keeps
+/// the verdict from clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_admin_answer_a_router_did_not_send_is_never_trusted() {
+    for admin_on in [false, true] {
+        let (r, ep) = router(admin_on).await;
+        let owners = client(&ep).await;
+        let tool = client(&ep).await;
+        let spoofer = client(&ep).await;
+        let _services = tcgui(&owners).await;
+        settled(&tool, &TCGUI).await;
+        let rz = r.zid().to_string();
+        let _doc = admin_doc(
+            &spoofer,
+            &format!("@/{rz}/router"),
+            json!({"plugins": null}),
+        )
+        .await;
+        eventually("the spoofed document answers", || async {
+            zenkey_fleet::admin_get(&tool, &format!("@/{rz}/router"), T)
+                .await
+                .is_ok_and(|e| !e.is_empty())
+        })
+        .await;
+        let r = doctor(
+            &bus(&tool, &tool, ""),
+            &spec(&[CheckId::StorageOnState, CheckId::AdminUnreachable]),
+        )
+        .await;
+        let s4 = verdict(&r, CheckId::StorageOnState);
+        assert!(s4.verdict.is_unobservable(), "admin {admin_on}: {s4:#?}");
+        let why = unseen(&r, CheckId::StorageOnState);
+        assert!(
+            why.contains(&spoofer.zid().to_string()),
+            "admin {admin_on}: names the spoofer: {why}"
+        );
+        if admin_on {
+            assert!(clean(&r, CheckId::AdminUnreachable).contains("1 router(s)"));
+        }
+    }
+}
+
+/// Core §4.2 (0.13, F-81): a far router is verified through a verified
+/// router's document, which lists it as a `router` session. With R2 linked
+/// to R1 and a client tool on R1, both routers' answers count, and S4 is
+/// clean over both; a client answering `@/<its own zid>/router` under its
+/// own replier id is listed by R1 as a `client`, and is never trusted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_far_router_is_verified_through_the_router_that_lists_it() {
+    let (r1, ep) = router(true).await;
+    let (r2, _) = router_to(true, Some(&ep)).await;
+    let (owners, tool) = (client(&ep).await, client(&ep).await);
+    let _services = tcgui(&owners).await;
+    settled(&tool, &TCGUI).await;
+    let asked = spec(&[CheckId::StorageOnState, CheckId::AdminUnreachable]);
+    eventually("both routers answer", || async {
+        zenkey_fleet::admin_get(&tool, "@/*/router", T)
+            .await
+            .is_ok_and(|e| e.len() == 2)
+    })
+    .await;
+    let r = doctor(&bus(&tool, &tool, ""), &asked).await;
+    assert!(
+        clean(&r, CheckId::AdminUnreachable).contains("2 router(s)"),
+        "{r:#?}"
+    );
+    assert!(clean(&r, CheckId::StorageOnState).contains("on 2 router(s)"));
+
+    let spoofer = client(&ep).await;
+    let sz = spoofer.zid().to_string();
+    let _doc = admin_doc(
+        &spoofer,
+        &format!("@/{sz}/router"),
+        json!({"plugins": null}),
+    )
+    .await;
+    eventually("the spoofer answers too", || async {
+        zenkey_fleet::admin_get(&tool, "@/*/router", T)
+            .await
+            .is_ok_and(|e| e.len() == 3)
+    })
+    .await;
+    let r = doctor(&bus(&tool, &tool, ""), &asked).await;
+    let why = unseen(&r, CheckId::StorageOnState);
+    assert!(
+        why.contains(&sz) && why.contains("no verified router lists it as a router"),
+        "{why}"
+    );
+    drop((r1, r2));
 }

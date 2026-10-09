@@ -198,7 +198,8 @@ They are not losses.
 sample's stamp carries its clock's id (core §4.1, §4.3).
 - **The owner's own stamp.** It is the owner's when S1 holds, and its id
   then matches the owner's session, which the descriptor's `meta.zid`
-  names where present.
+  names where present. Two zids compare by value, never by their text:
+  zenoh drops leading zeros (core §3.3, 0.11).
 - **A router's stamp.** A router stamps what arrives unstamped.
 - **No stamp.** A stream sample may carry none.
 

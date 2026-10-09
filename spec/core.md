@@ -1,12 +1,15 @@
 # zk2 core specification
 
-**Version 0.9** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.13** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
 operations runtime's decisions and the codegen's gaps, in 0.8 what
-implementing 0.7 found, a refused presence read first, and in 0.9 the
-order of an owner's refusals and a scenario 0.8 got wrong).
+implementing 0.7 found, a refused presence read first, in 0.9 the
+order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
+a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
+who may answer the admin space, and in 0.13 how a far router is
+verified).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -493,8 +496,28 @@ gate does not name.
   `declared_by`. A role declared by the component's manifest names `null`.
   A role the configuration leaves unbound is listed with `"bindings": []`
   (§3.2). `[F: descriptors/d009-*]`
+  - **`optional`** (0.10) is `true` for a role the instance works without,
+    and absent otherwise: absent is required, and `false` written out is
+    the same as absent. For a manifest role it is the only place a tool
+    learns the role's need, which is why it was added. For a role a
+    contract declares, it repeats that contract's `[requires]`, and a tool
+    takes the need from the contract: a value that disagrees is not checked
+    (0.11, below). `[F: descriptors/ok-optional-role,
+    ok-optional-unchecked]`
 - **`profiles`** is the union of the `uses` of the contracts the instance
   implements, sorted and deduplicated (§10 point 4).
+- **`meta`** is informative: host, process, build, and nothing in it is
+  checked. One member is used (0.10): an owner SHOULD state its session's
+  zid as `meta.zid`, as the reference does. A tool attributes a state
+  stamp to its owner by comparing the stamp's id with it (S1, §4.2,
+  "Observing S1"). Without it, a stamp's clock is unattributable, never
+  foreign.
+  - **How a zid compares** (0.11). zenoh 1.10.1 writes a zid as lowercase
+    hexadecimal without leading zeros, at most 32 digits (Appendix B), so a
+    zid's text can be shorter than 32 digits, and another writer can spell
+    the same id differently. An owner SHOULD write `meta.zid` as zenoh
+    writes it. A tool MUST compare two zids by value, never by their text:
+    case and leading zeros carry no meaning.
 - **Size.** A descriptor SHOULD stay within 1 KB. At the constrained level
   (§12), it MUST fit one fragment. `[Sc: constrained.md §5]`
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
@@ -550,7 +573,11 @@ and reports these codes. `[F: descriptors/]`
    - that a role `declared_by` an interface is in that contract's
      `[requires]`, and that `params` values fit the required interface;
    - that `profiles` is the union of the contracts' `uses`;
-   - `minor`, an integer from 0 to 2^64−1 that nothing reads, and `token`.
+   - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
+     read it to order two revisions, §9.8), and `token`;
+   - that a role's `optional` agrees with the contract that declares it
+     (0.11): a tool reads the contract's `[requires]` instead.
+     `[F: descriptors/ok-optional-unchecked]`
 
 ---
 
@@ -586,6 +613,50 @@ and reports these codes. `[F: descriptors/]`
 
 A **tool** checks S4 against the routers' storage admin space. A consumer
 cannot tell under `Latest` which replier answered.
+- **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
+  deployment that wants S4 checked enables it, read-only, for the tools'
+  principals (0.10). Without it, a tool reports the check unobservable,
+  never clean.
+- **What the check reads** (0.11). The reference reads two selectors:
+  - `@/*/router`, the routers that answer;
+  - `@/*/router/**/storage_manager/storages/**`, one key per storage a
+    router's storage manager runs, its value the storage's configuration
+    with its `key_expr`.
+
+  A storage whose `key_expr` intersects an owner's `state/**` or
+  `@state/**` breaks S4. A router that answers the first selector and has
+  nothing under the second runs no storage. When no router answers the
+  first, the check is unobservable.
+- **Who answered** (0.12, F-80).
+  - **The problem.** Any session can declare a queryable under
+    `@/<zid>/router`, a real router's zid included. The key names the zid
+    its declarer chose, and the document is whatever that session sends.
+  - **Measured on zenoh 1.10.1.** With the admin space off, a client's
+    answer on the router's own key is the only answer. A tool that read it
+    as the router's would report S4 clean.
+  - **The rule.** A tool counts an answer as a router's only when the
+    reply's replier id is the zid the key names, and that zid is a
+    **verified router**. Any other answer is **unverified**, and an
+    unverified answer never contributes to a clean verdict.
+  - **Verified routers, outward** (0.13, F-81):
+    - the routers the tool's session is connected to, and the session
+      itself, are verified;
+    - so is every zid a verified router's own answer lists among its
+      `sessions` with `whatami` `router`;
+    - and so on, until no new router is verified.
+
+    A client connects to one router at a time (Appendix B), so without
+    this rule a far router's honest answer could never count, and S4 could
+    never be clean in a deployment with two or more routers. A session that
+    is no router is listed as a `client` or `peer`, and never qualifies.
+  - **The replier id** is unstable API in zenoh 1.10.1 (Appendix B), which
+    the core does not require (§0). A tool that cannot read it holds every
+    answer unverified.
+  - **The operator's alternative.** An operator MAY tell a tool to trust
+    every answer when the deployment's grants deny `@/**` queryables to
+    every principal (§11.1), which no tool can observe.
+
+  `[Sc: security.md §3]`
 
 **Observing S1.** An owner's stamp is told from a router's by its id: the
 owner's session's zid, against the router's (§4.1). Where the owner's
@@ -718,6 +789,11 @@ section is what the core requires of it.
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
   (`desired.v1`) uses both.
+- **What a tool can see** (0.10). An archive publishes no alignment status
+  at this version: not when it last aligned, from where, or how many
+  attempts it made. A tool sees each key's `confirmed` and nothing more, so
+  an archive that holds nothing reads as aligned, and a tool says so. An
+  alignment status is profile work (#613).
 
 `[Sc: state.md §4–§6, §9]`
 
@@ -1193,6 +1269,13 @@ Liveliness tokens carry no payload; everything is in the key.
     zenoh-python 1.10.1, one ended at its timeout with 257 of 2,002 tokens,
     and silently. zenoh-python has no unbounded handler, so a callback is
     the way there. `[Sc: presence.md §4]`
+  - **A fault read from presence shapes holds in two reads** (0.10). A
+    tool that decides a fault from the shape of presence (two holders, §6;
+    a token its descriptor does not list, or an exposed interface with no
+    token) MUST see it in two reads a grace apart, the grace longer than
+    the deployment's longest re-mint overlap. Start-up, re-mint and
+    teardown pass through such shapes briefly, by design. §6 states the
+    rule for split-brain, and it holds for every such shape.
   - A tool SHOULD treat a liveliness GET that ended at its timeout, rather
     than at the routers' final reply, as possibly incomplete: silence is not
     a verdict (O5). In zenoh 1.10.1 the difference shows: a GET that
@@ -1287,6 +1370,12 @@ A deployment SHOULD keep a domain within about 10–15k tokens, which kept
 discovery within 2–4 s in spike S2. At 50k tokens, discovery took 46–49 s or
 never finished. The budget is shared with every other declaration, which
 spike S2 did not measure.
+
+**What a tool can count** (0.10): liveliness tokens, the only declarations
+a reader can list, and of those only the ones its selectors and grants
+reach. Another application's tokens under its own verbatim chunks are out
+of reach, and so are subscribers and queryables. A tool's count is a lower
+bound of the domain's declarations, and it reports it as one.
 
 ### 8.4 Contract retrieval
 
@@ -1886,6 +1975,13 @@ reverse. Each rule below is a transition from the earlier revision to the
 candidate, and its class already accounts for an old reader of a new writer
 and a new reader of an old writer: that is what "both directions" means.
 
+- **On the bus, revisions carry no order** (0.10). A bundle keeps no
+  `minor` (§9.5), and two providers can serve two revisions side by side.
+  A tool that classifies them against each other MAY take the order from
+  the `minor` their descriptors state, when the two differ. Otherwise it
+  classifies both ways: the pair is clean only when both directions are
+  compatible, a finding when neither is, and undecided when they disagree.
+
 A change is **compatible**, **review** or **breaking**. The candidate's
 class is the worst over every rule and every earlier revision. A candidate
 that does not load at all is **invalid**, like the `add-pattern` case.
@@ -2155,6 +2251,10 @@ Ownership (§6) reduces access control to three grant shapes:
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
+- **No principal declares queryables under `@/**`** (0.12): the routers
+  serve the admin space themselves. A generator allows it to none under
+  `deny`, and denies it to every principal under `allow` (§4.2, "Who
+  answered"). `[Sc: security.md §3]`
 - **There are no cross-principal write grants.**
 - **An archive principal** has Own on its own prefix, plus Consume on what it
   records.
@@ -2192,6 +2292,8 @@ Ownership (§6) reduces access control to three grant shapes:
 - A refused liveliness read is answered complete and empty (§8.1). A deny
   on presence hides a service from a reader exactly as its absence would,
   so a reader the grants refuse attributes silence to absence.
+- Any session can answer under `@/**`, a router's own keys included,
+  unless the grants deny it (§4.2, "Who answered").
 
 ---
 
@@ -2259,10 +2361,15 @@ Appendix B. These are the ones the rules above cite:
 - `BestMatching` reaches the nearest `complete` queryable on each router.
 - Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
   beyond the HLC delta (500 ms).
+- The admin space is disabled by default (`adminspace.enabled: false`).
+- A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
 - A reply error carries a payload and an encoding, and no key expression.
-  `Reply::replier_id` is behind the `unstable` feature.
+  `Reply::replier_id` is behind the `unstable` feature. It names the session
+  that sent the reply, whatever key the reply is on.
+- A router's admin document (`@/<zid>/router`) lists its sessions, each
+  with the peer's zid and `whatami`: `router`, `peer` or `client`.
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.

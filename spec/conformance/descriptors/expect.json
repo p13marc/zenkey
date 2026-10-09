@@ -164,6 +164,12 @@
     "ok-minimal": {
       "codes": []
     },
+    "ok-optional-role": {
+      "codes": []
+    },
+    "ok-optional-unchecked": {
+      "codes": []
+    },
     "ok-tokenless": {
       "codes": []
     },
@@ -174,5 +180,5 @@
       "codes": []
     }
   },
-  "description": "<name>.json → the sorted D… codes of the descriptor checks (core.md §3.3, the D-code table), against contracts/nav.v2.toml. An interface whose contract is not supplied (any but nav.v2 here) is checked for syntax only."
+  "description": "<name>.json \u2192 the sorted D\u2026 codes of the descriptor checks (core.md \u00a73.3, the D-code table), against contracts/nav.v2.toml. An interface whose contract is not supplied (any but nav.v2 here) is checked for syntax only."
 }

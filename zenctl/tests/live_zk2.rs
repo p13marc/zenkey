@@ -1729,7 +1729,8 @@ async fn doctor_exits_on_its_findings_and_never_green_on_an_empty_scope() {
         binding["findings"][0]["subject"],
         "ws-01/tcgui-frontend scenario"
     );
-    assert_eq!(binding["findings"][0]["severity"], "warning");
+    // A required manifest role, as its descriptor says (§3.3, 0.10).
+    assert_eq!(binding["findings"][0]["severity"], "error");
     for clean in [
         "split-brain",
         "token-missing",

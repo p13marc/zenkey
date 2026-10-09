@@ -53,7 +53,7 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::SampleKind;
 
 use crate::bus::admin::{
-    ROUTERS, STORAGES, admin_read, merge_storage_rows, router_from_admin_entry,
+    AdminEntry, ROUTERS, STORAGES, admin_read, merge_storage_rows, router_from_admin_entry,
     storage_from_admin_entry,
 };
 use crate::bus::contracts::BundleStore;
@@ -100,6 +100,11 @@ pub struct DoctorSpec {
     pub deep: bool,
     /// The checks to ask; the rest are `NotAsked`.
     pub checks: BTreeSet<CheckId>,
+    /// Trust every admin-space answer, on the operator's word that the
+    /// deployment's grants deny `@/**` queryables to every principal
+    /// (§4.2, §11.1, 0.12), which no tool can observe. Off by default:
+    /// an answer is then trusted only when it is verifiably a router's.
+    pub trust_admin: bool,
 }
 
 impl DoctorSpec {
@@ -111,6 +116,7 @@ impl DoctorSpec {
             presence_budget: DEFAULT_PRESENCE_BUDGET,
             deep: false,
             checks: CheckId::ALL.into_iter().collect(),
+            trust_admin: false,
         }
     }
 
@@ -181,10 +187,19 @@ pub struct DoctorObservation {
 /// The routers' admin space, as two reads found it.
 #[derive(Debug, Clone, Default)]
 pub struct AdminSpace {
+    /// The routers whose answers were verified (below).
     pub routers: Vec<RouterInfo>,
+    /// The storages those routers run.
     pub storages: Vec<StorageInfo>,
     /// Whether both reads ended at the routers' final reply.
     pub complete: bool,
+    /// Answers that could not be shown to be a router's (§4.2, 0.12,
+    /// F-80), one line each: any session can answer under
+    /// `@/<zid>/router`. An answer is verified when its replier id is the
+    /// zid its key names and that zid is a router this session is
+    /// connected to, or the session itself. Never counted toward a clean
+    /// verdict.
+    pub unverified: Vec<String>,
 }
 
 /// The presence domain's tokens, counted through [`DOMAIN_SELECTORS`].
@@ -231,9 +246,10 @@ pub struct StateStamps {
 pub enum Memlock {
     /// The soft limit, in bytes.
     Limited(u64),
-    /// Unlimited — or unreadable, which `zenkey::shm::memlock_limit` does
-    /// not tell apart.
+    /// No limit.
     Unlimited,
+    /// The limit could not be read (#677): the check is unobservable.
+    Unknown,
 }
 
 // ─── the run ────────────────────────────────────────────────────────────────
@@ -262,7 +278,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         if !spec.asks_admin() {
             return None;
         }
-        Some(admin_space(&bus.raw, t).await)
+        Some(admin_space(&bus.raw, t, spec.trust_admin).await)
     };
     let domain = async {
         if !spec.asks(CheckId::PresenceOverBudget) {
@@ -283,7 +299,11 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         stamps: p.stamps,
         memlock: spec
             .asks(CheckId::ShmMemlockLow)
-            .then(|| zk2::shm::memlock_limit().map_or(Memlock::Unlimited, Memlock::Limited)),
+            .then(|| match zk2::shm::memlock() {
+                zk2::shm::Memlock::Limited(l) => Memlock::Limited(l),
+                zk2::shm::Memlock::Unlimited => Memlock::Unlimited,
+                zk2::shm::Memlock::Unknown => Memlock::Unknown,
+            }),
     }
 }
 
@@ -401,28 +421,100 @@ fn served(observed: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Des
 }
 
 /// The routers' admin space: `@/*/router` and the storages, in no
-/// namespace. Either read failing is the whole answer failing.
-async fn admin_space(raw: &Session, timeout: Duration) -> Result<AdminSpace, String> {
+/// namespace. Either read failing is the whole answer failing. Each answer
+/// is verified as a router's (§4.2, 0.12–0.13): its replier id is the zid
+/// its key names, and that zid is a router this session is connected to
+/// (or the session itself), or one a verified router's document lists as
+/// a `router` session; or, with `trust`, on the operator's word.
+async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<AdminSpace, String> {
+    let mut here: BTreeSet<String> = raw
+        .info()
+        .routers_zid()
+        .await
+        .map(|z| zid_value(&z.to_string()))
+        .collect();
+    here.insert(zid_value(&raw.zid().to_string()));
     let (routers, storages) = tokio::join!(
         admin_read(raw, ROUTERS, timeout),
         admin_read(raw, STORAGES, timeout)
     );
     let routers = routers.map_err(|e| crate::one_line(&e))?;
     let storages = storages.map_err(|e| crate::one_line(&e))?;
-    Ok(AdminSpace {
-        complete: routers.complete && storages.complete,
-        routers: routers
+    let complete = routers.complete && storages.complete;
+    // Routers, verified outward (§4.2, 0.12–0.13): a router this session is
+    // connected to (or the session itself) answering on its own key under
+    // its own replier id; then each session such a router's document lists
+    // as `router`, answering the same way; and so on. A client or peer is
+    // listed as such, and never qualifies.
+    let named = |e: &AdminEntry| crate::bus::admin::admin_key_zid(&e.key).map(zid_value);
+    let own = |e: &AdminEntry| {
+        named(e).is_some_and(|n| e.replier.as_deref().map(zid_value).as_ref() == Some(&n))
+    };
+    let mut ok: BTreeSet<String> = here.clone();
+    let mut verified_routers: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = verified_routers.len();
+        for e in &routers.entries {
+            let Some(n) = named(e) else { continue };
+            if trust || (own(e) && ok.contains(&n)) {
+                verified_routers.insert(n.clone());
+                for sess in e.value["sessions"].as_array().into_iter().flatten() {
+                    if sess["whatami"] == "router"
+                        && let Some(peer) = sess["peer"].as_str()
+                    {
+                        ok.insert(zid_value(peer));
+                    }
+                }
+            }
+        }
+        if verified_routers.len() == before {
+            break;
+        }
+    }
+    let mut unverified = BTreeSet::new();
+    let mut verified = |e: &AdminEntry| -> bool {
+        let n = named(e);
+        if trust || (own(e) && n.as_ref().is_some_and(|n| verified_routers.contains(n))) {
+            return true;
+        }
+        let why = if e.replier.is_none() {
+            "zenoh did not name who answered"
+        } else if !own(e) {
+            "its replier is not the router its key names"
+        } else if n
+            .as_ref()
+            .is_some_and(|n| here.contains(n) || ok.contains(n))
+        {
+            "its router's own answer was not verified"
+        } else {
+            "no verified router lists it as a router"
+        };
+        unverified.insert(format!(
+            "`{}`, answered by {}: {why}",
+            e.key,
+            e.replier.as_deref().unwrap_or("an unnamed session"),
+        ));
+        false
+    };
+    let routers: Vec<RouterInfo> = routers
+        .entries
+        .into_iter()
+        .filter(|e| verified(e))
+        .map(router_from_admin_entry)
+        .collect();
+    let storages = merge_storage_rows(
+        storages
             .entries
-            .into_iter()
-            .map(router_from_admin_entry)
+            .iter()
+            .filter(|e| verified(e))
+            .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
             .collect(),
-        storages: merge_storage_rows(
-            storages
-                .entries
-                .iter()
-                .filter_map(|e| storage_from_admin_entry(&e.key, &e.value))
-                .collect(),
-        ),
+    );
+    Ok(AdminSpace {
+        complete,
+        routers,
+        storages,
+        unverified: unverified.into_iter().collect(),
     })
 }
 
@@ -911,9 +1003,8 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
 enum Need {
     Required,
     Optional,
-    /// The descriptor does not say: a role a component's own manifest
-    /// declares carries no `optional` (§3.3), or its contract could not
-    /// be read.
+    /// The descriptor does not say: its declaring contract could not be
+    /// read, or declares no such role.
     Unknown(String),
 }
 
@@ -1034,11 +1125,13 @@ fn binding_unsatisfied(p: &Presence<'_>) -> CheckReport {
 
 fn need_of(p: &Presence<'_>, d: &Descriptor, r: &zenkey_model::descriptor::RequireEntry) -> Need {
     let Some(by) = &r.declared_by else {
-        return Need::Unknown(
-            "its component's manifest declares it, and a descriptor carries no `optional` \
-             for such a role (§3.3)"
-                .into(),
-        );
+        // A role the component's manifest declares states its own need
+        // (§3.3, 0.10): `optional`, absent being required.
+        return if r.optional {
+            Need::Optional
+        } else {
+            Need::Required
+        };
     };
     let Some(entry) = d.interfaces.iter().find(|e| &e.iface == by) else {
         return Need::Unknown(format!(
@@ -1609,6 +1702,21 @@ fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
     CheckReport::of(C, findings, undecided, clean)
 }
 
+/// A zid by its value (§3.3, 0.11): zenoh writes it as lowercase hex without
+/// leading zeros, and another writer may not, so two spellings of one id
+/// compare equal here. Text that is not hex is kept as written, and so
+/// matches only itself.
+fn zid_value(z: &str) -> String {
+    let t = z.trim().to_ascii_lowercase();
+    if t.is_empty() || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return z.to_owned();
+    }
+    match t.trim_start_matches('0') {
+        "" => "0".to_owned(),
+        v => v.to_owned(),
+    }
+}
+
 /// §4.2 S1–S2: each owner's state replies, by the clock that stamped them,
 /// against the owner's own session — the `meta.zid` its descriptors name.
 fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
@@ -1616,7 +1724,7 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
     let mut zids: BTreeMap<&Addr, BTreeSet<String>> = BTreeMap::new();
     for (a, _, d) in p.served() {
         if let Some(z) = d.meta.get("zid").and_then(|v| v.as_str()) {
-            zids.entry(a).or_default().insert(z.to_owned());
+            zids.entry(a).or_default().insert(zid_value(z));
         }
     }
     let mut findings = Vec::new();
@@ -1660,7 +1768,7 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                     "{count} unstamped (e.g. {}): a reply MUST carry its mutation's timestamp",
                     keys.join(", ")
                 )),
-                Some(c) if !own.contains(c) => wrong.push(format!(
+                Some(c) if !own.contains(&zid_value(c)) => wrong.push(format!(
                     "{count} stamped by clock {c} (e.g. {}), not the owner's session",
                     keys.join(", ")
                 )),
@@ -1771,14 +1879,40 @@ fn admin_of(obs: &DoctorObservation, check: CheckId) -> Result<&AdminSpace, Chec
 
 /// The reason an admin-space check is unobservable when no router answered.
 fn no_router(a: &AdminSpace) -> String {
-    if a.complete {
+    let base = if a.complete {
         format!(
             "no router answered `{ROUTERS}` through this reader: the admin space is disabled, \
              the mesh is peer-only, or access control denies it"
         )
     } else {
         format!("the admin read of `{ROUTERS}` ended at its timeout with no router")
+    };
+    if a.unverified.is_empty() {
+        base
+    } else {
+        format!(
+            "{base}; {} answer(s) could not be shown to be a router's, and are not trusted \
+             (§4.2, 0.12): {}",
+            a.unverified.len(),
+            a.unverified.join("; ")
+        )
     }
+}
+
+/// The answers no check may count, as unjudged subjects (§4.2, 0.12).
+fn unverified_answers(a: &AdminSpace) -> Vec<Unjudged> {
+    a.unverified
+        .iter()
+        .map(|u| {
+            unjudged(
+                "admin space",
+                format!(
+                    "{u}: any session can answer under `@/<zid>/router`, so only a router's own \
+                     reply, from a router this session is connected to, is trusted (§4.2, 0.12)"
+                ),
+            )
+        })
+        .collect()
 }
 
 /// §4.2 S4: each storage's key expression against every owner's state
@@ -1803,7 +1937,7 @@ fn storage_on_state(obs: &DoctorObservation) -> CheckReport {
         })
         .collect();
     let mut findings = Vec::new();
-    let mut undecided = Vec::new();
+    let mut undecided = unverified_answers(a);
     for s in &a.storages {
         let subject = format!("{}@{}", s.name, s.zid);
         let Some(text) = &s.key_expr else {
@@ -1902,7 +2036,7 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
         return CheckReport::unobservable(C, no_router(a));
     }
     let mut versions: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut undecided = Vec::new();
+    let mut undecided = unverified_answers(a);
     for r in &a.routers {
         match &r.version {
             Some(v) => versions.entry(v).or_default().push(&r.zid),
@@ -1982,12 +2116,12 @@ fn shm_memlock_low(obs: &DoctorObservation) -> CheckReport {
                 floor / MIB
             ),
         ),
-        Some(Memlock::Unlimited) => CheckReport::of(
+        Some(Memlock::Unlimited) => {
+            CheckReport::of(C, vec![], vec![], "RLIMIT_MEMLOCK is unlimited")
+        }
+        Some(Memlock::Unknown) => CheckReport::unobservable(
             C,
-            vec![],
-            vec![],
-            "RLIMIT_MEMLOCK is unlimited, as zenkey::shm reads it (it reads an unreadable \
-             limit the same way)",
+            "RLIMIT_MEMLOCK could not be read on this host (getrlimit failed)",
         ),
     }
 }
@@ -2135,6 +2269,15 @@ mod tests {
         judge(o, &spec()).check(id).expect("every check").clone()
     }
 
+    #[test]
+    fn a_zid_compares_by_value_not_by_its_text() {
+        // §3.3 (0.11, F-78): zenoh drops leading zeros; case is no meaning.
+        assert_eq!(zid_value("00AB12"), zid_value("ab12"));
+        assert_eq!(zid_value("0"), zid_value("000"));
+        assert_ne!(zid_value("ab12"), zid_value("ab120"));
+        assert_eq!(zid_value("zid-x"), "zid-x", "not hex: kept as written");
+    }
+
     #[track_caller]
     fn found(r: &CheckReport) -> &DoctorFinding {
         assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
@@ -2231,6 +2374,24 @@ mod tests {
                "bindings": bindings})
     }
 
+    /// [`bound`] with the consumer's manifest role stated optional (§3.3,
+    /// 0.10).
+    fn bound_optional(c: &Contract, to: &[&str]) -> Observed {
+        let mut r = role(None, to);
+        r["optional"] = json!(true);
+        observed(
+            &[
+                inst("h1/tc", A),
+                alive("h1/tc", "tc.v1", A, c),
+                inst("ws/gui", B),
+            ],
+            vec![
+                (("h1/tc", A), descriptor("h1/tc", A, &[entry(c)], &[])),
+                (("ws/gui", B), descriptor("ws/gui", B, &[], &[r])),
+            ],
+        )
+    }
+
     /// The tc provider `h1/tc` and a consumer `ws/gui` whose role `netif`
     /// is bound to `to`, declared by `gui.v1` when `by_contract`.
     fn bound(c: &Contract, g: Option<&Contract>, to: &[&str]) -> Observed {
@@ -2257,13 +2418,19 @@ mod tests {
         // Satisfied by the provider's token.
         let o = obs(bound(&c, None, &["*/tc"]), &[&c], &[]);
         assert!(clean(&check(&o, CheckId::BindingUnsatisfied)).starts_with("1 bound role"));
-        // A manifest role selecting nothing: its need cannot be told.
+        // A manifest role selecting nothing: required unless its entry says
+        // `optional` (§3.3, 0.10).
         let o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
         let r = check(&o, CheckId::BindingUnsatisfied);
         let f = found(&r);
         assert_eq!(f.subject, "ws/gui netif");
-        assert_eq!(f.severity, DoctorSeverity::Warning);
+        assert_eq!(f.severity, DoctorSeverity::Error);
         assert!(f.evidence.contains("visible to this reader"), "{f:?}");
+        let o = obs(bound_optional(&c, &["h9/tc"]), &[&c], &[]);
+        assert_eq!(
+            found(&check(&o, CheckId::BindingUnsatisfied)).severity,
+            DoctorSeverity::Info
+        );
         // A run that asked no check comparing two reads took one: its read
         // is complete, and the finding stands.
         let mut o = obs(bound(&c, None, &["h9/tc"]), &[&c], &[]);
@@ -2459,6 +2626,7 @@ mod tests {
             routers: vec![router("r1", Some("1.10.1"))],
             storages: vec![],
             complete: true,
+            unverified: vec![],
         }));
         o.memlock = Some(Memlock::Limited(64 * 1024 * 1024));
         let report = judge(&o, &spec());
@@ -2565,9 +2733,41 @@ mod tests {
                 routers,
                 storages,
                 complete,
+                unverified: vec![],
             })),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_admin_answer_no_router_can_be_shown_to_have_sent_is_never_clean() {
+        // §4.2 (0.12, F-80): a session answering `@/<zid>/router` itself.
+        let spoof = "`@/r1/router`, answered by c0ffee".to_owned();
+        let mut o = admin(vec![], vec![], true);
+        if let Some(Ok(a)) = &mut o.admin {
+            a.unverified.push(spoof.clone());
+        }
+        for c in [CheckId::StorageOnState, CheckId::RouterVersionSkew] {
+            assert!(
+                unseen(&check(&o, c)).contains("could not be shown"),
+                "{c:?}"
+            );
+        }
+        assert!(
+            found(&check(&o, CheckId::AdminUnreachable))
+                .evidence
+                .contains("c0ffee")
+        );
+        // Beside a verified router, still no clean verdict.
+        let mut o = admin(vec![router("r1", Some("1.10.1"))], vec![], true);
+        if let Some(Ok(a)) = &mut o.admin {
+            a.unverified.push(spoof);
+        }
+        let r = check(&o, CheckId::StorageOnState);
+        assert!(
+            !matches!(r.verdict, Judgement::NotEstablished { .. }),
+            "{r:#?}"
+        );
     }
 
     #[test]
@@ -2702,5 +2902,7 @@ mod tests {
         assert!(f.evidence.contains("64 KiB"), "{f:?}");
         clean(&at(Memlock::Limited(zk2::shm::MEMLOCK_FLOOR)));
         clean(&at(Memlock::Unlimited));
+        // An unreadable limit is not an unlimited one (#677).
+        assert!(unseen(&at(Memlock::Unknown)).contains("could not be read"));
     }
 }

@@ -28,7 +28,7 @@
       }
     },
     "meta": {
-      "description": "Host, process, build, zid: informative, never interpreted.",
+      "description": "Host, process, build: informative, never interpreted. `zid` is the\nowner's session zid, which an owner SHOULD state: a tool attributes\na state stamp to the owner by it (§3.3, 0.10; S1).",
       "type": "object",
       "additionalProperties": true,
       "default": {}
@@ -142,6 +142,10 @@
         "interface": {
           "description": "The required interface, `<name>.v<major>`.",
           "type": "string"
+        },
+        "optional": {
+          "description": "Whether the role is optional: the instance works without a provider\n(§3.2, 0.10). Written only when `true`; absent is required. A role a\ncontract declares is optional as that contract says; one the\ncomponent's manifest declares, as the manifest says.",
+          "type": "boolean"
         },
         "params": {
           "description": "Template parameters bound by the binding (R2): parameter name →\n`self.system`, `self.service`, or a value.",
