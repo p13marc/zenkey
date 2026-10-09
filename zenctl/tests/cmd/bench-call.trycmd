@@ -18,11 +18,11 @@ here it then goes on to its session, the dead-bus fixture, whose 2 is the
 session's.
 
 ```console
-$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"up": true}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"operation": "Enable"}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
 ? 2
 Error: tc.netif.v1 @op/interfaces/{ns}/{iface}/set: is not idempotent, and a benchmark calls it again and again: that is a repeated write into a live deployment, not a measurement (O4). Pass --i-know to mean it
 
-$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"up": true}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl bench call host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}/set' --param ns=default --param iface=eth0 '{"operation": "Enable"}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --i-know --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open the Zenoh session
 

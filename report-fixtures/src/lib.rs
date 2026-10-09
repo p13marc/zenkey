@@ -1805,6 +1805,7 @@ pub fn snapshot() -> Snapshot {
             ),
             SnapshotRow {
                 stamper: Some(StamperWire::Other { id: "cd34".into() }),
+                timestamp: Some("7f3b2a1c00000001/cd34".into()),
                 source_zid: Some("cd34".into()),
                 ..snapshot_row(
                     "acme/zk2/host-b/tc/tc.netif.v1/state/namespaces",
@@ -1899,14 +1900,23 @@ pub fn snapshot_diff() -> SnapshotDiff {
 /// line up across the two, and the two deployments' clocks are not compared
 /// — nothing differs.
 pub fn snapshot_diff_namespaces() -> SnapshotDiff {
-    let a = snapshot();
+    zenkey_fleet::diff_snapshots(
+        &snapshot(),
+        &snapshot_staging(),
+        zenkey_fleet::DiffOpts::default(),
+    )
+}
+
+/// [`snapshot`]'s deployment under the `staging` namespace an hour on: the
+/// same state, other stamps.
+pub fn snapshot_staging() -> Snapshot {
     let mut b = snapshot();
     b.header = zsnap_header("staging", "2026-10-09T01:00:00Z", 0.9, 5, 1);
     for row in &mut b.rows {
         row.key = row.key.replacen("acme/", "staging/", 1);
         row.timestamp = row.timestamp.as_ref().map(|t| t.replace("/ab12", "/ef56"));
     }
-    zenkey_fleet::diff_snapshots(&a, &b, zenkey_fleet::DiffOpts::default())
+    b
 }
 
 /// [`snapshot`] against itself: identical on every facet.

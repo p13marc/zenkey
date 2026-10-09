@@ -94,21 +94,23 @@ For more information, try '--help'.
 
 ```
 
+`check probe` and `check schema` name an interface since FJ8b (#612): the
+name is zk2's `<name>.v<major>`, refused by the parser like any other.
+
 ```console
-$ zenctl check probe h-0123456789ab MyApp introspect
+$ zenctl check probe host-a/tc MyApp namespaces
 ? 2
-error: invalid value 'MyApp' for '<PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+error: invalid value 'MyApp' for '<IFACE[@FP]>': interface "MyApp" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
 
 For more information, try '--help'.
 
 ```
 
 ```console
-$ zenctl check probe h-0123456789ab probe Ping
+$ zenctl check probe host-a tc.netif.v1 namespaces
 ? 2
-error: invalid value 'Ping' for '<PROCEDURE>': "Ping" is not a plain chunk; a procedure path is plain chunks joined by `/` — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
-
-For more information, try '--help'.
+Error: host-a: binding "host-a" is not <system>/<service> (each a name or *)
+check probe: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
 
@@ -122,9 +124,9 @@ For more information, try '--help'.
 ```
 
 ```console
-$ zenctl check schema --type Health --from '{}' --producer MyApp
+$ zenctl check schema MyApp namespaces --from '{}'
 ? 2
-error: invalid value 'MyApp' for '--producer <PRODUCER>': not a plain chunk — RFC 03 §2: [a-z0-9]([a-z0-9._-]*[a-z0-9])?, lowercase, alphanumeric at both ends
+error: invalid value 'MyApp' for '<IFACE[@FP]>': interface "MyApp" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
 
 For more information, try '--help'.
 

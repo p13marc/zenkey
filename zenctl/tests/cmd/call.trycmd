@@ -73,11 +73,25 @@ Error: host-a: binding "host-a" is not <system>/<service> (each a name or *)
 
 ```
 
+A JSON Schema request is checked against its type before anything is sent
+(spec §5.1, "The request"; #671): a caller does not lean on an owner to
+refuse what the schema refuses. Every violation is named. No request at all
+is `{}`, which `diagnostics` refuses:
+
+```console
+$ zenctl call '*/tc' tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: the request for @op/diagnostics: does not satisfy json:DiagnosticsRequest (spec §7.3); nothing was sent:
+  /: the required property "namespace" is missing
+  /: the required property "interface" is missing
+
+```
+
 A call that passes every check goes on to its session — here the dead-bus
 fixture, so it stops there, and the 2 is the session's:
 
 ```console
-$ zenctl call '*/tc' tc.netif.v1 diagnostics --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+$ zenctl call '*/tc' tc.netif.v1 diagnostics '{"namespace": "default", "interface": "eth0"}' --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
 Error: failed to open the Zenoh session
 

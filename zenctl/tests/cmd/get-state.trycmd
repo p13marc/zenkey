@@ -26,13 +26,18 @@ Error: bandwidth/{ns}/{iface}: tc.netif.v1 declares no state resource "bandwidth
 
 ```
 
-`--last-known <ARCHIVE>` reads an archive instead of the owner (S5), one
-key at a time (§4.4): every template parameter must be given.
+`--last-known <ARCHIVE>` reads an archive instead of the owner (S5). A
+parameter left out is a wildcard over what the archive holds
+(`archive::last_known_all`, #671; FJ8b) — no longer refused — so this read
+goes on to its session, the dead-bus fixture, whose 2 is the session's:
 
 ```console
-$ zenctl get state host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --param ns=default --last-known ground/archive --contracts ../examples/zk2/tcgui/tc.netif.v1.toml
+$ zenctl get state host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --param ns=default --last-known ground/archive --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
 ? 2
-Error: --last-known reads an archive one key at a time (spec §4.4): give --param iface=…
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
 ```
 

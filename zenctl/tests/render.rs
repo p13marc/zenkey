@@ -472,12 +472,10 @@ bundle.bin
     assert!(notes(&fx::blob_fetch()).contains("failed verification before disk"));
 }
 
-/// One reply, one error envelope, and the attachment clause `check probe` used
-/// to drop (#237).
+/// One reply, one error envelope, and the attachment clause (#237).
 #[test]
-fn a_call_and_a_probe_render_a_reply_identically() {
+fn a_call_renders_a_reply_and_an_error_envelope() {
     let call = table(&fx::call_report());
-    let probe = table(&fx::probe_report());
     assert_data_eq!(
         call.clone(),
         str![[r#"
@@ -490,15 +488,11 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
 
 "#]]
     );
-    assert!(
-        probe.ends_with(&call),
-        "probe is the call plus one provenance line:\n{probe}"
-    );
     assert!(call.contains("attachment (18 B)"), "the clause probe lost");
 
     // R5: a silent call's note names the wait, and the document states it —
     // it used to say "the timeout too short" about a timeout the report
-    // never carried (O5). The probe inherits both by delegation.
+    // never carried (O5).
     let silent = zenkey_fleet::report::CallReport {
         answers: vec![],
         ..fx::call_report()
@@ -509,16 +503,94 @@ h-bbbbbbbbbbbb: ✗ unsupported — this build serves no `processes`
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
     // `5.0`: the seconds unification (#218) — see the budget window above.
     assert_eq!(envelope["timeout_s"], 5.0);
-    let silent_probe = zenkey_fleet::report::ProbeReport {
-        call: silent,
-        ..fx::probe_report()
+}
+
+/// `check probe` over zk2 (#612, FJ8b): a consumer-shaped read of one
+/// resource, no longer a call. The three verdicts each have their own
+/// word, the presence read that attributes a silence is drawn only when it
+/// was made, and an up-and-silent owner is told apart from no token at all.
+#[test]
+fn a_probe_names_its_verdict_and_attributes_its_silence() {
+    use zenkey_fleet::Judgement;
+    use zenkey_fleet::report::{ExpectPresence, ProbeReport};
+
+    let silent = fx::probe_report();
+    let t = table(&silent);
+    assert!(
+        t.starts_with(
+            "probe host-a/tc tc.netif.v1 state/interfaces/{ns}/{iface}: 0 value(s) in 5.0s \
+             (0 conforming, 0 not); current state: 0 key(s), 0 conforming\n"
+        ),
+        "{t}"
+    );
+    assert!(t.contains("presence: held by host-a/tc — up, and silent"), "{t}");
+    assert!(t.contains("NOTHING USABLE ARRIVED — the finding"), "{t}");
+    assert_eq!(silent.verdict, Judgement::Established);
+    let n = notes(&silent);
+    assert!(n.contains("2 sample(s) on a wildcard key discarded by rule"), "{n}");
+    assert!(n.contains("resolved to no member of the resource"), "{n}");
+
+    // No token, with a read that completed: the access-control caveat.
+    let nobody = ProbeReport {
+        presence: Some(ExpectPresence {
+            holders: vec![],
+            ..silent.presence.clone().unwrap()
+        }),
+        ..silent.clone()
     };
-    assert!(notes(&silent_probe).contains("within 5s"));
+    assert!(table(&nobody).contains("presence: no token visible to this reader"));
+    assert!(notes(&nobody).contains("a read access control refused"));
+    // No token, and the read ran to its timeout: never "absent".
+    let short = ProbeReport {
+        presence: Some(ExpectPresence {
+            holders: vec![],
+            complete: false,
+            ..silent.presence.clone().unwrap()
+        }),
+        ..silent.clone()
+    };
+    assert!(table(&short).contains("the read ended at its timeout"));
+
+    // A value arrived: the presence read was not made, so it is not drawn.
+    let arrived = ProbeReport {
+        received: 1,
+        conforming: 1,
+        keys_seen: 1,
+        presence: None,
+        current: None,
+        verdict: Judgement::NotEstablished {
+            reason: "a value arrived".into(),
+        },
+        ..silent.clone()
+    };
+    let t = table(&arrived);
+    assert!(t.contains("ARRIVED") && !t.contains("NOTHING"), "{t}");
+    assert!(!t.contains("presence:"), "not asked is not drawn:\n{t}");
+    assert!(!t.contains("current state"), "a stream has none to read:\n{t}");
+
+    let unobservable = ProbeReport {
+        verdict: Judgement::Unobservable {
+            reason: "the presence read failed".into(),
+        },
+        ..silent.clone()
+    };
+    let t = table(&unobservable);
+    assert!(t.contains("UNOBSERVABLE — the silence cannot be attributed"), "{t}");
+    assert!(t.contains("  ! the presence read failed"), "{t}");
+
+    // The verdict rides the envelope, and the exits are 1, 0, 2.
     let envelope: serde_json::Value =
-        serde_json::from_str(ndjson(&silent_probe).lines().next().unwrap()).unwrap();
-    // `5.0`: the seconds unification (#218) — a probe wraps a `CallReport`,
-    // so it moved with it, which is the point of rendering them identically.
-    assert_eq!(envelope["timeout_s"], 5.0);
+        serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["discarded"], 2);
+    assert_eq!(envelope["unresolved"], 1);
+    for (report, code) in [(&silent, 1), (&arrived, 0), (&unobservable, 2)] {
+        assert_eq!(
+            zenkey_fleet::judgement_exit_code(&report.verdict),
+            code,
+            "{:?}",
+            report.verdict
+        );
+    }
 }
 
 /// RFC 05 §3.2 (#424): a bounded reply that stopped early says so on the
@@ -557,15 +629,6 @@ fn a_partial_page_says_stopped_early_and_a_null_cursor_is_a_caveat() {
         "a cursor is a way on — no caveat for the first answer:\n{n}"
     );
     assert_eq!(report.exit_code(), 0, "a call is an act, not a judgement");
-
-    // `check probe` delegates, so it inherits both the line and the caveat.
-    let probe = zenkey_fleet::report::ProbeReport {
-        call: report,
-        ..fx::probe_report()
-    };
-    assert!(table(&probe).contains("stopped early (partial=true, next_cursor=null)"));
-    assert!(notes(&probe).contains("a contract violation) (RFC 05 §3.2)"));
-    assert_eq!(probe.call.exit_code(), 0);
 }
 
 #[test]
@@ -624,17 +687,18 @@ FAIL
 }
 
 /// The field window (#223): per-path stats beside their findings, the path
-/// table's bound stated in every format, and the stuck caveat — an
-/// observation with a window, not a verdict — where a reader will see it.
+/// table's bound stated in every format. Over zk2 (#612, FJ8b) a path is
+/// declared by the contract's type or not, and field-stuck is *not asked*
+/// until freshness has a profile (#613) — said, never silently dropped.
 #[test]
-fn a_field_report_states_its_bound_and_its_stuck_caveat() {
+fn a_field_report_states_its_bound_and_what_it_did_not_ask() {
     assert_data_eq!(
         table(&fx::field_report()),
         str![[r#"
-40/40  v1/h-3fa9c2d41b7e/state/sysinfo/health · temperature_c  number  unchanged  min 21.5 max 21.5 last 21.5  values {21.5}
-40/40  v1/h-3fa9c2d41b7e/state/sysinfo/health · status         string  1 change(s), last at 12.0s  values {"degraded", "ok"}
+40/40  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 · mtu          number  declared  unchanged  min 1500 max 1500 last 1500  values {1500}
+40/40  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 · driver_hint  string  NOT declared by its type  1 change(s), last at 12.0s  values {"e1000", "virtio"}
 
-⚠  field-stuck: v1/h-3fa9c2d41b7e/state/sysinfo/health · temperature_c — value 21.5 unchanged across 40 sample(s) spanning 29.5s — at least 3× the declared ttl_s 5s — while the key kept publishing. An observation over this 30s window, not a verdict: a constant-by-design field always reads this way  [RFC 04 §1.2]
+⚠  field-new: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 · driver_hint — present in 40 of 40 document sample(s) but never declared by the contract's type json:NetworkInterface — drift at field granularity
 
 "#]]
     );
@@ -648,12 +712,16 @@ fn a_field_report_states_its_bound_and_its_stuck_caveat() {
         "the bound's cost is stated (O6): {stderr}"
     );
     assert!(
-        stderr.contains("2 sample(s) carried no structural document"),
-        "undocumented is counted apart from absence (O4): {stderr}"
+        stderr.contains("2 sample(s) carried no document"),
+        "undocumented is counted apart from absence (O5): {stderr}"
     );
     assert!(
-        stderr.contains("not a verdict"),
-        "the stuck caveat rides every rendering: {stderr}"
+        stderr.contains("3 sample(s) on keys no contract resolved"),
+        "unresolved is unjudgeable, not clean (O4): {stderr}"
+    );
+    assert!(
+        stderr.contains("field-stuck was not asked"),
+        "not asked is stated, never read as clean (O4): {stderr}"
     );
 
     // The envelope leads the ndjson with the bound claim; rows and findings
@@ -681,15 +749,16 @@ fn a_field_report_states_its_bound_and_its_stuck_caveat() {
 }
 
 /// `IMPAIRED` is the absence of a verdict, and the note says so in every
-/// format.
+/// format. The expectation names a zk2 resource of an address, and a QoS
+/// violation names the axis that differs, declared beside observed (§2.4).
 #[test]
 fn an_impaired_expectation_says_it_is_not_a_verdict_either_way() {
     assert_data_eq!(
         table(&fx::expect_report()),
         str![[r#"
-acme/v1/**/state/**: 120 sample(s) on 4 key(s) over 5.0s, 24.00 Hz over the full window
+*/tc tc.netif.v1 stream/bandwidth/{ns}/{iface}: 120 sample(s) on 4 key(s) over 5.0s, 24.00 Hz over the full window
 violations (1 shown of 9):
-  ✗  v1/h-3fa9c2d41b7e/state/sysinfo/health: qos data/drop
+  ✗  zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: priority declared data, observed real_time
 IMPAIRED — the observation cannot carry the claim:
   !  17 sample(s) were dropped while behind
 
@@ -736,17 +805,18 @@ VIOLATES
     assert_eq!(states, ["met", "met", "not_met", "unknowable"]);
 }
 
-/// The fleet timeline (#216), arrival axis: lanes per origin/producer with
-/// the stamper in the heading, the unstamped lane beside them, `pos` from
-/// the merged ordering, and the drop as a break at its arrival position.
+/// The fleet timeline (#216), arrival axis: lanes per zk2 resource of one
+/// address (#612, FJ8b) with the stamper in the heading and whose clock it
+/// is, the unstamped lane beside them, `pos` from the merged ordering, and
+/// the drop as a break at its arrival position.
 #[test]
 fn a_timeline_on_arrival_groups_lanes_and_places_the_break() {
     assert_data_eq!(
         table(&fx::timeline_report_arrival()),
         str![[r#"
-h-3fa9c2d41b7e/sysinfo · arrival · stamper 33 (2 unattributable)
-0  +1.000ms  200/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
-1  +2.000ms  100/33      acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
+host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface} · arrival · stamper 33 (2 on the owner's clock)
+0  +1.000ms  200/33      acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0
+1  +2.000ms  100/33      acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1
 
 unstamped (arrival axis only) · arrival · no stamper
 3  +3.000ms              plain/key
@@ -756,21 +826,36 @@ breaks · arrival positions
 
 "#]]
     );
-    assert_data_eq!(
-        ndjson(&fx::timeline_report_arrival()),
-        str![[r#"
-{"axis":"arrival","clock":"observer monotonic, µs since window start","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]},{"first_t_us":3000,"lane":{"kind":"unstamped"},"last_t_us":3000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":0},"samples":1,"stampers":[]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by arrival — observer monotonic, µs since window start; a position says when this observer saw a sample, never when it was produced"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"arrival","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"window_s":10.0}
-{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
-{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"arrival","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
-{"kind":"dropped","n":3,"order_by":"arrival","pos":2,"row":"break"}
-{"key":"plain/key","kind":"put","lane":{"kind":"unstamped"},"order_by":"arrival","pos":3,"row":"sample","t_us":3000}
-
-"#]]
+    let out = ndjson(&fx::timeline_report_arrival());
+    let lines: Vec<serde_json::Value> = out
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "timeline");
+    assert_eq!(envelope["order_by"], "arrival");
+    assert_eq!(
+        envelope["lens"]["presence"]["complete"], true,
+        "the lens the lanes were resolved with rides the envelope"
+    );
+    assert_eq!(
+        envelope["lanes"][0]["provenance"],
+        serde_json::json!({"owner": 2, "other": 0, "unattributable": 0})
+    );
+    let rows: Vec<&str> = lines[1..]
+        .iter()
+        .map(|r| r["row"].as_str().unwrap())
+        .collect();
+    assert_eq!(rows, ["sample", "sample", "break", "sample"]);
+    assert_eq!(lines[1]["provenance"], "owner", "whose clock, per row (O7)");
+    assert!(
+        lines[4].get("provenance").is_none(),
+        "an unstamped row names no stamper: {}",
+        lines[4]
     );
     let n = notes(&fx::timeline_report_arrival());
     assert!(n.contains("ordered by arrival"), "{n}");
     assert!(n.contains("sequence-number lane is unavailable"), "{n}");
-    assert!(n.contains("never crosses an `@`-chunk"), "{n}");
     assert!(n.contains("deliberately no edges"), "{n}");
 }
 
@@ -783,20 +868,21 @@ fn a_timeline_on_hlc_states_its_claim_and_excludes_the_unstamped() {
     assert_data_eq!(
         table(&fx::timeline_report_hlc()),
         str![[r#"
-h-3fa9c2d41b7e/sysinfo · hlc · stamper 33 (2 unattributable)
-0  +2.000ms  100/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem
-1  +1.000ms  200/33  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu
+host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface} · hlc · stamper 33 (2 on the owner's clock)
+0  +2.000ms  100/33  acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1
+1  +1.000ms  200/33  acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0
 
 "#]]
     );
-    assert_data_eq!(
-        ndjson(&fx::timeline_report_hlc()),
-        str![[r#"
-{"axis":"hlc","claim":"happens_before","dropped":3,"keys_evicted":0,"lanes":[{"first_t_us":1000,"lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"last_t_us":2000,"provenance":{"foreign":0,"self_stamped":0,"unattributable":2},"samples":2,"stampers":["33"]}],"notes":[{"cite":"RFC 09 §5.1 O7","text":"ordered by HLC — every stamped sample was stamped by 33, so the order is that node's happened-before (its HLC is monotonic and updated by what it forwarded)"},{"text":"1 unstamped sample(s) are not on this axis — an unstamped sample has no HLC position and is never defaulted to its arrival time; see `--order arrival`"},{"text":"3 dropped sample(s) have no position on the HLC axis (a drop is something this observer suffered, on its own clock); see `--order arrival` for where they fell"},{"cite":"RFC 09 §5.1 O4","text":"the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"},{"cite":"RFC 03 §4 D2","text":"a `**` selector never crosses an `@`-chunk: the verbatim planes (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this window, not empty"},{"cite":"RFC 09 §5.1 O6","text":"3 sample(s) dropped while behind — the ordering covers only what was seen"}],"order_by":"hlc","report":"timeline","scopes":["acme/v1/**"],"sn_lane":{"reason":"zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it","state":"unavailable"},"source":{"kind":"live"},"stamper":"33","unstamped_excluded":1,"window_s":10.0}
-{"hlc":"100/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":0,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":2000}
-{"hlc":"200/33","key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu","kind":"put","lane":{"kind":"origin","origin":"h-3fa9c2d41b7e","producer":"sysinfo"},"order_by":"hlc","pos":1,"provenance":"unattributable","row":"sample","stamped_by":"33","t_us":1000}
-
-"#]]
+    let out = ndjson(&fx::timeline_report_hlc());
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["claim"], "happens_before");
+    assert_eq!(envelope["stamper"], "33");
+    assert_eq!(envelope["unstamped_excluded"], 1);
+    assert_eq!(
+        out.lines().filter(|l| l.contains("\"row\":\"break\"")).count(),
+        0,
+        "a drop has no position on this clock"
     );
     let n = notes(&fx::timeline_report_hlc());
     assert!(n.contains("happened-before"), "{n}");
@@ -856,48 +942,55 @@ would replay 4800 put(s) and 20 tombstone(s) from acme/v1/** (captured 2026-08-2
 }
 
 /// A snapshot states its span in every format (RFC 13 §4.4, #219): the
-/// table's second line, and a caveat note the machine formats carry.
+/// table's second line, and a caveat note the machine formats carry. Its
+/// holders are zk2's (#612, FJ8b): live owners, addresses no instance held,
+/// and the payloads that failed their type, each counted apart.
 #[test]
 fn a_snapshot_states_its_span_and_its_holders() {
     assert_data_eq!(
         table(&fx::snapshot_report()),
         str![[r#"
-snapshot of acme/v1/**: 5 key(s) — 2 live, 2 storage-only, 1 unattributed → fleet.zsnap
-collected over 1.25s from 2026-09-06T00:00:00Z (1 asked, 6 answered)
+snapshot of acme/zk2/*/*/*/state/**: 4 key(s) — 3 live, 1 with no instance, 0 unattributed; 1 not conforming to their type → deployment.zsnap
+collected over 1.25s from 2026-10-09T00:00:00Z (1 asked, 5 answered)
 
 "#]]
     );
     let n = notes(&fx::snapshot_report());
     assert!(n.contains("not at an instant"), "{n}");
-    assert!(n.contains("`**` cannot cross"), "{n}");
-    assert!(n.contains("lost last-writer-wins"), "{n}");
+    assert!(n.contains("lost to a newer one"), "{n}");
     assert!(
-        !n.contains("roster not asked"),
-        "the fixture asked the roster: {n}"
+        n.contains("no instance visible to this reader") && n.contains("S4 forbids"),
+        "an answer for an address nobody holds is named, never counted live: {n}"
+    );
+    assert!(n.contains("@state keys are excluded, not empty"), "{n}");
+    assert!(
+        !n.contains("presence not read"),
+        "the fixture asked presence: {n}"
     );
     assert_data_eq!(
         ndjson(&fx::snapshot_report()),
         str![[r#"
-{"header":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"live":2,"notes":[{"cite":"RFC 13 §4.4","text":"collected over 1.25s, not at an instant — a fan-in GET has no single moment"},{"cite":"RFC 03 §4 D2","text":"`**` cannot cross `@`-planes; they are excluded, not empty"},{"cite":"RFC 09 §5.1 O6","text":"1 answer(s) lost last-writer-wins to a newer reply on the same key"}],"out":"fleet.zsnap","report":"snapshot","storage_only":2,"unattributed":1}
+{"header":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"live":3,"no_instance":1,"nonconforming":1,"notes":[{"cite":"RFC 13 §4.4","text":"collected over 1.25s, not at an instant — a fan-in GET has no single moment"},{"cite":"tooling guide O5","text":"@state keys are excluded, not empty: no selector names `@state`, and `*`/`**` never match a verbatim chunk"},{"cite":"spec §4.2 S4","text":"1 value(s) answered for an address with no instance visible to this reader: an owner gone, or a store answering on its keys, which S4 forbids"},{"cite":"RFC 09 §5.1 O6","text":"1 answer(s) for one key lost to a newer one from another selector"}],"out":"deployment.zsnap","report":"snapshot","unattributed":0}
 
 "#]]
     );
 }
 
-/// A diff states both spans, keeps the facets apart in its rows, and its
-/// human verdict word is the exit code's carrier (#219).
+/// A diff states both spans, keeps the facets apart in its rows — value,
+/// conformance, holder — and its human verdict word is the exit code's
+/// carrier (#219). Keys compare by their zk2 key (#612, FJ8b).
 #[test]
 fn a_snapshot_diff_states_both_spans_and_tags_every_row() {
     assert_data_eq!(
         table(&fx::snapshot_diff()),
         str![[r#"
-a: 5 key(s), span 1.25s at 2026-09-06T00:00:00Z (acme/v1/**)
-b: 5 key(s), span 0.80s at 2026-09-06T00:05:00Z (acme/v1/**)
-1 added, 1 removed, 2 changed, 2 unchanged
-  +  acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used
-  -  acme/v1/h-9b2e4c7a1d05/state/logs/rotated
-  ~  acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  value: 1 change(s) (value: 41.0 → 42.0)
-  ~  acme/v1/h-9b2e4c7a1d05/state/sysinfo/health                 value: 1 change(s) (status: "degraded" → "ok"); holder: storage_only → live(unknown)
+a: 4 key(s), span 1.25s at 2026-10-09T00:00:00Z in namespace "acme" (acme/zk2/*/*/*/state/**)
+b: 4 key(s), span 0.80s at 2026-10-09T00:05:00Z in namespace "acme" (acme/zk2/*/*/*/state/**)
+1 added, 1 removed, 2 changed, 1 unchanged
+  +  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1
+  -  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9
+  ~  zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0  value: 1 change(s) (is_up: "yes" → true); conformance: invalid(1) → valid
+  ~  zk2/host-b/tc/tc.netif.v1/state/namespaces               holder: no_instance → live(owner)
 DIFFERENT
 
 "#]]
@@ -905,15 +998,14 @@ DIFFERENT
     let n = notes(&fx::snapshot_diff());
     assert!(n.contains("a: span 1.25s"), "{n}");
     assert!(n.contains("b: span 0.80s"), "{n}");
-    assert!(n.contains("no origin alignment was asked"), "{n}");
     assert_data_eq!(
         ndjson(&fx::snapshot_diff()),
         str![[r#"
-{"a":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.8,"roster":2,"selectors":["acme/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-09-06T00:00:00Z, b: span 0.80s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 09 §5.1 O4","text":"keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added"}],"report":"snapshot-diff","unchanged":2}
-{"key":"acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used","row":"added"}
-{"key":"acme/v1/h-9b2e4c7a1d05/state/logs/rotated","row":"removed"}
-{"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":42.0,"old":41.0,"op":"changed","path":"value"}],"truncated":0}}
-{"holder":[{"kind":"storage_only","origin":"h-9b2e4c7a1d05"},{"answered_by":"unknown","kind":"live","origin":"h-9b2e4c7a1d05"}],"key":"acme/v1/h-9b2e4c7a1d05/state/sysinfo/health","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/cd34"],"value":{"changes":[{"new":"ok","old":"degraded","op":"changed","path":"status"}],"truncated":0}}
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
+{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1","row":"added"}
+{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9","row":"removed"}
+{"conformance":[{"state":"invalid","violations":["/is_up: expected boolean"]},{"state":"valid"}],"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":true,"old":"yes","op":"changed","path":"is_up"}],"truncated":0}}
+{"holder":[{"address":"host-b/tc","kind":"no_instance"},{"address":"host-b/tc","answered_by":"owner","kind":"live"}],"key":"zk2/host-b/tc/tc.netif.v1/state/namespaces","row":"changed","timestamp":["7f3b2a1c00000001/cd34","7f3b2a1c00000001/cd34"]}
 
 "#]]
     );
@@ -923,155 +1015,33 @@ DIFFERENT
     assert!(!same.contains("  ~"), "{same}");
 }
 
-/// An alignment that was asked and could not place every origin is
-/// **refused** (#220): the pairs it had and — the RFC 13 §4.4 MUST — every
-/// origin it could not pair, each with its reason, under NOT COMPARED
-/// rather than a count line that would read as a comparison; and as rows.
+/// Two namespaces line up on their zk2 keys — what v1 needed an origin
+/// alignment for, zk2's key carries — and the two deployments' clocks are
+/// not compared: a stamp that moved alone is not a change.
 #[test]
-fn a_refused_snapshot_diff_lists_every_unpaired_origin_and_compares_nothing() {
-    assert_data_eq!(
-        table(&fx::snapshot_diff_unmapped()),
-        str![[r#"
-a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
-b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
-origins aligned: 1
-  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
-origins not paired: 2
-  ?  h-9b2e4c7a1d05 (in a)  label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b
-  ?  h-0badcafe1234 (in b)  label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a
-NOT COMPARED
-
-"#]]
-    );
-    let n = notes(&fx::snapshot_diff_unmapped());
-    assert!(n.contains("could not be paired"), "{n}");
-    assert!(n.contains("--map A=B"), "{n}");
-    let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_unmapped())
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    assert_eq!(
-        rows.iter().filter(|r| r["row"] == "unmapped").count(),
-        2,
-        "one row per unpaired origin"
-    );
-    assert!(
-        rows.iter()
-            .any(|r| r["row"] == "unmapped" && r["side"] == "b")
-    );
-    assert!(
-        !rows.iter().any(|r| r["row"] == "subject"),
-        "no roll-up: not compared"
-    );
-    assert_eq!(rows[0]["origin_map"][0]["evidence"]["kind"], "explicit");
-}
-
-/// The acceptance case (#220): one fleet under two deployments, every
-/// origin re-minted, aligned on its label — the map table with its
-/// evidence column, every subject identical, the clean word.
-#[test]
-fn an_aligned_snapshot_diff_draws_its_map_and_rolls_up_per_subject() {
-    assert_data_eq!(
-        table(&fx::snapshot_diff_aligned()),
-        str![[r#"
-a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
-b: 6 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
-0 added, 0 removed, 0 changed, 6 unchanged
-origins aligned: 2
-  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  label `web`
-  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  label `db`
-4 subject(s) identical on every origin, 0 not
-IDENTICAL
-
-"#]]
-    );
-    let n = notes(&fx::snapshot_diff_aligned());
-    assert!(n.contains("re-based from `stg` onto `prod`"), "{n}");
-    assert!(!n.contains("no origin alignment was asked"), "{n}");
-    assert!(!n.contains("producer set alone"), "labels paired it: {n}");
-}
-
-/// One line per subject that differs — "differs on N of M origin(s)" with
-/// the example's facets, and only-in counts — and the agreeing subjects
-/// counted, not listed.
-#[test]
-fn a_normalized_snapshot_diff_says_per_subject_on_how_many_origins() {
-    assert_data_eq!(
-        table(&fx::snapshot_diff_normalized()),
-        str![[r#"
-a: 6 key(s), span 0.90s at 2026-09-06T00:00:00Z (prod/v1/**)
-b: 4 key(s), span 0.90s at 2026-09-06T00:05:00Z (stg/v1/**)
-0 added, 2 removed, 2 changed, 2 unchanged
-  -  plain/leak
-  -  prod/v1/h-9b2e4c7a1d05/state/logs/rotated
-  ~  prod/v1/h-3fa9c2d41b7e/state/sysinfo/health  value: 1 change(s) (source: "web" → "node")
-  ~  prod/v1/h-9b2e4c7a1d05/state/sysinfo/health  value: 1 change(s) (source: "db" → "node")
-origins aligned: 2
-  =  h-3fa9c2d41b7e ↔ h-c0ffee00c0de  explicit
-  =  h-9b2e4c7a1d05 ↔ h-0badcafe1234  explicit
-plain/leak            1 only in a
-state/logs/rotated    1 only in a
-state/sysinfo/health  differs on 2 of 2 origin(s)  value: 1 change(s) (source: "web" → "node")
-1 subject(s) identical on every origin, 3 not
-DIFFERENT
-
-"#]]
-    );
-    let rows: Vec<serde_json::Value> = ndjson(&fx::snapshot_diff_normalized())
-        .lines()
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect();
-    let health = rows
-        .iter()
-        .find(|r| r["row"] == "subject" && r["subject"] == "state/sysinfo/health")
-        .unwrap();
-    assert_eq!(
-        (health["compared"].as_u64(), health["differing"].as_u64()),
-        (Some(2), Some(2))
-    );
-    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
-}
-
-/// No health documents at all: the pairing rests on producer sets alone,
-/// and the O4 note says the label was never asked rather than absent.
-#[test]
-fn a_producer_set_pairing_says_the_label_was_not_asked() {
-    let (a, b) = fx::snapshot_pair_unlabelled();
-    let plan = zenkey_fleet::plan_map(
-        &zenkey_fleet::origin_profiles(&a),
-        &zenkey_fleet::origin_profiles(&b),
-        &[],
-    )
-    .unwrap();
-    let d = zenkey_fleet::diff_normalized(&a, &b, &plan, zenkey_fleet::DiffOpts::default());
+fn two_namespaces_diff_by_zk2_key_and_say_so() {
+    let d = fx::snapshot_diff_namespaces();
     let t = table(&d);
-    assert!(t.contains("  producer set"), "{t}");
+    assert!(t.contains("(acme/zk2/*/*/*/state/**)"), "{t}");
+    assert!(t.contains("(staging/zk2/*/*/*/state/**)"), "{t}");
     assert!(t.contains("IDENTICAL"), "{t}");
+    assert!(!t.contains("  ~") && !t.contains("  +") && !t.contains("  -"), "{t}");
     let n = notes(&d);
-    assert!(n.contains("paired by producer set alone"), "{n}");
-    assert!(n.contains("never asked"), "{n}");
-    assert!(n.contains("RFC 06 §6.2"), "{n}");
+    assert!(n.contains("clocks are not compared"), "{n}");
 }
 
-/// The two `.zsnap` files the CLI corpus diffs (`tests/cmd/snapshot-diff.trycmd`)
+/// The `.zsnap` files the CLI corpus diffs (`tests/cmd/snapshot-diff.trycmd`)
 /// are the shared fixtures, written through the engine's own writer — so a
 /// change to the fixture or the dialect moves both corpora together.
 /// `SNAPSHOTS=overwrite` (`just snapshots`) rewrites them; otherwise they
 /// must already match.
 #[test]
 fn the_zsnap_corpus_fixtures_are_the_shared_fixtures() {
-    let (renamed_a, renamed_b) = fx::snapshot_pair_renamed();
-    let (_, ambiguous_b) = fx::snapshot_pair_ambiguous();
-    let (unlabelled_a, unlabelled_b) = fx::snapshot_pair_unlabelled();
     for (name, snapshot) in [
         ("a.zsnap", fx::snapshot()),
         ("b.zsnap", fx::snapshot_b()),
-        // The two-deployment pairs (#220, `snapshot-diff-normalized.trycmd`).
-        ("prod.zsnap", renamed_a),
-        ("stg.zsnap", renamed_b),
-        ("stg-ambiguous.zsnap", ambiguous_b),
-        ("prod-unlabelled.zsnap", unlabelled_a),
-        ("stg-unlabelled.zsnap", unlabelled_b),
+        // The two-namespace diff (`snapshot-diff.trycmd`).
+        ("staging.zsnap", fx::snapshot_staging()),
     ] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/cmd/fixtures")
@@ -1095,7 +1065,9 @@ fn the_zsnap_corpus_fixtures_are_the_shared_fixtures() {
     }
 }
 
-/// The O6 eviction count leads, so `| head -5` cannot lose it.
+/// The O6 eviction count leads, so `| head -5` cannot lose it. Keys group
+/// by zk2 address and resource (#612, FJ8b) ahead of the per-key lines, and
+/// a key that is not zk2 data is its own group, never folded into one.
 #[test]
 fn a_rate_reports_bound_leads_its_ndjson() {
     let view = zenctl::render::RateView {
@@ -1108,8 +1080,11 @@ fn a_rate_reports_bound_leads_its_ndjson() {
     assert_data_eq!(
         table(&view),
         str![[r#"
-5.00 Hz  v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used  (0 sn gap(s))  lat — (50 unstamped: no HLC, no latency — not zero)
-5.00 Hz  v1/h-3fa9c2d41b7e/state/sysinfo/health  (0 sn gap(s))
+10.00 Hz  host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface}  (2 key(s))
+ 2.00 Hz  not a zk2 key  (1 key(s))
+
+5.00 Hz  zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0  (0 sn gap(s))  lat — (50 unstamped: no HLC, no latency — not zero)
+2.00 Hz  rt/chatter  (0 sn gap(s))
 total: 960.00 Hz over 50000 key(s) (9600 samples / 10s)
 
 "#]]
@@ -1122,8 +1097,11 @@ total: 960.00 Hz over 50000 key(s) (9600 samples / 10s)
     assert_data_eq!(
         table(&bw),
         str![[r#"
-225.0 B/s  v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used
-180.0 B/s  v1/h-3fa9c2d41b7e/state/sysinfo/health
+405.0 B/s  host-a/tc tc.netif.v1 stream/bandwidth/{ns}/{iface}  (2 key(s))
+  8.0 B/s  not a zk2 key  (1 key(s))
+
+225.0 B/s  zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0
+  8.0 B/s  rt/chatter
 total: 52800.0 B/s over 50000 key(s) (528000 bytes / 10s)
 
 "#]]
@@ -1581,40 +1559,68 @@ fn a_key_canon_prints_the_answer_alone_when_it_changed() {
     assert_eq!(table(&same), "v1/**/a is already canonical\n");
 }
 
-/// Nothing to say is *absent*, not an empty array meaning the same thing.
+/// `check schema` over zk2 (#612, FJ8b): the three verdicts each have
+/// their own word, the violations follow one per line, and nothing to say
+/// is *absent* in the document, not an empty list meaning the same thing.
 #[test]
-fn a_schema_check_omits_an_empty_detail_list() {
-    let valid = zenctl::render::SchemaCheck {
-        type_name: "Health".into(),
-        kind: "json-schema".into(),
-        verdict: zenctl::render::SchemaCheckVerdict::Valid,
-        detail: vec![],
+fn a_schema_check_names_its_verdict_and_omits_what_it_lacks() {
+    use zenkey_fleet::report::{Conformance, PayloadCheck};
+    let valid = PayloadCheck {
+        iface: "tc.netif.v1".into(),
+        fingerprint: actfx::fp(),
+        resource: "state/interfaces/{ns}/{iface}".into(),
+        member: "type".into(),
+        declared: "json:NetworkInterface".into(),
+        encoding: None,
+        size: 58,
+        conformance: Conformance::Valid,
+        value: None,
     };
     let doc: serde_json::Value = serde_json::from_str(ndjson(&valid).trim()).unwrap();
     assert_eq!(
         doc,
         serde_json::json!({
             "report": "schema-check",
-            "type": "Health",
-            "kind": "json-schema",
-            "verdict": "valid",
-        })
+            "iface": "tc.netif.v1",
+            "fingerprint": actfx::fp(),
+            "resource": "state/interfaces/{ns}/{iface}",
+            "member": "type",
+            "declared": "json:NetworkInterface",
+            "size": 58,
+            "conformance": {"state": "valid"},
+        }),
+        "no encoding given and no value kept: both absent"
     );
-    assert_eq!(table(&valid), "Health (json-schema): valid\n");
+    assert_eq!(
+        table(&valid),
+        "json:NetworkInterface tc.netif.v1@sha256:4f534f534f534f53… \
+         state/interfaces/{ns}/{iface} type: valid (58 B)\n"
+    );
 
-    let invalid = zenctl::render::SchemaCheck {
-        verdict: zenctl::render::SchemaCheckVerdict::Invalid,
-        detail: vec![r#"/status: "melted" is not one of "ok", "degraded" or "down""#.into()],
+    let invalid = PayloadCheck {
+        conformance: Conformance::Invalid {
+            violations: vec!["/is_up: expected boolean".into()],
+        },
+        ..valid.clone()
+    };
+    let t = table(&invalid);
+    assert!(t.contains("type: invalid (58 B)"), "{t}");
+    assert!(t.contains("\n  /is_up: expected boolean"), "{t}");
+
+    let undecodable = PayloadCheck {
+        encoding: Some("application/cbor".into()),
+        conformance: Conformance::Undecodable {
+            declared: "json:NetworkInterface".into(),
+            reason: "not CBOR".into(),
+        },
         ..valid
     };
-    assert_data_eq!(
-        table(&invalid),
-        str![[r#"
-Health (json-schema): invalid
-  /status: "melted" is not one of "ok", "degraded" or "down"
-
-"#]]
+    let t = table(&undecodable);
+    assert!(
+        t.contains("type: undecodable (58 B, read as application/cbor)"),
+        "the encoding read as is stated when given:\n{t}"
     );
+    assert!(t.contains("\n  not CBOR"), "{t}");
 }
 
 /// The cache is this tool's own disk footprint, and a script is a user:
@@ -1890,7 +1896,7 @@ fn every_observing_family_states_its_scope() {
 
     // Window-bearing subscribers.
     let s = scoped(&fx::expect_report());
-    assert_eq!(s.asked, ["acme/v1/**/state/**"]);
+    assert_eq!(s.asked, ["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*"]);
     assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&fx::cutover_report());
     assert_eq!(s.asked.len(), 2, "both halves of the claim: {:?}", s.asked);
@@ -1905,13 +1911,13 @@ fn every_observing_family_states_its_scope() {
     // The timeline's scope is every selector it watched, over the window;
     // a `.zrec` window has no `window_s` (nothing was asked, O4).
     let s = scoped(&fx::timeline_report_arrival());
-    assert_eq!(s.asked, ["acme/v1/**"]);
+    assert_eq!(s.asked, ["acme/zk2/**"]);
     assert_eq!(s.window_s, Some(10.0));
 
     // A snapshot's window is its collection span — the RFC 13 §4.4 fact
     // every rendering states (#219).
     let s = scoped(&fx::snapshot_report());
-    assert_eq!(s.asked, ["acme/v1/**"]);
+    assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
     assert_eq!(s.window_s, Some(1.25));
 
     // The exporter's scope is its selector, over the span it has been
@@ -1941,8 +1947,17 @@ fn every_observing_family_states_its_scope() {
     // GET-shaped asks: the wait is the window (R5/P1's `timeout_s`).
     let s = scoped(&fx::call_report());
     assert_eq!(s.window_s, Some(5.0));
+    // A probe subscribes like a consumer, and reads presence only to
+    // attribute a silence: both are what it asked.
     let s = scoped(&fx::probe_report());
-    assert_eq!(s.window_s, Some(5.0), "the probe's observation IS the call");
+    assert_eq!(
+        s.asked,
+        [
+            "zk2/host-a/tc/tc.netif.v1/state/interfaces/*/*",
+            "zk2/host-a/tc/@zk/alive/tc.netif.v1/**"
+        ]
+    );
+    assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&zenctl::render::GetReport {
         selector: "acme/v1/**/state/**".into(),
         timeout_s: 5.0,
@@ -3300,8 +3315,12 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         timestamp: None,
         event: WatchEvent::Put {
             payload: Box::new(actfx::structural()),
+            conformance: zenkey_fleet::report::Conformance::NotChecked {
+                reason: "contract not held".into(),
+            },
             attachment: None,
         },
+        qos_mismatch: None,
     };
     assert_eq!(
         zenctl::render::sample_lines(&sample),
@@ -3315,9 +3334,42 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
     );
     let delete = WatchSample {
         event: WatchEvent::Delete,
-        ..sample
+        ..sample.clone()
     };
     assert!(zenctl::render::sample_lines(&delete)[1].contains("not an empty value"));
+    // A sample that failed its type, off its declared QoS: each its own line,
+    // the violation and the axis that differs named.
+    let off = WatchSample {
+        event: WatchEvent::Put {
+            payload: Box::new(actfx::structural()),
+            conformance: zenkey_fleet::report::Conformance::Invalid {
+                violations: vec!["/is_up: expected boolean".into()],
+            },
+            attachment: None,
+        },
+        qos_mismatch: Some(zenkey_fleet::report::QosMismatch {
+            declared: zenkey_fleet::report::QosAxes {
+                priority: "data".into(),
+                congestion: "drop".into(),
+                express: false,
+            },
+            observed: zenkey_fleet::report::QosAxes {
+                priority: "real_time".into(),
+                congestion: "drop".into(),
+                express: false,
+            },
+            differs: vec!["priority".into()],
+        }),
+        ..sample
+    };
+    let lines = zenctl::render::sample_lines(&off);
+    assert_eq!(lines[2], "  invalid against its type: /is_up: expected boolean");
+    assert!(
+        lines[3].starts_with("  QoS not as declared (spec §2.4): priority")
+            && lines[3].contains("data")
+            && lines[3].contains("real_time"),
+        "{lines:#?}"
+    );
     let summary = WatchSummary {
         address: "*/tc".into(),
         iface: "tc.netif.v1".into(),
@@ -3326,6 +3378,9 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
         selectors: vec!["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*".into()],
         received: 4,
         discarded: 10,
+        unresolved: 0,
+        qos_mismatched: 0,
+        nonconforming: 0,
         lagged: 3,
         elapsed_s: 2.0,
         ended: WatchEnd::Window,
@@ -3334,6 +3389,19 @@ fn a_watch_keeps_r6_discards_apart_from_its_lag() {
     assert_eq!(lines.len(), 3, "{lines:#?}");
     assert!(lines[1].starts_with("10 sample(s)") && lines[1].contains("(R6)"));
     assert!(lines[2].starts_with("3 sample(s)") && lines[2].contains("lower bound"));
+    // #671's unresolved, §2.4's QoS and §7's types: three more counts, each
+    // its own line, none folded into another.
+    let counted = WatchSummary {
+        unresolved: 1,
+        qos_mismatched: 2,
+        nonconforming: 5,
+        ..summary.clone()
+    };
+    let lines = zenctl::render::summary_lines(&counted);
+    assert_eq!(lines.len(), 6, "{lines:#?}");
+    assert!(lines[2].starts_with("1 sample(s) on a key that resolved to no member"));
+    assert!(lines[3].starts_with("2 sample(s) did not ride the resource's declared QoS"));
+    assert!(lines[4].starts_with("5 payload(s) failed their declared type"));
     let silent = WatchSummary {
         received: 0,
         discarded: 0,

@@ -55,10 +55,10 @@ impl Render for TimelineReport {
                 let p = &lane.provenance;
                 let mut parts = Vec::new();
                 if p.owner > 0 {
-                    parts.push(format!("{} the owner's clock", p.owner));
+                    parts.push(format!("{} on the owner's clock", p.owner));
                 }
                 if p.other > 0 {
-                    parts.push(format!("{} another clock", p.other));
+                    parts.push(format!("{} on another clock", p.other));
                 }
                 if p.unattributable > 0 {
                     parts.push(format!("{} unattributable", p.unattributable));
