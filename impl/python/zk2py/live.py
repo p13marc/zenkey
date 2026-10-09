@@ -424,27 +424,65 @@ class S4Reading:
     detail: str = ""
 
 
-def unverified_why(session: zenoh.Session, a: Answer) -> str | None:
-    """§4.2 (0.12) "Who answered": "A tool counts an answer as a router's
-    only when the reply's replier id is the zid the key names, and that zid
-    is a router its session is connected to, or the session itself." Both
-    are compared by value (0.11).
+def _self_consistent(a: Answer) -> bool:
+    """The reply's replier id is the zid its key names (§4.2, 0.12), by
+    value (0.11)."""
+    if a.key is None or a.replier is None:
+        return False
+    named = _zid_value(a.key.split("/")[1])
+    return named is not None and _zid_value(a.replier) == named
 
-    None when the answer is verified, else why not:
+
+def verified_routers(session: zenoh.Session, records: list[Answer]) -> set[int]:
+    """§4.2 (0.13) "Verified routers, outward": "the routers the tool's
+    session is connected to, and the session itself, are verified; so is
+    every zid a verified router's own answer lists among its sessions with
+    whatami router; and so on, until no new router is verified."
+
+    ``records`` are the answers to ``@/*/router``. A router's "own answer"
+    is a self-consistent one on its key. Appendix B (0.13): its document
+    "lists its sessions, each with the peer's zid and whatami". Returns
+    zid values."""
+    verified = {_zid_value(str(z)) for z in session.info.routers_zid()} | {_zid_value(str(session.zid()))}
+    verified.discard(None)
+    while True:
+        grown = set()
+        for a in records:
+            if not _self_consistent(a) or _zid_value(a.key.split("/")[1]) not in verified:
+                continue
+            try:
+                doc = json.loads(a.payload)
+            except ValueError:
+                continue
+            for s in doc.get("sessions", []) if isinstance(doc, dict) else []:
+                if isinstance(s, dict) and s.get("whatami") == "router":
+                    z = _zid_value(s.get("peer"))
+                    if z is not None and z not in verified:
+                        grown.add(z)
+        if not grown:
+            return verified
+        verified |= grown
+
+
+def unverified_why(a: Answer, verified: set[int], storage: bool = False) -> str | None:
+    """§4.2 (0.12, 0.13) "Who answered": "A tool counts an answer as a
+    router's only when the reply's replier id is the zid the key names, and
+    that zid is a verified router." None when the answer counts, else why
+    not, in the reference doctor's terms (0.13):
     - ``no replier id``: the binding gives none, so every answer is held;
-    - ``replier is not the key's zid``: a session answering under another's
-      key, the spoof;
-    - ``not a router of this session``: the replier is the key's zid, but
-      no router this session is connected to (a router further away, which
-      a client, connected to one endpoint, can never verify: SPEC-FINDINGS
-      F-81)."""
+    - ``a replier other than its key's router``: the spoof;
+    - ``no verified router lists it``: a router record whose zid no
+      verified router's own answer lists as a router, such as a client
+      answering on its own key;
+    - ``its router's own answer unverified``: a storage record under such
+      a zid."""
     if a.key is None or a.replier is None:
         return "no replier id"
-    named = _zid_value(a.key.split("/")[1])
-    if named is None or _zid_value(a.replier) != named:
-        return "replier is not the key's zid"
-    mine = {_zid_value(str(z)) for z in session.info.routers_zid()} | {_zid_value(str(session.zid()))}
-    return None if named in mine else "not a router of this session"
+    if not _self_consistent(a):
+        return "a replier other than its key's router"
+    if _zid_value(a.key.split("/")[1]) not in verified:
+        return "its router's own answer unverified" if storage else "no verified router lists it"
+    return None
 
 
 def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool = False) -> S4Reading:
@@ -457,9 +495,11 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     no router answers the first, the check is unobservable."
 
     0.12 "Who answered": each answer, router record or storage, counts only
-    when :func:`unverified_why` finds nothing. "Any other answer is unverified, and an
-    unverified answer never contributes to a clean verdict." zk2py holds
-    one as unjudged: it never breaks S4 and never lets it be clean.
+    when :func:`unverified_why` finds nothing, against the routers verified
+    outward from this session (0.13, :func:`verified_routers`). "Any other
+    answer is unverified, and an unverified answer never contributes to a
+    clean verdict." zk2py holds one as unjudged: it never breaks S4 and
+    never lets it be clean.
     ``trust`` is the operator's alternative: "An operator MAY tell a tool to
     trust every answer when the deployment's grants deny @/** queryables to
     every principal".
@@ -468,12 +508,13 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     kept. A verified storage whose configuration has no readable
     ``key_expr`` makes the check unobservable rather than clean."""
     out = S4Reading("unobservable", trusted=trust)
+    records = [a for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout)
+               if a.ok and a.key is not None]
+    verified = verified_routers(session, records)
     answered = 0
-    for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout):
-        if not a.ok or a.key is None:
-            continue
+    for a in records:
         answered += 1
-        why = None if trust else unverified_why(session, a)
+        why = None if trust else unverified_why(a, verified)
         if why is not None:
             out.unverified.append((a.key, a.replier, why))
             continue
@@ -493,7 +534,7 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
-        why = None if trust else unverified_why(session, a)
+        why = None if trust else unverified_why(a, verified, storage=True)
         if why is not None:
             out.unverified.append((a.key, a.replier, why))
             continue
