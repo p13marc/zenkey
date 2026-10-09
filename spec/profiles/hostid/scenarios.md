@@ -90,17 +90,20 @@ calling the runtime's minting with nothing cached between the threads
 - No temporary file remains in `var/lib/zk2`.
 - Rounds on different roots have different systems.
 
-## §3 Fail closed (§2.5, §2.6)
+## §3 Fail closed (§2.4, §2.5, §2.6)
 
-**Setup.** A root with neither machine-id file, where `var/lib/zk2` cannot
-be written: a read-only directory, or a regular file in its place. The
-service asks for a minted system, without `hostid.ephemeral`.
+**Setup.** A root with neither machine-id file, whose `var/lib/zk2` is a
+directory the service cannot write. The service asks for a minted system,
+without `hostid.ephemeral`.
 
 **Steps.**
 1. Start the service.
 2. On a root with neither machine-id file and a writable `var/lib/zk2`,
    whose `hostid` holds `garbage`, start the service.
-3. **The control.** The root of step 1, with `etc/machine-id` holding M1.
+3. On a root whose `etc/machine-id` holds M1 but cannot be read by the
+   service (mode 0000, the service not root, or the runtime's seam
+   failing the read), with a writable `var/lib/zk2`, start the service.
+4. **The control.** The root of step 1, with `etc/machine-id` holding M1.
 
 **Expected.**
 1. The service does not start. Its error names `/etc/machine-id` (absent),
@@ -110,7 +113,9 @@ service asks for a minted system, without `hostid.ephemeral`.
    appears within the wait.
 2. The service does not start. Its error names `/var/lib/zk2/hostid` as
    holding no id. The file still holds `garbage`.
-3. The control starts, with the system `h-bbd1aa1db10b`.
+3. The service does not start. Its error names `/etc/machine-id` as
+   unreadable. No shared file is created.
+4. The control starts, with the system `h-bbd1aa1db10b`.
 
 ## §4 Ephemeral (§2.3, §2.6, §2.7)
 
