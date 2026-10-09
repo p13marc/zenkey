@@ -479,7 +479,8 @@ fn lookup<'a>(spec: &'a GenSpec, e: &GenPlanEntry) -> Result<(&'a Arc<Revision>,
 
 /// One data entry's writer.
 enum Out {
-    Stream(zenkey::writer::Writer),
+    /// Boxed: a publisher is the largest of the three.
+    Stream(Box<zenkey::writer::Writer>),
     State(zenkey::state::StateWriter),
     Event(zenkey::writer::EventWriter),
 }
@@ -610,11 +611,11 @@ pub async fn run_gen(
                 b.event_writer(iface, &e.resource, &e.values)
                     .map_err(|err| runtime_error(rev, err))?,
             ),
-            _ => Out::Stream(
+            _ => Out::Stream(Box::new(
                 b.declare_writer(iface, &e.resource, &e.values)
                     .await
                     .map_err(|err| runtime_error(rev, err))?,
-            ),
+            )),
         };
         outs.push((i, out));
     }

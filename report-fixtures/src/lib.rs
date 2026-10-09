@@ -941,7 +941,18 @@ pub fn conform_report() -> ConformReport {
                 "@op/interfaces/{ns}/{iface}/set",
                 "not idempotent: each call is a write, which this suite makes only under --i-know",
             ),
-            ConformCase::not_asked(CaseId::Freshness, "service", "a profile (#613)"),
+            ConformCase::failed(
+                CaseId::Freshness,
+                "state/interfaces/{ns}/{iface}",
+                "1 of 2 member(s) stale against its horizon of 60 s: \
+                 zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within \
+                 its horizon",
+            ),
+            ConformCase::not_asked(
+                CaseId::Freshness,
+                "stream/bandwidth/{ns}/{iface}",
+                "it declares no freshness.ttl_s",
+            ),
         ],
         unobservable: None,
     }

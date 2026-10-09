@@ -18,10 +18,14 @@
 //! [`crate::bus::conform::SAMPLE_CAP`] samples per resource; the evidence
 //! says how many it judged of how many delivered.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::SystemTime;
 
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Body, Fanout, Resource};
+use zenkey_model::freshness::{
+    self as fresh, ClockTrust, Horizon, Judged, Observation, Reason, Reply, StampAge, Verdict,
+};
 use zenkey_model::schema::TypeId;
 
 use crate::bus::conform::{ConformObservation, FanoutSeen, Heard, OpObserved};
@@ -31,7 +35,7 @@ use crate::model::catalog::{ContractState, Revision, zid_value};
 use crate::model::lens::conformance;
 use crate::report::{
     CaseId, ConformCase, ConformReport, Conformance, OperationAnswer, OperationReport,
-    PayloadRendering, PresenceAttribution, StateReport, StateValue, WatchEvent,
+    PayloadRendering, PresenceAttribution, Stamp, StateReport, StateValue, WatchEvent,
 };
 
 /// Every case `obs` supports, in [`CaseId::ALL`] order per resource.
@@ -129,6 +133,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     let mut exposed = obs.exposed();
     exposed.sort_by_key(|r| zenkey::implementation::resource_name(r));
     let present = matches!(&obs.presence, Ok(o) if !o.tokens.is_empty());
+    let clocks = clock_offsets(obs);
     for r in exposed {
         let name = zenkey::implementation::resource_name(r);
         if r.kind == Kind::Operation {
@@ -188,6 +193,9 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
                 .push(state_stamp(&name, &owners, obs.admin.as_ref(), heard, get));
             report.cases.push(state_get(&name, get));
         }
+        report
+            .cases
+            .push(freshness(obs, r, &name, heard, get, &clocks));
     }
     report.cases.extend(profile_cases());
     let mut seen = BTreeSet::new();
@@ -195,22 +203,243 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
     report
 }
 
-/// The profile-backed cases, never asked until their profiles exist (#613).
-fn profile_cases() -> [ConformCase; 2] {
-    [
-        ConformCase::not_asked(
-            CaseId::Freshness,
-            "service",
-            "judged against a declared freshness (freshness.v1), a profile that does not exist \
-             yet (#613): not asked is neither a pass nor a violation",
+/// The profile-backed cases still waiting for their profile (#613).
+fn profile_cases() -> [ConformCase; 1] {
+    [ConformCase::not_asked(
+        CaseId::Budget,
+        "service",
+        "judged against a declared rate and population budget, a profile that does not \
+         exist yet (#613): not asked is neither a pass nor a violation",
+    )]
+}
+
+/// A stamp's time, as [`crate::bus::consume::stamp`] writes it (RFC 3339).
+fn stamp_time(s: &Stamp) -> Option<SystemTime> {
+    zenoh::time::NTP64::parse_rfc3339(&s.time)
+        .ok()
+        .map(|t| t.to_system_time())
+}
+
+/// The window's measurements of every stamping clock, across every
+/// resource's subscription: the offset closest to this host's clock.
+fn clock_offsets(obs: &ConformObservation) -> BTreeMap<String, StampAge> {
+    let mut out: BTreeMap<String, StampAge> = BTreeMap::new();
+    for h in obs.heard.values().flatten() {
+        for (clock, o) in &h.clocks {
+            out.entry(zid_value(clock))
+                .and_modify(|best| {
+                    if o.nanos().unsigned_abs() < best.nanos().unsigned_abs() {
+                        *best = *o;
+                    }
+                })
+                .or_insert(*o);
+        }
+    }
+    out
+}
+
+/// `freshness.v1` (#720): every member of a stream or state resource that
+/// declares a horizon, from the window's deliveries (§2.5) and the GET's
+/// replies (§2.6), its observations combined (§2.7), all judged at the
+/// window's end; the resource's verdict is §5's second question. A reply's
+/// stamp is aged only against a clock trusted to the delta: on the
+/// operator's word (`clocks_synced`), or measured on a live put of the
+/// same clock in this window.
+fn freshness(
+    obs: &ConformObservation,
+    r: &Resource,
+    name: &str,
+    heard: Option<&Result<Heard, String>>,
+    get: Option<&Result<StateReport, String>>,
+    clocks: &BTreeMap<String, StampAge>,
+) -> ConformCase {
+    const C: CaseId = CaseId::Freshness;
+    let h = fresh::horizon_of(r);
+    match &h {
+        Horizon::Undeclared => {
+            return ConformCase::not_asked(
+                C,
+                name,
+                "it declares no freshness.ttl_s, so its freshness is not asked (freshness.v1 \
+                 §2.3)",
+            );
+        }
+        Horizon::Ignored => {
+            return ConformCase::not_asked(
+                C,
+                name,
+                "an event's freshness.ttl_s is ignored: an occurrence is never confirmed again \
+                 (freshness.v1 §2.2)",
+            );
+        }
+        Horizon::Invalid(v) => {
+            return ConformCase::unobservable(
+                C,
+                name,
+                format!(
+                    "its freshness.ttl_s, {v}, is not a horizon: a whole number of seconds from \
+                     0 to 2^53-1 (freshness.v1 §2.1)"
+                ),
+            );
+        }
+        Horizon::Never | Horizon::Within(_) => {}
+    }
+    let delta = fresh::DEFAULT_DELTA;
+    let trust = |clock: &str| {
+        if obs.spec.clocks_synced {
+            return ClockTrust::Trusted { delta };
+        }
+        clocks
+            .get(&zid_value(clock))
+            .map_or(ClockTrust::Untrusted, |o| ClockTrust::measured(*o, delta))
+    };
+    let mut members: BTreeMap<String, Vec<Observation>> = BTreeMap::new();
+    let sub = match heard {
+        Some(Ok(h)) => Some(h),
+        _ => None,
+    };
+    if let Some(h) = sub {
+        for (k, o) in &h.members {
+            members.entry(k.clone()).or_default().push(*o);
+        }
+    }
+    if let (Some(Ok(g)), Some(at)) = (get, obs.read_at) {
+        for row in &g.rows {
+            let reply = match &row.value {
+                StateValue::Deleted => Reply::Delete,
+                StateValue::Value { .. } => Reply::Put {
+                    stamp_age: row
+                        .timestamp
+                        .as_ref()
+                        .and_then(stamp_time)
+                        .map(|t| StampAge::between(t, at)),
+                },
+            };
+            let clock = row
+                .timestamp
+                .as_ref()
+                .map_or(ClockTrust::Untrusted, |s| trust(&s.clock));
+            members
+                .entry(row.key.clone())
+                .or_default()
+                .push(Observation::Got {
+                    reply: Some(reply),
+                    clock,
+                });
+        }
+        // Delivered in the window, and absent from the GET's answer.
+        for (k, os) in &mut members {
+            if !g.rows.iter().any(|row| &row.key == k) {
+                os.push(Observation::Got {
+                    reply: None,
+                    clock: ClockTrust::Untrusted,
+                });
+            }
+        }
+    }
+    // Answered by the GET, and never delivered while the window listened.
+    if let Some(h) = sub {
+        for (k, os) in &mut members {
+            if !h.members.contains_key(k) {
+                os.push(Observation::Subscribed {
+                    last: None,
+                    listened: h.listened,
+                    complete: true,
+                });
+            }
+        }
+    }
+    let judged: Vec<(String, Judged)> = members
+        .iter()
+        .map(|(k, os)| (k.clone(), fresh::judge_all(&h, os)))
+        .collect();
+    let with = |v: Verdict| -> Vec<&(String, Judged)> {
+        judged.iter().filter(|(_, j)| j.verdict == v).collect()
+    };
+    let horizon = match &h {
+        Horizon::Within(t) => format!("its horizon of {} s", t.as_secs()),
+        _ => "ttl_s = 0".to_owned(),
+    };
+    let first = |of: &[&(String, Judged)]| -> String {
+        let (k, j) = of[0];
+        let more = if of.len() > 1 {
+            format!(", and {} more", of.len() - 1)
+        } else {
+            String::new()
+        };
+        format!("{k}: {}{more}", j.reason.says())
+    };
+    let stale = with(Verdict::Stale);
+    if !stale.is_empty() {
+        return ConformCase::failed(
+            C,
+            name,
+            format!(
+                "{} of {} member(s) stale against {horizon}, as this run observed them: {} \
+                 (freshness.v1 §2.5–§2.7) — a finding about the value, never the owner's \
+                 presence",
+                stale.len(),
+                judged.len(),
+                first(&stale)
+            ),
+        );
+    }
+    let unseen = with(Verdict::Unobservable);
+    if !unseen.is_empty() {
+        let hint = if unseen
+            .iter()
+            .any(|(_, j)| j.reason == Reason::ClockUntrusted)
+        {
+            "; a reply is aged only against a clock trusted to the HLC delta, measured on a live \
+             put of the same clock or on the operator's word (--clocks-synced, freshness.v1 \
+             §2.6)"
+        } else {
+            ""
+        };
+        return ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "{} of {} member(s) could not be aged against {horizon}: {}{hint}",
+                unseen.len(),
+                judged.len(),
+                first(&unseen)
+            ),
+        );
+    }
+    let fresh_ones = with(Verdict::Fresh);
+    if fresh_ones.is_empty() {
+        return ConformCase::unobservable(
+            C,
+            name,
+            if judged.is_empty() {
+                "no member was delivered in the window or answered by the GET: nothing to age \
+                 (freshness.v1 §5)"
+                    .to_owned()
+            } else {
+                format!(
+                    "every member read ({}) is deleted: no value to age",
+                    judged.len()
+                )
+            },
+        );
+    }
+    ConformCase::passed(
+        C,
+        name,
+        format!(
+            "{} member(s) fresh against {horizon}{}",
+            fresh_ones.len(),
+            match &h {
+                Horizon::Never => ", never stale".to_owned(),
+                _ => format!(
+                    ", the last confirmation within it, by this run's receive clock or a reply's \
+                     stamp against a clock trusted to {} ms",
+                    delta.as_millis()
+                ),
+            }
         ),
-        ConformCase::not_asked(
-            CaseId::Budget,
-            "service",
-            "judged against a declared rate and population budget, a profile that does not \
-             exist yet (#613): not asked is neither a pass nor a violation",
-        ),
-    ]
+    )
 }
 
 fn forbids_fanout(r: &Resource) -> bool {
@@ -896,11 +1125,13 @@ mod tests {
         )
         .expect("write");
         let l = zenkey_model::contract::load_str(
-            "[interface]\nname = \"m\"\nmajor = 1\n[schemas]\njsonschema = [\"s.json\"]\n\
+            "[interface]\nname = \"m\"\nmajor = 1\nuses = [\"freshness.v1\"]\n\
+             [schemas]\njsonschema = [\"s.json\"]\n\
              [resources.\"bandwidth/{dev}\"]\nkind = \"stream\"\ntype = \"json:Bw\"\n\
              params = { dev = \"string\" }\ncardinality = 8\n\
              [resources.\"status/{dev}\"]\nkind = \"state\"\ntype = \"json:Status\"\n\
              params = { dev = \"string\" }\ncardinality = 8\n\
+             annotations = { \"freshness.ttl_s\" = 60 }\n\
              [resources.diag]\nkind = \"operation\"\nrequest = \"json:Req\"\nresponse = \"json:Resp\"\n\
              idempotent = true\n\
              [resources.\"set/{dev}\"]\nkind = \"operation\"\nrequest = \"json:Req\"\n\
@@ -992,11 +1223,40 @@ mod tests {
         }
     }
 
+    /// How long the fixtures' window listened.
+    const WINDOW: Duration = Duration::from_secs(2);
+
+    /// The window's end on the wall clock: 2 s after the fixtures' stamp.
+    fn read_at() -> SystemTime {
+        stamp_time(&stamp("x").unwrap()).unwrap() + WINDOW
+    }
+
+    /// Each sample's member delivered 1 s before the window's end, and each
+    /// stamp's clock measured 10 ms off this host's.
     fn heard(samples: Vec<WatchSample>) -> Result<Heard, String> {
+        let members = samples
+            .iter()
+            .map(|s| {
+                let o = Observation::Subscribed {
+                    last: Some(fresh::Last::Put(Duration::from_secs(1))),
+                    listened: WINDOW,
+                    complete: true,
+                };
+                (s.key.clone(), o)
+            })
+            .collect();
+        let clocks = samples
+            .iter()
+            .filter_map(|s| s.timestamp.as_ref())
+            .map(|t| (t.clock.clone(), StampAge::behind(Duration::from_millis(10))))
+            .collect();
         Ok(Heard {
             received: samples.len() as u64,
             samples,
             selectors: vec!["zk2/lab/m/m.v1/stream/bandwidth/*".into()],
+            members,
+            clocks,
+            listened: WINDOW,
             ..Heard::default()
         })
     }
@@ -1111,6 +1371,7 @@ mod tests {
                 seed: 42,
                 trust_admin: false,
                 calls_granted: true,
+                clocks_synced: false,
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
@@ -1129,6 +1390,7 @@ mod tests {
                 router_zids: ["r1".to_owned()].into(),
                 ..Default::default()
             })),
+            read_at: Some(read_at()),
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -1191,6 +1453,7 @@ mod tests {
             (CaseId::StateGet, "state/status/{dev}".to_owned()),
             (CaseId::Operation, "@op/diag".to_owned()),
             (CaseId::Operation, "@op/list".to_owned()),
+            (CaseId::Freshness, "state/status/{dev}".to_owned()),
         ] {
             assert!(
                 matches!(
@@ -1202,11 +1465,12 @@ mod tests {
             );
         }
         // Not idempotent, and no --i-know: not asked, with why; so is its
-        // fan-out probe; and the profile cases wait for their profiles.
+        // fan-out probe; a resource with no horizon is not asked its
+        // freshness; and the budget waits for its profile.
         for (id, subject) in [
             (CaseId::Operation, "@op/set/{dev}"),
             (CaseId::FanoutRefused, "@op/set/{dev}"),
-            (CaseId::Freshness, "service"),
+            (CaseId::Freshness, "stream/bandwidth/{dev}"),
             (CaseId::Budget, "service"),
         ] {
             let c = case(&r, id, subject);
@@ -1407,6 +1671,102 @@ mod tests {
         assert!(
             failed(&r, CaseId::ContractServed, &format!("m.v1 {}", fp()))
                 .contains("no holder served a bundle that verified")
+        );
+    }
+
+    /// `freshness.v1` (#720), per resource, judged at the window's end: a
+    /// member not confirmed within its horizon is the finding; a reply's
+    /// stamp against a clock nobody measured is unobservable, unless the
+    /// operator gives their word; no member read is unobservable; no
+    /// horizon is not asked (the conforming case above).
+    #[test]
+    fn freshness_is_judged_per_resource_at_the_windows_end() {
+        const S: &str = "state/status/{dev}";
+        let status = |last: Option<fresh::Last>, listened: Duration, measured: bool| {
+            let mut h = heard(vec![sample(
+                STATUS,
+                Conformance::Valid,
+                false,
+                Some("ab12"),
+            )])
+            .unwrap();
+            h.listened = listened;
+            h.members.clear();
+            if let Some(l) = last {
+                h.members.insert(
+                    STATUS.into(),
+                    Observation::Subscribed {
+                        last: Some(l),
+                        listened,
+                        complete: true,
+                    },
+                );
+            }
+            if !measured {
+                h.clocks.clear();
+            }
+            Ok(h)
+        };
+        // The reply's stamp is 70 s old at the window's end.
+        let late = read_at() + Duration::from_secs(68);
+
+        // The last delivery 70 s old, the reply as old against a measured
+        // clock: stale, the finding.
+        let mut o = conforming();
+        o.heard.insert(
+            S.into(),
+            status(
+                Some(fresh::Last::Put(Duration::from_secs(70))),
+                Duration::from_secs(80),
+                true,
+            ),
+        );
+        o.read_at = Some(late);
+        let r = judge(&o);
+        let d = failed(&r, CaseId::Freshness, S);
+        assert!(
+            d.contains("1 of 1 member(s) stale against its horizon of 60 s") && d.contains(STATUS),
+            "{d}"
+        );
+        assert!(d.contains("never the owner's presence"), "{d}");
+        assert_eq!(judgement_exit_code(&r.judgement()), 1);
+
+        // Nothing delivered in a 2 s window, and no live put measured the
+        // owner's clock: unobservable, naming the way out.
+        let mut o = conforming();
+        o.heard.insert(S.into(), status(None, WINDOW, false));
+        o.read_at = Some(late);
+        let r = judge(&o);
+        assert!(
+            matches!(
+                &case(&r, CaseId::Freshness, S).verdict,
+                Judgement::Unobservable { reason } if reason.contains("--clocks-synced")
+            ),
+            "{r:#?}"
+        );
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
+        // On the operator's word, the same reply is aged: stale.
+        o.spec.clocks_synced = true;
+        let r = judge(&o);
+        assert!(failed(&r, CaseId::Freshness, S).contains("not confirmed within its horizon"));
+
+        // No member delivered, none answered: nothing to age.
+        let mut o = conforming();
+        o.heard.insert(S.into(), status(None, WINDOW, true));
+        o.gets.insert(
+            S.into(),
+            Ok(StateReport {
+                rows: vec![],
+                ..get(b"{}", None).unwrap()
+            }),
+        );
+        let r = judge(&o);
+        assert!(
+            matches!(
+                &case(&r, CaseId::Freshness, S).verdict,
+                Judgement::Unobservable { reason } if reason.contains("no member")
+            ),
+            "{r:#?}"
         );
     }
 }
