@@ -3,6 +3,70 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.20 — 2026-10-09: a provider on the service's own system, the order of `profiles`, and a derived address (#719, PB)
+
+`hostid.v1`'s runtime landed (PB). A system the runtime mints is not
+known before the service starts, so a binding cannot spell a provider on
+the service's own host by name. The maintainer decided on 2026-10-09 that
+`self.system/<service>` is a provider spelling, resolved at start like the
+rest of the configuration. Implementing it, and the descriptor's
+`profiles` beside it, showed three more things the core left unsaid.
+
+**Changed: rules stated.**
+- **`self.system` providers (§3.2, R1).** A provider whose system position
+  is `self.system` names the service's own system, literal or derived:
+  `self.system/<service>` and `self.system/*`. A runtime resolves it once,
+  at start, and it holds across a re-mint. A tool, which is not a service,
+  refuses one, as it refuses a parameter bound to `self.system` (R2).
+  - New scenario `bindings.md` §5: a provider and a wildcard on the own
+    system, delivered from that system alone, listed resolved, and refused
+    to a tool.
+- **Listed resolved (R3, §3.3 `requires`).** The descriptor lists such a
+  provider as `<system>/<service>`, so a tool draws an edge to an address
+  it can find. A parameter bound to `self.system` is still listed as
+  configured.
+- **The order of `profiles` (§3.3).** 0.19 said "sorted" without an order.
+  It is now §9.5's order for `uses`: the name as a string, then the major
+  as a number. A sort of the whole strings differs at a major of 10 and
+  above (`views.v10` before `views.v2`), and where one name is another's
+  prefix followed by a dot (`a.b.v1` before `a.v1`). The reference sorted
+  strings, and now sorts as §9.5 does, with a unit test of both cases.
+- **A derived address (§8.2).** The address, and every key built from it,
+  is fixed before step 1 (a pure consumer's before its instance token). A
+  system a profile derives is derived then, before the session opens where
+  the runtime can, and a derivation that fails refuses the start as step 2
+  does. The `self.system` providers resolve at the same time.
+- **No implicit identity (§1.5).** A `self.system` binding is spelled in
+  the configuration, so it is not the implicit identity §1.5 forbids.
+
+**Found while implementing.**
+- **`self.system` is a plain chunk** (§1.2 allows dots). A system could be
+  named `self.system`, and a provider of that name would read as the
+  keyword. R1 now says that at a provider's system position it always
+  means the service's own system, a system of that name is bound only by
+  `*`, and a deployment SHOULD NOT name a system `self.system` or
+  `self.service`. R2 already read a parameter's value that way.
+- **So D009 cannot see an unresolved provider.** A descriptor listing
+  `self.system/teleop` passes D009, as a binding to a system of that name.
+  Cascade 7 now says so; `bindings.md` §5 checks the runtime instead.
+
+**Deliberately not changed.**
+- **No new D code, and D009 unchanged.** A checker cannot tell an
+  unresolved provider from a system named `self.system`, and the order of
+  `profiles` is not checked: a tool reads the list as a set.
+- **No `self.service` provider,** and no `self.system` at the service
+  position: each is the literal chunk it spells. Binding a service to its
+  own address has no use the core knows of.
+- **No reserved system names in §1.2.** Refusing `self.system` as a name
+  would change the lexical rules and `keys.json`. A SHOULD NOT is enough
+  for a name nobody needs.
+- **The core still depends on no profile.** §8.2 names `hostid.v1` as
+  today's derived system, as §3.3 and §10 name it as today's
+  derivation-only profile; the derivation, its inputs and its failures are
+  the profile's (`hostid.v1` text 0.2).
+- **`descriptor.schema.json`** and the descriptor fixtures. A resolved
+  provider is an ordinary binding.
+
 ## 0.19 — 2026-10-09: profiles that only derive, and where profiles live (#719)
 
 `hostid.v1` is the first profile to be written (#613's first tier,

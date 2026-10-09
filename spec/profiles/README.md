@@ -9,7 +9,7 @@ and `examples/zk2/`.
 
 | Profile | Text | Status | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|
-| [`hostid.v1`](hostid/v1.md) | 0.1 | draft | 0.19 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
+| [`hostid.v1`](hostid/v1.md) | 0.2 | draft | 0.20 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
 
 ## Layout
 
@@ -82,7 +82,8 @@ thing in the same place.
 - **A profile that needs the core to change** says so, and the core
   changes first, through [`../CHANGELOG.md`](../CHANGELOG.md).
   `hostid.v1` needed 0.19, so that an instance can declare a profile no
-  contract uses.
+  contract uses, and its runtime 0.20, so that a binding can name a
+  provider on the service's own, minted, system.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in

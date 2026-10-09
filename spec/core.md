@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.19** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.20** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -12,8 +12,9 @@ who may answer the admin space, in 0.13 how a far router is verified, and
 in 0.14 what access control measured, in 0.15 what §11 needs to be built
 from, in 0.16 what the tools' last verbs could not decide, in 0.17
 what a tool needs that it cannot read off the bus, in 0.18 two words
-0.17 left loose, and in 0.19 profiles that only derive, and where
-profiles live).
+0.17 left loose, in 0.19 profiles that only derive, and where
+profiles live, and in 0.20 a provider on the service's own system, the
+order of `profiles`, and a derived address).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -210,7 +211,9 @@ each of its chunks separately. `[F: slugs.json; templates.json]`
 - **No implicit identity.** Every key form names its system and service
   (§1.1), so a key cannot be built without them. A fleet-wide selection is
   spelled by name or wildcard, never defaulted from the local process.
-  `[F: keys.json]`
+  `[F: keys.json]` A binding to `self.system` (R1, R2) is spelled in the
+  configuration, so it is not an implicit identity: it names the service's
+  own system, and is resolved once, at start (0.20).
 
 ### 1.6 Namespaces and base-relative keys
 
@@ -411,9 +414,9 @@ the required interface, and MUST NOT be empty.
 
 | # | Rule | Evidence |
 |---|---|---|
-| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is a list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1]` |
+| R1 | **Deployment:** a role MUST be bound by configuration, never in code. A binding is a list of service addresses, exact (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, meaning every service on `vehicle-01` that implements the interface). A provider on the service's own system is spelled `self.system/<service>`, or `self.system/*` for every service on it that implements the interface (0.20, below). The binding configuration's format is a recommendation, not a rule. | `[Sc: bindings.md §1, §5]` |
 | R2 | **Deployment:** a template parameter MAY be bound too. `{vehicle} = self.system` (or `self.service`) binds the consumer to its own slice of a provider's collection. | `[Sc: bindings.md §2]` |
-| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings and parameter bindings as configured. **Tool:** the data-flow graph is read from descriptors, never inferred. | `[Sc: bindings.md §3]` |
+| R3 | **Owner:** the descriptor (§3.3) MUST list every requirement with its bindings and parameter bindings as configured, a `self.system` provider resolved (0.20, below). **Tool:** the data-flow graph is read from descriptors, never inferred. | `[Sc: bindings.md §3, §5]` |
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
@@ -421,6 +424,29 @@ the required interface, and MUST NOT be empty.
 
 When several providers are bound, choosing between them is the consumer's
 (`arbitration.v1`).
+
+- **A provider on the service's own system** (0.20). A runtime MUST
+  resolve a provider whose system position is `self.system` into the
+  service's own system, once, when the service starts, as it resolves the
+  rest of its configuration: `self.system/<service>` becomes
+  `<system>/<service>`, and `self.system/*` becomes `<system>/*`. The
+  system is the service's, literal or derived (a minted one,
+  [`profiles/hostid/v1.md`](profiles/hostid/v1.md) §2.7), and it does not
+  change while the service runs, across a re-mint included.
+  `[Sc: bindings.md §5]`
+  - **The descriptor lists the provider resolved** (R3): a tool draws an
+    edge to an address it can find. A parameter bound to `self.system`
+    (R2) is listed as configured, as before.
+  - **`self.system` at a provider's system position always means the
+    service's own system.** It is also a plain chunk (§1.2), so a system
+    literally named `self.system` is bound only by `*`. A deployment
+    SHOULD NOT name a system `self.system` or `self.service`.
+  - **Only the system position.** `self.service` is not a provider
+    spelling, and neither is `self.system` at the service position: each
+    is the literal plain chunk it spells.
+  - **A tool has no system of its own.** A tool that is not a service MUST
+    refuse a `self.system` provider, as it refuses a parameter bound to
+    `self.system` (R2). `[Sc: bindings.md §5]`
 
 - **An unbound required role.** An owner whose configuration binds a
   required role to nothing MUST NOT start, as one missing a required
@@ -505,7 +531,9 @@ gate does not name.
   (R2, R3). A role declared in a contract names that contract's interface in
   `declared_by`. A role declared by the component's manifest names `null`.
   A role the configuration leaves unbound is listed with `"bindings": []`
-  (§3.2). `[F: descriptors/d009-*]`
+  (§3.2). A `self.system` provider is listed resolved, as
+  `<system>/<service>` (R1, 0.20). `[F: descriptors/d009-*]`
+  `[Sc: bindings.md §5]`
   - **`optional`** (0.10) is `true` for a role the instance works without,
     and absent otherwise: absent is required, and `false` written out is
     the same as absent. For a manifest role it is the only place a tool
@@ -514,8 +542,12 @@ gate does not name.
     takes the need from the contract: a value that disagrees is not checked
     (0.11, below). `[F: descriptors/ok-optional-role,
     ok-optional-unchecked]`
-- **`profiles`** lists the profiles the instance follows, sorted and
-  deduplicated (§10 point 4). That is the union of two sets (0.19):
+- **`profiles`** lists the profiles the instance follows, deduplicated,
+  and sorted as §9.5 sorts a contract's `uses`: by name as a string, then
+  by major as a number (0.20). So `views.v2` comes before `views.v10`, and
+  `a.v1` before `a.b.v1`, where a sort of the whole strings gives the
+  reverse of each. The checker does not read the order (cascade 7). It is
+  the union of two sets (0.19):
   - the `uses` of the contracts the instance implements;
   - the derivation-only profiles the instance follows (§10). Today that is
     `hostid.v1`, listed by an instance whose system is minted
@@ -599,6 +631,11 @@ and reports these codes. `[F: descriptors/]`
      derivation-only profiles the instance follows: a checker cannot see
      which profiles an instance follows (0.19), so a profile no given
      contract uses is not a finding `[F: descriptors/ok-derivation-profile]`;
+   - the order of `profiles` (0.20): an owner writes it, and a tool reads
+     the list as a set;
+   - that a `self.system` provider was resolved (0.20): `self.system` is a
+     plain chunk, so an unresolved one reads as a system of that name.
+     `bindings.md §5` checks the runtime instead;
    - `minor`, an integer from 0 to 2^64−1 that no check reads (a tool MAY
      read it to order two revisions, §9.8), and `token` except on
      `archive.v1` (D011, cascade 6);
@@ -1397,6 +1434,18 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
 
 `[Sc: presence.md §1]`
 
+- **The address comes first** (0.20). An owner's address, and every key
+  built from it, is fixed before step 1, and a pure consumer's before its
+  instance token. Where the deployment asks a profile to derive the system
+  (§10; `hostid.v1` mints one, [`profiles/hostid/v1.md`](profiles/hostid/v1.md)
+  §2.7), the runtime derives it then, before the service's session opens
+  where it can. It derives nothing for a literal address.
+  - A derivation that fails refuses the start as step 2 does: no instance
+    token appears, and nothing of the service is declared or put. The
+    profile states its failures, and its scenarios watch the refusal
+    (`hostid.v1` §2.6, its `scenarios.md` §3).
+  - The `self.system` providers of R1 are resolved at the same time, from
+    the same system (§3.2).
 - **Exposed** is what an instance serves, as its descriptor says (§3.3).
   At start-up, a resource is exposed once what serves it is declared, or,
   for a template whose members appear later, once the owner serves the

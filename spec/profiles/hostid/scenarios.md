@@ -2,9 +2,9 @@
 
 The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
-a setup, steps, and expected observations. None has run yet. The runtime
-that runs them comes after this text (#719), one test per section, named
-after it.
+a setup, steps, and expected observations. The reference runtime runs §1
+to §5 (`zenkey/tests/profile_hostid.rs`, one test per section, named after
+it). §6 is a tool's, and waits for one that asks its question.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v1.md's rules; core
@@ -16,6 +16,11 @@ after it.
   below are relative to that root, and `var/lib` exists in it unless a
   step says otherwise. The paths a runtime names in its errors and logs
   are the absolute ones of v1.md §2.4.
+  - **Links resolve in the root** (0.2). A seam resolves every path under
+    the root as a chroot would: a symbolic link whose target is absolute
+    (`/etc/machine-id`) starts again at the root, never at the host's `/`,
+    and `..` never climbs above the root (v1.md §2.4, "Under a root"). A
+    mount namespace and a chroot do so already.
 - **Failures a runner cannot cause as root** (a file it cannot read, a
   directory it cannot write, `link(2)` refused) are made by running the
   service as another user, or through the runtime's seam.
@@ -60,6 +65,12 @@ step starts one service on a fresh root, and stops it before the next.
    writable.
 5. **The control.** The root of step 1, and a service configured with the
    literal address `h-bbd1aa1db10b/sysinfo`.
+6. (0.2) There is no `etc/machine-id`, `var/lib/dbus/machine-id` is a
+   symbolic link to the absolute path `/etc/machine-id`, and
+   `var/lib/zk2/hostid` holds M3.
+7. (0.2) `etc/machine-id` holds `uninitialized`, and
+   `var/lib/dbus/machine-id` is a symbolic link to the absolute path
+   `/srv/machine-id`, which holds M2 in the root.
 
 **Expected.**
 1. The system is `h-bbd1aa1db10b`, M1's, derived with `zk2-hostid-v1`.
@@ -74,6 +85,11 @@ step starts one service on a fresh root, and stops it before the next.
    derivation of that content.
 5. The address is step 1's, but the descriptor does not list `hostid.v1`:
    a literal name in the minted shape is literal (§2.8).
+6. The system is `h-504c6767c349`, M3's. Both machine-id files are absent:
+   the link resolves in the root, where `/etc/machine-id` is absent,
+   whatever the host running the scenario holds in its own.
+7. The system is `h-3f6d94515669`, M2's, read through the link in the
+   root.
 - In every step, nothing the tool receives (samples, replies, tokens,
   descriptors) contains M1, M2, M3 or the shared file's content in any
   form: the hex text in lowercase or uppercase, the 16 bytes, or a UUID
@@ -146,6 +162,11 @@ calling the runtime's minting with nothing cached between the threads
    `hostid.ephemeral`.
 5. On the roots of §3 steps 2 and 3, start a service with
    `hostid.ephemeral`.
+6. (0.2) A root with neither machine-id file and a writable `var/lib/zk2`,
+   and a service with `hostid.ephemeral` whose `link(2)` fails with
+   `EEXIST` while `var/lib/zk2/hostid` is absent when it is then read: a
+   racer's file removed in between. A runner makes it through the
+   runtime's seam.
 
 **Expected.**
 1. Both runs start. Each system is in the minted shape, and the two
@@ -159,6 +180,8 @@ calling the runtime's minting with nothing cached between the threads
    the ephemeral rung.
 5. As §3 steps 2 and 3: the service does not start. Ephemeral replaces
    only the refusal of §3 step 1.
+6. The service does not start. Its error names `/var/lib/zk2/hostid` as
+   absent (§2.5 step 4, §2.6). No temporary file remains.
 
 ## §5 Minted once per run (§2.7)
 
@@ -169,23 +192,33 @@ subscribed to the liveliness selector `zk2/*/*/@zk/**`.
 1. The service re-mints its instance (core §8.1).
 2. While it runs, `etc/machine-id` is changed to hold M2. The service
    re-mints again, and the process then starts a second service,
-   `@hostid.v1/logger`.
+   `@hostid.v1/logger`, a consumer that binds `sysinfo.v1` to
+   `self.system/sysinfo` (core R1, 0.20).
 3. The process is restarted.
 4. Steps 1 and 3 are repeated with an ephemeral service, on the root of §3
    step 1.
 5. A process whose only service is literal (`vehicle-01/sysinfo`) starts on
    the root of §3 step 3, where `etc/machine-id` cannot be read.
+6. (0.2) On the root of §3 step 1, one process starts `@hostid.v1/a`
+   without `hostid.ephemeral`. Then `etc/machine-id` is made to hold M1,
+   and the same process starts `@hostid.v1/b`, then `@hostid.v1/c` with
+   `hostid.ephemeral`.
 
 **Expected.**
 1. A new instance token appears under `zk2/h-bbd1aa1db10b/sysinfo/`, then
    the old one goes (core §8.1). The instance changes, and the system does
    not.
 2. The system is still `h-bbd1aa1db10b`, for `sysinfo` after its re-mint
-   and for `logger`: the process minted once.
+   and for `logger`: the process minted once. `logger`'s descriptor lists
+   its binding resolved, `h-bbd1aa1db10b/sysinfo`.
 3. Both services are under `zk2/h-3f6d94515669/`, M2's, and no token
    remains under `zk2/h-bbd1aa1db10b/`.
 4. The re-mint keeps the ephemeral system, and the restart mints another.
 5. It starts: a process with no minted service reads no input.
+6. `a` does not start (§3 step 1). `b` starts, with `h-bbd1aa1db10b`: a
+   failure mints nothing, and the inputs are read again (§2.7). `c` does
+   not start, as a configuration error: `a` fixed the process's setting,
+   although it did not start (§2.3).
 
 ## §6 What a tool concludes (§2.9, §2.11, §2.12)
 
@@ -208,6 +241,10 @@ core §6 recommends (under 1 s).
 4. A third service is configured with the literal address
    `h-504c6767c349/logger`. The tool is asked whether its system is
    minted.
+5. (0.2) As step 1, with each service also an owner of `sysinfo-x.v1`, an
+   interface of plain streams whose contract lists `hostid.v1` in `uses`,
+   which the tool reads (core §8.4). Each holds it in its tokenless set
+   (core §8.1), so that core §6's split-brain still does not apply.
 
 **Expected.**
 1. Both services have the system `h-bbd1aa1db10b`. The tool sees two
@@ -219,3 +256,7 @@ core §6 recommends (under 1 s).
 3. The address is undecided: unobservable, never clean.
 4. Not minted: the descriptor does not list `hostid.v1`, whatever the
    shape of its system (§2.11, §5).
+5. The address is undecided: unobservable, never clean and never the
+   finding. Both descriptors list `hostid.v1`, but a contract each
+   implements does too, so whether either system is minted is
+   unobservable (§5), and neither instance is counted (§2.12).

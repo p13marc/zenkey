@@ -4,6 +4,75 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-09: what a cold read and the runtime left open (#719, PB)
+
+The Python implementation read 0.1 cold (PR #723) and reported four
+findings, F-94 to F-97. The reference runtime (PB) had to decide each of
+them as well. 0.2 decides them in the text, so that both runtimes agree
+with it. It is written against core 0.20, which adds `self.system`
+providers (R1). No derived value changes: a system minted under 0.1 is the
+same under 0.2.
+
+**Changed: rules stated.**
+- **Links under a root (§2.4, scenarios.md "A root"; F-94).** A runtime
+  whose seam reads the inputs under another directory MUST resolve paths
+  there as a chroot would: an absolute link target starts at that
+  directory, and `..` stops at it. Under 0.1 a seam could follow
+  `/var/lib/dbus/machine-id -> /etc/machine-id` to the host running the
+  test, and mint that host's system. Refusing absolute links as unreadable
+  was the alternative. It would fail closed on a root that is laid out
+  like a real host, which is what a root is for.
+  - New steps §1.6 and §1.7: an absolute link that dangles in the root, and
+    one that reaches an id in it.
+- **A failure fixes the setting, and mints nothing (§2.3, §2.7; F-95).**
+  The first service that asks fixes the process's `hostid.ephemeral`
+  setting, whether or not it starts. A failure mints nothing, so a later
+  service reads the inputs again, from the first: an operator may have
+  fixed the host while the process ran. "At most once" is about a system
+  minted, and keeping a failure would turn one bad start into a process
+  that cannot recover.
+  - New step §5.6: a failed start, the host fixed, a start that succeeds,
+    and a start whose setting differs from the failed one's.
+- **A racer's file gone when read fails closed (§2.5 step 4, §2.6; F-96).**
+  After `EEXIST`, a final file found absent was created by another racer
+  and removed before it was read. It is not "not created", so the
+  ephemeral rung does not replace it: the host had an id, and another
+  service may hold its system. That is the reason an unreadable input and a
+  shared file without an id already fail closed. A retry was the other
+  option. It would create a second id on a host where a service may be
+  running with the first, silently.
+  - New step §4.6, made through the runtime's seam.
+- **§2.12 counts instances known to be minted (§2.12, §5; F-97).** 0.1's
+  §2.12 counted every instance whose descriptor lists `hostid.v1`, while
+  §5 holds a listing unobservable when a contract the instance implements
+  lists `hostid.v1` in `uses`. §2.12 now counts an instance only when §5's
+  first question answers yes for it. An instance that lists `hostid.v1`
+  while that answer is unobservable makes the address unobservable, unless
+  the counted instances establish the finding. A system not known to be
+  minted cannot be a minted system that two sessions claim. Counting by the
+  listing alone was the other option. It would report this profile's
+  finding about a system the profile may not have minted.
+  - New step §6.5, with §5's last row and §2.12's "Undecided" to match.
+
+**Changed: wording.**
+- **§2.3** points at core R1 (0.20) for `self.system/<service>`, and
+  scenarios §5 step 2 binds `logger` that way, its descriptor listing the
+  binding resolved.
+- **§2.6.** An input that is not a regular file has no operating system's
+  error, so the error carries one "where there is one". The ephemeral log
+  is written at every start of a service whose system is ephemeral.
+- **scenarios.md** says which sections the reference runs.
+
+**Deliberately not changed.**
+- **The derivation, the salt, the inputs and their order.** Every vector
+  and shape holds as 0.1 wrote it.
+- **No retry after `EEXIST`.** One read of the winner's file decides.
+- **No new outcome.** A winner's file gone when read is reported `absent`,
+  one of §2.6's four outcomes. The step that found it says which absence
+  it was.
+- **Production follows links as the operating system does.** Only a seam
+  needs the rule, and on a host `/` is the root.
+
 ## 0.1 — 2026-10-09: the first text, draft (#719)
 
 `hostid.v1` is the first profile of #613's first tier, decided on

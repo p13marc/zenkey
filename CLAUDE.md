@@ -340,6 +340,12 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   feature gates everything holding a session; without it the crate is the
   model, `config`, `Implementation`, `call` and `codec`, so a contract
   crate's traits build without zenoh.
+  `hostid` (#719, a feature of its own that `zenoh` turns on: it reads the
+  host and holds no session) is `hostid.v1`'s runtime: `ServiceBuilder::new`
+  resolves `address = "@hostid.v1/<svc>"` through `HostIdMinter::global()`,
+  once per run, and spells out `self.system/<svc>` providers (core 0.20);
+  a test hands `ServiceBuilder::with_hostid` a minter over a temp root,
+  never the host's `/etc/machine-id`.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. On `main` it shares the
   name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.
@@ -379,7 +385,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.19 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.20 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);

@@ -46,3 +46,28 @@ declares and nothing serves (core §3.2).
 discards all 10.
 
 *Spike S10: 10 of 10 discarded; spike S1: about 10 ns per check.*
+
+## §5 A provider on the service's own system (R1, R3; 0.20)
+
+**Setup.** Detectors `vehicle-01/det0`, `vehicle-01/det1` and
+`vehicle-02/det0` implement `detections.v1`. Two trackers on
+`vehicle-01` bind `detections.v1` as `sources`: `vehicle-01/one` to
+`self.system/det0`, and `vehicle-01/all` to `self.system/*`.
+
+**Steps.**
+1. Every detector puts samples on `stream/objects`.
+2. A tool reads both trackers' descriptors.
+3. A tool, which is not a service, binds a consumer of its own to
+   `self.system/det0`.
+
+**Expected.**
+1. `vehicle-01/one` receives from `vehicle-01/det0` alone, and
+   `vehicle-01/all` from `vehicle-01/det0` and `vehicle-01/det1`. Neither
+   receives from `vehicle-02/det0`.
+2. The descriptors list the bindings resolved: `["vehicle-01/det0"]` and
+   `["vehicle-01/*"]`.
+3. The tool's binding is refused: a tool has no system of its own.
+
+A system that a profile derives resolves the same way, from the derived
+system: `hostid.v1`'s scenarios bind `self.system/sysinfo` from a service
+whose system is minted (`profiles/hostid/scenarios.md` §5).
