@@ -1615,6 +1615,21 @@ fn archive_unaligned(p: &Presence<'_>) -> CheckReport {
     CheckReport::of(C, findings, undecided, clean)
 }
 
+/// A zid by its value (§3.3, 0.11): zenoh writes it as lowercase hex without
+/// leading zeros, and another writer may not, so two spellings of one id
+/// compare equal here. Text that is not hex is kept as written, and so
+/// matches only itself.
+fn zid_value(z: &str) -> String {
+    let t = z.trim().to_ascii_lowercase();
+    if t.is_empty() || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return z.to_owned();
+    }
+    match t.trim_start_matches('0') {
+        "" => "0".to_owned(),
+        v => v.to_owned(),
+    }
+}
+
 /// §4.2 S1–S2: each owner's state replies, by the clock that stamped them,
 /// against the owner's own session — the `meta.zid` its descriptors name.
 fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
@@ -1622,7 +1637,7 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
     let mut zids: BTreeMap<&Addr, BTreeSet<String>> = BTreeMap::new();
     for (a, _, d) in p.served() {
         if let Some(z) = d.meta.get("zid").and_then(|v| v.as_str()) {
-            zids.entry(a).or_default().insert(z.to_owned());
+            zids.entry(a).or_default().insert(zid_value(z));
         }
     }
     let mut findings = Vec::new();
@@ -1666,7 +1681,7 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                     "{count} unstamped (e.g. {}): a reply MUST carry its mutation's timestamp",
                     keys.join(", ")
                 )),
-                Some(c) if !own.contains(c) => wrong.push(format!(
+                Some(c) if !own.contains(&zid_value(c)) => wrong.push(format!(
                     "{count} stamped by clock {c} (e.g. {}), not the owner's session",
                     keys.join(", ")
                 )),
@@ -2139,6 +2154,15 @@ mod tests {
 
     fn check(o: &DoctorObservation, id: CheckId) -> CheckReport {
         judge(o, &spec()).check(id).expect("every check").clone()
+    }
+
+    #[test]
+    fn a_zid_compares_by_value_not_by_its_text() {
+        // §3.3 (0.11, F-78): zenoh drops leading zeros; case is no meaning.
+        assert_eq!(zid_value("00AB12"), zid_value("ab12"));
+        assert_eq!(zid_value("0"), zid_value("000"));
+        assert_ne!(zid_value("ab12"), zid_value("ab120"));
+        assert_eq!(zid_value("zid-x"), "zid-x", "not hex: kept as written");
     }
 
     #[track_caller]

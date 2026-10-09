@@ -7,7 +7,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 
 | Path | What it is | Source |
 |---|---|---|
-| [`core.md`](core.md) | **The normative core**, version 0.10 (0.1 accepted on 2026-10-08, #606; amended for U23, the classifier's rule set, the TOML 1.0 lint, the second implementation's findings, its findings against 0.5 with the archive's gaps, its live findings with the operations runtime's and the codegen's gaps, a refused presence read with what implementing 0.7 found, the order of an owner's refusals, and what a doctor can and cannot decide). Every MUST cites a fixture or a scenario. | written from r4 |
+| [`core.md`](core.md) | **The normative core**, version 0.11 (0.1 accepted on 2026-10-08, #606; amended for U23, the classifier's rule set, the TOML 1.0 lint, the second implementation's findings, its findings against 0.5 with the archive's gaps, its live findings with the operations runtime's and the codegen's gaps, a refused presence read with what implementing 0.7 found, the order of an owner's refusals, what a doctor can and cannot decide, and how a zid compares). Every MUST cites a fixture or a scenario. | written from r4 |
 | [`contract.schema.json`](contract.schema.json) | JSON Schema (2020-12) of the contract authoring format, draft 1. It is generated from `zenkey-model`'s authoring types and checked in CI. | `zenkey-model/src/authoring.rs` |
 | [`descriptor.schema.json`](descriptor.schema.json) | JSON Schema of the descriptor record (core §3.3), generated the same way | `zenkey-model/src/descriptor.rs` |
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
