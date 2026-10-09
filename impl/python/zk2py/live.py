@@ -588,28 +588,29 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
     return out
 
 
-# -- §4.2 a tool's S1 check (0.16) -----------------------------------------------
+# -- §4.2 a tool's S1 check (0.16 to 0.18) -------------------------------------
 
 def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str | None,
              timeout: float = GET_TIMEOUT_S, trust: bool = False) -> tuple[str, str]:
-    """§4.2 "A tool's S1 check" (0.16, 0.17). "A tool attributes a state
+    """§4.2 "A tool's S1 check" (0.16 to 0.18). "A tool attributes a state
     reply's stamp by comparing its id with the owner's meta.zid (§3.3), by
     value":
     - "A foreign stamp is a finding whatever else the tool read: an owner
       that is its own router stamps with that router's id, which is its own
       meta.zid." A reply with no stamp is a finding too (S1, S2).
-    - "An owner's stamp is clean only when the tool verified at least one
-      router ("Who answered", above) and meta.zid is none of the zids it
-      knows to be routers: the routers its session is connected to, the
-      routers it verified, and every zid a verified router lists as a
-      router session."
+    - "An owner's stamp is clean only when the tool counted at least one
+      router's own answer ("Who answered", above) and meta.zid is none of
+      the zids it knows to be routers: the routers its session is connected
+      to, the routers whose answers it counted, and every zid such an
+      answer lists as a router session."
+    - "A counted answer, not a connection" (0.18): a connected router is a
+      verified router, but "a connection alone shows nothing about the
+      owner".
     - "Otherwise S1 is unobservable for that owner, never clean."
 
-    Without ``meta.zid`` the stamp is ``unattributable`` (§3.3). "Verified
-    at least one router" is read as one router's admin answer verified,
-    since 0.17 names the cases where none is: no admin read, the admin
-    space off, no replier id. ``trust`` is 0.12's operator alternative.
-    Returns (verdict, why)."""
+    Without ``meta.zid`` the stamp is ``unattributable`` (§3.3). The counted
+    answers are the ``@/*/router`` answers that "Who answered" verifies.
+    ``trust`` is 0.12's operator alternative. Returns (verdict, why)."""
     meta = descriptor.get("meta")
     zid = _zid_value(meta.get("zid") if isinstance(meta, dict) else None)
     if zid is None:
@@ -622,12 +623,12 @@ def s1_check(session: zenoh.Session, descriptor: dict[str, Any], stamp_id: str |
     known = verified_routers(session, records)  # connected, the session, verified and listed
     if trust:
         known |= {_zid_value(a.key.split("/")[1]) for a in records}
-    answered = [a for a in records if trust or unverified_why(a, known) is None]
+    counted = [a for a in records if trust or unverified_why(a, known) is None]  # routers' own answers
     if zid in known:
         return "unobservable", "meta.zid is a router's zid: the owner is its own router"
-    if not answered:
-        return "unobservable", ("no router verified (no admin read, the admin space off, or no replier id): "
-                                "the owner may be a router this tool cannot see")
+    if not counted:
+        return "unobservable", ("no router's own answer counted (no admin read, the admin space off, or no "
+                                "replier id): the owner may be a router this tool cannot see")
     return "clean", f"the stamp is the owner's, and meta.zid is none of {len(known)} known routers"
 
 

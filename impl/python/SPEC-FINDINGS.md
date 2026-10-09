@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Sixteen rounds.**
+**Seventeen rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -23,9 +23,10 @@ where that was not enough, or where the spec said two things.
 - Nothing new was found against 0.15 (see "At 0.15").
 - F-89 to F-91 were found against 0.16, whose rules came from the
   reference's tools rather than from zk2py.
-- Amendments 0.5 to 0.17 resolved F-01 to F-91. Each entry carries a
+- F-92 and F-93 were found against 0.17.
+- Amendments 0.5 to 0.18 resolved F-01 to F-93. Each entry carries a
   status line naming its amendment.
-- **F-92 and F-93 are new**, found against 0.17 (see "At 0.17" at the end).
+- **Nothing new was found against 0.18** (see "At 0.18" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -35,7 +36,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.17:** 93 entries.
+**Counts at 0.18:** 93 entries, all resolved.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -79,12 +80,15 @@ where that was not enough, or where the spec said two things.
   guesses: F-90's grants and F-91's refusal at step 2, which 0.17 also
   backs with a D code. It overturned one part of F-89: a foreign stamp is
   a finding even when no router is verified.
-- F-92 and F-93: **new**, 1 contradiction, 1 ambiguity.
+- F-92 and F-93: resolved by 0.18, in wording only.
+  - F-92 went against zk2py's placement of D011, after cascade 3. The new
+    fixture `d011-bad-fingerprint` failed until D011 moved before it.
+  - F-93 confirmed zk2py's reading.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.17 | Location | In one line |
+| Id | Severity | Status at 0.18 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -177,8 +181,8 @@ by the spec section that now states the rule.
 | F-89 | ambiguity | resolved by 0.17 | §4.2 "A tool's S1 check" (0.16) | What S1 reads for a tool that verifies no router: clean by `meta.zid` alone, or unobservable? |
 | F-90 | gap | resolved by 0.17 | §5.1 O3 judged from outside (0.16), §11.3 | "Only under grants that let it call": a tool cannot observe its grants, and the spec does not say where it learns them. |
 | F-91 | gap | resolved by 0.17 | §4.4 "Found by its token" (0.16) | An archive "MUST hold its archive.v1 interface token", but no step refuses a tokenless one and no check reports it. |
-| F-92 | contradiction | **new** | §3.3 D011 against "Cascades and scope" (0.17) | Cascade 6 still lists `token` as deliberately unchecked, and no cascade places D011. |
-| F-93 | ambiguity | **new** | §4.2 "A tool's S1 check" (0.17) against "Who answered" (0.13) | "Verified" is two things: a connected router is verified (0.13), yet "verified at least one router" must mean an answer. |
+| F-92 | contradiction | resolved by 0.18 | §3.3 D011 against "Cascades and scope" (0.17) | Cascade 6 still lists `token` as deliberately unchecked, and no cascade places D011. |
+| F-93 | ambiguity | resolved by 0.18 | §4.2 "A tool's S1 check" (0.17) against "Who answered" (0.13) | "Verified" is two things: a connected router is verified (0.13), yet "verified at least one router" must mean an answer. |
 
 ---
 
@@ -2545,6 +2549,8 @@ What changed in zk2py:
 
 ### F-92 · contradiction · §3.3 D011 against "Cascades and scope" (0.17): `token` checked, and listed as unchecked
 
+**Status at 0.18: resolved by 0.18, against zk2py's placement.** A new cascade 6: "D011 reads an entry's `iface` and `token`, and nothing else. It is reported for every entry whose `iface` is `archive.v1`, whether or not that contract is given, and whatever its `contract` says: cascades 3 and 5 do not suppress it." The old cascade 6, now 7, lists `token` as unchecked "except on `archive.v1`". zk2py had checked D011 after cascade 3, so the new fixture `descriptors/d011-bad-fingerprint` (`["D003", "D011"]`) failed with `["D003"]`. D011 now runs right after cascade 2, before the fingerprint test, and the fixture passes.
+
 > D011: "an interface entry for `archive.v1` is marked `"token": false`: an
 > archive is never tokenless (§4.4, 0.17) | error | per entry"
 
@@ -2568,6 +2574,8 @@ reports D011 once per such entry, a repeated one included (cascade 4).
 
 ### F-93 · ambiguity · §4.2 (0.17) against (0.13): what "verified" means
 
+**Status at 0.18: resolved by 0.18.** §4.2: an owner's stamp is clean only when the tool "counted at least one router's own answer", with "A counted answer, not a connection" stated. "Verified router" keeps 0.13's meaning. This is what zk2py built. `live.s1_check` now names its premise `counted` and quotes the new text.
+
 > 0.13, "Verified routers, outward": "the routers the tool's session is
 > connected to, and the session itself, are verified".
 
@@ -2590,3 +2598,17 @@ router's admin answer verified ("Who answered"), and keeps 0.13's set
 knows to be routers. The `0.16` run's simulated binding without the
 replier id is the case that tells the two readings apart. It reports an
 owner's own stamp unobservable there.
+
+## At 0.18 (#609)
+
+`just py-conformance` passes 522 of 522, with `descriptors/d011-bad-fingerprint`.
+`just py-live` passes 235 of 235, with no known deviation: nothing moved.
+
+What changed in zk2py:
+- **D011 moved** before the fingerprint cascade (cascade 6, 0.18), which
+  the new fixture required. The checker's docstring now lists the seven
+  cascades.
+- **`s1_check` quotes 0.18**, and names its premise "counted" answers
+  rather than "verified" routers. Its logic is unchanged.
+
+Implementing 0.18 raised no new question.

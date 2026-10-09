@@ -80,21 +80,21 @@ contracts      96 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
-descriptors    40 passed     0 failed
+descriptors    41 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
-total         521 passed     0 failed
+total         522 passed     0 failed
 ```
 
-The figures are against `core.md` 0.17. Three releases added descriptor
+The figures are against `core.md` 0.18. Four releases added descriptor
 fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
-- 0.17, `d011-tokenless-archive` and `ok-archive`.
+- 0.17, `d011-tokenless-archive` and `ok-archive`;
+- 0.18, `d011-bad-fingerprint`.
 
-- Amendments 0.5 to 0.17 resolved F-01 to F-91. F-92 and F-93 are open
-  against 0.17.
+- Amendments 0.5 to 0.18 resolved F-01 to F-93. None is open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way.
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
@@ -362,7 +362,8 @@ ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
   - an owner in client mode under a verified router is clean;
   - an owner opened in router mode and linked to R1 (`Owner(router_connect=…)`)
     is unobservable;
-  - with no router verified, an owner's own stamp is unobservable (F-93).
+  - with no router's own answer counted, an owner's own stamp is
+    unobservable (0.18).
 - **O3 judged from outside (§5.1)** is `live.o3_verdict`. It takes the
   grants from the deployment (`acl.may_call`) and the owner's presence.
   - A silence is unobservable when the tool was not told its grants, or
@@ -374,7 +375,8 @@ ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
 - **U22's tokenless set** is `Owner(tokenless=…)`: `"token": false`, no
   interface token. `archive.v1` in it is refused at step 2, whatever the
   owner implements (§4.4, §8.2 step 2). presence.md §2 step 6 runs in the
-  refusal run, and the descriptor checker reports D011 (F-92).
+  refusal run, and the descriptor checker reports D011 whatever the
+  entry's `contract` says (cascade 6, 0.18).
 - **§2.6's replay bound** is `live.replay_events`. It GETs with `_time`
   and filters by the ULID's time, so the consumer applies the retention
   even against a storage that ignores `_time`. zenoh-python routers run no
