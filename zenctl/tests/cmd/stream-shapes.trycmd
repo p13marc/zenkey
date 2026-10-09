@@ -54,11 +54,11 @@ acknowledge, and an accepted-but-inert flag is a mis-shape — the same exit-2
 pattern as the verb's own `<--from|KEY>` group.
 
 ```console
-$ zenctl pub v1/x body --i-know
+$ zenctl pub plant/x body --i-know
 ? 2
 error: the argument '[KEY]' cannot be used with '--i-know'
 
-Usage: zenctl pub --base <BASE> <--from <FROM>|KEY> <BODY>
+Usage: zenctl pub <--from <FROM>|KEY> <BODY>
 
 For more information, try '--help'.
 

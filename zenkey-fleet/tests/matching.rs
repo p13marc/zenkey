@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::{declare_publication, declare_repeating};
 
 mod util;
@@ -24,7 +24,7 @@ const KEY: &str = "v1/h-cccccccccccc/state/demo/health";
 async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
     let (a, b) = peer_pair().await;
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, WireQos::DEFAULT, None)
         .await
         .expect("declare publication");
     let events = publication.matching_events().await.expect("events");
@@ -54,13 +54,9 @@ async fn a_publication_sees_its_own_subscribers_appear_and_leave() {
 async fn a_repeating_query_sees_a_server_appear() {
     let (a, b) = peer_pair().await;
 
-    let repeating = declare_repeating(
-        &zenkey_fleet::Fleet::new(&b, ""),
-        KEY,
-        Duration::from_secs(5),
-    )
-    .await
-    .expect("declare");
+    let repeating = declare_repeating(&b, KEY, Duration::from_secs(5))
+        .await
+        .expect("declare");
     let events = repeating.matching_events().await.expect("events");
 
     let _queryable = a

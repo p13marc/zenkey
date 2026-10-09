@@ -1,18 +1,11 @@
-//! Payload and registry diff (issue #203).
-//!
-//! Two unrelated things share the word, and this file covers both because
-//! both were untested:
-//!
-//! - [`zenkey_fleet::diff`] — what moved between two values of one key, which
-//!   is *the* question for an LWW `state` document;
-//! - [`SliceSet::diff`] — what the fleet serves against what a checkout
-//!   declares (RFC 08 §6: a disagreement is a finding).
-//!
-//! Neither needs a bus.
+//! Payload diff (issue #203): what moved between two values of one key,
+//! which is *the* question for a `state` document. It needs no bus. v1's
+//! registry diff, the served slice against a checkout's, left with the v1
+//! registry (#612, FJ9).
 
 use serde_json::json;
 use zenkey_fleet::model::diff::diff;
-use zenkey_fleet::{Change, SliceSet, byte_diff};
+use zenkey_fleet::{Change, byte_diff};
 
 #[test]
 fn a_structural_diff_names_the_path_that_moved() {
@@ -86,73 +79,4 @@ fn a_byte_diff_says_it_is_a_byte_diff() {
     let grew = byte_diff(b"ab", b"abcd");
     assert_eq!(grew.common_prefix, 2);
     assert_eq!((grew.old_len, grew.new_len), (2, 4));
-}
-
-fn set(toml: &str) -> SliceSet {
-    SliceSet::from_slices(vec![zenkey::parse_slice(toml).expect("fixture parses")])
-}
-
-const SERVED: &str = r#"
-[registry]
-version = "1.0"
-app = "t"
-convention = 1
-[producer]
-name = "netring"
-[[subject]]
-path = "flows"
-class = "telemetry"
-type = "FlowRecord"
-"#;
-
-/// Same version, different shape — the case a version comparison alone calls
-/// equal. RFC 08 §6's point is that the *content* disagreeing is the finding,
-/// and a build that forgot to bump its version is exactly when you need to
-/// hear about it.
-#[test]
-fn a_shape_that_differs_under_one_version_is_still_a_finding() {
-    let local = r#"
-[registry]
-version = "1.0"
-app = "t"
-convention = 1
-[producer]
-name = "netring"
-[[subject]]
-path = "flows"
-class = "telemetry"
-type = "FlowRecord"
-[[subject]]
-path = "drops"
-class = "telemetry"
-type = "FlowRecord"
-"#;
-    let report = set(SERVED).diff(&set(local));
-    assert_eq!(report.producers.len(), 1);
-    let p = &report.producers[0];
-    assert_eq!(p.served_version.as_deref(), Some("1.0"));
-    assert_eq!(p.local_version.as_deref(), Some("1.0"));
-    assert!(
-        !p.findings.is_empty(),
-        "matching versions do not make disagreeing shapes agree"
-    );
-    assert!(
-        p.findings.iter().any(|f| f.contains("drops")),
-        "the subject only one side knows is named: {:?}",
-        p.findings
-    );
-    assert_eq!(report.disagreeing(), 1);
-}
-
-#[test]
-fn identical_sets_agree_and_say_nothing() {
-    let report = set(SERVED).diff(&set(SERVED));
-    assert_eq!(report.producers.len(), 1);
-    assert!(
-        report.producers[0].findings.is_empty(),
-        "agreement is an empty finding list, which is the answer the view \
-         wants to give in one glance: {:?}",
-        report.producers[0].findings
-    );
-    assert_eq!(report.disagreeing(), 0);
 }

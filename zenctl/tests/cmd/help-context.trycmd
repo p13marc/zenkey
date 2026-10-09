@@ -38,9 +38,6 @@ Options:
   -l, --listen <LISTEN>
           Endpoint to listen on, repeatable — a context that listens opens a peer session, where every other context opens a client
 
-      --registry <DIR>
-          Registry dir, repeatable (offline slice source)
-
       --scouting
           Enable multicast scouting for this context
 

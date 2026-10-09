@@ -1000,7 +1000,6 @@ mod tests {
                     key: A.into(),
                     payload: vec![1, 2, 3],
                     encoding: None,
-                    qos: None,
                     qos_axes: None,
                     delete: false,
                     attachment: None,

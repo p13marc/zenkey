@@ -19,48 +19,40 @@
 //! this crate cannot see; their fixtures live beside their tests.
 
 use zenkey_fleet::report::*;
-use zenkey_fleet::{
-    Coverage, CoverageRow, RecordReport, ReplayReport, StorageInfo, TimelineReport,
-};
+use zenkey_fleet::{RecordReport, ReplayReport, StorageInfo, TimelineReport};
 
 pub const ORIGIN: &str = "h-3fa9c2d41b7e";
 
-/// A storage list carrying all three coverage verdicts, and a storage whose
-/// admin document omitted its strip prefix.
+/// A storage list: one storage whose admin document omitted its strip
+/// prefix, and one that states every field.
 pub fn storage_list() -> StorageList {
     StorageList {
-        storages: vec![StorageInfo {
-            name: "main".into(),
-            zid: "aabbccdd".into(),
-            key_expr: Some("acme/v1/**/state/**".into()),
-            strip_prefix: None,
-            volume: Some("memory".into()),
-            // The untrimmed admin document. A fixture carries a realistic one
-            // rather than `null`, because it is what a layout change would
-            // arrive as.
-            raw: serde_json::json!({
-                "key_expr": "acme/v1/**/state/**",
-                "volume": {"id": "memory"},
-            }),
-        }],
-        coverage: vec![
-            CoverageRow {
-                producer: "sysinfo".into(),
-                path: "health".into(),
-                ttl_s: Some(120),
-                coverage: Coverage::Covered("main@aabbccdd".into()),
+        storages: vec![
+            StorageInfo {
+                name: "events".into(),
+                zid: "aabbccdd".into(),
+                key_expr: Some("acme/zk2/*/*/*/events/**".into()),
+                strip_prefix: None,
+                volume: Some("memory".into()),
+                // The untrimmed admin document. A fixture carries a realistic
+                // one rather than `null`, because it is what a layout change
+                // would arrive as.
+                raw: serde_json::json!({
+                    "key_expr": "acme/zk2/*/*/*/events/**",
+                    "volume": {"id": "memory"},
+                }),
             },
-            CoverageRow {
-                producer: "logs".into(),
-                path: "state/{unit}".into(),
-                ttl_s: None,
-                coverage: Coverage::Partial("main@aabbccdd".into()),
-            },
-            CoverageRow {
-                producer: "parallax".into(),
-                path: "stream/{id}".into(),
-                ttl_s: Some(30),
-                coverage: Coverage::Uncovered,
+            StorageInfo {
+                name: "plant".into(),
+                zid: "aabbccdd".into(),
+                key_expr: Some("acme/plant/**".into()),
+                strip_prefix: Some("acme/plant".into()),
+                volume: Some("fs".into()),
+                raw: serde_json::json!({
+                    "key_expr": "acme/plant/**",
+                    "strip_prefix": "acme/plant",
+                    "volume": {"id": "fs"},
+                }),
             },
         ],
     }
@@ -324,58 +316,6 @@ pub fn bench_report() -> BenchReport {
                 },
             ],
         },
-    }
-}
-
-/// One producer agreeing, one disagreeing, and one the bus serves that the
-/// checkout does not have — the `served x · local —` case.
-///
-/// Plus the case #399 exists for: `catalog` agrees with the checkout *and*
-/// two hosts serve it at different versions, so the row that reads "agree"
-/// is computed from one of them. A fixture where the two disagreements are
-/// on the same producer is the one that proves the renderer keeps them
-/// apart — the fleet against the checkout, and the fleet against itself.
-pub fn registry_diff() -> RegistryDiff {
-    RegistryDiff {
-        producers: vec![
-            ProducerDiff {
-                producer: "catalog".into(),
-                served_version: Some("1.1".into()),
-                local_version: Some("1.1".into()),
-                findings: vec![],
-            },
-            ProducerDiff {
-                producer: "sysinfo".into(),
-                served_version: Some("1.1".into()),
-                local_version: Some("1.0".into()),
-                findings: vec![
-                    "served declares telemetry disk/{mount}/inodes; local does not".into(),
-                ],
-            },
-            ProducerDiff {
-                producer: "parallax".into(),
-                served_version: Some("1.3".into()),
-                local_version: None,
-                findings: vec!["no local slice for this producer".into()],
-            },
-        ],
-        collapsed: Asked::Asked(vec![CollapsedProducer {
-            producer: "catalog".into(),
-            origins: vec!["h-3fa9c2d41b7e".into(), "h-8b1e07af22c9".into()],
-            versions: vec!["1.1".into(), "1.0".into()],
-            agreed: false,
-        }]),
-    }
-}
-
-/// The same diff, from a served side that never came off the bus — so the
-/// collapse question was never put. The pair with [`registry_diff`] is what
-/// pins that "not asked" and "asked, and nothing collapsed" render and
-/// serialize differently (RFC 13 §3 O4).
-pub fn registry_diff_not_asked() -> RegistryDiff {
-    RegistryDiff {
-        collapsed: Asked::NotAsked,
-        ..registry_diff()
     }
 }
 
@@ -652,25 +592,8 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
     }
 }
 
-pub fn attachments() -> Vec<zenkey_fleet::OriginAttachment> {
-    vec![
-        zenkey_fleet::OriginAttachment {
-            origin: ORIGIN.into(),
-            session_zid: Some("eeff0011".into()),
-            reporter_zid: "aabbccdd".into(),
-            token_key: format!("v1/{ORIGIN}/state/sysinfo/alive"),
-        },
-        zenkey_fleet::OriginAttachment {
-            origin: "h-bbbbbbbbbbbb".into(),
-            session_zid: None,
-            reporter_zid: "aabbccdd".into(),
-            token_key: "v1/h-bbbbbbbbbbbb/state/logs/alive".into(),
-        },
-    ]
-}
-
-/// The RFC 09 §2 sketch as a plan (#393): two volumes, three storages, the
-/// documented `catalog`/`pdns_history` overlap, a refused `complete`, and one
+/// A zk2 deployment's storages as a plan (#393): two volumes, three
+/// storages, an overlap warned on both sides, a refused `complete`, and one
 /// storage refused outright.
 pub fn storage_plan() -> StoragePlan {
     use std::collections::BTreeMap;
@@ -685,13 +608,15 @@ pub fn storage_plan() -> StoragePlan {
         text: text.into(),
         cite: cite.into(),
     };
+    let default_gc = || GarbageCollection {
+        period_s: 30,
+        lifespan_s: 86_400,
+        derivation:
+            "zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from"
+                .into(),
+    };
     StoragePlan {
         base: "acme".into(),
-        registry: Asked::Asked(RegistryFacts {
-            slices: 3,
-            max_ttl_s: Some(900),
-            ttl_source: Some("sysinfo/alert/{alert_key}".into()),
-        }),
         volumes: vec![
             PlannedVolume {
                 id: "fs".into(),
@@ -712,40 +637,9 @@ pub fn storage_plan() -> StoragePlan {
         ],
         storages: vec![
             PlannedStorage {
-                name: "catalog".into(),
-                class: Some(StorageClass::Catalog),
-                key_expr: "acme/v1/@catalog/state/**".into(),
-                strip_prefix: "acme/v1/@catalog/state".into(),
-                volume: "fs".into(),
-                history: HistoryMode::Latest,
-                replication: None,
-                complete: false,
-                garbage_collection: GarbageCollection {
-                    period_s: 30,
-                    lifespan_s: 172_800,
-                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
-                },
-                retention: None,
-                params: params(&[("dir", "catalog")]),
-                covers: Asked::Asked(3),
-                warnings: vec![
-                    warn(
-                        WarningKind::CompleteRefused,
-                        "complete = true refused: it is not the fully covering latest storage (class state) — emitted as false",
-                        "RFC 09 §2.2",
-                    ),
-                    warn(
-                        WarningKind::Overlap,
-                        "overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both",
-                        "RFC 09 §2",
-                    ),
-                ],
-            },
-            PlannedStorage {
-                name: "latest".into(),
-                class: Some(StorageClass::State),
-                key_expr: "acme/v1/*/state/**".into(),
-                strip_prefix: "acme/v1".into(),
+                name: "events".into(),
+                key_expr: "acme/zk2/*/*/*/events/**".into(),
+                strip_prefix: "acme/zk2".into(),
                 volume: "fs".into(),
                 history: HistoryMode::Latest,
                 replication: Some(
@@ -758,33 +652,54 @@ pub fn storage_plan() -> StoragePlan {
                     .collect(),
                 ),
                 complete: true,
-                garbage_collection: GarbageCollection {
-                    period_s: 30,
-                    lifespan_s: 1800,
-                    derivation: "max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s".into(),
-                },
+                garbage_collection: default_gc(),
                 retention: None,
-                params: params(&[("dir", "latest")]),
-                covers: Asked::Asked(12),
-                warnings: vec![],
+                params: params(&[("dir", "events")]),
+                warnings: vec![warn(
+                    WarningKind::Overlap,
+                    "overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both",
+                    "RFC 09 §2",
+                )],
             },
             PlannedStorage {
-                name: "pdns_history".into(),
-                class: Some(StorageClass::CatalogPdns),
-                key_expr: "acme/v1/@catalog/state/pdns/**".into(),
-                strip_prefix: "acme/v1/@catalog/state/pdns".into(),
-                volume: "influxdb".into(),
-                history: HistoryMode::All,
+                name: "links".into(),
+                key_expr: "acme/zk2/*/*/*/events/link/**".into(),
+                strip_prefix: "acme/zk2".into(),
+                volume: "fs".into(),
+                history: HistoryMode::Latest,
                 replication: None,
                 complete: false,
                 garbage_collection: GarbageCollection {
                     period_s: 30,
-                    lifespan_s: 172_800,
-                    derivation: "max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s".into(),
+                    lifespan_s: 3600,
+                    derivation: "declared gc_lifespan_s 3600".into(),
                 },
                 retention: None,
-                params: params(&[("db", "pdns")]),
-                covers: Asked::Asked(1),
+                params: params(&[("dir", "links")]),
+                warnings: vec![
+                    warn(
+                        WarningKind::CompleteRefused,
+                        "complete = true refused: it is not replicated — emitted as false",
+                        "RFC 09 §2.2",
+                    ),
+                    warn(
+                        WarningKind::Overlap,
+                        "overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both",
+                        "RFC 09 §2",
+                    ),
+                ],
+            },
+            PlannedStorage {
+                name: "timeseries".into(),
+                key_expr: "acme/zk2/*/*/*/stream/**".into(),
+                strip_prefix: "acme/zk2".into(),
+                volume: "influxdb".into(),
+                history: HistoryMode::All,
+                replication: None,
+                complete: false,
+                garbage_collection: default_gc(),
+                retention: None,
+                params: params(&[("db", "streams")]),
                 warnings: vec![warn(
                     WarningKind::RetentionIsTheDatabases,
                     "retention is the database's policy, not zenoh config",
@@ -793,11 +708,11 @@ pub fn storage_plan() -> StoragePlan {
             },
         ],
         refusals: vec![Refusal {
-            storage: Some("events".into()),
+            storage: Some("plant".into()),
             volume: None,
-            key_expr: Some("acme/v1/*/events/**".into()),
-            reason: "the registry declares no subject under \"acme/v1/*/events/**\" — empty coverage is a finding, not a plan".into(),
-            cite: "RFC 13 §3".into(),
+            key_expr: Some("acme/plant/**".into()),
+            reason: "names volume \"rocks\", which [volumes] does not declare".into(),
+            cite: "RFC 09 §2".into(),
         }],
     }
 }
@@ -823,36 +738,35 @@ pub fn storage_check() -> StorageCheck {
         findings: vec![
             finding(
                 CheckKind::StripPrefixDiffers,
-                "latest",
+                "events",
                 Some("aabbccdd"),
-                Some("acme/v1"),
+                Some("acme/zk2"),
                 Some("acme"),
             ),
             finding(
                 CheckKind::LifespanBelowMinimum,
-                "latest",
+                "events",
                 Some("aabbccdd"),
-                Some("1800"),
+                Some("86400"),
                 Some("600"),
             ),
             finding(
                 CheckKind::Missing,
-                "pdns_history",
+                "timeseries",
                 None,
-                Some("acme/v1/@catalog/state/pdns/**"),
+                Some("acme/zk2/*/*/*/stream/**"),
                 None,
             ),
             finding(
                 CheckKind::Extra,
-                "blobs",
+                "state",
                 Some("aabbccdd"),
                 None,
-                Some("acme/v1/*/@blob/**"),
+                Some("acme/zk2/*/*/*/state/**"),
             ),
         ],
         unjudged: vec![
-            "catalog@aabbccdd: the admin document does not carry garbage_collection.lifespan"
-                .into(),
+            "links@aabbccdd: the admin document does not carry garbage_collection.lifespan".into(),
         ],
         judgement: Judgement::Established,
     }
@@ -873,17 +787,16 @@ pub fn storage_check_unobservable() -> StorageCheck {
     }
 }
 
-/// One key, taken by the latest storage.
+/// One key, taken by the events storage.
 pub fn storage_explain() -> StorageExplain {
     StorageExplain {
-        key: "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health".into(),
+        key: "acme/zk2/host-a/tc/tc.netif.v1/events/reset/01k0".into(),
         base: "acme".into(),
         takers: vec![Taker {
-            storage: "latest".into(),
-            key_expr: "acme/v1/*/state/**".into(),
-            class: Some(StorageClass::State),
+            storage: "events".into(),
+            key_expr: "acme/zk2/*/*/*/events/**".into(),
             relation: TakerRelation::Includes,
-            why: "class state under base \"acme\": acme/v1/*/state/** includes every key it names; stored under strip_prefix \"acme/v1\" on volume fs (latest)".into(),
+            why: "its selector under namespace \"acme\": acme/zk2/*/*/*/events/** includes every key it names; stored under strip_prefix \"acme/zk2\" on volume fs (latest)".into(),
         }],
         refused_takers: vec![],
         none_reason: None,
@@ -893,13 +806,12 @@ pub fn storage_explain() -> StorageExplain {
 /// A key nothing takes, because a refused storage would have.
 pub fn storage_explain_none() -> StorageExplain {
     StorageExplain {
-        key: "acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J".into(),
+        key: "acme/plant/line-1/temp".into(),
         base: "acme".into(),
         takers: vec![],
-        refused_takers: vec!["events".into()],
+        refused_takers: vec!["plant".into()],
         none_reason: Some(
-            "no planned storage's selector includes it; refused storage(s) events would have"
-                .into(),
+            "no planned storage's selector includes it; refused storage(s) plant would have".into(),
         ),
     }
 }

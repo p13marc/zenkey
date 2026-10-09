@@ -9,12 +9,9 @@
 //! - **QoS is mapped to the wire in one place**, express axis included.
 
 use crate::{Error, Result};
-use zenkey::qos::QosProfile;
 use zenoh::Session;
 
-use crate::model::registry::SliceSet;
-
-/// A declared publisher with its QoS profile applied — the only publish path.
+/// A declared publisher with its QoS axes applied — the only publish path.
 pub struct Publication {
     publisher: zenoh::pubsub::Publisher<'static>,
     encoding: Option<String>,
@@ -28,27 +25,13 @@ impl std::fmt::Debug for Publication {
     }
 }
 
-/// Declare a publication on a **full wire key** (explorers are un-namespaced;
-/// compose with `with_base` first).
-///
-/// The profile maps to the wire in one place: reliability, congestion
-/// control, priority, and the express bit (RFC 04 §3 — `alert` and `frame`
-/// are the express profiles; nothing in the workspace ever set it before).
-///
-/// A wildcard key is refused, never declared ([`check_concrete`], #504).
-pub async fn declare_publication(
-    session: &Session,
-    key: &str,
-    qos: QosProfile,
-    encoding: Option<&str>,
-) -> Result<Publication> {
-    declare_publication_with(session, key, WireQos::of_profile(qos), encoding).await
-}
-
-/// A publication's QoS axes as zenoh takes them (#612, FJ8a): a v1
-/// profile's, or the axes a row recorded (`qos_axes`), which a replay and
-/// `pub --from ndjson` publish with exactly. A zk2 owner's QoS is per
-/// resource (spec §2.4), and v1's five profile names spell little of it.
+/// A publication's QoS axes as zenoh takes them (#612, FJ8a): what a
+/// recorded row's `qos_axes` asks for, which a replay and `pub --from
+/// ndjson` publish with exactly, or [`WireQos::DEFAULT`]. A zk2 owner's QoS
+/// is per resource (spec §2.4); a tool writing a foreign key has no
+/// contract to read it from, so it publishes what it recorded or what it is
+/// told. v1's five profile names (RFC 04 §3) left with the v1 dependency
+/// (#612, FJ9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireQos {
     pub priority: zenoh::qos::Priority,
@@ -58,15 +41,14 @@ pub struct WireQos {
 }
 
 impl WireQos {
-    /// A v1 profile's axes (RFC 04 §3).
-    pub fn of_profile(p: QosProfile) -> WireQos {
-        WireQos {
-            priority: p.priority(),
-            congestion: p.congestion_control(),
-            reliability: p.reliability(),
-            express: p.express(),
-        }
-    }
+    /// zenoh's own defaults — `data/drop/reliable`, no express: what a
+    /// publisher declared with nothing said publishes with.
+    pub const DEFAULT: WireQos = WireQos {
+        priority: zenoh::qos::Priority::DEFAULT,
+        congestion: zenoh::qos::CongestionControl::DEFAULT,
+        reliability: zenoh::qos::Reliability::DEFAULT,
+        express: false,
+    };
 
     /// The axes a `qos_axes` token spells
     /// ([`crate::report::qos_axes_token`]), or `None` for one it could not
@@ -80,11 +62,26 @@ impl WireQos {
             express,
         })
     }
+
+    /// The `qos_axes` token for these axes, which [`WireQos::parse`] reads
+    /// back.
+    pub fn token(&self) -> String {
+        crate::report::qos_axes_token(
+            self.priority,
+            self.congestion,
+            self.reliability,
+            self.express,
+        )
+    }
 }
 
-/// [`declare_publication`] with the axes given one by one: what a recorded
-/// row's `qos_axes` asks for (#612, FJ8a).
-pub async fn declare_publication_with(
+/// Declare a publication on a **full wire key** (a raw session is in no
+/// namespace; join one first with [`crate::with_namespace`]), with its QoS
+/// axes applied in one place: reliability, congestion control, priority and
+/// the express bit.
+///
+/// A wildcard key is refused, never declared ([`check_concrete`], #504).
+pub async fn declare_publication(
     session: &Session,
     key: &str,
     qos: WireQos,
@@ -231,104 +228,27 @@ pub fn check_concrete(key: &str, act: WriteAct) -> Result<()> {
     ))
 }
 
-/// What a key is, for the purpose of retiring it — the guard's positive
-/// verdict, so callers print facts instead of re-deriving them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RetireClass {
-    /// State-shaped: retirement is the class's own semantics (RFC 04 §1.2).
-    State {
-        /// Whether a loaded registry recognises the subject. An unregistered
-        /// state key still tombstones authoritatively — but no `ttl_s`
-        /// bounds how long the tombstone stays observable.
-        registered: bool,
-        /// The registry's `ttl_s`, when declared: storages keep the
-        /// tombstone observable at least this long (RFC 04 §1.2).
-        ttl_s: Option<i64>,
-    },
-    /// A v1 key off the state class (telemetry/events, or a verbatim
-    /// plane) — retired anyway, as a forced operator cleanup (v1.12).
-    NonState { class: String },
-    /// The grammar could not say what the key is — retired blind, forced.
-    Unclassified { reason: String },
-}
-
-/// Refuse a tombstone the class semantics do not license, unless forced.
+/// Refuse a tombstone a tool has no licence to send, unless forced.
 ///
-/// The judgment mirrors `bench`'s idempotence guard: the refusal is
-/// grammar- and registry-driven, and the messages cite what they know.
-/// Unlike `bench`, a missing registry does not blind us on the happy path —
-/// the class is written in the key itself, so a state key passes with no
-/// slices loaded. The one unconditional refusal is a wildcard: a tombstone
-/// is addressed to one concrete key (RFC 04 §1.2, v1.12), and no `force`
-/// overrides a blast radius.
-pub fn check_retire(
-    base: &str,
-    key: &str,
-    slices: Option<&SliceSet>,
-    force: bool,
-) -> Result<RetireClass> {
+/// A wildcard is refused whatever `force` says: a tombstone is addressed to
+/// one concrete key, and no flag overrides a blast radius ([`check_concrete`]).
+/// A concrete key is retired only when `force` says the operator means it.
+/// What a delete means is its owner's to say: a zk2 service's own key is
+/// refused before this is asked (P3, spec §6), and a key no contract
+/// describes has no class a tool could read a licence from — v1 read one
+/// off the key's class and its registry (RFC 04 §1.2), and that reading
+/// left with the v1 grammar (#612, FJ9).
+pub fn check_retire(key: &str, force: bool) -> Result<()> {
     check_concrete(key, WriteAct::Retire)?;
-    let facts = crate::model::facts::describe_key(base, key, slices).facts;
-    use crate::model::facts::{ClassKind, KeyShape, Registration};
-    match &facts.shape {
-        KeyShape::V1(v) if v.class_kind == ClassKind::State => {
-            let (registered, ttl_s) = match &facts.registration {
-                Registration::Registered(s) => (true, s.ttl_s),
-                _ => (false, None),
-            };
-            Ok(RetireClass::State { registered, ttl_s })
-        }
-        KeyShape::V1(v) if matches!(v.class_kind, ClassKind::Telemetry | ClassKind::Events) => {
-            if force {
-                return Ok(RetireClass::NonState {
-                    class: v.class.clone(),
-                });
-            }
-            Err(Error::unaskable(
-                key,
-                format!(
-                    "is {}-shaped — RFC 04 §1: a delete there is meaningless and \
-                     MUST NOT be sent by the class's publisher. Retiring it anyway \
-                     is an operator cleanup (RFC 04 §1.2, v1.12) — pass --i-know \
-                     to mean it.",
-                    v.class
-                ),
-            ))
-        }
-        KeyShape::V1(v) => {
-            if force {
-                return Ok(RetireClass::NonState {
-                    class: v.class.clone(),
-                });
-            }
-            Err(Error::unaskable(
-                key,
-                format!(
-                    "sits on the {} plane — a plane key answers GETs or carries \
-                     frames; a tombstone there is at most a storage purge \
-                     (RFC 04 §1.2, v1.12) — pass --i-know to mean it.",
-                    v.class
-                ),
-            ))
-        }
-        KeyShape::NotUnderBase | KeyShape::Unparsed { .. } => {
-            let reason = match &facts.shape {
-                KeyShape::Unparsed { reason } => reason.clone(),
-                _ => format!("not under base {base:?}"),
-            };
-            if force {
-                return Ok(RetireClass::Unclassified { reason });
-            }
-            Err(Error::unaskable(
-                key,
-                format!(
-                    "cannot be classified under base {base:?} ({reason}) — 'not \
-                     asked' is not 'state' (RFC 09 §5.1 O4); pass --i-know to \
-                     retire an unclassified key."
-                ),
-            ))
-        }
+    if force {
+        return Ok(());
     }
+    Err(Error::unaskable(
+        key,
+        "is a tombstone on a key no contract describes: nothing says a delete is \
+         its writer's to send, so this tool will not presume it — pass --i-know \
+         to retire it anyway",
+    ))
 }
 
 /// A stream of matching changes for one **self-declared** entity (a
@@ -370,23 +290,12 @@ impl MatchingEvents {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey::slice::{RegistrySlice, SubjectDecl};
 
-    fn slice_with_state_subject() -> SliceSet {
-        let mut health = SubjectDecl::new("health", zenkey::Class::State);
-        health.type_name = "Health".into();
-        health.ttl_s = Some(900);
-        let mut slice = RegistrySlice::new("1.0", "t", "sysinfo");
-        slice.subjects = vec![health];
-        SliceSet::from_slices(vec![slice])
-    }
-
-    /// The five outcomes of the retire guard (RFC 04 §1.2, v1.12), each
-    /// citing what it knows.
+    /// A wildcard tombstone is refused whatever `force` says.
     #[test]
     fn a_wildcard_retire_is_refused_unconditionally() {
         for force in [false, true] {
-            let err = check_retire("", "v1/h-3fa9c2d41b7e/state/sysinfo/**", None, force)
+            let err = check_retire("prod/zk2/host-a/tc/**", force)
                 .unwrap_err()
                 .to_string();
             assert!(err.contains("blast radius"), "{err}");
@@ -397,11 +306,7 @@ mod tests {
     /// a tombstone does — `$*` included, a concrete key untouched.
     #[test]
     fn a_wildcard_write_is_refused_whatever_the_act() {
-        for key in [
-            "prod/v1/**",
-            "v1/*/state/sysinfo/health",
-            "v1/h-3fa9c2d41b7e/$*",
-        ] {
+        for key in ["prod/zk2/**", "plant/*/temp", "plant/line-1/$*"] {
             for act in [WriteAct::Put, WriteAct::Retire] {
                 let err = check_concrete(key, act).unwrap_err();
                 assert!(err.is_unaskable(), "a refused input, exit 2: {err}");
@@ -411,96 +316,52 @@ mod tests {
                 assert!(err.contains("Not overridable"), "{err}");
             }
         }
-        let put = check_concrete("prod/v1/**", WriteAct::Put)
+        let put = check_concrete("prod/zk2/**", WriteAct::Put)
             .unwrap_err()
             .to_string();
         assert!(put.contains("RFC 07 §3"), "{put}");
         assert!(put.contains("every subscriber"), "{put}");
-        assert!(check_concrete("v1/h-3fa9c2d41b7e/state/sysinfo/health", WriteAct::Put).is_ok());
+        assert!(check_concrete("plant/line-1/temp", WriteAct::Put).is_ok());
     }
 
     /// … and the only publish path asks it, so no frontend can forget to.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_wildcard_publication_is_never_declared() {
         let session = crate::bus::session::standalone().await;
-        let err = declare_publication(&session, "prod/v1/**", QosProfile::Sampled, None)
+        let err = declare_publication(&session, "prod/zk2/**", WireQos::DEFAULT, None)
             .await
             .unwrap_err();
         assert!(err.is_unaskable(), "{err}");
         assert!(err.to_string().contains("blast radius"), "{err}");
     }
 
+    /// A concrete tombstone needs `--i-know`, and says so: no contract
+    /// describes the key, so no class licenses the delete.
     #[test]
-    fn a_state_key_retires_without_a_registry() {
-        // The class is written in the key itself — unlike bench's
-        // idempotence, a missing registry does not blind the guard.
-        let got = check_retire("", "v1/h-3fa9c2d41b7e/state/sysinfo/health", None, false).unwrap();
-        assert_eq!(
-            got,
-            RetireClass::State {
-                registered: false,
-                ttl_s: None
-            }
-        );
-        // With the registry loaded, the tombstone-visibility bound rides out.
-        let slices = slice_with_state_subject();
-        let got = check_retire(
-            "",
-            "v1/h-3fa9c2d41b7e/state/sysinfo/health",
-            Some(&slices),
-            false,
-        )
-        .unwrap();
-        assert_eq!(
-            got,
-            RetireClass::State {
-                registered: true,
-                ttl_s: Some(900)
-            }
-        );
+    fn a_concrete_retire_needs_i_know() {
+        let err = check_retire("plant/line-1/temp", false).unwrap_err();
+        assert!(err.is_unaskable(), "a refused input, exit 2: {err}");
+        assert!(err.to_string().contains("--i-know"), "{err}");
+        assert!(check_retire("plant/line-1/temp", true).is_ok());
     }
 
+    /// The default axes are zenoh's own, and every axis set round-trips
+    /// through its `qos_axes` token.
     #[test]
-    fn a_telemetry_retire_needs_i_know_and_cites_the_rfc() {
-        let key = "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu/usage";
-        let err = check_retire("", key, None, false).unwrap_err().to_string();
-        assert!(err.contains("MUST NOT"), "{err}");
-        assert!(err.contains("v1.12"), "{err}");
-        assert!(err.contains("--i-know"), "{err}");
+    fn the_default_is_zenohs_and_a_token_round_trips() {
+        assert_eq!(WireQos::DEFAULT.token(), "data/drop/reliable");
+        let urgent = WireQos {
+            priority: zenoh::qos::Priority::RealTime,
+            congestion: zenoh::qos::CongestionControl::Block,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express: true,
+        };
+        assert_eq!(urgent.token(), "real_time/block/reliable+express");
+        assert_eq!(WireQos::parse(&urgent.token()), Some(urgent));
         assert_eq!(
-            check_retire("", key, None, true).unwrap(),
-            RetireClass::NonState {
-                class: "telemetry".to_string()
-            }
+            WireQos::parse("sampled"),
+            None,
+            "a v1 profile name is no token"
         );
-    }
-
-    #[test]
-    fn a_plane_retire_needs_i_know_too() {
-        let key = "v1/h-3fa9c2d41b7e/@rpc/sysinfo/introspect";
-        let err = check_retire("", key, None, false).unwrap_err().to_string();
-        assert!(err.contains("plane"), "{err}");
-        assert!(matches!(
-            check_retire("", key, None, true).unwrap(),
-            RetireClass::NonState { class } if class == "@rpc"
-        ));
-    }
-
-    #[test]
-    fn an_unclassified_retire_needs_i_know_and_names_o4() {
-        // A foreign key under an empty base parses as... nothing v1.
-        let err = check_retire("", "some/foreign/key", None, false)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("O4"), "{err}");
-        assert!(matches!(
-            check_retire("", "some/foreign/key", None, true).unwrap(),
-            RetireClass::Unclassified { .. }
-        ));
-        // And a key under another base is unclassified, not misclassified.
-        let err = check_retire("acme", "other/v1/h-3fa9c2d41b7e/state/x/y", None, false)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("cannot be classified"), "{err}");
     }
 }

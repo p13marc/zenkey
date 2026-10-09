@@ -6,7 +6,9 @@
 //! empty base onto the empty base, which proves nothing (#506) — is refused
 //! without `--force-base`; a recorded delete keeps the retire gate's price
 //! (`--i-know`); the capture's drop ledger is repeated, because a replay
-//! of a partial view is a partial view.
+//! of a partial view is a partial view. A row publishes with the QoS axes
+//! it recorded (`.zrec` version 3), or `--qos`: a version-1 or 2 capture's
+//! v1 profile names are not read since #612's FJ9.
 //!
 //! **`--namespace`** (#612, FJ5; spike S13, r4 §4.1) publishes through a
 //! session opened in a deployment namespace, each key moved from the
@@ -21,12 +23,17 @@ use std::io::BufReader;
 use anyhow::{Context, Result};
 use zenkey_fleet::{ReplayEvent, ReplayTarget, ZrecSource};
 
-use crate::Bus;
+use crate::bus::Deployment;
 use crate::exit::unaskable;
 
 pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
+    // The base this bus carries climbs the namespace ladder (flag > env >
+    // context > empty); `--namespace` below is typed only, and is where
+    // the keys go, not what the bus is.
+    let bus = Deployment::resolve(&crate::cli::NamespaceArgs {
+        namespace: cli.base.clone(),
+        session: cli.session.clone(),
+    })?;
     let crate::cli::ReplayArgs {
         file,
         speed,
@@ -34,15 +41,12 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         force_base,
         i_know,
         seed_state,
-        qos,
+        qos: default_qos,
         namespace,
-        bus: _,
+        base: _,
+        session: _,
     } = cli;
-    let (file, qos) = (file.as_str(), qos.as_str());
-    // The `--qos` name is checked here, before a byte is read: the engine
-    // takes the closed enum, so an unknown profile is a refusal rather than a
-    // per-row "malformed" event partway through a replay.
-    let default_qos = super::publish::parse_qos(qos)?;
+    let file = file.as_str();
     // The read runs on the blocking pool (#332): a replay interleaves pacing
     // sleeps and network puts, and a blocking line read between them stalls
     // the runtime mid-pacing.
@@ -64,7 +68,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
     );
     // Under `--namespace` the target is the namespace typed: moving the keys
     // there is the point, so the base contract below does not apply to it.
-    let target_base = namespace.as_deref().unwrap_or(args.base());
+    let target_base = namespace.as_deref().unwrap_or(bus.namespace());
     // Both base refusals are refusals of the command line, so both are a 2
     // (`crate::exit`); the mismatch was a bare `bail!`, a 1, until #506 put
     // its sibling beside it. Neither opens a session.
@@ -105,7 +109,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
     // One resolution for the whole run, and it happens in `Mode::of` (#198).
     // A streaming verb's question is only ever "is a program reading this" —
     // it has rows for one and prose for the other, and no third answer.
-    let ndjson = crate::render::Mode::of(args.format()).machine();
+    let ndjson = crate::render::Mode::of(bus.format()).machine();
     let mut on_event = |ev: ReplayEvent<'_>| match ev {
         ReplayEvent::WouldPut {
             key,
@@ -203,17 +207,13 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
         .await?
     } else {
         let session = match &namespace {
-            Some(ns) => args.session_in(ns).await?,
-            None => args.session().await?,
+            Some(ns) => bus.link().session_in(ns).await?,
+            None => bus.link().session().await?,
         };
-        let slices = args.slices_optional().await?;
         zenkey_fleet::replay(
             &mut reader,
             zenkey_fleet::ReplaySpec {
-                target: ReplayTarget::Bus {
-                    session: &session,
-                    slices: slices.as_ref(),
-                },
+                target: ReplayTarget::Bus { session: &session },
                 speed,
                 i_know,
                 default_qos,
@@ -226,7 +226,7 @@ pub async fn run(cli: crate::cli::ReplayArgs) -> Result<()> {
     };
 
     let failed = report.malformed > 0 || report.refused > 0;
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
+    crate::render::emit_with(&mut std::io::stdout(), &report, bus.format(), bus.color())?;
     if failed {
         std::process::exit(1);
     }

@@ -228,14 +228,13 @@ pub fn interval_of(secs: f64) -> Result<Duration> {
     Ok(Duration::from_secs_f64(secs))
 }
 
-pub async fn storage_list(secs: f64, args: &crate::Bus) -> Result<()> {
+pub async fn storage_list(secs: f64, args: &crate::bus::Link) -> Result<()> {
     validate_format(args.format())?;
     let interval = interval_of(secs)?;
     let session = args.session().await?;
     let fetch = async || {
         let storages = zenkey_fleet::storages(&session, args.timeout()).await?;
-        let coverage = super::storage::coverage(args, &storages).await;
-        Ok(crate::report::StorageList { storages, coverage })
+        Ok(crate::report::StorageList { storages })
     };
     poll_loop(interval, args.format(), args.color(), fetch).await
 }

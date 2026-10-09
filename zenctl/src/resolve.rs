@@ -3,25 +3,25 @@
 //! Every knob this tool takes is resolved the same way — **flag > env >
 //! active context > default** — and each rung was written out again wherever
 //! it was needed. `session()` and `session_reporting()` were verbatim copies
-//! of one four-rung climb; `Scout`, which has no `BusArgs` to hang methods on,
-//! had a third copy of two of them; `cmd/watch.rs` re-derived the slice-source
-//! decision by hand.
+//! of one four-rung climb, and `Scout`, which has no argument struct to hang
+//! methods on, had a third copy of two of them.
 //!
-//! ## Scalars, not `&BusArgs`
+//! ## Scalars, not argument structs
 //!
 //! A ladder that demands the whole argument struct cannot serve the caller
 //! that does not have one — and `Scout` is the standing proof of what happens
 //! then: it gets copy-pasted instead of called. So these take the flag value
-//! and the stored context, and `BusArgs` adapts.
+//! and the stored context, and `crate::bus` adapts. The `--registry` ladder
+//! and the slice-source decision left with the v1 registry (#612, FJ9).
 //!
 //! ## The second parameter is the testability
 //!
 //! `stored: Option<&StoredContext>` passed in — rather than read from
 //! `~/.config` inside — removes the config file, the process-global cache and
 //! the `exit(2)` from every test at once. Before this, the crate's only unit
-//! test of a `BusArgs` accessor passed *because it never let the ladder reach
-//! its second rung* (`cmd/mod.rs` sets `base: Some("zs")`): with `base: None`
-//! it would have read the developer's real config.
+//! test of a bus accessor passed *because it never let the ladder reach its
+//! second rung*: with no base it would have read the developer's real
+//! config.
 //!
 //! Nothing here opens a file, a session, or a process. The engine legislated
 //! this for its own half already — `zenkey_explorer_config` opens with
@@ -93,16 +93,6 @@ pub fn timeout(flag: Option<u64>, stored: Option<&StoredContext>) -> Duration {
     )
 }
 
-/// Registry directories: a non-empty flag list replaces the context's, on the
-/// same rule as [`endpoints`].
-pub fn registry_dirs(flag: &[PathBuf], stored: Option<&StoredContext>) -> Vec<PathBuf> {
-    if flag.is_empty() {
-        stored.map(|c| c.registry.clone()).unwrap_or_default()
-    } else {
-        flag.to_vec()
-    }
-}
-
 /// The zenoh JSON5 config file (#122): flag (or `ZENCTL_ZENOH_CONFIG`) >
 /// context > none.
 pub fn zenoh_config(flag: Option<&Path>, stored: Option<&StoredContext>) -> Option<PathBuf> {
@@ -139,119 +129,6 @@ pub fn transport(
     }
 }
 
-/// Where registry slices come from for this invocation.
-///
-/// `--registry` dirs, when given, do not *replace* the bus — they union with
-/// it, served winning per producer (RFC 08 §6.1, issue #43). What they change
-/// is whether a bus that will not come up is fatal: a question the dirs can
-/// answer on their own must not die with the transport (#196).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SliceSource {
-    /// Live introspection only — the bus is the whole answer.
-    Bus,
-    /// The union of the bus and these directories.
-    Union(Vec<PathBuf>),
-}
-
-/// Which source this invocation's slices come from.
-pub fn slice_source(dirs: Vec<PathBuf>) -> SliceSource {
-    if dirs.is_empty() {
-        SliceSource::Bus
-    } else {
-        SliceSource::Union(dirs)
-    }
-}
-
-/// The sentences the slice ladder says about its own coverage.
-///
-/// They are notes, not log lines: each one is a claim about **what was
-/// asked** (RFC 09 §5.1 O4/O5) or about a zero that is not a verdict
-/// (RFC 05 §3.1). Built here, printed by the caller, so what they say is
-/// testable without a bus.
-pub mod notes {
-    use std::path::Path;
-
-    use crate::render::Note;
-
-    /// The transport would not come up, and the dirs answered instead.
-    ///
-    /// Pinned byte-for-byte by `tests/cmd/session-transport-fallback.trycmd`,
-    /// including the trailing period after the citation — which is why the
-    /// citation is part of the text here rather than a `cite`.
-    pub fn registry_only(error: &str, dirs: &[impl AsRef<Path>]) -> Note {
-        Note::coverage(format!(
-            "no session ({error}); answering from --registry only: {}.\n\
-             That is what this checkout declares, not what the fleet \
-             serves — `zenctl check conform <producer> --registry <dir>` compares them \
-             when the bus is reachable (RFC 05 §3.1).",
-            dirs.iter()
-                .map(|d| d.as_ref().display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-    }
-
-    /// The bus and a directory declare the same producer differently.
-    ///
-    /// Reported, never silently overwritten: the union has a winner, and the
-    /// loser having existed is a fact about the deployment.
-    pub fn disagreement(
-        producer: &str,
-        bus_version: &str,
-        dirs_version: &str,
-        shape_differs: bool,
-    ) -> Note {
-        Note::caveat(format!(
-            "registry disagreement: {producer} — bus serves v{bus_version}, \
-             dirs carry v{dirs_version}{} (served wins; `zenctl check conform \
-             {producer} --registry <dir>` details the drift)",
-            if shape_differs { ", shapes differ" } else { "" }
-        ))
-    }
-
-    /// The fleet does not agree with **itself** about a producer (#399).
-    ///
-    /// A different claim from [`disagreement`], which is the fleet against
-    /// this checkout, and it has to read differently: this one says several
-    /// hosts answered for one producer and did not say the same thing. The
-    /// set kept one of the answers, and which one is arrival order — not a
-    /// fact about the fleet — so every slice-derived answer below it is
-    /// derived from a pick.
-    pub fn collapsed(producer: &str, origins: &[String], versions: &[String]) -> Note {
-        let who: Vec<String> = origins
-            .iter()
-            .zip(versions.iter())
-            .map(|(o, v)| format!("{o} serves v{v}"))
-            .collect();
-        Note::coverage(format!(
-            "the fleet does not agree with itself about {producer}: {} — \
-             this answer used one of them, and which one is arrival order \
-             (`zenctl check conform {producer}` calls each origin)",
-            who.join(", ")
-        ))
-        .cite("RFC 13 §3 O4")
-    }
-
-    /// Nobody answered the introspect sweep.
-    ///
-    /// An empty set is not "this deployment has no registry"; it is "nothing
-    /// answered", and the note has to say which, with the two questions that
-    /// tell them apart.
-    pub fn no_slices(base: &str) -> Note {
-        // `Note::silence` would append the citation, and this sentence already
-        // spends it mid-clause — where it belongs, because it is the *zero*
-        // that is not a verdict, not the note as a whole.
-        Note::new(
-            crate::render::NoteKind::Silence,
-            format!(
-                "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-             `zenctl admin graph` says who is actually attached.\n\
-             (offline alternative: --registry <dir> with the app's registry TOMLs)"
-            ),
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,10 +138,10 @@ mod tests {
             base: Some("prod".into()),
             connect: vec!["tcp/router:7447".into()],
             listen: vec!["tcp/0.0.0.0:0".into()],
-            registry: vec![PathBuf::from("/ctx/registry")],
             scouting: Some(false),
             zenoh_config: Some(PathBuf::from("/ctx/zenoh.json5")),
             timeout: Some(30),
+            ..StoredContext::default()
         }
     }
 
@@ -360,97 +237,6 @@ mod tests {
                 listen: vec![],
                 scouting: None,
             }
-        );
-    }
-
-    /// Registry dirs climb the same replace-not-merge ladder as endpoints, and
-    /// the source decision reads off the result — one place, so `watch` cannot
-    /// re-derive it differently.
-    #[test]
-    fn the_slice_source_follows_the_dirs() {
-        let c = ctx();
-        assert_eq!(registry_dirs(&[], Some(&c)), c.registry);
-        assert_eq!(
-            registry_dirs(&[PathBuf::from("/flag")], Some(&c)),
-            vec![PathBuf::from("/flag")]
-        );
-        assert_eq!(slice_source(vec![]), SliceSource::Bus);
-        assert_eq!(
-            slice_source(registry_dirs(&[], Some(&c))),
-            SliceSource::Union(c.registry.clone()),
-            "a context's dirs select the union just as the flag does"
-        );
-        assert_eq!(slice_source(registry_dirs(&[], None)), SliceSource::Bus);
-    }
-
-    /// The registry-only note is pinned byte-for-byte by the corpus. Asserting
-    /// its shape here means a copy-edit fails a unit test before it fails a
-    /// trycmd file nobody was looking at.
-    #[test]
-    fn the_registry_only_note_names_the_dirs_and_the_bound() {
-        let n = notes::registry_only("port in use", &[Path::new("/a"), Path::new("/b")]);
-        let line = n.to_line();
-        assert!(line.starts_with("no session (port in use); "), "{line}");
-        assert!(line.contains("--registry only: /a, /b."), "{line}");
-        assert!(
-            line.contains("what this checkout declares, not what the fleet serves"),
-            "the claim is about coverage, not about the fleet: {line}"
-        );
-    }
-
-    /// A zero from the bus is a zero, and says so with the question that
-    /// distinguishes "nothing answered" from "nothing is declared".
-    #[test]
-    fn an_empty_sweep_is_never_a_verdict() {
-        let line = notes::no_slices("zensight").to_line();
-        assert!(line.contains("not a verdict (RFC 05 §3.1)"), "{line}");
-        assert_eq!(
-            line.matches("RFC 05 §3.1").count(),
-            1,
-            "the citation is spent once — `Note::silence` would append a second: {line}"
-        );
-        assert!(line.contains("admin graph"), "{line}");
-        assert!(
-            line.contains("--registry <dir>"),
-            "the offline alternative rides along: {line}"
-        );
-    }
-
-    /// A disagreement is reported with both versions, and the shape clause
-    /// appears only when shapes actually differ.
-    #[test]
-    fn a_disagreement_names_both_versions() {
-        let with = notes::disagreement("sysinfo", "2", "1", true).to_line();
-        assert!(
-            with.contains("bus serves v2, dirs carry v1, shapes differ"),
-            "{with}"
-        );
-        let without = notes::disagreement("sysinfo", "2", "1", false).to_line();
-        assert!(without.contains("dirs carry v1 (served wins"), "{without}");
-    }
-
-    /// #399: the fleet against *itself* is a different sentence from the
-    /// fleet against this checkout, and must not be mistakable for it.
-    #[test]
-    fn a_collapse_names_every_host_and_says_which_answer_was_used() {
-        let line = notes::collapsed(
-            "sysinfo",
-            &["h-3fa9c2d41b7e".to_string(), "h-8b1e07af22c9".to_string()],
-            &["2.0".to_string(), "1.0".to_string()],
-        )
-        .to_line();
-        assert!(
-            line.contains("h-3fa9c2d41b7e serves v2.0")
-                && line.contains("h-8b1e07af22c9 serves v1.0"),
-            "both hosts and both versions: {line}"
-        );
-        assert!(
-            line.contains("arrival order"),
-            "and that the pick is not a fact about the fleet: {line}"
-        );
-        assert!(
-            !line.contains("dirs"),
-            "this one is not about the checkout: {line}"
         );
     }
 }

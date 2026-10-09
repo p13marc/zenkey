@@ -8,7 +8,7 @@
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
-use zenkey::qos::QosProfile;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::declare_publication;
 use zenoh::sample::SampleKind;
 
@@ -23,7 +23,7 @@ const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 async fn a_tombstone_reaches_the_subscriber_as_delete() {
     let (a, b) = peer_pair().await;
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, WireQos::DEFAULT, None)
         .await
         .expect("declare publication");
     let events = publication.matching_events().await.expect("events");
@@ -72,7 +72,7 @@ async fn the_monitor_reports_kind_delete() {
     let mut events = monitor.events();
     monitor.watch(KEY).await.expect("watch");
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, WireQos::DEFAULT, None)
         .await
         .expect("declare publication");
     let matching = publication.matching_events().await.expect("events");

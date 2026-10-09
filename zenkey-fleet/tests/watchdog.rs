@@ -10,8 +10,8 @@
 
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
 use zenkey_fleet::Sipper as _;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::declare_publication;
 use zenkey_fleet::judge::condition::{Condition, WatchdogSpec, watchdog};
 use zenkey_fleet::report::{CondState, Transition, WatchdogSummary};
@@ -67,7 +67,7 @@ async fn drain(
 async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() {
     let (a, b) = peer_pair().await;
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, WireQos::DEFAULT, None)
         .await
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
@@ -197,7 +197,7 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
     // reads presence twice, its grace period apart (2 s by default) — far
     // longer than a tick, so a sweep that gated the drain would cost the
     // window its samples many times over.
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, WireQos::DEFAULT, None)
         .await
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");

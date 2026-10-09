@@ -2,33 +2,33 @@
 //! bus anything.
 //!
 //! One rule places a module here: *it can do its job from values already in
-//! hand*. Nothing below takes a session. A key becomes a described key
-//! ([`facts`]), a set of served slices becomes a queryable registry
-//! ([`registry`]), a stream of samples becomes rates and latencies
-//! ([`stats`]) or a tree ([`tree`], [`skeleton`]), two payloads become a diff
-//! ([`diff`]), a payload plus a schema becomes a rendering ([`decode`]), a
-//! sample on the alert plane becomes an alert transition ([`alert`]), a
-//! window of samples becomes a lane-partitioned ordering on a stated clock
-//! ([`timeline`]), a fan-in's
-//! replies become snapshot rows ([`snapshot`]), two snapshots become one
-//! comparison by zk2 key ([`snapshot_diff`]), and a stream of
-//! described samples becomes a metrics surface whose blind spots are series
-//! of their own ([`export`], [`prom`]).
+//! hand*. Nothing below takes a session. A presence read and its descriptors
+//! become a catalog of services, interfaces, revisions and bindings
+//! ([`catalog`], which also holds the contracts loaded offline); a zk2
+//! sample plus the revision in hand becomes an honest rendering
+//! ([`render`]); two revisions become the classifier's verdict on the
+//! change ([`compat`]). What a resolved verb aims at — an address or a
+//! pattern, a resource, the values given, a call's plan and its request's
+//! bytes, and whether a wire key is a service's own (P3) — is settled here
+//! before anything is sent ([`target`]). A raw observer's wire key is
+//! resolved rung by rung through a namespace ([`namespace`]), a presence
+//! read and the contracts in hand ([`lens`]): its address and resource, its
+//! payload checked against the declared type, its stamp attributed to its
+//! owner. Bytes no schema reaches fall to the structural ladder
+//! ([`structural`]).
 //!
-//! For zk2 (#612, FJ3), a presence read and its descriptors become a catalog
-//! of services, interfaces, revisions and bindings ([`catalog`], which also
-//! holds the contracts loaded offline), a zk2 sample plus the revision in
-//! hand becomes an honest rendering ([`render`]), and two revisions become
-//! the classifier's verdict on the change ([`compat`], FJ4). What a resolved
-//! verb aims at — an address or a pattern, a resource, the values given, a
-//! call's plan and its request's bytes, and whether a wire key is a
-//! service's own (P3) — is settled here before anything is sent
-//! ([`target`], FJ5). A raw observer's wire key is resolved rung by rung
-//! through a namespace, a presence read and the contracts in hand
-//! ([`lens`], FJ8b): its address and resource, its payload checked against
-//! the declared type, its stamp attributed to its owner. Bytes no
-//! schema reaches fall to the structural ladder ([`structural`]), which
-//! v1's decode seam and zk2's rendering share.
+//! The rest is generation-neutral: a stream of samples becomes rates and
+//! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
+//! ([`diff`]), a window of samples becomes a lane-partitioned ordering on a
+//! stated clock ([`timeline`]), a fan-in's replies become snapshot rows
+//! ([`snapshot`]), two snapshots become one comparison by zk2 key
+//! ([`snapshot_diff`]), an enrollment and the contracts become a router's
+//! access control ([`acl`]), and a deployment file becomes its storages
+//! ([`storage`]).
+//!
+//! v1's half of this layer — the described key (`facts`), the registry
+//! slice set (`registry`), the skeleton tree, the schema-aware decode seam
+//! and the exporter — left at #612's FJ9; the `v1` branch keeps it.
 //!
 //! Being session-free is the useful property, not an accident of history: it
 //! is what lets a frontend replay a `.zrec` through the same projections it
@@ -51,13 +51,11 @@ pub mod catalog;
 pub mod compat;
 pub mod diff;
 pub mod examples;
-pub mod facts;
 pub mod jsonschema;
 pub mod lens;
-pub mod registry;
+pub mod namespace;
 pub mod render;
 pub mod retain;
-pub mod skeleton;
 pub mod snapshot;
 pub mod snapshot_diff;
 pub mod stats;
@@ -66,6 +64,3 @@ pub mod structural;
 pub mod target;
 pub mod timeline;
 pub mod tree;
-
-#[cfg(feature = "decode")]
-pub mod decode;

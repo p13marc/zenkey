@@ -6,7 +6,7 @@
 //! * a `tests/` corpus can only assert that every leaf verb is covered if it
 //!   can *walk* the tree, which means the tree has to be importable;
 //! * `docs/redesign-2026-07.md` names this file, and #209 names the directory
-//!   it becomes (`cli/`, one module per family, with `BusArgs` in
+//!   it becomes (`cli/`, one module per family, with the bus arguments in
 //!   `cli/bus.rs`). This is the first step of that, taken now because the
 //!   renderer rewrite has to move every call site anyway.
 //!
@@ -16,20 +16,29 @@
 //!
 //! * a **noun** is something declared, alive or persisted, and gets a family
 //!   with verbs under it — `service`, `iface`, `schema`, `namespace`,
-//!   `config`, `storage`, `acl`, `blob`, `admin`, `key`, `bench`;
+//!   `storage`, `acl`, `admin`, `key`, `bench`;
 //! * a **wire verb** is an act or an observation on live traffic, and hangs
 //!   off the root — `get`, `call`, `watch`, `echo`, `pub`, `rate`, `field`,
-//!   `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`, `export`,
-//!   `serve`, `gen`, `scout`;
+//!   `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`, `serve`,
+//!   `gen`, `scout`;
 //! * a **judgement** is exit-coded under the one contract in [`crate::exit`],
 //!   and the exit-coded assertions live together under `check`.
 //!
 //! That is what moved `echo`/`pub` out of `topic` (they are not
 //! things a registry declares), collapsed `topic hz` and `topic bw` into
 //! `rate --bytes`, turned the `schema` noun/verb hybrid into `schema show`,
-//! and gathered `expect`/`cutover`/`retired`/`probe`/`schema check` under
-//! `check`. No aliases and no shims: the old spellings are gone, and
-//! `zenctl/CHANGELOG.md` carries the table.
+//! and gathered `expect`/`probe`/`schema check` under `check`. No aliases
+//! and no shims: the old spellings are gone, and `zenctl/CHANGELOG.md`
+//! carries the table.
+//!
+//! ## v1 left at FJ9 (#612)
+//!
+//! v1's registry (`--registry`, RFC 08 §6 introspection, the slice cache),
+//! its composed selectors (`--origin`/`--class`/`--producer`), its judges
+//! (`why`, `check cutover|conform|retired`) and the profile-backed nouns
+//! (`config`, `blob`, `export`) are gone from `main`; the `v1` branch keeps
+//! them. Every verb left takes `SessionArgs` (a connection, no namespace)
+//! or `NamespaceArgs` (a deployment namespace and a connection).
 //!
 //! ## zk2's nouns (#612, FJ4)
 //!
@@ -77,11 +86,9 @@
 //! in backticks rather than linking them: a public doc must not link a
 //! private bound (#213's `88970a5`, and this module tripped it once already).
 //!
-//! `BusArgs` still carries the resolution policy: five `flag`-then-`env`-then
-//! -`context`-then-default ladders, the registry union, and the
-//! completion-cache write. Extracting those into pure functions is #209's job;
-//! they are deliberately untouched here so this move stays mechanical and
-//! reviewable.
+//! The resolution policy — the `flag`-then-`env`-then-`context`-then-default
+//! ladders — is `crate::resolve`'s, as pure functions (#209), and
+//! `crate::bus` climbs them once per invocation.
 
 use std::path::PathBuf;
 
@@ -292,18 +299,18 @@ pub(crate) struct PubArgs {
     /// Payload: inline text, `@file`, or `-` for stdin (omit with --from).
     pub(crate) body: Option<Source>,
     /// Read rows from stdin instead: `--from ndjson` accepts the exact
-    /// row shape `echo --format ndjson` (and the zengui export) emits —
-    /// key + value per row, optionally encoding/qos/delete/attachment. One
+    /// row shape `echo --format ndjson` emits — key + value per row,
+    /// optionally encoding/qos_axes/delete/attachment. One
     /// shape, both directions; malformed rows are counted and reported,
     /// never silently skipped, and echo's tagged meta lines
     /// (`"row":"dropped"`/`"row":"seed"`) are skipped as stream metadata —
     /// counted as skipped, not malformed.
     #[arg(long, value_enum)]
     pub(crate) from: Option<PubSource>,
-    /// With --from: delete rows on keys that are not state-shaped are
-    /// refused (and counted) unless this is passed — RFC 04 §1.2
-    /// (v1.12) prices the off-state tombstone even in a pipe. A row on a
-    /// wildcard key is refused either way.
+    /// With --from: delete rows are refused (and counted) unless this is
+    /// passed — a tombstone on a key no contract describes is the
+    /// operator's act, even in a pipe. A row on a wildcard key, or on a
+    /// key a zk2 service owns, is refused either way.
     // `conflicts_with = "key"`, not `requires = "from"`: on the
     // positional-key shape there is nothing this flag can acknowledge,
     // and an accepted-but-inert flag is a mis-shape — refused at exit 2
@@ -312,14 +319,14 @@ pub(crate) struct PubArgs {
     // satisfies it.)
     #[arg(long = "i-know", conflicts_with = "key")]
     pub(crate) i_know: bool,
-    /// QoS profile (RFC 04 §3): sampled|refreshed|transition|alert|frame.
-    /// Defaults to the subject's declared profile when the key refines
-    /// against a loaded registry, else `sampled` — either way the choice
-    /// and its source are printed (#158).
-    #[arg(long, add = ArgValueCandidates::new(completion::qos_profiles))]
-    pub(crate) qos: Option<String>,
-    /// Wire encoding to declare (e.g. application/json). Defaults to the
-    /// registry's declared encoding when the key refines, else none.
+    /// QoS axes, `priority/congestion/reliability[+express]` — the token
+    /// `echo` prints as `qos_axes` (`data_high/block/reliable`). Default:
+    /// zenoh's own, `data/drop/reliable`. With --from, a row's recorded
+    /// `qos_axes` win over this. The choice is printed either way (#158).
+    #[arg(long, value_name = "AXES", value_parser = qos_arg)]
+    pub(crate) qos: Option<zenkey_fleet::WireQos>,
+    /// Wire encoding to declare (e.g. application/json). None by default:
+    /// the bytes go out as typed.
     #[arg(long)]
     pub(crate) encoding: Option<String>,
     /// Publish this many times.
@@ -332,21 +339,24 @@ pub(crate) struct PubArgs {
     /// Seconds between repeats — the one period flag (#307).
     #[arg(long, value_name = "SECS", default_value_t = 1.0)]
     pub(crate) every: f64,
-    /// Do not refuse a body the served schema rejects — it ships as typed,
-    /// with a note. (It is still encoded when it *does* encode.)
-    #[arg(long)]
-    pub(crate) no_validate: bool,
-    /// Send the bytes verbatim: no schema lookup, no encoding, no refusal.
-    /// The escape hatch for a subject this tool cannot type.
-    #[arg(long)]
-    pub(crate) raw: bool,
     /// Attachment riding beside the payload: inline text, `@file`, or
-    /// `-` for stdin. Never schema-encoded — the registry's vocabulary
-    /// ends at the payload (#117).
+    /// `-` for stdin, sent verbatim (#117).
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub(crate) attachment: Option<Source>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) session: SessionArgs,
+}
+
+/// A `--qos` token, `priority/congestion/reliability[+express]` — clap's
+/// refusal, exit 2, naming the grammar.
+pub(crate) fn qos_arg(s: &str) -> Result<zenkey_fleet::WireQos, String> {
+    zenkey_fleet::WireQos::parse(s).ok_or_else(|| {
+        "not QoS axes: priority/congestion/reliability[+express], e.g. data/drop/reliable or \
+         real_time/block/reliable+express (priority real_time|interactive_high|interactive_low|\
+         data_high|data|data_low|background; congestion drop|block; reliability \
+         best_effort|reliable)"
+            .to_owned()
+    })
 }
 
 /// `doctor`'s flags — one struct, the `GenArgs` pattern.
@@ -465,8 +475,8 @@ pub(crate) enum Command {
     Namespace(NamespaceCmd),
     /// Storages: what the mesh persists, and the router config behind it.
     ///
-    /// What the mesh persists, joined against declared state — and the
-    /// router block that makes it persist (RFC 09 §2).
+    /// What the routers' admin space says the mesh persists — and the router
+    /// block that makes it persist (RFC 09 §2).
     #[command(subcommand)]
     Storage(StorageCmd),
     /// Router access control, generated from an enrollment and the contracts.
@@ -497,7 +507,9 @@ pub(crate) enum Command {
     /// key as it is (`prod/zk2/…`, `v1/…`, `@/**` for the zenoh admin space).
     /// The fleet discipline (RFC 05 §2.1): target All, consolidation None,
     /// every reply attributed by its own key; error envelopes render as
-    /// errors, and payloads ride `echo`'s rendering ladder. `get state
+    /// errors, and each reply is resolved through the deployment in
+    /// --namespace as `echo` resolves a sample: a zk2 key decoded as its
+    /// declared type, a foreign one rendered structurally. `get state
     /// <ADDRESS> <IFACE> <STATE>` is RESOLVED: one zk2 state resource of one
     /// owner, read through its contract in the deployment's namespace — see
     /// `zenctl get state --help`. Exit codes, both forms: 0 values only, 1
@@ -756,7 +768,7 @@ pub(crate) enum Command {
     /// Manage named connection contexts (config file).
     #[command(subcommand)]
     Context(ContextCmd),
-    /// Inspect or clear the slice cache that feeds shell completion.
+    /// Inspect, refresh or clear the name cache that feeds shell completion.
     #[command(subcommand)]
     Cache(CacheCmd),
     /// Generate shell completions (bash, zsh, fish, elvish, powershell).
@@ -764,11 +776,11 @@ pub(crate) enum Command {
     /// e.g. `zenctl completions bash > ~/.local/share/bash-completion/completions/zenctl`
     ///
     /// The default script is **dynamic** (issue #54): it calls back into
-    /// `zenctl` so producer, subject, type and procedure names come from the
-    /// cached registry of the active context. The cache is written by any
-    /// command that loads slices; completion never touches the bus, so a
-    /// `<TAB>` cannot hang on a fleet that is down. `--static` emits the old
-    /// self-contained script instead.
+    /// `zenctl` so service addresses, interfaces and namespaces come from
+    /// what the last presence read and `namespace list` saw, cached per
+    /// context. Completion never touches the bus, so a `<TAB>` cannot hang
+    /// on a deployment that is down. `--static` emits the self-contained
+    /// script instead.
     Completions {
         shell: clap_complete::Shell,
         /// Emit the self-contained script: no callbacks, no cached names.
@@ -854,21 +866,22 @@ pub(crate) enum CacheCmd {
     /// Print the cache directory for the active context, and what is in it.
     Show {
         #[command(flatten)]
-        bus: BusArgs,
+        session: SessionArgs,
     },
-    /// Re-read the slice source and rewrite the cache.
+    /// Read presence in a namespace and rewrite what the cache holds of it.
     ///
-    /// Every command already answers from its source live — this exists so a
+    /// Every command already answers from the bus live — this exists so a
     /// *completion* can be brought up to date without running one, and so
-    /// "why is it suggesting a producer we deleted" has an answer.
+    /// "why is it suggesting a service we retired" has an answer. One
+    /// presence read of the namespace, the read `service list` makes.
     Refresh {
         #[command(flatten)]
-        bus: BusArgs,
+        ns: NamespaceArgs,
     },
     /// Delete the cache for the active context.
     Clear {
         #[command(flatten)]
-        bus: BusArgs,
+        session: SessionArgs,
     },
 }
 
@@ -950,7 +963,7 @@ pub(crate) enum AdminCmd {
     /// Enumerate routers/peers (zid, version, locators).
     Routers {
         #[command(flatten)]
-        bus: BusArgs,
+        session: SessionArgs,
     },
     /// The mesh as the admin space answers it: nodes, edges, mentions.
     ///
@@ -1022,36 +1035,34 @@ pub(crate) enum AclCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum StorageCmd {
-    /// List configured storages and which declared state they cover.
+    /// List the storages the routers' admin space reports.
     ///
-    /// Each declared state family is judged covered, partial or uncovered
-    /// (RFC 04 §4, issue #14).
+    /// Each storage with its key expression, strip prefix and volume, as
+    /// the admin space states them; a field the layout omits is absent, not
+    /// agreeing. An admin space that answers nothing is a fact about
+    /// reachability, never an empty mesh. v1's coverage column (declared
+    /// state families against the storages) left with the v1 registry; a
+    /// storage on an owner's state keys is the doctor's `storage-on-state`.
     List(StorageListArgs),
-    /// Generate the router's storage config from the registry and a deployment file
+    /// Generate the router's storage config from a deployment file
     ///
-    /// Plan the router's storages from the registry and a small deployment
-    /// file, and emit the `plugins.storage_manager` block with
-    /// `garbage_collection.lifespan` DERIVED (RFC 09 §2, #393).
+    /// Plan the router's storages from a small deployment file, and emit the
+    /// `plugins.storage_manager` block (RFC 09 §2, #393).
     ///
-    /// RFC 09 §2 specifies class-driven storages, each with a selector, a
-    /// literal `strip_prefix` and a `garbage_collection.lifespan` that must be
-    /// ≥ the longest `ttl_s` in the registry (§2.3) — and the registry knows
-    /// that number. The deployment file names only what the registry cannot:
-    /// the base, the volumes (RFC 09 §2.1's capability pair is per volume —
-    /// one volume per history mode from the same plugin) and, per storage,
-    /// its class and volume. Everything else is derived: the selector from
-    /// the class (`@catalog` explicit, because `*` never matches it), the
-    /// `strip_prefix` as the literal leftmost run, and the lifespan as
-    /// ceil(max covered ttl_s × gc_margin), with the computation shown.
+    /// Each storage names its selector, relative to the deployment namespace;
+    /// the `strip_prefix` is derived as the selector's literal leftmost run,
+    /// and a volume's capability pair comes from RFC 09 §2.1's table (per
+    /// volume — one volume per history mode from the same plugin). A
+    /// `garbage_collection.lifespan` is the file's, or zenoh's 24 h default,
+    /// and says which: a zk2 contract declares no tombstone lifetime to
+    /// derive one from.
     ///
     /// The plan refuses what the router would refuse — replication on an
-    /// all-mode volume (§2.2), a volume nobody declared, a class the registry
-    /// declares nothing under — and warns where a caveat applies: overlapping
-    /// selectors (§2), `complete = true` off the replicated latest storage
+    /// all-mode volume (§2.2), a volume nobody declared, a selector that is
+    /// not a key expression — and warns where a caveat applies: overlapping
+    /// selectors (§2), `complete = true` off a replicated latest-mode storage
     /// (§2.2), retention that is the database's and not zenoh's (§2.3),
-    /// redb's mandatory retention in all mode (§2.1), a seed on a volatile
-    /// volume (§2.1). Without a registry the lifespans fall back to the
-    /// default and say so; they are not invented.
+    /// redb's mandatory retention in all mode (§2.1).
     ///
     /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
     /// the zenohd block with every derivation and warning as a comment beside
@@ -1062,24 +1073,22 @@ pub(crate) enum StorageCmd {
     ///
     /// The deployment file, in full:
     ///
-    ///   base = "zensight"              # optional; default = --base / context / ""
+    ///   base = "fleet-a"               # the namespace; default = --namespace / context / ""
     ///
     ///   [volumes.fs]                   # id; `backend` is emitted when it differs
     ///   plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
     ///   # history = "latest"           # fixed by the plugin; per volume for redb
     ///   dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
     ///
-    ///   [storages.latest]
-    ///   class = "state"                # state | telemetry | events | catalog | catalog-pdns
-    ///   # selector = "v1/*/state/sysinfo/**"   # instead of class: a base-relative override
+    ///   [storages.events]
+    ///   selector = "zk2/*/*/*/events/**"   # relative to the namespace
     ///   volume = "fs"
     ///   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
     ///   complete = true                # honoured only where §2.2 allows it
-    ///   params = { dir = "latest" }    # merged into `volume: { id: "fs", … }`
+    ///   params = { dir = "events" }    # merged into `volume: { id: "fs", … }`
     ///   # retention = { … }            # the backend's own block (redb), verbatim
     ///   # gc_period_s = 30             # garbage_collection.period
-    ///   # gc_margin = 2.0              # lifespan = ceil(max ttl_s × margin)
-    ///   # gc_lifespan_s = 86400        # an explicit lifespan; warned about when below max ttl_s
+    ///   # gc_lifespan_s = 86400        # garbage_collection.lifespan; default zenoh's 24 h
     #[command(verbatim_doc_comment)]
     Gen(StorageGenArgs),
 }
@@ -1099,9 +1108,6 @@ pub(crate) enum ContextCmd {
         /// a peer session, where every other context opens a client.
         #[arg(long, short = 'l')]
         listen: Vec<String>,
-        /// Registry dir, repeatable (offline slice source).
-        #[arg(long, value_name = "DIR")]
-        registry: Vec<PathBuf>,
         /// Enable multicast scouting for this context.
         #[arg(long)]
         scouting: bool,
@@ -1400,77 +1406,6 @@ fn addr_arg(s: &str) -> Result<zenkey_model::grammar::Addr, String> {
     s.parse().map_err(|e| format!("{e}"))
 }
 
-/// Options shared by every v1 command: the deployment base, the registry
-/// source, and the connection. zk2's verbs take `NamespaceArgs` (or
-/// `SessionArgs` alone) instead, until FJ9 retires this struct.
-#[derive(Args, Clone)]
-pub(crate) struct BusArgs {
-    /// The deployment base — the first chunk(s) of every key on the wire.
-    ///
-    /// Applications set this as their Zenoh session `namespace` and never
-    /// spell it. `zenctl` deliberately does **not**: a debug tool runs
-    /// un-namespaced so it sees the wire as it really is, including traffic
-    /// from outside the deployment (RFC 09 §5) — which is what lets it spot a
-    /// leak. So it has to be told what the base is.
-    /// Resolution: flag > env > active context (`zenctl context …`) > empty —
-    /// the base-less bus-root deployment, the RFC v1.6 default, whose wire
-    /// keys start at `v1/`. `zenctl namespace list` finds the namespaces zk2
-    /// services use.
-    #[arg(long, env = "ZENCTL_BASE")]
-    pub(crate) base: Option<String>,
-    /// Use a named context from the config file for this invocation
-    /// (default: the file's `current` pointer; env `ZENCTL_CONTEXT`).
-    #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::contexts))]
-    pub(crate) context: Option<String>,
-    /// Local registry directory (`registry/*.{toml,kdl}`), repeatable. Joined with
-    /// the live bus as a union (RFC 08 §6.1): a producer's served slice wins,
-    /// these files fill the gaps, and a disagreement is reported — never
-    /// silently overwritten. With the bus unreachable they answer alone.
-    #[arg(long, value_name = "DIR")]
-    pub(crate) registry: Vec<PathBuf>,
-    /// Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
-    ///
-    /// The session is a zenoh client of these endpoints: no listener of its
-    /// own, no gossip, nothing the mesh can route through (RFC 09 §5). An
-    /// endpoint nothing answers fails the command (exit 2) rather than
-    /// reading as an empty bus, and one that does not parse — no `tcp/`,
-    /// say — is refused by name (exit 2).
-    #[arg(long, short = 'c')]
-    pub(crate) connect: Vec<String>,
-    /// Endpoint to listen on, repeatable.
-    ///
-    /// Listening makes the session a zenoh peer — reachable, and part of the
-    /// mesh's gossip — which an explorer otherwise never is (RFC 09 §5).
-    #[arg(long, short = 'l')]
-    pub(crate) listen: Vec<String>,
-    /// Enable multicast scouting.
-    ///
-    /// OFF by default — with a --zenoh-config too, unless the file itself
-    /// states `scouting.multicast.enabled` — and you should think before
-    /// turning it on: a scouting explorer joins whatever mesh it can find,
-    /// which is how a throwaway session ends up talking to a production fleet.
-    #[arg(long)]
-    pub(crate) scouting: bool,
-    /// Seconds to wait for replies (default 5; a context may override the
-    /// default). Reply-wait only: a passive observation window is `--for`.
-    #[arg(long, value_name = "SECS")]
-    pub(crate) timeout: Option<u64>,
-    /// Zenoh JSON5 config file (#122): the passthrough that reaches a
-    /// secured bus (TLS, QUIC with certs, usrpwd, …). Loaded as the base
-    /// layer; --connect/--listen/--scouting apply on top when given
-    /// (flag > env > context > file). A file that sets a session namespace
-    /// is refused — explorers run un-namespaced (RFC 09 §5).
-    ///
-    /// Only what the file states counts: one that does not name `mode` gets
-    /// the explorer's client session (a peer when it listens), and one that
-    /// does not name `scouting.multicast.enabled` gets multicast off — zenoh's
-    /// own defaults (peer, multicast on) do not leak in.
-    #[arg(long, value_name = "FILE", env = "ZENCTL_ZENOH_CONFIG")]
-    pub(crate) zenoh_config: Option<PathBuf>,
-    #[command(flatten)]
-    pub(crate) out: OutputArgs,
-}
-
 /// `--format` selects among **zenkey's own three renderings** of a report. A
 /// foreign document format — `--dot` (`admin graph`, `graph`),
 /// `--json5`, `export --prom` — is somebody else's schema, so the two are
@@ -1577,34 +1512,37 @@ pub(crate) fn refuse_stream_json(matches: &clap::ArgMatches) {
 #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
 pub(crate) struct GetArgs {
     /// Any key expression, params included (`key?k=v`): a WIRE selector, on
-    /// a session in no namespace. For a zk2 state resource through its
-    /// contract, use `get state`.
+    /// a session in no namespace (`prod/zk2/…`). Each reply is resolved
+    /// through the deployment in --namespace, as `echo` resolves a sample.
+    /// For a zk2 state resource through its contract, use `get state`.
     #[arg(required = true, add = ArgValueCandidates::new(completion::keys))]
     pub(crate) selector: Option<String>,
-    /// Query body: inline text, `@file`, or `-` for stdin — rides the
-    /// same encode ladder as `pub` when the selector's key part refines
-    /// to a registered subject.
+    /// Query body: inline text, `@file`, or `-` for stdin, sent as typed.
+    /// Calling a zk2 operation through its contract is `zenctl call`.
     #[arg(long, value_name = "TEXT|@FILE|-")]
     pub(crate) body: Option<Source>,
-    /// Ship the body verbatim and print payloads as hex; no decode.
+    /// Print payloads as hex; no decode.
     #[arg(long)]
     pub(crate) raw: bool,
-    /// Decode the type name, print the payload as hex.
+    /// Resolve the declared type, print the payload as hex.
     #[arg(long)]
     pub(crate) hex: bool,
     /// Per-reply line template — the `echo` % vocabulary
-    /// (%k %K %o %c %p %s %t %v %e %l %n %a %{a.b.c}). %T renders `-`
+    /// (%k %K %A %i %r %t %v %e %l %n %a %{a.b.c}). %T renders `-`
     /// and %q/%S render empty here: a reply carries no arrival stamp,
     /// QoS axes or SourceInfo — those are subscription-side facts (#120).
     #[arg(long, value_name = "TEMPLATE")]
     pub(crate) fmt: Option<String>,
-    /// Skip schema decode; render structurally.
+    /// Skip contract resolution: no presence read, no bundle retrieved,
+    /// every payload rendered structurally (and said to be).
     #[arg(long)]
     pub(crate) no_decode: bool,
     #[command(subcommand)]
     pub(crate) cmd: Option<GetSub>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
 }
 
 #[derive(Subcommand)]
@@ -1995,9 +1933,9 @@ pub(crate) struct ReplayArgs {
     /// apart.
     #[arg(long)]
     pub(crate) force_base: bool,
-    /// Write what is not this replay's to write: recorded deletes that
-    /// fall off the state class (RFC 04 §1.2, v1.12), and a zk2 service's
-    /// own keys where that service runs (P3, spec §6).
+    /// Write what is not this replay's to write: recorded deletes (a
+    /// tombstone on a key no contract describes is the operator's act),
+    /// and a zk2 service's own keys where that service runs (P3, spec §6).
     #[arg(long = "i-know")]
     pub(crate) i_know: bool,
     /// Publish into this deployment namespace, through a session opened in
@@ -2016,12 +1954,18 @@ pub(crate) struct ReplayArgs {
     /// (§4.2); the rows are skipped and counted instead.
     #[arg(long)]
     pub(crate) seed_state: bool,
-    /// QoS profile for rows that recorded none.
-    #[arg(long, default_value = "refreshed",
-          add = ArgValueCandidates::new(completion::qos_profiles))]
-    pub(crate) qos: String,
+    /// QoS axes for rows that recorded none (a version-1 or 2 capture):
+    /// `priority/congestion/reliability[+express]`. A version-3 row
+    /// publishes with the axes it rode with.
+    #[arg(long, value_name = "AXES", value_parser = qos_arg, default_value = "data/drop/reliable")]
+    pub(crate) qos: zenkey_fleet::WireQos,
+    /// The deployment this bus carries, which the capture's base must match
+    /// unless --force-base (without --namespace). Resolution: flag > env >
+    /// active context > empty, the bus-root deployment.
+    #[arg(long, value_name = "BASE", env = "ZENCTL_BASE")]
+    pub(crate) base: Option<String>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) session: SessionArgs,
 }
 
 /// The `serve` verb's flags (#612, FJ8a) — one struct the dispatcher hands
@@ -2375,13 +2319,8 @@ pub(crate) struct AdminGraphArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long)]
     pub(crate) dot: bool,
-    /// Also join liveliness origins to their sessions (#131) — one
-    /// extra admin sweep; attachments come from the admin sources or
-    /// they are shown as merely reported, never guessed.
-    #[arg(long)]
-    pub(crate) origins: bool,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) session: SessionArgs,
 }
 
 /// The `acl gen` verb's flags — one struct the dispatcher hands over whole,
@@ -2486,7 +2425,7 @@ pub(crate) struct StorageListArgs {
     #[arg(long, value_name = "SECS", default_value_t = 2.0, requires = "watch")]
     pub(crate) every: f64,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) session: SessionArgs,
 }
 
 /// The `storage gen` verb's flags (#393) — one struct the dispatcher hands
@@ -2507,7 +2446,7 @@ pub(crate) struct StorageGenArgs {
     pub(crate) json5: bool,
     /// Compare the plan against the storages a live router runs (the admin
     /// space): missing, extra, a differing key_expr / strip_prefix / volume,
-    /// a gc.lifespan below the computed minimum. Exit 0 = as planned, 1 = a
+    /// a gc.lifespan below the plan's. Exit 0 = as planned, 1 = a
     /// difference, 2 = no verdict (the admin space answered nothing, or the
     /// question could not be put).
     #[arg(long, conflicts_with = "explain")]
@@ -2517,5 +2456,5 @@ pub(crate) struct StorageGenArgs {
     #[arg(long, value_name = "KEY")]
     pub(crate) explain: Option<String>,
     #[command(flatten)]
-    pub(crate) bus: BusArgs,
+    pub(crate) ns: NamespaceArgs,
 }

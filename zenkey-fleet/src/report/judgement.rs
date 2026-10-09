@@ -94,8 +94,8 @@ impl Judgement {
 /// The projection reads the core convention (module doc): the judged claim
 /// is the **finding**, so `Established` is the finding exit and
 /// `NotEstablished` the clean one. A vocabulary with inverted surface
-/// polarity handles the flip in its own `to_judgement()` mapping
-/// ([`crate::report::WhyVerdict`] is the documented case), never here — this
+/// polarity handles the flip in its own `to_judgement()` mapping (v1's
+/// `WhyVerdict` was the documented case), never here — this
 /// function has exactly one spelling per pole.
 pub fn judgement_exit_code(j: &Judgement) -> i32 {
     match j.conclusive() {

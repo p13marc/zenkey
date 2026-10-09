@@ -9,13 +9,21 @@
 
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
+use zenkey_fleet::WireQos;
 use zenkey_fleet::declare_publication;
 
 mod util;
 use util::peer_pair;
 
-const KEY: &str = "v1/h-eeeeeeeeeeee/state/demo/health";
+const KEY: &str = "demo/plant/line-1/health";
+
+/// Axes no default spells, so the view can only have read them off the wire.
+const DECLARED: WireQos = WireQos {
+    priority: zenoh::qos::Priority::DataHigh,
+    congestion: zenoh::qos::CongestionControl::Block,
+    reliability: zenoh::qos::Reliability::Reliable,
+    express: false,
+};
 
 /// The Monitor delivers the attachment beside the payload — and a sample
 /// without one delivers `None`, not an empty buffer.
@@ -29,7 +37,7 @@ async fn a_watched_sample_carries_its_attachment() {
     let mut events = monitor.events();
     monitor.watch(KEY).await.expect("watch");
 
-    let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
+    let publication = declare_publication(&a, KEY, DECLARED, None)
         .await
         .expect("declare");
     let matching = publication.matching_events().await.expect("events");
@@ -61,16 +69,9 @@ async fn a_watched_sample_carries_its_attachment() {
     }
     let first = views[0].attachment.as_ref().expect("first carried one");
     assert_eq!(first.to_bytes().as_ref(), b"meta");
-    // #120: the wire's actual QoS axes ride the view and match the profile
-    // the publication declared.
-    assert!(
-        views[0].qos_matches(QosProfile::Transition),
-        "declared transition, observed {:?}/{:?}/{:?}/express={}",
-        views[0].priority,
-        views[0].congestion_control,
-        views[0].reliability,
-        views[0].express
-    );
+    // #120: the wire's actual QoS axes ride the view, as the publication
+    // declared them.
+    assert_eq!(views[0].wire_qos(), DECLARED);
     assert!(
         views[1].attachment.is_none(),
         "no attachment on the wire is None, not an empty buffer"
@@ -101,7 +102,7 @@ async fn a_fleet_answer_carries_the_reply_attachment() {
     // Settle: loop the GET until the queryable answers (wait-routable).
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             KEY,
             &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
         )

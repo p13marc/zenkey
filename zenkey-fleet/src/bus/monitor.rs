@@ -180,14 +180,16 @@ impl SampleView {
         }
     }
 
-    /// Whether the wire's actual axes match a declared profile (RFC 04 §3)
-    /// — the declared-vs-observed comparison nobody else in the field can
-    /// render, because nobody else holds a registry that declares QoS.
-    pub fn qos_matches(&self, profile: zenkey::qos::QosProfile) -> bool {
-        self.priority == profile.priority()
-            && self.congestion_control == profile.congestion_control()
-            && self.reliability == profile.reliability()
-            && self.express == profile.express()
+    /// The wire's actual QoS axes, as one value — what the lens compares
+    /// against a resource's declared QoS (spec §2.4), and what a replay
+    /// publishes a recorded row with.
+    pub fn wire_qos(&self) -> crate::bus::write::WireQos {
+        crate::bus::write::WireQos {
+            priority: self.priority,
+            congestion: self.congestion_control,
+            reliability: self.reliability,
+            express: self.express,
+        }
     }
 }
 

@@ -4,12 +4,13 @@
 //!
 //! zenoh's default 256-slot handler hangs such a GET at every size measured
 //! from 996 tokens (zenoh#2678, spike S2), and the fleet's sessions do hold
-//! one: the [`zenkey_fleet::Monitor`] watches the roster with a history
-//! subscriber. `roster`, `node_info` and `discover_bases` (the last two left
-//! with v1's `node` and `base` nouns at FJ4) each ran a
+//! one: a [`zenkey_fleet::Monitor`] can watch tokens with a history
+//! subscriber. v1's `roster`, `node_info` and `discover_bases` each ran a
 //! liveliness GET on zenoh's default handler until this suite, and against
-//! that code this test hangs: the deadlock blocks the runtime's own threads,
-//! so not even a `tokio::time::timeout` around the read fires.
+//! that code this test hung: the deadlock blocks the runtime's own threads,
+//! so not even a `tokio::time::timeout` around the read fires. Every
+//! liveliness GET now goes through [`zenkey_fleet::liveliness_read`], which
+//! this suite drives directly.
 //!
 //! So the body runs on a thread and a runtime of its own, and the test
 //! thread waits for it with a deadline: a regression fails here, by name,
@@ -20,11 +21,10 @@ use std::time::Duration;
 
 mod util;
 use util::zk2::{client, router};
-use zenkey_fleet::{Fleet, Monitor, MonitorSpec};
+use zenkey_fleet::{Monitor, MonitorSpec};
 
 /// Past zenoh#2678's threshold (996 tokens in spike S2), with margin.
 const N: usize = 1_200;
-const ORIGIN: &str = "h-3fa9c2d41b7e";
 
 /// Every read below, on a session whose monitor watches the same tokens,
 /// returns with every token instead of hanging.
@@ -63,32 +63,33 @@ async fn reads_beside_a_subscriber() {
         tokens.push(
             holder
                 .liveliness()
-                .declare_token(format!("v1/{ORIGIN}/state/p{i:04}/alive"))
+                .declare_token(format!("demo/held/p{i:04}/alive"))
                 .await
                 .expect("token"),
         );
     }
 
-    // The monitor's roster watch: a liveliness subscriber with history,
-    // drained as its samples arrive (spec §8.1's "the subscribers bind too").
+    // A liveliness watch: a subscriber with history, drained as its samples
+    // arrive (spec §8.1's "the subscribers bind too").
     let monitor = Monitor::start(
         &reader,
         MonitorSpec {
-            liveliness: vec!["v1/*/state/*/alive".to_owned()],
+            liveliness: vec!["demo/held/*/alive".to_owned()],
             ..MonitorSpec::default()
         },
     )
     .await
     .expect("monitor");
 
-    let fleet = Fleet::new(&reader, "");
     let get = Duration::from_secs(5);
 
     // The tokens reach the router before the property is asked about.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     loop {
-        let roster = zenkey_fleet::roster(&fleet, get).await.expect("roster");
-        let seen = roster.get(ORIGIN).map_or(0, Vec::len);
+        let read = zenkey_fleet::liveliness_read(&reader, "demo/held/*/alive", get)
+            .await
+            .expect("a liveliness read");
+        let seen = read.keys.len();
         if seen == N {
             break;
         }
@@ -101,7 +102,7 @@ async fn reads_beside_a_subscriber() {
 
     // A read across every prefix, the shape `namespace list` asks
     // (`**/zk2/…`), through the same chokepoint: every token, and complete.
-    let read = zenkey_fleet::liveliness_read(&reader, "**/v1/*/state/*/alive", get)
+    let read = zenkey_fleet::liveliness_read(&reader, "**/held/*/alive", get)
         .await
         .expect("a liveliness read");
     assert_eq!(read.keys.len(), N);

@@ -13,9 +13,9 @@ It is a refusal of the command line, so it comes first — before the body is
 read, before a session opens — and exits **2** (`zenctl/src/exit.rs`).
 
 ```console
-$ zenctl pub 'prod/v1/**' '{"x":1}' --base prod
+$ zenctl pub 'plant/**' '{"x":1}'
 ? 2
-Error: prod/v1/**: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+Error: plant/**: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
 
 ```
 
@@ -23,9 +23,9 @@ Error: prod/v1/**: is a wildcard — a put is addressed to one concrete key (RFC
 stand in a key expression.
 
 ```console
-$ zenctl pub 'v1/h-3fa9c2d41b7e/state/sysinfo/he$*' '{}'
+$ zenctl pub 'plant/line-1/te$*' '{}'
 ? 2
-Error: v1/h-3fa9c2d41b7e/state/sysinfo/he$*: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
+Error: plant/line-1/te$*: is a wildcard — a put is addressed to one concrete key (RFC 07 §3: a publisher always names its own); a wildcard put reaches every subscriber it intersects, across every producer's keys — not an operator act, a blast radius. Not overridable.
 
 ```
 

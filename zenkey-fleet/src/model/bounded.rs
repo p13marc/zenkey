@@ -4,9 +4,10 @@
 //! projections, watch state. Every one of those tables needs the same three
 //! things — a ceiling, an eviction that amortises, and a *count* of what the
 //! ceiling cost — and two of them ([`StatsTable`](crate::model::stats::StatsTable)
-//! and [`FactsCache`](crate::model::facts::FactsCache)) had shipped a
-//! byte-identical copy of the mechanism: same evict fraction, same batch
-//! scan, same `len - target` batch, differing only in the recency *type*.
+//! and v1's facts cache, which left with the v1 registry at #612's FJ9) had
+//! shipped a byte-identical copy of the mechanism: same evict fraction, same
+//! batch scan, same `len - target` batch, differing only in the recency
+//! *type*.
 //!
 //! So the mechanism lives here, once, and the policy stays with each holder:
 //! `BoundedLru::admit` returns how many entries it dropped, and the caller
@@ -120,10 +121,6 @@ impl<K: std::hash::Hash + Eq + Clone, V> BoundedLru<K, V> {
         self.entries.is_empty()
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.entries.clear();
-    }
-
     pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
         self.entries.keys()
     }
@@ -134,10 +131,6 @@ impl<K: std::hash::Hash + Eq + Clone, V> BoundedLru<K, V> {
 
     pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
-    }
-
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
-        self.entries.values_mut()
     }
 
     /// Borrowed lookup: `&str` against `String` keys, no per-sample

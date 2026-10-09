@@ -41,9 +41,6 @@ jobs:
       # The dispatch dispatches (#209): `lib.rs` names no engine, and `run()`
       # stays under the 600 lines the issue drew the line at.
       - run: ./scripts/check-dispatch.sh
-      # One door out of a missing registry (#210). Multiline-aware, because the
-      # single-line grep the issue proposed passes straight over `service info`.
-      - run: ./scripts/check-degradation.sh
       # The update thread does not touch the disk (#255): a handler that
       # needs the filesystem needs a services:: function returning a Task and
       # a message for the result to land on.

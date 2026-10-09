@@ -4,13 +4,9 @@
 use std::time::Duration;
 
 use crate::{Error, Result};
-use zenkey::{RegistrySlice, SliceFormat};
 use zenoh::Session;
 use zenoh::qos::Priority;
 use zenoh::query::{ConsolidationMode, QueryTarget};
-
-use crate::bus::monitor::SampleView;
-use crate::bus::session::Fleet;
 
 /// How a producer answered a procedure call.
 ///
@@ -30,18 +26,16 @@ pub enum Answer {
     Error { name: String, message: String },
 }
 
-/// One host's answer, attributed to the origin that actually replied.
+/// One answer, attributed by the key it was sent on.
 #[derive(Debug, Clone)]
 pub struct FleetAnswer {
-    pub origin: String,
-    /// The reply's **own** key expression — what `origin` was derived from, and
-    /// the concrete key a follow-up must be addressed to.
+    /// The reply's **own** key expression: the attribution, and the concrete
+    /// key a follow-up must be addressed to (RFC 05 §2.1). A key that names
+    /// no service a reader knows is still a fact about who answered (O1).
     ///
     /// Empty for an error reply, which zenoh gives no sample and therefore no
-    /// key. Carried because `origin` is lossy by design: the attribution helper goes
-    /// through the grammar and yields `"?"` for any key that does not parse
-    /// under `base`, and a caller that must still *name* the responder (RFC 09
-    /// §5.1 O1 — a non-conforming key is a fact) has nowhere else to look.
+    /// key. v1's `origin`, the origin chunk the v1 grammar read out of this
+    /// key, left with the v1 grammar (#612, FJ9).
     pub key: String,
     /// The reply's declared encoding, when it carried one.
     ///
@@ -262,22 +256,23 @@ pub(crate) async fn disciplined_get(
     builder.await.map_err(|e| Error::bus("get", "", e))
 }
 
-/// Call a procedure and collect **every** reply, attributed by origin.
+/// GET a selector and collect **every** reply, attributed by its own key.
 ///
 /// The RFC 05 §2.1 fan-in, end to end: `disciplined_get` sets target `All`
 /// and consolidation `None`, and `answer_of` attributes each reply by the
-/// reply's *own* key — which is what makes `*`-origin fan-out legible.
+/// reply's *own* key — which is what makes a wildcard fan-out legible. The
+/// session is the caller's: a raw `get` passes one in no namespace, and the
+/// selector is the wire key.
 ///
 /// Silence is deliberately *not* interpreted here (RFC 05 §3.1: "no reply" is
-/// not one condition). Callers that need a verdict join this against the
-/// liveliness roster; see `cmd::doctor`.
-/// Bounded at [`GetOpts::reply_bound`], and what the bound cost is on
+/// not one condition). Callers that need a verdict join this against a
+/// presence read. Bounded at [`GetOpts::reply_bound`], and what the bound cost is on
 /// [`GetOpts::elided`] (#339).
-pub async fn fleet_get(fleet: &Fleet<'_>, key: &str, opts: &GetOpts) -> Result<Vec<FleetAnswer>> {
-    let replies = disciplined_get(fleet.session(), key, opts)
+pub async fn fleet_get(session: &Session, key: &str, opts: &GetOpts) -> Result<Vec<FleetAnswer>> {
+    let replies = disciplined_get(session, key, opts)
         .await
         .map_err(|e| Error::bus("query", key.to_string(), e))?;
-    let (answers, elided) = collect_answers(fleet.base(), replies, opts.max_replies).await;
+    let (answers, elided) = collect_answers(replies, opts.max_replies).await;
     opts.note_elided(elided);
     Ok(answers)
 }
@@ -292,7 +287,6 @@ pub async fn fleet_get(fleet: &Fleet<'_>, key: &str, opts: &GetOpts) -> Result<V
 /// The two are different facts: draining is the fan-in finishing, keeping is
 /// what used to be unbounded.
 async fn collect_answers(
-    base: &str,
     replies: zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>,
     max: usize,
 ) -> (Vec<FleetAnswer>, u64) {
@@ -304,7 +298,7 @@ async fn collect_answers(
             elided += 1;
             continue;
         }
-        out.push(answer_of(base, reply));
+        out.push(answer_of(reply));
     }
     (out, elided)
 }
@@ -312,10 +306,9 @@ async fn collect_answers(
 /// One reply, attributed — the per-reply half of [`collect_answers`], shared
 /// with the timed drain in [`RepeatingQuery::fetch_timed`] so attribution and
 /// the RFC 05 §3 error envelope have exactly one implementation.
-fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
+fn answer_of(reply: zenoh::query::Reply) -> FleetAnswer {
     match reply.result() {
         Ok(sample) => FleetAnswer {
-            origin: origin_of(base, sample.key_expr().as_str()),
             key: sample.key_expr().as_str().to_string(),
             encoding: Some(sample.encoding().to_string()),
             attachment: sample.attachment().cloned(),
@@ -347,7 +340,6 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
             // An error reply has no sample, so no concrete key to attribute
             // by; zenoh does not surface the responder here.
             FleetAnswer {
-                origin: "?".to_string(),
                 key: String::new(),
                 encoding: None,
                 attachment: None,
@@ -360,8 +352,8 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
 
 /// A **declared** querier carrying the same RFC 05 §2.1 discipline as
 /// [`fleet_get`] (target `All`, consolidation `None`, attribution by reply
-/// key), for fetches that re-ask the **same key expression** — watch loops,
-/// the schema cache's re-asks, registry sweeps, doctor. Declaring once lets
+/// key), for fetches that re-ask the **same key expression** — watch loops
+/// and periodic sweeps. Declaring once lets
 /// the network keep routing state warm instead of rebuilding it per GET
 /// (report §12's zenoh-1.9 adoption row).
 ///
@@ -371,13 +363,12 @@ fn answer_of(base: &str, reply: zenoh::query::Reply) -> FleetAnswer {
 ///   keyexpr — a `?params` suffix in `key` is a bug here);
 /// - genuinely one-shot, or an ad-hoc key → [`fleet_get`].
 ///
-/// Liveliness sweeps ([`crate::bus::roster::roster()`]) are a different API
+/// Liveliness reads are a different API
 /// (`session.liveliness().get()`) with no querier equivalent and stay
 /// undeclared; they have a chokepoint of their own,
 /// [`crate::bus::presence::liveliness_read`], for spec §8.1's handler rule.
 pub struct RepeatingQuery {
     querier: zenoh::query::Querier<'static>,
-    base: String,
     /// Replies kept per fetch, and what the bound has cost across all of them
     /// (#339) — the same ledger [`GetOpts`] carries, for the declared path.
     max_replies: usize,
@@ -389,11 +380,11 @@ pub struct RepeatingQuery {
 /// The §2.1 discipline is fixed at declaration: target `All`, consolidation
 /// `None`, `timeout` for every subsequent fetch.
 pub async fn declare_repeating(
-    fleet: &Fleet<'_>,
+    session: &Session,
     key: &str,
     timeout: Duration,
 ) -> Result<RepeatingQuery> {
-    declare(fleet, key, timeout, false).await
+    declare(session, key, timeout, false).await
 }
 
 /// As [`declare_repeating`], additionally accepting replies **outside** the
@@ -401,21 +392,20 @@ pub async fn declare_repeating(
 /// the `@adv` cache rung needs. A separate constructor because this axis is
 /// part of the querier's identity: never reuse one querier across both modes.
 pub async fn declare_repeating_any(
-    fleet: &Fleet<'_>,
+    session: &Session,
     key: &str,
     timeout: Duration,
 ) -> Result<RepeatingQuery> {
-    declare(fleet, key, timeout, true).await
+    declare(session, key, timeout, true).await
 }
 
 async fn declare(
-    fleet: &Fleet<'_>,
+    session: &Session,
     key: &str,
     timeout: Duration,
     accept_any: bool,
 ) -> Result<RepeatingQuery> {
-    let mut builder = fleet
-        .session()
+    let mut builder = session
         .declare_querier(key.to_string())
         .target(QueryTarget::All)
         .consolidation(ConsolidationMode::None)
@@ -426,7 +416,6 @@ async fn declare(
     let querier = crate::bus::teardown::declared("declare querier", &key, builder).await?;
     Ok(RepeatingQuery {
         querier,
-        base: fleet.base().to_string(),
         max_replies: DEFAULT_MAX_REPLIES,
         elided: std::sync::atomic::AtomicU64::new(0),
     })
@@ -461,7 +450,7 @@ impl RepeatingQuery {
         let replies = builder
             .await
             .map_err(|e| Error::bus("query", self.key(), e))?;
-        let (answers, elided) = collect_answers(&self.base, replies, self.max_replies).await;
+        let (answers, elided) = collect_answers(replies, self.max_replies).await;
         self.note_elided(elided);
         Ok(answers)
     }
@@ -525,7 +514,7 @@ impl RepeatingQuery {
                 elided += 1;
                 continue;
             }
-            out.push((answer_of(&self.base, reply), at));
+            out.push((answer_of(reply), at));
         }
         self.note_elided(elided);
         Ok(out)
@@ -557,401 +546,4 @@ impl RepeatingQuery {
     pub async fn matching_events(&self) -> Result<crate::bus::write::MatchingEvents> {
         crate::bus::write::MatchingEvents::for_querier(&self.querier).await
     }
-}
-
-/// The origin chunk of a wire key, via the grammar (never by index — RFC 03
-/// §1.1: positions are relative to the configured base).
-fn origin_of(base: &str, key: &str) -> String {
-    zenkey::grammar::parse_full(base, key)
-        .map(|k| k.origin.chunk().to_string())
-        .unwrap_or_else(|| "?".to_string())
-}
-
-/// Discover every live producer's registry slice **from the bus**, with nothing
-/// compiled in (RFC 08 §6: "generic explorer tooling … needs no compiled-in
-/// registry").
-///
-/// Every producer MUST serve its registry slice as TOML on
-/// `@rpc/<producer>/introspect`. This fans one wildcard-producer `introspect`
-/// GET across the fleet — `<base>/v1/*/@rpc/*/introspect` — and parses each
-/// reply. It is the same introspect+`parse_slice` path `doctor` walks, minus
-/// the compiled-in diff: here the served slice *is* the answer.
-///
-/// A reply that does not parse is reported to stderr and skipped, never fatal:
-/// one malformed producer must not blind the tool to every other producer's
-/// slice. The tuple's first element is the producer (or service) base name the
-/// slice declares (`slice.name`), matching the compiled path's producer column.
-///
-/// A verbatim service origin is unmatchable by the `*` of a fleet selector
-/// (grammar property D4), so the wildcard sweep cannot enumerate services.
-/// The well-known `@catalog` identity service (RFC 06 §5) is therefore asked
-/// by name, exactly as [`crate::bus::roster::roster()`] does for its alive token; other
-/// service origins remain reachable only via local registry files
-/// (`check conform --registry` asks each declared `service_origin` by name).
-pub async fn fleet_registry(
-    fleet: &Fleet<'_>,
-    timeout: Duration,
-) -> Result<Vec<(String, RegistrySlice)>> {
-    Ok(fleet_registry_by_origin(fleet, timeout)
-        .await?
-        .into_iter()
-        .map(|served| (served.slice.name.clone(), served.slice))
-        .collect())
-}
-
-/// As [`fleet_registry`], additionally yielding each reply's raw TOML text
-/// (the artifact the slice cache persists).
-///
-/// Also drops the origin — see [`fleet_registry_by_origin`], which is the
-/// call to reach for when *which host said this* is part of the question.
-pub async fn fleet_registry_raw(
-    fleet: &Fleet<'_>,
-    timeout: Duration,
-) -> Result<Vec<(RegistrySlice, String)>> {
-    Ok(fleet_registry_by_origin(fleet, timeout)
-        .await?
-        .into_iter()
-        .map(|served| (served.slice, served.raw))
-        .collect())
-}
-
-/// One producer's served registry slice, attributed to the host that
-/// answered (#385).
-///
-/// The origin cannot come from the slice: a slice is `include_str!` of a
-/// compiled registry file, and [`RegistrySlice::service_origin`] is `Some`
-/// only for a service — a host producer's origin is the host it runs on and
-/// is therefore not in the document. It comes from the reply's own key, the
-/// way RFC 05 §2.1 requires every fan-in answer to be attributed.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ServedSlice {
-    /// The origin that answered — the `h-…` host id, or a verbatim service
-    /// origin. `"?"` when the reply key did not parse under this base, the
-    /// same lossy-but-stated convention [`FleetAnswer::origin`] uses.
-    pub origin: String,
-    /// The parsed slice. Its `name` is the producer, which is a different
-    /// question from `origin` and is why both are here.
-    pub slice: RegistrySlice,
-    /// The reply's raw registry file — the artifact the slice cache
-    /// persists, since slices do not re-serialize.
-    pub raw: String,
-    /// The `Encoding` the reply declared, verbatim, when it declared one
-    /// (RFC 08 §6, v1.44) — `application/toml`, `application/kdl`, or the
-    /// undeclared `text/plain` / `zenoh/bytes` of a producer that has not
-    /// caught up.
-    pub encoding: Option<String>,
-    /// The spelling `raw` was read as: the declared one, or the sniff's for
-    /// an undeclared reply ([`zenkey::registry_doc::negotiate`]).
-    pub format: SliceFormat,
-}
-
-/// One `introspect` reply that **arrived and could not be read** (#491) —
-/// the pole beside a [`ServedSlice`] and no reply at all.
-///
-/// Kept, never dropped: RFC 08 §6 (v1.44) says a consumer that cannot read
-/// what a reply declares "reports that producer's slice as unreadable and
-/// names the encoding", and does not let it pass for one that serves no
-/// slice (RFC 13 §3 O4). Before this, the sweep logged the failure and
-/// returned nothing, and every reader above it drew "no introspect reply".
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct UnreadableReply {
-    /// The origin that answered, attributed as [`ServedSlice::origin`] is.
-    pub origin: String,
-    /// The producer the reply key names — its producer chunk on a host, the
-    /// service name on a service origin, spelled as the roster spells its
-    /// token. There is no slice to take a `name` from; `"?"` when the reply
-    /// key did not parse under this base.
-    pub producer: String,
-    /// What it declared and why it did not read.
-    pub unreadable: crate::report::UnreadableSlice,
-}
-
-/// One registry sweep with nothing dropped (#491): every slice that read,
-/// and every reply that answered and did not.
-#[derive(Debug, Clone, Default)]
-#[non_exhaustive]
-pub struct RegistrySweep {
-    pub served: Vec<ServedSlice>,
-    pub unreadable: Vec<UnreadableReply>,
-}
-
-/// The producer an `introspect` reply key names, spelled as the roster
-/// spells the same producer's `alive` token — so an unreadable reply lands
-/// on the row its token already made (#491).
-pub(crate) fn introspect_producer(base: &str, key: &str) -> String {
-    zenkey::grammar::parse_full(base, key)
-        .map(|k| {
-            k.producer()
-                .map(|p| p.chunk())
-                .unwrap_or_else(|| k.origin.chunk().trim_start_matches('@').to_string())
-        })
-        .unwrap_or_else(|| "?".to_string())
-}
-
-/// Read one `introspect` value reply in the spelling it declares (RFC 08 §6,
-/// v1.44: never second-guessed; an undeclared reply is sniffed) — the one
-/// reader every introspect consumer shares, so a sweep, a node's story and
-/// the conformance suite cannot disagree about which reply was a slice.
-///
-/// `Err` is the unreadable pole (#491), carrying the declaration and the
-/// first line of the refusal.
-pub(crate) fn read_introspect(
-    encoding: Option<&str>,
-    bytes: &[u8],
-) -> std::result::Result<(RegistrySlice, SliceFormat, String), crate::report::UnreadableSlice> {
-    let served = String::from_utf8_lossy(bytes).to_string();
-    zenkey::registry_doc::negotiate(encoding, &served)
-        .and_then(|format| zenkey::parse_slice_as(&served, format).map(|slice| (slice, format)))
-        .map(|(slice, format)| (slice, format, served))
-        .map_err(|e| crate::report::UnreadableSlice::new(encoding.map(str::to_string), &e))
-}
-
-/// The fleet sweep, **keeping the origin that answered** (#385).
-///
-/// [`fleet_registry`] and [`fleet_registry_raw`] answer "what does this
-/// fleet serve", collapsing to one entry per producer; this answers "who
-/// served it", which is a different question and the only one that can
-/// express per-host drift. RFC 08 §6 promises exactly that capability of
-/// the introspect sweep — *which hosts still serve a deprecated subject,
-/// which run last month's registry* — and neither can be asked without the
-/// origin.
-///
-/// Nothing is deduplicated here: N hosts running one producer are N entries,
-/// which is the point. Feed it to [`crate::SliceSet::from_slices`] (or
-/// [`crate::SliceSet::from_bus`]) when a decoder needs one slice per
-/// producer instead — for *refining a key*, which host answered is
-/// genuinely irrelevant.
-pub async fn fleet_registry_by_origin(
-    fleet: &Fleet<'_>,
-    timeout: Duration,
-) -> Result<Vec<ServedSlice>> {
-    let repeating = RepeatingRegistry::declare(fleet, timeout).await?;
-
-    let slices = repeating.fetch_by_origin().await?;
-
-    repeating.undeclare().await?;
-
-    Ok(slices)
-}
-
-/// The registry sweep as a **declared** pair of queriers (#37) — for callers
-/// that re-run the sweep (`--watch topic list`, doctor's second pass, a GUI
-/// refresh). One-shot callers keep [`fleet_registry`].
-///
-/// Two queriers, not one: the wildcard-producer fan-out plus `@catalog` by
-/// name (a `*` never matches a verbatim origin, D4 — the two cannot
-/// double-count; same reasoning as [`fleet_registry`]).
-pub struct RepeatingRegistry {
-    wildcard: RepeatingQuery,
-    catalog: RepeatingQuery,
-}
-
-impl RepeatingRegistry {
-    pub async fn declare(fleet: &Fleet<'_>, timeout: Duration) -> Result<Self> {
-        // This session is un-namespaced on purpose (RFC 09 §5), so it must
-        // spell the base itself — exactly as `service call` composes its key.
-        let wildcard = fleet.wire(zenkey::selector::rpc(
-            zenkey::selector::Scope::fleet(),
-            zenkey::selector::Producers::all(),
-            &["introspect"],
-        ));
-        let catalog = fleet.wire(zenkey::selector::service_rpc(
-            &zenkey::ServiceOrigin::catalog(),
-            &["introspect"],
-        ));
-        Ok(RepeatingRegistry {
-            wildcard: declare_repeating(fleet, &wildcard, timeout).await?,
-            catalog: declare_repeating(fleet, &catalog, timeout).await?,
-        })
-    }
-
-    /// One sweep: every parsed slice with its raw TOML.
-    ///
-    /// Drops the answering origin. [`fetch_by_origin`](Self::fetch_by_origin)
-    /// is the same sweep keeping it, and is what a caller asking *which host*
-    /// wants (#385).
-    pub async fn fetch(&self) -> Result<Vec<(RegistrySlice, String)>> {
-        Ok(self
-            .fetch_by_origin()
-            .await?
-            .into_iter()
-            .map(|served| (served.slice, served.raw))
-            .collect())
-    }
-
-    /// One sweep, attributed: every parsed slice with the origin that served
-    /// it and its raw TOML (#385).
-    ///
-    /// The readable half of [`sweep`](Self::sweep): an unreadable reply is
-    /// logged and left out here, which is right for a caller whose question
-    /// is *what does this fleet declare*. A caller that renders or judges
-    /// who answered — a roster, the doctor — asks [`sweep`](Self::sweep),
-    /// or it will draw an answer as silence (#491).
-    pub async fn fetch_by_origin(&self) -> Result<Vec<ServedSlice>> {
-        Ok(self.sweep().await?.served)
-    }
-
-    /// One sweep with both poles kept (#491).
-    ///
-    /// Each reply is read in the spelling its `Encoding` declares (RFC 08 §6,
-    /// v1.44: `application/toml` or `application/kdl`, never second-guessed;
-    /// an undeclared reply is sniffed). A reply that does not parse — or
-    /// declares an encoding that is neither spelling — is an
-    /// [`UnreadableReply`], logged naming the encoding and never fatal: one
-    /// malformed producer must not blind the tool to every other producer's
-    /// slice, and must not vanish either. Nothing is deduplicated: a fleet
-    /// mid-rollout serving three versions of one producer yields three
-    /// entries, and that disagreement is the finding.
-    pub async fn sweep(&self) -> Result<RegistrySweep> {
-        let mut out = RegistrySweep::default();
-        for q in [&self.wildcard, &self.catalog] {
-            for answer in q.fetch().await? {
-                let origin = answer.origin;
-                let Answer::Value(bytes) = answer.answer else {
-                    continue;
-                };
-                let encoding = answer.encoding;
-                match read_introspect(encoding.as_deref(), &bytes.to_bytes()) {
-                    Ok((slice, format, raw)) => out.served.push(ServedSlice {
-                        origin,
-                        slice,
-                        raw,
-                        encoding,
-                        format,
-                    }),
-                    Err(unreadable) => {
-                        tracing::warn!(
-                            origin = %origin,
-                            encoding = encoding.as_deref().unwrap_or("(none)"),
-                            "introspect reply did not parse: {}",
-                            unreadable.error
-                        );
-                        out.unreadable.push(UnreadableReply {
-                            producer: introspect_producer(&q.base, &answer.key),
-                            origin,
-                            unreadable,
-                        });
-                    }
-                }
-            }
-        }
-        Ok(out)
-    }
-
-    /// Undeclare both queriers, acknowledged.
-    ///
-    /// Both, even when the first refuses (#346): the wildcard sweep and the
-    /// `@catalog` ask are one teardown, and leaving the second declared
-    /// because the first would not go is the half-torn-down state
-    /// [`crate::Monitor::shutdown`] refuses. Failures are reported together.
-    pub async fn undeclare(self) -> Result<()> {
-        crate::bus::teardown::drain_undeclare(
-            vec![
-                ("wildcard introspect".to_string(), self.wildcard),
-                ("@catalog introspect".to_string(), self.catalog),
-            ],
-            RepeatingQuery::undeclare,
-        )
-        .await
-    }
-}
-
-/// One state sample from a snapshot GET.
-#[derive(Debug, Clone)]
-pub struct StateSample {
-    /// Full wire key.
-    pub key: String,
-    /// HLC timestamp, when the deployment stamps samples (RFC 04 §4
-    /// requires it for LWW to be meaningful — its absence is itself a
-    /// doctor-grade observation).
-    pub timestamp: Option<zenoh::time::Timestamp>,
-    pub payload_len: usize,
-}
-
-/// GET the current state under a selector with the fan-in discipline
-/// (target All, consolidation None) — the doctor's freshness check
-/// (RFC 04 §1.2) consumes the timestamps. Same chokepoint posture as
-/// [`fleet_get`]: no subcommand issues a raw `session.get`.
-///
-/// `max` bounds the samples **drained** (`doctor --sample N`): the loop
-/// stops reading at the cap, so a bounded sweep is cheaper, not merely
-/// quieter. `None` drains every reply.
-pub async fn state_snapshot(
-    session: &Session,
-    selector: &str,
-    timeout: Duration,
-    max: Option<usize>,
-) -> Result<Vec<StateSample>> {
-    let replies = disciplined_get(session, selector, &GetOpts::new(timeout))
-        .await
-        .map_err(|e| Error::bus("state snapshot", selector, e))?;
-    let mut out = Vec::new();
-    while let Ok(reply) = replies.recv_async().await {
-        if max.is_some_and(|m| out.len() >= m) {
-            break;
-        }
-        let Ok(sample) = reply.result() else { continue };
-        out.push(StateSample {
-            key: sample.key_expr().as_str().to_string(),
-            timestamp: sample.timestamp().copied(),
-            payload_len: sample.payload().len(),
-        });
-    }
-    Ok(out)
-}
-
-/// What one snapshot GET brought back (#219).
-#[derive(Debug, Default)]
-pub struct SnapshotReplies {
-    /// Every value reply as a [`SampleView`], with the replier's zenoh id
-    /// where the reply named one (`Reply::replier_id`, zenoh's unstable
-    /// surface). Not yet folded per key — that is [`crate::model::snapshot::fold_latest`]'s job,
-    /// and keeping the two apart is what lets the fold count what it
-    /// superseded.
-    pub values: Vec<(SampleView, Option<zenoh::config::ZenohId>)>,
-    /// Error replies (RFC 05 §3 envelopes): a refusal is not a value and not
-    /// silence, so it is counted rather than folded into either.
-    pub errors: u64,
-}
-
-/// GET a selector's current values with the fan-in discipline, keeping
-/// **everything a snapshot row needs** — the third sibling of [`fleet_get`]
-/// (which keeps the payload but not the timestamp) and [`state_snapshot`]
-/// (which keeps the timestamp but not the payload). RFC 13 §4.4's `.zsnap`
-/// wants both, plus the stamper and the replier, so this drains the channel
-/// into the same [`SampleView`] the seed path builds
-/// ([`SampleView::of`], the one conversion) and reads the replier id beside
-/// it.
-///
-/// Bounded by [`GetOpts::reply_bound`]; what the bound cost rides
-/// [`GetOpts::elided`], summed across every selector run under one `opts`
-/// (#339). Silence is not interpreted here (RFC 05 §3.1): an empty
-/// `values` is "nobody answered", and the caller decides what that means.
-pub async fn snapshot_get(
-    session: &Session,
-    selector: &str,
-    opts: &GetOpts,
-) -> Result<SnapshotReplies> {
-    let replies = disciplined_get(session, selector, opts)
-        .await
-        .map_err(|e| Error::bus("snapshot", selector, e))?;
-    let mut out = SnapshotReplies::default();
-    let mut elided = 0u64;
-    while let Ok(reply) = replies.recv_async().await {
-        let replier = reply.replier_id().map(|e| e.zid());
-        match reply.result() {
-            Ok(sample) => {
-                if out.values.len() >= opts.max_replies {
-                    elided += 1;
-                    continue;
-                }
-                out.values.push((SampleView::of(sample), replier));
-            }
-            Err(_) => out.errors += 1,
-        }
-    }
-    opts.note_elided(elided);
-    Ok(out)
 }

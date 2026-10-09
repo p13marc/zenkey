@@ -1,13 +1,14 @@
-//! The admin plane (RFC 09 §5.1): routers, storages, declared entities,
-//! state coverage and the mesh topology — everything read out of Zenoh's own
-//! `@/**` adminspace rather than off the keyspace.
+//! The admin plane (RFC 09 §5.1): routers, storages, declared entities and
+//! the mesh topology — everything read out of Zenoh's own `@/**` adminspace
+//! rather than off the keyspace. v1's state coverage and origin attachments
+//! left with the v1 grammar they joined against (#612, FJ9).
 
 use serde::Serialize;
 
+/// The storages the admin space answered for.
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageList {
     pub storages: Vec<crate::StorageInfo>,
-    pub coverage: Vec<crate::CoverageRow>,
 }
 
 /// The routers the admin space answered for (#236).
@@ -55,36 +56,6 @@ pub struct StorageInfo {
     pub volume: Option<String>,
     /// The full admin document, untrimmed — layouts vary by version.
     pub raw: serde_json::Value,
-}
-
-/// How a declared state family relates to the configured storages.
-///
-/// `rename_all` is not decoration: without it this enum inherited Rust's
-/// variant spelling and serialized `"Covered"` while every other vocabulary in
-/// the report surface — `TopicVerdict`, `DoctorSeverity`, `CutoverVerdict`,
-/// `ExpectVerdict` — was snake_case (#232). A consumer could not learn the
-/// file's conventions from one document and apply them to the next.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "coverage", content = "storage", rename_all = "snake_case")]
-pub enum Coverage {
-    /// Some storage's key expression includes every key of the family.
-    Covered(String),
-    /// A storage overlaps the family but does not include all of it.
-    Partial(String),
-    /// No storage touches the family. For volatile (ttl'd) state this can be
-    /// legitimate — advanced-pub/sub cache seeding (RFC 04 §3.5); storage is
-    /// authoritative for durable data.
-    Uncovered,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct CoverageRow {
-    pub producer: String,
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ttl_s: Option<i64>,
-    #[serde(flatten)]
-    pub coverage: Coverage,
 }
 
 /// What kind of declared entity an admin reply describes.
@@ -135,27 +106,6 @@ pub struct MeshLink {
     /// links are not merged: the two ends name the same link from opposite
     /// sides, and concatenating them would read as twice the links.
     pub links: Vec<String>,
-}
-
-/// One liveliness origin attached to the session that declared its token —
-/// the #131 join, evidence-first: an attachment is made only from what the
-/// admin space actually said, never guessed (a guessed attachment would be
-/// the O4 failure on a picture).
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct OriginAttachment {
-    /// The origin the token names (`h-…` or `@service`).
-    pub origin: String,
-    /// The declaring session's zid, when the token's admin `sources` names
-    /// exactly one. `None` = the sources were absent or ambiguous — the
-    /// origin is then only *reported by* the answering admin space, and a
-    /// renderer says so instead of drawing a line it cannot back.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_zid: Option<String>,
-    /// The admin space that reported the token: the origin's own session in
-    /// a peer mesh serving its admin space, a router in a routed one.
-    pub reporter_zid: String,
-    /// The token key the evidence rode — the audit trail.
-    pub token_key: String,
 }
 
 /// One node of the mesh, as the topology join sees it (#118).

@@ -16,9 +16,9 @@ use zenkey_fleet::{Answer, declare_repeating};
 mod util;
 use util::peer_pair;
 
-const HOST_A: &str = "v1/h-aaaaaaaaaaaa/@rpc/sysinfo/introspect";
-const HOST_B: &str = "v1/h-bbbbbbbbbbbb/@rpc/sysinfo/introspect";
-const SELECTOR: &str = "v1/*/@rpc/sysinfo/introspect";
+const HOST_A: &str = "zk2/host-a/tc/tc.netif.v1/@op/diagnostics";
+const HOST_B: &str = "zk2/host-b/tc/tc.netif.v1/@op/diagnostics";
+const SELECTOR: &str = "zk2/*/tc/tc.netif.v1/@op/diagnostics";
 
 /// Two queryables, one declared `complete` — the exact configuration that
 /// makes `BestMatching` collapse a fleet to one reply. The declared path
@@ -49,13 +49,9 @@ async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
         .await
         .expect("queryable b");
 
-    let repeating = declare_repeating(
-        &zenkey_fleet::Fleet::new(&b, ""),
-        SELECTOR,
-        Duration::from_secs(5),
-    )
-    .await
-    .expect("declare");
+    let repeating = declare_repeating(&b, SELECTOR, Duration::from_secs(5))
+        .await
+        .expect("declare");
     // Routing propagation is async; retry bounded until both peers answer.
     let answers = tokio::time::timeout(util::SETTLE, async {
         loop {
@@ -68,11 +64,11 @@ async fn a_complete_queryable_does_not_collapse_the_declared_fleet() {
     })
     .await
     .expect("both queryables should answer within 5s");
-    let mut origins: Vec<&str> = answers.iter().map(|a| a.origin.as_str()).collect();
-    origins.sort_unstable();
+    let mut keys: Vec<&str> = answers.iter().map(|a| a.key.as_str()).collect();
+    keys.sort_unstable();
     assert_eq!(
-        origins,
-        vec!["h-aaaaaaaaaaaa", "h-bbbbbbbbbbbb"],
+        keys,
+        vec![HOST_A, HOST_B],
         "target All + reply-key attribution must survive a complete queryable"
     );
     repeating.undeclare().await.expect("undeclare");
@@ -96,13 +92,9 @@ async fn parameters_ride_per_get_not_in_the_declared_key() {
         .await
         .expect("queryable");
 
-    let repeating = declare_repeating(
-        &zenkey_fleet::Fleet::new(&b, ""),
-        SELECTOR,
-        Duration::from_secs(5),
-    )
-    .await
-    .expect("declare");
+    let repeating = declare_repeating(&b, SELECTOR, Duration::from_secs(5))
+        .await
+        .expect("declare");
     assert!(
         !repeating.key().contains('?'),
         "the declared keyexpr must never carry parameters"
@@ -174,7 +166,7 @@ async fn the_reply_bound_keeps_what_it_says_and_counts_the_rest() {
         .await
         .expect("queryable");
 
-    let fleet = zenkey_fleet::Fleet::new(&b, "");
+    let fleet = b.clone();
     // Unbounded first, to learn how many replies actually landed — the point
     // is the *relationship* between the two runs, not a hard-coded 40 that a
     // dropped reply would turn into a flake.

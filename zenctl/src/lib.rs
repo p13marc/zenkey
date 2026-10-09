@@ -1,34 +1,29 @@
-//! `zenctl` — a bus explorer for the keyspace-v2 convention.
+//! `zenctl` — a bus explorer for zk2 deployments (#612).
 //!
-//! RFC 08 §6 names this tool: runtime introspection exists so that "generic
-//! explorer tooling — the `busctl`/`d-feet` equivalent — needs no compiled-in
-//! registry". Every producer MUST serve `@rpc/<producer>/introspect`, so a
-//! fleet can describe itself. `zenctl` is app-neutral: nothing
-//! application-specific is compiled in, and any conformant fleet is
-//! explorable.
+//! zenctl is app-neutral: nothing application-specific is compiled in, and
+//! any zk2 deployment is explorable. What it knows of one it reads off the
+//! bus — presence (instance and interface tokens, spec §8.1), the
+//! descriptor each instance serves (§3.3), and the contract bundles those
+//! descriptors name, retrieved by fingerprint (§8.4) — or from contracts
+//! known offline (`--contracts`).
 //!
-//! Registry knowledge comes from one of two sources:
+//! Two kinds of verb, by session (decided 2026-10-08):
 //!
-//! * **the live bus** (the default): each producer's served `introspect`
-//!   slice — what the fleet *actually* serves;
-//! * **`--registry <dir>`** (repeatable): local `registry/*.{toml,kdl}` files — what
-//!   a checked-out application *declares*. Works with the fleet down.
+//! * a **resolved** verb — `service`, `iface`, `schema`, `graph`, `compat`,
+//!   `call`, `get state`, `watch`, `check expect|probe|schema`, `doctor` —
+//!   reads through a session opened **in** the deployment's namespace
+//!   (`--namespace`, alias `--base`; the active context's `base`), as the
+//!   deployment's own consumers do;
+//! * a **raw** verb — `get <SELECTOR>`, `echo`, `rate`, `field`, `record`,
+//!   `timeline`, `snapshot`, `pub`, `replay`, `admin`, `storage`,
+//!   `namespace list`, `scout` — runs on a session in **no** namespace and
+//!   sees the wire as it is. The observers among them resolve each key
+//!   through one lens (FJ8b): the namespace, its presence read, the
+//!   contract each descriptor names.
 //!
-//! The gap between the two is drift, and `check conform <producer>
-//! --registry <dir>` reports it (it was `doctor`'s until #612's FJ6 made the
-//! doctor zk2's).
-//!
-//! **zk2's nouns** (#612, FJ4) — `service`, `iface`, `schema`, `namespace`,
-//! and the `graph` and `compat` verbs — read no slice at all: presence
-//! tokens, the descriptor each instance serves, and contract bundles,
-//! through a session opened in the deployment's namespace (`--namespace`,
-//! alias `--base`; decided 2026-10-08), with `--contracts` for revisions
-//! known offline. They replaced v1's `topic`, `node`, `base`, `interface`
-//! and `registry`; the rest of the tree is ported verb by verb until FJ9.
-//! FJ5 added the acts and reads through a contract — `call` (which
-//! replaced v1's `service call`), `get state` and `watch` — and the P3
-//! guard on `pub`; `retire` is gone, and `replay --namespace` writes
-//! through a session in a deployment namespace.
+//! v1 left at FJ9: the registry (`--registry`, RFC 08 §6 introspection, the
+//! slice cache), the v1 judges and the profile-backed nouns. The `v1`
+//! branch keeps them, and releases 0.14.x.
 //!
 //! Two seams carry the shape of the tool rather than the shape of a command:
 //! [`cli`] is the clap tree and the vocabulary it enforces (#307), and
@@ -36,7 +31,6 @@
 //! rest is verbs.
 pub(crate) mod bus;
 pub mod cli;
-pub(crate) mod degrade;
 pub mod errors;
 pub mod exit;
 pub mod input;
@@ -50,10 +44,9 @@ mod context;
 
 use anyhow::Result;
 
-/// `cmd/*` runs against the **resolved** flags, never the parsed ones: the
-/// context is read once, at the edge, and a command that gets a [`Bus`] is
-/// past every way resolution can fail (#209).
-pub(crate) use crate::bus::Bus;
+// `cmd/*` runs against the **resolved** flags, never the parsed ones: the
+// context is read once, at the edge, and a command that gets a `Link` or a
+// `Deployment` is past every way resolution can fail (#209).
 use crate::cli::{
     AclCmd, AdminCmd, BenchCmd, CheckCmd, Cli, Command, GetSub, IfaceCmd, KeyCmd, NamespaceCmd,
     SchemaCmd, ServiceCmd, SnapshotSub, StorageCmd,
@@ -113,9 +106,9 @@ pub async fn run() -> Result<()> {
         Command::Storage(StorageCmd::List(a)) => cmd::storage::list(a).await,
         Command::Storage(StorageCmd::Gen(a)) => cmd::storage::plan(a).await,
         Command::Acl(AclCmd::Gen(a)) => cmd::acl::run(a).await,
-        Command::Admin(AdminCmd::Routers { bus }) => {
-            let bus = Bus::resolve(&bus)?;
-            cmd::admin::routers(&bus).await
+        Command::Admin(AdminCmd::Routers { session }) => {
+            let link = crate::bus::Link::resolve(&session)?;
+            cmd::admin::routers(&link).await
         }
         Command::Admin(AdminCmd::Graph(a)) => cmd::admin::graph(a).await,
         Command::Key(KeyCmd::Includes(a)) => cmd::key::includes(a),

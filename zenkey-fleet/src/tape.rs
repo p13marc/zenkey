@@ -40,6 +40,4 @@ pub mod mock;
 pub mod record;
 pub mod snapshot;
 pub mod synth;
-
-#[cfg(feature = "decode")]
 pub mod trigger;

@@ -1,19 +1,21 @@
-//! The live suite's bus: one in-process producer per case, and a way to run
+//! The live suite's bus: one in-process publisher per case, and a way to run
 //! the real `zenctl` binary against it (#499).
 //!
-//! ## The producer
+//! ## The publisher
 //!
 //! A zenoh session listening on loopback port 0 and reading back the port it
 //! was given (the `ANY_PORT`/`bound` pattern of `zenkey-fleet/tests/util/mod.rs`,
-//! which is not exported; #527), with no scouting and no external router, brought up the way
-//! RFC 04 §5 says a producer is: `introspect` (a real slice), `describe`
-//! (a schema for every type the slice names), a read procedure, all declared through [`BringUp`] — and only
-//! then `alive`. It publishes one state key and one telemetry key, and
-//! answers a GET on the state key the way a storage would.
+//! which is not exported; #527), with no scouting and no external router. It
+//! publishes one telemetry-shaped key on a period and one state-shaped key
+//! on a heartbeat, and answers a GET on the state key the way a storage
+//! would. Its keys are **foreign** — no zk2 service owns them — which is
+//! what the raw verbs pinned here (`get`, `rate`, `pub`, `watchdog`) must
+//! handle as well as a zk2 key; the zk2 cases are `tests/live_zk2.rs`.
+//! v1's producer — an `introspect` slice and a `describe` behind `BringUp` —
+//! left with the v1 registry (#612, FJ9).
 //!
-//! The session runs in **router** mode. An explorer's session is a peer
-//! today and becomes a client under #501; a router accepts either, so the
-//! suite does not have to change when the explorer's mode does.
+//! The session runs in **router** mode: an explorer's session is a client
+//! (#501), and a router accepts it.
 //!
 //! Every bus gets a **base of its own** (`live-<pid>-<n>`), so two cases —
 //! or two whole runs — never see each other's keys even if their
@@ -22,7 +24,7 @@
 //! ## Waiting
 //!
 //! Each `zenctl` run is a new process with a new session, and a query sent
-//! before that session has met the producer's declarations is silence, not
+//! before that session has met the publisher's declarations is silence, not
 //! an answer. So a case that expects an answer asks [`Bus::until`]: rerun
 //! until the outcome the case is about appears, within [`SETTLE`] — which
 //! returns the instant it does, so a generous net costs a passing run
@@ -38,7 +40,6 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::bus::producer::{BringUp, LiveProducer};
 use zenoh::Session;
 
 /// How long a case waits before calling a hang a hang — the fleet suites'
@@ -50,99 +51,23 @@ pub const SETTLE: Duration = Duration::from_secs(20);
 /// hung. Above any window a case asks for, so it only ever fires on a hang.
 pub const RUN_LIMIT: Duration = Duration::from_secs(60);
 
-/// The producer's origin.
-pub const HOST: &str = "h-11fe11fe11fe";
-/// The producer's name.
-pub const PRODUCER: &str = "probe";
+/// The base-relative keys the publisher writes.
+pub const CPU: &str = "plant/line-1/cpu";
+pub const HEALTH_KEY: &str = "plant/line-1/health";
 
-/// The served slice (RFC 08 §6): one state subject, one telemetry subject,
-/// one read procedure. Every type it names is in [`schema_set`].
-const SLICE: &str = r#"
-[registry]
-version = "1.0"
-app = "live"
-convention = 1
-
-[producer]
-name = "probe"
-description = "zenctl's live-suite producer (#499)"
-
-[[subject]]
-path = "health"
-class = "state"
-type = "Health"
-since = "1.0"
-description = "whether the probe is well"
-
-[[subject]]
-path = "cpu"
-class = "telemetry"
-type = "Cpu"
-since = "1.0"
-description = "a load reading"
-
-[[procedure]]
-path = "ping"
-kind = "read"
-reply = "Pong"
-idempotent = true
-since = "1.0"
-description = "answers pong"
-"#;
-
-/// The `describe` reply (RFC 08 §7): a schema for each type [`SLICE`] names.
-fn schema_set() -> String {
-    let object = |props: serde_json::Value| {
-        zenkey::schema::TypeSchema::json_schema(serde_json::json!({
-            "type": "object",
-            "properties": props,
-        }))
-    };
-    zenkey::schema::SchemaSet::builder("live")
-        .entry(
-            "Health",
-            object(serde_json::json!({ "status": { "type": "string" } })),
-        )
-        .entry(
-            "Cpu",
-            object(serde_json::json!({ "value": { "type": "number" } })),
-        )
-        .entry(
-            "Pong",
-            object(serde_json::json!({ "pong": { "type": "boolean" } })),
-        )
-        .build()
-        .to_json()
-}
-
-/// The state value the producer publishes and answers a GET with.
+/// The state value the publisher publishes and answers a GET with.
 pub const HEALTH: &str = r#"{"status":"ok"}"#;
 
 /// How often the telemetry key publishes. Fast enough that a two-second
-/// window holds dozens of samples, which is what `rate` and `check expect`
-/// are pointed at.
+/// window holds dozens of samples, which is what `rate` and `watchdog` are
+/// pointed at.
 const TELEMETRY_PERIOD: Duration = Duration::from_millis(50);
-
-/// What else a bus carries beyond the healthy producer.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct Extras {
-    /// A second producer that holds `alive` and answers nothing — the
-    /// RFC 04 §5 violation: alive ⇒ callable, broken.
-    pub mute: bool,
-    /// No producer at all (#510): the router listens and nothing on the bus
-    /// holds a token, serves a procedure or publishes — a reachable bus with
-    /// nothing to judge. The session's admin space is zenoh's default (off),
-    /// so no router answers `@/*/router` either. `mute` is ignored.
-    pub bare: bool,
-}
 
 /// One case's bus.
 pub struct Bus {
     pub endpoint: String,
     pub base: String,
     session: Session,
-    _live: Option<LiveProducer>,
-    _mute: Option<zenoh::liveliness::LivelinessToken>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
     home: PathBuf,
 }
@@ -169,12 +94,8 @@ fn unique_base() -> String {
 }
 
 impl Bus {
-    /// The healthy producer and nothing else.
+    /// The publisher, publishing.
     pub async fn up() -> Bus {
-        Bus::with(Extras::default()).await
-    }
-
-    pub async fn with(extras: Extras) -> Bus {
         let base = unique_base();
 
         let mut cfg = zenoh::Config::default();
@@ -186,7 +107,7 @@ impl Bus {
         // a concurrent run's outgoing connection, as often as not (#527).
         cfg.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
             .expect("listen");
-        let session = zenoh::open(cfg).await.expect("the producer's session");
+        let session = zenoh::open(cfg).await.expect("the publisher's session");
         let endpoint = session
             .info()
             .locators()
@@ -194,66 +115,20 @@ impl Bus {
             .into_iter()
             .map(|l| l.to_string())
             .find(|l| l.starts_with("tcp/127.0.0.1:"))
-            .expect("the producer listens on loopback");
+            .expect("the publisher listens on loopback");
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-home")
             .join(&base);
         std::fs::create_dir_all(&home).expect("a config root of its own");
-        if extras.bare {
-            return Bus {
-                endpoint,
-                base,
-                session,
-                _live: None,
-                _mute: None,
-                tasks: Vec::new(),
-                home,
-            };
-        }
 
-        let key = |rel: &str| zenkey::grammar::with_base(&base, rel);
-        let rpc = key(&format!("v1/{HOST}/@rpc/{PRODUCER}"));
-        let introspect = format!("{rpc}/introspect");
-        let describe = format!("{rpc}/describe");
-        let ping = format!("{rpc}/ping");
-
-        // RFC 04 §5: every queryable first…
-        let mut up = BringUp::new(&session);
-        up.serve(&introspect).await.expect("introspect");
-        up.serve(&describe).await.expect("describe");
-        up.serve(&ping).await.expect("ping");
-
-        // The state key's last value, answered as a storage would.
-        let health = key(&format!("v1/{HOST}/state/{PRODUCER}/health"));
+        let key = |rel: &str| format!("{base}/{rel}");
+        let health = key(HEALTH_KEY);
         let storage = session
             .declare_queryable(&health)
             .await
             .expect("the state storage");
 
-        // …and `alive` last.
-        let mut live = up
-            .alive(&key(&format!("v1/{HOST}/state/{PRODUCER}/alive")))
-            .await
-            .expect("alive");
-
         let mut tasks = Vec::new();
-        let slice_type = zenkey::SliceFormat::Toml.media_type();
-        let schemas = schema_set();
-        for r in std::mem::take(&mut live.responders) {
-            let (payload, encoding) = match r.key() {
-                k if k == introspect => (SLICE.to_string(), slice_type),
-                k if k == describe => (schemas.clone(), "application/json"),
-                _ => (r#"{"pong":true}"#.to_string(), "application/json"),
-            };
-            tasks.push(tokio::spawn(async move {
-                while let Some(q) = r.next().await {
-                    let _ = r
-                        .reply(&q, payload.clone().into_bytes(), Some(encoding))
-                        .await;
-                }
-            }));
-        }
-
         let reply_key = health.clone();
         tasks.push(tokio::spawn(async move {
             while let Ok(q) = storage.recv_async().await {
@@ -268,7 +143,7 @@ impl Bus {
         // on a period.
         let state_pub = session.declare_publisher(health).await.expect("state");
         let cpu = session
-            .declare_publisher(key(&format!("v1/{HOST}/telemetry/{PRODUCER}/cpu")))
+            .declare_publisher(key(CPU))
             .await
             .expect("telemetry");
         tasks.push(tokio::spawn(async move {
@@ -287,24 +162,10 @@ impl Bus {
             }
         }));
 
-        let mute = if extras.mute {
-            Some(
-                session
-                    .liveliness()
-                    .declare_token(key(&format!("v1/{HOST}/state/mute/alive")))
-                    .await
-                    .expect("the mute producer's token"),
-            )
-        } else {
-            None
-        };
-
         Bus {
             endpoint,
             base,
             session,
-            _live: Some(live),
-            _mute: mute,
             tasks,
             home,
         }
@@ -312,7 +173,7 @@ impl Bus {
 
     /// A base-relative key as the wire spells it under this bus's base.
     pub fn key(&self, rel: &str) -> String {
-        zenkey::grammar::with_base(&self.base, rel)
+        format!("{}/{rel}", self.base)
     }
 
     /// A subscriber on the producer's session — what receives a `pub`.
@@ -326,7 +187,9 @@ impl Bus {
             .expect("a test subscriber")
     }
 
-    /// Run `zenctl <args> -c <endpoint> --base <base>` once.
+    /// Run `zenctl <args> -c <endpoint>` once. A verb that reads a
+    /// deployment is given `--namespace` by the case, through [`Bus::ns`]:
+    /// `pub` takes none since FJ9.
     pub async fn zenctl(&self, args: &[&str]) -> Run {
         self.zenctl_fed(args, None).await
     }
@@ -340,16 +203,19 @@ impl Bus {
 
     async fn zenctl_fed(&self, args: &[&str], input: Option<String>) -> Run {
         let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        argv.extend([
-            "-c".into(),
-            self.endpoint.clone(),
-            "--base".into(),
-            self.base.clone(),
-        ]);
+        argv.extend(["-c".into(), self.endpoint.clone()]);
         let home = self.home.clone();
         tokio::task::spawn_blocking(move || run(&argv, &home, input))
             .await
             .expect("the zenctl runner")
+    }
+
+    /// `args` with `--namespace <base>` after them, for a verb that resolves
+    /// keys against the deployment.
+    pub fn ns<'a>(&'a self, args: &[&'a str]) -> Vec<&'a str> {
+        let mut v = args.to_vec();
+        v.extend(["--namespace", self.base.as_str()]);
+        v
     }
 
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way,

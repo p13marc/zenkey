@@ -50,8 +50,6 @@ pub mod zk2;
 
 use anyhow::Result;
 
-use crate::Bus;
-
 use crate::exit::unaskable;
 
 /// The raw-selector seam: every selector (or key) a user types, rather than
@@ -73,42 +71,6 @@ pub fn raw_selector(sel: &str) -> Result<&str> {
         ));
     }
     Ok(sel)
-}
-
-/// The hint for a base-relative selector typed under a non-empty base, or
-/// `None` when there is nothing to say (#512).
-///
-/// Wire verbs take **wire keys**: an explorer runs un-namespaced and `--base`
-/// is for discovery (RFC 09 §5), so `v1/**` under `--base prod` is a
-/// subscription to a keyspace nobody publishes on — silence, with no error to
-/// say why. Not rewritten: the wire is what you typed, and this only says so.
-///
-/// Only a selector whose first chunk is the grammar's root `v1` is the
-/// mistake. The rest that do not start with the base are deliberate and stay
-/// quiet: `@/…` (the admin space, under no base), a leading wildcard (`**/v1/…`
-/// spans every base, which is how a leak is found), and another deployment's
-/// own wire keys (`staging/v1/…`) — those *are* wire keys, which is the thing
-/// the hint would ask for.
-pub fn off_base_hint(sel: &str, base: &str) -> Option<String> {
-    if base.is_empty() || zenkey::grammar::strip_base(base, sel).is_some() {
-        return None;
-    }
-    let first = sel.split(['/', '?']).next().unwrap_or_default();
-    (first == "v1").then(|| {
-        let wire = zenkey::grammar::with_base(base, sel);
-        format!(
-            "hint: {sel:?} does not sit under base {base:?} — selectors are wire \
-             keys (RFC 09 §5); did you mean {wire:?}?"
-        )
-    })
-}
-
-/// [`off_base_hint`] onto stderr — never stdout, which `--format json|ndjson`
-/// keeps for the document. One line, and the run carries on.
-pub fn hint_off_base(sel: &str, args: &Bus) {
-    if let Some(hint) = off_base_hint(sel, args.base()) {
-        eprintln!("{hint}");
-    }
 }
 
 /// How an output file is opened — decided before any session opens (#514).
@@ -184,40 +146,4 @@ pub fn positive_secs(flag: &str, secs: f64) -> Result<std::time::Duration> {
         ));
     }
     Ok(std::time::Duration::from_secs_f64(secs))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_base_relative_selector_under_a_base_is_hinted_and_nothing_else_is() {
-        let hint = off_base_hint("v1/**", "prod").expect("the mistake is hinted");
-        assert!(
-            hint.contains(r#""v1/**" does not sit under base "prod""#),
-            "{hint}"
-        );
-        assert!(hint.contains(r#"did you mean "prod/v1/**"?"#), "{hint}");
-        assert!(off_base_hint("v1/*/state/sysinfo/health", "site/prod").is_some());
-        // A GET's parameters ride along into the suggestion.
-        assert!(
-            off_base_hint("v1/**?_time=[now(-1h)..]", "prod")
-                .unwrap()
-                .contains(r#""prod/v1/**?_time=[now(-1h)..]""#)
-        );
-        // Quiet: the wire-key form, the empty base, the admin space, a
-        // leading wildcard, another deployment's wire keys, a bare `v1x`.
-        for (sel, base) in [
-            ("prod/v1/**", "prod"),
-            ("v1/**", ""),
-            ("@/**", "prod"),
-            ("**/v1/**", "prod"),
-            ("*/v1/*/state/**", "prod"),
-            ("staging/v1/**", "prod"),
-            ("v1x/**", "prod"),
-            ("prod/@catalog/**", "prod"),
-        ] {
-            assert_eq!(off_base_hint(sel, base), None, "{sel} under {base:?}");
-        }
-    }
 }

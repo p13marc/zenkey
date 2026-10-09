@@ -25,58 +25,11 @@
 //! Where a shape here looks inconsistent with its neighbours, it is pinned as
 //! it *is* and the inconsistency is filed. That promise has now been kept
 //! once: #232 named three, chunk AI changed them, and each change had to state
-//! itself in this file to land. `Coverage`'s tags are snake_case below because
-//! of it. The rule stands for the next one.
+//! itself in this file to land. The rule stands for the next one.
 
 use serde_json::json;
 use zenkey_fleet::report::*;
-use zenkey_fleet::{Coverage, CoverageRow};
 use zenkey_report_fixtures as fx;
-
-/// The trickiest shape in the file: a `#[serde(flatten)]` over an adjacently
-/// tagged enum.
-///
-/// Its tag values were **PascalCase** while every other enum in this surface
-/// was snake or kebab — pinned here as it was, and filed as #232 rather than
-/// quietly changed, because it is a wire contract. #232 is that change, and
-/// this is where it states itself.
-#[test]
-fn coverage_flattens_into_its_row_with_snake_case_tags() {
-    let covered = CoverageRow {
-        producer: "sysinfo".into(),
-        path: "health".into(),
-        ttl_s: Some(30),
-        coverage: Coverage::Covered("main@abc".into()),
-    };
-    assert_eq!(
-        serde_json::to_value(&covered).unwrap(),
-        json!({
-            "producer": "sysinfo",
-            "path": "health",
-            "ttl_s": 30,
-            "coverage": "covered",
-            "storage": "main@abc",
-        })
-    );
-
-    let uncovered = CoverageRow {
-        producer: "sysinfo".into(),
-        path: "health".into(),
-        ttl_s: None,
-        coverage: Coverage::Uncovered,
-    };
-    assert_eq!(
-        serde_json::to_value(&uncovered).unwrap(),
-        json!({"producer": "sysinfo", "path": "health", "coverage": "uncovered"}),
-        "no storage key at all when nothing covers it, and no ttl when none \
-         is declared"
-    );
-
-    assert_eq!(
-        serde_json::to_value(Coverage::Partial("main@abc".into())).unwrap(),
-        json!({"coverage": "partial", "storage": "main@abc"})
-    );
-}
 
 /// #213's three populations, and the two counters beside them. `stampers_dropped`
 /// skips on zero, so the common case carries no bound-accounting noise while a
@@ -283,17 +236,6 @@ fn doctor_severities_findings_and_verdicts_are_the_stable_vocabulary() {
 /// (#612, FJ9).
 #[test]
 fn every_enum_in_the_surface_names_its_wire_vocabulary() {
-    fn topic(v: &TopicVerdict) -> &'static str {
-        match v {
-            TopicVerdict::Registered => "registered",
-            TopicVerdict::Unregistered => "unregistered",
-            TopicVerdict::NoSliceForProducer => "no_slice_for_producer",
-            TopicVerdict::NotADataClass => "not_a_data_class",
-            TopicVerdict::NotV1 => "not_v1",
-            TopicVerdict::NotUnderBase => "not_under_base",
-            TopicVerdict::RegistryNotLoaded => "registry_not_loaded",
-        }
-    }
     fn severity(v: &DoctorSeverity) -> &'static str {
         match v {
             DoctorSeverity::Error => "error",
@@ -306,14 +248,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
             ExpectVerdict::Met => "met",
             ExpectVerdict::NotMet => "not_met",
             ExpectVerdict::Impaired => "impaired",
-        }
-    }
-    // #232: this one was PascalCase, alone in the file.
-    fn coverage(v: &Coverage) -> &'static str {
-        match v {
-            Coverage::Covered(_) => "covered",
-            Coverage::Partial(_) => "partial",
-            Coverage::Uncovered => "uncovered",
         }
     }
 
@@ -333,17 +267,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
     }
 
     for v in [
-        TopicVerdict::Registered,
-        TopicVerdict::Unregistered,
-        TopicVerdict::NoSliceForProducer,
-        TopicVerdict::NotADataClass,
-        TopicVerdict::NotV1,
-        TopicVerdict::NotUnderBase,
-        TopicVerdict::RegistryNotLoaded,
-    ] {
-        assert_eq!(wire(&v, ""), topic(&v));
-    }
-    for v in [
         DoctorSeverity::Error,
         DoctorSeverity::Warning,
         DoctorSeverity::Info,
@@ -356,13 +279,6 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         ExpectVerdict::Impaired,
     ] {
         assert_eq!(wire(&v, ""), expect(&v));
-    }
-    for v in [
-        Coverage::Covered("s".into()),
-        Coverage::Partial("s".into()),
-        Coverage::Uncovered,
-    ] {
-        assert_eq!(wire(&v, "coverage"), coverage(&v));
     }
 }
 

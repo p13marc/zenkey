@@ -150,7 +150,7 @@ impl<'a> Lens<'a> {
     /// Rung 1: the key relative to the namespace, or `None` when it does
     /// not sit under it.
     pub fn relative<'k>(&self, wire: &'k str) -> Option<&'k str> {
-        zenkey::grammar::strip_base(self.namespace, wire)
+        crate::model::namespace::strip(self.namespace, wire)
     }
 
     /// Rungs 1–6 for one wire key.

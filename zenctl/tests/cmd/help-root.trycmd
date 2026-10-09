@@ -1,17 +1,18 @@
 The root: the tree itself, the version, and what a bare invocation does.
 
 Read the command list below as three groups, because that is how it was built
-(#307). **Nouns** — `service`, `config`, `iface`, `schema`, `namespace`,
-`storage`, `acl`, `blob`, `admin`, `key`, `bench` — are things declared, alive
-or persisted, and get verbs under them; FJ4 (#612) replaced v1's `topic`,
-`node`, `base`, `interface` and `registry` with zk2's `service`, `iface`,
-`schema` and `namespace`. **Wire verbs** — `get`, `echo`, `pub`, `retire`,
-`rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`,
-`export`, `serve`, `gen`, `scout` — are acts and observations on live traffic,
-and hang off the root, because an act is not a property of a noun.
-**Judgement** — `check`, `doctor`, `why`,
-`watchdog` — is exit-coded, under the one contract in `zenctl/src/exit.rs`.
-Then `context`, `cache` and `completions`, which are about the tool.
+(#307). **Nouns** — `service`, `iface`, `schema`, `namespace`, `storage`,
+`acl`, `admin`, `key`, `bench` — are things declared, alive or persisted, and
+get verbs under them; FJ4 (#612) replaced v1's `topic`, `node`, `base`,
+`interface` and `registry` with zk2's `service`, `iface`, `schema` and
+`namespace`. **Wire verbs** — `get`, `call`, `watch`, `echo`, `pub`, `rate`,
+`field`, `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`,
+`serve`, `gen`, `scout` — are acts and observations on live traffic, and hang
+off the root, because an act is not a property of a noun. **Judgement** —
+`check`, `doctor`, `watchdog` — is exit-coded, under the one contract in
+`zenctl/src/exit.rs`. Then `context`, `cache` and `completions`, which are
+about the tool. FJ9 removed what was left of v1: `config`, `blob`, `export`
+and `why` (#612); the `v1` branch keeps them.
 
 A bare `zenctl` exits **2**, and so does `zenctl key includes` with too few
 arguments — clap's usage error. `zenctl key includes 'v1/**a' 'v1/a'` also
@@ -28,13 +29,11 @@ Usage: zenctl <COMMAND>
 
 Commands:
   service      Running services: their instances, interfaces and descriptors
-  config       Read and change a producer's live configuration
   iface        Interfaces: who provides each, who requires it, and its contract
   schema       Payload schemas, as a contract's bundle carries them
   namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
   acl          Router access control, generated from an enrollment and the contracts
-  blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
   bench        Measure how a deployment answers its operations
@@ -51,16 +50,14 @@ Commands:
   snapshot     Take a deployment's state to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
-  export       Serve the bus and its contract as Prometheus metrics
   serve        Serve one operation of an interface as a mock owner, and log each call
   gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   doctor       Judge a zk2 deployment against the core: one verdict per check
-  why          Explain why a key is silent, one established fact at a time
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
-  cache        Inspect or clear the slice cache that feeds shell completion
+  cache        Inspect, refresh or clear the name cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
   help         Print this message or the help of the given subcommand(s)
 
@@ -97,13 +94,11 @@ Usage: zenctl <COMMAND>
 
 Commands:
   service      Running services: their instances, interfaces and descriptors
-  config       Read and change a producer's live configuration
   iface        Interfaces: who provides each, who requires it, and its contract
   schema       Payload schemas, as a contract's bundle carries them
   namespace    Deployment namespaces in use on the bus (needs no --namespace)
   storage      Storages: what the mesh persists, and the router config behind it
   acl          Router access control, generated from an enrollment and the contracts
-  blob         Bulk content: who serves it, and fetching it
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
   bench        Measure how a deployment answers its operations
@@ -120,16 +115,14 @@ Commands:
   snapshot     Take a deployment's state to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
-  export       Serve the bus and its contract as Prometheus metrics
   serve        Serve one operation of an interface as a mock owner, and log each call
   gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   doctor       Judge a zk2 deployment against the core: one verdict per check
-  why          Explain why a key is silent, one established fact at a time
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
-  cache        Inspect or clear the slice cache that feeds shell completion
+  cache        Inspect, refresh or clear the name cache that feeds shell completion
   completions  Generate shell completions (bash, zsh, fish, elvish, powershell)
   help         Print this message or the help of the given subcommand(s)
 

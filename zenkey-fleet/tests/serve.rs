@@ -37,7 +37,7 @@ async fn a_responder_answers_and_logs_the_ask() {
     // Settle: loop the GET until the queryable answers (wait-routable).
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             &format!("{KEY}?who=test"),
             &zenkey_fleet::GetOpts::new(Duration::from_millis(500)).payload(Some(b"ping".to_vec())),
         )
@@ -100,7 +100,7 @@ async fn a_wildcard_ask_is_answered_on_the_responders_concrete_key() {
 
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             "v1/*/@rpc/mock/answer",
             &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
         )
@@ -160,7 +160,7 @@ async fn a_query_in_hand_outlives_the_window_that_took_it() {
 
     let answers = loop {
         let answers = zenkey_fleet::fleet_get(
-            &zenkey_fleet::Fleet::new(&b, ""),
+            &b,
             KEY,
             &zenkey_fleet::GetOpts::new(Duration::from_millis(500)),
         )

@@ -2,12 +2,13 @@
 //!
 //! `tests/cli.rs` pins what zenctl says with no bus; the render snapshots pin
 //! how a report draws; zenkey-fleet's suites pin the engine. None of them ran
-//! what zenctl adds on top — `Bus::resolve`, the argument → `GetOpts`/
-//! `CallSpec` mapping, the guards in `cmd/*.rs`, the rendering of *real*
-//! replies, and every 0 and 1 a verdict verb can exit with. Every case here
-//! does: an in-process producer on an ephemeral port (`live/harness.rs`),
-//! the binary run as a script would run it, and its stdout, stderr and exit
-//! code asserted against the contract in `zenctl/src/exit.rs`.
+//! what zenctl adds on top — the argument → `GetOpts` mapping, the guards in
+//! `cmd/*.rs`, the rendering of *real* replies, and every 0 and 1 a verdict
+//! verb can exit with. Every case here does: an in-process publisher of
+//! foreign keys on an ephemeral port (`live/harness.rs`), the binary run as
+//! a script would run it, and its stdout, stderr and exit code asserted
+//! against the contract in `zenctl/src/exit.rs`. The zk2 cases — services,
+//! contracts, owners — are `tests/live_zk2.rs`.
 //!
 //! Later chunks of epic #498 land their regressions here.
 
@@ -16,17 +17,17 @@ mod harness;
 
 use std::time::{Duration, Instant};
 
-use harness::{Bus, HEALTH, HOST, PRODUCER, Run, SETTLE};
+use harness::{Bus, CPU, HEALTH, HEALTH_KEY, Run, SETTLE};
 use serde_json::{Value, json};
 use zenoh::sample::SampleKind;
 
-/// The producer's two published keys, as the wire spells them.
+/// The publisher's two keys, as the wire spells them.
 fn cpu(bus: &Bus) -> String {
-    bus.key(&format!("v1/{HOST}/telemetry/{PRODUCER}/cpu"))
+    bus.key(CPU)
 }
 
 fn health(bus: &Bus) -> String {
-    bus.key(&format!("v1/{HOST}/state/{PRODUCER}/health"))
+    bus.key(HEALTH_KEY)
 }
 
 /// Assert an exit code, printing the whole run when it is not the one.
@@ -41,31 +42,37 @@ fn exits(run: &Run, code: i32) {
 // (#612); zk2's `service`, `iface`, `graph` and `namespace` are pinned
 // against live services in `tests/live_zk2.rs`.
 
-/// `get` answers 0 with the stored value, decoded against the served schema;
-/// a key nobody answers is silence, and silence is 2 — never an empty 0
-/// (RFC 05 §3.1).
+/// `get` answers 0 with the stored value, resolved through the lens — a
+/// foreign key in the namespace is `not_zk2`, rendered structurally and
+/// never refused; a key nobody answers is silence, and silence is 2 —
+/// never an empty 0 (RFC 05 §3.1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_is_0_with_a_value_and_2_on_silence() {
     let bus = Bus::up().await;
     let key = health(&bus);
     let run = bus
-        .until(&["get", &key, "--format", "ndjson"], |r| r.code == 0)
+        .until(&bus.ns(&["get", &key, "--format", "ndjson"]), |r| {
+            r.code == 0
+        })
         .await;
     exits(&run, 0);
     let answers = run.rows("answer");
     assert_eq!(answers.len(), 1, "{run}");
     assert_eq!(answers[0]["key"], json!(key));
-    assert_eq!(answers[0]["origin"], json!(HOST));
-    assert_eq!(answers[0]["type"], json!("Health"));
+    assert_eq!(answers[0]["identity"]["is"], json!("not_zk2"), "{run}");
+    assert!(
+        answers[0].get("origin").is_none(),
+        "v1's origin left at FJ9"
+    );
     assert_eq!(
         answers[0]["value"],
         serde_json::from_str::<Value>(HEALTH).unwrap()
     );
 
     // The bus answers (above); this key is simply unserved.
-    let nothing = bus.key(&format!("v1/{HOST}/state/{PRODUCER}/nothing"));
+    let nothing = bus.key("plant/line-1/nothing");
     let run = bus
-        .zenctl(&["get", &nothing, "--timeout", "1", "--format", "ndjson"])
+        .zenctl(&bus.ns(&["get", &nothing, "--timeout", "1", "--format", "ndjson"]))
         .await;
     exits(&run, 2);
     assert_eq!(run.ndjson()[0]["answers"], json!(0), "{run}");
@@ -79,9 +86,10 @@ async fn rate_counts_a_window() {
     let bus = Bus::up().await;
     let key = cpu(&bus);
     let run = bus
-        .until(&["rate", &key, "--for", "2", "--format", "json"], |r| {
-            r.code == 0 && r.json()["total_count"].as_u64().is_some_and(|n| n > 0)
-        })
+        .until(
+            &bus.ns(&["rate", &key, "--for", "2", "--format", "json"]),
+            |r| r.code == 0 && r.json()["total_count"].as_u64().is_some_and(|n| n > 0),
+        )
         .await;
     exits(&run, 0);
     let doc = run.json();
@@ -127,8 +135,8 @@ async fn act_until_heard(
     }
 }
 
-/// `pub` goes out on a declared publisher, encoded as the served slice
-/// declares, and a subscriber receives it. stdout stays empty (#242).
+/// `pub` goes out on a declared publisher, the bytes as typed, and a
+/// subscriber receives it. stdout stays empty (#242).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pub_is_received_by_a_subscriber() {
     let bus = Bus::up().await;
@@ -158,14 +166,15 @@ async fn heard_body(sub: &Sub, body: &str, window: Duration) -> usize {
     n
 }
 
-/// A wildcard put is refused — 2, before a session opens, `--raw` or not —
-/// and a subscriber on everything under the base hears none of it (#504).
+/// A wildcard put is refused — 2, before a session opens, whatever else the
+/// flags say — and a subscriber on everything under it hears none of it
+/// (#504).
 /// The same subscriber hears a concrete `pub` first, so its silence is
 /// about the refusal and not about a route that never formed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pub_refuses_a_wildcard_and_nothing_is_delivered() {
     let bus = Bus::up().await;
-    let everything = bus.key("v1/**");
+    let everything = bus.key("plant/**");
     let sub = bus.subscribe(&everything).await;
     let control = r#"{"status":"control"}"#;
     let (run, _) = act_until_heard(&bus, &["pub", &health(&bus), control], &sub, |s| {
@@ -177,7 +186,7 @@ async fn pub_refuses_a_wildcard_and_nothing_is_delivered() {
     let wild = r#"{"status":"wild"}"#;
     for args in [
         vec!["pub", &everything, wild],
-        vec!["pub", &everything, wild, "--raw"],
+        vec!["pub", &everything, wild, "--qos", "data/block/reliable"],
     ] {
         let run = bus.zenctl(&args).await;
         exits(&run, 2);
@@ -198,7 +207,7 @@ async fn pub_refuses_a_wildcard_and_nothing_is_delivered() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pub_from_ndjson_refuses_a_wildcard_row() {
     let bus = Bus::up().await;
-    let everything = bus.key("v1/**");
+    let everything = bus.key("plant/**");
     let sub = bus.subscribe(&everything).await;
     let rows = format!(
         "{}\n{}\n",
@@ -255,6 +264,8 @@ async fn watchdog_count_exits_on_how_its_rules_ended() {
             "1".into(),
             "--count".into(),
             "2".into(),
+            "--namespace".into(),
+            bus.base.clone(),
         ]
     };
 
@@ -274,7 +285,7 @@ async fn watchdog_count_exits_on_how_its_rules_ended() {
     let run = bus.until(&ok, |r| r.code == 0).await;
     exits(&run, 0);
 
-    let quiet = bus.key(&format!("v1/{HOST}/telemetry/{PRODUCER}/nothere"));
+    let quiet = bus.key("plant/line-1/nothere");
     let blind = bounded(format!("silent-for {quiet} 600"));
     let blind: Vec<&str> = blind.iter().map(String::as_str).collect();
     let run = bus.zenctl(&blind).await;

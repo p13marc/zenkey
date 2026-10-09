@@ -130,10 +130,9 @@ ci:
     # One report, three renderings, and exactly one place that decides which
     # (#198).
     ./scripts/check-render-seam.sh
-    # The dispatch dispatches, and one door out of a missing registry
-    # (#209, #210).
+    # The dispatch dispatches (#209). #210's one door out of a missing
+    # registry left with the v1 registry (#612, FJ9).
     ./scripts/check-dispatch.sh
-    ./scripts/check-degradation.sh
     # The update thread does not touch the disk (#255): a handler that needs
     # the filesystem needs a services:: function and a landing message.
     ./scripts/check-fs-seam.sh

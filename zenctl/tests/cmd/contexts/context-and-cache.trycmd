@@ -1,4 +1,4 @@
-Contexts and the slice cache: the two families that touch a filesystem and no
+Contexts and the name cache: the two families that touch a filesystem and no
 bus at all. They are the reason this corpus sets
 `ZENKEY_EXPLORER_CONFIG_DIR` — unset, these cases would read and write the
 developer's own `~/.config/zenctl/config.toml`.
@@ -7,7 +7,7 @@ One file, run in order, because these commands are stateful and every other
 case in the corpus is not — and run in a **home of its own**
 (`tests/cli.rs`), because the statefulness cuts both ways: the context this
 file creates would be every concurrent case's active context, and any case
-that loads slices fills the cache keyed by it, which made `cache clear`'s
+that reads presence fills the cache keyed by it, which made `cache clear`'s
 pinned `existed:false` a race against trycmd's file scheduling.
 
 An empty config says so, and says what to type next — an empty set is not a
@@ -81,7 +81,7 @@ tty is ndjson.
 ```console
 $ zenctl cache show --format table
 [..]/cache/lab/slices
-empty — completion falls back to the static command tree. Any command that loads slices fills it (or `zenctl cache refresh`)
+empty — completion falls back to the static command tree. Any presence read fills it (`service list`, `iface list`, `zenctl cache refresh`), and `namespace list` adds the namespaces
 
 $ zenctl cache clear --format table
 [..]/cache/lab/slices does not exist — nothing to clear

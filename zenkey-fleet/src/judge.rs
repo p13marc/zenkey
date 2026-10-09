@@ -3,8 +3,8 @@
 //! One rule places a module here: *it says whether something is wrong*.
 //! Everything below reads what [`crate::bus`] gathered and [`crate::model`]
 //! projected, and returns a document that takes a position — a doctor
-//! finding, an expectation met or unmet, a rung explaining why a key is
-//! silent, a cutover that did or did not finish.
+//! finding, an expectation met or unmet, a probe's answer, a watchdog
+//! rule's state, a path a type does not declare.
 //!
 //! Because a verdict is the only thing here worth having, the honesty rules
 //! (RFC 13, v1.24; RFC 09 §5.1 O1–O7 for the individual rules) bite hardest
@@ -25,27 +25,17 @@
 //! placement rule on [`crate::report`] admits no exceptions, not even for the
 //! vocabulary the judges are written in.
 //!
-//! [`common`] holds the rest of that vocabulary: the check- and rung-id
-//! registries, the synthetic-traffic marker, the definition of "the new
-//! plane", the scope statement a passive observation watches, and the caps on
-//! how many offenders a report names. It exists because those had lived
-//! wherever they were first needed and the other judges reached across for
-//! them — `doctor` into `field`, `expect` and `condition` into `doctor`,
-//! `retired` into `cutover`. A judge importing another judge is now the
-//! signal it should be: it means one of them is doing the other's work.
+//! [`common`] holds the rest of that vocabulary: the caps on how many
+//! offenders a report names. A judge importing another judge is the signal
+//! it should be: it means one of them is doing the other's work.
 //!
 //! What a judge returns is a **report**, and every serialized report shape
 //! lives in [`crate::report`], not here (see that module's placement rule).
 
 pub mod common;
+pub mod condition;
 pub mod doctor;
 pub mod doctor_delta;
-
-#[cfg(feature = "decode")]
-pub mod condition;
-#[cfg(feature = "decode")]
 pub mod expect;
-#[cfg(feature = "decode")]
 pub mod field;
-#[cfg(feature = "decode")]
 pub mod probe;

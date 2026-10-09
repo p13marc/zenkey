@@ -5,8 +5,8 @@
 //! `canon` shows the canonical spelling (or the parse error, verbatim).
 //! What makes this more than nuze's equivalent is one sentence: when the
 //! answer is the *convention's* doing rather than the algebra's — a `**`
-//! stopped by an `@`-chunk, a `*` that will not match a verbatim origin —
-//! the RFC citation says so.
+//! stopped by an `@`-chunk, a `*` that will not match a verbatim chunk
+//! (zk2's `@stream`, `@state`, `@op`, `@zk`, `@adv`) — the citation says so.
 
 use anyhow::Result;
 use zenoh::key_expr::KeyExpr;
@@ -58,8 +58,8 @@ fn convention_note(a: &str, b: &str) -> Option<String> {
     } else {
         Some(
             "note: `*` never matches a verbatim `@`-chunk (zenoh verbatim \
-             semantics; RFC 03 §4 D4) — a service origin must be named \
-             explicitly."
+             semantics; RFC 03 §4 D4) — a verbatim chunk (`@stream`, `@op`, \
+             `@zk`, …) must be named explicitly."
                 .into(),
         )
     }
@@ -219,28 +219,29 @@ mod tests {
     }
 
     /// The two footguns the convention leans on, cited when they bite:
-    /// D2 — `**` never crosses an `@`-chunk (which is why the raw scope
-    /// cannot see `@rpc`); D4 — `*` never matches a verbatim origin.
+    /// D2 — `**` never crosses an `@`-chunk (which is why the default
+    /// `<ns>/zk2/**` scope cannot see `@stream`); D4 — `*` never matches a
+    /// verbatim chunk.
     #[test]
     fn a_convention_shaped_no_cites_the_rfc() {
-        // D2: the media-safe scope really cannot see the plane.
+        // D2: the default scope really cannot see an explicit-only stream.
         let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Includes,
-            "v1/**",
-            "v1/h-1/@rpc/p/introspect",
+            "prod/zk2/**",
+            "prod/zk2/host-a/cam/video.v1/@stream/frames",
         ) else {
-            panic!("** must not cross @rpc (D2)");
+            panic!("** must not cross @stream (D2)");
         };
         let note = note.expect("the convention explains this no");
         assert!(note.contains("D2"), "{note}");
 
-        // D4: a wildcard origin position does not match a service origin.
+        // D4: a wildcard kind position does not match a verbatim one.
         let RelationVerdict::No { note } = judge(
             crate::render::KeyOp::Intersects,
-            "v1/*/state/x",
-            "v1/@catalog/state/x",
+            "prod/zk2/host-a/tc/tc.netif.v1/*/x",
+            "prod/zk2/host-a/tc/tc.netif.v1/@op/x",
         ) else {
-            panic!("* must not match @catalog (D4)");
+            panic!("* must not match @op (D4)");
         };
         let note = note.expect("the convention explains this no");
         assert!(note.contains("D4"), "{note}");

@@ -15,7 +15,7 @@
 //! one writer cannot drift from itself.
 //!
 //! A row names its key and payload, and optionally its encoding, QoS
-//! profile, tombstone-ness, and attachment. Unknown fields are ignored
+//! axes, tombstone-ness, and attachment. Unknown fields are ignored
 //! (rows carry observer-side extras like `type`/`typed`); a row that
 //! cannot be published is an error *naming the reason*, and callers MUST
 //! count those rather than silently skipping (zenoh-cli logs-and-drops;
@@ -26,30 +26,26 @@
 //! `"value"`: a `value` is a decoded *rendering* and does not round-trip a
 //! binary payload. Same for `"attachment_b64"` over `"attachment"`.
 //!
-//! **Re-cut for zk2** (#612, FJ8a). A row's QoS is its wire axes,
-//! `"qos_axes"` (`priority/congestion/reliability[+express]`), and they win
-//! over a v1 profile name in `"qos"`: a zk2 owner's QoS is per resource
-//! (§2.4), and v1's five names spell little of it. `echo` has written the
-//! axes since #120 and `.zrec` rows since version 3, so a pipe and a replay
-//! publish a foreign row with exactly the QoS it was seen with. A row whose
-//! key a zk2 service owns parses like any other: the writer refuses it
-//! (P3, spec §6), not the dialect.
+//! **Re-cut for zk2** (#612, FJ8a, FJ9). A row's QoS is its wire axes,
+//! `"qos_axes"` (`priority/congestion/reliability[+express]`): a zk2
+//! owner's QoS is per resource (§2.4). `echo` has written the axes since
+//! #120 and `.zrec` rows since version 3, so a pipe and a replay publish a
+//! foreign row with exactly the QoS it was seen with. v1's profile name in
+//! `"qos"`, and the `origin` and `subject` the v1 grammar parsed out of a
+//! key, left with the v1 dependency (FJ9): a row that carries them reads,
+//! and they are ignored like any other observer-side extra. A row whose key
+//! a zk2 service owns parses like any other: the writer refuses it (P3,
+//! spec §6), not the dialect.
 
 use crate::report::SampleRow;
 
 impl SampleRow {
-    /// The identity fields every writer shares: the wire key, and what the
-    /// convention could make of it under this base.
-    ///
-    /// A key that does not parse still yields a row — O1: a key that does
-    /// not parse is a fact, not an error — it simply carries no `origin`
-    /// or `subject`.
-    pub fn of_key(key: &str, base: &str) -> SampleRow {
-        let parsed = zenkey::grammar::parse_full(base, key);
+    /// A row on `key`, the wire key as received. What a lens made of the
+    /// key rides [`SampleRow::identity`], which the writer that resolved it
+    /// fills in.
+    pub fn of_key(key: &str) -> SampleRow {
         SampleRow {
             key: key.to_string(),
-            origin: parsed.as_ref().map(|p| p.origin.chunk().to_string()),
-            subject: parsed.as_ref().map(|p| p.subject.join("/")),
             ..SampleRow::default()
         }
     }
@@ -65,13 +61,14 @@ impl SampleRow {
             self.encoding = Some(view.encoding.clone());
         }
         self.timestamp = view.timestamp.map(|t| t.to_string());
-        // The profile name only where the axes actually match one, exactly
-        // as `.zrec` has always done it: a name the reader cannot resolve
-        // is worse than no name (#235).
-        self.qos = zenkey::qos::QosProfile::ALL
-            .into_iter()
-            .find(|p| view.qos_matches(*p))
-            .map(|p| p.name().to_string());
+        // The axes as they rode, which a replay and a pipe publish with
+        // (a zk2 owner's QoS is per resource, §2.4).
+        self.qos_axes = Some(crate::report::qos_axes_token(
+            view.priority,
+            view.congestion_control,
+            view.reliability,
+            view.express,
+        ));
         self
     }
 
@@ -100,10 +97,8 @@ pub struct IngestRow {
     pub payload: Vec<u8>,
     /// The row's declared encoding, when it carries one.
     pub encoding: Option<String>,
-    /// The row's QoS profile name (RFC 04 §3), when it carries one.
-    pub qos: Option<String>,
-    /// The row's wire QoS axes, when it carries them: they win over
-    /// [`IngestRow::qos`] (#612, FJ8a).
+    /// The row's wire QoS axes, when it carries them (#612, FJ8a); a row
+    /// without them publishes with its writer's default.
     pub qos_axes: Option<crate::bus::write::WireQos>,
     /// A tombstone row (RFC 04 §1.2): publish a delete, not the payload.
     pub delete: bool,
@@ -189,7 +184,6 @@ pub fn parse_row(line: &str) -> Result<IngestRow, String> {
             .and_then(|e| e.as_str())
             .filter(|e| !e.is_empty())
             .map(str::to_string),
-        qos: obj.get("qos").and_then(|q| q.as_str()).map(str::to_string),
         delete,
         attachment,
     })
@@ -245,12 +239,12 @@ mod tests {
     #[test]
     fn a_hand_written_row_reads_back_with_its_extras_ignored() {
         let row = parse_row(
-            r#"{"key":"v1/h-1/state/p/health","origin":"h-1","type":"Health","typed":true,
-                "encoding":"application/json","timestamp":null,"delete":false,
+            r#"{"key":"prod/zk2/host-a/tc/tc.netif.v1/state/namespaces","type":"json:Namespaces",
+                "typed":true,"encoding":"application/json","timestamp":null,"delete":false,
                 "value":{"status":"ok"}}"#,
         )
         .unwrap();
-        assert_eq!(row.key, "v1/h-1/state/p/health");
+        assert_eq!(row.key, "prod/zk2/host-a/tc/tc.netif.v1/state/namespaces");
         assert_eq!(row.payload, br#"{"status":"ok"}"#);
         assert_eq!(row.encoding.as_deref(), Some("application/json"));
         assert!(!row.delete);
@@ -300,81 +294,54 @@ mod tests {
 
     /// A `SampleView` built from the wire, so `with_wire`'s rules are
     /// exercised rather than restated.
-    fn view(payload: &[u8], profile: Option<zenkey::qos::QosProfile>) -> crate::SampleView {
-        use zenkey::qos::QosProfile;
-        // Axes that match no profile, unless one was asked for: the case
-        // `.zrec` always handled and `echo` did not (#235).
-        let p = profile.unwrap_or(QosProfile::Sampled);
+    fn view(payload: &[u8]) -> crate::SampleView {
         crate::SampleView {
-            key: "v1/h-3fa9c2d41b7e/state/sysinfo/health".into(),
+            key: "plant/line-1/temp".into(),
             payload: zenoh::bytes::ZBytes::from(payload.to_vec()),
             encoding: "application/json".into(),
             kind: zenoh::sample::SampleKind::Put,
             timestamp: None,
             stamped_by: None,
             attachment: None,
-            priority: if profile.is_some() {
-                p.priority()
-            } else {
-                zenoh::qos::Priority::Background
-            },
-            congestion_control: p.congestion_control(),
-            reliability: p.reliability(),
-            express: p.express(),
+            priority: zenoh::qos::Priority::DataHigh,
+            congestion_control: zenoh::qos::CongestionControl::Block,
+            reliability: zenoh::qos::Reliability::Reliable,
+            express: false,
             source: None,
             received: std::time::Instant::now(),
         }
     }
 
-    /// The bug #235 was: `qos` is the field the reader resolves through
-    /// `QosProfile::from_name`, so anything a writer puts there must be a
-    /// name — never the wire axes, which match no profile by design.
-    #[test]
-    fn the_qos_field_only_ever_carries_a_name_the_reader_can_resolve() {
-        let named = SampleRow::of_key("k", "")
-            .with_wire(&view(b"{}", Some(zenkey::qos::QosProfile::Alert)));
-        assert_eq!(named.qos.as_deref(), Some("alert"));
-        assert!(
-            zenkey::qos::QosProfile::from_name(named.qos.as_deref().unwrap()).is_some(),
-            "whatever lands in `qos` must resolve, or every row of the pipe is malformed"
-        );
-
-        // Axes matching no declared profile are not approximated: the field
-        // is absent, which the reader treats as "no profile stated" and the
-        // publisher's own ladder then resolves.
-        let unnamed = SampleRow::of_key("k", "").with_wire(&view(b"{}", None));
-        assert_eq!(
-            unnamed.qos, None,
-            "axes matching no profile are omitted, never spelled into `qos`"
-        );
-    }
-
     /// The round trip the README advertises and RFC 09 §5.2 rests on, over
-    /// a row this crate wrote rather than one a test hand-typed — which is
-    /// exactly what `an_echo_row_reads_back` above could not check.
+    /// a row this crate wrote rather than one a test hand-typed — and the
+    /// axes the sample rode with ride the row both ways (#235, FJ8a).
     #[test]
     fn a_row_this_crate_wrote_is_a_row_this_crate_reads() {
-        let v = view(
-            br#"{"status":"ok"}"#,
-            Some(zenkey::qos::QosProfile::Refreshed),
-        );
+        let v = view(br#"{"status":"ok"}"#);
 
         // The observer's dialect: a rendering under `value`, the wire axes
-        // under their own key, the profile name under `qos`.
-        let mut observed = SampleRow::of_key(&v.key, "").with_wire(&v);
+        // under their own key.
+        let mut observed = SampleRow::of_key(&v.key).with_wire(&v);
         observed.value = Some(serde_json::json!({"status": "ok"}));
-        observed.qos_axes = Some("data/drop/reliable".into());
         observed.payload_bytes = Some(15);
+        assert_eq!(
+            observed.qos_axes.as_deref(),
+            Some("data_high/block/reliable")
+        );
         let back = parse_row(&observed.to_line()).expect("the observer's row reads back");
         assert_eq!(back.payload, br#"{"status":"ok"}"#);
-        assert_eq!(back.qos.as_deref(), Some("refreshed"));
         assert_eq!(back.encoding.as_deref(), Some("application/json"));
-        // The axes ride back too, and win over the profile name (FJ8a).
         let axes = back.qos_axes.expect("the axes read back");
         assert_eq!(
-            (axes.priority, axes.reliability, axes.express),
             (
-                zenoh::qos::Priority::Data,
+                axes.priority,
+                axes.congestion,
+                axes.reliability,
+                axes.express
+            ),
+            (
+                zenoh::qos::Priority::DataHigh,
+                zenoh::qos::CongestionControl::Block,
                 zenoh::qos::Reliability::Reliable,
                 false
             )
@@ -391,7 +358,21 @@ mod tests {
         .with_payload_bytes(&v.payload.to_bytes());
         let back = parse_row(&captured.to_line()).expect("the capture's row reads back");
         assert_eq!(back.payload, br#"{"status":"ok"}"#);
-        assert_eq!(back.qos.as_deref(), Some("refreshed"));
+        assert_eq!(back.qos_axes, Some(axes));
+    }
+
+    /// A version-1 or 2 row's v1 extras — a profile name under `qos`, the
+    /// parsed `origin` and `subject` — read as ignored extras: the row
+    /// still publishes, with its writer's default axes (#612, FJ9).
+    #[test]
+    fn a_v1_rows_profile_name_is_an_ignored_extra() {
+        let row = parse_row(
+            r#"{"key":"v1/h-1/state/p/health","origin":"h-1","subject":"health",
+                "qos":"refreshed","value":{"status":"ok"}}"#,
+        )
+        .unwrap();
+        assert_eq!(row.key, "v1/h-1/state/p/health");
+        assert_eq!(row.qos_axes, None, "a profile name is no axes");
     }
 
     /// A writer that does not hold a fact omits it. Asserted as a whole
@@ -408,8 +389,8 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&row).unwrap(),
             serde_json::json!({"key": "demo/foreign", "delete": true}),
-            "a key that did not parse carries no origin/subject, an unstamped \
-             sample carries no timestamp, and an undecoded one carries no type"
+            "an unresolved key carries no identity, an unstamped sample carries \
+             no timestamp, and an undecoded one carries no type"
         );
     }
 
@@ -447,7 +428,6 @@ mod tests {
         let axes = row.qos_axes.expect("axes");
         assert_eq!(axes.priority, zenoh::qos::Priority::RealTime);
         assert!(axes.express);
-        assert_eq!(row.qos, None, "no profile name was written");
         let err = parse_row(r#"{"key":"k","value":1,"qos_axes":"fast"}"#).unwrap_err();
         assert!(err.contains("qos_axes"), "{err}");
         let err = parse_row(r#"{"key":"k","value":1,"qos_axes":3}"#).unwrap_err();
@@ -457,9 +437,7 @@ mod tests {
     /// Attachments ride the same value rules (#117).
     #[test]
     fn attachments_ride_rows() {
-        let row =
-            parse_row(r#"{"key":"k","value":1,"attachment":{"who":"me"},"qos":"alert"}"#).unwrap();
+        let row = parse_row(r#"{"key":"k","value":1,"attachment":{"who":"me"}}"#).unwrap();
         assert_eq!(row.attachment.as_deref(), Some(br#"{"who":"me"}"#.as_ref()));
-        assert_eq!(row.qos.as_deref(), Some("alert"));
     }
 }

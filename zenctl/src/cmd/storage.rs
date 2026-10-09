@@ -1,69 +1,40 @@
-//! `zenctl storage list` — the storages this bus admits to, and which
-//! declared state keys they actually cover — and `zenctl storage gen`, the
-//! block that makes a router admit to the right ones (#393).
+//! `zenctl storage list` — the storages this bus admits to — and `zenctl
+//! storage gen`, the block that makes a router admit to the right ones
+//! (#393).
 //!
-//! Lived inline in the dispatch until #209, and the coverage join lived there
-//! *twice*: once here and once in `cmd/watch.rs`'s polling form, which had
-//! dropped the note about its own degradation on the way. One join now, one
-//! sentence, and the watch says it each cycle because that is what every other
-//! note in `watch::redraw` does.
+//! v1's coverage join (which declared state families a storage holds) and
+//! the registry `ttl_s` a lifespan was derived from left with the v1
+//! registry (#612, FJ9). The doctor's `storage-on-state` is the zk2
+//! question about a running storage: does it answer on an owner's state
+//! keys (S4)?
 
 use anyhow::Result;
 
-use crate::Bus;
+use crate::bus::{Deployment, Link};
 use crate::report;
 
-/// The RFC 04 §2 coverage join: which declared state keys a storage holds.
-///
-/// Slices only **enrich** this — the storages are the answer, and the join is
-/// an extra column — so a fleet with no reachable registry degrades to
-/// storages-only rather than failing. It says so: an empty coverage column
-/// that means "not asked" and one that means "nothing covered" are different
-/// claims, and a reader cannot tell them apart from the table (RFC 09 §5.1
-/// O4).
-pub async fn coverage(
-    args: &Bus,
-    storages: &[zenkey_fleet::StorageInfo],
-) -> Vec<zenkey_fleet::CoverageRow> {
-    match args.slices_optional().await {
-        Ok(Some(slices)) => zenkey_fleet::state_coverage(&slices, args.base(), storages),
-        // `slices_optional` has already said why, once.
-        Ok(None) => Vec::new(),
-        // A source the user named, failing: not this function's to swallow,
-        // but not worth losing the storages over either — they are the
-        // answer. Rendered through the one error shape (`errors::render`),
-        // like every other error this tool prints.
-        Err(e) => {
-            eprintln!("{}", crate::errors::render(&e));
-            Vec::new()
-        }
-    }
-}
-
-/// The storages and their coverage, once.
 /// `storage list`, with the `--watch` decision where the verb is (#354).
 pub async fn list(cli: crate::cli::StorageListArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
+    let link = Link::resolve(&cli.session)?;
     let crate::cli::StorageListArgs {
         watch,
         every,
-        bus: _,
+        session: _,
     } = cli;
     if watch {
-        return crate::cmd::watch::storage_list(every, &bus).await;
+        return crate::cmd::watch::storage_list(every, &link).await;
     }
-    once(&bus).await
+    once(&link).await
 }
 
-async fn once(args: &Bus) -> Result<()> {
-    let session = args.session().await?;
-    let storages = zenkey_fleet::storages(&session, args.timeout()).await?;
-    let coverage = coverage(args, &storages).await;
+async fn once(link: &Link) -> Result<()> {
+    let session = link.session().await?;
+    let storages = zenkey_fleet::storages(&session, link.timeout()).await?;
     crate::render::emit_with(
         &mut std::io::stdout(),
-        &report::StorageList { storages, coverage },
-        args.format(),
-        args.color(),
+        &report::StorageList { storages },
+        link.format(),
+        link.color(),
     )
 }
 
@@ -82,28 +53,22 @@ fn read_deployment(path: &std::path::Path) -> Result<zenkey_fleet::report::Deplo
 }
 
 /// `storage gen` (#393; `gen` is a reserved word in edition 2024, hence
-/// `plan`): the plan, the zenohd block, the check, or the
-/// explanation — one deployment file, one registry read, four ways out.
-///
-/// The registry only **enriches** the plan: without one the lifespans fall
-/// back to RFC 09 §2.3's default and every derivation says so
-/// (`slices_optional`, #210). A registry the user *named* that will not
-/// read stays fatal, as everywhere.
+/// `plan`): the plan, the zenohd block, the check, or the explanation —
+/// one deployment file, four ways out. Only `--check` opens a session.
 pub async fn plan(cli: crate::cli::StorageGenArgs) -> Result<()> {
     let crate::cli::StorageGenArgs {
         deployment,
         json5,
         check,
         explain,
-        bus,
+        ns,
     } = cli;
     if check {
-        return check_run(&deployment, &bus).await;
+        return check_run(&deployment, &ns).await;
     }
-    let bus = Bus::resolve(&bus)?;
+    let bus = Deployment::resolve(&ns)?;
     let dep = read_deployment(&deployment)?;
-    let slices = bus.slices_optional().await?;
-    let plan = zenkey_fleet::plan_storages(slices.as_ref(), bus.base(), &dep);
+    let plan = zenkey_fleet::plan_storages(bus.namespace(), &dep);
 
     if let Some(key) = explain {
         let report = zenkey_fleet::explain_storage(&plan, &key);
@@ -143,13 +108,13 @@ pub async fn plan(cli: crate::cli::StorageGenArgs) -> Result<()> {
 /// `--check`: a verdict verb, so every step before the comparison lands on
 /// the reserved 2 through [`ASKING`] rather than claiming a difference the
 /// run never measured.
-async fn check_run(deployment: &std::path::Path, args: &crate::cli::BusArgs) -> Result<()> {
-    let bus = ASKING.ask(Bus::resolve(args));
+async fn check_run(deployment: &std::path::Path, args: &crate::cli::NamespaceArgs) -> Result<()> {
+    let bus = ASKING.ask(Deployment::resolve(args));
     let dep = ASKING.ask(read_deployment(deployment));
-    let session = ASKING.ask(bus.session().await);
+    // The admin space sits outside every namespace: the session is in none.
+    let session = ASKING.ask(bus.link().session().await);
     let observed = ASKING.ask(zenkey_fleet::storages(&session, bus.timeout()).await);
-    let slices = ASKING.ask(bus.slices_optional().await);
-    let plan = zenkey_fleet::plan_storages(slices.as_ref(), bus.base(), &dep);
+    let plan = zenkey_fleet::plan_storages(bus.namespace(), &dep);
     // A refused storage is not compared — say which, so a clean check over
     // three of four storages is not read as a clean check over four.
     for note in crate::render::refusal_notes(&plan) {

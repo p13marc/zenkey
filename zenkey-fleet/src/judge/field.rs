@@ -5,7 +5,7 @@
 //! exactly its declared rate, payload validating perfectly, whose
 //! `temperature_c` has not moved in four hours because the sensor died. This
 //! module makes a *field* — a dotted path inside a decoded structural value
-//! ([`crate::model::decode::structural_value`]) — a first-class observed thing:
+//! ([`crate::model::structural::structural_value`]) — a first-class observed thing:
 //! bounded per-path statistics over a window (presence, type stability,
 //! last-change, change count, numeric min/max/last, small-domain distinct
 //! values) yielding three finding kinds:
@@ -246,7 +246,7 @@ impl FieldObservation {
     }
 
     /// Feed one sample. `doc` is the structural value when the payload
-    /// carried one ([`crate::model::decode::structural_value`]); `None` counts the
+    /// carried one ([`crate::model::structural::structural_value`]); `None` counts the
     /// sample as undocumented rather than pretending its fields were absent.
     pub fn observe_unread(&mut self, key: &str) {
         self.keys.entry(key.to_string()).or_default().unread += 1;

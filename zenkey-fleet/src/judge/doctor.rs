@@ -1917,7 +1917,7 @@ fn storage_on_state(obs: &DoctorObservation) -> CheckReport {
         .into_iter()
         .filter_map(|token| {
             let rel = [GRAMMAR, "*", "*", "*", token, "**"].join("/");
-            let full = zenkey::grammar::with_base(&obs.namespace, rel);
+            let full = crate::model::namespace::join(&obs.namespace, rel);
             let ke = zenoh::key_expr::OwnedKeyExpr::try_from(full.clone()).ok()?;
             Some((full, ke))
         })

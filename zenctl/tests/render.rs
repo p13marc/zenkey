@@ -51,30 +51,26 @@ fn ndjson<R: Render>(r: &R) -> String {
     to_string(r, Format::Ndjson, W).expect("render").0
 }
 
-/// Two row kinds on one stream, told apart by a tag rather than by guessing at
-/// fields — the defect this family had before the seam.
+/// One row kind on the stream, tagged like every family's, and the field an
+/// admin document omitted drawn as `—`, never as an agreeing value.
 #[test]
-fn a_storage_lists_two_row_kinds_are_tagged() {
+fn a_storage_list_tags_its_rows() {
     let out = ndjson(&fx::storage_list());
     let kinds: Vec<String> = out
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
         .filter_map(|v| v.get("row").and_then(|r| r.as_str()).map(str::to_string))
         .collect();
-    assert_eq!(kinds, ["storage", "coverage", "coverage", "coverage"]);
+    assert_eq!(kinds, ["storage", "storage"]);
     assert_data_eq!(
         table(&fx::storage_list()),
         str![[r#"
 configured storages:
 
-  main  @aabbccdd  acme/v1/**/state/**
+  events  @aabbccdd  acme/zk2/*/*/*/events/**
     strip —  ·  volume memory
-
-declared state families vs storage coverage:
-
-  ✓ sysinfo   health        covered by main@aabbccdd
-  ~ logs      state/{unit}  PARTIAL via main@aabbccdd
-  · parallax  stream/{id}   uncovered
+  plant   @aabbccdd  acme/plant/**
+    strip acme/plant  ·  volume fs
 
 "#]]
     );
@@ -785,17 +781,12 @@ aabbccdd  1.9.0  tcp/10.0.0.1:7447
     );
 }
 
-/// Three row kinds on one stream, told apart by a tag rather than by probing
-/// for fields — and an origin whose sources named no single session is
-/// *reported*, not attached.
+/// Two row kinds on one stream, told apart by a tag rather than by probing
+/// for fields. v1's origin attachments (`--origins`) left at FJ9 (#612).
 #[test]
-fn an_admin_graph_tags_its_three_row_kinds() {
+fn an_admin_graph_tags_its_row_kinds() {
     let report = fx::topology();
-    let attachments = fx::attachments();
-    let view = zenctl::render::TopologyView {
-        report: &report,
-        attachments: &attachments,
-    };
+    let view = zenctl::render::TopologyView { report: &report };
     let kinds: Vec<String> = ndjson(&view)
         .lines()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
@@ -803,16 +794,14 @@ fn an_admin_graph_tags_its_three_row_kinds() {
         .collect();
     assert_eq!(
         kinds,
-        ["node", "node", "edge", "attachment", "attachment"],
-        "nodes, edges and attachments used to be one untagged stream"
+        ["node", "node", "edge"],
+        "nodes and edges used to be one untagged stream"
     );
     assert_data_eq!(
         table(&view),
         str![[r#"
 aabbccdd  router  1.9.0  tcp/10.0.0.1:7447
 eeff0011  peer    —      (heard of, not queryable)
-  h-3fa9c2d41b7e  ⚓ session eeff0011  (token v1/h-3fa9c2d41b7e/state/sysinfo/alive)
-  h-bbbbbbbbbbbb  reported by aabbccdd — sources named no single session; shown as reported, not attached
   aabbccdd —— eeff0011  [tcp]
 
 "#]]
@@ -1109,28 +1098,39 @@ fn a_schema_check_names_its_verdict_and_omits_what_it_lacks() {
 fn a_cache_report_names_its_directory_in_both_formats() {
     let full = zenctl::render::CacheReport {
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: vec![zenctl::render::CachedSlice {
-            producer: "sysinfo".into(),
-            registry_version: "1.0".into(),
-            subjects: 41,
-            procedures: 3,
-        }],
+        listed: vec![String::new(), "prod".into()],
+        seen: vec![
+            zenctl::render::CachedNamespace {
+                namespace: String::new(),
+                services: 1,
+                ifaces: 1,
+            },
+            zenctl::render::CachedNamespace {
+                namespace: "prod".into(),
+                services: 3,
+                ifaces: 2,
+            },
+        ],
     };
     assert_data_eq!(
         table(&full),
         str![[r#"
 /home/u/.cache/zenkey-explorer/lab/slices
-  sysinfo  registry 1.0  41 subject(s), 3 procedure(s)
+  (empty)  1 service(s), 1 interface(s)
+  prod     3 service(s), 2 interface(s)
+namespaces listed: (empty), prod
 
 "#]]
     );
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&full).lines().next().unwrap()).unwrap();
     assert_eq!(doc["dir"], "/home/u/.cache/zenkey-explorer/lab/slices");
+    assert_eq!(doc["namespaces"], 2);
 
     let empty = zenctl::render::CacheReport {
         dir: "/home/u/.cache/zenkey-explorer/default/slices".into(),
-        slices: vec![],
+        listed: vec![],
+        seen: vec![],
     };
     assert!(notes(&empty).contains("falls back to the static command tree"));
 }
@@ -1140,17 +1140,17 @@ fn a_cache_report_names_its_directory_in_both_formats() {
 #[test]
 fn a_get_with_no_replies_names_the_three_silences() {
     let silent = zenctl::render::GetReport {
-        selector: "acme/v1/**/state/**".into(),
+        selector: "acme/zk2/**".into(),
         timeout_s: 5.0,
         elided: 0,
         answers: vec![],
     };
     let n = notes(&silent);
-    assert!(n.contains("Nobody is registered for it"), "{n}");
+    assert!(n.contains("Nothing may hold it"), "{n}");
     assert!(n.contains("the three are different"), "{n}");
     let doc: serde_json::Value =
         serde_json::from_str(ndjson(&silent).lines().next().unwrap()).unwrap();
-    assert_eq!(doc["selector"], "acme/v1/**/state/**");
+    assert_eq!(doc["selector"], "acme/zk2/**");
     // `5.0`: the seconds unification (#218) — see the budget window above.
     assert_eq!(doc["timeout_s"], 5.0);
 }
@@ -1410,12 +1410,12 @@ fn every_observing_family_states_its_scope() {
     );
     assert_eq!(s.window_s, Some(5.0));
     let s = scoped(&zenctl::render::GetReport {
-        selector: "acme/v1/**/state/**".into(),
+        selector: "acme/zk2/*/*/*/state/**".into(),
         timeout_s: 5.0,
         elided: 0,
         answers: vec![],
     });
-    assert_eq!(s.asked, ["acme/v1/**/state/**"]);
+    assert_eq!(s.asked, ["acme/zk2/*/*/*/state/**"]);
     scoped(&fx::bench_report());
 
     // Sweeps: asked is the claim; a one-shot sweep has no window.
@@ -1423,11 +1423,7 @@ fn every_observing_family_states_its_scope() {
     let s = scoped(&fx::router_list());
     assert_eq!(s.window_s, None);
     let report = fx::topology();
-    let attachments = fx::attachments();
-    scoped(&zenctl::render::TopologyView {
-        report: &report,
-        attachments: &attachments,
-    });
+    scoped(&zenctl::render::TopologyView { report: &report });
     // zk2's acts and reads (#612, FJ5): the keys a call or a state GET
     // went out on, over its reply wait.
     let s = scoped(&actfx::value());
@@ -1579,14 +1575,14 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
     let removed = zenctl::render::CacheAction {
         action: "cleared",
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: None,
+        services: None,
         existed: true,
     };
     assert!(notes(&removed).starts_with("removed /home/u"));
     let absent = zenctl::render::CacheAction {
         action: "cleared",
         dir: "/home/u/.cache/zenkey-explorer/lab/slices".into(),
-        slices: None,
+        services: None,
         existed: false,
     };
     assert!(notes(&absent).contains("does not exist — nothing to clear"));
@@ -1594,7 +1590,7 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
         serde_json::from_str(ndjson(&absent).lines().next().unwrap()).unwrap();
     assert_eq!(doc["existed"], false);
     assert!(
-        doc.get("slices").is_none(),
+        doc.get("services").is_none(),
         "clear counts nothing — absent, not zero (RFC 09 §5.1 O4)"
     );
 }
@@ -1602,43 +1598,47 @@ fn a_cache_clear_says_whether_there_was_anything_to_clear() {
 // ── The storage-plan families (#393) ──────────────────────────────────────
 
 /// The plan as a table: one row per volume and storage, the derivation and
-/// every warning as detail lines, the refusal and the registry claim as notes
-/// — and, on the wire, the same facts under `row` tags.
+/// every warning as detail lines, the refusal as a note — and, on the wire,
+/// the same facts under `row` tags.
 #[test]
 fn a_storage_plan_shows_its_derivations_and_names_its_refusals() {
     assert_data_eq!(
         table(&fx::storage_plan()),
         str![[r#"
-storage plan for base "acme"  (registry: 3 slice(s), longest state ttl_s 900 (sysinfo/alert/{alert_key}))
+storage plan for namespace "acme"
 
 volumes:
   fs        fs        durable · latest
   influxdb  influxdb  durable · all     url="http://localhost:8086"
 
 storages:
-  catalog       acme/v1/@catalog/state/**       fs (latest)
-    strip acme/v1/@catalog/state  ·  covers 3 declared subject(s)
-    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
-    ! complete_refused: complete = true refused: it is not the fully covering latest storage (class state) — emitted as false (RFC 09 §2.2)
-    ! overlap: overlaps pdns_history (acme/v1/@catalog/state/pdns/**): a GET under both selectors is answered by both (RFC 09 §2)
-  latest        acme/v1/*/state/**              fs (latest)     replicated, complete
-    strip acme/v1  ·  covers 12 declared subject(s)
-    gc lifespan 1800 s (period 30 s): max ttl_s 900 (sysinfo/alert/{alert_key}) × 2.0 = 1800 s
-  pdns_history  acme/v1/@catalog/state/pdns/**  influxdb (all)
-    strip acme/v1/@catalog/state/pdns  ·  covers 1 declared subject(s)
-    gc lifespan 172800 s (period 30 s): max ttl_s 86400 (catalog/pdns/{ip_slug}) × 2.0 = 172800 s
+  events      acme/zk2/*/*/*/events/**       fs (latest)     replicated, complete
+    strip acme/zk2
+    gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
+    ! overlap: overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both (RFC 09 §2)
+  links       acme/zk2/*/*/*/events/link/**  fs (latest)
+    strip acme/zk2
+    gc lifespan 3600 s (period 30 s): declared gc_lifespan_s 3600
+    ! complete_refused: complete = true refused: it is not replicated — emitted as false (RFC 09 §2.2)
+    ! overlap: overlaps events (acme/zk2/*/*/*/events/**): a GET under both selectors is answered by both (RFC 09 §2)
+  timeseries  acme/zk2/*/*/*/stream/**       influxdb (all)
+    strip acme/zk2
+    gc lifespan 86400 s (period 30 s): zenoh's default 86400 s — no contract declares a tombstone lifetime to derive one from
     ! retention_is_the_databases: retention is the database's policy, not zenoh config (RFC 09 §2.3)
 
 "#]]
     );
     let notes = notes(&fx::storage_plan());
-    assert!(notes.contains("refused storage events:"), "{notes}");
+    assert!(notes.contains("refused storage plant:"), "{notes}");
     assert!(notes.contains("3 storage(s) on 2 volume(s) planned, 1 refused"));
     let out = ndjson(&fx::storage_plan());
     let mut lines = out.lines();
     let envelope: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
     assert_eq!(envelope["report"], "storage-plan");
-    assert_eq!(envelope["registry"]["max_ttl_s"], 900);
+    assert!(
+        envelope.get("registry").is_none(),
+        "v1's registry claim left at FJ9"
+    );
     assert!(
         envelope.get("storages").is_none(),
         "rows do not ride the envelope"
@@ -1659,23 +1659,6 @@ storages:
     );
 }
 
-/// Without a registry the plan says so in every format — the O4 sentence is
-/// a coverage note, so it rides the json document too.
-#[test]
-fn a_storage_plan_without_a_registry_says_what_it_could_not_verify() {
-    let plan = zenkey_fleet::report::StoragePlan {
-        registry: zenkey_fleet::report::Asked::NotAsked,
-        ..fx::storage_plan()
-    };
-    assert!(table(&plan).contains("(registry: not asked)"));
-    let notes = notes(&plan);
-    assert!(notes.contains("no registry was asked"), "{notes}");
-    let out = ndjson(&plan);
-    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert!(envelope.get("registry").is_none(), "not asked is absence");
-    assert!(envelope["notes"].to_string().contains("RFC 09 §5.1 O4"));
-}
-
 /// The check: one line per finding, the unjudged comparison as a coverage
 /// note, and the empty admin sweep as a non-verdict rather than a pass.
 #[test]
@@ -1683,11 +1666,11 @@ fn a_storage_check_draws_each_finding_and_keeps_unjudged_apart() {
     assert_data_eq!(
         table(&fx::storage_check()),
         str![[r#"
-storage check for base "acme": 3 planned, 3 observed row(s) — 4 finding(s)
-  ✗ latest@aabbccdd  strip_prefix differs           planned acme/v1, observed acme
-  ✗ latest@aabbccdd  gc.lifespan below the minimum  planned 1800, observed 600
-  ✗ pdns_history     missing                        planned acme/v1/@catalog/state/pdns/**
-  ✗ blobs@aabbccdd   extra                          observed acme/v1/*/@blob/**
+storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s)
+  ✗ events@aabbccdd  strip_prefix differs          planned acme/zk2, observed acme
+  ✗ events@aabbccdd  gc.lifespan below the plan's  planned 86400, observed 600
+  ✗ timeseries       missing                       planned acme/zk2/*/*/*/stream/**
+  ✗ state@aabbccdd   extra                         observed acme/zk2/*/*/*/state/**
 
 "#]]
     );
@@ -1700,7 +1683,7 @@ storage check for base "acme": 3 planned, 3 observed row(s) — 4 finding(s)
     assert_data_eq!(
         table(&fx::storage_check_unobservable()),
         str![[r#"
-storage check for base "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
+storage check for namespace "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
 
 "#]]
     );
@@ -1713,23 +1696,23 @@ fn a_storage_explain_names_the_taker_or_the_reason() {
     assert_data_eq!(
         table(&fx::storage_explain()),
         str![[r#"
-acme/v1/h-3fa9c2d41b7e/state/sysinfo/health
-  → latest  acme/v1/*/state/**  includes it
-      class state under base "acme": acme/v1/*/state/** includes every key it names; stored under strip_prefix "acme/v1" on volume fs (latest)
+acme/zk2/host-a/tc/tc.netif.v1/events/reset/01k0
+  → events  acme/zk2/*/*/*/events/**  includes it
+      its selector under namespace "acme": acme/zk2/*/*/*/events/** includes every key it names; stored under strip_prefix "acme/zk2" on volume fs (latest)
 
 "#]]
     );
     assert_data_eq!(
         table(&fx::storage_explain_none()),
         str![[r#"
-acme/v1/h-3fa9c2d41b7e/events/netring/capture/01J
-  none: no planned storage's selector includes it; refused storage(s) events would have
+acme/plant/line-1/temp
+  none: no planned storage's selector includes it; refused storage(s) plant would have
 
 "#]]
     );
     let out = ndjson(&fx::storage_explain_none());
     let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-    assert_eq!(envelope["refused_takers"], serde_json::json!(["events"]));
+    assert_eq!(envelope["refused_takers"], serde_json::json!(["plant"]));
     assert_eq!(out.lines().count(), 1, "no takers, no rows");
 }
 
