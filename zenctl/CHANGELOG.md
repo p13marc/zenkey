@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — spec 0.17 (#713)
+
+Two verdicts that read clean or failed on a premise the tool could not see
+now need that premise.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`: a present service's silent call is a violation | the same, only with `--calls-granted`; without it, unobservable (exit 2) | Spec §5.1 (0.17): no tool can observe its grants, so the operator says they let it call, or that the deployment runs no access control. A CI run against a deployment without access control adds the flag |
+| `check conform`: `state-stamp` passes on the owner's own stamp | it passes only against a router this run verified; `--trust-admin-space` as `doctor`'s | Spec §4.2 (0.17): an owner that is its own router stamps with its own `meta.zid`. The routers' admin space must be on (zenoh's default is off) for `state-stamp`, and so the run, to pass |
+| `doctor --deep`: `state-stamp-foreign` clean on the owner's own stamp | clean only against a router this run verified; a foreign stamp is still the finding | The same rule. The check now reads the admin space |
+
 ## Unreleased (`main`, zk2) — zk2's coverage completed (#585, FK1)
 
 Four follow-ups of #612 bring back, in zk2's terms, the questions FJ9 left

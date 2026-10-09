@@ -4,8 +4,8 @@
 //! The suite is the engine's ([`zenkey_fleet::run_conform`]): the reads in
 //! its bus layer, every case decided from values in its judge, so a GUI or a
 //! CI harness asks the same questions. This command is orchestration and
-//! rendering: resolve the deployment, open a session **in** its namespace,
-//! run, print, write `--junit`, and exit through the report's own judgement
+//! rendering: resolve the deployment, open a session **in** its namespace
+//! and one in none for the routers' admin space (S1, §4.2, 0.17), run, print, write `--junit`, and exit through the report's own judgement
 //! — 1 on a violation, 0 when every case asked passed, 2 when a case was
 //! left unobservable or the service could not be judged at all. A verdict
 //! verb: every failure before the run is the reserved 2.
@@ -35,23 +35,32 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         i_know,
         junit,
         seed,
+        trust_admin_space,
+        calls_granted,
         contracts,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
-    let session = ASKING.ask(dep.session().await);
     let spec = ConformSpec {
         timeout: dep.timeout(),
         window,
         call_all: i_know,
         seed,
+        trust_admin: trust_admin_space,
+        calls_granted,
+    };
+    // The service is read in the deployment's namespace, and the admin
+    // space in none, as the doctor reads them (S1, §4.2, 0.17).
+    let bus = zenkey_fleet::DoctorBus {
+        session: ASKING.ask(dep.session().await),
+        raw: ASKING.ask(dep.link().session().await),
+        namespace: dep.namespace().to_owned(),
     };
     let report = zenkey_fleet::run_conform(
-        &session,
+        &bus,
         &offline,
-        dep.namespace(),
         address,
         target.iface,
         target.fingerprint,

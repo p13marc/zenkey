@@ -1,0 +1,15 @@
+{
+ "format": "zk2-descriptor/0.1",
+ "service": "vehicle-01/archive",
+ "instance": "3fa9c2d41b7e0013",
+ "interfaces": [
+  {
+   "iface": "archive.v1",
+   "contract": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+   "minor": 1
+  }
+ ],
+ "meta": {
+  "note": "an archive holds its token: the default"
+ }
+}

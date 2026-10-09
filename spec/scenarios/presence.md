@@ -43,8 +43,10 @@ GET, so that runner did not test the moment the token appears.*
    nothing (core §3.2).
 5. An owner is started with an optional resource it neither exposes nor
    lists `unavailable`, its gate's capability held (core §8.2 step 2).
+6. An owner that does not implement `archive.v1` is started with
+   `archive.v1` in its tokenless set (core §4.4, §8.2 step 2, 0.17).
 
-**Watching a refusal (steps 3 to 5).** A refusal shows only as a token
+**Watching a refusal (steps 3 to 6).** A refusal shows only as a token
 that never appears, and silence is not a verdict (core O5), so the watch
 needs a router that outlives the owner and a control:
 - the owner and the tool are clients of R1, which stays up whatever the
@@ -54,8 +56,9 @@ needs a router that outlives the owner and a control:
   `zk2/<system>/<service>/@zk/**` through R1 before the owner is launched,
   and watches until the owner exits or the wait of core §8.1 ends;
 - **the control:** the same owner, with the resource exposed (or, in
-  step 5, listed `unavailable`) or the role bound, launched the same way,
-  shows its instance token to that subscriber within the wait.
+  step 5, listed `unavailable`), the role bound, or (in step 6) the
+  tokenless set empty, launched the same way, shows its instance token to
+  that subscriber within the wait.
 
 **Expected.**
 1. One reply, with `Encoding` `application/json`: a descriptor that
@@ -71,6 +74,8 @@ needs a router that outlives the owner and a control:
 4. As 3.
 5. As 3: its descriptor would have claimed the resource, whose exposure is
    compact (core §3.3).
+6. As 3: the tokenless set is the deployment's configuration, and naming
+   the archive in it is an error whatever the owner implements.
 
 *Measured on the reference owner, from zenoh-python 1.10.1 (#609): one
 reply, `application/json`, no timestamp and no attachment; the

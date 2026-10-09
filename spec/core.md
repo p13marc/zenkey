@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.16** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.17** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -10,7 +10,8 @@ order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
 a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
 who may answer the admin space, in 0.13 how a far router is verified, and
 in 0.14 what access control measured, in 0.15 what §11 needs to be built
-from, and in 0.16 what the tools' last verbs could not decide).
+from, in 0.16 what the tools' last verbs could not decide, and in 0.17
+what a tool needs that it cannot read off the bus).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -552,6 +553,7 @@ and reports these codes. `[F: descriptors/]`
 | D008 | a capability is not `[a-z0-9][a-z0-9_.-]*`; or one is listed twice | error | once per malformed occurrence; once more for the list when any value repeats, however many do (below) |
 | D009 | in a requirement entry: `role` is not `[a-z][a-z0-9_]*`; `interface` is not an interface id; `declared_by` is not one of the interfaces this descriptor lists; a `params` key is not `[a-z][a-z0-9_]*`, or its value is empty; a binding is not `<system>/<service>`, each chunk plain or `*` | error | per finding |
 | D010 | a profile is not `<name>.v<major>`; or one is listed twice | error | as D008: once per malformed occurrence, once for the repeats |
+| D011 | an interface entry for `archive.v1` is marked `"token": false`: an archive is never tokenless (§4.4, 0.17) | error | per entry |
 
 **Cascades and scope.**
 1. D000 stops the check: no other code is reported.
@@ -679,10 +681,21 @@ timestamping enabled, which keeps the stamp a put carries unless it is
 future-dated (§4.1), and checks the check against a control: a put without
 a timestamp, through the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
-- **A tool's S1 check** (0.16). A tool that reads the admin space (§11.1,
-  the admin read) compares the owner's `meta.zid` with the verified
-  routers' zids, by value. When they match, the owner is its own router, and
-  the tool reports S1 unobservable for it, never clean.
+- **A tool's S1 check** (0.16, 0.17). A tool attributes a state reply's
+  stamp by comparing its id with the owner's `meta.zid` (§3.3), by value.
+  - **A foreign stamp is a finding** whatever else the tool read: an owner
+    that is its own router stamps with that router's id, which is its own
+    `meta.zid`.
+  - **An owner's stamp is clean** only when the tool verified at least one
+    router ("Who answered", above) and `meta.zid` is none of the zids it
+    knows to be routers: the routers its session is connected to, the
+    routers it verified, and every zid a verified router lists as a
+    `router` session.
+  - **Otherwise S1 is unobservable for that owner,** never clean. Either
+    `meta.zid` is a router's, so the owner is its own router, or the tool
+    verified no router (it has no admin read, the admin space is off, or it
+    cannot read the replier id, Appendix B), so the owner may be a router
+    it cannot see.
 
 ### 4.3 Clocks (S7)
 
@@ -806,7 +819,10 @@ section is what the core requires of it.
 - **Found by its token** (0.16). An archive MUST hold its `archive.v1`
   interface token: it is never in the tokenless set (§8.1). Consumers and
   tools find archives by that token for last-known reads (S6), and a
-  tokenless one would be invisible to them.
+  tokenless one would be invisible to them. An owner whose tokenless set
+  names `archive.v1` is refused at §8.2's step 2, and a descriptor that
+  marks it `"token": false` is D011 (0.17).
+  `[F: descriptors/d011-tokenless-archive]`
 - **Placement.** An archive on the consumer's side covers losing the link,
   and one on the owner's side covers losing the owner. Store-and-forward
   (`desired.v1`) uses both.
@@ -868,7 +884,17 @@ SHOULD NOT repeat a template parameter. `[F: contracts/w102-repeat]`
   queryable gets a value or an envelope. A tool judging O3 from outside,
   as a conformance suite does, holds a silence as a finding only under
   grants that let it call: an access-control refusal is silent too (O5,
-  §11.3). It says so beside the finding (0.16). A handler that ends without
+  §11.3). It says so beside the finding (0.16).
+  - **Where a tool learns its grants** (0.17). No tool can observe its
+    grants (§11.3). It learns that they let it call from its operator, or
+    from the deployment's §11.1 input when it holds one; a deployment that
+    runs no access control lets every principal call.
+  - **Told so,** the tool holds a silence from an owner whose tokens it
+    reads as the finding. **Not told,** the silence is unobservable, and
+    the tool names the premise it lacked: a silence is never a verdict on
+    its own (O5).
+
+  A handler that ends without
   replying is answered `internal`, so a live server's own bug is never
   silence (O5). With `replies = "many"`, a declared `summary` is owed too:
   a handler that ends without it is answered `internal`, after any values
@@ -1370,7 +1396,10 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   descriptor says (gated on a capability not held, or listed
   `unavailable`), and one both exposed and listed. A descriptor's exposure
   is compact (§3.3), so an optional resource left out of `unavailable` is
-  claimed. `[Sc: presence.md §2]`
+  claimed. It also refuses an owner whose tokenless set names `archive.v1`,
+  whether or not the owner implements it (§4.4, 0.17): the set is the
+  deployment's configuration, and naming the archive in it is an error.
+  `[Sc: presence.md §2]`
 - **The order of steps 1 and 2** is free: what it protects is that
   nothing of steps 3 and 4 happens unless step 2 passes. The reference
   validates first, then declares its state queryables and `unavailable`

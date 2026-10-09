@@ -255,8 +255,8 @@ async fn s1_bring_up_order_and_tokens() {
 }
 
 /// §2: the descriptor validates; losing a capability puts a new one in
-/// which the gated resource's absence is implied, not listed; a required
-/// resource missing keeps the owner down.
+/// which the gated resource's absence is implied, not listed; each of step
+/// 2's refusals keeps the owner down.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_the_descriptor() {
     let (_r1, ep) = router(None).await;
@@ -402,6 +402,23 @@ async fn s2_the_descriptor() {
     };
     refused_while_watched(&tool, "p2/gated", gated(false), "state/covariance").await;
     controlled(&tool, "p2/gated", gated(true)).await;
+
+    // 6. `archive.v1` in the tokenless set: no start, whether or not the
+    //    owner implements it (core §4.4, §8.2 step 2, 0.17).
+    let tokenless = |named: bool| {
+        let mut cfg = config("p2/tokenless");
+        if named {
+            cfg = cfg.tokenless("archive.v1".parse().unwrap());
+        }
+        let mut b = ServiceBuilder::new(&owner, cfg);
+        b.implement(imp("nav.v2")).unwrap();
+        for res in ["state/pose", "@op/goto", "state/tracks/{track}"] {
+            b.expose(&nav(), res).unwrap();
+        }
+        b
+    };
+    refused_while_watched(&tool, "p2/tokenless", tokenless(true), "archive.v1").await;
+    controlled(&tool, "p2/tokenless", tokenless(false)).await;
 }
 
 /// A liveliness subscriber to `address`'s tokens through R1, up and known

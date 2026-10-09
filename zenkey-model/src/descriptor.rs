@@ -221,6 +221,14 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             ));
         }
         ifaces.insert(e.iface.clone());
+        // §4.4 (0.17): an archive is never tokenless, whatever its contract.
+        if e.iface == "archive.v1" && !e.token {
+            report.push(Diagnostic::error(
+                "D011",
+                &at,
+                "archive.v1 is marked \"token\": false: an archive is never tokenless (§4.4)",
+            ));
+        }
         let fp_ok = e
             .contract
             .strip_prefix("sha256:")

@@ -398,6 +398,16 @@ impl ServiceBuilder {
     pub async fn start(self) -> Result<Service> {
         // 2. Exposure.
         check_exposure(&self.impls, &self.config)?;
+        // §4.4, §8.2 step 2 (0.17): an archive is never tokenless. The set
+        // is the deployment's configuration, so naming the archive in it is
+        // refused whether or not this owner implements it.
+        if self.config.tokenless.contains(&crate::archive::iface()) {
+            return Err(Error::NotExposed(
+                "archive.v1 is in the tokenless set, and an archive is never tokenless: \
+                 consumers and tools find it by its interface token (§4.4)"
+                    .to_owned(),
+            ));
+        }
         for r in &self.roles {
             let bound = self
                 .config
