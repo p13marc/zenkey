@@ -57,4 +57,6 @@ pub mod field;
 #[cfg(feature = "decode")]
 pub mod kind;
 #[cfg(feature = "decode")]
+pub mod probe;
+#[cfg(feature = "decode")]
 pub mod registry_checks;

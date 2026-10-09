@@ -1,25 +1,28 @@
 `snapshot diff` is the offline half of the `.zsnap` verb (#219, RFC 13 §4.4):
 two files in, no session, and the one contract the section makes
 non-negotiable — **both spans stated**, in the envelope and in the caveat —
-visible on every exit code. The two fixtures are the shared report fixtures
+visible on every exit code. The fixtures are the shared report fixtures
 written through the engine's own writer (`tests/render.rs` keeps them in
 step), so this case and the render snapshots read the same bytes.
 
+Rows line up by their **zk2 key** (#612, FJ8b): the namespace is stripped on
+both sides, so a deployment compares to another deployment with no origin
+alignment to ask for — the key already names the system and the service.
+
 **1 — they differ.** A difference *is* the finding. Every row is tagged by
 kind (`added`, `removed`, `changed`), and a `changed` row carries only the
-facets that moved: the disk value carries a `value` diff, the second host's
-health carries a `value` diff *and* a `holder` pair.
+facets that moved: `eth0`'s value *and* its conformance (it was fixed), and
+`host-b/tc`'s holder (an address no instance held came back).
 
 ```console
 $ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/b.zsnap
 ? 1
-{"a":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-09-06T00:05:00Z","collection_span_s":0.8,"roster":2,"selectors":["acme/v1/**"],"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-09-06T00:00:00Z, b: span 0.80s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 09 §5.1 O4","text":"keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added"}],"report":"snapshot-diff","unchanged":2}
-{"key":"acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used","row":"added"}
-{"key":"acme/v1/h-9b2e4c7a1d05/state/logs/rotated","row":"removed"}
-{"key":"acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":42.0,"old":41.0,"op":"changed","path":"value"}],"truncated":0}}
-{"holder":[{"kind":"storage_only","origin":"h-9b2e4c7a1d05"},{"answered_by":"unknown","kind":"live","origin":"h-9b2e4c7a1d05"}],"key":"acme/v1/h-9b2e4c7a1d05/state/sysinfo/health","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/cd34"],"value":{"changes":[{"new":"ok","old":"degraded","op":"changed","path":"status"}],"truncated":0}}
-a: span 1.25s at 2026-09-06T00:00:00Z, b: span 0.80s at 2026-09-06T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
-keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added (RFC 09 §5.1 O4)
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":4,"asked":1,"base":"acme","collected_at":"2026-10-09T00:05:00Z","collection_span_s":0.8,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":1}
+{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1","row":"added"}
+{"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9","row":"removed"}
+{"conformance":[{"state":"invalid","violations":["/is_up: expected boolean"]},{"state":"valid"}],"key":"zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0","row":"changed","timestamp":["7f3b2a1c00000001/ab12","7f3b2a1c00000002/ab12"],"value":{"changes":[{"new":true,"old":"yes","op":"changed","path":"is_up"}],"truncated":0}}
+{"holder":[{"address":"host-b/tc","kind":"no_instance"},{"address":"host-b/tc","answered_by":"owner","kind":"live"}],"key":"zk2/host-b/tc/tc.netif.v1/state/namespaces","row":"changed","timestamp":["7f3b2a1c00000001/cd34","7f3b2a1c00000001/cd34"]}
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.80s at 2026-10-09T00:05:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
 
 ```
 
@@ -29,9 +32,21 @@ instant.
 
 ```console
 $ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/a.zsnap
-{"a":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"b":{"answered":6,"asked":1,"base":"acme","collected_at":"2026-09-06T00:00:00Z","collection_span_s":1.25,"roster":2,"selectors":["acme/v1/**"],"superseded":1,"zsnap":1},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-09-06T00:00:00Z, b: span 1.25s at 2026-09-06T00:00:00Z — each side was collected over its span, not at an instant"},{"cite":"RFC 09 §5.1 O4","text":"keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added"}],"report":"snapshot-diff","unchanged":5}
-a: span 1.25s at 2026-09-06T00:00:00Z, b: span 1.25s at 2026-09-06T00:00:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
-keys compared verbatim — no origin alignment was asked, so the same host under a different origin reads as removed and added (RFC 09 §5.1 O4)
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant"}],"report":"snapshot-diff","unchanged":4}
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 1.25s at 2026-10-09T00:00:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+
+```
+
+Two namespaces, one diff: `staging.zsnap` is the same deployment under
+`staging`, an hour on, on another clock. The keys line up, and the two
+deployments' clocks are not compared — a stamp that moved alone is not a
+change, and the caveat says so.
+
+```console
+$ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/staging.zsnap
+{"a":{"answered":5,"asked":1,"base":"acme","collected_at":"2026-10-09T00:00:00Z","collection_span_s":1.25,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["acme/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"b":{"answered":5,"asked":1,"base":"staging","collected_at":"2026-10-09T01:00:00Z","collection_span_s":0.9,"presence":{"complete":true,"selector":"zk2/*/*/@zk/**","services":2},"selectors":["staging/zk2/*/*/*/state/**"],"superseded":1,"zsnap":2},"notes":[{"cite":"RFC 13 §4.4","text":"a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant"},{"cite":"spec §1.6","text":"keys compared relative to each file's namespace (a: /"acme/", b: /"staging/"); two deployments' clocks are not compared, so a stamp that moved alone is not a change here"}],"report":"snapshot-diff","unchanged":4}
+a: span 1.25s at 2026-10-09T00:00:00Z, b: span 0.90s at 2026-10-09T01:00:00Z — each side was collected over its span, not at an instant (RFC 13 §4.4)
+keys compared relative to each file's namespace (a: "acme", b: "staging"); two deployments' clocks are not compared, so a stamp that moved alone is not a change here (spec §1.6)
 
 ```
 
@@ -50,19 +65,16 @@ snapshot diff: the question could not be asked — exit 2, the reserved non-verd
 
 ```
 
-Two deployments, one diff — `--normalize-origins` and `--map A=B` — are
-`snapshot-diff-normalized.trycmd`'s. A `--map` without the alignment is a
-usage error (clap's 2): a pairing the diff would not read is not an input
-it accepts.
+A v1 `.zsnap` is refused the same way, with a hint: its keys are v1's, and
+there is nothing to line them up with.
 
 ```console
-$ zenctl snapshot diff --map h-3fa9c2d41b7e=h-c0ffee00c0de tests/cmd/fixtures/prod.zsnap tests/cmd/fixtures/stg.zsnap
+$ zenctl snapshot diff tests/cmd/fixtures/a.zsnap tests/cmd/fixtures/v1.zsnap
 ? 2
-error: the following required arguments were not provided:
-  --normalize-origins
+Error: read tests/cmd/fixtures/v1.zsnap
 
-Usage: zenctl snapshot diff --normalize-origins --map <A=B> <A> <B>
-
-For more information, try '--help'.
+Caused by:
+    .zsnap: unsupported version 1 (this reader speaks 2) — a version-1 file is v1's registry snapshot, which the `v1` branch reads
+snapshot diff: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```

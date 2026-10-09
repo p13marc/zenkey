@@ -6,7 +6,68 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — writes and captures (#612, FJ8a)
+## Unreleased (`main`, zk2) — observers and checks (#612, FJ8b)
+
+The verbs that watch traffic and judge it read zk2 now. The raw observers
+(`echo`, `rate`, `field`, `timeline`, `snapshot`, `watchdog`, `record --on`)
+keep a wire selector on a session in no namespace, so they still see every
+key — and resolve each one through one session-free **lens**: the
+deployment in `--namespace`, its presence read, the contract each
+descriptor names (from `--contracts` or its holders, spec §8.4). Where the
+ladder stops, the rung is named (the tooling guide's O2): not in this
+namespace, not a zk2 key, no provider, no revision, contract unavailable,
+no resource. A `.zrec` is read through the same lens, `--contracts` alone,
+so a window rendered live and from its file is the same projection. The
+checks (`check expect|schema|probe`) are written over an address, an
+interface revision and a resource. v1's composed selectors
+(`--origin`/`--class`/`--producer`), the registry ladder, the identity
+bridge and the origin alignment are gone from these verbs; the `v1` branch
+keeps them.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `echo [selector] --origin/--class/--producer` (default `<base>/v1/**`) | `echo [selector] [--namespace NS] [--contracts …]` (default `<ns>/zk2/**`) | a zk2 key is decoded as its declared type (§7.2) and a JSON Schema value validated (§7.3); bytes that do not decode are named as their type and `undecodable`; a foreign key renders structurally, never refused |
+| `echo --seed` | — | an owner's current state is `get state` (S4); a router storage answering on an owner's keys is what S4 forbids |
+| `echo --no-decode` | the same | no presence read, no bundle retrieved, every payload structural and said to be |
+| `echo --fmt` `%o %c %p %s` | `%A` address, `%i` interface, `%r` resource, `%K` the key relative to the namespace | `%t` is the declared type |
+| `echo --format ndjson` rows | the same rows, plus `identity` (`is`: `resource`, `control`, `not_in_namespace`, `not_zk2`; the address, interface, kind token and resource; the rung it stopped at) and `verdict` (`valid`, `invalid`, `undecodable`, `not-checked: <why>`), `violations`, `decode_error` | `pub --from ndjson` and `.zrec` still read them back; a reader ignores `identity` |
+| `rate --origin/--class/--producer` | `rate [selector] [--namespace NS]` | `group` rows lead, one per zk2 address and resource (`is`, `address`, `iface`, `token`, `resource`, `keys`, `count`, `bytes`), a key that is not this deployment's zk2 data in a group of its own; `--per-key` adds `key` rows, each with its `identity`; `lens` on the envelope |
+| `rate --latency` | the same | each stamper named in `clocks`: the owner's (its descriptor's `meta.zid`), another's, or unattributable (O7) |
+| `field` over a served `describe` | `field` over payloads decoded through their contract | each `path` row says whether the declared type accounts for it (`declared`); `field-new` is judged from the bundle's own type (a JSON Schema's properties, a protobuf message's fields), `field-vanished` as before; samples no contract resolved are counted (`unresolved`), observed structurally, and judged for nothing that needs a type (O4) |
+| `field-stuck` | not asked | it judges against a declared freshness, the `freshness.v1` profile's (#613); every rendering says so |
+| `timeline` lanes per origin/producer, `provenance` `self_stamped`/`foreign`/`unattributable` | lanes per zk2 address and resource (`lane.kind`: `resource`, `control`, `foreign`, `unstamped`), `provenance` `owner`/`other`/`unattributable` | a stamp is the owner's when its id is the session zid the owner's descriptor states as `meta.zid` (§3.3), compared by value; a router-stamped stream sample is another clock's; `lens` on the envelope |
+| `timeline --from <zrec>` | the same, with `--contracts` | the same lanes; every stamp unattributable, since a file names no owner |
+| `snapshot --origin/--class/--producer` (default `<base>/v1/**`) | `snapshot [selector…] [--namespace NS]` (default `<ns>/zk2/**`) | each selector narrowed to its state keys and asked as S4 asks (target All, consolidation Latest), a reply on a wildcard key discarded (R6) |
+| `snapshot --no-roster` | `snapshot --no-presence` | every holder `unattributed`, every stamp unattributable, a key resolved past its address only through `--contracts` |
+| `.zsnap` version 1 | version 2 | the header's `roster` is `presence` (`selector`, `complete`, `services`), plus `discarded`; a row's `registration` is `identity`, its `verdict` is `conformance` (`state`: `valid`, `invalid` with `violations`, `undecodable`, `not_checked` with `reason`), `stamper` is `owner` or `other` with its id; `holder` is `live` (`address`, `answered_by`: `owner` or `other`), `no_instance` (a value answered for an address presence shows no instance of, which S4 forbids), or `unattributed`. A version-1 file is refused (exit **2**) with a hint: the `v1` branch reads it |
+| `snapshot` report `storage_only` | `no_instance`, plus `nonconforming` | |
+| `snapshot diff [--normalize-origins] [--map A=B]` | `snapshot diff <a> <b>` | rows line up by **zk2 key**, each file's namespace stripped, so two deployments compare as they are — the key already names the system and the service, and there is no origin to align. Facets `value`, `conformance`, `holder`; between two namespaces a stamp that moved alone is not a change. The `origin_map`, `unmapped` and `subject` rows are gone |
+| `check expect <selector> [--origin/--class/--producer]` | `check expect <system>/<service> <iface>[@fp] [resource] [--param k=v]` | the runtime's consumer, subscribed before the window opens (O4); R6's discards and unresolved samples counted apart from the lag. The report adds `address`, `iface`, `fingerprint`, `resource`, `selectors`, `discarded`, `unresolved`, `presence` |
+| `check expect --valid-payload` against a served schema | the same, against the declared type | decodes as the type, and a JSON Schema value satisfies it; "not checked" fails the assertion, with why |
+| `check expect --qos declared\|PROFILE` | `--qos declared` | priority, congestion control and express against the resource's (§2.4); no v1 profile names |
+| — | `check expect --present` | the address holds the interface's token within the window (§8.1); no resource: presence alone. A complete read with none is not met; one that ran to its timeout cannot carry it (exit **2**) |
+| `check schema --type T --producer P \| --schema-set FILE` | `check schema <iface>[@fp] <resource> [--member type\|attachment\|request\|response\|error\|summary] --from … [--encoding]` | the revision's own type, from `--contracts` (no session) or its holders. Exit 0 conforms, 1 invalid or undecodable, 2 not checked (no revision, no such resource or member, a raw type, an unreadable payload). The `schema-check` report is `iface`, `fingerprint`, `resource`, `member`, `declared`, `encoding`, `size`, `conformance`, `value` (was `type`, `kind`, `verdict`, `detail`) |
+| `check probe <origin\|hostname> <producer> <procedure>` | `check probe <system>/<service> <iface>[@fp] <resource> [--param k=v] [--for SECS]` | a resource read the way a consumer reads it: a state resource's current state from its owner first (S4), then the subscription. Exit 0 a conforming value arrived; 1 nothing usable did, while a complete presence read shows the provider up, or no token visible to this reader; 2 the presence read timed out, or the probe could not stand up. The `probe` report is new (`received`, `conforming`, `nonconforming`, `current`, `first`, `presence`, `verdict`); the RFC 06 §6 bridge is gone |
+| `watchdog --rule 'invalid-payload <SEL>'` against a served schema | the same, against the declared type | a payload that does not decode, or fails its JSON Schema; a tick with nothing checked is `unobservable`, never `ok` |
+| `watchdog --rule 'qos-mismatch <SEL>'` against a registry profile | the same, against the resource's declared QoS | priority, congestion control, express (§2.4); reliability is the link's and not compared |
+| `watchdog --rule 'origin-down <origin>'` | `instance-gone <system>/<service>` | no instance token visible to this reader (§8.1); the old spelling is refused and names the new one |
+| `watchdog --rule 'alert-firing …'` | — | dark until the alert profile exists (#613); refused (exit **2**) |
+| `watchdog` summary `facts_evicted` | — | the v1 facts cache is gone |
+| `record --on 'invalid-payload\|qos-mismatch …'` (refused in FJ8a) | armed again, judging zk2 | and `instance-gone`; `alert-firing` stays refused |
+| `watch` samples | each sample's `conformance`, and its `qos_mismatch` (`declared`, `observed`, `differs`) when it rode another QoS; the summary's `unresolved` (#671), `qos_mismatched`, `nonconforming` | the runtime's `Subscription::unresolved`: a sample on a key that resolves to no member, never delivered |
+| `call`, `bench call` with a request its JSON Schema refuses | refused, exit **2**, every violation named, nothing sent | §5.1 "The request", #671. `bench call` refuses the act first (not idempotent, `--calls 0`) |
+| `call` fan-out `presence.unheard` | the same, from the runtime's `Fleet::presence` (#671) | its `complete` says whether the read could carry "nobody" |
+| `get state --last-known` with a parameter left out: refused | read: every member the archive holds (`archive::last_known_all`, #671) | one row per origin |
+
+The observed QoS is judged against the declared one in three places:
+`watch` (per sample), `check expect --qos declared`, and the watchdog's
+`qos-mismatch`. Report families re-shaped: `schema-check`, `probe`, `rate`
+(`group` rows), `field`, `timeline`, `snapshot`, `snapshot-diff`, `expect`,
+`watch`. Still v1 on `main` until FJ9 retires the registry: raw `get`'s
+decode ladder, `why`, `export`, `check cutover`, `check conform`, `check
+retired`, `config`, `blob`.
+
+## Writes and captures (#612, FJ8a)
 
 The verbs that put traffic on a bus or keep it are zk2's now. `gen` and
 `serve` are **mock owners**: real zk2 services at an address the operator

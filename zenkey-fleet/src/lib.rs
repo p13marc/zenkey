@@ -70,16 +70,20 @@
 //!
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
-//!   `diff`, `decode`, `retain`, zk2's `catalog` and `render`, the
-//!   `structural` ladder both generations fall back to, plus the two
+//!   `diff`, `decode`, `retain`, zk2's `catalog`, `render`, `target` and
+//!   `lens` (FJ8b: a raw observer's key resolved rung by rung, its payload
+//!   checked, its stamp attributed), `timeline`, `snapshot` and
+//!   `snapshot_diff` over it, the `structural` ladder both generations fall
+//!   back to, plus the two
 //!   mechanisms every long-running
 //!   projection shares (`bounded`, `examples`). Nothing here takes a
 //!   session, and that is load-bearing: it is what lets a frontend replay a
 //!   `.zrec` through the same projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` (zk2's, FJ6)
-//!   and its `doctor_delta`, `expect`, `condition`, `conform` and the v1
-//!   `registry_checks` it projects, `field`, `why`, `cutover`, `retired`,
+//!   and its `doctor_delta`, `expect`, `probe` and `condition` (zk2's,
+//!   FJ8b), `conform` and the v1 `registry_checks` it projects, `field`,
+//!   `why`, `cutover`, `retired`,
 //!   `budget`, and [`judge::common`] for the vocabulary they share. The honesty rules
 //!   (RFC 13, v1.24) bite hardest here, so the layer states them once.
 //!
@@ -87,7 +91,9 @@
 //!   domain. Its module doc carries the placement rule, which is the answer
 //!   to "where does this struct go?" whenever the struct has a `Serialize`
 //!   on it. zk2's shapes are domains of their own (`presence`, `iface`,
-//!   `graph`, `contract`, `payload`) beside v1's until FJ9.
+//!   `graph`, `contract`, `payload`, and `observe` for what every raw
+//!   observer says of a key: its identity, its conformance, its QoS against
+//!   the declared one) beside v1's until FJ9.
 //!
 //! * **[`tape`]** — traffic as a thing rather than an event. `record`,
 //!   `ingest`, `generate`, `synth`, `bench`. It sits beside the others
@@ -159,15 +165,15 @@ pub use bus::describe::{DescribeSweep, describe_sweep};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    AlertAsk, AlertFloor, CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState,
-    SweepOutcome, WatchdogSpec, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, InstanceAsk, InstanceRead, RuleSet, RuleState,
+    SweepOutcome, WatchdogSpec, WindowExamples, watchdog,
 };
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::conform::{ConformSpec, run_conform};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use judge::expect::{ExpectSpec, QosCheck, run_expect};
+pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::field::{
@@ -176,6 +182,9 @@ pub use judge::field::{
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::kind::{KeyKind, KindObservation, judge_kind};
+#[cfg(feature = "decode")]
+#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
+pub use judge::probe::run_probe;
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use model::decode::{
@@ -197,7 +206,7 @@ pub use tape::mock::{
 pub use tape::synth::{Synth, Synthesized, member_type, size_class};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection, zk2_rules};
+pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 /// The #159 conformance verdict, re-exported so frontends never reach around
 /// the engine for it.
 #[cfg(feature = "decode")]
@@ -284,6 +293,14 @@ pub use model::render::{
     Member, render as render_payload, render_detail, render_resource,
     render_with as render_payload_with, resolved_revision,
 };
+// The raw observers' lens (#612, FJ8b): a wire key resolved through the
+// namespace, presence and the contracts in hand, rung by rung (the tooling
+// guide's O2), and the read that keeps it current.
+pub use bus::lens::{LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens};
+pub use model::lens::{
+    Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
+    qos_mismatch,
+};
 // zk2's acts and reads through a contract (#612, FJ5): planned and refused
 // without a session (`model::target`), then made through the runtime's
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
@@ -302,7 +319,7 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 #[cfg(feature = "decode")]
 #[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
 pub use judge::condition::{
-    SilenceEvidence, TickEvidence, judge_alert_firing, judge_doctor_check, judge_origin_down,
+    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone,
 };
 pub use judge::retired::EntryEvidence;
 // The remaining items a frontend actually calls. Every one of these was
@@ -340,13 +357,12 @@ pub use model::facts::{
     FactsCache, KeyDescription, KeyFacts, KeyShape, Registration, describe_key,
 };
 pub use model::impact::{ImpactInputs, MAX_DEPTH_CAP, attribute, entity_of};
-pub use model::origin_map::{Label, MapError, MapPlan, OriginProfile, origin_profiles, plan_map};
 pub use model::prom::{exposition, metric_name};
 pub use model::registry::SliceSet;
 pub use model::retain::{RetentionBudget, RetentionStats};
 pub use model::skeleton::{MergedNode, NodeStatus, Skeleton};
-pub use model::snapshot::{fold_latest, holder_of, registration_of, stamper_of};
-pub use model::snapshot_diff::{DiffOpts, diff_normalized, diff_snapshots};
+pub use model::snapshot::{fold_latest, holder_of, row_of as snapshot_row, stamper_of};
+pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
     check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
@@ -390,10 +406,10 @@ pub use tape::record::{
     VERBATIM, ZREC_READS, ZREC_VERSION, ZrecItem, ZrecReader, ZrecSink, ZrecSource, ZrecWriter,
     excluded_by as zrec_excluded, record, replay,
 };
-#[cfg(feature = "decode")]
-#[cfg_attr(docsrs, doc(cfg(feature = "decode")))]
-pub use tape::snapshot::{SnapshotSpec, Taken, take_snapshot};
-pub use tape::snapshot::{ZSNAP_VERSION, ZsnapReader, ZsnapWriter, report_of as snapshot_report};
+pub use tape::snapshot::{
+    SnapshotSpec, Taken, ZSNAP_VERSION, ZsnapReader, ZsnapWriter, report_of as snapshot_report,
+    take_snapshot,
+};
 /// The RFC 07 reference client, re-exported so a frontend, an example or a
 /// test cannot end up on a different version of it than the engine.
 #[cfg(feature = "blob")]

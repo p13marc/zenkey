@@ -45,10 +45,13 @@ impl Render for RateView<'_> {
         // — the hand-built trailing envelope wrote it unconditionally and
         // nulled it when `--loss` was not asked, which is the O4 inversion
         // #232's fourth item names.
-        envelope_without(self.report, &["rows"])
+        envelope_without(self.report, &["rows", "groups"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for g in &self.report.groups {
+            out(Row::of("group", g));
+        }
         for r in &self.report.rows {
             out(Row::of("key", r));
         }
@@ -56,6 +59,22 @@ impl Render for RateView<'_> {
 
     fn table(&self, t: &mut Table) {
         let secs = self.report.window_s;
+        // The groups lead: one line per zk2 address and resource, the unit
+        // a service publishes as, and one for what is not this
+        // deployment's zk2 data (#612, FJ8b).
+        let mut groups = Grid::unheaded(2).right(0);
+        for g in &self.report.groups {
+            let figure = if self.bandwidth {
+                format!("{:.1} B/s", g.bytes as f64 / secs)
+            } else {
+                format!("{:.2} Hz", g.count as f64 / secs)
+            };
+            groups.row([
+                Cell::text(figure),
+                Cell::text(format!("{}  ({} key(s))", g.group.label(), g.keys)),
+            ]);
+        }
+        t.grid(groups);
         let mut g = Grid::unheaded(2).right(0);
         for row in &self.report.rows {
             if self.bandwidth {
@@ -95,12 +114,24 @@ impl Render for RateView<'_> {
                 // sample was stamped into a population above.
                 (None, _) => {}
             }
+            if let Some(clocks) = row.clocks.as_option()
+                && !clocks.is_empty()
+            {
+                let named: Vec<String> = clocks
+                    .iter()
+                    .map(|(stamper, p)| format!("{stamper} {}", clock_word(*p)))
+                    .collect();
+                tail.push_str(&format!("  (clocks: {})", named.join(", ")));
+            }
             g.row([
                 Cell::text(format!("{:.2} Hz", row.count as f64 / secs)),
                 Cell::text(tail),
             ]);
         }
-        t.grid(g);
+        if !self.report.rows.is_empty() {
+            t.line("");
+            t.grid(g);
+        }
         t.line(if self.bandwidth {
             format!(
                 "total: {:.1} B/s over {} key(s) ({} bytes / {}s)",
@@ -122,6 +153,15 @@ impl Render for RateView<'_> {
 
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
+        if self.report.lens.presence.is_none() {
+            notes.push(
+                Note::coverage(
+                    "no presence read stood behind the groups: a zk2 key is grouped by \
+                     its address and kind, and no further",
+                )
+                .cite("tooling guide O4"),
+            );
+        }
         // The caveat is part of the measurement (#119) and names *which*
         // clock (#213). Worded by the engine so the GUI cannot describe the
         // same number differently (RFC 09 §5.1 O7).
@@ -168,5 +208,14 @@ fn human_us(us: i64) -> String {
         format!("{sign}{:.1}ms", a as f64 / 1_000.0)
     } else {
         format!("{sign}{:.2}s", a as f64 / 1_000_000.0)
+    }
+}
+
+/// Whose clock a stamper is, in a word (O7).
+fn clock_word(p: zenkey_fleet::report::Provenance) -> &'static str {
+    match p {
+        zenkey_fleet::report::Provenance::Owner => "the owner's",
+        zenkey_fleet::report::Provenance::Other => "another's",
+        zenkey_fleet::report::Provenance::Unattributable => "unattributable",
     }
 }

@@ -62,7 +62,10 @@
 //! `v1_checks` under v1 names (`V1CheckId`, `V1Finding`). Their type names do
 //! not collide, so the flat namespace holds both generations. FJ8a gave the
 //! mock owner its domain (`mock`: `gen`'s plan and report, `serve`'s calls)
-//! in place of v1's `generate`, and re-cut `bench` over zk2 calls.
+//! in place of v1's `generate`, and re-cut `bench` over zk2 calls. FJ8b gave
+//! the raw observers theirs (`observe`: a wire key's identity as far as the
+//! O2 ladder got, a payload's conformance to its declared type, a sample's
+//! QoS against the contract's, and what the observer resolved with).
 
 mod acl;
 mod admin;
@@ -87,6 +90,7 @@ mod impact;
 mod judgement;
 mod mock;
 mod node;
+mod observe;
 mod operation;
 mod payload;
 mod presence;
@@ -129,6 +133,7 @@ pub use impact::*;
 pub use judgement::*;
 pub use mock::*;
 pub use node::*;
+pub use observe::*;
 pub use operation::*;
 pub use payload::*;
 pub use presence::*;

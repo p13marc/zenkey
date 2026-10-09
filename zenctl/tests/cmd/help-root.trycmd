@@ -41,14 +41,14 @@ Commands:
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded
-  echo         Subscribe and print decoded samples (on-bus)
+  echo         Subscribe to wire keys and print every sample, decoded where it can be
   pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
-  field        Per-field statistics over a window: stuck, vanished and new fields
+  field        Per-field statistics over a window: vanished and new fields
   record       Capture wire selectors' traffic to a .zrec file
   replay       Replay a .zrec capture onto the bus (this publishes)
-  timeline     One merged ordering of a window's samples, a lane per origin
-  snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
+  timeline     One merged ordering of a window's samples, a lane per zk2 resource
+  snapshot     Take a deployment's state to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics
@@ -110,14 +110,14 @@ Commands:
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
   watch        Subscribe to a zk2 resource and print every sample, decoded
-  echo         Subscribe and print decoded samples (on-bus)
+  echo         Subscribe to wire keys and print every sample, decoded where it can be
   pub          Publish a value to a key that no zk2 service owns
   rate         Measure publish rate over a window (ros2-style), or bytes with --bytes
-  field        Per-field statistics over a window: stuck, vanished and new fields
+  field        Per-field statistics over a window: vanished and new fields
   record       Capture wire selectors' traffic to a .zrec file
   replay       Replay a .zrec capture onto the bus (this publishes)
-  timeline     One merged ordering of a window's samples, a lane per origin
-  snapshot     Take a fleet snapshot to a .zsnap file, or compare two with `diff`
+  timeline     One merged ordering of a window's samples, a lane per zk2 resource
+  snapshot     Take a deployment's state to a .zsnap file, or compare two with `diff`
   graph        The data-flow graph: each role bound to the providers it selects
   compat       Compare two contract revisions: compatible, review or breaking
   export       Serve the bus and its contract as Prometheus metrics

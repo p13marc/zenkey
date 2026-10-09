@@ -223,22 +223,31 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
     // like the report-level `sn_gaps` and the row's own `latency`. The pin
     // change is the visible act: a row from an unasked run used to serialize
     // an uncaveated `"sn_gaps": 0`.
+    let identity = KeyIdentity {
+        group: KeyGroup::NotZk2,
+        values: Default::default(),
+        unresolved: Some(Unresolved::NotZk2 { detail: "x".into() }),
+    };
     let quiet = RateRow {
         key: "v1/h-a/telemetry/p/m".into(),
+        identity: identity.clone(),
         count: 12,
         bytes: 480,
         sn_gaps: Asked::Asked(0),
         latency: None,
         unstamped: Asked::Asked(12),
+        clocks: Asked::Asked(Default::default()),
     };
     assert_eq!(
         serde_json::to_value(&quiet).unwrap(),
         json!({
             "key": "v1/h-a/telemetry/p/m",
+            "identity": {"is": "not_zk2", "unresolved": {"reason": "not_zk2", "detail": "x"}},
             "count": 12,
             "bytes": 480,
             "sn_gaps": 0,
             "unstamped": 12,
+            "clocks": {},
         }),
         "nothing stamped: the latency key is absent, which is not zero latency"
     );
@@ -246,16 +255,18 @@ fn a_rate_row_keeps_its_latency_populations_apart() {
     let unasked = RateRow {
         sn_gaps: Asked::NotAsked,
         unstamped: Asked::NotAsked,
+        clocks: Asked::NotAsked,
         ..quiet.clone()
     };
     assert_eq!(
         serde_json::to_value(&unasked).unwrap(),
         json!({
             "key": "v1/h-a/telemetry/p/m",
+            "identity": {"is": "not_zk2", "unresolved": {"reason": "not_zk2", "detail": "x"}},
             "count": 12,
             "bytes": 480,
         }),
-        "no --loss and no --latency: both counters are absent (O4), never zero"
+        "no --loss and no --latency: the counters and the clocks are absent (O4), never zero"
     );
 
     let dist = zenkey_fleet::LatencySummary {
@@ -308,32 +319,46 @@ fn the_three_state_verdicts_keep_their_third_state() {
     }
 
     let clean = ExpectReport {
-        selector: "v1/**".into(),
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: "sha256:ab".into(),
+        resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+        selectors: vec!["zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*".into()],
         window_s: 5.0,
         ended_early: false,
         samples: 0,
         keys_seen: 0,
         dropped: 0,
+        discarded: 0,
+        unresolved: 0,
         rate_hz: None,
+        presence: None,
         violations: vec![],
         violations_total: 0,
-        unmet: vec!["saw 0 sample(s), wanted at least 1".into()],
+        unmet: vec!["0 sample(s) observed, 1 required".into()],
         verdict: ExpectVerdict::NotMet,
     };
     assert_eq!(
         serde_json::to_value(&clean).unwrap(),
         json!({
-            "selector": "v1/**",
+            "address": "host-a/tc",
+            "iface": "tc.netif.v1",
+            "fingerprint": "sha256:ab",
+            "resource": "stream/bandwidth/{ns}/{iface}",
+            "selectors": ["zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*"],
             "window_s": 5.0,
             "ended_early": false,
             "samples": 0,
             "keys_seen": 0,
             "dropped": 0,
+            "discarded": 0,
+            "unresolved": 0,
             "violations_total": 0,
-            "unmet": ["saw 0 sample(s), wanted at least 1"],
+            "unmet": ["0 sample(s) observed, 1 required"],
             "verdict": "not_met",
         }),
-        "an empty violation list is absent, and `rate_hz: None` means not asked"
+        "an empty violation list is absent, `rate_hz: None` means not asked, and \
+         presence not asked is absent"
     );
 }
 
@@ -849,31 +874,45 @@ fn a_why_rung_keeps_not_asked_distinct_on_the_wire() {
 
 // ── The consumers join (#224) ─────────────────────────────────────────────
 
-// ── The fleet timeline (#216) ─────────────────────────────────────────────
+// ── The fleet timeline (#216; zk2's lanes and clocks since #612, FJ8b) ────
 
 /// The arrival axis: every row carries `order_by`, the break sits at its
-/// position with no lane, the unstamped lane exists, and the
+/// position with no lane, a lane is one zk2 resource of one address, the
+/// unstamped lane exists, each stamp names whose clock it is (the owner's,
+/// here), the lens the lanes were resolved with rides the envelope, and the
 /// sequence-number lane is *unavailable* with its fixed reason — never an
 /// empty list. `unstamped_excluded` is absent at zero.
 #[test]
 fn a_timeline_on_the_arrival_axis_is_pinned() {
+    let lane = json!({
+        "kind": "resource",
+        "address": "host-a/tc",
+        "iface": "tc.netif.v1",
+        "token": "stream",
+        "resource": "stream/bandwidth/{ns}/{iface}",
+    });
     assert_eq!(
         serde_json::to_value(fx::timeline_report_arrival()).unwrap(),
         json!({
             "order_by": "arrival",
             "axis": "arrival",
             "clock": "observer monotonic, µs since window start",
-            "scopes": ["acme/v1/**"],
+            "scopes": ["acme/zk2/**"],
             "window_s": 10.0,
             "source": {"kind": "live"},
+            "lens": {
+                "namespace": "acme",
+                "presence": {"selector": "zk2/*/*/@zk/**", "complete": true, "services": 1},
+                "contracts": 1,
+            },
             "lanes": [
                 {
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "lane": lane,
                     "samples": 2,
                     "first_t_us": 1000,
                     "last_t_us": 2000,
                     "stampers": ["33"],
-                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
+                    "provenance": {"owner": 2, "other": 0, "unattributable": 0}
                 },
                 {
                     "lane": {"kind": "unstamped"},
@@ -881,7 +920,7 @@ fn a_timeline_on_the_arrival_axis_is_pinned() {
                     "first_t_us": 3000,
                     "last_t_us": 3000,
                     "stampers": [],
-                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 0}
+                    "provenance": {"owner": 0, "other": 0, "unattributable": 0}
                 }
             ],
             "sn_lane": {
@@ -893,17 +932,17 @@ fn a_timeline_on_the_arrival_axis_is_pinned() {
             "rows": [
                 {
                     "row": "sample", "order_by": "arrival", "pos": 0,
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "lane": lane,
+                    "key": "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
                     "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
-                    "provenance": "unattributable", "kind": "put"
+                    "provenance": "owner", "kind": "put"
                 },
                 {
                     "row": "sample", "order_by": "arrival", "pos": 1,
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
+                    "lane": lane,
+                    "key": "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1",
                     "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
-                    "provenance": "unattributable", "kind": "put"
+                    "provenance": "owner", "kind": "put"
                 },
                 {"row": "break", "order_by": "arrival", "pos": 2, "kind": "dropped", "n": 3},
                 {
@@ -921,49 +960,19 @@ fn a_timeline_on_the_arrival_axis_is_pinned() {
 /// drop is a total with no row — a break has no position on this clock.
 #[test]
 fn a_timeline_on_the_hlc_axis_is_pinned() {
+    let v = serde_json::to_value(fx::timeline_report_hlc()).unwrap();
+    assert_eq!(v["order_by"], "hlc");
+    assert_eq!(v["claim"], "happens_before");
+    assert_eq!(v["stamper"], "33");
+    assert_eq!(v["unstamped_excluded"], 1);
+    assert_eq!(v["dropped"], 3);
+    let rows = v["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "no break row, no unstamped row");
     assert_eq!(
-        serde_json::to_value(fx::timeline_report_hlc()).unwrap(),
-        json!({
-            "order_by": "hlc",
-            "axis": "hlc",
-            "claim": "happens_before",
-            "stamper": "33",
-            "scopes": ["acme/v1/**"],
-            "window_s": 10.0,
-            "source": {"kind": "live"},
-            "lanes": [{
-                "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                "samples": 2,
-                "first_t_us": 1000,
-                "last_t_us": 2000,
-                "stampers": ["33"],
-                "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 2}
-            }],
-            "sn_lane": {
-                "state": "unavailable",
-                "reason": "zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it"
-            },
-            "unstamped_excluded": 1,
-            "dropped": 3,
-            "keys_evicted": 0,
-            "rows": [
-                {
-                    "row": "sample", "order_by": "hlc", "pos": 0,
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/mem",
-                    "t_us": 2000, "hlc": "100/33", "stamped_by": "33",
-                    "provenance": "unattributable", "kind": "put"
-                },
-                {
-                    "row": "sample", "order_by": "hlc", "pos": 1,
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                    "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
-                    "t_us": 1000, "hlc": "200/33", "stamped_by": "33",
-                    "provenance": "unattributable", "kind": "put"
-                }
-            ]
-        })
+        rows[0]["key"], "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1",
+        "the earlier stamp leads on this axis"
     );
+    assert!(rows.iter().all(|r| r["order_by"] == "hlc"));
     // The other two claims, so a rename of either is a diff here too.
     assert_eq!(
         serde_json::to_value(AxisLabel::Hlc {
@@ -983,74 +992,80 @@ fn a_timeline_on_the_hlc_axis_is_pinned() {
     );
 }
 
-// ─── snapshots (RFC 13 §4.4, #219) ───────────────────────────────────────
+// ─── snapshots (RFC 13 §4.4, #219; zk2's since #612, FJ8b) ────────────────
 
-/// The `.zsnap` header: the span is the fact a capture header does not
-/// carry, the O6 counters are absent at zero, and `roster` is a count when
-/// asked and absent when not.
+/// The `.zsnap` header, version 2: the span is the fact a capture header
+/// does not carry, the O6 counters are absent at zero, and the presence
+/// read is carried when made and absent when not.
 #[test]
 fn a_zsnap_header_states_its_span_and_omits_what_did_not_happen() {
     let h = fx::snapshot().header;
     assert_eq!(
         serde_json::to_value(&h).unwrap(),
         json!({
-            "zsnap": 1,
-            "selectors": ["acme/v1/**"],
+            "zsnap": 2,
+            "selectors": ["acme/zk2/*/*/*/state/**"],
             "base": "acme",
-            "collected_at": "2026-09-06T00:00:00Z",
+            "collected_at": "2026-10-09T00:00:00Z",
             "collection_span_s": 1.25,
             "asked": 1,
-            "answered": 6,
+            "answered": 5,
             "superseded": 1,
-            "roster": 2,
+            "presence": {"selector": "zk2/*/*/@zk/**", "complete": true, "services": 2},
         })
     );
     let unasked = ZsnapHeader {
-        roster: Asked::NotAsked,
+        presence: None,
         superseded: 0,
         ..h
     };
     let v = serde_json::to_value(&unasked).unwrap();
-    assert!(v.get("roster").is_none(), "not asked is absent: {v}");
+    assert!(v.get("presence").is_none(), "not asked is absent: {v}");
     assert!(v.get("superseded").is_none(), "zero is absent: {v}");
     assert!(v.get("elided").is_none() && v.get("errors").is_none());
+    assert!(v.get("discarded").is_none());
 }
 
 /// Every row facet on the wire, pinned on the two rows that exercise the
-/// most: a live host answering its own stamped value, and a tombstone.
+/// most: a payload that fails its type answered by its owner, and a
+/// deletion within the owner's window.
 #[test]
-fn a_snapshot_row_carries_its_four_facets_tagged() {
+fn a_snapshot_row_carries_its_facets_tagged() {
     let s = fx::snapshot();
-    let health = &s.rows[1];
+    let eth0 = &s.rows[0];
     assert_eq!(
-        serde_json::to_value(health).unwrap(),
+        serde_json::to_value(eth0).unwrap(),
         json!({
-            "key": "acme/v1/h-3fa9c2d41b7e/state/sysinfo/health",
+            "key": "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+            "identity": {
+                "is": "resource",
+                "address": "host-a/tc",
+                "iface": "tc.netif.v1",
+                "token": "state",
+                "resource": "state/interfaces/{ns}/{iface}",
+                "values": {"iface": ["eth0"], "ns": ["default"]},
+            },
             "delete": false,
-            "bytes": "eyJzb3VyY2UiOiJub2RlLWEiLCJob3N0X2lkIjoiaC0zZmE5YzJkNDFiN2UiLCJzdGF0dXMiOiJvayJ9",
+            "bytes": "eyJuYW1lIjoiZXRoMCIsImlzX3VwIjoieWVzIn0=",
             "encoding": "application/json",
             "timestamp": "7f3b2a1c00000001/ab12",
-            "stamper": {"kind": "unattributable", "id": "ab12"},
+            "stamper": {"kind": "owner", "id": "ab12"},
             "source_zid": "ab12",
-            "registration": "registered",
-            "verdict": {"state": "valid"},
-            "holder": {"kind": "live", "origin": "h-3fa9c2d41b7e", "answered_by": "stamper"},
+            "conformance": {"state": "invalid", "violations": ["/is_up: expected boolean"]},
+            "holder": {"kind": "live", "address": "host-a/tc", "answered_by": "owner"},
         })
     );
-    let tombstone = &s.rows[3];
+    let deletion = &s.rows[1];
+    let v = serde_json::to_value(deletion).unwrap();
+    assert_eq!(v["delete"], true);
+    assert!(
+        v.get("bytes").is_none() && v.get("encoding").is_none(),
+        "a deletion carries no bytes and no encoding — the delete is the whole fact"
+    );
+    assert_eq!(v["conformance"]["state"], "not_checked");
     assert_eq!(
-        serde_json::to_value(tombstone).unwrap(),
-        json!({
-            "key": "acme/v1/h-9b2e4c7a1d05/state/logs/rotated",
-            "delete": true,
-            "timestamp": "7f3b2a1c00000001/ab12",
-            "stamper": {"kind": "unattributable", "id": "ab12"},
-            "source_zid": "ab12",
-            "registration": "registered",
-            "verdict": {"state": "not_validated", "reason": "tombstone"},
-            "holder": {"kind": "storage_only", "origin": "h-9b2e4c7a1d05"},
-        }),
-        "a tombstone carries no bytes and no encoding — the delete is the whole fact"
+        serde_json::to_value(&s.rows[3]).unwrap()["holder"],
+        json!({"kind": "no_instance", "address": "host-b/tc"})
     );
     // Every row reads back to itself: the file is a contract both ways.
     for row in &s.rows {
@@ -1064,16 +1079,16 @@ fn a_snapshot_report_is_the_header_plus_holder_counts() {
     let r = fx::snapshot_report();
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["header"]["collection_span_s"], 1.25);
-    assert_eq!(v["out"], "fleet.zsnap");
-    assert_eq!(v["live"], 2);
-    assert_eq!(v["storage_only"], 2);
-    assert_eq!(v["unattributed"], 1);
+    assert_eq!(v["out"], "deployment.zsnap");
+    assert_eq!(v["live"], 3);
+    assert_eq!(v["no_instance"], 1);
+    assert_eq!(v["unattributed"], 0, "a count, present at zero");
+    assert_eq!(v["nonconforming"], 1);
     assert!(v.get("incomplete").is_none(), "empty is absent");
 }
 
 /// A diff carries both headers whole (both spans, RFC 13 §4.4), lists the
-/// three key sets, keeps the facets apart, and — with no alignment asked —
-/// carries neither the origin map nor the roll-up.
+/// three key sets by zk2 key, and keeps the facets apart.
 #[test]
 fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     let d = fx::snapshot_diff();
@@ -1082,41 +1097,36 @@ fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     assert_eq!(v["b"]["collection_span_s"], 0.8);
     assert_eq!(
         v["added"],
-        json!(["acme/v1/h-9b2e4c7a1d05/telemetry/sysinfo/disk/var-log/used"])
+        json!(["zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1"])
     );
     assert_eq!(
         v["removed"],
-        json!(["acme/v1/h-9b2e4c7a1d05/state/logs/rotated"])
+        json!(["zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9"])
     );
-    assert_eq!(v["unchanged"], 2);
-    for absent in ["truncated", "origin_map", "unmapped", "by_subject"] {
-        assert!(v.get(absent).is_none(), "{absent} not asked: {v}");
-    }
+    assert_eq!(v["unchanged"], 1);
+    assert!(v.get("truncated").is_none());
 
     let changed = v["changed"].as_array().unwrap();
     assert_eq!(changed.len(), 2);
     assert_eq!(
-        changed[0],
-        json!({
-            "key": "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/disk/var-log/used",
-            "value": {
-                "changes": [{"op": "changed", "path": "value", "old": 41.0, "new": 42.0}],
-                "truncated": 0,
-            },
-            "timestamp": ["7f3b2a1c00000001/ab12", "7f3b2a1c00000002/ab12"],
-        }),
-        "a value change carries the value facet and nothing else"
+        changed[0]["key"],
+        "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0"
+    );
+    assert_eq!(changed[0]["value"]["changes"][0]["path"], "is_up");
+    assert_eq!(changed[0]["conformance"][0]["state"], "invalid");
+    assert_eq!(changed[0]["conformance"][1]["state"], "valid");
+    assert!(
+        changed[0].get("holder").is_none(),
+        "the holder did not move"
     );
     assert_eq!(
         changed[1]["holder"],
         json!([
-            {"kind": "storage_only", "origin": "h-9b2e4c7a1d05"},
-            {"kind": "live", "origin": "h-9b2e4c7a1d05", "answered_by": "unknown"},
+            {"kind": "no_instance", "address": "host-b/tc"},
+            {"kind": "live", "address": "host-b/tc", "answered_by": "owner"},
         ]),
-        "the holder facet rides beside the value facet, as its own pair"
+        "the holder facet as its own pair"
     );
-    assert_eq!(changed[1]["value"]["changes"][0]["path"], "status");
-    assert!(changed[1].get("verdict").is_none() && changed[1].get("registration").is_none());
     assert!(d.differs());
     assert_eq!(judgement_exit_code(&d.to_judgement()), 1);
     assert_eq!(
@@ -1125,100 +1135,15 @@ fn a_snapshot_diff_keeps_both_spans_and_its_facets_apart() {
     );
 }
 
-/// An alignment that was asked and refused (#220) lists what it paired
-/// *and* what it could not (RFC 13 §4.4: "MUST list, never drop"), carries
-/// no roll-up — the comparison was not made — and projects to the reserved
-/// non-verdict.
+/// Two namespaces line up on their zk2 keys, and the two deployments'
+/// clocks are not compared: the same state there reads identical.
 #[test]
-fn a_refused_alignment_lists_its_pairs_and_its_unpaired_and_compares_nothing() {
-    let d = fx::snapshot_diff_unmapped();
-    let v = serde_json::to_value(&d).unwrap();
-    assert_eq!(
-        v["origin_map"],
-        json!([{
-            "a": "h-3fa9c2d41b7e",
-            "b": "h-c0ffee00c0de",
-            "evidence": {"kind": "explicit"},
-        }])
-    );
-    assert_eq!(
-        v["unmapped"],
-        json!([
-            {
-                "origin": "h-9b2e4c7a1d05",
-                "side": "a",
-                "reason": "label `db` claimed by no origin in b; producer set {logs, sysinfo} matches no origin in b",
-            },
-            {
-                "origin": "h-0badcafe1234",
-                "side": "b",
-                "reason": "label `node` claimed by no origin in a; producer set {sysinfo} matches no origin in a",
-            },
-        ])
-    );
-    for absent in ["by_subject", "truncated"] {
-        assert!(v.get(absent).is_none(), "{absent}: {v}");
-    }
-    assert_eq!(v["added"], json!([]));
-    assert_eq!(v["changed"], json!([]));
-    assert_eq!(v["unchanged"], 0);
-    assert!(d.refused());
-    assert_eq!(judgement_exit_code(&d.to_judgement()), 2);
-}
-
-/// An alignment that completed carries every pair with its evidence and
-/// one `by_subject` row per subject — the acceptance case: disjoint
-/// origins, zero differences, exit 0.
-#[test]
-fn a_completed_alignment_carries_its_pairs_and_the_subject_roll_up() {
-    let d = fx::snapshot_diff_aligned();
-    let v = serde_json::to_value(&d).unwrap();
-    assert_eq!(
-        v["origin_map"],
-        json!([
-            {"a": "h-3fa9c2d41b7e", "b": "h-c0ffee00c0de", "evidence": {"kind": "label", "source": "web"}},
-            {"a": "h-9b2e4c7a1d05", "b": "h-0badcafe1234", "evidence": {"kind": "label", "source": "db"}},
-        ])
-    );
-    assert!(v.get("unmapped").is_none(), "empty is absent: {v}");
-    assert_eq!(v["added"], json!([]));
-    assert_eq!(v["removed"], json!([]));
-    assert_eq!(v["changed"], json!([]));
-    assert_eq!(v["unchanged"], 6);
-    let subjects = v["by_subject"].as_array().unwrap();
-    assert_eq!(subjects.len(), 4);
-    assert_eq!(
-        subjects[2],
-        json!({"subject": "state/sysinfo/health", "compared": 2, "differing": 0, "only_in_a": 0, "only_in_b": 0}),
-        "no example when nothing differs"
-    );
-    assert!(!d.differs() && !d.refused());
+fn two_namespaces_compare_by_zk2_key() {
+    let d = fx::snapshot_diff_namespaces();
+    assert!(!d.differs(), "{d:?}");
+    assert_eq!(d.unchanged, 4);
     assert_eq!(judgement_exit_code(&d.to_judgement()), 0);
-
-    // Mapped by hand and differing: the subject carries its example.
-    let v = serde_json::to_value(fx::snapshot_diff_normalized()).unwrap();
-    assert_eq!(v["origin_map"][0]["evidence"], json!({"kind": "explicit"}));
-    let health = v["by_subject"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["subject"] == "state/sysinfo/health")
-        .unwrap();
-    assert_eq!(
-        (health["compared"].as_u64(), health["differing"].as_u64()),
-        (Some(2), Some(2))
-    );
-    assert_eq!(health["example"]["value"]["changes"][0]["path"], "source");
-    let logs = v["by_subject"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["subject"] == "state/logs/rotated")
-        .unwrap();
-    assert_eq!(logs["only_in_a"], 1);
 }
-
-// ── The metrics surface (#228) ───────────────────────────────────────────────
 
 /// The exporter fold, whole: a stopped series has no `value`, a zero
 /// `drop_exposed` is absent, every observer counter is present, the doctor

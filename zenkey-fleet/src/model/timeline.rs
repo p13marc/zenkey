@@ -40,8 +40,19 @@
 //!   total and points at `--order arrival` for where they fell.
 //!
 //! `drop_future_timestamp = false` also lets a router re-stamp a sample
-//! whose HLC runs ahead; O7's `Foreign` provenance covers it, and the
+//! whose HLC runs ahead; the `other` provenance covers it, and the
 //! per-lane provenance counts keep that population visible.
+//!
+//! # Lanes and clocks in zk2 (#612, FJ8b)
+//!
+//! A lane is one resource of one address ([`LaneId::Resource`]), resolved
+//! through a [`Lens`]: the namespace the operator stated, the presence read
+//! whose descriptors name each owner's session zid (`meta.zid`, spec §3.3
+//! 0.10), and the revisions in hand. Each stamp is attributed against that
+//! zid, by value: the owner's clock, another's (a router's), or
+//! unattributable when nothing names the owner's — never foreign
+//! ([`Provenance`]). The lens is the one input a `.zrec` and live traffic
+//! share, so the same lens gives the same lanes from either.
 //!
 //! An **unstamped** sample has no HLC position, and that is enforced by the
 //! type system rather than by a warning: [`Placed<HlcAxis>`] has exactly one
@@ -72,8 +83,8 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::time::Instant;
 
-use crate::bus::monitor::{SampleView, StampProvenance};
-use crate::model::facts::{KeyFacts, KeyShape};
+use crate::bus::monitor::SampleView;
+use crate::model::lens::Lens;
 use crate::report::{
     ARRIVAL_CLOCK, AxisLabel, BreakKind, HlcClaim, LaneId, LaneSummary, OrderLabel, Provenance,
     ProvenanceCounts, RowKind, SN_UNAVAILABLE_REASON, SnLaneReport, TimelineEntry, TimelineReport,
@@ -122,19 +133,15 @@ pub struct TimelineRow {
 impl TimelineRow {
     /// A row from a live sample, `t_us` measured from `epoch` — the instant
     /// the caller's watches were all declared. A sample received before the
-    /// epoch saturates to 0, as `ZrecWriter` does.
-    pub fn from_view(view: &SampleView, epoch: Instant, base: &str) -> TimelineRow {
+    /// epoch saturates to 0, as `ZrecWriter` does. The lane and the stamp's
+    /// provenance come from `lens`.
+    pub fn from_view(view: &SampleView, epoch: Instant, lens: &Lens<'_>) -> TimelineRow {
         let t_us = u64::try_from(view.received.saturating_duration_since(epoch).as_micros())
             .unwrap_or(u64::MAX);
-        let hlc = view.timestamp.as_ref().map(|t| HlcStamp {
-            ntp64: t.get_time().as_u64(),
-            stamper: t.get_id().to_string(),
-            provenance: match view.stamped_by {
-                Some(StampProvenance::SelfStamped) => Provenance::SelfStamped,
-                Some(StampProvenance::Foreign { .. }) => Provenance::Foreign,
-                Some(StampProvenance::Unattributable { .. }) | None => Provenance::Unattributable,
-            },
-        });
+        let hlc = view
+            .timestamp
+            .as_ref()
+            .map(|t| (t.get_time().as_u64(), t.get_id().to_string()));
         TimelineRow::assemble(
             view.key.clone(),
             t_us,
@@ -147,32 +154,34 @@ impl TimelineRow {
                 RowKind::Put
             },
             view.payload.len(),
-            base,
+            lens,
         )
     }
 
-    /// The one place a lane is decided: unstamped first, then the key.
+    /// The one place a lane is decided: unstamped first, then the key's
+    /// group through the lens; and the one place a stamp is attributed,
+    /// against the owner's `meta.zid`.
     #[allow(clippy::too_many_arguments)]
-    fn assemble(
+    pub fn assemble(
         key: String,
         t_us: u64,
-        hlc: Option<HlcStamp>,
+        hlc: Option<(u64, String)>,
         source: Option<String>,
         sn: Option<u32>,
         kind: RowKind,
         payload_bytes: usize,
-        base: &str,
+        lens: &Lens<'_>,
     ) -> TimelineRow {
+        let group = lens.identity(&key).group;
         let lane = match &hlc {
             None => LaneId::Unstamped,
-            Some(_) => match KeyFacts::project(base, &key).shape {
-                KeyShape::V1(f) => LaneId::Origin {
-                    origin: f.origin,
-                    producer: f.producer,
-                },
-                KeyShape::NotUnderBase | KeyShape::Unparsed { .. } => LaneId::Foreign,
-            },
+            Some(_) => LaneId::from(&group),
         };
+        let hlc = hlc.map(|(ntp64, stamper)| HlcStamp {
+            provenance: lens.provenance(group.address(), &stamper),
+            ntp64,
+            stamper,
+        });
         TimelineRow {
             key,
             lane,
@@ -249,16 +258,15 @@ pub enum Ingested {
 impl Ingested {
     /// A `.zrec` line as the live path would have seen it (RFC 09 §5.2):
     /// `t` verbatim as the arrival offset, `timestamp` parsed back through
-    /// `uhlc::Timestamp: FromStr`, and the stamper judged against the
-    /// row's `source` exactly as [`StampProvenance`] judges a live sample
-    /// — `Unattributable` unless the row carried one, so live and replay
-    /// classify identically.
+    /// `uhlc::Timestamp: FromStr`, and the stamper judged through `lens`
+    /// exactly as a live sample is, so live and replay classify
+    /// identically.
     ///
     /// A row without `t` (a hand-piped ndjson row rather than a capture)
     /// sits at 0: it has no pacing, and inventing one would be an ordering
     /// claim. A `timestamp` that does not parse reads as unstamped — the
     /// row is kept (O1), and the arrival axis still holds it.
-    pub fn from_zrec(item: &ZrecItem, base: &str) -> Ingested {
+    pub fn from_zrec(item: &ZrecItem, lens: &Lens<'_>) -> Ingested {
         match item {
             ZrecItem::Dropped(n) => Ingested::Break(Break::Dropped(*n)),
             ZrecItem::Preamble { row, .. } => Ingested::Preamble {
@@ -284,11 +292,7 @@ impl Ingested {
                 let hlc = timestamp
                     .as_deref()
                     .and_then(|s| zenoh::time::Timestamp::from_str(s).ok())
-                    .map(|t| HlcStamp {
-                        ntp64: t.get_time().as_u64(),
-                        stamper: t.get_id().to_string(),
-                        provenance: provenance_of(t.get_id(), entity.as_deref()),
-                    });
+                    .map(|t| (t.get_time().as_u64(), t.get_id().to_string()));
                 Ingested::Row(TimelineRow::assemble(
                     row.key.clone(),
                     t_us.unwrap_or(0),
@@ -301,25 +305,10 @@ impl Ingested {
                         RowKind::Put
                     },
                     row.payload.len(),
-                    base,
+                    lens,
                 ))
             }
         }
-    }
-}
-
-/// [`StampProvenance::of`]'s judgement over the `.zrec` spelling of a
-/// source: the entity's zid against the stamper's id, exact, and
-/// `Unattributable` when there is nothing to compare against (O4).
-fn provenance_of(stamper: &zenoh::time::TimestampId, entity: Option<&str>) -> Provenance {
-    let Some(entity) = entity else {
-        return Provenance::Unattributable;
-    };
-    let zid = entity.split(':').next().unwrap_or(entity);
-    match zenoh::config::ZenohId::from_str(zid) {
-        Ok(zid) if zenoh::time::TimestampId::from(zid) == *stamper => Provenance::SelfStamped,
-        Ok(_) => Provenance::Foreign,
-        Err(_) => Provenance::Unattributable,
     }
 }
 
@@ -623,6 +612,8 @@ pub struct Window {
     pub source: TimelineSource,
     /// Keys the bounded statistics table retired during the window (O6).
     pub keys_evicted: u64,
+    /// What the rows were resolved with ([`Lens::scope`]).
+    pub lens: crate::report::LensScope,
 }
 
 /// The report for one window on one axis.
@@ -706,6 +697,7 @@ pub fn timeline(window: &Window, order: Order) -> TimelineReport {
         scopes: window.scopes.clone(),
         window_s: window.window_s,
         source: window.source.clone(),
+        lens: window.lens.clone(),
         lanes,
         sn_lane: sn,
         unstamped_excluded,
@@ -747,8 +739,8 @@ fn summarise<A>(
                 if let Some(h) = &r.hlc {
                     stampers.insert(h.stamper.clone());
                     match h.provenance {
-                        Provenance::SelfStamped => provenance.self_stamped += 1,
-                        Provenance::Foreign => provenance.foreign += 1,
+                        Provenance::Owner => provenance.owner += 1,
+                        Provenance::Other => provenance.other += 1,
                         Provenance::Unattributable => provenance.unattributable += 1,
                     }
                 }
@@ -768,28 +760,34 @@ fn summarise<A>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::catalog::ContractSet;
 
-    const BASE: &str = "acme";
+    const NS: &str = "acme";
+
+    fn with_lens<T>(f: impl FnOnce(&Lens<'_>) -> T) -> T {
+        let set = ContractSet::new();
+        f(&Lens::new(NS, None, &set))
+    }
 
     fn stamped(key: &str, t_us: u64, ntp64: u64, stamper: &str) -> TimelineRow {
-        TimelineRow::assemble(
-            key.into(),
-            t_us,
-            Some(HlcStamp {
-                ntp64,
-                stamper: stamper.into(),
-                provenance: Provenance::Unattributable,
-            }),
-            None,
-            None,
-            RowKind::Put,
-            3,
-            BASE,
-        )
+        with_lens(|lens| {
+            TimelineRow::assemble(
+                key.into(),
+                t_us,
+                Some((ntp64, stamper.into())),
+                None,
+                None,
+                RowKind::Put,
+                3,
+                lens,
+            )
+        })
     }
 
     fn unstamped(key: &str, t_us: u64) -> TimelineRow {
-        TimelineRow::assemble(key.into(), t_us, None, None, None, RowKind::Put, 3, BASE)
+        with_lens(|lens| {
+            TimelineRow::assemble(key.into(), t_us, None, None, None, RowKind::Put, 3, lens)
+        })
     }
 
     fn keys(report: &TimelineReport) -> Vec<(&str, usize)> {
@@ -807,15 +805,20 @@ mod tests {
         Window {
             rows,
             breaks,
-            scopes: vec!["acme/v1/**".into()],
+            scopes: vec!["acme/zk2/**".into()],
             window_s: Some(1.0),
             source: TimelineSource::Live,
             keys_evicted: 0,
+            lens: crate::report::LensScope {
+                namespace: NS.into(),
+                presence: None,
+                contracts: 0,
+            },
         }
     }
 
-    const A: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/a";
-    const B: &str = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/b";
+    const A: &str = "acme/zk2/lab/m/m.v1/stream/a";
+    const B: &str = "acme/zk2/lab/m/m.v1/stream/b";
 
     /// The acceptance criterion: a synthetic reorder — A seen first, B
     /// stamped first — is visible as hlc-order ≠ arrival-order.
@@ -843,8 +846,19 @@ mod tests {
                 clock: ARRIVAL_CLOCK
             }
         );
-        // Both rows share one lane; the lane says who stamped it.
+        // Both rows share one lane — one address's stream, the contract not
+        // in hand — and the lane says who stamped it: nobody named the
+        // owner's zid, so unattributable.
         assert_eq!(by_hlc.lanes.len(), 1);
+        assert_eq!(
+            by_hlc.lanes[0].lane,
+            LaneId::Resource {
+                address: "lab/m".into(),
+                iface: "m.v1".into(),
+                token: "stream".into(),
+                resource: None,
+            }
+        );
         assert_eq!(by_hlc.lanes[0].stampers.len(), 1);
         assert_eq!(by_hlc.lanes[0].provenance.unattributable, 2);
     }
@@ -889,10 +903,10 @@ mod tests {
         assert!(by_hlc.lanes.iter().all(|l| l.lane != LaneId::Unstamped));
     }
 
-    /// A v1 key from an origin, unstamped, still goes to the unstamped
-    /// lane — the lane is about the axis it can live on, not the key.
+    /// A zk2 key, unstamped, still goes to the unstamped lane — the lane is
+    /// about the axis it can live on, not the key.
     #[test]
-    fn an_unstamped_v1_key_is_in_the_unstamped_lane_not_its_origins() {
+    fn an_unstamped_zk2_key_is_in_the_unstamped_lane_not_its_resources() {
         let row = unstamped(A, 1);
         assert_eq!(row.lane, LaneId::Unstamped);
         // And a hand-built row cannot smuggle itself onto the HLC axis by
@@ -904,13 +918,16 @@ mod tests {
         assert_eq!(Placed::<HlcAxis>::new(lying), Err(Unstamped));
     }
 
-    /// Nothing under the base is a lane of its own, never a dropped row.
+    /// Outside the namespace, or not zk2: a lane of its own, never a
+    /// dropped row (O1, O3).
     #[test]
-    fn a_key_outside_the_base_is_foreign_and_kept() {
-        let row = stamped("other/v1/h-3fa9c2d41b7e/state/x/y", 1, 1, "33");
+    fn a_key_outside_the_namespace_is_foreign_and_kept() {
+        let row = stamped("other/zk2/lab/m/m.v1/stream/a", 1, 1, "33");
         assert_eq!(row.lane, LaneId::Foreign);
-        let w = window(vec![row], vec![]);
-        assert_eq!(timeline(&w, Order::Hlc).rows.len(), 1);
+        let v1 = stamped("acme/v1/h-3fa9c2d41b7e/state/x/y", 1, 1, "33");
+        assert_eq!(v1.lane, LaneId::Foreign);
+        let w = window(vec![row, v1], vec![]);
+        assert_eq!(timeline(&w, Order::Hlc).rows.len(), 2);
     }
 
     #[test]
@@ -973,43 +990,47 @@ mod tests {
 
     #[test]
     fn a_zrec_drop_record_is_a_break_and_a_row_reads_its_stamp_back() {
-        assert_eq!(
-            Ingested::from_zrec(&ZrecItem::Dropped(3), BASE),
-            Ingested::Break(Break::Dropped(3))
-        );
-        let item = ZrecItem::Sample {
-            row: crate::tape::ingest::IngestRow {
-                key: A.into(),
-                payload: vec![1, 2, 3],
-                encoding: None,
-                qos: None,
-                qos_axes: None,
-                delete: false,
-                attachment: None,
-            },
-            t_us: Some(42),
-            timestamp: Some("100/33".into()),
-            source: None,
-        };
-        let Ingested::Row(row) = Ingested::from_zrec(&item, BASE) else {
-            panic!("a sample line is a row");
-        };
-        assert_eq!(row.t_us, 42);
-        assert_eq!(
-            row.hlc,
-            Some(HlcStamp {
-                ntp64: 100,
-                stamper: "33".into(),
-                provenance: Provenance::Unattributable
-            })
-        );
-        assert_eq!(row.payload_bytes, 3);
-        assert_eq!(
-            row.lane,
-            LaneId::Origin {
-                origin: "h-3fa9c2d41b7e".into(),
-                producer: Some("sysinfo".into())
-            }
-        );
+        with_lens(|lens| {
+            assert_eq!(
+                Ingested::from_zrec(&ZrecItem::Dropped(3), lens),
+                Ingested::Break(Break::Dropped(3))
+            );
+            let item = ZrecItem::Sample {
+                row: crate::tape::ingest::IngestRow {
+                    key: A.into(),
+                    payload: vec![1, 2, 3],
+                    encoding: None,
+                    qos: None,
+                    qos_axes: None,
+                    delete: false,
+                    attachment: None,
+                },
+                t_us: Some(42),
+                timestamp: Some("100/33".into()),
+                source: None,
+            };
+            let Ingested::Row(row) = Ingested::from_zrec(&item, lens) else {
+                panic!("a sample line is a row");
+            };
+            assert_eq!(row.t_us, 42);
+            assert_eq!(
+                row.hlc,
+                Some(HlcStamp {
+                    ntp64: 100,
+                    stamper: "33".into(),
+                    provenance: Provenance::Unattributable
+                })
+            );
+            assert_eq!(row.payload_bytes, 3);
+            assert_eq!(
+                row.lane,
+                LaneId::Resource {
+                    address: "lab/m".into(),
+                    iface: "m.v1".into(),
+                    token: "stream".into(),
+                    resource: None,
+                }
+            );
+        });
     }
 }

@@ -35,14 +35,16 @@
 //! fires, before the fetch, because the fetch takes as long as the fleet
 //! takes to answer.
 //!
-//! **zk2** (#612, FJ8a). The capture is a `.zrec` version 3 (the tooling
-//! guide's §5): the header's base is the namespace the operator stated,
-//! and it says what the watched selectors exclude (O5). The rules judge
-//! zk2 conditions ([`zk2_rules`]): the watchdog's vocabulary as FJ6 left it,
-//! less the rules that judge v1's registry, roster or alert plane. The
-//! preamble is the owners' own answer (S4: target `All`, consolidation
-//! `Latest`, R6's discard) on the plain-`state` projection of the watched
-//! selectors ([`state_projection`]), never a storage's.
+//! **zk2** (#612, FJ8a, FJ8b). The capture is a `.zrec` version 3 (the
+//! tooling guide's §5): the header's base is the namespace the operator
+//! stated, and it says what the watched selectors exclude (O5). The rules
+//! are the watchdog's zk2 vocabulary whole — `invalid-payload`,
+//! `qos-mismatch` and `instance-gone` read the deployment through a lens
+//! and a session in its namespace ([`TriggerSpec::deployment`]), refreshed
+//! beside the drain like every other sweep. The preamble is the owners' own
+//! answer (S4: target `All`, consolidation `Latest`, R6's discard) on the
+//! plain-`state` projection of the watched selectors
+//! ([`state_projection`]), never a storage's.
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
@@ -55,6 +57,8 @@ use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{FleetEvent, SampleView, StreamItem};
 use crate::judge::condition::{Condition, RuleSet, SweepOutcome};
+use crate::model::catalog::{Catalog, ContractSet};
+use crate::model::lens::Lens;
 use crate::model::retain::RetentionBudget;
 use crate::report::{
     CondState, PreRollInfo, PreambleInfo, PreambleSemantics, RecordReport, Transition, ZrecHeader,
@@ -77,12 +81,16 @@ pub struct TriggerSpec {
     pub rules: Vec<Condition>,
     /// Evaluation cadence — the watchdog's `--every`.
     pub tick: Duration,
-    /// Per-ask timeout: the roster and doctor sweeps, and the preamble GET.
+    /// Per-ask timeout: the presence, contract and doctor sweeps, and the
+    /// preamble GET.
     pub timeout: Duration,
-    /// Where a `doctor <CHECK-ID>` rule's doctor reads (#612, FJ6), as
-    /// [`crate::WatchdogSpec::doctor`]: `None` makes every doctor rule
-    /// unobservable, saying why.
-    pub doctor: Option<crate::judge::doctor::DoctorBus>,
+    /// The deployment's sessions (#612, FJ6, FJ8b): where a `doctor` rule's
+    /// doctor reads, an `instance-gone` rule's presence, and the lens
+    /// `invalid-payload` and `qos-mismatch` judge through. `None` makes
+    /// each of those rules unobservable, saying why.
+    pub deployment: Option<crate::judge::doctor::DoctorBus>,
+    /// Revisions known offline (`--contracts`): never retrieved.
+    pub contracts: ContractSet,
     /// Stop waiting after this long with nothing fired; `None` waits until
     /// the caller stops the future.
     pub give_up: Option<Duration>,
@@ -178,36 +186,6 @@ pub fn state_projection(namespace: &str, selector: &str) -> Option<String> {
     Some(zenkey::grammar::with_base(namespace, projected.join("/")))
 }
 
-/// Refuses the rules of the watchdog's vocabulary that judge v1 rather than
-/// zk2 (#612, FJ8a): `invalid-payload` and `qos-mismatch` judge against the
-/// v1 registry, `origin-down` reads the v1 roster's `alive` tokens, and
-/// `alert-firing` the v1 alert plane, which a zk2 deployment has none of
-/// until its profiles exist (#613). Their zk2 cut is the watchdog's (FJ8b).
-/// What stays: `rate-above`, `rate-below`, `silent-for` and `dropped`, which
-/// judge any wire selector, and `doctor`, zk2's own.
-pub fn zk2_rules(rules: &[Condition]) -> Result<()> {
-    for rule in rules {
-        let why = match rule {
-            Condition::InvalidPayload { .. } | Condition::QosMismatch { .. } => {
-                "judges against the v1 registry"
-            }
-            Condition::OriginDown { .. } => "reads the v1 roster's alive tokens",
-            Condition::AlertFiring { .. } => {
-                "reads the v1 alert plane; zk2's alerts are a profile still to come (#613)"
-            }
-            _ => continue,
-        };
-        return Err(Error::unaskable(
-            format!("--on '{rule}'"),
-            format!(
-                "{why}, not a zk2 deployment. A zk2 capture fires on rate-above, rate-below, \
-                 silent-for, dropped or doctor <CHECK-ID>"
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// The owners' current state under `selector` (S4): target `All`,
 /// consolidation `Latest`, each reply on a concrete key (R6). A deletion
 /// within an owner's window is not a value, and is left out. Returns the
@@ -294,9 +272,7 @@ pub fn watch_cover<'s>(selectors: impl IntoIterator<Item = &'s String>) -> Vec<S
 ///
 /// `session` is the capture's own, in no namespace (the selectors are wire
 /// keys, and rows keep them whole); `namespace` is the one the operator
-/// stated, which the header carries as its base (#612, FJ8a). A rule that
-/// judges v1 rather than zk2 is refused before anything is declared
-/// ([`zk2_rules`]).
+/// stated, which the header carries as its base (#612, FJ8a).
 pub async fn record_on<W, F>(
     session: &Session,
     namespace: &str,
@@ -314,17 +290,27 @@ where
             "a trigger capture needs at least one rule to fire on",
         ));
     }
-    zk2_rules(&spec.rules)?;
 
     // Compiled before the monitor exists, so the `?` has nothing to tear
     // down (#336).
-    let mut rules = RuleSet::new(&spec.rules, namespace, None)?;
+    let mut rules = RuleSet::new(&spec.rules)?;
     let watched = watch_cover(spec.selectors.iter().chain(rules.watched()));
-    let wants_doctor = rules.wants_doctor();
+    let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
+    let addresses = rules.instance_addresses();
     // The doctor rules' doctor (#612, FJ6): only the checks they name, one
-    // contract store for the capture.
+    // contract store for the capture, seeded with what `--contracts` holds.
     let doctor_spec = rules.doctor_spec(spec.timeout);
     let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
+    bundles.seed(&spec.contracts);
+    let deployment = spec.deployment.as_ref();
+    // The lens before the first window (FJ8b): a check inside the drain
+    // never waits on a presence read or a retrieval.
+    let mut catalog: Option<Catalog> = match (wants_lens, deployment) {
+        (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
+            .await
+            .ok(),
+        _ => None,
+    };
 
     // The ring is budgeted to the pre-roll **before** anything is watched:
     // `set_budget` applies from the next push, and the first push must
@@ -344,26 +330,33 @@ where
 
     let armed = tokio::time::Instant::now();
     let give_up_at = spec.give_up.map(|d| armed + d);
-    let mut facts_cache = crate::model::facts::FactsCache::default();
 
     // ── armed: judge tick by tick, write nothing ──────────────────────────
     let fired: Option<Transition> = 'armed: loop {
         let deadline = rules.last_eval() + spec.tick;
-        // zk2's rules ask nothing per tick but the doctor: no roster, no
-        // alert plane, no decode (`zk2_rules`).
+        // The sweep asks what the rules need, beside the drain: the doctor,
+        // the instance tokens, a fresh lens.
         let sweep = async {
-            if wants_doctor {
-                Some(
-                    crate::judge::condition::tick_doctor(
-                        spec.doctor.as_ref(),
-                        &bundles,
-                        &doctor_spec,
-                    )
-                    .await,
-                )
+            let doctor = if wants_doctor {
+                Some(crate::judge::condition::tick_doctor(deployment, &bundles, &doctor_spec).await)
             } else {
                 None
-            }
+            };
+            let instances = if addresses.is_empty() {
+                None
+            } else {
+                Some(
+                    crate::judge::condition::tick_instances(deployment, &addresses, spec.timeout)
+                        .await,
+                )
+            };
+            let lens = match (wants_lens, deployment) {
+                (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
+                    .await
+                    .ok(),
+                _ => None,
+            };
+            (doctor, instances, lens)
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
@@ -381,8 +374,11 @@ where
         while !closed {
             let item = tokio::select! {
                 item = events.recv() => item,
-                outcome = &mut sweep, if swept.is_none() => {
-                    swept = Some(outcome);
+                (doctor, instances, lens) = &mut sweep, if swept.is_none() => {
+                    if let Some(c) = lens {
+                        catalog = Some(c);
+                    }
+                    swept = Some((doctor, instances));
                     continue;
                 }
                 () = &mut tick_over, if swept.is_some() => break,
@@ -392,9 +388,10 @@ where
                 }
             };
             match item {
-                // No rule left asks for a verdict (`zk2_rules`).
                 Some(StreamItem::Event(FleetEvent::Sample(s))) => {
-                    rules.observe_sample(&s, &mut facts_cache, None);
+                    let lens =
+                        Lens::new(namespace, catalog.as_ref(), &bundles).offline(&spec.contracts);
+                    rules.observe_sample(&s, &lens);
                 }
                 Some(StreamItem::Dropped(n)) => rules.observe_drop(n),
                 Some(_) => {}
@@ -409,9 +406,15 @@ where
             // stream that is gone, and nothing was written.
             break 'armed None;
         }
-        let doctor_outcome = match swept {
+        let (doctor_outcome, instance_asks) = match swept {
             Some(outcome) => outcome,
-            None => sweep.await,
+            None => {
+                let (doctor, instances, lens) = sweep.await;
+                if let Some(c) = lens {
+                    catalog = Some(c);
+                }
+                (doctor, instances)
+            }
         };
         let now = tokio::time::Instant::now();
         let at = crate::tape::record::rfc3339_now();
@@ -422,8 +425,7 @@ where
                 doctor: doctor_outcome
                     .as_ref()
                     .map(|o| o.as_ref().map_err(String::as_str)),
-                roster: None,
-                alerts: None,
+                instances: instance_asks.as_deref(),
             },
         );
         for t in transitions {
@@ -736,28 +738,28 @@ mod tests {
         assert_eq!(state_projection("prod", "other/zk2/**"), None);
     }
 
-    /// A rule that judges v1 is refused by name, with what a zk2 capture
-    /// fires on; the rest pass.
+    /// Every zk2 rule arms a capture now (FJ8b): the three FJ8a refused —
+    /// `invalid-payload`, `qos-mismatch` and v1's `origin-down` as zk2's
+    /// `instance-gone` — parse and compile into one rule set; v1's
+    /// `alert-firing` is dark (#613) and refused at the parse.
     #[test]
-    fn only_zk2_conditions_arm_a_capture() {
-        let rule = |s: &str| Condition::parse(s).expect(s);
-        for ok in [
+    fn every_zk2_condition_arms_a_capture() {
+        let rules: Vec<Condition> = [
             "rate-above zk2/** 10",
             "silent-for zk2/** 5",
             "dropped",
             "doctor split-brain",
-        ] {
-            assert!(zk2_rules(&[rule(ok)]).is_ok(), "{ok}");
-        }
-        for v1 in [
-            "invalid-payload v1/**",
-            "qos-mismatch v1/**",
-            "origin-down h-aaaaaaaaaaaa",
-            "alert-firing v1/**",
-        ] {
-            let e = zk2_rules(&[rule("dropped"), rule(v1)]).unwrap_err();
-            assert!(e.is_unaskable(), "{v1}: {e}");
-            assert!(e.to_string().contains("silent-for"), "{e}");
-        }
+            "invalid-payload zk2/**",
+            "qos-mismatch zk2/**",
+            "instance-gone host-a/tc",
+        ]
+        .iter()
+        .map(|s| Condition::parse(s).expect(s))
+        .collect();
+        let set = RuleSet::new(&rules).expect("they compile");
+        assert!(set.wants_lens());
+        assert_eq!(set.instance_addresses(), ["host-a/tc"]);
+        let e = Condition::parse("alert-firing zk2/**").unwrap_err();
+        assert!(e.is_unaskable() && e.to_string().contains("#613"), "{e}");
     }
 }

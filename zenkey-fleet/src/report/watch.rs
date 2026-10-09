@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use super::observe::{Conformance, QosMismatch};
 use super::payload::PayloadRendering;
 use super::state::Stamp;
 
@@ -28,6 +29,11 @@ pub struct WatchSample {
     /// carried none (a stream sample may not).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<Stamp>,
+    /// The QoS the sample rode against its resource's (spec §2.4: an owner
+    /// MUST publish with it), present only when they differ: the declared
+    /// axes, the observed ones, and which (#612, FJ8b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qos_mismatch: Option<QosMismatch>,
     /// A put or a delete. Tagged `kind`.
     #[serde(flatten)]
     pub event: WatchEvent,
@@ -41,6 +47,9 @@ pub enum WatchEvent {
     /// through the declared attachment type when one rode along.
     Put {
         payload: Box<PayloadRendering>,
+        /// The payload against its declared type (§7.2, §7.3): valid,
+        /// invalid, undecodable, or not checked with why.
+        conformance: Conformance,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attachment: Option<Box<PayloadRendering>>,
     },
@@ -67,6 +76,15 @@ pub struct WatchSummary {
     /// Samples put on a wildcard key and discarded by rule (R6). Not
     /// losses.
     pub discarded: u64,
+    /// Samples on a concrete key that resolved to no member of the
+    /// resource through a bound provider (#671): the bus and the contract
+    /// disagree. Counted apart from R6's discards and from lag (O6).
+    pub unresolved: u64,
+    /// Delivered samples whose QoS differed from the resource's (§2.4).
+    pub qos_mismatched: u64,
+    /// Delivered puts that failed their declared type: invalid, or
+    /// undecodable.
+    pub nonconforming: u64,
     /// Samples dropped because this tool fell behind its own buffer:
     /// losses, which make `received` a lower bound (O6).
     pub lagged: u64,
@@ -114,8 +132,12 @@ mod tests {
             key: key.into(),
             values: [("iface".to_owned(), vec!["eth0".to_owned()])].into(),
             timestamp: None,
+            qos_mismatch: None,
             event: WatchEvent::Put {
                 payload: Box::new(payload.clone()),
+                conformance: Conformance::NotChecked {
+                    reason: "no resource matches".into(),
+                },
                 attachment: None,
             },
         };
@@ -127,6 +149,7 @@ mod tests {
                 "values": {"iface": ["eth0"]},
                 "kind": "put",
                 "payload": serde_json::to_value(&payload).unwrap(),
+                "conformance": {"state": "not_checked", "reason": "no resource matches"},
             })
         );
         let d = WatchSample {
@@ -147,12 +170,18 @@ mod tests {
             selectors: vec!["zk2/*/tc/tc.netif.v1/stream/bandwidth/*/*".into()],
             received: 4,
             discarded: 10,
+            unresolved: 2,
+            qos_mismatched: 1,
+            nonconforming: 0,
             lagged: 0,
             elapsed_s: 1.5,
             ended: WatchEnd::Window,
         };
         let v = serde_json::to_value(&summary).unwrap();
         assert_eq!(v["discarded"], 10);
+        assert_eq!(v["unresolved"], 2, "apart from R6's discards (#671)");
+        assert_eq!(v["qos_mismatched"], 1);
+        assert_eq!(v["nonconforming"], 0, "a count, present at zero");
         assert_eq!(v["received"], 4);
         assert_eq!(
             v["lagged"], 0,

@@ -1,12 +1,12 @@
-//! `zenctl field` (#223) — per-path statistics plus the three field-granular
-//! findings, one family.
+//! `zenctl field` (#223; zk2's since #612, FJ8b) — per-path statistics plus
+//! the field-granular findings, one family.
 //!
 //! The honesty load here is the module's whole reason: the path table is
-//! bounded and its cost is a [`Note`] in every format (RFC 09 §5.1 O6);
-//! samples with no structural document are counted apart from absence, a
-//! missing registry makes `field-stuck`/`field-new` unjudgeable rather than
-//! silently clean (O4), and a stuck reading carries its own "observation,
-//! not a verdict" caveat so nobody pages off a constant-by-design field.
+//! bounded and its cost is a [`Note`] in every format (O6); samples with no
+//! document are counted apart from absence, a key no contract resolved is
+//! judged for nothing that needs its type rather than read as clean, and
+//! `field-stuck` is said to be not asked — its freshness is a profile's
+//! (#613) — never silently absent (O4).
 
 use zenkey_fleet::report::FieldReport;
 
@@ -36,6 +36,12 @@ impl Render for FieldReport {
         let mut grid = Grid::unheaded(3).right(0);
         for r in &self.rows {
             let mut detail = vec![r.kinds.join("+")];
+            detail.push(match r.declared {
+                Some(true) => "declared".to_string(),
+                Some(false) => "NOT declared by its type".to_string(),
+                // No declared surface: unjudgeable, which is not undeclared.
+                None => "—".to_string(),
+            });
             detail.push(match (r.changes, r.last_change_s) {
                 (0, _) => "unchanged".to_string(),
                 (n, Some(at)) => format!("{n} change(s), last at {at:.1}s"),
@@ -61,16 +67,13 @@ impl Render for FieldReport {
             let mut grid = Grid::unheaded(2);
             for f in &self.findings {
                 let mark = crate::render::style::mark(f.severity);
-                let citation = f
-                    .citation
-                    .as_deref()
-                    .map(|c| format!("  [{c}]"))
-                    .unwrap_or_default();
                 grid.row([
                     Cell::styled(mark, crate::render::style::severity(f.severity)),
                     Cell::text(format!(
-                        "{}: {} — {}{citation}",
-                        f.check, f.subject, f.evidence
+                        "{}: {} — {}",
+                        f.check.as_str(),
+                        f.subject,
+                        f.evidence
                     )),
                 ]);
             }
@@ -81,7 +84,7 @@ impl Render for FieldReport {
     fn bounds(&self) -> Vec<BoundCost> {
         // The examples behind the refused count (`paths_dropped_examples`)
         // and the bound itself (`max_paths`) ride the document; the note
-        // carries the cost and its reading (the bounds() migration).
+        // carries the cost and its reading.
         vec![
             BoundCost::new(
                 BoundKind::Missed,
@@ -94,14 +97,6 @@ impl Render for FieldReport {
                 self.paths_dropped,
                 "path observation(s) refused at the path-table bound; stats \
                  cover the tracked set",
-            ),
-            // The bounded facts cache's cost (#107, O6): declared ttl/type
-            // context covers the retained keys only.
-            BoundCost::new(
-                BoundKind::Retired,
-                self.facts_evicted,
-                "key projection(s) retired by the bounded facts cache — \
-                 declared ttl/type context covers the retained keys only",
             ),
         ]
     }
@@ -121,22 +116,31 @@ impl Render for FieldReport {
         );
         if self.undocumented > 0 {
             coverage.push_str(&format!(
-                "; {} sample(s) carried no structural document — fields are \
-                 unobservable for them, which is not absence",
+                "; {} sample(s) carried no document (a raw type, bytes that do not \
+                 decode, a deletion) — fields are unobservable for them, which is not \
+                 absence",
                 self.undocumented
             ));
         }
-        notes.push(Note::coverage(coverage).cite("RFC 09 §5.1 O5"));
-        if !self.registry_loaded {
+        notes.push(Note::coverage(coverage).cite("tooling guide O5"));
+        if self.unresolved > 0 {
             notes.push(
-                Note::coverage(
-                    "no registry loaded — declared ttl_s and type names are unknown, \
-                     so field-stuck and field-new are unjudgeable, which is not the \
-                     same as clean",
-                )
-                .cite("RFC 09 §5.1 O4"),
+                Note::coverage(format!(
+                    "{} sample(s) on keys no contract resolved were observed \
+                     structurally: field-new is unjudgeable for them, which is not \
+                     the same as clean",
+                    self.unresolved
+                ))
+                .cite("tooling guide O4"),
             );
         }
+        notes.push(
+            Note::coverage(
+                "field-stuck was not asked: it judges against a declared freshness, \
+                 the freshness.v1 profile's (#613)",
+            )
+            .cite("tooling guide O4"),
+        );
         if self.findings.is_empty() {
             notes.push(Note::summary(format!(
                 "no findings over this {:.0}s window — which scopes the claim: a \
@@ -144,15 +148,8 @@ impl Render for FieldReport {
                 self.window_s
             )));
         } else {
-            notes.push(
-                Note::caveat(
-                    "a stuck reading is an observation with a stated window, not a \
-                     verdict — a constant-by-design field always reads this way",
-                )
-                .cite("RFC 04 §1.2"),
-            );
             notes.push(Note::summary(format!(
-                "{} finding(s) across field-vanished / field-stuck / field-new.",
+                "{} finding(s) across field-vanished / field-new.",
                 self.findings.len()
             )));
         }

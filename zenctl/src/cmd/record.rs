@@ -16,10 +16,11 @@
 //! written until a rule fires, and then the file carries the state
 //! preamble (the owners' own answer, S4), the retained pre-roll, the trigger
 //! record and the post-roll. The engine's [`record_on`] does all of it over
-//! one event stream; this verb parses the rules the way `watchdog` does,
-//! refuses the ones that judge v1 rather than zk2 before a session opens,
-//! and renders what came back. Nothing firing within `--for` is exit 0
-//! with a silence note — a rule not firing is not a finding.
+//! one event stream; this verb parses the rules the way `watchdog` does —
+//! the whole zk2 vocabulary since FJ8b, `invalid-payload`, `qos-mismatch`
+//! and `instance-gone` judged through the deployment's namespace — and
+//! renders what came back. Nothing firing within `--for` is exit 0 with a
+//! silence note — a rule not firing is not a finding.
 
 use std::io::BufWriter;
 
@@ -47,6 +48,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         every,
         preamble,
         overwrite,
+        contracts,
         ns: _,
     } = cli;
     // Before anything else that could take time: an existing capture is
@@ -64,7 +66,9 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             "--on needs --pre <SECS>: a trigger capture is the retained window"
         ));
     };
+    let contracts = super::zk2::load_contracts(&contracts)?;
     let triggered = Triggered {
+        contracts,
         rules: on,
         pre: super::positive_secs("--pre", pre)?,
         post: super::positive_secs("--post", post)?,
@@ -214,6 +218,7 @@ async fn run_inner(
 
 /// The triggered form's flags, parsed and bounded.
 struct Triggered {
+    contracts: zenkey_fleet::ContractSet,
     rules: Vec<String>,
     pre: std::time::Duration,
     post: std::time::Duration,
@@ -231,23 +236,21 @@ async fn run_triggered(
     dep: &Deployment,
 ) -> Result<()> {
     // The rules, the `watchdog` way: parsed before a session exists, so a
-    // rule outside the closed vocabulary — or one that judges v1 rather
-    // than zk2 — is a refusal and not a connect.
+    // rule outside the closed vocabulary — or one of v1's dark ones — is a
+    // refusal and not a connect.
     let rules: Vec<Condition> = t
         .rules
         .iter()
         .map(|r| Condition::parse(r))
         .collect::<std::result::Result<_, _>>()
         .map_err(anyhow::Error::from)?;
-    zenkey_fleet::zk2_rules(&rules)?;
 
     let session = dep.link().session().await?;
-    // A `doctor <CHECK-ID>` rule's doctor reads the deployment through a
-    // session in its namespace, beside this one (#612, FJ6).
-    let doctor = if rules
-        .iter()
-        .any(|r| matches!(r, Condition::DoctorCheck { .. }))
-    {
+    // The rules that read the deployment — the doctor, an address's
+    // instance tokens, the lens a payload or a QoS is judged through — read
+    // it through a session in its namespace, beside this one (#612, FJ6,
+    // FJ8b).
+    let deployment = if rules.iter().any(super::watchdog::reads_deployment) {
         Some(DoctorBus {
             session: dep.session().await?,
             raw: session.clone(),
@@ -257,7 +260,8 @@ async fn run_triggered(
         None
     };
     let spec = TriggerSpec {
-        doctor,
+        deployment,
+        contracts: t.contracts,
         selectors: selectors.to_vec(),
         pre: t.pre,
         post: t.post,

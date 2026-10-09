@@ -54,11 +54,11 @@ impl Render for TimelineReport {
                 );
                 let p = &lane.provenance;
                 let mut parts = Vec::new();
-                if p.self_stamped > 0 {
-                    parts.push(format!("{} self-stamped", p.self_stamped));
+                if p.owner > 0 {
+                    parts.push(format!("{} on the owner's clock", p.owner));
                 }
-                if p.foreign > 0 {
-                    parts.push(format!("{} foreign", p.foreign));
+                if p.other > 0 {
+                    parts.push(format!("{} on another clock", p.other));
                 }
                 if p.unattributable > 0 {
                     parts.push(format!("{} unattributable", p.unattributable));
@@ -173,14 +173,36 @@ impl Render for TimelineReport {
                 .cite("RFC 09 §5.1 O4"),
             );
         }
-        if self.scopes.iter().any(|s| s.contains("**")) {
+        let excluded = zenkey_fleet::zrec_excluded(&self.scopes);
+        if !excluded.is_empty() {
+            notes.push(
+                Note::coverage(format!(
+                    "{} excluded from this window, not empty: no selector names them, \
+                     and `*`/`**` never match a verbatim chunk",
+                    excluded.join(", ")
+                ))
+                .cite("tooling guide O5"),
+            );
+        }
+        // Whose clock a stamp is on needs the owner's session zid, which only
+        // a presence read names (O7): without one, every stamp reads
+        // unattributable, and that is not the same as foreign.
+        if self.lens.presence.is_none() {
             notes.push(
                 Note::coverage(
-                    "a `**` selector never crosses an `@`-chunk: the verbatim planes \
-                     (`@rpc`, `@media`, `@blob`, `@catalog`) are excluded from this \
-                     window, not empty",
+                    "no presence read stood behind these lanes: no owner's zid is \
+                     named, so every stamp is unattributable (not foreign), and a key \
+                     resolves past its address only through --contracts",
                 )
-                .cite("RFC 03 §4 D2"),
+                .cite("tooling guide O7"),
+            );
+        } else if self.lens.presence.as_ref().is_some_and(|p| !p.complete) {
+            notes.push(
+                Note::coverage(
+                    "the presence read ended at its timeout: an owner it did not see \
+                     leaves its stamps unattributable",
+                )
+                .cite("spec §8.1"),
             );
         }
         notes.push(Note::rendering(

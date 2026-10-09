@@ -54,12 +54,13 @@ Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
 
 The verdict verbs land the same refusal on the same code, and say so in their
 own words: a `$*` selector is a question that cannot be asked, and their 1
-would claim a verdict this run never reached.
+would claim a verdict this run never reached. `check expect` names an
+address since FJ8b (#612), and the address grammar is what refuses it.
 
 ```console
-$ zenctl check expect 'v1/$*/x' --for 1
+$ zenctl check expect 'host-$*/tc' tc.netif.v1 --for 1
 ? 2
-Error: `$*` must not be used in selectors (RFC 03 §2): "v1/$*/x"
+Error: host-$*/tc: binding "host-$*/tc" is not <system>/<service> (each a name or *)
 check expect: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```

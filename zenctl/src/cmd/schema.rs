@@ -1,7 +1,6 @@
 //! `zenctl schema show` (#612, FJ4) — one zk2 revision's schema artifacts,
 //! as its bundle carries them — and [`check`](check), which answers under
-//! `check schema` (#307) and still checks a payload against a v1 producer's
-//! served `describe` or a SchemaSet file until FJ8 re-cuts it.
+//! `check schema` (#307): a payload against one type of a revision (FJ8b).
 //!
 //! v1's `schema show <producer>` read a producer's served `describe`. In zk2
 //! the shapes travel *with the contract*: a bundle carries every schema
@@ -12,7 +11,6 @@
 
 use anyhow::Result;
 
-use crate::Bus;
 use crate::bus::Deployment;
 use crate::cmd::zk2;
 use crate::exit::unaskable;
@@ -38,139 +36,70 @@ pub async fn show(cli: crate::cli::SchemaShowArgs) -> Result<()> {
     crate::render::emit_with(&mut std::io::stdout(), &view, dep.format(), dep.color())
 }
 
-/// `zenctl check schema` (#159): one payload against one schema, exit-coded
-/// for CI. 0 = valid; 1 = the payload does not conform (schema violations,
-/// or bytes that do not decode as the kind at all); 2 = could not check
-/// (no schema found, unknown kind) — "could not check" must never exit like
-/// either verdict, for the same reason `check cutover` reserves its 2.
+/// `zenctl check schema` (#159; zk2's since #612, FJ8b): one payload, from
+/// a file or stdin, against one type of a zk2 contract, exit-coded for CI.
+/// 0 = it conforms; 1 = it does not (violations of its JSON Schema type,
+/// or bytes that do not decode as the declared type at all); 2 = it could
+/// not be checked (no revision, no such resource or member, a raw type that
+/// declares no structure, an unreadable payload) — "could not check" must
+/// never exit like either verdict.
 ///
-/// This checks; it never publishes and never encodes.
+/// The type is the revision's own, from `--contracts` or retrieved from its
+/// holders (spec §8.4): a JSON Schema type decodes as JSON or CBOR and is
+/// validated with `zenkey_model::validate` (§7.3); a protobuf type decodes
+/// through the bundle's descriptor set (§7.2). This checks; it never
+/// publishes and never encodes.
 pub async fn check(cli: crate::cli::CheckSchemaArgs) -> Result<()> {
-    let bus = ASKING.ask(Bus::resolve(&cli.bus));
-    let args = &bus;
+    let dep = ASKING.ask(Deployment::resolve(&cli.ns));
+    let contracts = ASKING.ask(zk2::load_contracts(&cli.contracts));
     let crate::cli::CheckSchemaArgs {
-        type_name,
+        target,
+        resource,
+        member,
         from,
-        producer,
-        schema_set,
         encoding,
-        bus: _,
+        contracts: _,
+        ns: _,
     } = cli;
-    let (type_name, from, producer, schema_set, encoding) = (
-        type_name.as_str(),
-        &from,
-        producer.as_deref(),
-        schema_set.as_deref(),
-        encoding.as_deref(),
-    );
-    use zenkey::schema::WireEncoding;
-    use zenkey_fleet::Verdict;
-
     // A payload that cannot be read is *unobservable*, not nonconformant
-    // (#244). `?` here would exit 1 — this verb's "does not conform" — and
-    // tell CI that a typo'd path is a schema violation.
+    // (#244): a typo'd path is not a schema violation.
     let bytes = match from.read() {
         Ok(bytes) => bytes,
         Err(e) => not_checked(&format!("{e:#}")),
     };
-
-    // Offline (--schema-set) needs no session at all — that is the whole
-    // point: an app repo checks its golden payloads in CI with no bus.
-    // Every schema-acquisition failure below is `not_checked`, never `?`: a
-    // `?` exits 1, this verb's "does not conform", and an unreadable file, a
-    // dead bus or a missing flag is not a claim about the payload (the same
-    // split #244 fixed for the payload itself).
-    let schema = match (schema_set, producer) {
-        (Some(path), _) => {
-            let text = match std::fs::read_to_string(path) {
-                Ok(t) => t,
-                Err(e) => not_checked(&format!("{}: {e}", path.display())),
-            };
-            let set = match zenkey::schema::SchemaSet::parse(&text) {
-                Ok(s) => s,
-                Err(e) => not_checked(&format!(
-                    "{}: not a SchemaSet document: {e}",
-                    path.display()
-                )),
-            };
-            match set.get(type_name) {
-                Some(s) => s.clone(),
-                None => not_checked(&format!("{} carries no type {type_name:?}", path.display())),
-            }
+    let mut session = None;
+    let revision = match zk2::revision(&dep, &contracts, &target, &mut session).await {
+        Ok(r) => r,
+        Err(e) => not_checked(&crate::errors::without_source_locations(&format!("{e:#}"))),
+    };
+    use zenkey_model::authoring::Kind;
+    let r = match revision.resource(
+        &resource,
+        &[Kind::Stream, Kind::State, Kind::Event, Kind::Operation],
+    ) {
+        Ok(r) => r,
+        Err(e) => not_checked(&e),
+    };
+    let member = member.into();
+    let report =
+        match zenkey_fleet::check_payload(&revision, r, member, encoding.as_deref(), &bytes) {
+            Ok(report) => report,
+            Err(why) => not_checked(&why),
+        };
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
+    // Off a `match` on the conformance, never a string (#356).
+    match report.conformance {
+        zenkey_fleet::report::Conformance::Valid => Ok(()),
+        zenkey_fleet::report::Conformance::Invalid { .. }
+        | zenkey_fleet::report::Conformance::Undecodable { .. } => {
+            std::process::exit(crate::exit::FINDING)
         }
-        (None, Some(p)) => {
-            let session = match args.session().await {
-                Ok(s) => s,
-                Err(e) => not_checked(&format!(
-                    "no session, so {p}'s served describe is out of reach: {}",
-                    crate::errors::without_source_locations(&format!("{e:#}"))
-                )),
-            };
-            let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-            match store.schema_for(&session, p, type_name).await {
-                Some(s) => s,
-                None => not_checked(&format!(
-                    "{p} serves no schema for {type_name:?} (RFC 08 §7 is a SHOULD — \
-                     this is silence about the type, not a claim about the payload)"
-                )),
-            }
-        }
-        (None, None) => not_checked(
-            "give --producer (live describe) or --schema-set FILE — the registry \
-             TOMLs carry type names, not shapes (RFC 08 §7)",
-        ),
-    };
-
-    let wire = match encoding
-        .map(str::to_string)
-        .or_else(|| zenkey_fleet::encode_encoding(None, None, Some(&schema)))
-    {
-        Some(name) => WireEncoding::from_encoding_str(&name),
-        None => not_checked(&format!(
-            "schema kind {:?} has no known framing — pass --encoding",
-            schema.kind_str()
-        )),
-    };
-
-    // A session-less store still decodes (it only needs one for fetching).
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    use crate::render::SchemaCheckVerdict as V;
-    let (verdict, detail): (V, Vec<String>) = match store.decode(&schema, &wire, &bytes) {
-        Ok(decoded) => match decoded.verdict {
-            Verdict::Valid => (V::Valid, decoded.notes),
-            Verdict::Invalid(errors) => (V::Invalid, errors),
-            Verdict::NotValidated(reason) => not_checked(&reason.to_string()),
-        },
-        Err(e) => match &e {
-            zenkey::schema::decode::DecodeError::Malformed { .. }
-            | zenkey::schema::decode::DecodeError::WrongEncoding(_) => {
-                (V::Undecodable, vec![e.to_string()])
-            }
-            _ => not_checked(&e.to_string()),
-        },
-    };
-
-    let report = crate::render::SchemaCheck {
-        type_name: type_name.to_string(),
-        kind: schema.kind_str().to_string(),
-        verdict,
-        detail,
-    };
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
-    // Off a `match` on the verdict, not a string comparison — which is the
-    // one thing `crate::exit` exists to stop being spelled twice (#356).
-    match report.verdict.exit_code() {
-        crate::exit::CLEAN => Ok(()),
-        code => std::process::exit(code),
+        zenkey_fleet::report::Conformance::NotChecked { reason } => not_checked(&reason),
     }
 }
 
 /// Exit 2: the check never happened — reserved so CI can tell "nonconformant"
-/// from "unobservable", the same split `check cutover` and `check probe`
-/// guard (`crate::exit`).
+/// from "unobservable", through the same seam as every other exit-2 (#355).
 fn not_checked(reason: &str) -> ! {
-    // Through the same seam as every other exit-2 (#355): this used to spell
-    // the code and the message itself, so it was a fourth statement of a
-    // contract `crate::exit` exists to state once.
     ASKING.unobservable(format_args!("not checked: {reason}"))
 }

@@ -348,8 +348,10 @@ impl Render for ExpectReport {
 
     fn table(&self, t: &mut Table) {
         t.line(format!(
-            "{}: {} sample(s) on {} key(s) over {:.1}s{}{}",
-            self.selector,
+            "{} {} {}: {} sample(s) on {} key(s) over {:.1}s{}{}",
+            self.address,
+            self.iface,
+            self.resource.as_deref().unwrap_or("(presence)"),
             self.samples,
             self.keys_seen,
             self.window_s,
@@ -359,6 +361,16 @@ impl Render for ExpectReport {
                 None => String::new(),
             }
         ));
+        if let Some(p) = &self.presence {
+            t.line(match (&p.error, p.holders.as_slice(), p.complete) {
+                (Some(e), _, _) => format!("presence: not read — {e}"),
+                (None, [], true) => "presence: no token visible to this reader".to_owned(),
+                (None, [], false) => {
+                    "presence: no token seen, and the read ended at its timeout".to_owned()
+                }
+                (None, holders, _) => format!("presence: held by {}", holders.join(", ")),
+            });
+        }
         if !self.violations.is_empty() {
             t.line(format!(
                 "violations ({} shown of {}):",
@@ -406,8 +418,12 @@ impl Render for ExpectReport {
     }
 
     fn scope(&self) -> Option<ObservedScope> {
+        let mut asked = self.selectors.clone();
+        if let Some(p) = &self.presence {
+            asked.push(p.selector.clone());
+        }
         Some(ObservedScope {
-            asked: vec![self.selector.clone()],
+            asked,
             window_s: Some(self.window_s),
         })
     }
@@ -423,6 +439,128 @@ impl Render for ExpectReport {
                      either way",
                 )
                 .cite("RFC 09 §5.1 O6"),
+            );
+        }
+        notes
+    }
+}
+
+/// `check probe` (#59; zk2's since #612, FJ8b): one resource read as a
+/// consumer reads it. The verdict's word leads — a value arrived, nothing
+/// usable did, or the silence could not be attributed — and the presence
+/// read that attributes a silence is drawn only when it was made.
+impl Render for zenkey_fleet::report::ProbeReport {
+    const FAMILY: &'static str = "probe";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        envelope_of(self)
+    }
+
+    fn rows(&self, _out: &mut dyn FnMut(Row)) {}
+
+    fn table(&self, t: &mut Table) {
+        use zenkey_fleet::Judgement;
+        t.line(format!(
+            "probe {} {} {}: {} value(s) in {:.1}s ({} conforming, {} not){}",
+            self.address,
+            self.iface,
+            self.resource,
+            self.received,
+            self.elapsed_s,
+            self.conforming,
+            self.nonconforming,
+            match &self.current {
+                Some(c) => match &c.error {
+                    Some(e) => format!("; current state not read: {e}"),
+                    None => format!(
+                        "; current state: {} key(s), {} conforming",
+                        c.answered, c.conforming
+                    ),
+                },
+                None => String::new(),
+            },
+        ));
+        if let Some(first) = &self.first {
+            for line in crate::render::sample_lines(first) {
+                t.line(format!("  {line}"));
+            }
+        }
+        if let Some(p) = &self.presence {
+            t.line(match (&p.error, p.holders.as_slice(), p.complete) {
+                (Some(e), _, _) => format!("presence: not read — {e}"),
+                (None, [], true) => "presence: no token visible to this reader".to_owned(),
+                (None, [], false) => {
+                    "presence: no token seen, and the read ended at its timeout".to_owned()
+                }
+                (None, holders, _) => {
+                    format!("presence: held by {} — up, and silent", holders.join(", "))
+                }
+            });
+        }
+        let (word, style) = match &self.verdict {
+            Judgement::NotEstablished { .. } => ("ARRIVED", crate::render::style::PASS),
+            Judgement::Established => (
+                "NOTHING USABLE ARRIVED — the finding",
+                crate::render::style::ERROR,
+            ),
+            Judgement::Unobservable { .. } | Judgement::NotAsked => (
+                "UNOBSERVABLE — the silence cannot be attributed",
+                crate::render::style::UNPROVEN,
+            ),
+        };
+        t.line_styled(word, style);
+        if let Judgement::Unobservable { reason } = &self.verdict {
+            t.line(format!("  ! {reason}"));
+        }
+    }
+
+    fn bounds(&self) -> Vec<BoundCost> {
+        vec![BoundCost::new(
+            BoundKind::Missed,
+            self.lagged,
+            "value(s) arrived past this tool's buffer, not inspected",
+        )]
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        let mut asked = self.selectors.clone();
+        if let Some(p) = &self.presence {
+            asked.push(p.selector.clone());
+        }
+        Some(ObservedScope {
+            asked,
+            window_s: Some(self.window_s),
+        })
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        if self.discarded > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{} sample(s) on a wildcard key discarded by rule — not values",
+                    self.discarded
+                ))
+                .cite("spec §3.2 R6"),
+            );
+        }
+        if self.unresolved > 0 {
+            notes.push(Note::coverage(format!(
+                "{} sample(s) on a key that resolved to no member of the resource (#671)",
+                self.unresolved
+            )));
+        }
+        if self
+            .presence
+            .as_ref()
+            .is_some_and(|p| p.holders.is_empty() && p.complete)
+        {
+            notes.push(
+                Note::caveat(
+                    "a read access control refused is complete and empty too: no token is \
+                     what this reader could see",
+                )
+                .cite("spec §8.1"),
             );
         }
         notes

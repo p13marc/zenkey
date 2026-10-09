@@ -151,7 +151,11 @@ claim. None discards the key.
 Every rung outcome has its own spelling in every medium, so a script
 branches on the rung, never on prose. The fleet's `Unresolved` and
 `Rendered` enums are that spelling. A type is named one way, decoded or
-not (core §7.2, 0.8).
+not (core §7.2, 0.8). zenctl's raw observers (`echo`, `rate`, `field`,
+`timeline`, `snapshot`, `watchdog`; #612, FJ8b) walk this ladder through
+one session-free lens, so a `.zrec` read later resolves exactly as the
+live window did; each key's outcome rides as its `identity` (`KeyGroup`
+plus the rung it stopped at).
 
 **O3. Do not guess another deployment's namespace.** A data key outside
 the configured namespace is "not in this namespace". A tool does not
@@ -263,7 +267,13 @@ lands at the bus root, where no consumer of the deployment listens.
   `compat`, `zk2 contract check-history`). A move from v1 to zk2 is each
   adopter's own (#614).
 - **Profile-backed checks** stay dark until their profiles exist (#613).
-  These are kinds and budgets, alerts, configuration, blobs and export.
+  These are kinds and budgets, alerts, configuration, blobs and export, and
+  `field-stuck`, which judges against a declared freshness (`freshness.v1`).
+  A tool says *not asked*, never *clean*.
+- **Origin alignment** (RFC 13 §4.4's `--normalize-origins`) has nothing to
+  align: a zk2 key names its system and service, so two deployments compare
+  by key, each file's namespace stripped. Their two clocks are still never
+  compared.
 
 ## 7. Testing a tool against this guide
 

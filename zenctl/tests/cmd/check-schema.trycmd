@@ -1,35 +1,63 @@
-`check schema --schema-set` is the offline half of the RFC 08 §7 decode seam —
-"needs no session at all — that is the whole point" (`cmd/schema.rs`). It is
-also the clearest place in the tool where the 0/1/2 contract carries three
-*different* facts rather than degrees of one, which is why it now sits under
-`check` with the other four (#307).
+`check schema` is the offline half of the decode seam: one payload against
+one type of a zk2 revision (#612, FJ8b), which "needs no session at all —
+that is the whole point". It is also the clearest place in the tool where the
+0/1/2 contract carries three *different* facts rather than degrees of one,
+which is why it sits under `check` with the others (#307).
+
+The type is the revision's own — from `--contracts` here, so the session is
+never opened (the `--zenoh-config` points at a dead bus and nothing fails),
+or retrieved from its holders (spec §8.4). A JSON Schema type decodes as JSON
+or CBOR and is validated (§7.3); a protobuf type decodes through the
+bundle's descriptor set (§7.2).
 
 **0 — it conforms.**
 
 ```console
-$ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"ok"}'
-{"kind":"json-schema","report":"schema-check","type":"Health","verdict":"valid"}
+$ zenctl check schema tc.netif.v1 state/interfaces/{ns}/{iface} --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from '{"name":"eth0","index":2,"namespace":"default","is_up":true}'
+{"conformance":{"state":"valid"},"declared":"json:NetworkInterface","fingerprint":"sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0","iface":"tc.netif.v1","member":"type","report":"schema-check","resource":"state/interfaces/{ns}/{iface}","size":60,"value":{"index":2,"is_up":true,"name":"eth0","namespace":"default"}}
 
 ```
 
 **1 — it was checked, and it does not conform.** A finding, with the failing
-constraint named.
+constraint named by its JSON pointer.
 
 ```console
-$ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from '{"status":"melted"}'
+$ zenctl check schema tc.netif.v1 state/interfaces/{ns}/{iface} --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from '{"name":"eth0","index":2,"namespace":"default","is_up":"yes"}'
 ? 1
-{"detail":["/status: /"melted/" is not one of /"ok/", /"degraded/" or /"down/""],"kind":"json-schema","report":"schema-check","type":"Health","verdict":"invalid"}
+{"conformance":{"state":"invalid","violations":["/is_up: expected boolean, found string"]},"declared":"json:NetworkInterface","fingerprint":"sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0","iface":"tc.netif.v1","member":"type","report":"schema-check","resource":"state/interfaces/{ns}/{iface}","size":61,"value":{"index":2,"is_up":"yes","name":"eth0","namespace":"default"}}
+
+```
+
+Bytes that do not decode as the declared type at all are the same finding,
+not a different exit: what was declared did not arrive.
+
+```console
+$ zenctl check schema tc.netif.v1 state/interfaces/{ns}/{iface} --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from 'not json'
+? 1
+{"conformance":{"declared":"json:NetworkInterface","reason":"as json: expected ident at line 1 column 2","state":"undecodable"},"declared":"json:NetworkInterface","fingerprint":"sha256:4f531ebec4c4eee015c18f11aefbce9138b413cfdca6bf6b777ea0eb6f43b4e0","iface":"tc.netif.v1","member":"type","report":"schema-check","resource":"state/interfaces/{ns}/{iface}","size":8}
 
 ```
 
 **2 — the check never happened.** Reserved so CI can tell "nonconformant" from
 "unobservable" — the same split `check cutover` and `check probe` guard, and
-the reason silence is never a verdict (RFC 05 §3.1).
+the reason silence is never a verdict. A resource the revision does not
+declare is the input refused:
 
 ```console
-$ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Nope --from '{}'
+$ zenctl check schema tc.netif.v1 state/nope --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from '{}'
 ? 2
-check schema: not checked: tests/cmd/fixtures/sysinfo.schemaset.json carries no type "Nope"
+check schema: not checked: tc.netif.v1 declares no stream or state or event or operation resource "state/nope"; it declares: @op/diagnostics, @op/interfaces/{ns}/{iface}/set, state/interfaces/{ns}/{iface}, state/namespaces, stream/bandwidth/{ns}/{iface}
+check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A member the resource does not have is the same: a stream sample has no
+`request`.
+
+```console
+$ zenctl check schema tc.netif.v1 stream/bandwidth/{ns}/{iface} --member request --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from '{}'
+? 2
+check schema: not checked: stream/bandwidth/{ns}/{iface} declares no request
 check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
@@ -43,7 +71,7 @@ The message names the flag and the interpretation, because the failure a user
 actually hits here is a literal `@` they did not mean as a path.
 
 ```console
-$ zenctl check schema --schema-set tests/cmd/fixtures/sysinfo.schemaset.json --type Health --from @tests/cmd/fixtures/no-such-payload.json
+$ zenctl check schema tc.netif.v1 state/interfaces/{ns}/{iface} --contracts ../examples/zk2/.history --zenoh-config tests/cmd/fixtures/dead-bus.json5 --from @tests/cmd/fixtures/no-such-payload.json
 ? 2
 check schema: not checked: --from: cannot read tests/cmd/fixtures/no-such-payload.json — a leading @ means "read this path": No such file or directory (os error 2)
 check schema: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)

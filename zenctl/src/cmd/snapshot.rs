@@ -1,36 +1,34 @@
-//! `zenctl snapshot` (#219, RFC 13 §4.4): a fleet's current values kept
-//! on disk as a `.zsnap`, and two of them compared.
+//! `zenctl snapshot` (#219, RFC 13 §4.4; zk2's since #612, FJ8b): a
+//! deployment's current state kept on disk as a `.zsnap`, and two of them
+//! compared by zk2 key.
 //!
-//! The take is the engine's [`take_snapshot`] — one fan-in GET per
-//! selector, the roster joined beside it, every reply folded per key
-//! last-writer-wins — written through the same `tokio::fs` → `BufWriter`
-//! path `record` uses. **Silence is not a snapshot**: a fan-out nobody
-//! answered exits 2 through [`crate::exit`]'s reserved non-verdict and
-//! writes nothing, because a file of zero rows would read as an empty
-//! fleet the next time somebody diffed against it (RFC 05 §3.1).
+//! The take is the engine's [`take_snapshot`]: one state GET per selector,
+//! the owners answering (spec §4.2 S4: target All, consolidation Latest),
+//! every reply folded per key and resolved through the raw observers' lens
+//! — the presence read made first, in the namespace, naming each address's
+//! instances and its owner's session zid, and the revisions its descriptors
+//! name. Written through the same `tokio::fs` → `BufWriter` path `record`
+//! uses. **Silence is not a snapshot**: a GET nobody answered exits 2
+//! through [`crate::exit`]'s reserved non-verdict and writes nothing,
+//! because a file of zero rows would read as an empty deployment the next
+//! time somebody diffed against it.
 //!
 //! The diff opens no session. Its exit is the RFC 13 §1.2 projection over
 //! the diff's own judgement — a difference *is* the finding (1), identity
 //! is clean (0) — and a file that could not be read is the reserved 2,
-//! never a claim that the two agree.
-//!
-//! `--normalize-origins` (#220) is two deployments, one diff: the engine
-//! profiles every host on both sides, plans the alignment (explicit
-//! `--map`s, then verified unique labels, then unique producer sets —
-//! `zenkey_fleet::plan_map`), and compares `b` read through it. An origin
-//! the plan cannot place is the third exit path: the report goes out with
-//! every unpaired origin listed, no comparison is made over them, and the
-//! judgement is the reserved 2 — "I cannot map these" is the finding a
-//! script can act on, and a diff that compared around them would not be.
+//! never a claim that the two agree. It compares by zk2 key: each row's key
+//! relative to its own file's namespace, so two deployments line up on the
+//! keys their services publish, which v1's origin alignment existed to
+//! approximate.
 
 use std::io::{BufReader, BufWriter};
 
 use anyhow::{Context, Result};
-use zenkey::origin::HostId;
-use zenkey_fleet::{DiffOpts, SnapshotSpec, ZsnapReader, ZsnapWriter, take_snapshot};
+use zenkey_fleet::{DiffOpts, Lens, SnapshotSpec, ZsnapReader, ZsnapWriter, take_snapshot};
 
-use crate::Bus;
+use crate::bus::Deployment;
 use crate::cli::{SnapshotArgs, SnapshotDiffArgs};
+use crate::cmd::zk2;
 use crate::exit::{self, Asking};
 
 /// The take's name on its one exit-2 path (silence under fan-out).
@@ -39,16 +37,17 @@ const TAKING: Asking = Asking::new("snapshot");
 const DIFFING: Asking = Asking::new("snapshot diff");
 
 pub async fn take(cli: SnapshotArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
+    let dep = Deployment::resolve(&cli.ns)?;
+    let contracts = zk2::load_contracts(&cli.contracts)?;
     let SnapshotArgs {
-        selector,
+        selectors,
         out,
         max_replies,
-        no_roster,
+        no_presence,
         overwrite,
         cmd: _,
-        bus: _,
+        contracts: _,
+        ns: _,
     } = cli;
     // `required = true` under `subcommand_negates_reqs`: clap has already
     // refused a take without `--out`, so this is the type's shape, not a
@@ -61,42 +60,72 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     // An existing snapshot is refused unless --overwrite (#514) — here,
     // before the session, because nothing the fleet answers changes it.
     let mode = super::output_mode(&out, overwrite)?;
-    let selector = super::selector_of(&selector, args)?;
+    let namespace = dep.namespace().to_owned();
+    let asked: Vec<String> = if selectors.is_empty() {
+        vec![zk2::default_selector(&namespace)]
+    } else {
+        selectors
+            .iter()
+            .map(|s| zk2::wire_selector(Some(s), &namespace))
+            .collect::<Result<_>>()?
+    };
+    // Only state answers a GET (spec §1.3): each selector narrowed to its
+    // state keys, and one that reaches none named, never silently dropped.
+    let mut gets = Vec::new();
+    let mut unreachable = Vec::new();
+    for s in &asked {
+        match zenkey_fleet::state_projection(&namespace, s) {
+            Some(p) if !gets.contains(&p) => gets.push(p),
+            Some(_) => {}
+            None => unreachable.push(s.clone()),
+        }
+    }
+    for s in &unreachable {
+        eprintln!(
+            "snapshot: {s} reaches no state key of namespace {namespace:?} — another kind, a \
+             control key, or outside the namespace: not asked"
+        );
+    }
+    if gets.is_empty() {
+        return Err(exit::unaskable!(
+            "no selector reaches a state key in {}: a snapshot is of state (spec §4.2)",
+            zk2::namespace_phrase(&namespace)
+        ));
+    }
 
-    let session = args.session().await?;
-    // Slices enrich: registration and the verdict judge against the
-    // registry; with none loaded every row says `registry_not_loaded` and
-    // `no_registry` — not asked, not answered no (O4).
-    let slices = args.slices_optional().await?;
-    let store = zenkey_fleet::SchemaStore::new(args.base(), args.timeout());
-    let fleet = args.fleet(&session);
+    let store = zk2::store(&dep, &contracts);
+    let catalog = if no_presence {
+        None
+    } else {
+        let ns_session = dep.session().await?;
+        zk2::read_lens(&dep, &ns_session, &store).await
+    };
+    let held = store.held().len();
+    let lens = Lens::new(&namespace, catalog.as_ref(), &store)
+        .offline(&contracts)
+        .held(held);
+    let session = dep.link().session().await?;
     let spec = SnapshotSpec {
-        selectors: vec![selector.clone()],
-        timeout: args.timeout(),
+        selectors: gets.clone(),
+        timeout: dep.timeout(),
         max_replies,
-        roster: !no_roster,
     };
 
-    // A `**` selector never crosses an `@`-chunk: say what the snapshot
-    // cannot contain up front, not after someone diffs it (O5).
     eprintln!(
-        "snapshot of {selector} to {out} — collected over a span, not at an instant{}",
-        if selector.contains("**") {
-            " — `**` cannot cross `@`-planes; they are excluded, not empty"
-        } else {
-            ""
-        }
+        "snapshot of {} to {out} — collected over a span, not at an instant",
+        gets.join(" + ")
     );
 
-    let taken = take_snapshot(&fleet, slices.as_ref(), &store, &spec).await?;
+    let taken = take_snapshot(&session, &lens, &spec).await?;
     if taken.snapshot.header.answered == 0 {
         // Silence under fan-out is the reserved 2 (`exit.rs`), and the file
         // is deliberately not written: nothing answered is not "nothing
         // there", and a `.zsnap` of zero rows would claim exactly that.
         TAKING.unobservable(format!(
-            "nobody answered {selector} within {}s — nothing written; silence is \
-             not a snapshot (RFC 05 §3.1)",
-            args.timeout().as_secs_f64()
+            "nobody answered {} within {}s — nothing written; silence is not a \
+             snapshot (S6)",
+            gets.join(" + "),
+            dep.timeout().as_secs_f64()
         ));
     }
 
@@ -111,25 +140,19 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
     }
     writer.finish()?;
 
-    let report = zenkey_fleet::snapshot_report(&taken.snapshot, Some(out), taken.incomplete);
-    crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())
+    let mut incomplete = taken.incomplete;
+    incomplete.extend(unreachable);
+    let report = zenkey_fleet::snapshot_report(&taken.snapshot, Some(out), incomplete);
+    crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())
 }
 
 pub fn diff(cli: SnapshotDiffArgs) -> Result<()> {
     let SnapshotDiffArgs {
         a,
         b,
-        normalize_origins,
-        maps,
         max_changes,
         out,
     } = cli;
-    // Parsed at the edge, before either file is opened: a `--map` this tool
-    // cannot read is an input it refuses (exit 2), not a pre-run failure.
-    let maps = maps
-        .iter()
-        .map(|m| parse_map(m))
-        .collect::<Result<Vec<_>>>()?;
     let read = |path: &str| -> Result<zenkey_fleet::Snapshot> {
         let file = std::fs::File::open(path).with_context(|| format!("open {path}"))?;
         let snapshot = ZsnapReader::new(BufReader::new(file))
@@ -145,38 +168,7 @@ pub fn diff(cli: SnapshotDiffArgs) -> Result<()> {
         max_changes,
         ..DiffOpts::default()
     };
-    let diff = if normalize_origins {
-        let plan = zenkey_fleet::plan_map(
-            &zenkey_fleet::origin_profiles(&a),
-            &zenkey_fleet::origin_profiles(&b),
-            &maps,
-        )
-        // An explicit pair naming an origin neither file holds is the
-        // operator's input, refused whole (exit 2) — a plan that quietly
-        // dropped it would compare the wrong keys.
-        .map_err(|e| exit::unaskable!("{e}"))?;
-        zenkey_fleet::diff_normalized(&a, &b, &plan, opts)
-    } else {
-        zenkey_fleet::diff_snapshots(&a, &b, opts)
-    };
+    let diff = zenkey_fleet::diff_snapshots(&a, &b, opts);
     crate::render::emit_with(&mut std::io::stdout(), &diff, out.format, out.color)?;
-    // Refused alignments exit 2 here too: `SnapshotDiff::to_judgement` is
-    // `Unobservable` over an unpaired origin, and the projection is the one
-    // seam (`exit.rs`).
     exit::verdict(&diff.to_judgement())
-}
-
-/// `A=B`, both sides `h-<12hex>` (RFC 03 §1.3) — anything else is refused
-/// at the edge.
-fn parse_map(spec: &str) -> Result<(HostId, HostId)> {
-    let Some((x, y)) = spec.split_once('=') else {
-        return Err(exit::unaskable!(
-            "--map {spec:?}: expected A=B, a's origin = b's origin"
-        ));
-    };
-    let parse = |side: &str, s: &str| {
-        HostId::parse(s)
-            .map_err(|e| exit::unaskable!("--map {spec:?}: {side} is not a host origin ({e})"))
-    };
-    Ok((parse("a", x)?, parse("b", y)?))
 }

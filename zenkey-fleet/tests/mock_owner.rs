@@ -24,6 +24,9 @@ use zenkey_fleet::{
 use zenkey_model::authoring::Kind;
 use zenkey_model::template::Bindings;
 
+/// A `json:DiagnosticsRequest` the contract's schema accepts.
+const DIAGNOSTICS: &[u8] = br#"{"namespace":"default","interface":"eth0"}"#;
+
 fn revision(path: &str) -> Arc<Revision> {
     Arc::new(Revision::from_contract(example(path), ContractSource::File))
 }
@@ -307,7 +310,8 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
     }
     let target = ResolvedTarget::parse("*/tc").unwrap();
     let plan = zenkey_fleet::plan_call(&netif, target, "diagnostics", Bindings::new()).unwrap();
-    let request = zenkey_fleet::encode_request(&netif, &plan, b"{}").unwrap();
+    // A request its type accepts: one it refuses is never sent (#671).
+    let request = zenkey_fleet::encode_request(&netif, &plan, DIAGNOSTICS).unwrap();
     let report = zenkey_fleet::run_bench(
         &tool,
         BenchSpec {
@@ -382,7 +386,7 @@ async fn a_bench_attributes_replies_by_key_and_keeps_refusals_apart() {
         Bindings::new(),
     )
     .unwrap();
-    let request = zenkey_fleet::encode_request(&netif, &silent_plan, b"{}").unwrap();
+    let request = zenkey_fleet::encode_request(&netif, &silent_plan, DIAGNOSTICS).unwrap();
     let silent = zenkey_fleet::run_bench(
         &tool,
         BenchSpec {

@@ -1,5 +1,8 @@
 //! `.zsnap` — a snapshot kept on disk (RFC 13 §4.4, v1.34; #219): the
-//! writer, the reader, and — behind `decode` — the collection itself.
+//! writer, the reader, and the collection itself — zk2's since #612
+//! (FJ8b): the owners' current state, one S4 GET per selector, each row
+//! resolved through the raw observers' lens. Version 2; a version-1 file
+//! is v1's, and the `v1` branch reads it.
 //!
 //! The file is the `.zrec` dialect's sibling: newline-delimited JSON, line 1
 //! the header, one row per key after it, payloads lossless as base64
@@ -15,8 +18,9 @@ use std::io::{BufRead, Write};
 use crate::report::{Snapshot, SnapshotRow, ZsnapHeader};
 use crate::{Error, Result};
 
-/// The current `.zsnap` format version, written into every header.
-pub const ZSNAP_VERSION: u32 = 1;
+/// The current `.zsnap` format version, written into every header: 2 since
+/// #612 (FJ8b), zk2's rows.
+pub const ZSNAP_VERSION: u32 = 2;
 
 fn io(e: std::io::Error) -> Error {
     Error::Io {
@@ -79,13 +83,36 @@ impl<R: BufRead> ZsnapReader<R> {
             .next()
             .ok_or_else(|| Error::malformed(".zsnap", "empty file — no header line"))?
             .map_err(io)?;
+        // The version first, so a file of another version is refused by its
+        // number rather than by the first field this version lacks.
+        let version = serde_json::from_str::<serde_json::Value>(&first)
+            .ok()
+            .and_then(|v| v.get("zsnap").and_then(serde_json::Value::as_u64));
+        if let Some(v) = version
+            && v != u64::from(ZSNAP_VERSION)
+        {
+            let hint = if v == 1 {
+                " — a version-1 file is v1's registry snapshot, which the `v1` branch reads"
+            } else {
+                ""
+            };
+            return Err(Error::malformed(
+                ".zsnap",
+                format!("unsupported version {v} (this reader speaks {ZSNAP_VERSION}){hint}"),
+            ));
+        }
         let header: ZsnapHeader = serde_json::from_str(&first)
             .map_err(|e| Error::malformed_with(".zsnap line 1", "is not a header", e))?;
         if header.zsnap != ZSNAP_VERSION {
+            let hint = if header.zsnap == 1 {
+                " — a version-1 file is v1's registry snapshot, which the `v1` branch reads"
+            } else {
+                ""
+            };
             return Err(Error::malformed(
                 ".zsnap",
                 format!(
-                    "unsupported version {} (this reader speaks {ZSNAP_VERSION})",
+                    "unsupported version {} (this reader speaks {ZSNAP_VERSION}){hint}",
                     header.zsnap
                 ),
             ));
@@ -138,92 +165,117 @@ impl<R: BufRead> ZsnapReader<R> {
     }
 }
 
-/// What to collect (`decode`).
-#[cfg(feature = "decode")]
+/// What to collect.
 #[derive(Debug, Clone)]
 pub struct SnapshotSpec {
-    /// Full wire selectors, one fan-in GET each.
+    /// Full wire selectors, one state GET each: already the state
+    /// projection of what the operator asked ([`crate::state_projection`]).
     pub selectors: Vec<String>,
-    /// Reply-wait per GET, and the roster ask's bound.
+    /// Reply-wait per GET.
     pub timeout: std::time::Duration,
     /// Replies kept per GET (#339); what the bound cost rides the header.
     pub max_replies: usize,
-    /// Whether to ask the liveliness roster. Off, every holder is
-    /// `unattributed { reason: "roster not asked" }` — cheaper, and honest.
-    pub roster: bool,
 }
 
 /// What [`take_snapshot`] hands back: the snapshot, and the selectors whose
-/// GET could not be issued at all (asked, never put — RFC 09 §5.1 O5).
-#[cfg(feature = "decode")]
+/// GET could not be issued at all (asked, never put — O5).
 #[derive(Debug, Clone)]
 pub struct Taken {
     pub snapshot: Snapshot,
     pub incomplete: Vec<String>,
 }
 
-/// Collect a snapshot (RFC 13 §4.4).
+/// One S4 GET's replies (spec §4.2): target `All`, consolidation `Latest`,
+/// a reply on a non-concrete key discarded by rule (R6).
+struct StateReplies {
+    values: Vec<(
+        crate::bus::monitor::SampleView,
+        crate::model::snapshot::Replier,
+    )>,
+    errors: u64,
+    elided: u64,
+    discarded: u64,
+}
+
+async fn state_get(
+    session: &zenoh::Session,
+    selector: &str,
+    timeout: std::time::Duration,
+    max_replies: usize,
+) -> Result<StateReplies> {
+    use zenoh::query::{ConsolidationMode, QueryTarget};
+    let replies = session
+        .get(selector)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::Latest)
+        .timeout(timeout)
+        .await
+        .map_err(|e| Error::bus("snapshot", selector, e))?;
+    let mut out = StateReplies {
+        values: Vec::new(),
+        errors: 0,
+        elided: 0,
+        discarded: 0,
+    };
+    while let Ok(reply) = replies.recv_async().await {
+        let replier = reply.replier_id().map(|e| e.zid());
+        match reply.result() {
+            Ok(sample) if sample.key_expr().is_wild() => out.discarded += 1,
+            Ok(sample) => {
+                if out.values.len() >= max_replies {
+                    out.elided += 1;
+                    continue;
+                }
+                out.values
+                    .push((crate::bus::monitor::SampleView::of(sample), replier));
+            }
+            Err(_) => out.errors += 1,
+        }
+    }
+    Ok(out)
+}
+
+/// Collect a snapshot of the owners' current state (RFC 13 §4.4; spec §4.2
+/// S4).
 ///
-/// The watchdog's discipline first: the schema store is pre-warmed for
-/// every producer the registry names and then sealed, so no decode inside
-/// the collection reaches for the bus ([`crate::prewarm`],
-/// [`crate::SchemaStore::seal`]). Then the roster ask and one
-/// [`snapshot_get`](crate::bus::query::snapshot_get) per selector run
-/// **together** — one [`crate::GetOpts`] across the GETs, so `elided`
-/// sums. The replies fold per key last-writer-wins
-/// ([`crate::model::snapshot::fold_latest`]), and each kept value becomes a
-/// row: registration from [`crate::KeyFacts`], verdict from
-/// [`crate::decode_sample`], holder from the roster.
+/// One state GET per selector — target `All`, consolidation `Latest`, R6's
+/// discard — all at once, on `session` (in no namespace: the selectors are
+/// wire keys and rows keep them whole). The replies fold per key across
+/// selectors ([`crate::model::snapshot::fold_latest`]), and each kept value
+/// becomes a row through `lens` ([`crate::model::snapshot::row_of`]): its
+/// identity, its conformance to its declared type, whose clock stamped it,
+/// and who holds it.
 ///
-/// `collection_span_s` is measured from before the first ask to after the
-/// last row — the roster ask included. That is the honest number: a fan-in
-/// GET is collected *over* a span, and every rendering states it.
-#[cfg(feature = "decode")]
+/// `collection_span_s` is measured from before the first GET to after the
+/// last row. A fan-in GET is collected *over* a span, and every rendering
+/// states it; the presence read behind `lens` was the caller's, before.
 pub async fn take_snapshot(
-    fleet: &crate::Fleet<'_>,
-    slices: Option<&crate::SliceSet>,
-    store: &crate::SchemaStore,
+    session: &zenoh::Session,
+    lens: &crate::model::lens::Lens<'_>,
     spec: &SnapshotSpec,
 ) -> Result<Taken> {
-    use crate::model::snapshot::{fold_latest, holder_of, registration_of, stamper_of, verdict_of};
-    use crate::report::{Asked, VerdictWire};
-    use zenoh::sample::SampleKind;
+    use crate::model::snapshot::{fold_latest, row_of};
 
     let started = std::time::Instant::now();
     let collected_at = crate::tape::record::rfc3339_now();
 
-    crate::model::decode::prewarm(fleet, store, slices).await;
-    let _sealed = store.seal();
-
-    let opts = crate::GetOpts::new(spec.timeout).max_replies(spec.max_replies);
-    let gets = futures_util::future::join_all(spec.selectors.iter().map(|selector| {
-        let opts = &opts;
-        async move {
-            (
-                selector.clone(),
-                crate::bus::query::snapshot_get(fleet.session(), selector, opts).await,
-            )
-        }
-    }));
-    let roster = async {
-        if spec.roster {
-            crate::bus::roster::roster(fleet, spec.timeout)
-                .await
-                .map(Some)
-        } else {
-            Ok(None)
-        }
-    };
-    let (replies, roster) = tokio::join!(gets, roster);
-    let roster = roster?;
+    let gets = futures_util::future::join_all(spec.selectors.iter().map(|selector| async move {
+        (
+            selector.clone(),
+            state_get(session, selector, spec.timeout, spec.max_replies).await,
+        )
+    }))
+    .await;
 
     let mut values = Vec::new();
-    let mut errors = 0u64;
+    let (mut errors, mut elided, mut discarded) = (0u64, 0u64, 0u64);
     let mut incomplete = Vec::new();
-    for (selector, replies) in replies {
+    for (selector, replies) in gets {
         match replies {
             Ok(r) => {
                 errors += r.errors;
+                elided += r.elided;
+                discarded += r.discarded;
                 values.extend(r.values);
             }
             Err(e) => {
@@ -234,63 +286,24 @@ pub async fn take_snapshot(
     }
     let answered = values.len() as u64;
     let (kept, superseded) = fold_latest(values);
-
-    let base = fleet.base();
-    let mut rows = Vec::with_capacity(kept.len());
-    for (key, (view, replier)) in kept {
-        let mut facts = crate::KeyFacts::project(base, &key);
-        if let Some(slices) = slices {
-            facts.resolve(slices);
-        }
-        let delete = view.kind == SampleKind::Delete;
-        let (bytes, verdict) = if delete {
-            (
-                None,
-                VerdictWire::NotValidated {
-                    reason: "tombstone".into(),
-                },
-            )
-        } else {
-            let payload = view.payload.to_bytes();
-            let encoding = (!view.encoding.is_empty()).then_some(view.encoding.as_str());
-            let decoded =
-                crate::decode_sample(fleet, store, slices, &key, encoding, &payload).await;
-            (
-                Some(crate::tape::ingest::b64(&payload)),
-                verdict_of(&decoded.verdict),
-            )
-        };
-        let holder = holder_of(base, &key, &view, replier, roster.as_ref());
-        rows.push(SnapshotRow {
-            key,
-            delete,
-            bytes,
-            encoding: (!view.encoding.is_empty()).then(|| view.encoding.clone()),
-            timestamp: view.timestamp.map(|t| t.to_string()),
-            stamper: view.stamped_by.as_ref().map(stamper_of),
-            source: view.source.map(|s| format!("{}:{}#{}", s.zid, s.eid, s.sn)),
-            source_zid: replier.map(|z| z.to_string()),
-            registration: registration_of(&facts),
-            verdict,
-            holder,
-        });
-    }
+    let rows: Vec<SnapshotRow> = kept
+        .into_values()
+        .map(|(view, replier)| row_of(lens, &view, replier))
+        .collect();
 
     let header = ZsnapHeader {
         zsnap: ZSNAP_VERSION,
         selectors: spec.selectors.clone(),
-        base: base.to_string(),
+        base: lens.namespace().to_owned(),
         collected_at,
         collection_span_s: started.elapsed().as_secs_f64(),
         asked: spec.selectors.len() as u64,
         answered,
-        elided: opts.elided(),
+        elided,
         errors,
+        discarded,
         superseded,
-        roster: match &roster {
-            Some(r) => Asked::Asked(r.len()),
-            None => Asked::NotAsked,
-        },
+        presence: lens.scope().presence,
     };
     Ok(Taken {
         snapshot: Snapshot { header, rows },
@@ -309,15 +322,19 @@ pub fn report_of(
         header: snapshot.header.clone(),
         out,
         live: 0,
-        storage_only: 0,
+        no_instance: 0,
         unattributed: 0,
+        nonconforming: 0,
         incomplete,
     };
     for row in &snapshot.rows {
         match row.holder {
             Holder::Live { .. } => report.live += 1,
-            Holder::StorageOnly { .. } => report.storage_only += 1,
+            Holder::NoInstance { .. } => report.no_instance += 1,
             Holder::Unattributed { .. } => report.unattributed += 1,
+        }
+        if row.conformance.is_violation() {
+            report.nonconforming += 1;
         }
     }
     report
@@ -326,40 +343,49 @@ pub fn report_of(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::{Asked, Holder, RegistrationWire, VerdictWire};
+    use crate::report::{Conformance, Holder, KeyGroup, KeyIdentity};
 
     fn header() -> ZsnapHeader {
         ZsnapHeader {
             zsnap: ZSNAP_VERSION,
-            selectors: vec!["v1/**".into()],
+            selectors: vec!["zk2/*/*/*/state/**".into()],
             base: String::new(),
-            collected_at: "2026-09-06T00:00:00Z".into(),
+            collected_at: "2026-10-09T00:00:00Z".into(),
             collection_span_s: 0.75,
             asked: 1,
             answered: 3,
             elided: 0,
             errors: 1,
+            discarded: 0,
             superseded: 1,
-            roster: Asked::Asked(1),
+            presence: None,
         }
     }
 
     fn row(key: &str) -> SnapshotRow {
         SnapshotRow {
             key: key.into(),
+            identity: KeyIdentity {
+                group: KeyGroup::Resource {
+                    address: "lab/m".into(),
+                    iface: "m.v1".into(),
+                    token: "state".into(),
+                    resource: None,
+                },
+                values: Default::default(),
+                unresolved: Some(crate::report::Unresolved::PresenceNotRead),
+            },
             delete: false,
             bytes: Some("e30=".into()),
             encoding: Some("application/json".into()),
             timestamp: Some("7f00...".into()),
             stamper: None,
-            source: None,
             source_zid: Some("ab12".into()),
-            registration: RegistrationWire::RegistryNotLoaded,
-            verdict: VerdictWire::NotValidated {
-                reason: "no_registry".into(),
+            conformance: Conformance::NotChecked {
+                reason: "presence was not read".into(),
             },
-            holder: Holder::StorageOnly {
-                origin: "h-aaaaaaaaaaaa".into(),
+            holder: Holder::NoInstance {
+                address: "lab/m".into(),
             },
         }
     }
@@ -367,10 +393,7 @@ mod tests {
     /// Writer → reader is the identity on the whole document.
     #[test]
     fn a_snapshot_round_trips_through_the_file() {
-        let rows = vec![
-            row("v1/h-aaaaaaaaaaaa/state/p/a"),
-            row("v1/h-aaaaaaaaaaaa/state/p/b"),
-        ];
+        let rows = vec![row("zk2/lab/m/m.v1/state/a"), row("zk2/lab/m/m.v1/state/b")];
         let mut sink = Vec::new();
         let mut w = ZsnapWriter::new(&mut sink, &header()).unwrap();
         for r in &rows {
@@ -393,7 +416,8 @@ mod tests {
     }
 
     /// A versioned reader refuses what it cannot speak rather than guessing,
-    /// in the `.zrec` reader's words; and a row is not a header.
+    /// by the version's number; v1's files are named as v1's; and a row is
+    /// not a header.
     #[test]
     fn the_header_is_a_contract() {
         let future = r#"{"zsnap":99,"selectors":[],"base":"","collected_at":"x","collection_span_s":0,"asked":0,"answered":0}"#;
@@ -403,7 +427,12 @@ mod tests {
             .to_string();
         assert!(err.contains("unsupported version 99"), "{err}");
 
-        let not_a_header = r#"{"key":"v1/x","delete":false}"#;
+        let v1 = r#"{"zsnap":1,"selectors":["v1/**"],"base":"","collected_at":"x","collection_span_s":0,"asked":1,"answered":0}"#;
+        let err = ZsnapReader::new(v1.as_bytes()).err().unwrap().to_string();
+        assert!(err.contains("unsupported version 1"), "{err}");
+        assert!(err.contains("`v1` branch"), "{err}");
+
+        let not_a_header = r#"{"key":"zk2/x","delete":false}"#;
         let err = ZsnapReader::new(not_a_header.as_bytes())
             .err()
             .unwrap()
@@ -421,7 +450,7 @@ mod tests {
         let body = format!(
             "{}\n{}\nnot json\n",
             serde_json::to_string(&header()).unwrap(),
-            serde_json::to_string(&row("v1/x")).unwrap()
+            serde_json::to_string(&row("zk2/x")).unwrap()
         );
         let err = ZsnapReader::new(body.as_bytes())
             .unwrap()
@@ -433,17 +462,21 @@ mod tests {
     }
 
     #[test]
-    fn the_report_counts_holders() {
-        let mut live = row("v1/h-aaaaaaaaaaaa/state/p/a");
+    fn the_report_counts_holders_and_nonconforming_rows() {
+        let mut live = row("zk2/lab/m/m.v1/state/a");
         live.holder = Holder::Live {
-            origin: "h-aaaaaaaaaaaa".into(),
-            answered_by: crate::report::AnsweredBy::Stamper,
+            address: "lab/m".into(),
+            answered_by: crate::report::AnsweredBy::Owner,
+        };
+        live.conformance = Conformance::Invalid {
+            violations: vec!["/x: expected integer".into()],
         };
         let snapshot = Snapshot {
             header: header(),
-            rows: vec![live, row("v1/h-aaaaaaaaaaaa/state/p/b")],
+            rows: vec![live, row("zk2/lab/m/m.v1/state/b")],
         };
         let r = report_of(&snapshot, Some("a.zsnap".into()), vec![]);
-        assert_eq!((r.live, r.storage_only, r.unattributed), (1, 1, 0));
+        assert_eq!((r.live, r.no_instance, r.unattributed), (1, 1, 0));
+        assert_eq!(r.nonconforming, 1);
     }
 }

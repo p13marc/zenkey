@@ -1,23 +1,15 @@
-//! The two snapshot families (#219, RFC 13 §4.4): what taking one did, and
-//! what two disagree about.
+//! The two snapshot families (#219, RFC 13 §4.4; zk2's since #612, FJ8b):
+//! what taking one did, and what two disagree about.
 //!
 //! `snapshot` is row-less like `record` — a file and the counts of what
-//! went into it. `snapshot-diff` has rows, five kinds of them, and the
-//! envelope carries **both** headers whole because the section's one
-//! non-negotiable is that every rendering states both spans.
-//!
-//! Under `--normalize-origins` (#220) the diff carries three more things
-//! and the table draws each: the map, one line per pair with its evidence
-//! (`explicit` / `label <source>` / `producer set`); the unpaired, one
-//! line per origin with the reason, under a **NOT COMPARED** word when
-//! there are any, because the comparison was refused over them; and the
-//! per-subject roll-up — "`sysinfo/cpu/usage` differs on 3 of 12
-//! origins" — with the subjects that agree everywhere counted, not
-//! listed.
+//! went into it, holders and conformance among them. `snapshot-diff` has
+//! rows, three kinds of them, and the envelope carries **both** headers
+//! whole because the section's one non-negotiable is that every rendering
+//! states both spans. Keys are zk2 keys, each relative to its own file's
+//! namespace.
 
 use zenkey_fleet::report::{
-    AnsweredBy, Holder, KeyChange, MapEvidence, RegistrationWire, Side, SnapshotDiff,
-    SnapshotReport, SubjectDelta, VerdictWire, ZsnapHeader,
+    AnsweredBy, Conformance, Holder, KeyChange, SnapshotDiff, SnapshotReport, ZsnapHeader,
 };
 
 use crate::render::{
@@ -37,12 +29,14 @@ impl Render for SnapshotReport {
     fn table(&self, t: &mut Table) {
         let h = &self.header;
         t.line(format!(
-            "snapshot of {}: {} key(s) — {} live, {} storage-only, {} unattributed{}",
+            "snapshot of {}: {} key(s) — {} live, {} with no instance, {} unattributed; {} \
+             not conforming to their type{}",
             h.selectors.join(" + "),
-            self.live + self.storage_only + self.unattributed,
+            self.live + self.no_instance + self.unattributed,
             self.live,
-            self.storage_only,
+            self.no_instance,
             self.unattributed,
+            self.nonconforming,
             self.out
                 .as_deref()
                 .map(|o| format!(" → {o}"))
@@ -55,10 +49,7 @@ impl Render for SnapshotReport {
         if !self.incomplete.is_empty() {
             let mut g = Grid::unheaded(2);
             for s in &self.incomplete {
-                g.row([
-                    Cell::text("  !"),
-                    Cell::text(format!("{s}: could not be asked")),
-                ]);
+                g.row([Cell::text("  !"), Cell::text(format!("{s}: not asked"))]);
             }
             t.grid(g);
         }
@@ -75,7 +66,7 @@ impl Render for SnapshotReport {
             BoundCost::new(
                 BoundKind::Coalesced,
                 self.header.superseded,
-                "answer(s) lost last-writer-wins to a newer reply on the same key",
+                "answer(s) for one key lost to a newer one from another selector",
             ),
         ]
     }
@@ -89,16 +80,32 @@ impl Render for SnapshotReport {
             ))
             .cite("RFC 13 §4.4"),
         ];
-        if h.selectors.iter().any(|s| s.contains("**")) {
+        let excluded = zenkey_fleet::zrec_excluded(&h.selectors);
+        if excluded.iter().any(|v| v == "@state") {
             notes.push(
-                Note::coverage("`**` cannot cross `@`-planes; they are excluded, not empty")
-                    .cite("RFC 03 §4 D2"),
+                Note::coverage(
+                    "@state keys are excluded, not empty: no selector names `@state`, and \
+                     `*`/`**` never match a verbatim chunk",
+                )
+                .cite("tooling guide O5"),
             );
         }
-        if h.roster.is_not_asked() {
+        if h.presence.is_none() {
             notes.push(
-                Note::coverage("roster not asked: every holder is unattributed")
-                    .cite("RFC 09 §5.1 O4"),
+                Note::coverage(
+                    "presence not read: every holder is unattributed and every stamp \
+                     unattributable",
+                )
+                .cite("tooling guide O4"),
+            );
+        }
+        if h.discarded > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{} repl(y|ies) on a wildcard key discarded by rule — not losses",
+                    h.discarded
+                ))
+                .cite("spec §3.2 R6"),
             );
         }
         if h.errors > 0 {
@@ -107,16 +114,28 @@ impl Render for SnapshotReport {
                     "{} error repl(y|ies) — refusals, counted apart from values and from silence",
                     h.errors
                 ))
-                .cite("RFC 05 §3"),
+                .cite("spec §5.2"),
+            );
+        }
+        if self.no_instance > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{} value(s) answered for an address with no instance visible to this \
+                     reader: an owner gone, or a store answering on its keys, which S4 \
+                     forbids",
+                    self.no_instance
+                ))
+                .cite("spec §4.2 S4"),
             );
         }
         if !self.incomplete.is_empty() {
             notes.push(
                 Note::coverage(format!(
-                    "{} selector(s) could not be asked at all; the file does not cover them",
+                    "{} selector(s) were not asked — no state key, or the GET could not be \
+                     issued; the file does not cover them",
                     self.incomplete.len()
                 ))
-                .cite("RFC 09 §5.1 O5"),
+                .cite("tooling guide O5"),
             );
         }
         notes
@@ -134,10 +153,7 @@ impl Render for SnapshotDiff {
     const FAMILY: &'static str = "snapshot-diff";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
-        envelope_without(
-            self,
-            &["added", "removed", "changed", "unmapped", "by_subject"],
-        )
+        envelope_without(self, &["added", "removed", "changed"])
     }
 
     fn rows(&self, out: &mut dyn FnMut(Row)) {
@@ -150,28 +166,18 @@ impl Render for SnapshotDiff {
         for c in &self.changed {
             out(Row::of("changed", c));
         }
-        for u in &self.unmapped {
-            out(Row::of("unmapped", u));
-        }
-        if let Some(subjects) = self.by_subject.as_option() {
-            for s in subjects {
-                out(Row::of("subject", s));
-            }
-        }
     }
 
     fn table(&self, t: &mut Table) {
         t.line(format!("a: {}", side(&self.a)));
         t.line(format!("b: {}", side(&self.b)));
-        if !self.refused() {
-            t.line(format!(
-                "{} added, {} removed, {} changed, {} unchanged",
-                self.added.len(),
-                self.removed.len(),
-                self.changed.len(),
-                self.unchanged,
-            ));
-        }
+        t.line(format!(
+            "{} added, {} removed, {} changed, {} unchanged",
+            self.added.len(),
+            self.removed.len(),
+            self.changed.len(),
+            self.unchanged,
+        ));
         if !self.added.is_empty() || !self.removed.is_empty() || !self.changed.is_empty() {
             let mut g = Grid::unheaded(3);
             for k in &self.added {
@@ -185,61 +191,8 @@ impl Render for SnapshotDiff {
             }
             t.grid(g);
         }
-        if let Some(pairs) = self.origin_map.as_option() {
-            t.line(format!("origins aligned: {}", pairs.len()));
-            if !pairs.is_empty() {
-                let mut g = Grid::unheaded(3);
-                for p in pairs {
-                    g.row([
-                        Cell::text("  ="),
-                        Cell::text(format!("{} ↔ {}", p.a, p.b)),
-                        Cell::text(evidence(&p.evidence)),
-                    ]);
-                }
-                t.grid(g);
-            }
-        }
-        if !self.unmapped.is_empty() {
-            t.line(format!("origins not paired: {}", self.unmapped.len()));
-            let mut g = Grid::unheaded(3);
-            for u in &self.unmapped {
-                let side = match u.side {
-                    Side::A => "a",
-                    Side::B => "b",
-                };
-                g.row([
-                    Cell::text("  ?"),
-                    Cell::text(format!("{} (in {side})", u.origin)),
-                    Cell::text(&u.reason),
-                ]);
-            }
-            t.grid(g);
-        }
-        if let Some(subjects) = self.by_subject.as_option() {
-            let (differing, agreeing): (Vec<&SubjectDelta>, Vec<&SubjectDelta>) = subjects
-                .iter()
-                .partition(|s| s.differing > 0 || s.only_in_a > 0 || s.only_in_b > 0);
-            if !differing.is_empty() {
-                let mut g = Grid::unheaded(3);
-                for s in &differing {
-                    g.row([
-                        Cell::text(&s.subject),
-                        Cell::text(subject_line(s)),
-                        Cell::text(s.example.as_ref().map(facets).unwrap_or_default()),
-                    ]);
-                }
-                t.grid(g);
-            }
-            t.line(format!(
-                "{} subject(s) identical on every origin, {} not",
-                agreeing.len(),
-                differing.len()
-            ));
-        }
         // The word is the carrier; the colour repeats it (#200).
-        if self.refused() {
-            t.line_styled("NOT COMPARED", crate::render::style::UNPROVEN);
-        } else if self.differs() {
+        if self.differs() {
             t.line_styled("DIFFERENT", crate::render::style::ERROR);
         } else {
             t.line_styled("IDENTICAL", crate::render::style::PASS);
@@ -266,98 +219,39 @@ impl Render for SnapshotDiff {
             ))
             .cite("RFC 13 §4.4"),
         ];
-        if self.origin_map.is_not_asked() {
+        if self.a.base != self.b.base {
             notes.push(
-                Note::coverage(
-                    "keys compared verbatim — no origin alignment was asked, so the same host \
-                     under a different origin reads as removed and added",
-                )
-                .cite("RFC 09 §5.1 O4"),
-            );
-        }
-        if let Some(pairs) = self.origin_map.as_option() {
-            if self.a.base != self.b.base {
-                notes.push(
-                    Note::caveat(format!(
-                        "b's keys re-based from `{}` onto `{}` for the comparison; the two \
-                         deployments' clocks are not compared, so a stamp that moved alone \
-                         is not a change here",
-                        self.b.base, self.a.base
-                    ))
-                    .cite("RFC 03 §1.1"),
-                );
-            }
-            let by_set = pairs
-                .iter()
-                .filter(|p| p.evidence == MapEvidence::ProducerSet)
-                .count();
-            if by_set > 0 {
-                notes.push(
-                    Note::coverage(format!(
-                        "{by_set} origin(s) paired by producer set alone — no verified label on \
-                         both sides; labels ride `state/*/health`, and a snapshot that did not \
-                         include it never asked for one"
-                    ))
-                    .cite("RFC 06 §6.2"),
-                );
-            }
-        }
-        if !self.unmapped.is_empty() {
-            notes.push(
-                Note::coverage(format!(
-                    "{} origin(s) could not be paired — listed, never dropped, and the \
-                     comparison was not made over them (exit 2); pair them with --map A=B",
-                    self.unmapped.len()
+                Note::caveat(format!(
+                    "keys compared relative to each file's namespace (a: {:?}, b: {:?}); two \
+                     deployments' clocks are not compared, so a stamp that moved alone is not \
+                     a change here",
+                    self.a.base, self.b.base
                 ))
-                .cite("RFC 13 §4.4"),
+                .cite("spec §1.6"),
             );
         }
         notes
     }
 }
 
-/// The evidence column of the map: what a pair rests on.
-fn evidence(e: &MapEvidence) -> String {
-    match e {
-        MapEvidence::Explicit => "explicit".into(),
-        MapEvidence::Label { source } => format!("label `{source}`"),
-        MapEvidence::ProducerSet => "producer set".into(),
-    }
-}
-
-/// One subject's line: "differs on 3 of 12 origins; 1 only in a".
-fn subject_line(s: &SubjectDelta) -> String {
-    let mut parts = Vec::new();
-    if s.differing > 0 {
-        parts.push(format!(
-            "differs on {} of {} origin(s)",
-            s.differing, s.compared
-        ));
-    } else if s.compared > 0 {
-        parts.push(format!("same on {} origin(s)", s.compared));
-    }
-    if s.only_in_a > 0 {
-        parts.push(format!("{} only in a", s.only_in_a));
-    }
-    if s.only_in_b > 0 {
-        parts.push(format!("{} only in b", s.only_in_b));
-    }
-    parts.join("; ")
-}
-
 /// One side's provenance line: rows, span, moment.
 fn side(h: &ZsnapHeader) -> String {
     format!(
-        "{} key(s), span {:.2}s at {} ({})",
+        "{} key(s), span {:.2}s at {} in {} ({})",
         h.answered.saturating_sub(h.superseded),
         h.collection_span_s,
         h.collected_at,
+        if h.base.is_empty() {
+            "the bus root".to_owned()
+        } else {
+            format!("namespace {:?}", h.base)
+        },
         h.selectors.join(" + "),
     )
 }
 
 /// The facets that moved on one key, each named — so a reader sees *which*
-/// of the four changed without opening the row.
+/// of them changed without opening the row.
 fn facets(c: &KeyChange) -> String {
     let mut parts = Vec::new();
     if let Some(v) = &c.value {
@@ -385,14 +279,11 @@ fn facets(c: &KeyChange) -> String {
             b.old_len, b.new_len, b.common_prefix
         ));
     }
-    if let Some((a, b)) = &c.verdict {
-        parts.push(format!("verdict: {} → {}", verdict(a), verdict(b)));
-    }
-    if let Some((a, b)) = &c.registration {
+    if let Some((a, b)) = &c.conformance {
         parts.push(format!(
-            "registration: {} → {}",
-            registration(*a),
-            registration(*b)
+            "conformance: {} → {}",
+            conformance(a),
+            conformance(b)
         ));
     }
     if let Some((a, b)) = &c.holder {
@@ -415,23 +306,12 @@ fn brief(v: &serde_json::Value) -> String {
     }
 }
 
-fn verdict(v: &VerdictWire) -> String {
-    match v {
-        VerdictWire::Valid => "valid".into(),
-        VerdictWire::Invalid { violations } => format!("invalid({})", violations.len()),
-        VerdictWire::NotValidated { reason } => format!("not_validated:{reason}"),
-    }
-}
-
-fn registration(r: RegistrationWire) -> &'static str {
-    match r {
-        RegistrationWire::Registered => "registered",
-        RegistrationWire::Unregistered => "unregistered",
-        RegistrationWire::NoSliceForProducer => "no_slice_for_producer",
-        RegistrationWire::NotADataClass => "not_a_data_class",
-        RegistrationWire::NotV1 => "not_v1",
-        RegistrationWire::NotUnderBase => "not_under_base",
-        RegistrationWire::RegistryNotLoaded => "registry_not_loaded",
+fn conformance(c: &Conformance) -> String {
+    match c {
+        Conformance::Valid => "valid".into(),
+        Conformance::Invalid { violations } => format!("invalid({})", violations.len()),
+        Conformance::Undecodable { .. } => "undecodable".into(),
+        Conformance::NotChecked { .. } => "not_checked".into(),
     }
 }
 
@@ -440,12 +320,12 @@ fn holder(h: &Holder) -> String {
         Holder::Live { answered_by, .. } => format!(
             "live({})",
             match answered_by {
-                AnsweredBy::Stamper => "stamper",
+                AnsweredBy::Owner => "owner",
                 AnsweredBy::Other => "other",
                 AnsweredBy::Unknown => "unknown",
             }
         ),
-        Holder::StorageOnly { .. } => "storage_only".into(),
+        Holder::NoInstance { .. } => "no_instance".into(),
         Holder::Unattributed { .. } => "unattributed".into(),
     }
 }

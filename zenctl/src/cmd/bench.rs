@@ -56,11 +56,12 @@ pub async fn call(cli: crate::cli::BenchCallArgs) -> Result<()> {
         TypeId::Raw { .. } => Vec::new(),
         _ => b"{}".to_vec(),
     });
-    let encoded = zenkey_fleet::encode_request(&revision, &plan, &input)?;
     let calls = calls.unwrap_or(DEFAULT_COUNT);
     // Refused before anything is asked of the bus (and asked again by the
-    // engine): a repeated write, or a bench of nothing.
+    // engine): a repeated write, or a bench of nothing — the act itself,
+    // ahead of what it would carry.
     zenkey_fleet::check_bench(&revision, &plan, calls, i_know)?;
+    let encoded = zenkey_fleet::encode_request(&revision, &plan, &input)?;
     let session = match session {
         Some(s) => s,
         None => dep.session().await?,

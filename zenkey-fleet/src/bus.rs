@@ -37,6 +37,7 @@ pub mod admin;
 pub mod blob;
 pub mod consume;
 pub mod contracts;
+pub mod lens;
 pub mod monitor;
 pub mod operation;
 pub mod presence;

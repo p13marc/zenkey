@@ -66,24 +66,39 @@ pub enum AxisLabel {
 /// The arrival clock, spelled once.
 pub const ARRIVAL_CLOCK: &str = "observer monotonic, µs since window start";
 
-/// Who a lane belongs to.
+/// Who a lane belongs to (#612, FJ8b: zk2's address and resource, where
+/// v1 had an origin and a producer).
 ///
-/// Lanes are keyed by origin and producer because that is the unit a
-/// fleet publishes as (RFC 03 §1). The two remaining variants are the two
-/// ways a sample can fail to belong: its key says nothing under this base,
-/// or it carries no HLC and therefore exists on the arrival axis only.
+/// A lane is one resource of one address, because that is the unit a zk2
+/// service publishes as (spec §2.2) — or, when the contract was not in hand,
+/// one interface's kind at that address, which is as far as the key itself
+/// resolves (the tooling guide's O2). The rest are the ways a sample can
+/// fail to belong: a control key, a key that is not this deployment's zk2
+/// data, and a sample that carries no HLC and so exists on the arrival axis
+/// only.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LaneId {
-    /// A conforming `v1/<origin>/<class>/<producer>/…` key. `producer` is
-    /// absent under a service origin and under `@blob` (RFC 03 §1.5).
-    Origin {
-        origin: String,
+    /// A zk2 data key in the stated namespace.
+    Resource {
+        /// `<system>/<service>`.
+        address: String,
+        /// `<name>.v<major>`.
+        iface: String,
+        /// The kind token on the key.
+        token: String,
+        /// `<kind token>/<template>`, when a contract resolved it.
         #[serde(skip_serializing_if = "Option::is_none")]
-        producer: Option<String>,
+        resource: Option<String>,
     },
-    /// The key does not parse as a v1 key under the base — not under it,
-    /// or under it and something else. Kept, never dropped (O1).
+    /// A zk2 control key (`@zk`) of one address, or a contract bundle,
+    /// which names none.
+    Control {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        address: Option<String>,
+    },
+    /// Not this deployment's zk2 data: outside the namespace, or not a zk2
+    /// key at all. Kept, never dropped (O1).
     Foreign,
     /// No HLC rode the sample. This lane has a place on the arrival axis
     /// and **no place on the HLC axis** — the type system in
@@ -95,36 +110,72 @@ impl LaneId {
     /// The lane as a human label — the table's group heading.
     pub fn label(&self) -> String {
         match self {
-            LaneId::Origin {
-                origin,
-                producer: Some(p),
-            } => format!("{origin}/{p}"),
-            LaneId::Origin {
-                origin,
-                producer: None,
-            } => origin.clone(),
-            LaneId::Foreign => "foreign (not a v1 key under this base)".into(),
+            LaneId::Resource {
+                address,
+                iface,
+                resource: Some(r),
+                ..
+            } => format!("{address} {iface} {r}"),
+            LaneId::Resource {
+                address,
+                iface,
+                token,
+                resource: None,
+            } => format!("{address} {iface} {token}/… (contract not in hand)"),
+            LaneId::Control { address: Some(a) } => format!("{a} @zk"),
+            LaneId::Control { address: None } => "@zk (contract bundles)".into(),
+            LaneId::Foreign => "foreign (not this deployment's zk2 data)".into(),
             LaneId::Unstamped => "unstamped (arrival axis only)".into(),
         }
     }
 }
 
-/// Who stamped a sample, as the wire spells it — the serialized form of
-/// [`crate::StampProvenance`], stamper identity carried beside it.
+impl From<&super::KeyGroup> for LaneId {
+    fn from(g: &super::KeyGroup) -> LaneId {
+        use super::KeyGroup;
+        match g {
+            KeyGroup::Resource {
+                address,
+                iface,
+                token,
+                resource,
+            } => LaneId::Resource {
+                address: address.clone(),
+                iface: iface.clone(),
+                token: token.clone(),
+                resource: resource.clone(),
+            },
+            KeyGroup::Control { address, .. } => LaneId::Control {
+                address: address.clone(),
+            },
+            KeyGroup::NotInNamespace | KeyGroup::NotZk2 => LaneId::Foreign,
+        }
+    }
+}
+
+/// Whose clock stamped a sample (the tooling guide's O7; spec §3.3 0.10,
+/// §4.2 "Observing S1"), stamper identity carried beside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
-    SelfStamped,
-    Foreign,
+    /// The stamp's id is the session zid the owner's descriptor states as
+    /// `meta.zid`, compared by value: the owner's own clock (S1).
+    Owner,
+    /// The owner's zid is known and the stamp's is another: a router's,
+    /// commonly, which stamps what arrives unstamped.
+    Other,
+    /// Nothing names the owner's zid — no presence read, a key that names
+    /// no address, a descriptor without `meta.zid`: unknown, never foreign.
     Unattributable,
 }
 
-/// How many of a lane's stamped samples fell in each provenance class
-/// (#213): three populations, never one number.
+/// How many of a lane's stamped samples fell in each provenance class:
+/// three populations, never one number — a pooled median describes
+/// neither clock (O7).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct ProvenanceCounts {
-    pub self_stamped: usize,
-    pub foreign: usize,
+    pub owner: usize,
+    pub other: usize,
     pub unattributable: usize,
 }
 
@@ -232,6 +283,9 @@ pub struct TimelineReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_s: Option<f64>,
     pub source: TimelineSource,
+    /// What the lanes were resolved with: the namespace, the presence read
+    /// whose descriptors name each owner's zid, the revisions in hand.
+    pub lens: super::LensScope,
     pub lanes: Vec<LaneSummary>,
     pub sn_lane: SnLaneReport,
     /// Samples that carried no HLC and were therefore **not placed** on the
@@ -261,9 +315,23 @@ mod tests {
     use serde_json::json;
 
     fn lane() -> LaneId {
-        LaneId::Origin {
-            origin: "h-3fa9c2d41b7e".into(),
-            producer: Some("sysinfo".into()),
+        LaneId::Resource {
+            address: "host-a/tc".into(),
+            iface: "tc.netif.v1".into(),
+            token: "stream".into(),
+            resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+        }
+    }
+
+    fn lens() -> crate::report::LensScope {
+        crate::report::LensScope {
+            namespace: String::new(),
+            presence: Some(crate::report::LensPresence {
+                selector: "zk2/*/*/@zk/**".into(),
+                complete: true,
+                services: 1,
+            }),
+            contracts: 1,
         }
     }
 
@@ -278,9 +346,10 @@ mod tests {
                     stamper: "33".into(),
                 },
             },
-            scopes: vec!["v1/**".into()],
+            scopes: vec!["zk2/**".into()],
             window_s: Some(10.0),
             source: TimelineSource::Live,
+            lens: lens(),
             lanes: vec![LaneSummary {
                 lane: lane(),
                 samples: 1,
@@ -288,7 +357,7 @@ mod tests {
                 last_t_us: 5,
                 stampers: ["33".to_string()].into_iter().collect(),
                 provenance: ProvenanceCounts {
-                    unattributable: 1,
+                    owner: 1,
                     ..Default::default()
                 },
             }],
@@ -303,11 +372,11 @@ mod tests {
                 order_by: OrderLabel::Hlc,
                 pos: 0,
                 lane: lane(),
-                key: "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu".into(),
+                key: "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
                 t_us: 5,
                 hlc: Some("100/33".into()),
                 stamped_by: Some("33".into()),
-                provenance: Some(Provenance::Unattributable),
+                provenance: Some(Provenance::Owner),
                 kind: RowKind::Put,
             }],
         };
@@ -318,16 +387,27 @@ mod tests {
                 "axis": "hlc",
                 "claim": "happens_before",
                 "stamper": "33",
-                "scopes": ["v1/**"],
+                "scopes": ["zk2/**"],
                 "window_s": 10.0,
                 "source": {"kind": "live"},
+                "lens": {
+                    "namespace": "",
+                    "presence": {"selector": "zk2/*/*/@zk/**", "complete": true, "services": 1},
+                    "contracts": 1
+                },
                 "lanes": [{
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
+                    "lane": {
+                        "kind": "resource",
+                        "address": "host-a/tc",
+                        "iface": "tc.netif.v1",
+                        "token": "stream",
+                        "resource": "stream/bandwidth/{ns}/{iface}"
+                    },
                     "samples": 1,
                     "first_t_us": 5,
                     "last_t_us": 5,
                     "stampers": ["33"],
-                    "provenance": {"self_stamped": 0, "foreign": 0, "unattributable": 1}
+                    "provenance": {"owner": 1, "other": 0, "unattributable": 0}
                 }],
                 "sn_lane": {
                     "state": "unavailable",
@@ -340,12 +420,18 @@ mod tests {
                     "row": "sample",
                     "order_by": "hlc",
                     "pos": 0,
-                    "lane": {"kind": "origin", "origin": "h-3fa9c2d41b7e", "producer": "sysinfo"},
-                    "key": "v1/h-3fa9c2d41b7e/telemetry/sysinfo/cpu",
+                    "lane": {
+                        "kind": "resource",
+                        "address": "host-a/tc",
+                        "iface": "tc.netif.v1",
+                        "token": "stream",
+                        "resource": "stream/bandwidth/{ns}/{iface}"
+                    },
+                    "key": "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
                     "t_us": 5,
                     "hlc": "100/33",
                     "stamped_by": "33",
-                    "provenance": "unattributable",
+                    "provenance": "owner",
                     "kind": "put"
                 }]
             })
@@ -361,10 +447,15 @@ mod tests {
             axis: AxisLabel::Arrival {
                 clock: ARRIVAL_CLOCK,
             },
-            scopes: vec!["v1/**".into()],
+            scopes: vec!["zk2/**".into()],
             window_s: None,
             source: TimelineSource::Zrec {
                 path: "bus.zrec".into(),
+            },
+            lens: crate::report::LensScope {
+                namespace: "prod".into(),
+                presence: None,
+                contracts: 0,
             },
             lanes: vec![],
             sn_lane: SnLaneReport::Present {
@@ -402,8 +493,9 @@ mod tests {
                 "order_by": "arrival",
                 "axis": "arrival",
                 "clock": "observer monotonic, µs since window start",
-                "scopes": ["v1/**"],
+                "scopes": ["zk2/**"],
                 "source": {"kind": "zrec", "path": "bus.zrec"},
+                "lens": {"namespace": "prod", "contracts": 0},
                 "lanes": [],
                 "sn_lane": {"state": "present", "sources": 1, "samples": 3},
                 "dropped": 7,

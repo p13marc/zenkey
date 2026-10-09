@@ -202,6 +202,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
                                             .as_deref(),
                                         qos: None,
                                         source: None,
+                                        zk2: None,
                                     },
                                 )
                             );
@@ -343,17 +344,7 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
     let revision =
         zk2::revision_at(&dep, &contracts, &cli.target, Some(&target), &mut session).await?;
     let r = zenkey_fleet::resolve_resource(&revision, &cli.resource, &[Kind::State])?;
-    let unbound = zenkey_fleet::check_values(r, &values)?;
-    if cli.last_known.is_some() && !unbound.is_empty() {
-        return Err(crate::exit::unaskable!(
-            "--last-known reads an archive one key at a time (spec §4.4): give {}",
-            unbound
-                .iter()
-                .map(|n| format!("--param {n}=…"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
+    zenkey_fleet::check_values(r, &values)?;
     let session = match session {
         Some(s) => s,
         None => dep.session().await?,

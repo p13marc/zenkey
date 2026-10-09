@@ -10,9 +10,15 @@
 //! `last_known` in its first field: a tool never presents it as current.
 //!
 //! **A watch counts R6's discards apart.** A sample put on a wildcard key
-//! is dropped by rule and counted by the runtime's subscription; samples
-//! this tool could not keep up with are counted separately as lagged
-//! (the tooling guide's O6). Neither is folded into the other.
+//! is dropped by rule and counted by the runtime's subscription; a sample on
+//! a concrete key that resolves to no member of the resource through a
+//! bound provider is counted as unresolved (#671); samples this tool could
+//! not keep up with are counted separately as lagged (the tooling guide's
+//! O6). None is folded into another.
+//!
+//! **Each sample is judged against its contract** (#612, FJ8b): its payload
+//! against the declared type (`conformance`, spec §7.2–§7.3), and the QoS it
+//! rode against the resource's (§2.4) — a mismatch carries both sides.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,6 +32,7 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
+use crate::model::lens::{conformance, declared_qos, observed_qos, qos_mismatch};
 use crate::model::render::{Member, render_with};
 use crate::model::target::Target;
 use crate::report::{
@@ -179,10 +186,12 @@ fn member_key(
         .map_err(|e| Error::unaskable_from(r.template.as_str(), e))
 }
 
-/// A key's last-known state, from the archive at `archive` (S5): one GET of
-/// the archive's key for it, through the runtime's explicit read. Every
-/// parameter must be given: an archive is read one key at a time. The
-/// report says `last_known` before it says anything else (S6).
+/// Last-known state from the archive at `archive` (S5), through the
+/// runtime's explicit reads: one key's, when every parameter is given; and
+/// every member a pattern selects otherwise, a parameter left out a
+/// wildcard (`archive::last_known_all`, #671), one row per origin the
+/// archive holds. The report says `last_known` before it says anything else
+/// (S6).
 pub async fn last_known(
     session: &Session,
     read: StateRead<'_>,
@@ -197,19 +206,7 @@ pub async fn last_known(
     } = read;
     let name = zk2::implementation::resource_name(r);
     if !all_bound(r, values) {
-        let missing: Vec<String> = r
-            .template
-            .params()
-            .filter(|(n, _)| !values.contains_key(*n))
-            .map(|(n, _)| format!("--param {n}=…"))
-            .collect();
-        return Err(Error::unaskable(
-            "--last-known",
-            format!(
-                "an archive is read one key at a time (spec §4.4): give {}",
-                missing.join(", ")
-            ),
-        ));
+        return last_known_pattern(session, revision, owner, r, values, archive, timeout).await;
     }
     let origin = member_key(owner, revision, r, values)?;
     let selector = zk2::archive::archive_key(archive, &origin);
@@ -217,30 +214,7 @@ pub async fn last_known(
         .await
         .map_err(|e| runtime("get", &selector, e))?;
     let rows = got
-        .map(|lk| {
-            let value = match &lk.value {
-                Some(bytes) => {
-                    let encoding = lk.encoding.as_ref().map(ToString::to_string);
-                    StateValue::Value {
-                        payload: Box::new(render_with(
-                            revision,
-                            &origin,
-                            Member::Type,
-                            encoding.as_deref(),
-                            bytes,
-                        )),
-                    }
-                }
-                None => StateValue::Deleted,
-            };
-            StateRow {
-                key: origin.clone(),
-                value,
-                timestamp: lk.timestamp.as_ref().map(stamp),
-                confirmed: Some(lk.confirmed),
-                identity: Some(lk.identity),
-            }
-        })
+        .map(|lk| last_known_row(revision, lk))
         .into_iter()
         .collect();
     Ok(StateReport {
@@ -255,6 +229,85 @@ pub async fn last_known(
         timeout_s: timeout.as_secs_f64(),
         rows,
     })
+}
+
+/// [`last_known`] over a pattern (#671): the owner's selectors for the
+/// resource, a parameter not given a wildcard, each read from the archive
+/// with `archive::last_known_all`.
+async fn last_known_pattern(
+    session: &Session,
+    revision: &Revision,
+    owner: &Addr,
+    r: &Resource,
+    values: &Bindings,
+    archive: &Addr,
+    timeout: Duration,
+) -> Result<StateReport> {
+    let name = zk2::implementation::resource_name(r);
+    let address = owner.to_string();
+    let consumer = zk2::consumer::Consumer::for_tool(
+        session,
+        revision.shared_contract(),
+        &[&address],
+        &r2_params(values)?,
+    )
+    .map_err(|e| runtime("get", &address, e))?;
+    let patterns: Vec<String> = consumer
+        .selectors(&name)
+        .map_err(|e| runtime("get", &address, e))?
+        .iter()
+        .map(|k| k.as_str().to_owned())
+        .collect();
+    let mut rows = Vec::new();
+    let mut selectors = Vec::new();
+    for pattern in &patterns {
+        let selector = zk2::archive::archive_key(archive, pattern);
+        let got = zk2::archive::last_known_all(session, archive, pattern, timeout)
+            .await
+            .map_err(|e| runtime("get", &selector, e))?;
+        selectors.push(selector);
+        rows.extend(got.into_iter().map(|lk| last_known_row(revision, lk)));
+    }
+    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(StateReport {
+        reading: StateReading::LastKnown,
+        address,
+        iface: revision.iface().to_string(),
+        fingerprint: revision.fingerprint().to_string(),
+        resource: name,
+        values: values.clone(),
+        selectors,
+        archive: Some(archive.to_string()),
+        timeout_s: timeout.as_secs_f64(),
+        rows,
+    })
+}
+
+/// One archive record as a state row: last-known, with whether alignment
+/// confirmed it and its type identity (§4.4).
+fn last_known_row(revision: &Revision, lk: zk2::archive::LastKnown) -> StateRow {
+    let value = match &lk.value {
+        Some(bytes) => {
+            let encoding = lk.encoding.as_ref().map(ToString::to_string);
+            StateValue::Value {
+                payload: Box::new(render_with(
+                    revision,
+                    &lk.origin,
+                    Member::Type,
+                    encoding.as_deref(),
+                    bytes,
+                )),
+            }
+        }
+        None => StateValue::Deleted,
+    };
+    StateRow {
+        key: lk.origin.clone(),
+        value,
+        timestamp: lk.timestamp.as_ref().map(stamp),
+        confirmed: Some(lk.confirmed),
+        identity: Some(lk.identity),
+    }
 }
 
 /// A sample's payload, rendered through `member`'s type.
@@ -313,27 +366,42 @@ pub async fn watch(
     let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
     let lagged = Arc::new(AtomicU64::new(0));
     let (rev, lag) = (revision.clone(), Arc::clone(&lagged));
+    // The QoS the resource declares (§2.4), once: every sample is judged
+    // against it as it arrives.
+    let declared = declared_qos(r);
     let sub = consumer
         .subscribe(&name, move |d: zk2::consumer::Delivery| {
             let key = d.sample.key_expr().as_str().to_owned();
             let event = match d.sample.kind() {
                 SampleKind::Delete => WatchEvent::Delete,
-                SampleKind::Put => WatchEvent::Put {
-                    payload: Box::new(payload(&rev, &key, &d.sample, Member::Type)),
-                    attachment: d.sample.attachment().map(|a| {
-                        Box::new(render_with(
-                            &rev,
-                            &key,
-                            Member::Attachment,
-                            None,
-                            &a.to_bytes(),
-                        ))
-                    }),
-                },
+                SampleKind::Put => {
+                    let rendered = payload(&rev, &key, &d.sample, Member::Type);
+                    WatchEvent::Put {
+                        conformance: conformance(&rev, &rendered),
+                        payload: Box::new(rendered),
+                        attachment: d.sample.attachment().map(|a| {
+                            Box::new(render_with(
+                                &rev,
+                                &key,
+                                Member::Attachment,
+                                None,
+                                &a.to_bytes(),
+                            ))
+                        }),
+                    }
+                }
             };
+            let observed = observed_qos(
+                d.sample.priority(),
+                d.sample.congestion_control(),
+                d.sample.express(),
+            );
             let sample = WatchSample {
                 provider: d.provider.to_string(),
                 timestamp: d.sample.timestamp().map(stamp),
+                qos_mismatch: declared
+                    .as_ref()
+                    .and_then(|declared| qos_mismatch(declared, &observed)),
                 key,
                 values: d.values,
                 event,
@@ -361,6 +429,14 @@ impl Watch {
     /// Samples put on a wildcard key and discarded by rule (R6).
     pub fn discarded(&self) -> u64 {
         self.sub.discarded()
+    }
+
+    /// Samples on a concrete key that did not resolve: not a zk2 data key,
+    /// another interface or an unbound provider, or no template position
+    /// of the resource (#671). A mismatch between the bus and the contract,
+    /// not R6's rule, and counted apart from it (O6).
+    pub fn unresolved(&self) -> u64 {
+        self.sub.unresolved()
     }
 
     /// Samples dropped because the reader fell [`WATCH_BUFFER`] behind.

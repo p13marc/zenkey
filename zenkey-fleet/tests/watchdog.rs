@@ -21,8 +21,14 @@ use util::peer_pair;
 
 const KEY: &str = "v1/h-dddddddddddd/state/demo/health";
 
-fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
-    zenkey_fleet::model::decode::SchemaStore::new("", Duration::from_millis(300))
+/// The watchdog's bus over one session: the bus-root deployment, so the
+/// session in the namespace and the raw one are the same.
+fn bus_of(session: &zenoh::Session) -> zenkey_fleet::DoctorBus {
+    zenkey_fleet::DoctorBus {
+        session: session.clone(),
+        raw: session.clone(),
+        namespace: String::new(),
+    }
 }
 
 /// Drain a whole run: every transition, then the summary (#397).
@@ -34,12 +40,12 @@ fn store_of() -> zenkey_fleet::model::decode::SchemaStore {
 /// comes out of the `await` that also performs the monitor teardown.
 async fn drain(
     session: &zenoh::Session,
-    slices: &zenkey_fleet::SliceSet,
     spec: &WatchdogSpec,
 ) -> zenkey_fleet::Result<(Vec<Transition>, WatchdogSummary)> {
-    let fleet = zenkey_fleet::Fleet::new(session, "");
-    let store = store_of();
-    let mut run = watchdog(&fleet, Some(slices), &store, spec).pin();
+    let bus = bus_of(session);
+    let store = zenkey_fleet::BundleStore::new(spec.timeout);
+    let contracts = zenkey_fleet::ContractSet::new();
+    let mut run = watchdog(&bus, &store, &contracts, spec).pin();
     let mut transitions = Vec::new();
     while let Some(t) = run.sip().await {
         transitions.push(t);
@@ -69,7 +75,6 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     let watchdog = tokio::spawn({
         let b = b.clone();
         async move {
-            let slices = zenkey_fleet::SliceSet::default();
             let spec = WatchdogSpec {
                 rules: vec![
                     Condition::parse(&format!("silent-for {KEY} 0.7")).expect("rule"),
@@ -78,9 +83,8 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
                 tick: Duration::from_millis(500),
                 ticks: Some(6),
                 timeout: Duration::from_millis(300),
-                doctor: None,
             };
-            drain(&b, &slices, &spec).await
+            drain(&b, &spec).await
         }
     });
 
@@ -128,9 +132,6 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
         transitions.len(),
         "the summary counts what was emitted"
     );
-    // The per-key facts cache is bounded (#107) and its cost is a summary
-    // fact (O6): this fixture's key set fits, so the ledger reads zero.
-    assert_eq!(summary.facts_evicted, 0);
     // #511: the run ended with the silence firing again, and the summary
     // says so — the 1 a bounded `zenctl watchdog` exits with.
     assert_eq!(
@@ -146,34 +147,28 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     );
 }
 
-/// `origin-down` judges the roster: an origin holding no alive token is a
+/// `instance-gone` (zk2's `origin-down`) reads presence: an address holding
+/// no instance token visible to this reader, in a complete read, is a
 /// baseline `firing` — and stays one line across the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn origin_down_fires_on_an_absent_origin_and_only_once() {
+async fn instance_gone_fires_on_an_absent_address_and_only_once() {
     let (_a, b) = peer_pair().await;
-    let slices = zenkey_fleet::SliceSet::default();
-
     let spec = WatchdogSpec {
-        rules: vec![Condition::parse("origin-down h-000000000000").expect("rule")],
+        rules: vec![Condition::parse("instance-gone lab/nobody").expect("rule")],
         tick: Duration::from_millis(200),
         ticks: Some(3),
         timeout: Duration::from_millis(300),
-        doctor: None,
     };
-    let (transitions, summary) = drain(&b, &slices, &spec).await.expect("run");
+    let (transitions, summary) = drain(&b, &spec).await.expect("run");
     assert_eq!(summary.ticks, 3);
     assert_eq!(transitions.len(), 1, "{transitions:#?}");
     assert_eq!(transitions[0].to, CondState::Firing);
     assert!(
-        transitions[0].evidence.contains("no alive token"),
+        transitions[0].evidence.contains("visible to this reader"),
         "{}",
         transitions[0].evidence
     );
-    assert_eq!(
-        summary.firing,
-        ["origin-down h-000000000000"],
-        "{summary:?}"
-    );
+    assert_eq!(summary.firing, ["instance-gone lab/nobody"], "{summary:?}");
 }
 
 /// #338: the sweep no longer gates the sampling it is judging.
@@ -202,12 +197,6 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
     // reads presence twice, its grace period apart (2 s by default) — far
     // longer than a tick, so a sweep that gated the drain would cost the
     // window its samples many times over.
-    let doctor = zenkey_fleet::DoctorBus {
-        session: b.clone(),
-        raw: b.clone(),
-        namespace: String::new(),
-    };
-
     let publication = declare_publication(&a, KEY, QosProfile::Transition, None)
         .await
         .expect("declare");
@@ -216,13 +205,13 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
     let watchdog = tokio::spawn({
         let b = b.clone();
         async move {
-            let slices = zenkey_fleet::SliceSet::default();
             let spec = WatchdogSpec {
                 rules: vec![
                     Condition::parse("dropped").expect("rule"),
                     // The watch: without a selector-bearing rule the
                     // watchdog subscribes to nothing and there is no drain
-                    // to gate.
+                    // to gate. A rule that reads the lens refreshes it in
+                    // the sweep too.
                     Condition::parse(&format!("qos-mismatch {KEY}")).expect("rule"),
                     // The sweep: a doctor run per tick.
                     Condition::parse("doctor split-brain").expect("rule"),
@@ -230,9 +219,8 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
                 tick: Duration::from_millis(300),
                 ticks: Some(3),
                 timeout: Duration::from_millis(500),
-                doctor: Some(doctor),
             };
-            drain(&b, &slices, &spec).await
+            drain(&b, &spec).await
         }
     });
 
@@ -286,18 +274,17 @@ async fn a_sweep_does_not_stop_the_sampling_it_judges() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown() {
     let (_a, b) = peer_pair().await;
-    let slices = zenkey_fleet::SliceSet::default();
     let spec = WatchdogSpec {
-        rules: vec![Condition::parse("origin-down h-000000000000").expect("rule")],
+        rules: vec![Condition::parse("instance-gone lab/nobody").expect("rule")],
         tick: Duration::from_millis(100),
         ticks: Some(4),
         timeout: Duration::from_millis(200),
-        doctor: None,
     };
 
-    let fleet = zenkey_fleet::Fleet::new(&b, "");
-    let store = store_of();
-    let mut run = watchdog(&fleet, Some(&slices), &store, &spec).pin();
+    let bus = bus_of(&b);
+    let store = zenkey_fleet::BundleStore::new(spec.timeout);
+    let contracts = zenkey_fleet::ContractSet::new();
+    let mut run = watchdog(&bus, &store, &contracts, &spec).pin();
 
     // One transition, then the consumer decides it has had enough — the
     // shape of `zenctl watchdog` hitting a write error on its first line.
@@ -316,65 +303,4 @@ async fn a_consumer_that_stops_sipping_still_gets_the_summary_and_the_teardown()
         summary.transitions >= 1,
         "and the summary counts what it produced, read or not: {summary:?}"
     );
-}
-
-/// #463: an alert already firing before the watchdog starts is seen on the
-/// first tick — the ask is a GET, not a subscription — and the rule goes
-/// back to `ok` once the document stops answering. The producer's side is a
-/// queryable on the alert key, the seed seam every sensor exposes for its
-/// alert documents (RFC 04 §3.2).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn alert_firing_sees_an_alert_that_was_firing_before_it_started() {
-    let (a, b) = peer_pair().await;
-    let slices = zenkey_fleet::SliceSet::default();
-    let key = "v1/h-eeeeeeeeeeee/state/systemd/alert/aaaaaaaaaaaaaaaa";
-    let doc = br#"{"severity":"critical","rule":"expect-service-active","labels":{"unit":"forgejo.service"},"summary":"expected service forgejo.service active"}"#;
-    let serving = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let flag = std::sync::Arc::clone(&serving);
-    let _queryable = a
-        .declare_queryable(key)
-        .callback(move |query| {
-            if flag.load(std::sync::atomic::Ordering::SeqCst) {
-                // On the document's own key, as a sensor answers — a reply on
-                // the query's selector would carry `v1/*/…`, which is no
-                // alert key and counts as "not an alert document".
-                let doc = doc.to_vec();
-                tokio::spawn(async move {
-                    let _ = query.reply(key, doc).encoding("application/json").await;
-                });
-            }
-        })
-        .await
-        .expect("alert queryable");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let spec = WatchdogSpec {
-        rules: vec![Condition::parse("alert-firing v1/*/state/*/alert/* critical").expect("rule")],
-        tick: Duration::from_millis(400),
-        ticks: Some(4),
-        timeout: Duration::from_millis(300),
-        doctor: None,
-    };
-    // Resolve the alert after the second tick: the queryable stops answering.
-    let stop = std::sync::Arc::clone(&serving);
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-        stop.store(false, std::sync::atomic::Ordering::SeqCst);
-    });
-    let (transitions, summary) = drain(&b, &slices, &spec).await.expect("run");
-    assert_eq!(summary.ticks, 4);
-    assert_eq!(
-        transitions.len(),
-        2,
-        "firing on the first tick, ok after the resolve: {transitions:#?}"
-    );
-    assert_eq!(transitions[0].to, CondState::Firing);
-    assert!(
-        transitions[0].evidence.contains(
-            "1 alert(s) firing at >= critical; first: h-eeeeeeeeeeee/systemd expect-service-active"
-        ),
-        "{}",
-        transitions[0].evidence
-    );
-    assert_eq!(transitions[1].to, CondState::Ok);
 }

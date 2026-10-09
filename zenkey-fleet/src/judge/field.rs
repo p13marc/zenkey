@@ -16,14 +16,19 @@
 //!   SEEN then absent: a path never observed is not a vanished path
 //!   (RFC 09 §5.1 O4 — "not asked" never renders as "no").
 //! - **`field-stuck`** — a numeric path unchanged across a span long relative
-//!   to the subject's declared `ttl_s`, while the key kept publishing. An
-//!   observation with a stated window, never a verdict: a constant-by-design
-//!   field always reads this way, and with no declared `ttl_s` there is
-//!   nothing to be long *relative to*, so nothing fires (O4).
-//! - **`field-new`** — a path the served schema never declared:
-//!   `schema-drift` at field granularity. Judged only where the served
-//!   schema actually enumerates properties; a free-form subtree is
-//!   unjudgeable, not new (O4).
+//!   to a declared freshness, while the key kept publishing. In zk2 a
+//!   freshness is the `freshness.v1` profile's (#613), so the judge
+//!   ([`judge_stuck`]) is kept and never asked: a run reports it not asked,
+//!   never clean (O4).
+//! - **`field-new`** — a path the declared type never declares: drift at
+//!   field granularity. Judged only where the type enumerates its fields —
+//!   a JSON Schema's properties, a protobuf message's fields, from the
+//!   bundle itself; a free-form subtree is unjudgeable, not new (O4).
+//!
+//! **zk2** (#612, FJ8b). Each payload is decoded through its contract by
+//! the raw observers' [`Lens`] — the decode `echo` runs — and a key no
+//! contract resolves is observed structurally and judged for nothing that
+//! would need its type.
 //!
 //! The path table is **bounded and reports what it dropped** (O6) — never a
 //! silent truncation. The judges are pure functions over the observation,
@@ -43,12 +48,12 @@ use crate::Result;
 use serde_json::Value;
 use zenoh::Session;
 
-use crate::judge::common::{FINDING_CAP, producer_of};
-use crate::model::decode::SchemaStore;
+use crate::judge::common::FINDING_CAP;
 use crate::model::examples::Examples;
 use crate::model::jsonschema::{COMBINATORS, resolve_ref};
-use crate::model::registry::SliceSet;
-use crate::report::{DoctorSeverity, FieldReport, FieldRow, V1CheckId, V1Finding};
+use crate::model::lens::Lens;
+use crate::model::render::Member;
+use crate::report::{DoctorSeverity, FieldCheck, FieldFinding, FieldReport, FieldRow, Rendered};
 
 /// Default bound on the per-path table, across every key the window sees. A
 /// high-cardinality document can blow a path table the way a `{var}` family
@@ -410,6 +415,39 @@ impl DeclaredPaths {
         (!walk.root_open && !out.declared.is_empty()).then_some(out)
     }
 
+    /// The paths a zk2 bundle's type declares (#612, FJ8b): a JSON Schema
+    /// type's properties, walked from its definition with the document's
+    /// `$defs` beside it (a `$ref` into another artifact stays open); a
+    /// protobuf message's fields by their JSON names, the names its decode
+    /// renders. `None` for a raw type, and for a type that enumerates
+    /// nothing: unjudgeable is not new (O4).
+    pub fn of_type(bundle: &zenkey_model::bundle::Bundle, ty: &Value) -> Option<DeclaredPaths> {
+        let artifact = bundle.schemas.get(ty["schema"].as_str()?)?;
+        let name = ty["name"].as_str()?;
+        match ty["kind"].as_str()? {
+            "jsonschema" => {
+                let doc = &artifact["data"];
+                let root = serde_json::json!({
+                    "$ref": format!("#/$defs/{}", name.replace('~', "~0").replace('/', "~1")),
+                    "$defs": doc.get("$defs").cloned().unwrap_or(Value::Null),
+                });
+                DeclaredPaths::from_json_schema(&root)
+            }
+            "protobuf" => {
+                use base64::Engine as _;
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(artifact["data"].as_str()?)
+                    .ok()?;
+                let pool = prost_reflect::DescriptorPool::decode(bytes.as_slice()).ok()?;
+                let message = pool.get_message_by_name(name)?;
+                let mut out = DeclaredPaths::default();
+                proto_fields(&message, "", 0, &mut BTreeSet::new(), &mut out);
+                (!out.declared.is_empty()).then_some(out)
+            }
+            _ => None,
+        }
+    }
+
     /// Whether the schema accounts for this path — declared, or under a
     /// free-form subtree it deliberately left open.
     pub fn accounts_for(&self, path: &str) -> bool {
@@ -525,6 +563,44 @@ impl Walk<'_> {
     }
 }
 
+/// A protobuf message's fields as dotted JSON paths: a message field
+/// descends (a well-known type does not: its JSON form is a scalar), a map
+/// leaves its subtree open (its keys are data), and a message already on
+/// the chain stops the walk and opens it.
+fn proto_fields(
+    message: &prost_reflect::MessageDescriptor,
+    prefix: &str,
+    depth: usize,
+    chain: &mut BTreeSet<String>,
+    out: &mut DeclaredPaths,
+) {
+    if depth > SCHEMA_DEPTH_CAP || !chain.insert(message.full_name().to_owned()) {
+        if !prefix.is_empty() {
+            out.open.insert(prefix.to_owned());
+        }
+        return;
+    }
+    for field in message.fields() {
+        let path = if prefix.is_empty() {
+            field.json_name().to_owned()
+        } else {
+            format!("{prefix}.{}", field.json_name())
+        };
+        out.declared.insert(path.clone());
+        if field.is_map() {
+            out.open.insert(path);
+            continue;
+        }
+        if let prost_reflect::Kind::Message(m) = field.kind()
+            && !field.is_list()
+            && !m.full_name().starts_with("google.protobuf.")
+        {
+            proto_fields(&m, &path, depth + 1, chain, out);
+        }
+    }
+    chain.remove(message.full_name());
+}
+
 // ─── the judges (pure — the #227/#221 house pattern) ────────────────────────
 
 /// What the judges may know about one key beyond its stats. Everything is
@@ -532,12 +608,10 @@ impl Walk<'_> {
 /// than guessing (O4).
 #[derive(Debug, Clone, Default)]
 pub struct KeyFieldContext {
-    /// The subject's declared `ttl_s`, when the key refined to a registered
-    /// subject — what `field-stuck` is long *relative to*.
-    pub ttl_s: Option<i64>,
-    /// The registered type name, for the `field-new` evidence line.
+    /// The declared type, in the authoring spelling, for the `field-new`
+    /// evidence line.
     pub type_name: Option<String>,
-    /// The served schema's declared paths, when derivable.
+    /// The paths the declared type declares, when derivable.
     pub declared: Option<DeclaredPaths>,
 }
 
@@ -550,9 +624,11 @@ pub fn judge_vanished(stats: &PathStats, key_documents: u64) -> bool {
 
 /// `field-stuck`: a purely numeric path, zero changes, observed at least
 /// `STUCK_MIN_SEEN` times across a span of at least [`STUCK_TTL_FACTOR`] ×
-/// the declared `ttl_s`. No declared ttl, no finding: there is nothing to be
-/// long relative to (O4) — and the numeric requirement is what keeps a
-/// constant-by-design hostname or enum out of the noise.
+/// a declared freshness `ttl_s`. No freshness, no finding: there is nothing
+/// to be long relative to (O4) — and the numeric requirement is what keeps a
+/// constant-by-design hostname or enum out of the noise. In zk2 the
+/// freshness is the `freshness.v1` profile's (#613): a `field` run does not
+/// ask this, and says so.
 pub fn judge_stuck(stats: &PathStats, ttl_s: Option<i64>) -> bool {
     let Some(ttl) = ttl_s.filter(|t| *t > 0) else {
         return false;
@@ -564,104 +640,71 @@ pub fn judge_stuck(stats: &PathStats, ttl_s: Option<i64>) -> bool {
         && (stats.last_at_s - stats.first_at_s) >= STUCK_TTL_FACTOR * ttl as f64
 }
 
-/// `field-new`: the served schema enumerates its properties and this path is
-/// not among them (nor under a free-form subtree). With no declared surface
+/// `field-new`: the declared type enumerates its fields and this path is not
+/// among them (nor under a free-form subtree). With no declared surface
 /// there is no finding — unjudgeable is not new (O4).
 pub fn judge_new(path: &str, declared: Option<&DeclaredPaths>) -> bool {
     declared.is_some_and(|d| !d.accounts_for(path))
 }
 
-/// Judge a whole observation into doctor findings, capped per check the way
-/// the doctor caps its listen findings. `ctx` supplies what is known per key;
-/// a key it does not name gets the empty context (everything unjudgeable).
+/// Judge a whole observation into findings, capped per check. `ctx`
+/// supplies what is known per key; a key it does not name gets the empty
+/// context (everything unjudgeable).
 pub fn judge_fields(
     obs: &FieldObservation,
     window_s: f64,
     ctx: &BTreeMap<String, KeyFieldContext>,
-) -> Vec<V1Finding> {
+) -> Vec<FieldFinding> {
     let empty = KeyFieldContext::default();
-
     let mut vanished = Examples::new(FINDING_CAP);
-
-    let mut stuck = Examples::new(FINDING_CAP);
-
     let mut new = Examples::new(FINDING_CAP);
-
     for (key, fields) in obs.iter() {
         let c = ctx.get(key).unwrap_or(&empty);
         for (path, stats) in &fields.paths {
             if judge_vanished(stats, fields.documents) {
-                vanished.push_with(|| V1Finding {
+                vanished.push_with(|| FieldFinding {
                     severity: DoctorSeverity::Warning,
-                    check: V1CheckId::FieldVanished,
+                    check: FieldCheck::Vanished,
                     subject: format!("{key} · {path}"),
                     evidence: format!(
                         "present in {} of {} document sample(s) in {window_s:.0}s, absent \
-                         from the last {} — seen, then gone; a schema that declares it \
-                         optional reads Valid without it by construction",
+                         from the last {} — seen, then gone; a type that declares it \
+                         optional validates without it by construction",
                         stats.seen,
                         fields.documents,
                         fields.documents - stats.last_seen_sample
                     ),
-                    citation: None,
-                });
-            }
-            if judge_stuck(stats, c.ttl_s) {
-                let ttl = c.ttl_s.unwrap_or(0);
-                stuck.push_with(|| V1Finding {
-                    severity: DoctorSeverity::Warning,
-                    check: V1CheckId::FieldStuck,
-                    subject: format!("{key} · {path}"),
-                    evidence: format!(
-                        "value {} unchanged across {} sample(s) spanning {:.1}s — at least \
-                         {STUCK_TTL_FACTOR:.0}× the declared ttl_s {ttl}s — while the key \
-                         kept publishing. An observation over this {window_s:.0}s window, \
-                         not a verdict: a constant-by-design field always reads this way",
-                        stats
-                            .num_last
-                            .map(|n| n.to_string())
-                            .unwrap_or_else(|| "?".into()),
-                        stats.seen,
-                        stats.last_at_s - stats.first_at_s,
-                    ),
-                    citation: Some("RFC 04 §1.2".into()),
                 });
             }
             if judge_new(path, c.declared.as_ref()) {
-                new.push_with(|| V1Finding {
+                new.push_with(|| FieldFinding {
                     severity: DoctorSeverity::Warning,
-                    check: V1CheckId::FieldNew,
+                    check: FieldCheck::New,
                     subject: format!("{key} · {path}"),
                     evidence: format!(
-                        "present in {} of {} document sample(s) but never declared by the \
-                         served schema{} — schema drift at field granularity",
+                        "present in {} of {} document sample(s) but never declared by \
+                         the contract's type{} — drift at field granularity",
                         stats.seen,
                         fields.documents,
                         c.type_name
                             .as_deref()
-                            .map(|t| format!(" for {t}"))
+                            .map(|t| format!(" {t}"))
                             .unwrap_or_default()
                     ),
-                    citation: Some("RFC 08 §7".into()),
                 });
             }
         }
     }
     let mut findings = Vec::new();
-    for (check, hits) in [
-        (V1CheckId::FieldVanished, vanished),
-        (V1CheckId::FieldStuck, stuck),
-        (V1CheckId::FieldNew, new),
-    ] {
+    for (check, hits) in [(FieldCheck::Vanished, vanished), (FieldCheck::New, new)] {
         let more = hits.more("more path(s) with the same finding");
         findings.extend(hits.into_vec());
         if let Some(evidence) = more {
-            findings.push(V1Finding {
+            findings.push(FieldFinding {
                 severity: DoctorSeverity::Info,
                 check,
                 subject: "fleet".into(),
                 evidence,
-                citation: None,
             });
         }
     }
@@ -673,33 +716,29 @@ pub fn judge_fields(
 /// What a `zenctl field` run watches, and its bounds.
 #[derive(Debug, Clone)]
 pub struct FieldSpec {
-    /// Full wire selector to watch (the session is un-namespaced, RFC 09 §5).
+    /// Full wire selector to watch, on a session in no namespace.
     pub selector: String,
     /// The observation window.
     pub window: Duration,
-    /// The per-path table bound (RFC 09 §5.1 O6).
+    /// The per-path table bound (O6).
     pub max_paths: usize,
 }
 
-/// Watch one selector for the window and report per-path statistics plus the
-/// three findings. The subscriber is declared **before** the window opens
-/// (O4). `slices: None` means no registry was loaded: declared `ttl_s` and
-/// type names are then unknown, `field-stuck` and `field-new` are
-/// unjudgeable, and the report says so rather than reading clean (O4; #246).
+/// Watch one wire selector for the window and report per-path statistics
+/// plus the findings. The subscriber is declared **before** the window
+/// opens (O4). Each payload is decoded through `lens` — the decode `echo`
+/// runs (#612, FJ8b): a decoded value's paths are judged against its
+/// declared type, and a key no contract resolves is observed structurally
+/// and judged for nothing that would need one.
 pub async fn run_field(
-    fleet: &crate::Fleet<'_>,
-    slices: Option<&SliceSet>,
-    store: &SchemaStore,
+    session: &Session,
+    lens: &Lens<'_>,
     spec: &FieldSpec,
 ) -> Result<FieldReport> {
     use crate::{FleetEvent, StreamItem};
 
-    let (session, base) = (fleet.session(), fleet.base());
-
     let monitor = crate::Monitor::start(session, crate::MonitorSpec::default()).await?;
-
     let mut events = monitor.events();
-
     // Declared before the window opens: not-asked must never read as "no" —
     // and a declaration that fails takes the monitor down with it (#336).
     let monitor = monitor.watching([spec.selector.as_str()]).await?;
@@ -709,15 +748,13 @@ pub async fn run_field(
     let mut obs = FieldObservation::new(spec.max_paths);
     let mut samples: u64 = 0;
     let mut dropped: u64 = 0;
-    // Bounded (#107): one projection per distinct key, LRU past the bound,
-    // evictions counted into the report (O6).
-    let mut facts = crate::model::facts::FactsCache::default();
+    let mut unresolved: u64 = 0;
+    // One context per key, decided on its first sample: what its type
+    // declares (O6: bounded with the path table's keys).
+    let mut ctx: BTreeMap<String, KeyFieldContext> = BTreeMap::new();
+    let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
 
     // One timer for the whole window, not one per iteration (#346).
-    // `sleep_until` builds a future and registers a timer each time it
-    // is evaluated, and a `select!` in a loop evaluates it on every
-    // pass — at 100k samples/s that is 100k registrations a second for
-    // a deadline that never moves.
     let window_over = tokio::time::sleep_until(deadline);
     tokio::pin!(window_over);
     loop {
@@ -728,16 +765,34 @@ pub async fn run_field(
         match item {
             Some(StreamItem::Event(FleetEvent::Sample(s))) => {
                 samples += 1;
+                if s.kind == zenoh::sample::SampleKind::Delete {
+                    // A deletion carries no document: a field is not absent
+                    // from it (O4).
+                    obs.observe(&s.key, opened.elapsed().as_secs_f64(), None);
+                    continue;
+                }
                 // Bounded, and the skip is counted rather than read as an
                 // absent document (#346).
                 let bytes = s.payload.to_bytes();
-                if bytes.len() > crate::model::decode::OBSERVE_LIMIT {
+                if bytes.len() > crate::model::structural::OBSERVE_LIMIT {
                     obs.observe_unread(&s.key);
-                } else {
-                    let doc = crate::model::decode::structural_value(&bytes);
-                    obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
+                    continue;
                 }
-                facts.ensure(base, &s.key, slices);
+                let encoding = (!s.encoding.is_empty()).then_some(s.encoding.as_str());
+                let checked = lens.check(&s.key, Member::Type, encoding, &bytes);
+                let doc = match &checked.rendering.rendered {
+                    Rendered::Value { value, .. } => Some(value.clone()),
+                    Rendered::Structural { value, .. } => {
+                        unresolved += 1;
+                        value.clone()
+                    }
+                    Rendered::Opaque { .. } | Rendered::Undecodable { .. } => None,
+                };
+                obs.observe(&s.key, opened.elapsed().as_secs_f64(), doc.as_ref());
+                if !ctx.contains_key(s.key.as_str()) {
+                    let c = context_of(lens, &s.key, &mut declared_cache);
+                    ctx.insert(s.key.clone(), c);
+                }
             }
             Some(StreamItem::Dropped(n)) => dropped += n,
             Some(_) => continue,
@@ -747,15 +802,16 @@ pub async fn run_field(
     monitor.shutdown().await?;
 
     let window_s = spec.window.as_secs_f64();
-    let ctx = field_context(session, store, slices, &facts).await;
     let findings = judge_fields(&obs, window_s, &ctx);
 
     let mut rows = Vec::new();
     for (key, fields) in obs.iter() {
+        let declared = ctx.get(key).and_then(|c| c.declared.as_ref());
         for (path, stats) in &fields.paths {
             rows.push(FieldRow {
                 key: key.to_string(),
                 path: path.clone(),
+                declared: declared.map(|d| d.accounts_for(path)),
                 seen: stats.seen,
                 documents: fields.documents,
                 kinds: stats.kinds.keys().map(|k| k.to_string()).collect(),
@@ -774,61 +830,52 @@ pub async fn run_field(
     Ok(FieldReport {
         selector: spec.selector.clone(),
         window_s,
+        lens: lens.scope(),
         samples,
         keys_seen: obs.keys_seen(),
         dropped,
         undocumented: obs.undocumented(),
         unread: obs.unread(),
-        registry_loaded: slices.is_some(),
+        unresolved,
         paths: obs.paths(),
         max_paths: obs.max_paths(),
         paths_dropped: obs.dropped_paths(),
         paths_dropped_examples: obs.dropped_examples().to_vec(),
-        facts_evicted: facts.evicted(),
         rows,
         findings,
     })
 }
 
-/// Build the per-key judge context: declared `ttl_s`/type from the resolved
-/// facts, declared paths from each producer's served schema (fetched through
-/// the store's ordinary cache — one `describe` per producer, not per key).
-pub(crate) async fn field_context(
-    session: &Session,
-    store: &SchemaStore,
-    slices: Option<&SliceSet>,
-    facts: &crate::model::facts::FactsCache,
-) -> BTreeMap<String, KeyFieldContext> {
-    let mut declared_cache: BTreeMap<(String, String), Option<DeclaredPaths>> = BTreeMap::new();
-
-    let mut ctx = BTreeMap::new();
-
-    for (key, f) in facts.iter() {
-        let mut c = KeyFieldContext::default();
-        if let crate::model::facts::Registration::Registered(sf) = &f.registration {
-            c.ttl_s = sf.ttl_s;
-            c.type_name = Some(sf.type_name.clone());
-            if let Some(producer) = producer_of(f, slices)
-                && !sf.type_name.is_empty()
-            {
-                let cache_key = (producer.clone(), sf.type_name.clone());
-                if !declared_cache.contains_key(&cache_key) {
-                    let declared = store
-                        .schema_for(session, &producer, &sf.type_name)
-                        .await
-                        .and_then(|schema| {
-                            schema
-                                .json_document()
-                                .and_then(DeclaredPaths::from_json_schema)
-                        });
-                    declared_cache.insert(cache_key.clone(), declared);
-                }
-                c.declared = declared_cache.get(&cache_key).cloned().flatten();
-            }
-        }
-        ctx.insert(key.to_string(), c);
+/// One key's judge context: its declared type and the paths that type
+/// declares, cached per (revision, resource) — the type is the contract's,
+/// not the key's.
+fn context_of(
+    lens: &Lens<'_>,
+    key: &str,
+    cache: &mut BTreeMap<(String, String), Option<DeclaredPaths>>,
+) -> KeyFieldContext {
+    let Some(r) = lens.resolve(key).resolved else {
+        return KeyFieldContext::default();
+    };
+    let resource = r.resource();
+    let bundle = r.revision.bundle();
+    let Some(ty) = zenkey_model::decode::type_of(
+        bundle,
+        resource.token.as_str(),
+        resource.template.as_str(),
+        Member::Type.as_str(),
+    ) else {
+        return KeyFieldContext::default();
+    };
+    let cache_key = (r.revision.fingerprint().to_string(), r.resource_name());
+    let declared = cache
+        .entry(cache_key)
+        .or_insert_with(|| DeclaredPaths::of_type(bundle, ty))
+        .clone();
+    KeyFieldContext {
+        type_name: Some(zenkey_model::decode::declared(ty)),
+        declared,
     }
-    ctx
 }
 
 #[cfg(test)]
@@ -907,7 +954,7 @@ mod tests {
         let findings = judge_fields(&obs, 5.0, &BTreeMap::new());
         let vanished: Vec<_> = findings
             .iter()
-            .filter(|f| f.check == V1CheckId::FieldVanished)
+            .filter(|f| f.check == FieldCheck::Vanished)
             .collect();
         assert_eq!(vanished.len(), 1, "{findings:?}");
         assert!(vanished[0].subject.ends_with("· opt"));
@@ -930,7 +977,7 @@ mod tests {
         assert!(
             judge_fields(&obs, 3.0, &BTreeMap::new())
                 .iter()
-                .all(|f| f.check != V1CheckId::FieldVanished)
+                .all(|f| f.check != FieldCheck::Vanished)
         );
     }
 
@@ -968,33 +1015,9 @@ mod tests {
             !judge_stuck(&fields.paths["temperature_c"], Some(10)),
             "a 7s span is not long relative to a 10s ttl"
         );
-
-        let ctx: BTreeMap<String, KeyFieldContext> = [(
-            "k".to_string(),
-            KeyFieldContext {
-                ttl_s: Some(1),
-                ..KeyFieldContext::default()
-            },
-        )]
-        .into();
-        let findings = judge_fields(&obs, 8.0, &ctx);
-        let stuck: Vec<_> = findings
-            .iter()
-            .filter(|f| f.check == V1CheckId::FieldStuck)
-            .collect();
-        assert_eq!(stuck.len(), 1, "{findings:?}");
-        assert!(stuck[0].subject.ends_with("· temperature_c"));
-        assert!(stuck[0].evidence.contains("21.5"), "{}", stuck[0].evidence);
-        assert!(
-            stuck[0].evidence.contains("not a verdict"),
-            "stuck is an observation with a stated window: {}",
-            stuck[0].evidence
-        );
-        assert!(
-            stuck[0].evidence.contains("ttl_s 1s"),
-            "the ttl it is relative to is stated: {}",
-            stuck[0].evidence
-        );
+        // And a run never asks it: zk2's freshness is a profile (#613).
+        let findings = judge_fields(&obs, 8.0, &BTreeMap::new());
+        assert!(findings.is_empty(), "{findings:?}");
     }
 
     /// `field-new` is judged only against a schema that enumerates its
@@ -1033,19 +1056,17 @@ mod tests {
             KeyFieldContext {
                 type_name: Some("Health".into()),
                 declared: Some(declared),
-                ..KeyFieldContext::default()
             },
         )]
         .into();
         let findings = judge_fields(&obs, 1.0, &ctx);
         let new: Vec<_> = findings
             .iter()
-            .filter(|f| f.check == V1CheckId::FieldNew)
+            .filter(|f| f.check == FieldCheck::New)
             .collect();
         assert_eq!(new.len(), 1, "{findings:?}");
         assert!(new[0].subject.ends_with("· extra"));
         assert!(new[0].evidence.contains("Health"), "{}", new[0].evidence);
-        assert_eq!(new[0].citation.as_deref(), Some("RFC 08 §7"));
     }
 
     /// The document `schemars` actually emits for an adjacently-tagged enum:
@@ -1305,7 +1326,7 @@ mod tests {
         assert!(
             judge_fields(&obs, 6.0, &BTreeMap::new())
                 .iter()
-                .all(|f| f.check != V1CheckId::FieldVanished),
+                .all(|f| f.check != FieldCheck::Vanished),
             "five undocumented samples are five unobservables, not a vanish"
         );
     }

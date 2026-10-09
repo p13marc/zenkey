@@ -37,12 +37,13 @@ so against a default-configured fleet `zenctl` works with no `--base` at all.
 Don't know the namespace? `zenctl namespace list` finds the ones zk2 services
 use.
 
-**Selectors are wire keys.** `--base` is for discovery and for the selectors
-zenctl composes itself; a selector you type is used exactly as typed. Under
-`--base prod`, `zenctl echo 'v1/**'` listens to a keyspace nobody publishes on
-— so zenctl says so on stderr (`hint: "v1/**" does not sit under base "prod" …
-did you mean "prod/v1/**"?`) and carries on. Leave the selector out and the
-verb watches `<base>/v1/**` for you.
+**Selectors are wire keys.** `--namespace` (alias `--base`) is for discovery,
+for resolving what a raw observer sees, and for the selectors zenctl composes
+itself; a selector you type is used exactly as typed. Under `--namespace
+prod`, `zenctl echo 'zk2/**'` listens to a keyspace nobody publishes on — so
+zenctl says so on stderr (`hint: "zk2/**" does not sit under namespace "prod"
+… did you mean "prod/zk2/**"?`) and carries on. Leave the selector out and
+the verb watches `<ns>/zk2/**` for you.
 
 ## Install
 
@@ -149,7 +150,7 @@ or `-c tls/other:7447` overrides it for one invocation.
 ```bash
 zenctl service list                                # which zk2 services are up, and what they serve
 zenctl doctor                                      # does the deployment keep the core's rules?
-zenctl echo --class state                          # current state traffic, decoded
+zenctl echo                                        # every zk2 sample, decoded as its declared type
 ```
 
 ## Session posture
@@ -211,10 +212,12 @@ esac
 zenctl doctor --namespace prod --fail-on error
 zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state; no admin space here
 
-# One expectation, for CI or a cron job: at least one health sample in 60 s.
-zenctl check expect 'prod/v1/*/state/sysinfo/health' --for 60 --at-least 1
-zenctl check expect 'prod/v1/*/telemetry/**' --for 30 --rate-min 1 --valid-payload
-zenctl check expect 'legacy/**' --for 60 --absent      # silence, asserted (2 if unprovable)
+# One expectation over a zk2 resource, for CI or a cron job.
+zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
+zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 30 \
+                    --rate-min 1 --valid-payload --qos declared --present
+zenctl check expect host-a/tc tc.netif.v1 --namespace prod --for 10 --present   # presence alone
+zenctl check probe host-a/tc tc.netif.v1 'interfaces/{ns}/{iface}' --namespace prod  # as a consumer reads it
 
 # A producer against its own registry, as a JUnit report CI can read.
 zenctl check conform --producer sysinfo --registry /srv/registry --junit conform.xml
@@ -226,8 +229,9 @@ zenctl export --once --prom --for 10 > /var/lib/node_exporter/zenkey.prom.$$ \
   && mv /var/lib/node_exporter/zenkey.prom.$$ /var/lib/node_exporter/zenkey.prom
 
 # Conditions, as ndjson transitions (ok / firing / unobservable); --count bounds a run.
-zenctl watchdog --rule 'silent-for prod/v1/*/state/sysinfo/health 120' \
-                --rule 'origin-down h-3fa9c2d41b7e' --rule dropped --count 12
+zenctl watchdog --namespace prod --rule 'silent-for prod/zk2/host-a/tc/tc.netif.v1/stream/** 120' \
+                --rule 'invalid-payload prod/zk2/**' --rule 'qos-mismatch prod/zk2/**' \
+                --rule 'instance-gone host-a/tc' --rule dropped --count 12
 zenctl doctor --transitions --every 60                 # check-id changes, not states
 
 # Why is this key silent? Each rung established, not established, or not asked.
@@ -262,7 +266,8 @@ reach further than one concrete thing:
 | `gen`, `serve` | a contract's required role left unbound (R1: the runtime would not start the service) | `--bind ROLE=SYSTEM/SERVICE` |
 | `export` | a non-loopback `--bind` | `--i-know` |
 | `record`, `snapshot` | an `-o` file that already exists | `--overwrite` |
-| `record --on` | a rule that judges v1 rather than zk2 (`invalid-payload`, `qos-mismatch`, `origin-down`, `alert-firing`) | not overridable |
+| `record --on`, `watchdog` | a rule that judges v1 rather than zk2 (`origin-down` is `instance-gone` now; `alert-firing` waits for the alert profile, #613) | not overridable |
+| `call`, `bench call` | a JSON Schema request its type refuses: every violation named, nothing sent (spec §7.3, #671) | not overridable — send what the type declares |
 | `bench call` | an operation not declared `idempotent` | `--i-know` |
 | `bench call` | a fan-out to an operation that does not declare `fanout = "allowed"` (O2) | not overridable |
 
@@ -295,11 +300,15 @@ scout` (raw scouting Hellos) · `zenctl key includes|intersects|canon`
 `@/**` browses the admin space) · `zenctl get state <address> <iface>
 <state>` (a zk2 state resource, the owner's current answer; `--last-known
 <archive>` an archive's) · `zenctl watch <address> <iface> <resource>` (a zk2
-subscription, decoded through the contract) · `zenctl echo` (subscribe and decode; `--seed`
-pulls current state first) · `zenctl rate` (per-key rates, `--bytes` for
-bandwidth) · `zenctl field --for 60` (per-field statistics: the stuck sensor,
-the vanished field, the field the schema never declared) · `zenctl timeline
---for 10` (one merged ordering, a lane per origin, the clock stated; `--from`
+subscription, decoded through the contract) · `zenctl echo` (every wire key,
+raw; a zk2 key resolved through presence and its contract and decoded as its
+declared type, and where the ladder stops, the rung named — not in this
+namespace, not zk2, no provider, no contract, undecodable as its type) ·
+`zenctl rate` (rates grouped by zk2 address and resource, `--per-key`,
+`--bytes` for bandwidth) · `zenctl field --for 60` (per-field statistics over
+decoded payloads: the vanished field, the field the declared type never
+declares) · `zenctl timeline --for 10` (one merged ordering, a lane per zk2
+resource, each stamp the owner's clock, another's or unattributable; `--from`
 a capture).
 
 **Capture — keep what happened.**
@@ -311,9 +320,10 @@ prod/zk2/** 30' --pre 30` (armed: written only when a rule fires, with the
 thirty seconds before it and the owners' state as a preamble) · `zenctl
 replay bus.zrec --dry-run` (replay is
 publishing: preview first; `--namespace replay` stands in for the recorded
-owners in a namespace of its own) · `zenctl snapshot -o fleet.zsnap` (the fleet's
-current values, collected over a span) and `zenctl snapshot diff a.zsnap
-b.zsnap` (`--normalize-origins` across two deployments).
+owners in a namespace of its own) · `zenctl snapshot -o state.zsnap` (the
+owners' current state, S4's GET, each row's holder, stamper and conformance,
+collected over a span) and `zenctl snapshot diff a.zsnap b.zsnap` (by zk2
+key, so two namespaces compare as they are).
 
 **Act — write to the bus.**
 `zenctl call <address> <iface> <operation> [request]` (a zk2 operation,
@@ -332,12 +342,16 @@ and a verified fetch from one origin; `zenctl blob list` reads only the
 registry).
 
 **Judge — exit-coded.**
-`zenctl check expect` (an expectation over a window) · `zenctl check cutover`
-and `zenctl check probe` (the two halves of cutover acceptance: the old family
-silent while the new one speaks; a consumer-shaped probe with concrete keys) ·
+`zenctl check expect <address> <iface> [resource]` (an expectation over a
+window: samples, rates, values against their type, the declared QoS,
+presence) · `zenctl check cutover` (the old key family silent while the new
+one speaks) · `zenctl check probe <address> <iface> <resource>` (a resource
+read the way a consumer reads it: did a value arrive, and if not, who was up
+and silent) ·
 `zenctl check retired` (which `[[deprecated]]` subjects are actually gone) ·
 `zenctl check conform` (a producer's registry as a conformance suite) ·
-`zenctl check schema` (one payload against its schema) · `zenctl doctor` (a
+`zenctl check schema <iface> <resource> --from …` (one payload against a
+type of a revision) · `zenctl doctor` (a
 zk2 deployment against the core, one verdict per check) · `zenctl why <key>`
 (why it is silent)
 · `zenctl watchdog --rule …` (conditions, as transitions) · `zenctl export`
@@ -367,7 +381,9 @@ show|refresh|clear` (the slice cache behind completion) · `zenctl completions
 > `node`, `base`, `interface` and `registry` → zk2's `service`, `iface`,
 > `schema`, `namespace`, `graph` and `compat`; FJ5 replaced `service call`
 > with zk2's `call`, added `get state` and `watch`, and dropped `retire`; FJ6
-> re-cut `doctor` for zk2, its registry diff now `check conform`'s.
+> re-cut `doctor` for zk2, its registry diff now `check conform`'s; FJ8b
+> re-cut the observers and the checks (`echo`, `rate`, `field`, `timeline`,
+> `snapshot`, `check expect|schema|probe`, `watchdog`) over zk2 keys.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -476,9 +492,9 @@ asks an owner what its state is.
 zenctl namespace list -c tcp/127.0.0.1:7447  # discover zk2 namespaces (needs no --namespace)
 zenctl service list --namespace acme    # zk2 services: instances, tokens, descriptors
 zenctl graph --namespace acme           # the binding graph (--dot for Graphviz)
-zenctl echo --base acme                 # subscribe + decode (defaults to <base>/v1/**)
+zenctl echo --namespace acme            # subscribe + decode (defaults to <ns>/zk2/**)
 zenctl storage list --base acme --watch --every 5  # poll+diff; +/- marks
-zenctl rate --base acme --per-key       # per-key sample rates; --bytes for bandwidth
+zenctl rate --namespace acme --per-key  # rates by zk2 resource, then per key; --bytes for bandwidth
 zenctl call '*/tc' tc.netif.v1 diagnostics --namespace acme   # a zk2 fan-out (fanout = "allowed" only)
 zenctl get state host-a/tc tc.netif.v1 namespaces --namespace acme   # a zk2 owner's current state
 zenctl watch '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace acme   # zk2 samples, decoded

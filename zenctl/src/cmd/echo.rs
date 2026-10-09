@@ -1,118 +1,104 @@
-//! `zenctl echo` — subscribe, refine, schema-decode (RFC 08 §7) with honest
-//! structural fallback.
+//! `zenctl echo` — every sample on a wire selector, decoded where a
+//! contract reaches it (#612, FJ8b; the tooling guide's O1 and O2).
 //!
-//! Top-level since #307: subscribing to live traffic is not something the
-//! registry declares, so it is not a verb of the `topic` noun. The rename is
-//! the whole change — the stream, the row shape and the `%`-vocabulary are
-//! untouched, which is what keeps `zenctl echo --format ndjson | zenctl pub
-//! --from ndjson` composing.
+//! RAW: the subscription is on a session in no namespace, so every key on
+//! the wire is shown, whoever's it is. A key in the deployment's namespace
+//! that parses as zk2 is resolved through a lens ([`zenkey_fleet::Lens`]):
+//! the presence read and the descriptors a second session, **in** the
+//! namespace, made of it, and the revisions those descriptors name,
+//! retrieved from their holders or held by `--contracts`. The payload is
+//! decoded as its declared type (spec §7.2), a JSON Schema value validated
+//! against it (§7.3), and where the ladder stops the rung is said — on the
+//! row, in every format. A foreign key renders structurally, never refused.
+//!
+//! The lens is a [`zenkey_fleet::LensFeed`]: a key that falls short of a
+//! provider or a revision nudges a re-read in the background, so a service
+//! that starts after `echo` resolves too, and the drain never waits on one.
+//!
+//! The row dialect is the one `pub --from ndjson` and `.zrec` read back
+//! (#235, FJ8a's `qos_axes`), with the key's `identity` beside it; the
+//! tagged `dropped` lines are stream metadata, skipped by the reader.
 
 use anyhow::Result;
+use zenkey_fleet::model::render::Member;
+use zenkey_fleet::report::{Conformance, KeyIdentity, Rendered};
+use zenkey_fleet::{Lens, LensFeed};
 
 use super::sample::{
-    self, SampleLine, attachment_display, attachment_json, format_sample, hex, qos_summary,
-    source_summary, type_tag,
+    SampleLine, Zk2Positions, attachment_json, format_sample, hex, qos_summary, source_summary,
 };
-use crate::Bus;
+use crate::bus::Deployment;
 use crate::cli::EchoArgs;
+use crate::cmd::zk2;
 
-/// `zenctl echo` — subscribe-first is not a style choice: RFC 04 §3.2 forbids
-/// GET-then-subscribe (it drops everything published in the gap).
+/// `zenctl echo [SELECTOR]` — subscribe first, and resolve beside it.
 pub async fn run(cli: EchoArgs) -> Result<()> {
-    let bus = Bus::resolve(&cli.bus)?;
-    let args = &bus;
+    let dep = Deployment::resolve(&cli.ns)?;
+    let contracts = zk2::load_contracts(&cli.contracts)?;
     let EchoArgs {
-        selector: sel,
+        selector,
         fmt,
         raw,
         hex: hex_payload,
         rate,
         no_decode,
         count,
-        seed,
-        bus: _,
-    } = &cli;
-    let (fmt, raw, hex_payload, rate, no_decode, count, seed) = (
-        fmt.as_deref(),
-        *raw,
-        *hex_payload,
-        *rate,
-        *no_decode,
-        *count,
-        *seed,
-    );
-    let selector = super::selector_of(sel, args)?;
-    let base = args.base().to_string();
+        contracts: _,
+        ns: _,
+    } = cli;
+    let namespace = dep.namespace().to_owned();
+    let selector = zk2::wire_selector(selector.as_deref(), &namespace)?;
 
-    // Slices first (a single introspect fan-in), then subscribe: the slice
-    // set names each subject's payload type; the schema store fetches
-    // `describe` lazily on first decode miss.
-    // Slices enrich: they name each key's payload type, and without them the
-    // decode ladder falls to its structural rung — which is exactly what
-    // `--raw` asks for on purpose. A registry that will not answer must not
-    // cost the user the stream itself (#210). `None` stays `None` into the
-    // ladder, so a row's verdict reads `no registry loaded` rather than
-    // claiming `no schema served` about types nobody looked up
-    // (RFC 09 §5.1 O4; #246).
-    let slices = if raw {
+    // The data plane in no namespace: every key as the wire carries it.
+    let session = dep.link().session().await?;
+    let store = zk2::store(&dep, &contracts);
+    // The deployment in its namespace, for the lens — unless nothing is to
+    // be decoded, which asks nothing of it.
+    let feed = if raw || no_decode {
         None
     } else {
-        args.slices_optional().await?
+        let ns_session = dep.session().await?;
+        let (feed, error) = LensFeed::open(&ns_session, &store, dep.timeout()).await;
+        if let Some(e) = error {
+            eprintln!(
+                "{}",
+                zk2::lens_unread_note(&zenkey_fleet::one_line(&e)).to_line()
+            );
+        }
+        Some(feed)
     };
-    let store = zenkey_fleet::SchemaStore::new(&base, args.timeout());
 
-    let session = args.session().await?;
-    let fleet = args.fleet(&session);
-    // Through the Monitor (issue #48): the same bounded broadcast the GUI
+    // Through the Monitor (#48): the same bounded broadcast every observer
     // uses, so a bus that outruns this terminal surfaces as an explicit
-    // dropped count instead of invisible loss (RFC 09 §5.1 O6). This is also
-    // the §6.3 promise kept: the CLI validates the engine's path.
-    // --seed makes the watch a seeded one (issue #92): the monitor declares
-    // the subscriber first, then pulls both seed paths through one LWW merge;
-    // the boundary event separates seeded state from live traffic.
+    // dropped count instead of invisible loss (O6).
     let monitor =
         zenkey_fleet::Monitor::start(&session, zenkey_fleet::MonitorSpec::default()).await?;
     let mut events = monitor.events();
-    if seed {
-        monitor
-            .watch_seeded(
-                &selector,
-                zenkey_fleet::SeedPolicy {
-                    timeout: args.timeout(),
-                    ..Default::default()
-                },
-            )
-            .await?;
-    } else {
-        monitor.watch(&selector).await?;
-    }
+    monitor.watch(&selector).await?;
 
-    // One resolution for the whole run, and it happens in `Mode::of` (#198).
-    // A streaming verb's question is only ever "is a program reading this" —
-    // it has rows for one and prose for the other, and no third answer.
-    let ndjson = crate::render::Mode::of(args.format()).machine();
+    let ndjson = crate::render::Mode::of(dep.format()).machine();
     if !ndjson {
         eprintln!(
             "echoing {selector}{} (ctrl-c to stop)",
-            if seed {
-                " (seeding current state…)"
-            } else {
-                ""
-            }
+            excluded_note(&selector)
         );
     }
     let mut seen = 0usize;
     let mut dropped_total = 0u64;
-    while let Some(item) = events.recv().await {
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+    loop {
+        let item = tokio::select! {
+            item = events.recv() => item,
+            _ = &mut ctrl_c => break,
+        };
+        let Some(item) = item else { break };
         let sample = match item {
             zenkey_fleet::StreamItem::Dropped(n) => {
                 dropped_total += n;
                 if ndjson {
-                    // Tagged (`"row":"dropped"`) so the pipe's other end —
-                    // `pub --from ndjson`, via `parse_stream_line` —
-                    // skips it as stream metadata instead of counting a
-                    // malformed row. A bare `{"dropped":n}` poisoned the
-                    // round trip the row dialect exists for (#235).
+                    // Tagged (`"row":"dropped"`) so `pub --from ndjson`
+                    // skips it as stream metadata (#235).
                     println!(
                         "{}",
                         crate::render::Row::tagged("dropped", serde_json::json!({ "dropped": n }))
@@ -123,216 +109,39 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
                 }
                 continue;
             }
-            zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::WatchSeeded {
-                coverage,
-                ..
-            }) => {
-                // The boundary, rendered per O4: which paths ran and what
-                // each yielded — zeros are observations, not verdicts.
-                if ndjson {
-                    // Tagged for the same reason as the dropped line above.
-                    println!(
-                        "{}",
-                        crate::render::Row::tagged(
-                            "seed",
-                            serde_json::json!({ "seed_complete": coverage })
-                        )
-                        .into_line()
-                    );
-                } else {
-                    let path = |n: Option<usize>, what: &str| match n {
-                        Some(n) => format!("{n} {what}"),
-                        None => format!("{what} path off"),
-                    };
-                    eprintln!(
-                        "-- seed complete: {} · {} · {} superseded — live from here --",
-                        path(coverage.history_replies, "from caches"),
-                        path(coverage.storage_replies, "from storage"),
-                        coverage.superseded,
-                    );
-                }
-                continue;
-            }
             zenkey_fleet::StreamItem::Event(zenkey_fleet::FleetEvent::Sample(s)) => s,
             zenkey_fleet::StreamItem::Event(_) => continue,
         };
         seen += 1;
-        // Borrowed, not cloned: `sample` is an `Arc<SampleView>` that
-        // outlives every use below (`docs/zero-copy.md`). `to_bytes()` is a
-        // `Cow` and is already the right form — it is not a copy.
-        let key = sample.key.as_str();
-        let bytes = sample.payload.to_bytes();
-        let encoding = sample.encoding.as_str();
-        let timestamp = sample.timestamp.map(|t| t.to_string());
-        // The attachment is a wire fact, rendered once (structural → hex,
-        // size-tagged, never schema-decoded) and shown wherever the sample is.
-        let att = sample.attachment.as_ref().map(attachment_display);
-        // The wire's actual QoS axes (#120) — always stamped, defaults
-        // included; the source only when the publisher attaches it.
-        let qos = qos_summary(
-            sample.priority,
-            sample.congestion_control,
-            sample.reliability,
-            sample.express,
-        );
-        let source = sample.source.as_ref().map(source_summary);
+        let catalog = feed.as_ref().and_then(LensFeed::catalog);
+        let lens = Lens::new(&namespace, catalog.as_deref(), &store).offline(&contracts);
+        let line = Line::of(&sample, &lens, raw || no_decode);
+        if let Some(f) = &feed {
+            f.nudge(line.identity.unresolved.as_ref());
+        }
         let rate_suffix = if rate {
             let (_, _, hz) = monitor.core().with_stats(|s| s.totals());
             format!("  @ {hz:.1}/s")
         } else {
             String::new()
         };
-
-        if sample.kind == zenoh::sample::SampleKind::Delete {
-            // A tombstone is not an empty put (#115): render the retirement,
-            // decode nothing — there is nothing to decode.
-            if ndjson {
-                // No `value` and no `payload_bytes`: a tombstone has no
-                // payload, and "0 bytes" would read as an empty put, which
-                // is the one thing RFC 04 §1.2 says it is not.
-                let mut row = zenkey_fleet::SampleRow::of_key(key, &base).with_wire(&sample);
-                row.qos_axes = Some(qos.clone());
-                if let Some(a) = &sample.attachment {
-                    row.attachment = Some(attachment_json(a));
-                    row.attachment_bytes = Some(a.len());
-                }
-                println!("{}", row.to_line());
-            } else {
-                println!(
-                    "{key}\n  <tombstone — authoritative retirement (RFC 04 §1.2), \
-                     not an empty value>{rate_suffix}"
-                );
-                if let Some(a) = &att {
-                    println!("  attachment: {a}");
-                }
-            }
+        if ndjson {
+            println!("{}", line.row(&sample, &namespace).to_line());
         } else if raw {
-            println!("{key}\n  {}{rate_suffix}", hex(&bytes));
+            println!("{}\n  {}{rate_suffix}", sample.key, hex(&line.bytes));
             if let Some(a) = &sample.attachment {
                 println!("  attachment: {}", hex(&a.to_bytes()));
             }
-        } else if hex_payload {
-            // --hex: the decode pipeline still names the type, the payload
-            // shows as bytes.
-            let type_name = zenkey_fleet::decode_sample(
-                &fleet,
-                &store,
-                slices.as_ref(),
-                key,
-                Some(encoding),
-                &bytes,
-            )
-            .await
-            .type_name;
-            // The tag names the registered type; the payload is shown as
-            // bytes at the user's request, which is not a failed decode —
-            // so no `?`.
-            let tag = type_tag(type_name.as_deref(), true);
-            println!("{key}\n  {tag} {}{rate_suffix}", hex(&bytes));
-            if let Some(a) = &sample.attachment {
-                println!("  attachment: {}", hex(&a.to_bytes()));
-            }
+        } else if let Some(fmt) = &fmt {
+            println!("{}", line.formatted(fmt, seen, &sample, &namespace));
         } else {
-            // `--no-decode` never asks, so it has no verdict to misreport —
-            // `sample::decode` carries that rule now, for both verbs.
-            let d = sample::decode(
-                &fleet,
-                &store,
-                slices.as_ref(),
-                key,
-                Some(encoding),
-                &bytes,
-                no_decode,
-            )
-            .await;
-            let type_name = d.type_name;
-            let v = sample::value_of(&d.rendering);
-            if ndjson {
-                let mut row = zenkey_fleet::SampleRow::of_key(key, &base).with_wire(&sample);
-                // The wire axes are a fact worth carrying, but not under
-                // `qos`: that key is resolved as an RFC 04 §3 profile *name*
-                // by the reader on the other end of this pipe (#235).
-                row.qos_axes = Some(qos.clone());
-                // `--no-decode` never asks, so it has nothing to report —
-                // absent, not null-when-unknown (RFC 09 §5.1 O4). The same
-                // rule the verdict below has always followed.
-                row.type_name = type_name.clone();
-                row.typed = Some(v.typed);
-                row.payload_bytes = Some(bytes.len());
-                row.value = Some(
-                    serde_json::from_str::<serde_json::Value>(&v.text)
-                        .unwrap_or(serde_json::Value::String(v.text.clone())),
-                );
-                // Present only when the publisher attached SourceInfo —
-                // absent, never null-when-unknown (#120).
-                row.source = sample.source.as_ref().map(source_summary);
-                // Present only when the wire carried one — absent, never
-                // null-when-unknown (#117).
-                if let Some(a) = &sample.attachment {
-                    row.attachment = Some(attachment_json(a));
-                    row.attachment_bytes = Some(a.len());
-                }
-                // #159: present only when the pipeline was asked (--no-decode
-                // never asks) — and then always, so "valid" and "not checked"
-                // cannot be confused by their shared absence.
-                if let Some(verdict) = &d.verdict {
-                    row.verdict = Some(match verdict {
-                        zenkey_fleet::Verdict::Valid => "valid".to_string(),
-                        zenkey_fleet::Verdict::Invalid(errors) => {
-                            row.violations = Some(errors.clone());
-                            "invalid".to_string()
-                        }
-                        zenkey_fleet::Verdict::NotValidated(r) => format!("not-validated: {r}"),
-                    });
-                    row.decode_error = d.decode_error.clone();
-                }
-                println!("{}", row.to_line());
-            } else if let Some(fmt) = fmt {
-                println!(
-                    "{}",
-                    format_sample(
-                        fmt,
-                        &SampleLine {
-                            n: seen,
-                            wire_key: key,
-                            base: &base,
-                            type_name: type_name.as_deref(),
-                            encoding,
-                            payload_len: bytes.len(),
-                            timestamp: timestamp.as_deref(),
-                            value: &v.text,
-                            attachment: att.as_deref(),
-                            qos: Some(&qos),
-                            source: source.as_deref(),
-                        },
-                    )
-                );
-            } else {
-                let tag = type_tag(type_name.as_deref(), v.typed);
-                println!("{key}\n  {tag} {}{rate_suffix}", v.text);
-                if let Some(a) = &att {
-                    println!("  attachment: {a}");
-                }
-                for note in v.notes {
-                    eprintln!("  note: {note}");
-                }
-                // #159: a checked failure says so; Valid and NotValidated
-                // stay quiet here (the tag already carries typed/structural).
-                if let Some(zenkey_fleet::Verdict::Invalid(errors)) = &d.verdict {
-                    for e in errors {
-                        eprintln!("  invalid: {e}");
-                    }
-                }
-                if let Some(e) = &d.decode_error {
-                    eprintln!("  undecodable: {e}");
-                }
-            }
+            line.print(&sample, hex_payload, &rate_suffix);
         }
-
         if count > 0 && seen >= count {
             break;
         }
     }
+    monitor.stop();
     if !ndjson {
         eprintln!(
             "{seen} sample(s) shown, {dropped_total} dropped{}",
@@ -346,45 +155,285 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
     Ok(())
 }
 
+/// What a `**` selector cannot carry, said up front (O5).
+fn excluded_note(selector: &str) -> String {
+    let excluded = zenkey_fleet::zrec_excluded(&[selector.to_owned()]);
+    if excluded.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " — {} excluded: no selector names them, and `*`/`**` never match one",
+            excluded.join(", ")
+        )
+    }
+}
+
+/// One sample through the lens, once, for whichever medium prints it.
+struct Line {
+    identity: KeyIdentity,
+    bytes: Vec<u8>,
+    /// `None` on a deletion, which carries nothing to decode (#115).
+    checked: Option<(zenkey_fleet::report::PayloadRendering, Conformance)>,
+    attachment: Option<zenkey_fleet::report::PayloadRendering>,
+}
+
+impl Line {
+    fn of(sample: &zenkey_fleet::SampleView, lens: &Lens<'_>, structural_only: bool) -> Line {
+        let bytes = sample.payload.to_bytes().into_owned();
+        let encoding = (!sample.encoding.is_empty()).then_some(sample.encoding.as_str());
+        let delete = sample.kind == zenoh::sample::SampleKind::Delete;
+        if structural_only {
+            let identity = lens.identity(&sample.key);
+            return Line {
+                identity,
+                checked: (!delete).then(|| {
+                    (
+                        zenkey_fleet::report::PayloadRendering {
+                            key: sample.key.clone(),
+                            size: bytes.len(),
+                            resource: None,
+                            rendered: Rendered::Structural {
+                                why: zenkey_fleet::report::Unresolved::DecodeNotAsked,
+                                value: zenkey_fleet::structural_value(&bytes),
+                                text: zenkey_fleet::structural(&bytes),
+                            },
+                        },
+                        Conformance::NotChecked {
+                            reason: zenkey_fleet::report::Unresolved::DecodeNotAsked.words(),
+                        },
+                    )
+                }),
+                attachment: None,
+                bytes,
+            };
+        }
+        if delete {
+            return Line {
+                identity: lens.identity(&sample.key),
+                checked: None,
+                attachment: None,
+                bytes,
+            };
+        }
+        let c = lens.check(&sample.key, Member::Type, encoding, &bytes);
+        let attachment = sample
+            .attachment
+            .as_ref()
+            .map(|a| lens.render(&sample.key, Member::Attachment, None, &a.to_bytes()));
+        Line {
+            identity: c.identity,
+            checked: Some((c.rendering, c.conformance)),
+            attachment,
+            bytes,
+        }
+    }
+
+    /// The declared type, when the ladder reached one.
+    fn declared(&self) -> Option<String> {
+        match &self.checked.as_ref()?.0.rendered {
+            Rendered::Value { declared, .. } | Rendered::Undecodable { declared, .. } => {
+                Some(declared.clone())
+            }
+            Rendered::Opaque { media_type } => Some(media_type.clone()),
+            Rendered::Structural { .. } => None,
+        }
+    }
+
+    /// The payload as a JSON value: decoded, or the structural document,
+    /// or its text.
+    fn value(&self) -> Option<serde_json::Value> {
+        let (r, _) = self.checked.as_ref()?;
+        Some(match &r.rendered {
+            Rendered::Value { value, .. } => value.clone(),
+            Rendered::Structural { value: Some(v), .. } => v.clone(),
+            Rendered::Structural { text, .. } => serde_json::Value::String(text.clone()),
+            Rendered::Opaque { media_type } => {
+                serde_json::Value::String(format!("<{media_type}, {} B>", r.size))
+            }
+            Rendered::Undecodable { .. } => {
+                serde_json::Value::String(zenkey_fleet::structural(&self.bytes))
+            }
+        })
+    }
+
+    /// The ndjson row: the dialect `pub --from ndjson` reads back, with the
+    /// key's identity and the payload's conformance beside it.
+    fn row(&self, sample: &zenkey_fleet::SampleView, namespace: &str) -> zenkey_fleet::SampleRow {
+        let mut row = zenkey_fleet::SampleRow::of_key(&sample.key, namespace).with_wire(sample);
+        // The wire axes ride `qos_axes`, never `qos` (a profile name, #235).
+        row.qos_axes = Some(qos_summary(
+            sample.priority,
+            sample.congestion_control,
+            sample.reliability,
+            sample.express,
+        ));
+        row.identity = Some(self.identity.clone());
+        row.source = sample.source.as_ref().map(source_summary);
+        if let Some(a) = &sample.attachment {
+            row.attachment = Some(match self.attachment.as_ref().map(|r| &r.rendered) {
+                Some(Rendered::Value { value, .. }) => value.clone(),
+                _ => attachment_json(a),
+            });
+            row.attachment_bytes = Some(a.len());
+        }
+        let Some((rendering, conformance)) = &self.checked else {
+            // A tombstone: no value, no byte count — "0 bytes" would read
+            // as an empty put, which RFC 04 §1.2 says it is not.
+            return row;
+        };
+        row.type_name = self.declared();
+        row.typed = Some(matches!(rendering.rendered, Rendered::Value { .. }));
+        row.payload_bytes = Some(self.bytes.len());
+        row.value = self.value();
+        row.verdict = Some(conformance.token());
+        match conformance {
+            Conformance::Invalid { violations } => row.violations = Some(violations.clone()),
+            Conformance::Undecodable { reason, .. } => row.decode_error = Some(reason.clone()),
+            Conformance::Valid | Conformance::NotChecked { .. } => {}
+        }
+        row
+    }
+
+    /// One `--fmt` line.
+    fn formatted(
+        &self,
+        fmt: &str,
+        n: usize,
+        sample: &zenkey_fleet::SampleView,
+        namespace: &str,
+    ) -> String {
+        let value = match self.value() {
+            Some(serde_json::Value::String(s)) => s,
+            Some(v) => v.to_string(),
+            None => String::new(),
+        };
+        let qos = qos_summary(
+            sample.priority,
+            sample.congestion_control,
+            sample.reliability,
+            sample.express,
+        );
+        let timestamp = sample.timestamp.map(|t| t.to_string());
+        let source = sample.source.as_ref().map(source_summary);
+        let attachment = self
+            .attachment
+            .as_ref()
+            .map(crate::render::payload_text)
+            .or_else(|| {
+                sample
+                    .attachment
+                    .as_ref()
+                    .map(super::sample::attachment_display)
+            });
+        let declared = self.declared();
+        let relative = zenkey::grammar::strip_base(namespace, &sample.key);
+        format_sample(
+            fmt,
+            &SampleLine {
+                n,
+                wire_key: &sample.key,
+                base: namespace,
+                type_name: declared.as_deref(),
+                encoding: &sample.encoding,
+                payload_len: self.bytes.len(),
+                timestamp: timestamp.as_deref(),
+                value: &value,
+                attachment: attachment.as_deref(),
+                qos: Some(&qos),
+                source: source.as_deref(),
+                zk2: Some(Zk2Positions {
+                    relative,
+                    identity: &self.identity,
+                }),
+            },
+        )
+    }
+
+    /// The table form: the wire key, then the rendering with the rung it
+    /// stopped at, and what failed against the declared type on stderr.
+    fn print(&self, sample: &zenkey_fleet::SampleView, hex_payload: bool, rate_suffix: &str) {
+        let Some((rendering, conformance)) = &self.checked else {
+            println!(
+                "{}\n  <tombstone — a deletion, not an empty value>{rate_suffix}",
+                sample.key
+            );
+            return;
+        };
+        if hex_payload {
+            let tag = self
+                .declared()
+                .map(|d| format!("<{d}>"))
+                .unwrap_or_else(|| format!("<{}>", identity_words(&self.identity)));
+            println!("{}\n  {tag} {}{rate_suffix}", sample.key, hex(&self.bytes));
+        } else {
+            println!(
+                "{}\n  {}{rate_suffix}",
+                sample.key,
+                crate::render::payload_text(rendering)
+            );
+        }
+        if let Some(a) = &self.attachment {
+            println!("  attachment: {}", crate::render::payload_text(a));
+        }
+        match conformance {
+            Conformance::Invalid { violations } => {
+                for v in violations {
+                    eprintln!("  invalid: {v}");
+                }
+            }
+            Conformance::Valid
+            | Conformance::Undecodable { .. }
+            | Conformance::NotChecked { .. } => {}
+        }
+    }
+}
+
+/// An identity in a few words, for a tag where no type was reached.
+fn identity_words(id: &KeyIdentity) -> String {
+    match &id.unresolved {
+        Some(why) => why.words(),
+        None => id.group.label(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The pipe round trip, meta lines included (#235's symmetry, kept): the
-    /// exact tagged lines this verb prints between its sample rows read back
-    /// as stream metadata — skipped, not malformed — and a sample row still
-    /// reads back as a row.
+    /// tagged `dropped` line this verb prints between its sample rows reads
+    /// back as stream metadata — skipped, not malformed — and a sample row
+    /// carrying its zk2 identity still reads back as a row.
     #[test]
     fn echo_meta_lines_read_back_as_meta_and_samples_as_samples() {
         use zenkey_fleet::StreamLine;
+        use zenkey_fleet::report::{KeyGroup, KeyIdentity};
 
-        // The two meta lines exactly as the ndjson arm above spells them.
         let dropped =
             crate::render::Row::tagged("dropped", serde_json::json!({ "dropped": 3 })).into_line();
-        let seed = crate::render::Row::tagged(
-            "seed",
-            serde_json::json!({ "seed_complete": { "superseded": 0 } }),
-        )
-        .into_line();
-        // A sample row as the same arm writes one.
-        let mut row = zenkey_fleet::SampleRow::of_key("v1/h-3fa9c2d41b7e/state/p/health", "");
-        row.value = Some(serde_json::json!({"status": "ok"}));
+        let mut row = zenkey_fleet::SampleRow::of_key(
+            "prod/zk2/host-a/tc/tc.netif.v1/state/namespaces",
+            "prod",
+        );
+        row.value = Some(serde_json::json!(["default"]));
+        row.identity = Some(KeyIdentity {
+            group: KeyGroup::Resource {
+                address: "host-a/tc".into(),
+                iface: "tc.netif.v1".into(),
+                token: "state".into(),
+                resource: Some("state/namespaces".into()),
+            },
+            values: Default::default(),
+            unresolved: None,
+        });
         let sample = row.to_line();
 
-        let stream = [sample.as_str(), dropped.as_str(), seed.as_str()];
-        let parsed: Vec<StreamLine> = stream
+        let parsed: Vec<StreamLine> = [sample.as_str(), dropped.as_str()]
             .iter()
             .map(|l| zenkey_fleet::parse_stream_line(l).expect("every echo line parses"))
             .collect();
         assert!(
-            matches!(&parsed[0], StreamLine::Sample(r) if r.key == "v1/h-3fa9c2d41b7e/state/p/health"),
+            matches!(&parsed[0], StreamLine::Sample(r) if r.key == "prod/zk2/host-a/tc/tc.netif.v1/state/namespaces"),
             "the sample row is a row"
         );
-        assert_eq!(
-            &parsed[1..],
-            [
-                StreamLine::Meta("dropped".into()),
-                StreamLine::Meta("seed".into())
-            ],
-            "meta lines are skipped as metadata, never counted malformed"
-        );
+        assert_eq!(parsed[1], StreamLine::Meta("dropped".into()));
     }
 }

@@ -159,6 +159,20 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   attributes it by key, envelopes and silence counted apart. `.zrec` is
   version 3 (header `excluded`, rows `qos_axes`; 1 and 2 still read), and
   `record --on` refuses the rules that judge v1.
+  FJ8b's observers and checks: the raw observers (`echo`, `rate`, `field`,
+  `timeline`, `snapshot`, `watchdog`, `record --on`) keep a wire selector in
+  no namespace and resolve every key through one session-free **lens**
+  (`zenkey_fleet::model::lens`, fed by `bus::lens`): presence in
+  `--namespace`, the contract each descriptor names, the rung named where
+  resolution stops (O2). A `.zrec` reads through the same lens, so live and
+  file windows are one projection. Their shapes — `KeyIdentity`/`KeyGroup`,
+  `Conformance`, `QosMismatch`, `LensScope`, `PayloadCheck` — are in
+  `report/observe.rs`. A stamp is the owner's when its id is the descriptor's
+  `meta.zid`, by value (O7). `.zsnap` is version 2 and `snapshot diff`
+  aligns by zk2 key (no origin alignment). `check expect`, `check probe` and
+  `check schema` take an address, an interface revision and a resource;
+  `origin-down` is `instance-gone`, `alert-firing` and field-stuck are dark
+  until their profiles exist (#613).
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
