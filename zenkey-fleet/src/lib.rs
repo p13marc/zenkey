@@ -44,7 +44,8 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
-//!   zk2's `presence`, `contracts`, `operation`, `consume` and `lens`. The
+//!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens` and `why`
+//!   (the reads a silence is explained from, #702). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -82,7 +83,8 @@
 //!   projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
-//!   `doctor_delta`, `expect`, `probe`, `condition` and `field`, and
+//!   `doctor_delta`, `expect`, `probe`, `condition`, `field` and `why` (a
+//!   silence explained rung by rung, #702), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -198,6 +200,13 @@ pub use judge::doctor::{
     observe as observe_doctor, run_doctor,
 };
 pub use judge::doctor_delta::doctor_delta;
+// zk2's `why` (#702): a key's or a service's silence, rung by rung — the
+// reads, the session-free judge, and the two in a row.
+pub use bus::why::{
+    ArchiveRead, KeyAnswer, KeyReply, WhyObservation, WhySpec, WhyTarget, observe as observe_why,
+    run_why,
+};
+pub use judge::why::judge as judge_why;
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -281,7 +290,7 @@ pub use report::{
     ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
     LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport, RouterInfo, SampleRow,
     SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow,
-    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, ZrecHeader,
+    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, WhyReport, ZrecHeader,
     ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs

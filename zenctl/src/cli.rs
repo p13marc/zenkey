@@ -428,6 +428,23 @@ pub(crate) struct DoctorArgs {
     pub(crate) ns: NamespaceArgs,
 }
 
+/// `why`'s flags (#702) — one struct, the `GenArgs` pattern.
+#[derive(clap::Args)]
+pub(crate) struct WhyArgs {
+    /// A wire key, the namespace included (`prod/zk2/<system>/<service>/…`),
+    /// or a service address, `<system>/<service>`. A key expression with a
+    /// wildcard is refused: `why` explains one key.
+    #[arg(value_name = "KEY|SYSTEM/SERVICE", add = ArgValueCandidates::new(completion::services))]
+    pub(crate) target: String,
+    /// How long a stream key is listened to for a sample, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 3.0)]
+    pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
 /// A doctor check id, refused with the vocabulary when it is not one.
 fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
     use zenkey_fleet::report::CheckId;
@@ -733,6 +750,37 @@ pub(crate) enum Command {
     /// flows both ways.
     #[command(subcommand)]
     Check(CheckCmd),
+    /// Explain why a key or a service is silent, rung by rung
+    ///
+    /// zk2's ladder (#702), read through a session in the deployment's
+    /// namespace and stopped at the first rung that establishes a cause:
+    ///
+    ///   namespace   the wire key sits under --namespace (spec §1.6); a key of
+    ///               another deployment is not guessed at
+    ///   key         it is a zk2 key (§1.1); a control key is judged as its
+    ///               service
+    ///   presence    a token of its service is visible to this reader (§8.1);
+    ///               none is "no token visible to this reader", since a read
+    ///               access control refuses is complete and empty too
+    ///   descriptor  served, implementing the interface, exposing the
+    ///               resource — or `unavailable` with its cause, or gated on
+    ///               a capability not held (§3.3)
+    ///   contract    the revision it names is retrievable and verifies, and
+    ///               declares the resource (§8.4)
+    ///   answer      the owner's state GET (S4: a deletion is a cause), a
+    ///               stream's sample within --for, a union storage's
+    ///               occurrence (§2.6); an operation is never called
+    ///   last-known  after the owner's silence only: what an archive still
+    ///               holds — last-known, never current (S6)
+    ///
+    /// TARGET is a wire key, the namespace included (`prod/zk2/…`), or a
+    /// service address `<system>/<service>`, judged up to its contracts. Exit
+    /// 1 when a cause is established — a cause is the finding — 0 when every
+    /// rung is healthy and the key answers, 2 when a rung is unobservable (a
+    /// read that timed out, a descriptor or an owner that did not answer), an
+    /// operation's answer was not asked, or the run could not start.
+    #[command(verbatim_doc_comment)]
+    Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
     /// Thirteen checks, each a question whose finding is the yes: split-brain

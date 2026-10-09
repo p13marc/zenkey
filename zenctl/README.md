@@ -340,9 +340,12 @@ window: samples, rates, values against their type, the declared QoS,
 presence) · `zenctl check probe <address> <iface> <resource>` (a resource
 read the way a consumer reads it: did a value arrive, and if not, who was up
 and silent) · `zenctl check schema <iface> <resource> --from …` (one payload
-against a type of a revision) · `zenctl doctor` (a zk2 deployment against the
-core, one verdict per check) · `zenctl watchdog --rule …` (conditions, as
-transitions).
+against a type of a revision) · `zenctl why <key|address>` (a key's or a
+service's silence, rung by rung — namespace, presence, descriptor, contract,
+the owner's answer, an archive's last-known — stopped at the first cause:
+exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·
+`zenctl doctor` (a zk2 deployment against the core, one verdict per check) ·
+`zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
 `zenctl storage list` (the storages the routers' admin space reports) ·
@@ -372,7 +375,8 @@ show|refresh|clear` (the name cache behind completion) · `zenctl completions
 > `doctor` for zk2; FJ8b re-cut the observers and the checks (`echo`, `rate`,
 > `field`, `timeline`, `snapshot`, `check expect|schema|probe`, `watchdog`)
 > over zk2 keys; FJ9 removed what was left of v1 — `why`, `check
-> cutover|retired|conform`, `config`, `blob`, `export` and `--registry`.
+> cutover|retired|conform`, `config`, `blob`, `export` and `--registry` — and
+> FK1 (#702–#705) brought `why` and `check conform` back in zk2's terms.
 > [`CHANGELOG.md`](CHANGELOG.md) has the full old→new tables and the
 > exit-code contract.
 
@@ -502,6 +506,7 @@ zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer 
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl admin graph --namespace acme     # …with each zk2 instance on the router that lists its session, or unattached
 zenctl doctor --namespace acme          # thirteen checks; 1 on a finding, 2 if one could not be judged
+zenctl why acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 --namespace acme  # why silent: the first rung with a cause
 zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
 zenctl context edit                     # the whole config file, in $EDITOR, validated

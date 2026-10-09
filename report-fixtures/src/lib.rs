@@ -776,6 +776,121 @@ pub fn storage_plan() -> StoragePlan {
     }
 }
 
+/// `why` stopped at a cause (#702): the namespace, the key and presence
+/// healthy, the descriptor listing the resource `unavailable` with its
+/// cause, and every rung past it not asked.
+pub fn why_report_cause() -> WhyReport {
+    WhyReport {
+        target: "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+        subject: WhySubject::Key,
+        namespace: "acme".into(),
+        asked: vec!["zk2/host-a/tc/@zk/**".into()],
+        window_s: None,
+        rungs: vec![
+            WhyRung::healthy(
+                RungId::Namespace,
+                "§1.6",
+                "the key sits under namespace \"acme\"",
+            ),
+            WhyRung::healthy(
+                RungId::Key,
+                "§1.1",
+                "a stream key of host-a/tc, interface tc.netif.v1",
+            ),
+            WhyRung::healthy(
+                RungId::Presence,
+                "§8.1",
+                "1 instance(s) of host-a/tc hold their token; 1 hold tc.netif.v1's interface token",
+            ),
+            WhyRung::cause(
+                RungId::Descriptor,
+                "§3.3",
+                "stream/bandwidth/{ns}/{iface} is unavailable at host-a/tc@3fa9c2d41b7e0012 \
+                 (config: no bandwidth probe)",
+            ),
+            WhyRung::not_asked(RungId::Contract, "§8.4"),
+            WhyRung::not_asked(RungId::Answer, "§2.1"),
+            WhyRung::not_asked(RungId::LastKnown, "§4.2 S6"),
+        ],
+        verdict: Judgement::Established,
+        stopped_at: Some(RungId::Descriptor),
+        value: None,
+        last_known: None,
+    }
+}
+
+/// `why` at the owner's silence (#702): every rung healthy up to the
+/// answer, the S4 GET unanswered, and an archive's last-known value read
+/// after it — last-known, never current.
+pub fn why_report_silent() -> WhyReport {
+    let key = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    WhyReport {
+        target: format!("acme/{key}"),
+        subject: WhySubject::Key,
+        namespace: "acme".into(),
+        asked: vec![
+            "zk2/host-a/tc/@zk/**".into(),
+            key.into(),
+            "zk2/*/*/@zk/alive/archive.v1/**".into(),
+        ],
+        window_s: None,
+        rungs: vec![
+            WhyRung::healthy(
+                RungId::Namespace,
+                "§1.6",
+                "the key sits under namespace \"acme\"",
+            ),
+            WhyRung::healthy(
+                RungId::Key,
+                "§1.1",
+                "a state key of host-a/tc, interface tc.netif.v1",
+            ),
+            WhyRung::healthy(
+                RungId::Presence,
+                "§8.1",
+                "1 instance(s) of host-a/tc hold their token",
+            ),
+            WhyRung::healthy(
+                RungId::Descriptor,
+                "§3.3",
+                "implements tc.netif.v1 at 5d1c0a9b2e3f4a6b, exposing state/interfaces/{ns}/{iface}",
+            ),
+            WhyRung::healthy(
+                RungId::Contract,
+                "§8.4",
+                "tc.netif.v1, retrieved from a holder and verified: the key is \
+                 state/interfaces/{ns}/{iface}",
+            ),
+            WhyRung::unobservable(
+                RungId::Answer,
+                "§4.2 S4",
+                "host-a/tc holds its tokens and sent no reply within 2s: silence is not a verdict",
+            ),
+            WhyRung::healthy(
+                RungId::LastKnown,
+                "§4.2 S6",
+                "ground/archive holds its last-known value, not confirmed by alignment: \
+                 last-known, never current (S6)",
+            ),
+        ],
+        verdict: Judgement::Unobservable {
+            reason: "answer: host-a/tc holds its tokens and sent no reply within 2s".into(),
+        },
+        stopped_at: Some(RungId::Answer),
+        value: None,
+        last_known: Some(WhyLastKnown {
+            archive: "ground/archive".into(),
+            key: key.into(),
+            value: None,
+            timestamp: Some(Stamp {
+                time: "2026-10-09T10:00:00.000000000Z".into(),
+                clock: "a1b2c3".into(),
+            }),
+            confirmed: false,
+        }),
+    }
+}
+
 /// A check with one of each finding kind the diff can draw, and one
 /// comparison the admin document could not carry.
 pub fn storage_check() -> StorageCheck {

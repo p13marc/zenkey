@@ -3756,3 +3756,186 @@ async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
     assert_eq!(doc["source"], "admin_space");
     assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
 }
+
+/// One rung's row in a `why --format json` document.
+fn rung<'a>(doc: &'a Value, id: &str) -> &'a Value {
+    rows_of(doc, "rung")
+        .into_iter()
+        .find(|r| r["rung"] == id)
+        .unwrap_or_else(|| panic!("{id} has a row: {doc}"))
+}
+
+/// #702: `why` over a live tcgui owner in a namespace, through the runtime
+/// (state.md §1's owner, the FJ8b publishing owner). Healthy — the owner
+/// answers its state GET with its own stamp (S1), and its stream within the
+/// window — exit 0; a service judged up to its contracts, exit 0. A cause
+/// at each live rung, exit 1: no token visible (presence), an interface
+/// the descriptor does not list (descriptor), a resource the revision does
+/// not declare (contract). And the owner's silence on a member it never
+/// wrote, exit 2: unobservable, the archives asked after it (S6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn why_explains_a_silence_rung_by_rung_over_a_live_owner() {
+    let mut bus = Bus::bare(Some("acme")).await;
+    let (owner, task) = publishing_owner(&bus, json!({}), true).await;
+    bus.services.push(owner);
+    bus.keep(task);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let why = |target: &str| -> Vec<String> {
+        [
+            "why",
+            target,
+            "--namespace",
+            "acme",
+            "--timeout",
+            "2",
+            "--for",
+            "1",
+            "--format",
+            "json",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    };
+    let run_of = |args: Vec<String>| {
+        let bus = &bus;
+        async move {
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            bus.until(&refs, |r| r.code != 2).await
+        }
+    };
+
+    // Healthy: the owner's current state, its own stamp.
+    let state = "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let run = run_of(why(state)).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "why");
+    assert_eq!(doc["verdict"]["answer"], "not_established", "{run}");
+    assert!(doc.get("stopped_at").is_none());
+    let answer = rung(&doc, "answer")["verdict"]["reason"].to_string();
+    assert!(answer.contains("the owner answers its state GET"), "{run}");
+    assert!(answer.contains("the owner's own clock"), "S1: {run}");
+    assert_eq!(
+        doc["value"]["value"],
+        eth0(true),
+        "rendered through the contract"
+    );
+    assert_eq!(rung(&doc, "last-known")["verdict"]["answer"], "not_asked");
+
+    // Healthy: a stream sample within the window.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
+    ))
+    .await;
+    exits(&run, 0);
+    assert_eq!(run.json()["window_s"], 1.0, "{run}");
+
+    // Healthy: the service, up to its contracts.
+    let run = run_of(why("host-a/tc")).await;
+    exits(&run, 0);
+    assert_eq!(run.json()["subject"], "service", "{run}");
+
+    // A cause at presence: nothing of host-z/tc is visible to this reader.
+    let run = bus
+        .zenctl(
+            &why("acme/zk2/host-z/tc/tc.netif.v1/state/interfaces/default/eth0")
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "presence", "{run}");
+    assert!(
+        doc["rows"]
+            .to_string()
+            .contains("no token of host-z/tc visible to this reader"),
+        "{run}"
+    );
+
+    // A cause at the descriptor: host-a/tc does not implement tc.netem.v1.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netem.v1/state/qdisc/default/eth0",
+    ))
+    .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "descriptor", "{run}");
+    assert!(
+        rung(&doc, "descriptor")["cause"]
+            .as_str()
+            .is_some_and(|c| c.contains("does not implement tc.netem.v1")),
+        "{run}"
+    );
+
+    // A cause at the contract: no state resource of tc.netif.v1 matches.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netif.v1/state/nothing/here/at/all",
+    ))
+    .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "contract", "{run}");
+    assert_eq!(rung(&doc, "contract")["verdict"]["answer"], "established");
+
+    // Unobservable: the owner never wrote eth9 — silence, never a verdict;
+    // the archives asked after it, and none visible.
+    let args = why("acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9");
+    let run = bus
+        .zenctl(&args.iter().map(String::as_str).collect::<Vec<_>>())
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "answer", "{run}");
+    assert_eq!(doc["verdict"]["answer"], "unobservable");
+    assert!(
+        doc["verdict"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("silence is not a verdict") && r.contains("last-known")),
+        "{run}"
+    );
+    assert_eq!(
+        rung(&doc, "last-known")["verdict"]["answer"],
+        "unobservable"
+    );
+    assert!(
+        run.stderr.contains("exit 2, the reserved non-verdict"),
+        "{run}"
+    );
+}
+
+/// Until `service list` in `namespace` shows every one of `addresses`
+/// with its descriptor served.
+async fn wait_for_ns(bus: &Bus, namespace: &str, addresses: &[&str]) {
+    let want: BTreeSet<String> = addresses.iter().map(|a| (*a).to_owned()).collect();
+    let run = bus
+        .until(
+            &[
+                "service",
+                "list",
+                "--namespace",
+                namespace,
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                r.code == 0
+                    && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                        let served: BTreeSet<String> = d["rows"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|i| i["descriptor"]["answer"] == "served")
+                            .filter_map(|i| i["address"].as_str().map(str::to_owned))
+                            .collect();
+                        want.is_subset(&served)
+                    })
+            },
+        )
+        .await;
+    exits(&run, 0);
+}

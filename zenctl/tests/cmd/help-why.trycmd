@@ -1,0 +1,175 @@
+`why` (#702) explains a zk2 key's or service's silence rung by rung, and stops
+at the first rung that establishes a cause. A judgement verb: exit 1 when a
+cause is established (a cause is the finding), 0 when every rung is healthy and
+the key answers, 2 when a rung is unobservable or the run could not start.
+
+```console
+$ zenctl why --help
+Explain why a key or a service is silent, rung by rung
+
+zk2's ladder (#702), read through a session in the deployment's
+namespace and stopped at the first rung that establishes a cause:
+
+  namespace   the wire key sits under --namespace (spec §1.6); a key of
+              another deployment is not guessed at
+  key         it is a zk2 key (§1.1); a control key is judged as its
+              service
+  presence    a token of its service is visible to this reader (§8.1);
+              none is "no token visible to this reader", since a read
+              access control refuses is complete and empty too
+  descriptor  served, implementing the interface, exposing the
+              resource — or `unavailable` with its cause, or gated on
+              a capability not held (§3.3)
+  contract    the revision it names is retrievable and verifies, and
+              declares the resource (§8.4)
+  answer      the owner's state GET (S4: a deletion is a cause), a
+              stream's sample within --for, a union storage's
+              occurrence (§2.6); an operation is never called
+  last-known  after the owner's silence only: what an archive still
+              holds — last-known, never current (S6)
+
+TARGET is a wire key, the namespace included (`prod/zk2/…`), or a
+service address `<system>/<service>`, judged up to its contracts. Exit
+1 when a cause is established — a cause is the finding — 0 when every
+rung is healthy and the key answers, 2 when a rung is unobservable (a
+read that timed out, a descriptor or an owner that did not answer), an
+operation's answer was not asked, or the run could not start.
+
+Usage: zenctl why [OPTIONS] <KEY|SYSTEM/SERVICE>
+
+Arguments:
+  <KEY|SYSTEM/SERVICE>
+          A wire key, the namespace included (`prod/zk2/<system>/<service>/…`), or a service address, `<system>/<service>`. A key expression with a wildcard is refused: `why` explains one key
+
+Options:
+      --for <SECS>
+          How long a stream key is listened to for a sample, seconds
+          
+          [default: 3]
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+A key outside the namespace, and one that is not zk2, are causes the key alone
+establishes: no session is opened for them (spec §1.6, §1.1; the tooling
+guide's O3 — another deployment's namespace is never guessed at).
+
+```console
+$ zenctl why staging/zk2/lab/m/m.v1/state/status/eth0 --namespace prod --format table
+? 1
+why staging/zk2/lab/m/m.v1/state/status/eth0 — a cause, at namespace
+✗  namespace (§1.6)      cause — `staging/zk2/lab/m/m.v1/state/status/eth0` does not sit under namespace "prod": it is not this deployment's key, and a tool does not guess another deployment's namespace (tooling guide O3) — `zenctl namespace list` names the ones in use
+—  key (§1.1)            not asked
+—  presence (§8.1)       not asked
+—  descriptor (§3.3)     not asked
+—  contract (§8.4)       not asked
+—  answer (§1.3)         not asked
+—  last-known (§4.2 S6)  not asked
+a cause at namespace: the ladder stopped there, 6 rung(s) not asked
+
+```
+
+```console
+$ zenctl why prod/v1/h-3fa9c2d41b7e/state/x --namespace prod --format table
+? 1
+why prod/v1/h-3fa9c2d41b7e/state/x — a cause, at key
+✓  namespace (§1.6)      healthy — the key sits under namespace "prod"
+✗  key (§1.1)            cause — "v1/h-3fa9c2d41b7e/state/x" is not a zk2 key: it does not start with zk2/: no zk2 service owns it, so nothing here explains its silence — the bus is shared (§1.7)
+—  presence (§8.1)       not asked
+—  descriptor (§3.3)     not asked
+—  contract (§8.4)       not asked
+—  answer (§1.3)         not asked
+—  last-known (§4.2 S6)  not asked
+a cause at key: the ladder stopped there, 5 rung(s) not asked
+
+```
+
+`why` explains one key: a key expression with a wildcard is refused, exit 2.
+
+```console
+$ zenctl why 'prod/zk2/**' --namespace prod
+? 2
+Error: prod/zk2/**: why explains one key, and a key expression with a wildcard names many: give a concrete key, or the service's address
+why: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A rung that needs the bus, against a bus that will not open, is the reserved
+2: no cause is claimed about a deployment nobody read.
+
+```console
+$ zenctl why lab/m --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+why: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+```console
+$ zenctl why lab/m --for 0
+? 2
+Error: --for must be a positive number of seconds, got 0
+why: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

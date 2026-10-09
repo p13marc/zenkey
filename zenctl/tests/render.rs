@@ -184,6 +184,70 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     );
 }
 
+/// zk2's `why` (#702): one row per rung, every pole spelled apart in every
+/// medium — a mark and a word in the table, an `answer` in the row, the
+/// cause only on the rung that established it — and the stop, the verdict
+/// and what was asked on the envelope. Between the two fixtures every pole
+/// appears; an archive's value is said to be last-known, never current.
+#[test]
+fn a_why_ladder_spells_every_rung_pole_apart_in_every_medium() {
+    let cause = fx::why_report_cause();
+    assert_data_eq!(
+        table(&cause),
+        str![[r#"
+why acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0 — a cause, at descriptor
+✓  namespace (§1.6)      healthy — the key sits under namespace "acme"
+✓  key (§1.1)            healthy — a stream key of host-a/tc, interface tc.netif.v1
+✓  presence (§8.1)       healthy — 1 instance(s) of host-a/tc hold their token; 1 hold tc.netif.v1's interface token
+✗  descriptor (§3.3)     cause — stream/bandwidth/{ns}/{iface} is unavailable at host-a/tc@3fa9c2d41b7e0012 (config: no bandwidth probe)
+—  contract (§8.4)       not asked
+—  answer (§2.1)         not asked
+—  last-known (§4.2 S6)  not asked
+
+"#]]
+    );
+    let silent = fx::why_report_silent();
+    let mut answers = std::collections::BTreeSet::new();
+    for report in [&cause, &silent] {
+        let lines: Vec<serde_json::Value> = ndjson(report)
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("one object per line"))
+            .collect();
+        let envelope = &lines[0];
+        assert_eq!(envelope["report"], "why");
+        assert!(envelope.get("rungs").is_none(), "rungs are rows");
+        assert!(envelope.get("verdict").is_some() && envelope.get("stopped_at").is_some());
+        let rows = &lines[1..];
+        assert_eq!(rows.len(), 7, "every rung, asked or not");
+        for r in rows {
+            assert_eq!(r["row"], "rung");
+            let answer = r["verdict"]["answer"].as_str().expect("an answer");
+            answers.insert(answer.to_owned());
+            assert_eq!(
+                r.get("cause").is_some(),
+                answer == "established",
+                "a cause rides only the rung that established it: {r}"
+            );
+        }
+    }
+    assert_eq!(
+        answers,
+        [
+            "established",
+            "not_asked",
+            "not_established",
+            "unobservable"
+        ]
+        .map(str::to_owned)
+        .into(),
+        "four poles, four spellings"
+    );
+    let said = notes(&silent);
+    assert!(said.contains("last-known, never current"), "{said}");
+    assert!(said.contains("no verdict"), "{said}");
+    assert!(notes(&cause).contains("a cause at descriptor"));
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -204,6 +268,8 @@ fn no_family_emits_trailing_whitespace() {
         table(&zenctl::render::TopologyView {
             report: &fx::topology_with_instances(),
         }),
+        table(&fx::why_report_cause()),
+        table(&fx::why_report_silent()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -1379,6 +1445,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-list",
         "storage-plan",
         "timeline",
+        "why",
     ];
 
     fn families(dir: &std::path::Path, out: &mut Vec<String>) {
@@ -1493,6 +1560,18 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, None);
     let report = fx::topology();
     scoped(&zenctl::render::TopologyView { report: &report });
+    // `why` (#702): what the ladder put to the bus — presence, the key, the
+    // archives after a silence — and no window unless a stream was heard.
+    let s = scoped(&fx::why_report_silent());
+    assert_eq!(
+        s.asked,
+        [
+            "zk2/host-a/tc/@zk/**",
+            "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+            "zk2/*/*/@zk/alive/archive.v1/**"
+        ]
+    );
+    assert_eq!(s.window_s, None);
     // With the instance join (#705), the presence selector it read too.
     let report = fx::topology_with_instances();
     let s = scoped(&zenctl::render::TopologyView { report: &report });

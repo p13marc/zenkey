@@ -144,6 +144,7 @@ pub async fn run() -> Result<()> {
         Command::Check(CheckCmd::Expect(a)) => cmd::expect::run(a).await,
         Command::Check(CheckCmd::Probe(a)) => cmd::probe::run(a).await,
         Command::Check(CheckCmd::Schema(a)) => cmd::schema::check(a).await,
+        Command::Why(a) => cmd::why::run(a).await,
         Command::Doctor(a) => cmd::doctor::run(a).await,
         Command::Watchdog(a) => cmd::watchdog::run(a).await,
 
