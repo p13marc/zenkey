@@ -41,6 +41,9 @@
 //! - [`validate`]: a value checked against a JSON Schema type of a bundle,
 //!   the §7.3 subset and nothing more, for tools that build a payload from
 //!   JSON (#671).
+//! - [`hostid`]: `hostid.v1`'s derivation of a system from a machine id
+//!   (`spec/profiles/hostid/v1.md`, #719). The inputs, the shared file and
+//!   failing closed are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -57,6 +60,7 @@ pub mod diag;
 pub mod envelope;
 pub mod grammar;
 pub mod history;
+pub mod hostid;
 pub mod schema;
 pub mod slug;
 mod strict;
