@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `freshness.v1` (#720, PC)
+
+`check conform`'s `freshness` case is asked, against the horizon a
+resource declares (`spec/profiles/freshness/v1.md`).
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`: one `freshness` row, subject `service`, not asked | one `freshness` row per exposed stream, state and event resource | A resource that declares `freshness.ttl_s` is judged at the end of the `--for` window, each member by this run's receive clock and the GET reply's stamp: stale is a violation (exit 1), and a reply's age is unobservable unless the clock is trusted to the HLC delta. One with no horizon, and an event, is not asked. Scripts that keyed on `subject == "service"` key on the resource |
+| — | `check conform --clocks-synced` | The operator's word that this host's clock and the owners' agree within the HLC delta (500 ms): a state reply's stamp is then aged against it. Without it, a stamp is aged only against a clock this run measured on a live put of the same clock (freshness.v1 §2.6) |
+| `check conform`'s note: freshness and budget not asked | budget alone not asked | Its profile does not exist yet (#613) |
+
 ## Unreleased (`main`, zk2) — `hostid.v1` (#719, PB)
 
 A noun read off the host, not the bus: the system a service gets when it

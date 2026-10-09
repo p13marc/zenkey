@@ -29,7 +29,18 @@ on one resource:
                    own stamp, its clock the descriptor's meta.zid,
                    compared by value (S1)
   state-get        the owner answers a GET, each reply stamped (S2)
-  freshness, budget  not asked: their profiles do not exist yet
+  freshness        each member of a stream or state resource that
+                   declares freshness.ttl_s is confirmed within it at
+                   the end of the window: by this run's receive
+                   clock, or a reply's stamp against a clock trusted
+                   to the HLC delta (freshness.v1); a resource with no
+                   horizon is not asked
+  budget           not asked: its profile does not exist yet
+
+A reply's stamp is aged only against a clock this run measured on a
+live put of the same clock, or on --clocks-synced; otherwise its age
+is unobservable, never fresh. A stale member is a finding about the
+value, never about the owner's presence.
 
 Only operations declared idempotent are called — with a request
 synthesized from the bundle — unless --i-know: every other call is a
@@ -74,6 +85,9 @@ Options:
 
       --calls-granted
           This tool's grants let it call the service, or the deployment runs no access control: a silent call to a present service is then a finding (O3). No tool can observe its grants (spec §5.1, 0.17), so without this flag such a silence is unobservable
+
+      --clocks-synced
+          This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a state reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, a stamp is aged only against a clock this run measured on a live put
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

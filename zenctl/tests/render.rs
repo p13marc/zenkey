@@ -265,7 +265,8 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
 ?  resource-served (§8.2)    state/namespaces                                                                     unobservable — nothing heard in the 5s window, and the state GET drew no reply
 ✗  operation (§5.1)          @op/diagnostics                                                                      violation — host-a/tc holds its tokens, and the call drew neither a value nor an envelope within 1s: never silence (O3)
 —  operation (§5.1)          @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
-—  freshness (freshness.v1)  service                                                                              not asked — a profile (#613)
+✗  freshness (freshness.v1)  state/interfaces/{ns}/{iface}                                                        violation — 1 of 2 member(s) stale against its horizon of 60 s: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within its horizon
+—  freshness (freshness.v1)  stream/bandwidth/{ns}/{iface}                                                        not asked — it declares no freshness.ttl_s
 
 "#]]
     );
@@ -304,9 +305,9 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
     }
     let said = notes(&report);
     assert!(said.contains("pass --i-know"), "{said}");
-    assert!(said.contains("their profiles do not exist yet"), "{said}");
+    assert!(said.contains("its profile does not exist yet"), "{said}");
     assert!(
-        said.contains("7 case(s): 2 violation(s), 2 passed, 1 unobservable, 2 not asked."),
+        said.contains("8 case(s): 3 violation(s), 2 passed, 1 unobservable, 2 not asked."),
         "{said}"
     );
 }

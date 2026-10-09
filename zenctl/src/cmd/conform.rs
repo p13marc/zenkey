@@ -37,6 +37,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         seed,
         trust_admin_space,
         calls_granted,
+        clocks_synced,
         contracts,
         ns,
     } = cli;
@@ -50,6 +51,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         seed,
         trust_admin: trust_admin_space,
         calls_granted,
+        clocks_synced,
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).
