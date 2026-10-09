@@ -1023,7 +1023,8 @@ mod tests {
     /// a directory, a FIFO, a link loop, a parent that is a file.
     #[test]
     fn what_is_not_read_fails_closed() {
-        let cases: [(&str, fn(&Path)); 4] = [
+        type Make = fn(&Path);
+        let cases: [(&str, Make); 4] = [
             ("a directory", |r| {
                 fs::create_dir_all(r.join("etc/machine-id")).unwrap();
             }),

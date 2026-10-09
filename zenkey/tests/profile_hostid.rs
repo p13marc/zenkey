@@ -822,7 +822,9 @@ async fn s5_minted_once_per_run() {
     b.require("src", sysinfo_iface(), false);
     let logger = b.start().await.unwrap();
     assert_eq!(logger.address().to_string(), format!("{S1}/logger"));
-    // R1 (core 0.20): `self.system` is the minted system.
+    // R1 (core 0.20): `self.system` is the minted system. The token first:
+    // the descriptor's queryable is declared before it (core §8.2).
+    tool.sees(&logger).await;
     let d = tool.descriptor(&logger).await;
     assert_eq!(d.requires[0].bindings, [format!("{S1}/sysinfo")]);
     tool.sees(&run1.svc).await;
