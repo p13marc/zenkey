@@ -1455,13 +1455,16 @@ def run_python_fanout(report: Report) -> None:
 
 
 def run_python_tool_rules(report: Report) -> None:
-    """The rules 0.10 to 0.12 state for a tool, where the bus shows them:
+    """The rules 0.10 to 0.13 state for a tool, where the bus shows them:
     - S4 needs the admin space (§4.2): off, the check is unobservable; on,
       read-only, it reads 0.11's two selectors, and a router with nothing
       under the storages selector runs no storage. An answer counts only
-      when its replier id is the zid its key names, a router this session
-      is connected to (0.12). security.md §3 steps 1-2: a client answering
-      on R1's own key, with the admin space off and on, stays unverified.
+      when its replier id is the zid its key names, a verified router: one
+      the session is connected to, or one a verified router's own document
+      lists as a router (0.12, 0.13). security.md §3 steps 1-2: a client
+      answering on R1's own key, with the admin space off and on, stays
+      unverified. Step 4: a far router is verified through R1's document,
+      and a client answering on its own key is not.
       A storage manager played from a client is unverified too; trusted by
       the operator, one on ``telemetry/**`` is clean and one on ``zk2/**``
       breaks S4;
@@ -1476,7 +1479,7 @@ def run_python_tool_rules(report: Report) -> None:
     from .contract import load_contract
     from .owner import Owner as PyOwner
 
-    run = "zk2py tool rules (0.10 to 0.12): S4's admin space, presence shapes, revisions on the bus"
+    run = "zk2py tool rules (0.10 to 0.13): S4's admin space, presence shapes, revisions on the bus"
     # S4 (§4.2, 0.10 to 0.12; Appendix B), and security.md §3 steps 1-2.
     import zenoh
 
@@ -1519,14 +1522,14 @@ def run_python_tool_rules(report: Report) -> None:
                                       "check is not clean either",
                                  sorted(answers) == sorted([(own, zid), (own, s_zid)])
                                  and spoofed.routers == [zid]
-                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.unverified == [(own, s_zid, "a replier other than its key's router")]
                                  and spoofed.verdict == "unobservable",
                                  f"answers {answers}; {spoofed.verdict}: {spoofed.detail}")
                 else:
                     report.check(run, "security.md §3 step 1: S's answer arrives on R1's own key, the only answer, "
                                       "its replier id S's zid, not R1's; held unverified: unobservable, never clean",
                                  answers == [(own, s_zid)] and s_zid != zid and not spoofed.routers
-                                 and spoofed.unverified == [(own, s_zid, "replier is not the key's zid")]
+                                 and spoofed.unverified == [(own, s_zid, "a replier other than its key's router")]
                                  and spoofed.verdict == "unobservable",
                                  f"answers {answers}, R1 {zid}; {spoofed.verdict}: {spoofed.detail}")
                 if admin:
@@ -1564,10 +1567,12 @@ def run_python_tool_rules(report: Report) -> None:
         finally:
             r.close()
 
-    # Two linked routers, both admin spaces on (SPEC-FINDINGS F-81): a
-    # client tool is connected to one router only (Appendix B), so the far
-    # router's own, honest answer is unverified; a peer connected to both
-    # verifies both.
+    # security.md §3 step 4 (0.13): a far router. R2 links to R1, both admin
+    # spaces on, read-only; the tool is still a client of R1. Routers are
+    # verified outward through R1's own document (§4.2), which lists R2 as
+    # a `router` session. Then S answers @/<S's zid>/router under its own
+    # replier id: R1 lists S as a `client`, so S stays unverified. A peer
+    # tool connected to both routers verifies them directly, a cross-check.
     from .owner import free_loopback_port
 
     ra, ep_a, za = _r1(adminspace=True)
@@ -1582,6 +1587,7 @@ def run_python_tool_rules(report: Report) -> None:
     zb = str(rb.zid())
     try:
         client = live.open_client(ep_a)
+        s = live.open_client(ep_a)
         pconf = zenoh.Config()
         pconf.insert_json5("mode", json.dumps("peer"))
         pconf.insert_json5("connect/endpoints", json.dumps([ep_a, f"tcp/127.0.0.1:{port}"]))
@@ -1593,18 +1599,37 @@ def run_python_tool_rules(report: Report) -> None:
             while time.monotonic() < deadline and len(far.routers) + len(far.unverified) < 2:
                 time.sleep(0.2)
                 far = live.check_s4(client)
+            report.check(run, "security.md §3 step 4: a client tool on R1 verifies R2 through R1's own document, "
+                              "which lists it as a router; R2's answer carries its own replier id: both "
+                              "verified, clean (§4.2, 0.13)",
+                         sorted(far.routers) == sorted([za, zb]) and not far.unverified
+                         and far.verdict == "clean", f"{far.verdict}: {far.detail}")
+            s_zid = str(s.zid())
+            own = f"@/{s_zid}/router"
+            q = spoof(s, own, {"plugins": None, "sessions": []})
+            time.sleep(0.3)
+            try:
+                with_s = live.check_s4(client)
+                r1_doc = next((json.loads(a.payload) for a in live._answers(
+                    client, f"@/{za}/router", zenoh.QueryTarget.ALL, 1.0) if a.ok and a.replier == za), {})
+            finally:
+                q.undeclare()
+            listed = {x.get("peer"): x.get("whatami") for x in r1_doc.get("sessions", [])}
+            report.check(run, "step 4: S answers on its own key under its own replier id; R1 lists S as a client, "
+                              "so S stays unverified (no verified router lists it), and the check is not clean",
+                         listed.get(s_zid) == "client" and listed.get(zb) == "router"
+                         and with_s.unverified == [(own, s_zid, "no verified router lists it")]
+                         and sorted(with_s.routers) == sorted([za, zb]) and with_s.verdict == "unobservable",
+                         f"R1 lists S as {listed.get(s_zid)!r}, R2 as {listed.get(zb)!r}; "
+                         f"{with_s.verdict}: {with_s.detail}")
             both = live.check_s4(peer)
-            report.check(run, "two linked routers, a client tool on one: the far router's answer carries its own "
-                              "replier id, yet is unverified (not a router of this session), so S4 is never "
-                              "clean (F-81)",
-                         far.routers == [za] and far.unverified == [(f"@/{zb}/router", zb,
-                                                                     "not a router of this session")]
-                         and far.verdict == "unobservable", f"{far.verdict}: {far.detail}")
-            report.check(run, "the same deployment, a peer tool connected to both routers: both verified, clean",
+            report.check(run, "cross-check: a peer tool connected to both routers verifies them directly, and "
+                              "reads the same verdict, clean",
                          sorted(both.routers) == sorted([za, zb]) and not both.unverified
                          and both.verdict == "clean", f"{both.verdict}: {both.detail}")
         finally:
             peer.close()
+            s.close()
             client.close()
     finally:
         rb.close()

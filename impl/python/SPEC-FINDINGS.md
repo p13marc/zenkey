@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Eleven rounds.**
+**Twelve rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -17,9 +17,10 @@ where that was not enough, or where the spec said two things.
 - Nothing new was found against 0.9 (see "At 0.9").
 - F-77 to F-79 were found against 0.10.
 - F-80 was found against 0.11.
-- Amendments 0.5 to 0.12 resolved F-01 to F-80. Each entry carries a
+- F-81 was found against 0.12.
+- Amendments 0.5 to 0.13 resolved F-01 to F-81. Each entry carries a
   status line naming its amendment.
-- **F-81 is new**, found against 0.12 (see "New at 0.12" at the end).
+- **Nothing new was found against 0.13** (see "At 0.13" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -29,7 +30,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.12:** 81 entries.
+**Counts at 0.13:** 81 entries, all resolved.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -61,12 +62,14 @@ where that was not enough, or where the spec said two things.
 - F-80: resolved by 0.12, against zk2py's fix. Judging an answer by the
   zid in its key was not enough: a spoofer answers on the real router's
   own key. 0.12 judges by the reply's replier id.
-- F-81: **new**, 1 gap.
+- F-81: resolved by 0.13. Routers are verified outward through the
+  session lists of routers already verified, so a client tool verifies a
+  far router through its own router.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.12 | Location | In one line |
+| Id | Severity | Status at 0.13 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -148,7 +151,7 @@ by the spec section that now states the rule.
 | F-78 | gap | resolved by 0.11 | §3.3 `meta.zid`, §4.2 "Observing S1" (0.10) | A zid has no spelling; zenoh writes one without leading zeros, so a textual comparison can call an owner's stamp foreign. |
 | F-79 | gap | resolved by 0.11 | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
 | F-80 | gap | resolved by 0.12 | §4.2 S4, "What the check reads" (0.11) | Any session can answer `@/*/router`: with the routers' admin space off, one record turns "unobservable" into "clean". |
-| F-81 | gap | **new** | §4.2 "Who answered" (0.12), Appendix B | Only a router the tool's session is connected to is verified, and a client connects to one: with two routers, a client tool's S4 is never clean. |
+| F-81 | gap | resolved by 0.13 | §4.2 "Who answered" (0.12), Appendix B | Only a router the tool's session is connected to is verified, and a client connects to one: with two routers, a client tool's S4 is never clean. |
 
 ---
 
@@ -2023,6 +2026,8 @@ What changed in zk2py:
 
 ### F-81 · gap · §4.2 "Who answered" (0.12): a client tool verifies one router
 
+**Status at 0.13: resolved by 0.13.** §4.2 "Verified routers, outward": the routers the session is connected to, and the session itself, are verified, and so is every zid a verified router's own answer lists among its `sessions` with `whatami` `router`, until nothing new is verified. Appendix B states the document's shape. zk2py implements it (`live.verified_routers`) and gives each unverified answer the reference doctor's reason. A client tool on R1 now verifies R2 through R1's document, and S4 reads clean (security.md §3 step 4). A client answering on its own key stays unverified, since R1 lists it as `client`. The peer tool, kept as a cross-check, reads the same verdict directly.
+
 > "A tool counts an answer as a router's only when the reply's replier id
 > is the zid the key names, and that zid is a router its session is
 > connected to, or the session itself. Any other answer is unverified, and
@@ -2052,3 +2057,32 @@ The cost is not stated.
 answer as unverified with its own reason ("not a router of this session"),
 distinct from a spoof ("replier is not the key's zid"). The runner shows
 that a peer tool connected to every router gets the clean verdict.
+
+## At 0.13 (#609)
+
+`just py-conformance` passes 519 of 519 (0.13 adds no fixture). `just
+py-live` passes 198 of 198, with no known deviation.
+
+What changed in zk2py:
+- **Verified routers, outward** (`live.verified_routers`). The base is
+  the session's routers (`info.routers_zid()`) and the session itself. Each
+  verified router's self-consistent answer adds the `peer` of every session
+  it lists with `whatami` `router`, until nothing new is added.
+- **Each answer is judged against that set** (`live.unverified_why`), with
+  the reference doctor's reasons:
+  - no replier id;
+  - a replier other than its key's router;
+  - no verified router lists it (a router record);
+  - its router's own answer unverified (a storage record).
+- **security.md §3 step 4.** R2 links to R1, both admin spaces on,
+  read-only, and the tool is a client of R1.
+  - R1's document lists R2 as `router`, and the tool, and `S`, as
+    `client`.
+  - R2's answer carries R2's own replier id, so both routers are verified,
+    and the check is clean.
+  - `S` then answers `@/<S's zid>/router` under its own replier id. It stays
+    unverified, "no verified router lists it", and the check is not clean.
+- **The peer tool** connected to both routers is kept as a cross-check: it
+  verifies both directly, and reads the same verdict.
+
+Implementing 0.13 raised no new question.
