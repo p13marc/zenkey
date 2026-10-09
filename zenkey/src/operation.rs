@@ -452,9 +452,9 @@ impl Ops {
                 {
                     continue;
                 }
-                let spec = Arc::new(OpSpec::new(&b.config().address, s.imp.iface(), r)?);
+                let spec = Arc::new(OpSpec::new(b.address()?, s.imp.iface(), r)?);
                 let avail = Arc::clone(&availability);
-                let ke = pattern_of(&b.config().address, s.imp.iface(), r)?;
+                let ke = pattern_of(b.address()?, s.imp.iface(), r)?;
                 let q = b
                     .session()
                     .declare_queryable(ke)
@@ -937,10 +937,10 @@ impl ServiceBuilder {
         Fut: Future<Output = Result<(), OpError>> + Send + 'static,
     {
         let r = self.resource_of(iface, resource)?;
-        let spec = OpSpec::new(&self.config().address, iface, &r)?;
+        let spec = OpSpec::new(self.address()?, iface, &r)?;
         let ke = match values {
             Some(v) => self.key(iface, resource, v)?.into_keyexpr(),
-            None => pattern_of(&self.config().address, iface, &r)?,
+            None => pattern_of(self.address()?, iface, &r)?,
         };
         self.expose(iface, resource)?;
         let availability = Arc::clone(self.availability());

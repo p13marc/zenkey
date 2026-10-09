@@ -6,6 +6,15 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `hostid.v1` (#719, PB)
+
+A noun read off the host, not the bus: the system a service gets when it
+asks for `@hostid.v1/<service>` (`spec/profiles/hostid/v1.md`).
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `hostid [--machine-id HEX] [--v1-salt SALT]... [--format F]` | The inputs read in order (`/etc/machine-id`, `/var/lib/dbus/machine-id`, the shared file `/var/lib/zk2/hostid`) with the runtime's own ladder, read-only: the shared file is never created, and no machine id is printed. Exit 0 with the system; 2 when the host fails closed, or no input holds an id and the shared file is still to be made, every path named with its outcome; 2 for a `--machine-id` that §2.1 refuses. Each `--v1-salt` adds a `v1_origin` row for the migration table (Appendix B), none for an id from the shared file, which no v1 application read. Rows tagged `input` and `v1_origin` |
+
 ## Unreleased (`main`, zk2) — spec 0.17 (#713)
 
 Two verdicts that read clean or failed on a premise the tool could not see

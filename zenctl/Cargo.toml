@@ -21,13 +21,17 @@ path = "src/main.rs"
 
 [dependencies]
 # The engine, by path while it is ported (#612). No v1 `zenkey` since FJ9:
-# what zenctl needs of the runtime it reaches through the engine.
+# what zenctl needs of the runtime it reaches through the engine, `hostid`
+# aside (below).
 zenkey-fleet = { path = "../zenkey-fleet" }
 zenkey-explorer-config = { workspace = true }
 # zk2's session-free half (#612, FJ4): the key grammar, the contract
 # authoring format, bundles and the compatibility classifier `compat` runs —
 # the same one the contract CI binary and the codegen's history gate run.
 zenkey-model = { path = "../zenkey-model" }
+# The runtime, for `hostid` (#719): hostid.v1's ladder is the runtime's,
+# read without a session. Already in the graph through the engine.
+zenkey = { path = "../zenkey" }
 
 zenoh = { workspace = true }
 tokio = { workspace = true }
@@ -58,9 +62,8 @@ anstream = { workspace = true }
 # — the same ones, so the wire corpus and the render corpus cannot disagree
 # about what a report is (#201).
 zenkey-report-fixtures = { workspace = true }
-# The zk2 runtime, to bring services up in `tests/live_zk2.rs` with its own
-# `ServiceBuilder` (#612, FJ4).
-zenkey = { path = "../zenkey" }
+# Roots standing in for `/`, for `hostid`'s exits (#719).
+tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 # Crate-local rather than workspace-declared, and the only such dep here: the

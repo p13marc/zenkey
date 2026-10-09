@@ -1227,6 +1227,63 @@ fn a_key_canon_prints_the_answer_alone_when_it_changed() {
     assert_eq!(table(&same), "v1/**/a is already canonical\n");
 }
 
+/// `zenctl hostid` (#719): the system leads, alone on its line, then where
+/// it came from and every input read. An id from the shared file has no v1
+/// origin, and the note says why, in every format.
+#[test]
+fn a_hostid_report_leads_with_the_system() {
+    use zenctl::render::{HostIdInput, HostIdReport, V1Origin};
+    let input = |path: &str, outcome: &str| HostIdInput {
+        path: path.into(),
+        outcome: outcome.into(),
+    };
+    let r = HostIdReport {
+        system: "h-504c6767c349".into(),
+        from: "/var/lib/zk2/hostid".into(),
+        salt: "zk2-hostid-v1".into(),
+        inputs: vec![
+            input("/etc/machine-id", "refused"),
+            input("/var/lib/dbus/machine-id", "absent"),
+            input("/var/lib/zk2/hostid", "id"),
+        ],
+        v1: vec![V1Origin {
+            salt: "tcgui-host-id-v1".into(),
+            origin: None,
+        }],
+    };
+    assert_data_eq!(
+        table(&r),
+        str![[r#"
+h-504c6767c349
+from                        /var/lib/zk2/hostid
+salt                        zk2-hostid-v1
+  /etc/machine-id           refused
+  /var/lib/dbus/machine-id  absent
+  /var/lib/zk2/hostid       id
+v1 tcgui-host-id-v1         no mapping
+
+"#]]
+    );
+    assert_data_eq!(
+        notes(&r),
+        str![[r#"
+the id came from the shared file, which no v1 application read: this host's v1 origins have no mapping by derivation
+
+"#]]
+    );
+    assert_data_eq!(
+        ndjson(&r),
+        str![[r#"
+{"from":"/var/lib/zk2/hostid","notes":[{"text":"the id came from the shared file, which no v1 application read: this host's v1 origins have no mapping by derivation"}],"report":"hostid","salt":"zk2-hostid-v1","system":"h-504c6767c349"}
+{"outcome":"refused","path":"/etc/machine-id","row":"input"}
+{"outcome":"absent","path":"/var/lib/dbus/machine-id","row":"input"}
+{"outcome":"id","path":"/var/lib/zk2/hostid","row":"input"}
+{"row":"v1_origin","salt":"tcgui-host-id-v1"}
+
+"#]]
+    );
+}
+
 /// `check schema` over zk2 (#612, FJ8b): the three verdicts each have
 /// their own word, the violations follow one per line, and nothing to say
 /// is *absent* in the document, not an empty list meaning the same thing.
@@ -1487,6 +1544,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "gen-plan",
         "get",
         "graph",
+        "hostid",
         "iface-list",
         "iface-show",
         "key-canon",

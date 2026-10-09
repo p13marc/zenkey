@@ -4,7 +4,9 @@
 //!
 //! - **R1:** a binding is a list of service addresses, exact
 //!   (`vehicle-01/teleop`) or wildcard (`vehicle-01/*`, `*/tc`). It resolves
-//!   at once: a subscription needs no presence.
+//!   at once: a subscription needs no presence. A service's
+//!   `self.system/<service>` is spelled out when it starts (0.20); a tool,
+//!   with no system of its own, is refused one.
 //! - **R2:** a template parameter may be bound, to `self.system`,
 //!   `self.service` or a value. Unbound parameters select every member.
 //! - **R5:** a consumer MAY wait on presence for its providers.
@@ -47,6 +49,13 @@ impl Provider {
             ))
         };
         let (sys, svc) = s.split_once('/').ok_or_else(bad)?;
+        if sys == crate::config::SELF_SYSTEM {
+            // R1 (0.20): a service's runtime spells it out at start, so only
+            // a tool, which has no system of its own, gets here.
+            return Err(Error::Contract(format!(
+                "binding {s:?} names the service's own system, which a tool has none of (R1)"
+            )));
+        }
         let pos = |p: &str| -> Result<Option<String>> {
             if p == "*" {
                 Ok(None)

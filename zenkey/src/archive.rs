@@ -413,7 +413,10 @@ impl Archive {
             .service
             .tombstone_window_s
             .map_or(DEFAULT_WINDOW, Duration::from_secs);
-        let me = config.service.address.clone();
+        // The archive's own address, resolved before anything is declared
+        // (a minted one included, hostid.v1 §2.7).
+        let mut b = ServiceBuilder::new(session, config.service);
+        let me = b.address()?.clone();
         let sources = config
             .records
             .iter()
@@ -452,7 +455,6 @@ impl Archive {
         }
         // §4.4: an archive holds its interface token; `start` refuses a
         // tokenless set that names it (§8.2 step 2, 0.17).
-        let mut b = ServiceBuilder::new(session, config.service);
         b.implement(Implementation::new(contract()))?;
         let i = Arc::clone(&inner);
         let q = b

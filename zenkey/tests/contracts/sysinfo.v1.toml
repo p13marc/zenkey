@@ -1,0 +1,15 @@
+# hostid.v1's scenarios (spec/profiles/hostid/scenarios.md): `sysinfo`, an
+# owner of one interface whose resources are all of plain kinds, so that
+# `zk2/**` sees everything it writes.
+[interface]
+name = "sysinfo"
+major = 1
+minor = 0
+
+[resources.cpu]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.uptime]
+kind = "state"
+type = { raw = "text/plain" }

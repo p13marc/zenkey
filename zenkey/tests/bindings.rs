@@ -1,4 +1,4 @@
-//! `spec/scenarios/bindings.md` §1–§4 (spec §3.2 R1–R6).
+//! `spec/scenarios/bindings.md` §1–§5 (spec §3.2 R1–R6).
 
 mod common;
 
@@ -299,4 +299,65 @@ async fn s4_wildcard_puts() {
     }
     eventually("all ten discarded", || async { sub.discarded() == 10 }).await;
     assert!(got.lock().unwrap().is_empty(), "none delivered");
+}
+
+/// §5 (0.20): `self.system/<service>` and `self.system/*` name providers on
+/// the consumer's own system, resolved once at start. The descriptor lists
+/// them resolved; a tool, with no system of its own, is refused one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_a_provider_on_the_services_own_system() {
+    let (_r1, ep) = router(None).await;
+    let dets_s = client(&ep).await;
+    let trackers_s = client(&ep).await;
+    let tool = client(&ep).await;
+    let mut dets = Vec::new();
+    for address in ["vehicle-01/det0", "vehicle-01/det1", "vehicle-02/det0"] {
+        dets.push(detector(&dets_s, address).await);
+    }
+    let one = tracker(&trackers_s, "vehicle-01/one", &["self.system/det0"]).await;
+    let all = tracker(&trackers_s, "vehicle-01/all", &["self.system/*"]).await;
+
+    // 1. Delivered from the own system only: det0 to `one`, both of
+    // vehicle-01's to `all`. Re-put until every edge has delivered.
+    eventually("every bound provider delivered", || async {
+        for (_, w) in &dets {
+            w.put("d").await.unwrap();
+        }
+        one.2.lock().unwrap().len() == 1 && all.2.lock().unwrap().len() == 2
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let delivered = |g: &Arc<Mutex<BTreeMap<String, u64>>>| -> BTreeSet<String> {
+        g.lock().unwrap().keys().cloned().collect()
+    };
+    assert_eq!(
+        delivered(&one.2),
+        BTreeSet::from(["vehicle-01/det0".to_owned()])
+    );
+    assert_eq!(
+        delivered(&all.2),
+        BTreeSet::from(["vehicle-01/det0".to_owned(), "vehicle-01/det1".to_owned()])
+    );
+
+    // 2. The descriptors list the bindings resolved (R3, D009).
+    for (svc, want) in [(&one.0, "vehicle-01/det0"), (&all.0, "vehicle-01/*")] {
+        let d = presence::descriptor(&tool, svc.address(), svc.instance(), T)
+            .await
+            .unwrap()
+            .into_descriptor()
+            .unwrap();
+        assert_eq!(d.requires[0].bindings, [want]);
+    }
+
+    // 3. A tool has no system of its own.
+    let refused = zenkey::consumer::Consumer::for_tool(
+        &tool,
+        Arc::new(contract("detections.v1")),
+        &["self.system/det0"],
+        &BTreeMap::new(),
+    );
+    assert!(
+        refused.is_err_and(|e| e.to_string().contains("own system")),
+        "a tool's self.system binding is refused"
+    );
 }

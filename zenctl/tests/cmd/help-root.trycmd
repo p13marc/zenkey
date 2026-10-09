@@ -36,6 +36,7 @@ Commands:
   acl          Router access control, generated from an enrollment and the contracts
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
+  hostid       This host's system, as hostid.v1 mints it from the machine id
   bench        Measure how a deployment answers its operations
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract
@@ -102,6 +103,7 @@ Commands:
   acl          Router access control, generated from an enrollment and the contracts
   admin        Zenoh's own introspection: routers, peers and the mesh graph
   key          Key-expression algebra, offline: inclusion, intersection, canon
+  hostid       This host's system, as hostid.v1 mints it from the machine id
   bench        Measure how a deployment answers its operations
   get          Query a raw selector, or read a zk2 state resource (`get state`)
   call         Call one operation of a zk2 service, through its contract

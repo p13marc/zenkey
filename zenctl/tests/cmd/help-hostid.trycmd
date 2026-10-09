@@ -1,0 +1,41 @@
+This host's system, as `hostid.v1` mints it (#719): a noun read off the host,
+not the bus. No session, nothing written — see `hostid.trycmd` for its exits.
+
+```console
+$ zenctl hostid --help
+This host's system, as hostid.v1 mints it from the machine id.
+
+The system a service on this host gets when it asks for `@hostid.v1/<service>` (spec/profiles/hostid/v1.md): the inputs read in order, `/etc/machine-id`, `/var/lib/dbus/machine-id`, then the shared file `/var/lib/zk2/hostid`, and the system derived from the first that holds a machine id (§2.1–§2.4). No session is opened and nothing is written: where a service would create the shared file, this says so instead. No machine id is ever printed. `--machine-id` derives from a given id instead; each `--v1-salt` adds the v1 origin the same id had under that v1 application's salt, for the migration table (Appendix B). Exit 0 with a system; 2 when the host has no id a service could use, each path named with its outcome, or when `--machine-id` is not a machine id.
+
+Usage: zenctl hostid [OPTIONS]
+
+Options:
+      --machine-id <HEX>
+          Derive from this machine id (32 hex digits) instead of reading the host's
+
+      --v1-salt <SALT>
+          Add the v1 origin the same id had under this v1 salt, such as `tcgui-host-id-v1`. Repeatable
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```

@@ -1,0 +1,84 @@
+`zenctl hostid` reads the inputs a service asking for `@hostid.v1/<service>`
+reads (`spec/profiles/hostid/v1.md` §2.4) and prints the system it would get.
+These cases read a root standing in for `/` (`--root`, hidden: the seam the
+tests use), never the host's own `/etc/machine-id`.
+
+Exit 0: the first input with a machine id wins. The system leads, alone on its
+line; no machine id is ever printed.
+
+```console
+$ zenctl hostid --root tests/cmd/fixtures/hostid/m1 --format table
+h-bbd1aa1db10b
+from               /etc/machine-id
+salt               zk2-hostid-v1
+  /etc/machine-id  id
+
+```
+
+The same as a document, the inputs as rows, with the v1 origins of the
+migration table (Appendix B) for two v1 salts:
+
+```console
+$ zenctl hostid --root tests/cmd/fixtures/hostid/m1 --v1-salt tcgui-host-id-v1 --v1-salt zensight-host-id-v1 --format ndjson
+{"from":"/etc/machine-id","report":"hostid","salt":"zk2-hostid-v1","system":"h-bbd1aa1db10b"}
+{"outcome":"id","path":"/etc/machine-id","row":"input"}
+{"origin":"h-eed9ac91da20","row":"v1_origin","salt":"tcgui-host-id-v1"}
+{"origin":"h-94431c427f53","row":"v1_origin","salt":"zensight-host-id-v1"}
+
+```
+
+`--machine-id` derives from a given id instead of the host's:
+
+```console
+$ zenctl hostid --machine-id B642B4217B34B1E8D3BD915FC65C4452 --v1-salt example-salt-v1 --format json
+{
+  "from": "--machine-id",
+  "report": "hostid",
+  "rows": [
+    {
+      "origin": "h-20609002f7b6",
+      "row": "v1_origin",
+      "salt": "example-salt-v1"
+    }
+  ],
+  "salt": "zk2-hostid-v1",
+  "system": "h-bbd1aa1db10b"
+}
+
+```
+
+Exit 2, no verdict: no input holds a machine id. A service would create the
+shared file, and its random content would decide the system; `hostid` only
+reads, so the system is not decided yet. Each path is named with its outcome.
+
+```console
+$ zenctl hostid --root tests/cmd/fixtures/hostid/none --format table
+? 2
+Error: this host's system is not decided yet: no input holds a machine id, and a service asking for a minted system would create the shared file, whose random content decides it (hostid.v1 §2.5). zenctl only reads:
+  /etc/machine-id: refused by hostid.v1 §2.1
+  /var/lib/dbus/machine-id: absent
+  /var/lib/zk2/hostid: absent
+
+```
+
+Exit 2: the host fails closed, as a service on it would. A shared file without
+an id is never replaced (§2.5), and a service does not start (§2.6).
+
+```console
+$ zenctl hostid --root tests/cmd/fixtures/hostid/garbage --format table
+? 2
+Error: this host has no id hostid.v1 can mint a system from, so a service asking for one would not start (hostid.v1 §2.6):
+  /etc/machine-id: absent
+  /var/lib/dbus/machine-id: absent
+  /var/lib/zk2/hostid: refused by hostid.v1 §2.1
+
+```
+
+Exit 2: a `--machine-id` that `hostid.v1` §2.1 refuses. It is not echoed.
+
+```console
+$ zenctl hostid --machine-id 00000000000000000000000000000000 --format table
+? 2
+Error: --machine-id is not a machine id: hostid.v1 takes 32 hex digits, not all zeros, once ASCII whitespace is trimmed (hostid.v1 §2.1)
+
+```
