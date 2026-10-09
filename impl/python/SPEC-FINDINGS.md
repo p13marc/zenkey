@@ -6,16 +6,17 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Seven rounds.**
+**Eight rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
 - F-56 to F-63 were found against 0.5.
 - F-64 to F-70 were found against 0.6, with the rest of the live half.
 - F-71 to F-73 were found against 0.7.
-- Amendments 0.5 to 0.8 resolved F-01 to F-73. Each entry carries a status
+- F-74 to F-76 were found against 0.8.
+- Amendments 0.5 to 0.9 resolved F-01 to F-76. Each entry carries a status
   line naming its amendment.
-- **F-74 to F-76 are new**, found against 0.8.
+- **Nothing new was found against 0.9** (see "At 0.9" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -25,7 +26,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.8:** 76 entries.
+**Counts at 0.9:** 76 entries, all resolved.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -36,17 +37,23 @@ where that was not enough, or where the spec said two things.
   - The Rust owner example has met F-65 and F-68 since FH2 (#660), and the
     runner now checks both strictly. With its new `--connect`, it also runs
     in F-69's setup, behind a router.
-- F-71 to F-73: resolved by 0.8; none left unresolved.
+- F-71 to F-73: resolved by 0.8.
   - 0.8 overturned two of zk2py's guesses, F-71 (`["null"]`) and F-72 (by
     text).
   - It resolved F-73 by withdrawing the scenario's claim to observe the
     tick from outside.
-- F-74 to F-76: **new**, 2 ambiguity, 1 gap.
+- F-74 to F-76: resolved by 0.9; none left unresolved.
+  - 0.9 confirmed zk2py's two guesses, F-74 (O2 first) and F-76 (zero
+    values, then completion).
+  - It made zk2py's fix of F-75 the scenario's step.
+  - It also fixed the owner example's silent templated operations, which
+    the runner had reported as two known deviations. Both are plain checks
+    now.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.8 | Location | In one line |
+| Id | Severity | Status at 0.9 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -121,9 +128,9 @@ by the spec section that now states the rule.
 | F-71 | ambiguity | resolved by 0.8 | §7.3 the nullable form (0.7) | "The null schema, whose type is exactly null": is `{"type": ["null"]}` one? |
 | F-72 | ambiguity | resolved by 0.8 | §9.8 inside undecided keywords (0.7) | "A $ref back to a target already being followed is compared as written": its text, or its target? |
 | F-73 | gap | resolved by 0.8 | state.md §1 step 3 (0.7) | "Faster than its clock advances" cannot be arranged by a tester; the tick path went unexercised. |
-| F-74 | ambiguity | **new** | §5.1 "Over a template" against O2 (0.8) | A wildcard call to a fan-out-forbidden template, with a non-canonical parameter chunk: `fanout_forbidden` or `invalid_request`? |
-| F-75 | gap | **new** | presence.md §6 step 3 (0.8) | `zk2/**` selects no control token, so its stalled read's "no token" cannot fail. |
-| F-76 | ambiguity | **new** | §5.1 "Over a template" and "Answering" (0.8) | A template-wide `replies = "many"` handler that names no member and sends nothing: `internal`, or zero values then completion? |
+| F-74 | ambiguity | resolved by 0.9 | §5.1 "Over a template" against O2 (0.8) | A wildcard call to a fan-out-forbidden template, with a non-canonical parameter chunk: `fanout_forbidden` or `invalid_request`? |
+| F-75 | gap | resolved by 0.9 | presence.md §6 step 3 (0.8) | `zk2/**` selects no control token, so its stalled read's "no token" cannot fail. |
+| F-76 | ambiguity | resolved by 0.9 | §5.1 "Over a template" and "Answering" (0.8) | A template-wide `replies = "many"` handler that names no member and sends nothing: `internal`, or zero values then completion? |
 
 ---
 
@@ -1691,8 +1698,13 @@ queryable "on its concrete key (or its template)", and §8.2 "Exposed" says
 a template is exposed by its template. The runner reports both calls as
 known deviations (`run_rust_behind_r1`). This also leaves F-74 and F-76
 unobservable on the reference.
+**Fixed with 0.9:** the owner example serves every operation now, a
+templated one over the whole template. The two known deviations are plain
+checks, and both pass.
 
 ### F-74 · ambiguity · §5.1 "Over a template" (0.8) against O2: two refusals for one call
+
+**Status at 0.9: resolved by 0.9.** §5.1 "The order of refusals": before any handler, `fanout_forbidden` (O2), then `unavailable` (O3), then a key that names no member. zk2py's guess was the rule. operations.md §2 step 1 now makes the call, and zk2py's owners and the owner example both answer `fanout_forbidden`. zk2py's `unavailable` queryable answered every call `unavailable`, wildcards included, so it now checks O2 first too. The runner pins the whole order on a gated operation no host exposes.
 
 > O2: "a call whose key expression is not concrete MUST be refused with
 > `fanout_forbidden`, unless the operation declares `fanout = "allowed"`"
@@ -1715,6 +1727,8 @@ whole, before it reads the template, so the call is `fanout_forbidden`
 
 ### F-75 · gap · presence.md §6 step 3 (0.8): a read that selects no token
 
+**Status at 0.9: resolved by 0.9.** presence.md §6 step 3 now reads `zk2/*/*/@zk/instance/*` with an owner present: the open read holds the token, and the held one is empty with `Timeout`. That was zk2py's fix, and the runner now runs the step as written, without the `zk2/**` pair.
+
 > "3. The second tool reads `zk2/**` with the link flowing, then again with
 > R1's replies held back past the read's timeout." Expected: "The second
 > ends with the error reply `Timeout` and no token"
@@ -1731,6 +1745,8 @@ flows, has none and the `Timeout` reply while it is stalled, and has the
 token again once the link is released.
 
 ### F-76 · ambiguity · §5.1 (0.8): a `replies = "many"` handler that names no member
+
+**Status at 0.9: resolved by 0.9.** §5.1 "Sending nothing needs no member": with no `summary`, zero values then completion; with one, `internal`. zk2py's guess was the rule. operations.md §2 step 6 pins it, and zk2py's owner passes it: no value, no envelope, and the handler ran. The owner example's handler always echoes, so step 6 does not apply to it. Its unbound fan-out is `internal`, as §5.1 says of a server that would reply but names no member.
 
 > "It names the member each reply answers for, and replies on that
 > member's key … One that names no member has no key to reply on, and
@@ -1750,3 +1766,26 @@ handler that sends nothing ends with completion alone, unless a summary
 is owed or the handler raised (`OpCall.finish`). `internal` is reserved for
 a call that needed an answer, and for zk2py's default handler, which names
 no member for a fan-out and says so.
+
+## At 0.9 (#609)
+
+`just py-conformance` passes 517 of 517: 0.9 adds no fixture. `just
+py-live` passes 170 of 170, with no known deviation.
+
+What changed in zk2py:
+- **The refusal order.** The owner's `unavailable` queryable now checks O2
+  first. It was the one place where zk2py's order differed from 0.9's.
+- **operations.md §2** gains step 1's `ETH0/set` call and step 6. A
+  further check pins the whole order on `calibrate`, an optional operation
+  gated on a capability no host holds:
+  - a wildcard call is `fanout_forbidden` from each host;
+  - a concrete call with `ETH0` is `unavailable`, with cause `capability`,
+    not `invalid_request`.
+- **presence.md §6 step 3** reads the instance tokens, as amended.
+- **The owner example's templated operations** are plain checks now. Behind
+  R1 it also answers:
+  - step 1's `ETH0/set` with `fanout_forbidden`;
+  - step 4's `ETH0/reset` with `invalid_request`;
+  - a fan-out that leaves the parameter unbound with `internal`.
+
+Implementing 0.9 raised no new question. There is no F-77.

@@ -485,18 +485,34 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
                          [(r.kind, r.key) for r in diag.replies] == [("value", f"{base}/diagnostics")],
                          str([(r.kind, r.key) for r in diag.replies]))
             claimed = [e.get("unavailable") for e in doc.get("interfaces", []) if e.get("iface") == "zk2py_tc.v1"]
+
+            def shown(res) -> str:
+                return str([(r.kind, r.key, (r.envelope or {}).get("code")) for r in res.replies])
+
+            # Its templated operations, which it serves since 0.9's fix
+            # (the 0.8 round's two XFAILs).
             member = live.call(tool, f"{base}/interfaces/eth0/set", b"x")
-            report.known_deviation(
-                run, "a templated operation it claims exposed answers a concrete call, a value or an envelope "
-                     "(O1, O3, §8.2 \"Exposed\")",
-                not member.silent, f"{len(member.replies)} replies; descriptor lists unavailable {claimed}",
-                "the owner example declares no queryable over an operation template (0.8, observed)")
+            report.check(run, "a templated operation it claims exposed answers a concrete call, on the member's "
+                              "key (O1, O3, §8.2 \"Exposed\")",
+                         [(r.kind, r.key) for r in member.replies] == [("value", f"{base}/interfaces/eth0/set")],
+                         f"{shown(member)}; descriptor lists unavailable {claimed}")
             malformed = live.call(tool, f"{base}/interfaces/ETH0/set", b"x")
-            report.known_deviation(
-                run, "interfaces/ETH0/set is invalid_request (operations.md §3 step 3, §5.1)",
-                [(r.envelope or {}).get("code") for r in malformed.replies] == ["invalid_request"],
-                f"{[(r.kind, (r.envelope or {}).get('code')) for r in malformed.replies]}",
-                "the same: no queryable over the template")
+            report.check(run, "interfaces/ETH0/set is invalid_request (operations.md §3 step 3, §5.1)",
+                         [(r.envelope or {}).get("code") for r in malformed.replies] == ["invalid_request"],
+                         shown(malformed))
+            # operations.md §2 against it, where it serves the operation.
+            fan = f"zk2/*/{svc}/zk2py_tc.v1/@op"
+            o2 = live.call(tool, f"{fan}/interfaces/ETH0/set", b"x", fanout=True)
+            report.check(run, "operations.md §2 step 1 (0.9): a wildcard call to set with ETH0 is "
+                              "fanout_forbidden, O2 first (§5.1 \"The order of refusals\")",
+                         [(r.envelope or {}).get("code") for r in o2.replies] == ["fanout_forbidden"], shown(o2))
+            bad = live.call(tool, f"{fan}/interfaces/ETH0/reset", b"x", fanout=True)
+            report.check(run, "operations.md §2 step 4: a fan-out to reset with ETH0 is invalid_request",
+                         [(r.envelope or {}).get("code") for r in bad.replies] == ["invalid_request"], shown(bad))
+            unbound = live.call(tool, f"{fan}/interfaces/*/reset", b"x", fanout=True)
+            report.check(run, "a fan-out that leaves the parameter unbound: its echo names no member, so it is "
+                              "refused internal (§5.1 \"Over a template\")",
+                         [(r.envelope or {}).get("code") for r in unbound.replies] == ["internal"], shown(unbound))
         finally:
             code = owner.close()
             tool.close()
@@ -1063,41 +1079,36 @@ def run_python_presence_refused(report: Report) -> None:
                                       "holds the token (presence.md §6, measured)",
                                  alive.complete and len(alive.alive) == 1, alive.reading)
                     continue
-                # Step 3: the second tool, through a link the runner stalls.
+                # Step 3 (0.9): the second tool reads zk2/*/*/@zk/instance/*
+                # through a link the runner stalls, with the owner present.
+                selector = "zk2/*/*/@zk/instance/*"
                 proxy = _StallProxy(r1_endpoint)
                 try:
                     tool2 = live.open_client(proxy.endpoint)
                     try:
-                        flowing = live.list_presence(tool2, "zk2/**")
-                        flowing_inst = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                        flowing = live.list_presence(tool2, selector)
                         proxy.flowing.clear()
                         try:
-                            stalled = live.list_presence(tool2, "zk2/**")
-                            stalled_inst = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                            stalled = live.list_presence(tool2, selector)
                         finally:
                             proxy.flowing.set()
                         time.sleep(0.3)
-                        after = live.list_presence(tool2, "zk2/*/*/@zk/instance/*")
+                        after = live.list_presence(tool2, selector)
                     finally:
                         tool2.close()
                 finally:
                     proxy.close()
-                report.check(run, "step 3: zk2/** with the link flowing ends with no error reply",
-                             flowing.complete and not flowing.errors, flowing.reading)
-                report.check(run, "step 3: zk2/** with R1's replies held past the timeout ends with the error "
-                                  "reply Timeout and no token; reported possibly incomplete, never absence",
+                report.check(run, "step 3: the open read holds the owner's instance token, no error reply",
+                             [i["instance"] for i in flowing.instances] == [owner.instance] and flowing.complete
+                             and not flowing.errors, flowing.reading)
+                report.check(run, "step 3: the read held past its timeout ends with the error reply Timeout and "
+                                  "no token; reported possibly incomplete, never absence",
                              not stalled.complete and stalled.errors == ["zenoh/string: Timeout"]
                              and stalled.count == 0 and stalled.reading.startswith("possibly incomplete"),
                              stalled.reading)
-                # zk2/** selects no control token (`**` never crosses @zk,
-                # §1.3): the same pair on the instance tokens, where "no
-                # token" is evidence (SPEC-FINDINGS F-75).
-                report.check(run, "step 3, on zk2/*/*/@zk/instance/*: the token when flowing; Timeout and no "
-                                  "token when stalled; the token again once released",
-                             len(flowing_inst.instances) == 1 and flowing_inst.complete
-                             and stalled_inst.errors == ["zenoh/string: Timeout"] and stalled_inst.count == 0
-                             and len(after.instances) == 1 and after.complete,
-                             f"{flowing_inst.reading} | {stalled_inst.reading} | {after.reading}")
+                report.check(run, "and once the link is released, the same read holds the token again",
+                             [i["instance"] for i in after.instances] == [owner.instance] and after.complete,
+                             after.reading)
             finally:
                 owner.close()
         finally:
@@ -1281,9 +1292,13 @@ def run_python_fanout(report: Report) -> None:
             # Step 1.
             one = live.call(caller, "zk2/h1/tc/zk2py_tc.v1/@op/interfaces/*/set", b"x", fanout=True)
             three = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/*/set", b"x", fanout=True)
-            report.check(run, "step 1: one, then three fanout_forbidden refusals, and 0 executions",
+            # 0.9: then ETH0, not canonical either; O2 comes first.
+            eth0 = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/ETH0/set", b"x", fanout=True)
+            report.check(run, "step 1: one, then three, then three fanout_forbidden refusals (ETH0 too: O2 "
+                              "comes first, §5.1 \"The order of refusals\"), and 0 executions",
                          codes(one) == ["fanout_forbidden"] and codes(three) == ["fanout_forbidden"] * 3
-                         and not any(o.handled for o in owners), f"{codes(one)} {codes(three)}")
+                         and codes(eth0) == ["fanout_forbidden"] * 3 and not any(o.handled for o in owners),
+                         f"{codes(one)} {codes(three)} {codes(eth0)}")
             # Step 2.
             diag = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/diagnostics", b"x", fanout=True)
             report.check(run, "step 2: diagnostics with All + None: one reply per host, each on its own key",
@@ -1329,6 +1344,29 @@ def run_python_fanout(report: Report) -> None:
                          and len(refused_to_handler) == 1,
                          f"{[(r.kind, r.key, r.payload) for r in many.replies]}; refused to the handler: "
                          f"{refused_to_handler}")
+            # Step 6 (0.9): the same operation, served over the template by a
+            # handler that names no member and sends nothing.
+            quiet = PyOwner("h9", "scan", [load_contract(REPO / SCAN)], connect=r1_endpoint,
+                            handlers={"@op/ports/{port}/scan": lambda call: None})
+            quiet.start()
+            owners.append(quiet)
+            _wait_alive(caller, "zk2/h9/scan/@zk/alive/**", 1)
+            nothing = live.call(caller, "zk2/h9/scan/zk2py_scan.v1/@op/ports/*/scan", b"", fanout=True)
+            report.check(run, "step 6: a handler that names no member and sends nothing: no value and no "
+                              "envelope, the handler having run (§5.1, \"Sending nothing needs no member\")",
+                         nothing.silent and nothing.done_s is not None and len(quiet.handled) == 1,
+                         f"{len(nothing.replies)} replies, completed {nothing.done_s is not None}, "
+                         f"handler runs {len(quiet.handled)}")
+            # §5.1 (0.9) "The order of refusals", on calibrate: optional,
+            # gated on a capability no tc host holds, so implied absent.
+            wild = live.call(caller, "zk2/*/tc/zk2py_tc.v1/@op/interfaces/ETH0/calibrate", b"x", fanout=True)
+            gone = live.call(caller, "zk2/h2/tc/zk2py_tc.v1/@op/interfaces/ETH0/calibrate", b"x")
+            causes = [(r.envelope or {}).get("cause") for r in gone.replies]
+            report.check(run, "the order of refusals (§5.1, 0.9): a wildcard call to an operation not exposed is "
+                              "fanout_forbidden first; a concrete one is unavailable (capability) before its "
+                              "ETH0 names no member",
+                         codes(wild) == ["fanout_forbidden"] * 3 and codes(gone) == ["unavailable"]
+                         and causes == ["capability"], f"{codes(wild)} {codes(gone)} {causes}")
             # operations.md §3 step 3, beside it: the concrete call.
             concrete = live.call(caller, "zk2/h2/tc/zk2py_tc.v1/@op/interfaces/ETH0/set", b"x")
             report.check(run, "and §3 step 3: a concrete call to interfaces/ETH0/set is invalid_request, not "
