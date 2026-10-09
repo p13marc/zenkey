@@ -1,0 +1,1303 @@
+{
+  "cases": [
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "no horizon: not asked, however fresh the delivery (§2.3)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "no horizon: not asked, however old the stamp (§2.3)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 500
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "kind",
+        "verdict": "not_asked"
+      },
+      "kind": "event",
+      "note": "an event: not this profile's (§2.2)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "kind",
+        "verdict": "not_asked"
+      },
+      "kind": "operation",
+      "note": "an operation: not this profile's (§2.2)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 1
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": "60"
+      },
+      "expect": {
+        "reason": "not_a_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a string is no horizon: unobservable, never fresh (§2.1)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1.5
+      },
+      "expect": {
+        "reason": "not_a_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a fraction is no horizon (§2.1)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 0.1
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "last_known",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "an archive's answer is never current (§2.8)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "last_known",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "not even at ttl 0 (§2.8)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": "60"
+      },
+      "expect": {
+        "reason": "last_known",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "the archive is checked before the value (§2.7's order)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ]
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "the horizon is checked first (§2.7's order)",
+      "observations": [
+        {
+          "via": "archive"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a delivery 10 s old",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a delivery exactly ttl old is fresh: at most ttl",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 60,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "a millisecond beyond ttl: stale, on the subscriber's own monotonic clock",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 60.001,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "incomplete",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "deliveries were lost: the lost one may have been a confirmation",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 61,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a fresh delivery is fresh, whatever was lost",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 10,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_delivery",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "nothing in more than ttl of listening, of a member known to exist",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 61,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "listened_too_short",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "nothing, having listened exactly ttl: not long enough to tell",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 60,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "listened_too_short",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a 5 s window cannot age a 60 s horizon",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 5,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "incomplete",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "nothing heard, and deliveries were lost",
+      "observations": [
+        {
+          "complete": false,
+          "last": null,
+          "listened_s": 61,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "the last delivery is a delete: no value",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "delete"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "never_stale",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl 0: never stale, no delivery needed (§2.3)",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 1000,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "never_stale",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl 0: a value a day old is fresh",
+      "observations": [
+        {
+          "complete": false,
+          "last": {
+            "age_s": 100000,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "ttl 0, deleted: no value",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "delete"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "stream",
+      "note": "a stream sample 0.5 s old (scenarios.md §5)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 0.5,
+            "kind": "put"
+          },
+          "listened_s": 2,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "stream",
+      "note": "a stream sample 1.5 s old (scenarios.md §5)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1.5,
+            "kind": "put"
+          },
+          "listened_s": 3,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "a stopped refresher, 3 s after its last re-put (scenarios.md §2)",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 3,
+            "kind": "put"
+          },
+          "listened_s": 6,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "no reply for the member: no value (core O5, S6)",
+      "observations": [
+        {
+          "reply": null,
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "deleted",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "a reply_del: deleted, no value",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "delete"
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a reply without a stamp breaks S2: its age is unobservable",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": null
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a clock not trusted: never fresh",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "and never stale, however old the stamp reads",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 120
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "10 s old against a trusted clock",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl - delta exactly: fresh",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 59.5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "within the delta below the horizon",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 59.6
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "ttl + delta exactly: not yet beyond the band",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 60.5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "beyond ttl + delta: stale",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 60.6
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a stamp ahead by the delta: within the trust",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": -0.5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "clock_disagrees",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a stamp ahead beyond the delta: the clocks disagree beyond the trust",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": -0.6
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "never_stale",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl 0: no stamp and no clock needed (§2.3)",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": null
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "ttl 0, no reply: no value to call fresh",
+      "observations": [
+        {
+          "reply": null,
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "scenarios.md §2: 0.2 s after a stopped refresher, at most 1.2 s old",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 1.2
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "scenarios.md §2: 3.5 s after it, beyond ttl + delta (2.5 s)",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 3.5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "scenarios.md §4: a reader 5 s off, its measurement failed",
+      "observations": [
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "scenarios.md §4: the same reply, on the deployment's word",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "ttl 1: fresh only up to ttl - delta, 0.5 s",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 0.5
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "ttl 1: 0.6 s is within the band",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 0.6
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1
+      },
+      "expect": {
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "a deployment's delta of 2 s at or above the horizon: a GET reader can never call it fresh",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 2,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 0
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a short subscription and a fresh reply: fresh",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 30,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a reply fresher than the subscription's last delivery: the most recent confirmation decides",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 70,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 2
+      },
+      "expect": {
+        "reason": "no_delivery",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "scenarios.md §6: nothing heard in 4 s, the reply unaged: stale",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 4,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 4
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "listened_too_short",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "two unobservable observations: the first's reason",
+      "observations": [
+        {
+          "complete": true,
+          "last": null,
+          "listened_s": 30,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "trusted": false
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "one saw a delete, one a fresh value: judged on the value",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "delete"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 10
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "kind": "state",
+      "note": "one saw a delete, one a stale value: judged on the value",
+      "observations": [
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "delete"
+          },
+          "via": "get"
+        },
+        {
+          "complete": true,
+          "last": {
+            "age_s": 70,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "within_horizon",
+        "verdict": "fresh"
+      },
+      "kind": "state",
+      "note": "a fresh delivery and a silent GET: fresh",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        },
+        {
+          "reply": null,
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "no_observation",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "nothing observed",
+      "observations": []
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "no horizon: not asked, whatever was observed",
+      "observations": [
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "put"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        },
+        {
+          "clock": {
+            "delta_s": 0.5,
+            "trusted": true
+          },
+          "reply": {
+            "kind": "put",
+            "stamp_age_s": 1
+          },
+          "via": "get"
+        }
+      ]
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "last_known",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "only not-asked verdicts: the first one's reason",
+      "observations": [
+        {
+          "via": "archive"
+        },
+        {
+          "complete": true,
+          "last": {
+            "age_s": 1,
+            "kind": "delete"
+          },
+          "listened_s": 120,
+          "via": "subscription"
+        }
+      ]
+    }
+  ],
+  "description": "freshness.v1 §2.3, §2.5–§2.8: a resource's kind and merged annotations (read as horizons.json reads them), and the observations a reader made of one member -> the combined verdict. Each observation is judged in §2.7's order, then combined: fresh if any is fresh, else stale if any is, else unobservable if any is (the first one's reason), else not_asked (the first one's reason); no observation at all is unobservable, no_observation. Observations: {\"via\": \"subscription\", \"listened_s\": seconds since the subscription was declared, \"complete\": false when it lost deliveries, \"last\": null or {\"kind\": \"put\" | \"delete\", \"age_s\": seconds since that delivery, on the subscriber's monotonic clock}}; {\"via\": \"get\", \"reply\": null (no reply for the member) or {\"kind\": \"delete\"} or {\"kind\": \"put\", \"stamp_age_s\": the reader's clock minus the stamp's time, negative when the stamp is ahead, or null when the reply has no stamp}, \"clock\": {\"trusted\": false} or {\"trusted\": true, \"delta_s\": the delta the clocks are trusted to}}; {\"via\": \"archive\"}. expect.verdict is fresh, stale, unobservable or not_asked (a premise that does not hold, an event or a deleted member, is not_asked), and expect.reason its class: within_horizon, never_stale, beyond_horizon, no_delivery, not_a_horizon, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation, no_horizon, kind, last_known, deleted. Seconds are compared exactly, to the nanosecond."
+}
