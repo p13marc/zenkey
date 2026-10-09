@@ -62,7 +62,8 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
         rules: vec![Condition::parse(rule).expect("rule")],
         tick: Duration::from_millis(250),
         timeout: Duration::from_secs(1),
-        doctor: None,
+        deployment: None,
+        contracts: zenkey_fleet::ContractSet::new(),
         give_up: Some(give_up),
         preamble: semantics,
         max_samples: None,
@@ -285,7 +286,8 @@ async fn full_semantics_keep_every_fetched_key() {
 
 /// Nothing fires within `give_up`: no file, no trigger, and a report that
 /// says so rather than an empty capture — a rule not firing is not a
-/// finding. A rule that judges v1 is refused before anything is declared.
+/// finding. v1's `origin-down` is refused at the parse, naming zk2's
+/// `instance-gone`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_rule_that_never_fires_leaves_no_file() {
     let (_router, ep) = router(None).await;
@@ -321,19 +323,99 @@ async fn a_rule_that_never_fires_leaves_no_file() {
     assert_eq!(report.samples, 0);
     assert_eq!(report.header.preamble, None);
 
-    let v1 = spec(
-        "origin-down h-aaaaaaaaaaaa",
-        None,
-        Duration::from_millis(100),
-    );
-    let e = record_on(
-        &session,
-        "",
-        &v1,
-        || async { Ok(SharedBuf::default()) },
-        |_| {},
-    )
-    .await
-    .unwrap_err();
+    let e = Condition::parse("origin-down h-aaaaaaaaaaaa").unwrap_err();
     assert!(e.is_unaskable(), "{e}");
+    assert!(e.to_string().contains("instance-gone"), "{e}");
+}
+
+/// FJ8b: `invalid-payload` arms a capture again, in its zk2 meaning — a
+/// payload that fails its declared type, read through the lens the
+/// deployment's session gives — and fires on the owner's first bad put,
+/// the good puts before it in the pre-roll.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_invalid_payload_fires_a_capture_through_the_lens() {
+    let (_router, ep) = router(None).await;
+    let (owners, recorder_session) = (client(&ep).await, client(&ep).await);
+    let netif = iface("tc.netif.v1");
+    let mut b = zk2::ServiceBuilder::new(&owners, config("host-a/tc"));
+    b.implement(zk2::Implementation::new(example("tcgui/tc.netif.v1")))
+        .expect("implement");
+    for r in &example("tcgui/tc.netif.v1").resources {
+        let _ = b.expose(&netif, &zk2::implementation::resource_name(r));
+    }
+    let member: Bindings = [
+        ("ns".to_owned(), vec!["default".to_owned()]),
+        ("iface".to_owned(), vec!["eth0".to_owned()]),
+    ]
+    .into();
+    let spoken = b
+        .declare_state_writer(&netif, "state/interfaces/{ns}/{iface}", &member)
+        .await
+        .expect("spoken");
+    let _service = b.start().await.expect("the owner");
+
+    let (fired_tx, mut fired_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let buf = SharedBuf::default();
+    let recorder = tokio::spawn({
+        let buf = buf.clone();
+        async move {
+            let mut s = spec(
+                &format!("invalid-payload {SELECTOR}"),
+                None,
+                Duration::from_secs(20),
+            );
+            s.deployment = Some(zenkey_fleet::DoctorBus {
+                session: recorder_session.clone(),
+                raw: recorder_session.clone(),
+                namespace: String::new(),
+            });
+            record_on(
+                &recorder_session,
+                "",
+                &s,
+                || async move { Ok(buf) },
+                |ev| {
+                    if let TriggerEvent::Fired(_) = ev {
+                        let _ = fired_tx.send(());
+                    }
+                },
+            )
+            .await
+        }
+    });
+
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while !spoken.writer().matching().await.unwrap_or(false) {
+        assert!(tokio::time::Instant::now() < deadline, "never matched");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Valid values until the rule has judged a clean window, then one that
+    // fails its type (`is_up` is a boolean), until it fires.
+    let good = br#"{"name":"eth0","index":2,"namespace":"default","is_up":true}"#.to_vec();
+    let bad = br#"{"name":"eth0","index":2,"namespace":"default","is_up":"yes"}"#.to_vec();
+    for _ in 0..4 {
+        spoken.put(good.clone()).await.expect("put");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let fired = async {
+        loop {
+            spoken.put(bad.clone()).await.expect("put");
+            tokio::select! {
+                _ = fired_rx.recv() => break,
+                () = tokio::time::sleep(Duration::from_millis(250)) => {}
+            }
+        }
+    };
+    tokio::time::timeout(util::SETTLE, fired)
+        .await
+        .expect("the rule fired within the settle window");
+    let report = recorder.await.expect("join").expect("the capture ran");
+    let trigger = report.trigger.expect("it fired");
+    assert_eq!(trigger.to, CondState::Firing);
+    assert!(
+        trigger.evidence.contains("failed their declared type"),
+        "{}",
+        trigger.evidence
+    );
+    assert!(trigger.evidence.contains("/is_up"), "{}", trigger.evidence);
 }

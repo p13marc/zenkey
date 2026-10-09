@@ -6,16 +6,31 @@
 //! built from `SampleView`s, written through `ZrecWriter::new_at` with the
 //! same epoch the live rows measure from, read back with `ZrecReader`, and
 //! projected both ways on both axes.
+//!
+//! zk2's since #612 (FJ8b): both paths resolve each key through one
+//! [`Lens`] — here the tcgui contract held offline, as `zenctl timeline
+//! --from <file> --contracts` reads a capture — so the lanes are zk2
+//! resources, and the lens is the one input the two sources share.
 
 use std::time::{Duration, Instant};
 
-use zenkey_fleet::report::TimelineSource;
+use zenkey_fleet::report::{LaneId, TimelineSource};
 use zenkey_fleet::{
-    Break, Ingested, Order, PlacedBreak, SampleView, StampProvenance, StreamItem, TimelineRow,
-    Window, ZREC_VERSION, ZrecHeader, ZrecItem, ZrecReader, ZrecWriter, timeline,
+    Break, ContractSet, Ingested, Lens, Order, PlacedBreak, SampleView, StampProvenance,
+    StreamItem, TimelineRow, Window, ZREC_VERSION, ZrecHeader, ZrecItem, ZrecReader, ZrecWriter,
+    timeline,
 };
 
 const BASE: &str = "acme";
+
+/// The tcgui pilot's `tc.netif.v1`, held offline.
+fn contracts() -> ContractSet {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/zk2/tcgui/tc.netif.v1.toml");
+    let (set, problems) = ContractSet::load_path(&path);
+    assert!(problems.is_empty(), "{problems:?}");
+    set
+}
 
 fn stamp(ntp64: u64, id: u8) -> zenoh::time::Timestamp {
     zenoh::time::Timestamp::new(
@@ -53,9 +68,9 @@ fn view(key: &str, at: Instant, ts: Option<zenoh::time::Timestamp>, delete: bool
 /// the third and fourth samples — every case the projection distinguishes.
 fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
     let at = |ms: u64| epoch + Duration::from_millis(ms);
-    let a = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/a";
-    let b = "acme/v1/h-3fa9c2d41b7e/telemetry/sysinfo/b";
-    let c = "acme/v1/h-9a1b2c3d4e5f/state/logs/health";
+    let a = "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0";
+    let b = "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1";
+    let c = "acme/zk2/host-b/tc/tc.netif.v1/state/interfaces/default/eth0";
     let items = vec![
         Arrival::Sample(Box::new(view(a, at(10), Some(stamp(2_000, 0x33)), false))),
         Arrival::Sample(Box::new(view(b, at(20), Some(stamp(1_000, 0x33)), false))),
@@ -65,10 +80,10 @@ fn live_window(epoch: Instant) -> (Vec<Arrival>, ZrecHeader) {
     ];
     let header = ZrecHeader {
         zrec: ZREC_VERSION,
-        selectors: vec!["acme/v1/**".into()],
+        selectors: vec!["acme/zk2/**".into()],
         base: BASE.into(),
-        captured_at: "2026-09-06T00:00:00Z".into(),
-        excluded: Some(zenkey_fleet::zrec_excluded(&["acme/v1/**".to_owned()])),
+        captured_at: "2026-10-09T00:00:00Z".into(),
+        excluded: Some(zenkey_fleet::zrec_excluded(&["acme/zk2/**".to_owned()])),
         preamble: None,
         pre_roll: None,
     };
@@ -84,12 +99,16 @@ enum Arrival {
 
 /// What `zenctl timeline` does with a live drain: rows from views, breaks
 /// at the row count they interrupted.
-fn from_live(items: &[Arrival], epoch: Instant) -> (Vec<TimelineRow>, Vec<PlacedBreak>) {
+fn from_live(
+    items: &[Arrival],
+    epoch: Instant,
+    lens: &Lens<'_>,
+) -> (Vec<TimelineRow>, Vec<PlacedBreak>) {
     let mut rows = Vec::new();
     let mut breaks = Vec::new();
     for item in items {
         match item {
-            Arrival::Sample(v) => rows.push(TimelineRow::from_view(v, epoch, BASE)),
+            Arrival::Sample(v) => rows.push(TimelineRow::from_view(v, epoch, lens)),
             Arrival::Dropped(n) => breaks.push(PlacedBreak {
                 after: rows.len(),
                 lane: None,
@@ -105,6 +124,7 @@ fn through_zrec(
     items: &[Arrival],
     header: &ZrecHeader,
     epoch: Instant,
+    lens: &Lens<'_>,
 ) -> (Vec<TimelineRow>, Vec<PlacedBreak>) {
     let mut w = ZrecWriter::new_at(Vec::new(), header, epoch).expect("writer");
     for item in items {
@@ -119,7 +139,7 @@ fn through_zrec(
     let mut breaks = Vec::new();
     while let Some(item) = r.next() {
         let item: ZrecItem = item.expect("a well-formed line");
-        match Ingested::from_zrec(&item, BASE) {
+        match Ingested::from_zrec(&item, lens) {
             Ingested::Row(row) => rows.push(row),
             Ingested::Break(kind) => breaks.push(PlacedBreak {
                 after: rows.len(),
@@ -135,9 +155,11 @@ fn through_zrec(
 #[test]
 fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
     let epoch = Instant::now();
+    let set = contracts();
+    let lens = Lens::new(BASE, None, &set).offline(&set).held(set.len());
     let (items, header) = live_window(epoch);
-    let (live_rows, live_breaks) = from_live(&items, epoch);
-    let (zrec_rows, zrec_breaks) = through_zrec(&items, &header, epoch);
+    let (live_rows, live_breaks) = from_live(&items, epoch, &lens);
+    let (zrec_rows, zrec_breaks) = through_zrec(&items, &header, epoch, &lens);
 
     // Row for row first, so a divergence names the field rather than the
     // report.
@@ -154,6 +176,7 @@ fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
         window_s: None,
         source: source.clone(),
         keys_evicted: 0,
+        lens: lens.scope(),
     };
     let zrec = Window {
         rows: zrec_rows,
@@ -183,6 +206,36 @@ fn the_same_window_from_live_and_from_zrec_is_the_same_timeline_on_both_axes() {
     ));
     assert_eq!(by_arrival.rows.len(), 5);
     assert_eq!(by_hlc.rows.len(), 3);
+    // The lanes are zk2 resources, resolved through the contract held
+    // offline: one stream of host-a, one state of host-b, and the foreign
+    // key has no HLC, so it lives in the unstamped lane.
+    let lanes: Vec<&LaneId> = by_arrival.lanes.iter().map(|l| &l.lane).collect();
+    assert!(
+        lanes.contains(&&LaneId::Resource {
+            address: "host-a/tc".into(),
+            iface: "tc.netif.v1".into(),
+            token: "stream".into(),
+            resource: Some("stream/bandwidth/{ns}/{iface}".into()),
+        }),
+        "{lanes:?}"
+    );
+    assert!(
+        lanes.contains(&&LaneId::Resource {
+            address: "host-b/tc".into(),
+            iface: "tc.netif.v1".into(),
+            token: "state".into(),
+            resource: Some("state/interfaces/{ns}/{iface}".into()),
+        }),
+        "{lanes:?}"
+    );
+    assert!(lanes.contains(&&LaneId::Unstamped), "{lanes:?}");
+    // A file names no owner: every stamp is unattributable, never foreign.
+    assert!(
+        by_arrival
+            .lanes
+            .iter()
+            .all(|l| l.provenance.owner == 0 && l.provenance.other == 0)
+    );
 }
 
 /// The `Dropped` variant of the live stream is the break the file records.
@@ -192,8 +245,10 @@ fn a_stream_drop_and_a_file_drop_are_one_break() {
         StreamItem::Dropped(n) => Break::Dropped(n),
         StreamItem::Event(_) => unreachable!(),
     };
+    let set = ContractSet::new();
+    let lens = Lens::new(BASE, None, &set);
     assert_eq!(
-        Ingested::from_zrec(&ZrecItem::Dropped(9), BASE),
+        Ingested::from_zrec(&ZrecItem::Dropped(9), &lens),
         Ingested::Break(live)
     );
 }
