@@ -22,7 +22,7 @@ use crate::grammar::Name;
 
 /// The one salt of `hostid.v1` (§2.2; architecture D26). Every system is
 /// derived with it, so a machine is one system across every zk2
-/// application. It is not configurable: [`derive`] takes a salt only so
+/// application. It is not configurable: [`derive()`] takes a salt only so
 /// that the test vectors and the v1 migration table (Appendix B) can be
 /// computed.
 pub const SALT: &str = "zk2-hostid-v1";
