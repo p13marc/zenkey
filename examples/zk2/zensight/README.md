@@ -45,7 +45,7 @@ The v1 surface, re-counted from
 
 | zk2 concept | ZenSight |
 |---|---|
-| `system` | the host id, `h-<12hex>`, minted by `hostid.v1` (v1's origin derivation, unchanged) |
+| `system` | the host id, `h-<12hex>`, minted by [`hostid.v1`](../../../spec/profiles/hostid/v1.md): v1's construction with zk2's one salt (D26), so the value is not v1's origin. Its Appendix B maps ZenSight's v1 origins. |
 | host services | v1's producer names: `sysinfo`, `netlink`, `netring`, `systemd`, `logs`, `hostspec`, `parallax`, `probe`, `pve`, `historian`, plus the process identities `correlator`, `policy-compiler`, `exporter-prometheus`, `exporter-otel`. A second instance is just another service (`netring-2`) implementing the same interface. |
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
 | fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |

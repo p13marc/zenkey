@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "expect": true,
+      "note": "v1's RFC 06 vector",
+      "value": "h-20609002f7b6"
+    },
+    {
+      "expect": true,
+      "note": "the zk2 vector",
+      "value": "h-bbd1aa1db10b"
+    },
+    {
+      "expect": true,
+      "note": "the shape is lexical: twelve zeros are in it",
+      "value": "h-000000000000"
+    },
+    {
+      "expect": false,
+      "note": "uppercase prefix",
+      "value": "H-20609002f7b6"
+    },
+    {
+      "expect": false,
+      "note": "uppercase hex digits",
+      "value": "h-20609002F7B6"
+    },
+    {
+      "expect": false,
+      "note": "11 hex digits",
+      "value": "h-20609002f7b"
+    },
+    {
+      "expect": false,
+      "note": "13 hex digits",
+      "value": "h-20609002f7b6a"
+    },
+    {
+      "expect": false,
+      "note": "an h_ prefix, v1's legacy separator",
+      "value": "h_20609002f7b6"
+    },
+    {
+      "expect": false,
+      "note": "no prefix",
+      "value": "20609002f7b6"
+    },
+    {
+      "expect": false,
+      "note": "a non-hex digit",
+      "value": "h-20609002f7g6"
+    },
+    {
+      "expect": false,
+      "note": "a trailing newline: the pattern is matched against the whole string",
+      "value": "h-20609002f7b6\n"
+    },
+    {
+      "expect": false,
+      "note": "a leading space",
+      "value": " h-20609002f7b6"
+    },
+    {
+      "expect": false,
+      "note": "empty",
+      "value": ""
+    },
+    {
+      "expect": false,
+      "note": "a literal system",
+      "value": "vehicle-01"
+    }
+  ],
+  "description": "hostid.v1 §2.11: a string -> whether it is in the minted shape, exactly \"h-\" followed by 12 lowercase hex digits, the whole string (^h-[0-9a-f]{12}$ matched against all of it). The shape is a hint, never proof: only the descriptor's profiles establishes a minted system (§2.8, §5)."
+}
