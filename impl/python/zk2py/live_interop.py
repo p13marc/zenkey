@@ -756,14 +756,17 @@ def run_python_owner(report: Report, consume: Path) -> None:
 
 
 def run_python_refusal(report: Report) -> None:
-    """presence.md §2 steps 4 and 5 (0.6, 0.7): zk2py's owner, a client of a
-    router R1 that outlives it, watched by a liveliness subscriber through
-    R1 declared before launch. Each refusal has its control, launched the
-    same way, which shows its instance token within the wait; the refusal
-    shows none, and a liveliness GET through R1 afterwards returns none.
+    """presence.md §2 steps 4 to 6 (0.6, 0.7, 0.17): zk2py's owner, a client
+    of a router R1 that outlives it, watched by a liveliness subscriber
+    through R1 declared before launch. Each refusal has its control,
+    launched the same way, which shows its instance token within the wait;
+    the refusal shows none, and a liveliness GET through R1 afterwards
+    returns none.
     - step 4: a required role bound to nothing (§3.2);
     - step 5: an optional resource, its gate's capability held, neither
-      exposed nor listed unavailable (§8.2 step 2); its control lists it."""
+      exposed nor listed unavailable (§8.2 step 2); its control lists it;
+    - step 6: archive.v1 in the tokenless set of an owner that does not
+      implement it (§4.4, §8.2 step 2); its control's set is empty."""
     import zenoh
 
     from . import live
@@ -789,6 +792,12 @@ def run_python_refusal(report: Report) -> None:
             ("step 5: an optional resource neither exposed nor listed (§8.2 step 2)",
              dict(bindings=bound, capabilities={"cal"}, unavailable={"state/calibration": "config"}),
              dict(bindings=bound, capabilities={"cal"}, withhold={"state/calibration"})),
+            # 0.17: zk2py_needs.v1 does not implement archive.v1; the
+            # control's tokenless set is empty.
+            ("step 6: archive.v1 in the tokenless set of an owner that does not implement it (§4.4, §8.2 "
+             "step 2, 0.17)",
+             dict(bindings=bound, capabilities={"cal"}, tokenless=set()),
+             dict(bindings=bound, capabilities={"cal"}, tokenless={"archive.v1"})),
         ]
         try:
             for label, control_kw, refusal_kw in cases:
@@ -1733,7 +1742,7 @@ def run_python_016(report: Report) -> None:
     from .descriptor import check_descriptor
     from .owner import Owner as PyOwner, OwnerRefused
 
-    run = "zk2py tool rules (0.16): S1 from a tool, Appendix B, §4.4's tokenless archive, §2.6's replay bound"
+    run = "zk2py tool rules (0.16, 0.17): S1 from a tool, Appendix B, §4.4's tokenless archive, §2.6's replay bound"
     r1, r1_endpoint, r1_zid = _r1(adminspace=True)
     owners: list[Any] = []
     try:
@@ -1763,19 +1772,45 @@ def run_python_016(report: Report) -> None:
                          verdict == "unobservable" and "own router" in why
                          and live.attribute_stamp(stamp, doc) == "owner",
                          f"{verdict}: {why}; the stamp alone reads {live.attribute_stamp(stamp, doc)!r}")
-            # Appendix B (0.16): a binding without the replier id.
+            # §4.2 (0.17): a foreign stamp. The owner's clock is another
+            # session's HLC, so its state carries that session's id.
+            other = live.open_client(r1_endpoint)
+            try:
+                foreign = PyOwner("py-site", "s1-foreign", [echo], connect=r1_endpoint)
+                foreign.start()
+                owners.append(foreign)
+                foreign.clock = other.new_timestamp
+                foreign.set_state("zk2/py-site/s1-foreign/zk2py_echo.v1/state/health", b"stamped-elsewhere")
+                foreign.clock = None
+                time.sleep(0.3)
+                d = live.get_descriptor(tool, foreign.instance_key)
+                fdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+                st = live.get_state(tool, "zk2/py-site/s1-foreign/zk2py_echo.v1/state/health")
+                fstamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
+                f_admin = live.s1_check(tool, fdoc, fstamp)
+                other_zid = str(other.zid())
+            finally:
+                other.close()
+            # Appendix B (0.16): a binding without the replier id, so no
+            # router is verified.
             live.READ_REPLIER = False
             try:
                 s4 = live.check_s4(tool)
                 cdoc, cstamp, _ = readings["client"]
                 s1 = live.s1_check(tool, cdoc, cstamp)
+                f_blind = live.s1_check(tool, fdoc, fstamp)
             finally:
                 live.READ_REPLIER = True
             report.check(run, "Appendix B (0.16): without Reply.replier_id every admin answer is unverified (no "
-                              "replier id): S4 and S1 are unobservable, never clean",
+                              "replier id): S4 is unobservable, and so is S1 for an owner's own stamp (§4.2, 0.17)",
                          s4.verdict == "unobservable" and s4.unverified
                          and all(u[2] == "no replier id" for u in s4.unverified) and s1[0] == "unobservable",
                          f"S4 {s4.verdict} ({len(s4.unverified)} unverified); S1 {s1[0]}: {s1[1]}")
+            report.check(run, "§4.2 (0.17): a foreign stamp is a finding whatever else the tool read: with routers "
+                              "verified, and with none verified",
+                         fstamp is not None and live._zid_value(fstamp) == live._zid_value(other_zid)
+                         and f_admin[0] == "finding" and f_blind[0] == "finding",
+                         f"stamp {fstamp} (another session's {other_zid}); verified: {f_admin}; none: {f_blind}")
             # §4.4 and U22: the tokenless set.
             tokenless = PyOwner("py-site", "quiet", [echo], connect=r1_endpoint, tokenless={"zk2py_echo.v1"})
             tokenless.start()

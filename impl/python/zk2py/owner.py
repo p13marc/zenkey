@@ -342,9 +342,8 @@ class Owner:
             for role, req in c.canonical["requires"].items():
                 if not req["optional"] and not self.bindings.get(role):
                     raise OwnerRefused(f"{c.interface}: required role {role!r} is bound to nothing (§3.2)")
-        # §4.4 (0.16): "An archive MUST hold its archive.v1 interface token:
-        # it is never in the tokenless set." Refused before anything is
-        # declared, with step 2's refusals (SPEC-FINDINGS F-91).
+        # §8.2 step 2 (0.17): "It also refuses an owner whose tokenless set
+        # names archive.v1, whether or not the owner implements it (§4.4)".
         if "archive.v1" in self.tokenless:
             raise OwnerRefused("archive.v1 is never in the tokenless set: an archive is found by its token (§4.4)")
         return plan

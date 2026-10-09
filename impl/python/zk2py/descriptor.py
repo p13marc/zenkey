@@ -5,7 +5,7 @@
 against the fixture contract."
 
 Since amendment 0.5, §3.3 "The checks" states every code with its severity
-and counting (D000–D010; D006 alone is a warning), and "Cascades and scope":
+and counting (D000–D011; D006 alone is a warning), and "Cascades and scope":
 1. D000 stops the check;
 2. an entry whose ``iface`` is not an interface id is checked no further,
    and does not count for ``declared_by``;
@@ -82,6 +82,13 @@ def check_descriptor(data: bytes, contracts: Contract | Sequence[Contract],
         if FINGERPRINT.fullmatch(entry["contract"]) is None:
             codes.append("D003")
             continue
+        # D011 (0.17): "an interface entry for archive.v1 is marked
+        # "token": false: an archive is never tokenless (§4.4)", per entry.
+        # It needs no contract (descriptors/d011-tokenless-archive gives
+        # none), so it is checked with the syntax, after cascades 2 and 3
+        # (SPEC-FINDINGS F-92).
+        if iface == "archive.v1" and entry.get("token") is False:
+            codes.append("D011")
         # Cascade 5: an interface none of the given contracts declares is
         # checked for syntax only.
         contract = held_contracts.get(iface)
