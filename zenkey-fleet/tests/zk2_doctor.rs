@@ -898,10 +898,13 @@ async fn an_admin_answer_a_router_did_not_send_is_never_trusted() {
             json!({"plugins": null}),
         )
         .await;
+        // Wait for the spoofer's own answer, by its replier id: with the
+        // admin space on, the router answers first, and any answer would do.
+        let sz = spoofer.zid().to_string();
         eventually("the spoofed document answers", || async {
             zenkey_fleet::admin_get(&tool, &format!("@/{rz}/router"), T)
                 .await
-                .is_ok_and(|e| !e.is_empty())
+                .is_ok_and(|e| e.iter().any(|a| a.replier.as_deref() == Some(sz.as_str())))
         })
         .await;
         let r = doctor(
