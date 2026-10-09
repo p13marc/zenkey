@@ -1,30 +1,62 @@
-//! Schema-driven payload synthesis (#162) — the datagen half of `zenctl gen`.
+//! Payload synthesis from a contract (#612, FJ8a): what a mock owner
+//! publishes and answers, built from the revision's bundle alone (spec §7).
 //!
-//! Synthesis produces a **JSON value** for every schema kind; the kind's own
-//! encoder (`DecoderRegistry::encode`, the same seam `zenctl pub` writes
-//! through) turns it into wire bytes. That keeps this module codec-free: it
-//! never frames bytes, it only answers "what instance would this schema
-//! accept?".
+//! Every type kind of §7.1 has a synthesizer:
 //!
-//! Deterministic on purpose: a `(seed, tick)` pair always yields the same
-//! instance (spray's seeded-sine precedent) — a generator whose runs cannot
-//! be reproduced cannot be used to bisect a consumer bug. Numeric leaves
-//! wander on a sine per field so plots move; everything else is stable.
+//! * **JSON Schema** through the §7.3 subset: `type` (a set of names),
+//!   `properties`, `required`, `additionalProperties`, `items`,
+//!   `prefixItems`, `enum`, `const`, the numeric bounds, the string and
+//!   array lengths, `$ref` across the listed files, `oneOf` and `anyOf`.
+//!   Annotations are ignored, as the subset ignores them. The value is then
+//!   checked by [`zenkey_model::validate::validate`], and one that does not
+//!   pass is refused here, never sent: a mock owner writes only what its
+//!   schema declares (§9.8).
+//! * **protobuf** through the bundle's descriptor set: a `DynamicMessage`
+//!   per message, every field filled with a value that is not its default
+//!   (a default is not on the wire, and a consumer would see nothing), the
+//!   first field of each `oneof`, one element per list and one entry per
+//!   map. Recursion stops at a depth, leaving the deeper message unset.
+//!   `google.protobuf.Any` is left unset: a value of it names a type URL no
+//!   bundle resolves.
+//! * **raw** as bytes of its media type's size class ([`size_class`]): no
+//!   generic tool decodes a raw type (§7.1), so its bytes carry nothing but
+//!   their size, deterministic noise for a binary type and a short line for
+//!   `text/*`.
+//!
+//! **Deterministic per `(seed, tick)`**, as v1's generator was: a run that
+//! cannot be reproduced cannot bisect a consumer bug. Numeric leaves wander
+//! on a sine, phase-offset by the field's name so siblings do not move in
+//! lockstep; everything else is stable or cycles with the tick.
 
+use std::collections::BTreeSet;
+
+use prost_reflect::{DescriptorPool, DynamicMessage, Kind as ProtoKind, MapKey, MessageDescriptor};
 use serde_json::{Map, Value, json};
-use zenkey::schema::TypeSchema;
+use zenkey_model::authoring::Encoding as WireEncoding;
+use zenkey_model::bundle::Bundle;
+use zenkey_model::contract::{Body, Resource};
+use zenkey_model::schema::TypeId;
+use zenkey_model::validate::{resolve_ref, satisfies, validate};
 
-use crate::model::jsonschema::resolve_ref;
+use crate::model::catalog::Revision;
+use crate::model::render::Member;
 
-/// How deep nested objects/arrays are followed before giving up — a cyclic
-/// or pathological schema degrades to a placeholder, not a stack overflow.
-///
-/// Raised from 6 with `$ref` following (#384): a resolved reference costs a
-/// level, and `schemars` hoists every nested named type into `$defs`, so the
-/// old cap was spent on indirection rather than on nesting. A cycle still
-/// terminates here — the cap is what stops it, since a `$ref` chain has no
-/// other bottom.
-const DEPTH_CAP: usize = 16;
+/// How deep a JSON value is built before every optional part is left out:
+/// past it an object carries only its required properties, an array only
+/// its `minItems`, and a nullable prefers its null. What makes a recursive
+/// type finite.
+const SOFT_DEPTH: usize = 6;
+
+/// How deep a JSON value is built at all: a schema whose required parts
+/// recurse forever gets `null` here, and the check refuses it.
+const HARD_DEPTH: usize = 32;
+
+/// How deep protobuf messages nest: a message field past it is left unset.
+const PROTO_DEPTH: usize = 6;
+
+/// The schema that admits anything: what an array item or an undeclared
+/// property is held to when nothing else is written.
+static ANY_SCHEMA: Value = Value::Bool(true);
 
 /// A deterministic instance generator.
 #[derive(Debug, Clone, Copy)]
@@ -32,446 +64,889 @@ pub struct Synth {
     pub seed: u64,
 }
 
-/// A cheap deterministic hash for per-field phase offsets (FNV-1a) — not
+/// One synthesized payload.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Synthesized {
+    /// The payload, encoded as the contract carries the type (§7.2): JSON
+    /// or CBOR for a JSON Schema type, the binary protobuf encoding, a raw
+    /// type's bytes.
+    pub bytes: Vec<u8>,
+    /// The value the bytes encode, for a JSON Schema type (checked against
+    /// its schema) or a protobuf one (its JSON mapping). Absent for a raw
+    /// type.
+    pub value: Option<Value>,
+}
+
+/// The type and the wire encoding of a resource's `member` (§7.1): a data
+/// resource's `type` or `attachment`, an operation's `request`, `response`,
+/// `error` or `summary`. `None` when the resource declares no such member.
+#[must_use]
+pub fn member_type(r: &Resource, member: Member) -> Option<(&TypeId, Option<WireEncoding>)> {
+    match (&r.body, member) {
+        (Body::Data(d), Member::Type) => Some((&d.type_, d.encoding)),
+        (Body::Data(d), Member::Attachment) => {
+            d.attachment.as_ref().map(|t| (t, d.attachment_encoding))
+        }
+        (Body::Operation(o), Member::Request) => Some((&o.request, o.encoding)),
+        (Body::Operation(o), Member::Response) => Some((&o.response, o.encoding)),
+        (Body::Operation(o), Member::Error) => o.error.as_ref().map(|t| (t, o.encoding)),
+        (Body::Operation(o), Member::Summary) => o.summary.as_ref().map(|t| (t, o.encoding)),
+        _ => None,
+    }
+}
+
+/// The byte size a raw type's synthesized payload has: a class per
+/// top-level media type, because no generic tool can do more with a raw
+/// type than say its media type and size (§7.1).
+#[must_use]
+pub fn size_class(media_type: &str) -> usize {
+    match media_type.split('/').next().unwrap_or_default() {
+        "video" => 16 * 1024,
+        "image" => 4 * 1024,
+        "audio" => 2 * 1024,
+        "text" => 64,
+        _ => 256,
+    }
+}
+
+/// A cheap deterministic hash for per-field phase offsets (FNV-1a): not
 /// cryptographic, just stable across runs and platforms.
 fn fnv(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
         h ^= u64::from(b);
-        h = h.wrapping_mul(0x100000001b3);
+        h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
 }
 
+/// SplitMix64: deterministic noise for a raw type's bytes.
+fn splitmix(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
 impl Synth {
+    #[must_use]
     pub fn new(seed: u64) -> Synth {
         Synth { seed }
     }
 
-    /// A wandering numeric value: a sine over `tick`, phase-offset by the
-    /// field's name so sibling fields do not move in lockstep.
+    /// A wandering value in `[min, max]`: a sine over `tick`, phase-offset
+    /// by the field's name.
     fn wander(&self, field: &str, tick: u64, min: f64, max: f64) -> f64 {
-        let phase = (fnv(field) ^ self.seed) % 628 /* 2π·100 */;
+        let phase = (fnv(field) ^ self.seed) % 628;
         let x = (tick as f64) / 10.0 + (phase as f64) / 100.0;
         let mid = f64::midpoint(min, max);
         let amp = (max - min) / 2.0;
-        mid + amp * x.sin()
+        (mid + amp * x.sin()).clamp(min, max)
     }
 
-    /// Synthesize an instance for a schema entry. `None` means this kind
-    /// cannot be synthesized here (unknown kind) — the caller degrades with
-    /// a stated note, never silently.
-    pub fn instance(&self, schema: &TypeSchema, tick: u64) -> Option<Value> {
-        match schema.kind_str() {
-            zenkey::schema::SchemaKind::JSON_SCHEMA => schema
-                .json_document()
-                .map(|doc| self.json_schema_value(doc, doc, "", tick, 0)),
-            zenkey::schema::SchemaKind::CDR => {
-                let fields = schema.cdr_fields()?;
-                let types = schema.cdr_types();
-                Some(self.cdr_fields_value(fields, types, tick, 0))
+    /// One payload of `member` of `r`, at `tick`, encoded as the contract
+    /// carries it. `Err` names why none could be built: a member the
+    /// resource does not declare, a schema this synthesizer could not
+    /// satisfy (the value it built did not validate), a descriptor set that
+    /// does not decode.
+    pub fn sample(
+        &self,
+        revision: &Revision,
+        r: &Resource,
+        member: Member,
+        tick: u64,
+    ) -> Result<Synthesized, String> {
+        let (ty, encoding) = member_type(r, member)
+            .ok_or_else(|| format!("{}/{} declares no {}", r.token, r.template, member.as_str()))?;
+        let bundle = revision.bundle();
+        let canonical = zenkey_model::decode::type_of(
+            bundle,
+            r.token.as_str(),
+            r.template.as_str(),
+            member.as_str(),
+        )
+        .ok_or_else(|| {
+            format!(
+                "the bundle holds no {} for {}/{}",
+                member.as_str(),
+                r.token,
+                r.template
+            )
+        })?;
+        match ty {
+            TypeId::JsonSchema { .. } => {
+                use zk2::codec::Codec as _;
+                let value = self.json(bundle, canonical, tick)?;
+                let bytes = zk2::codec::Json::<Value>::encode(&value, encoding)?;
+                Ok(Synthesized {
+                    bytes,
+                    value: Some(value),
+                })
             }
-            #[cfg(feature = "decode-protobuf")]
-            zenkey::schema::SchemaKind::PROTOBUF => self.protobuf_value(schema, tick),
-            _ => None,
+            TypeId::Protobuf { .. } => {
+                let msg = self.protobuf(bundle, canonical, tick)?;
+                let value = serde_json::to_value(&msg).ok();
+                Ok(Synthesized {
+                    bytes: zk2::prost::Message::encode_to_vec(&msg),
+                    value,
+                })
+            }
+            TypeId::Raw { media_type, .. } => Ok(Synthesized {
+                bytes: self.raw(media_type, tick),
+                value: None,
+            }),
         }
     }
 
-    /// Walk a draft 2020-12 document conservatively: satisfy `type`,
-    /// `required` (by emitting every declared property), `enum`/`const`,
-    /// combinators, `$ref`, and numeric bounds. Unknown or empty schemas get
-    /// a wandering number — `{}` accepts anything.
-    ///
-    /// `root` is the whole document, carried so `$ref` can be resolved
-    /// against it; `doc` is the subschema being satisfied.
-    fn json_schema_value(
+    /// A value of the JSON Schema type `ty` (a canonical type reference of
+    /// `bundle`), checked against it: `Err` lists what the schema refused,
+    /// and nothing that fails is ever handed out.
+    pub fn json(&self, bundle: &Bundle, ty: &Value, tick: u64) -> Result<Value, String> {
+        let (Some(id), Some(name)) = (ty["schema"].as_str(), ty["name"].as_str()) else {
+            return Err(format!("{ty} is not a JSON Schema type reference"));
+        };
+        let doc = bundle
+            .schemas
+            .get(id)
+            .map(|s| &s["data"])
+            .ok_or_else(|| format!("the bundle holds no schema {id}"))?;
+        let pointer = format!("#/$defs/{}", name.replace('~', "~0").replace('/', "~1"));
+        let (schema, doc) = resolve_ref(bundle, doc, &pointer)
+            .ok_or_else(|| format!("{name} is not defined in its schema"))?;
+        let value = JsonWalk {
+            synth: self,
+            bundle,
+        }
+        .value(schema, doc, "", tick, 0);
+        validate(bundle, ty, &value).map_err(|violations| {
+            format!(
+                "the synthesized json:{name} does not validate: {}",
+                violations
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        })?;
+        Ok(value)
+    }
+
+    /// A message of the protobuf type `ty` (a canonical type reference of
+    /// `bundle`), built through the bundle's descriptor set.
+    pub fn protobuf(
         &self,
-        root: &Value,
-        doc: &Value,
+        bundle: &Bundle,
+        ty: &Value,
+        tick: u64,
+    ) -> Result<DynamicMessage, String> {
+        use base64::Engine as _;
+        let name = ty["name"].as_str().unwrap_or_default();
+        let set = ty["schema"]
+            .as_str()
+            .and_then(|id| bundle.schemas.get(id))
+            .and_then(|s| s["data"].as_str())
+            .and_then(|b64| base64::engine::general_purpose::STANDARD.decode(b64).ok())
+            .ok_or_else(|| format!("the bundle carries no descriptor set for {name}"))?;
+        let pool = DescriptorPool::decode(set.as_slice())
+            .map_err(|e| format!("the descriptor set for {name} does not decode: {e}"))?;
+        let desc = pool
+            .get_message_by_name(name)
+            .ok_or_else(|| format!("{name} is not in the bundle's descriptor set"))?;
+        Ok(self.message(&desc, tick, 0))
+    }
+
+    /// The bytes of a raw type of `media_type`, its size class long.
+    #[must_use]
+    pub fn raw(&self, media_type: &str, tick: u64) -> Vec<u8> {
+        let n = size_class(media_type);
+        if media_type.starts_with("text/") {
+            let line = format!("{media_type} sample {tick} (seed {})\n", self.seed);
+            return line.bytes().cycle().take(n).collect();
+        }
+        let base = self.seed ^ fnv(media_type) ^ tick.wrapping_mul(0x0000_0100_0000_01b3);
+        (0..n.div_ceil(8) as u64)
+            .flat_map(|i| splitmix(base ^ i).to_le_bytes())
+            .take(n)
+            .collect()
+    }
+
+    fn message(&self, desc: &MessageDescriptor, tick: u64, depth: usize) -> DynamicMessage {
+        let mut msg = DynamicMessage::new(desc.clone());
+        let mut oneofs: BTreeSet<String> = BTreeSet::new();
+        for field in desc.fields() {
+            if let Some(o) = field.containing_oneof()
+                && !o.is_synthetic()
+                && !oneofs.insert(o.full_name().to_owned())
+            {
+                continue;
+            }
+            let name = field.name().to_owned();
+            let value = if field.is_map() {
+                let ProtoKind::Message(entry) = field.kind() else {
+                    continue;
+                };
+                let (k, v) = (entry.map_entry_key_field(), entry.map_entry_value_field());
+                let (Some(key), Some(value)) = (
+                    self.map_key(&k.kind(), &name, tick),
+                    self.scalar(&v.kind(), &name, tick, depth),
+                ) else {
+                    continue;
+                };
+                prost_reflect::Value::Map([(key, value)].into_iter().collect())
+            } else if field.is_list() {
+                let Some(v) = self.scalar(&field.kind(), &name, tick, depth) else {
+                    continue;
+                };
+                prost_reflect::Value::List(vec![v])
+            } else {
+                let Some(v) = self.scalar(&field.kind(), &name, tick, depth) else {
+                    continue;
+                };
+                v
+            };
+            msg.set_field(&field, value);
+        }
+        msg
+    }
+
+    /// One value of a field's kind, never its default; `None` leaves the
+    /// field unset (a message past the depth, or `Any`).
+    fn scalar(
+        &self,
+        kind: &ProtoKind,
+        name: &str,
+        tick: u64,
+        depth: usize,
+    ) -> Option<prost_reflect::Value> {
+        use prost_reflect::Value as V;
+        let n = || self.wander(name, tick, 1.0, 100.0);
+        let int = || n().round().max(1.0);
+        Some(match kind {
+            ProtoKind::Double => V::F64(n()),
+            ProtoKind::Float => V::F32(n() as f32),
+            ProtoKind::Int32 | ProtoKind::Sint32 | ProtoKind::Sfixed32 => V::I32(int() as i32),
+            ProtoKind::Int64 | ProtoKind::Sint64 | ProtoKind::Sfixed64 => V::I64(int() as i64),
+            ProtoKind::Uint32 | ProtoKind::Fixed32 => V::U32(int() as u32),
+            ProtoKind::Uint64 | ProtoKind::Fixed64 => V::U64(int() as u64),
+            ProtoKind::Bool => V::Bool(true),
+            ProtoKind::String => V::String(format!("{name}{}", tick % 10)),
+            ProtoKind::Bytes => V::Bytes(zk2::prost::bytes::Bytes::from(
+                format!("{name}{}", tick % 10).into_bytes(),
+            )),
+            // The second value when there is one: the first is the default,
+            // which the wire never carries.
+            ProtoKind::Enum(e) => V::EnumNumber(
+                e.values()
+                    .find(|v| v.number() != 0)
+                    .or_else(|| e.values().next())
+                    .map_or(0, |v| v.number()),
+            ),
+            ProtoKind::Message(m) => {
+                if depth >= PROTO_DEPTH || m.full_name() == "google.protobuf.Any" {
+                    return None;
+                }
+                V::Message(self.message(m, tick, depth + 1))
+            }
+        })
+    }
+
+    fn map_key(&self, kind: &ProtoKind, name: &str, tick: u64) -> Option<MapKey> {
+        let n = self.wander(name, tick, 1.0, 100.0).round().max(1.0);
+        Some(match kind {
+            ProtoKind::Bool => MapKey::Bool(true),
+            ProtoKind::Int32 | ProtoKind::Sint32 | ProtoKind::Sfixed32 => MapKey::I32(n as i32),
+            ProtoKind::Int64 | ProtoKind::Sint64 | ProtoKind::Sfixed64 => MapKey::I64(n as i64),
+            ProtoKind::Uint32 | ProtoKind::Fixed32 => MapKey::U32(n as u32),
+            ProtoKind::Uint64 | ProtoKind::Fixed64 => MapKey::U64(n as u64),
+            ProtoKind::String => MapKey::String(format!("{name}{}", tick % 10)),
+            _ => return None,
+        })
+    }
+}
+
+/// One JSON Schema walk over a bundle's documents.
+struct JsonWalk<'s, 'b> {
+    synth: &'s Synth,
+    bundle: &'b Bundle,
+}
+
+/// The type names a schema position allows, in the order written: `type`
+/// as a string or a list. Empty when it says nothing.
+fn type_names(schema: &Value) -> Vec<&str> {
+    match schema.get("type") {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether a branch of a `oneOf` or `anyOf` admits only `null`.
+fn is_null_schema(schema: &Value) -> bool {
+    type_names(schema) == ["null"] || schema.get("const") == Some(&Value::Null)
+}
+
+impl<'b> JsonWalk<'_, 'b> {
+    /// A value `schema` (a position inside `doc`) admits, best effort; the
+    /// caller checks the whole value against its type.
+    fn value(
+        &self,
+        schema: &'b Value,
+        doc: &'b Value,
         field: &str,
         tick: u64,
         depth: usize,
     ) -> Value {
-        if depth > DEPTH_CAP {
+        let deep = depth >= SOFT_DEPTH;
+        if depth > HARD_DEPTH {
             return Value::Null;
         }
-        if let Some(c) = doc.get("const") {
+        let obj = match schema {
+            Value::Bool(true) => return json!(self.synth.wander(field, tick, 0.0, 100.0)),
+            Value::Object(o) => o,
+            _ => return Value::Null,
+        };
+        if let Some(c) = obj.get("const") {
             return c.clone();
         }
-        if let Some(e) = doc.get("enum").and_then(Value::as_array)
-            && let Some(first) = e.first()
+        if let Some(e) = obj.get("enum").and_then(Value::as_array)
+            && !e.is_empty()
         {
-            return first.clone();
+            // The first the whole position admits: an enum beside a `type`
+            // can list values the type refuses.
+            return e
+                .iter()
+                .find(|v| satisfies(self.bundle, doc, schema, v))
+                .unwrap_or(&e[0])
+                .clone();
         }
-        // `$ref` into `$defs` is where `schemars` puts every nested named
-        // type, so a walk that does not follow it synthesizes a wandering
-        // number where a struct belongs (#384). Unresolvable falls through
-        // to the conservative default below, as an unknown schema does.
-        if let Some(pointer) = doc.get("$ref").and_then(Value::as_str)
-            && let Some(target) = resolve_ref(root, pointer)
+        if let Some(r) = obj.get("$ref").and_then(Value::as_str)
+            && let Some((target, tdoc)) = resolve_ref(self.bundle, doc, r)
         {
-            return self.json_schema_value(root, target, field, tick, depth + 1);
+            return self.value(target, tdoc, field, tick, depth + 1);
         }
-        // `allOf` composes one shape out of several, so an instance must
-        // satisfy every member: merge them.
-        if let Some(members) = doc.get("allOf").and_then(Value::as_array) {
-            let mut merged = Map::new();
-            for member in members {
-                if let Value::Object(o) =
-                    self.json_schema_value(root, member, field, tick, depth + 1)
-                {
-                    merged.extend(o);
-                }
-            }
-            return Value::Object(merged);
+        for (k, exactly_one) in [("oneOf", true), ("anyOf", false)] {
+            let Some(branches) = obj.get(k).and_then(Value::as_array) else {
+                continue;
+            };
+            return self.branch(schema, doc, branches, exactly_one, field, tick, depth);
         }
-        // `oneOf`/`anyOf` alternate, and one instance satisfies one branch —
-        // so the first is as good a pick as any. Deliberately unlike the
-        // declared-path walk in `judge::field`, which must union every
-        // branch: a *surface* is all the shapes allowed, an *instance* is one.
-        for branch in ["oneOf", "anyOf"] {
-            if let Some(b) = doc.get(branch).and_then(Value::as_array)
-                && let Some(first) = b.first()
-            {
-                return self.json_schema_value(root, first, field, tick, depth + 1);
-            }
-        }
-        let ty = doc.get("type").and_then(Value::as_str).unwrap_or("number");
+        let names = type_names(schema);
+        let ty = if deep && names.contains(&"null") {
+            "null"
+        } else if let Some(t) = names.iter().find(|t| **t != "null") {
+            t
+        } else if names.contains(&"null") {
+            "null"
+        } else if obj.contains_key("properties") || obj.contains_key("required") {
+            "object"
+        } else if obj.contains_key("items") || obj.contains_key("prefixItems") {
+            "array"
+        } else {
+            "number"
+        };
         match ty {
-            "object" => {
-                let mut out = Map::new();
-                if let Some(props) = doc.get("properties").and_then(Value::as_object) {
-                    for (name, sub) in props {
-                        out.insert(
-                            name.clone(),
-                            self.json_schema_value(root, sub, name, tick, depth + 1),
-                        );
-                    }
-                }
-                Value::Object(out)
-            }
-            "array" => {
-                let n = doc
-                    .get("minItems")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(1)
-                    .max(1);
-                let item = doc.get("items").cloned().unwrap_or(json!({}));
-                Value::Array(
-                    (0..n)
-                        .map(|i| self.json_schema_value(root, &item, field, tick + i, depth + 1))
-                        .collect(),
-                )
-            }
-            "string" => Value::String(format!(
-                "{}-{}",
-                if field.is_empty() { "s" } else { field },
-                tick % 10
-            )),
+            "object" => self.object(obj, doc, tick, depth),
+            "array" => self.array(obj, doc, field, tick, depth),
+            "string" => Value::String(self.string(obj, field, tick)),
             "boolean" => Value::Bool(tick.is_multiple_of(2)),
-            "integer" => {
-                let (min, max) = bounds(doc, 0.0, 100.0);
-                json!(self.wander(field, tick, min, max).round() as i64)
-            }
+            "integer" => self.integer(obj, field, tick),
             "null" => Value::Null,
-            // "number" and anything else numeric-shaped.
-            _ => {
-                let (min, max) = bounds(doc, 0.0, 100.0);
-                json!(self.wander(field, tick, min, max))
-            }
+            _ => self.number(obj, field, tick),
         }
     }
 
-    /// The `cdr` kind's compact field list (RFC 08 §7.1): positional
-    /// `[{name, type}]` with a local `types` table for composites.
-    fn cdr_fields_value(
+    /// A value of one branch of a `oneOf` (it must match exactly one) or an
+    /// `anyOf` (at least one), and of everything written beside it. A
+    /// non-null branch is preferred until the soft depth, a null one past
+    /// it; the first candidate that holds wins.
+    #[allow(clippy::too_many_arguments)]
+    fn branch(
         &self,
-        fields: &Value,
-        types: Option<&Map<String, Value>>,
+        schema: &'b Value,
+        doc: &'b Value,
+        branches: &'b [Value],
+        exactly_one: bool,
+        field: &str,
         tick: u64,
         depth: usize,
     ) -> Value {
-        if depth > DEPTH_CAP {
-            return Value::Null;
-        }
-        let Some(list) = fields.as_array() else {
-            return Value::Null;
-        };
-        let mut out = Map::new();
-        for f in list {
-            let Some(name) = f.get("name").and_then(Value::as_str) else {
-                continue;
+        let deep = depth >= SOFT_DEPTH;
+        let mut order: Vec<&Value> = branches.iter().collect();
+        order.sort_by_key(|b| is_null_schema(b) != deep);
+        let mut first = None;
+        for b in order {
+            let candidate = self.value(b, doc, field, tick, depth + 1);
+            let fits = if exactly_one {
+                branches
+                    .iter()
+                    .filter(|x| satisfies(self.bundle, doc, x, &candidate))
+                    .count()
+                    == 1
+            } else {
+                true
             };
-            let ty = f.get("type").cloned().unwrap_or(Value::Null);
-            out.insert(
-                name.to_string(),
-                self.cdr_value(&ty, types, name, tick, depth),
-            );
+            if fits && satisfies(self.bundle, doc, schema, &candidate) {
+                return candidate;
+            }
+            first.get_or_insert(candidate);
+        }
+        first.unwrap_or(Value::Null)
+    }
+
+    fn object(
+        &self,
+        obj: &'b Map<String, Value>,
+        doc: &'b Value,
+        tick: u64,
+        depth: usize,
+    ) -> Value {
+        let deep = depth >= SOFT_DEPTH;
+        let required: BTreeSet<&str> = obj
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let mut out = Map::new();
+        if let Some(props) = obj.get("properties").and_then(Value::as_object) {
+            for (name, sub) in props {
+                if *sub == Value::Bool(false) || (deep && !required.contains(name.as_str())) {
+                    continue;
+                }
+                out.insert(name.clone(), self.value(sub, doc, name, tick, depth + 1));
+            }
+        }
+        // A required property `properties` does not declare takes what
+        // `additionalProperties` admits.
+        let extra = obj.get("additionalProperties").unwrap_or(&ANY_SCHEMA);
+        for name in required {
+            if !out.contains_key(name) && *extra != Value::Bool(false) {
+                out.insert(
+                    name.to_owned(),
+                    self.value(extra, doc, name, tick, depth + 1),
+                );
+            }
         }
         Value::Object(out)
     }
 
-    fn cdr_value(
+    fn array(
         &self,
-        ty: &Value,
-        types: Option<&Map<String, Value>>,
+        obj: &'b Map<String, Value>,
+        doc: &'b Value,
         field: &str,
         tick: u64,
         depth: usize,
     ) -> Value {
-        if depth > DEPTH_CAP {
-            return Value::Null;
+        let deep = depth >= SOFT_DEPTH;
+        let count = |k: &str| obj.get(k).and_then(Value::as_u64).map(|n| n as usize);
+        let prefix: &[Value] = obj
+            .get("prefixItems")
+            .and_then(Value::as_array)
+            .map_or(&[], Vec::as_slice);
+        let items = obj.get("items");
+        let min = count("minItems").unwrap_or(0);
+        let max = count("maxItems").unwrap_or(usize::MAX);
+        let mut n = if deep {
+            min
+        } else {
+            min.max(1).max(prefix.len())
+        };
+        if items == Some(&Value::Bool(false)) {
+            n = n.min(prefix.len()).max(min.min(prefix.len()));
         }
-        match ty {
-            Value::String(name) => match name.as_str() {
-                "bool" => Value::Bool(tick.is_multiple_of(2)),
-                "string" => Value::String(format!("{field}-{}", tick % 10)),
-                "float32" | "float" | "float64" | "double" => {
-                    json!(self.wander(field, tick, 0.0, 100.0))
-                }
-                // The full primitive vocabulary of the cdr kind (RFC 08
-                // §7.1's IDL-flavoured aliases included).
-                "int8" | "char" | "int16" | "short" | "int32" | "long" | "int64" | "long long" => {
-                    json!(self.wander(field, tick, 0.0, 100.0).round() as i64)
-                }
-                "uint8" | "byte" | "octet" | "uint16" | "unsigned short" | "uint32"
-                | "unsigned long" | "uint64" | "unsigned long long" => {
-                    json!(self.wander(field, tick, 0.0, 100.0).round().abs() as u64)
-                }
-                // A named composite from the local table.
-                other => match types.and_then(|t| t.get(other)) {
-                    Some(composite) => {
-                        let fields = composite.get("fields").unwrap_or(composite);
-                        self.cdr_fields_value(fields, types, tick, depth + 1)
-                    }
-                    None => Value::Null,
-                },
-            },
-            // {"array": {"of": T, "len": n}} / {"sequence": {"of": T}}
-            Value::Object(o) => {
-                if let Some(arr) = o.get("array") {
-                    let n = arr.get("len").and_then(Value::as_u64).unwrap_or(1).max(1);
-                    let of = arr.get("of").cloned().unwrap_or(Value::Null);
-                    Value::Array(
-                        (0..n)
-                            .map(|i| self.cdr_value(&of, types, field, tick + i, depth + 1))
-                            .collect(),
-                    )
-                } else if let Some(seq) = o.get("sequence") {
-                    let of = seq.get("of").cloned().unwrap_or(Value::Null);
-                    Value::Array(vec![self.cdr_value(&of, types, field, tick, depth + 1)])
-                } else {
-                    Value::Null
-                }
-            }
-            _ => Value::Null,
+        let n = n.min(max);
+        Value::Array(
+            (0..n)
+                .map(|i| {
+                    let sub = prefix.get(i).or(items).unwrap_or(&ANY_SCHEMA);
+                    self.value(sub, doc, field, tick + i as u64, depth + 1)
+                })
+                .collect(),
+        )
+    }
+
+    fn string(&self, obj: &Map<String, Value>, field: &str, tick: u64) -> String {
+        let count = |k: &str| obj.get(k).and_then(Value::as_u64).map(|n| n as usize);
+        let mut s = format!(
+            "{}-{}",
+            if field.is_empty() { "s" } else { field },
+            tick % 10
+        );
+        let min = count("minLength").unwrap_or(0);
+        while s.chars().count() < min {
+            s.push('x');
+        }
+        if let Some(max) = count("maxLength") {
+            s = s.chars().take(max).collect();
+        }
+        s
+    }
+
+    /// The bounds a number must lie within: `minimum`/`maximum` inclusive,
+    /// `exclusiveMinimum`/`exclusiveMaximum` exclusive; a side not bound is
+    /// a hundred from the other, or the default range.
+    fn bounds(obj: &Map<String, Value>) -> (f64, bool, f64, bool) {
+        let f = |k: &str| obj.get(k).and_then(Value::as_f64);
+        let (lo, lo_open) = match (f("minimum"), f("exclusiveMinimum")) {
+            (Some(a), Some(b)) if b >= a => (b, true),
+            (Some(a), _) => (a, false),
+            (None, Some(b)) => (b, true),
+            (None, None) => (f64::NAN, false),
+        };
+        let (hi, hi_open) = match (f("maximum"), f("exclusiveMaximum")) {
+            (Some(a), Some(b)) if b <= a => (b, true),
+            (Some(a), _) => (a, false),
+            (None, Some(b)) => (b, true),
+            (None, None) => (f64::NAN, false),
+        };
+        match (lo.is_nan(), hi.is_nan()) {
+            (true, true) => (0.0, false, 100.0, false),
+            (false, true) => (lo, lo_open, lo + 100.0, false),
+            (true, false) => (hi - 100.0, false, hi, hi_open),
+            (false, false) => (lo, lo_open, hi, hi_open),
         }
     }
 
-    /// Protobuf: field names and kinds off the served descriptor; the value
-    /// is JSON in prost-reflect's serde dialect, which `store.encode`
-    /// deserializes into a `DynamicMessage`.
-    #[cfg(feature = "decode-protobuf")]
-    fn protobuf_value(&self, schema: &TypeSchema, tick: u64) -> Option<Value> {
-        use prost_reflect::{DescriptorPool, Kind};
-        let fds = schema.protobuf_descriptor_set()?;
-        let message = schema.protobuf_message()?;
-        let pool = DescriptorPool::decode(fds.as_slice()).ok()?;
-        let desc = pool.get_message_by_name(message)?;
-        fn message_value(
-            synth: &Synth,
-            desc: &prost_reflect::MessageDescriptor,
-            tick: u64,
-            depth: usize,
-        ) -> Value {
-            if depth > DEPTH_CAP {
-                return Value::Object(Map::new());
-            }
-            let mut out = Map::new();
-            for field in desc.fields() {
-                let name = field.json_name().to_string();
-                let v = match field.kind() {
-                    Kind::Double | Kind::Float => json!(synth.wander(&name, tick, 0.0, 100.0)),
-                    Kind::Int32
-                    | Kind::Int64
-                    | Kind::Sint32
-                    | Kind::Sint64
-                    | Kind::Sfixed32
-                    | Kind::Sfixed64 => {
-                        json!(synth.wander(&name, tick, 0.0, 100.0).round() as i64)
-                    }
-                    Kind::Uint32 | Kind::Uint64 | Kind::Fixed32 | Kind::Fixed64 => {
-                        json!(synth.wander(&name, tick, 0.0, 100.0).round().abs() as u64)
-                    }
-                    Kind::Bool => Value::Bool(tick.is_multiple_of(2)),
-                    Kind::String => Value::String(format!("{name}-{}", tick % 10)),
-                    Kind::Bytes => Value::String(String::new()),
-                    Kind::Enum(e) => e
-                        .values()
-                        .next()
-                        .map(|v| Value::String(v.name().to_string()))
-                        .unwrap_or(Value::Null),
-                    Kind::Message(m) => message_value(synth, &m, tick, depth + 1),
-                };
-                let v = if field.is_list() {
-                    Value::Array(vec![v])
-                } else {
-                    v
-                };
-                out.insert(name, v);
-            }
-            Value::Object(out)
+    fn integer(&self, obj: &Map<String, Value>, field: &str, tick: u64) -> Value {
+        let (lo, lo_open, hi, hi_open) = Self::bounds(obj);
+        let mut lo_i = lo.ceil();
+        if lo_open && lo_i <= lo {
+            lo_i += 1.0;
         }
-        Some(message_value(self, &desc, tick, 0))
+        let mut hi_i = hi.floor();
+        if hi_open && hi_i >= hi {
+            hi_i -= 1.0;
+        }
+        if lo_i > hi_i {
+            return json!(lo_i as i64);
+        }
+        let v = self
+            .synth
+            .wander(field, tick, lo_i, hi_i)
+            .round()
+            .clamp(lo_i, hi_i);
+        if v >= 0.0 {
+            json!(v as u64)
+        } else {
+            json!(v as i64)
+        }
     }
-}
 
-fn bounds(doc: &Value, dmin: f64, dmax: f64) -> (f64, f64) {
-    let min = doc.get("minimum").and_then(Value::as_f64).unwrap_or(dmin);
-    let max = doc
-        .get("maximum")
-        .and_then(Value::as_f64)
-        .unwrap_or_else(|| dmax.max(min + 1.0));
-    (min, max.max(min))
+    fn number(&self, obj: &Map<String, Value>, field: &str, tick: u64) -> Value {
+        let (lo, lo_open, hi, hi_open) = Self::bounds(obj);
+        let eps = ((hi - lo).abs() * 1e-6).max(1e-9);
+        let lo = if lo_open { lo + eps } else { lo };
+        let hi = if hi_open { hi - eps } else { hi };
+        let v = if lo <= hi {
+            self.synth.wander(field, tick, lo, hi)
+        } else {
+            lo
+        };
+        serde_json::Number::from_f64(v).map_or(Value::Null, Value::Number)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zenkey::schema::WireEncoding;
-    use zenkey::schema::decode::DecoderRegistry;
+    use crate::report::ContractSource;
+    use zenkey_model::decode::{Rendered, decode};
 
-    /// The whole point: a synthesized instance survives the kind's own
-    /// encoder — and for json-schema (with validate-json on in tests) that
-    /// encoder *validates*, so this is a real conformance round trip.
-    #[test]
-    fn a_synthesized_json_instance_encodes_and_validates() {
-        let schema = TypeSchema::json_schema(json!({
+    /// A contract from `toml` and its schema files, in a directory of its
+    /// own.
+    fn revision(tag: &str, toml: &str, files: &[(&str, &str)]) -> Revision {
+        let dir =
+            std::env::temp_dir().join(format!("zenkey-fleet-synth-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        for (name, text) in files {
+            let path = dir.join(name);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("dirs");
+            std::fs::write(path, text).expect("write");
+        }
+        let l = zenkey_model::contract::load_str(toml, &dir, None);
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        Revision::from_contract(c, ContractSource::File)
+    }
+
+    const SUBSET: &str = r##"{"$defs": {
+        "Status": {
             "type": "object",
-            "required": ["status", "load", "cores"],
             "properties": {
-                "status": { "type": "string", "enum": ["ok", "degraded"] },
-                "load": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                "cores": { "type": "integer", "minimum": 1, "maximum": 128 },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "nested": {
-                    "type": "object",
-                    "properties": { "up": { "type": "boolean" } },
-                },
+                "state": {"type": "string", "enum": ["up", "down"]},
+                "kind": {"const": "status"},
+                "since_ms": {"type": "integer", "minimum": 0},
+                "load": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+                "cores": {"type": "integer", "minimum": 1, "maximum": 4},
+                "label": {"type": "string", "minLength": 2, "maxLength": 3},
+                "link": {"$ref": "common.json#/$defs/Link"},
+                "hops": {"type": "array", "prefixItems": [{"type": "string"}],
+                         "items": {"type": "integer"}, "minItems": 2, "maxItems": 3},
+                "pair": {"type": "array", "prefixItems": [{"type": "boolean"}, {"type": "null"}],
+                         "items": false},
+                "retries": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                "nullable": {"type": ["null", "string"]},
+                "event": {"oneOf": [
+                    {"type": "object", "properties": {"up": {"const": true}}, "required": ["up"]},
+                    {"type": "object", "properties": {"down": {"const": true}}, "required": ["down"]}
+                ]},
+                "loose": {"oneOf": [{"type": "string"}, {"type": "string", "maxLength": 1}]},
+                "tree": {"$ref": "#/$defs/Tree"},
+                "any": true,
+                "never": false
             },
-        }));
-        let registry = DecoderRegistry::new();
+            "required": ["state", "kind", "tags"],
+            "additionalProperties": {"type": "array", "items": {"type": "string"}}
+        },
+        "Tree": {
+            "type": "object",
+            "properties": {"label": {"type": "string"},
+                           "children": {"type": "array", "items": {"$ref": "#/$defs/Tree"}}},
+            "required": ["label"]
+        }
+    }}"##;
+
+    const COMMON: &str = r#"{"$defs": {"Link": {"type": "object",
+        "properties": {"mbps": {"type": "number", "minimum": 10, "maximum": 20}},
+        "required": ["mbps"], "additionalProperties": false}}}"#;
+
+    const PROTO: &str = r#"syntax = "proto3";
+package m.v1;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+enum Mode { MODE_UNSPECIFIED = 0; MODE_FAST = 1; }
+message Inner { int32 n = 1; repeated Inner more = 2; }
+message Pose {
+  double x = 1; float y = 2; int64 seq = 3; uint32 count = 4; sint32 delta = 5;
+  fixed64 big = 6; bool ok = 7; string frame = 8; bytes blob = 9; Mode mode = 10;
+  Inner inner = 11; repeated string tags = 12; map<string, int32> counts = 13;
+  oneof choice { string name = 14; int32 id = 15; }
+  optional double maybe = 16;
+  google.protobuf.Timestamp at = 17;
+  google.protobuf.Any extra = 18;
+}
+"#;
+
+    fn subset() -> Revision {
+        revision(
+            "subset",
+            "[interface]\nname = \"m\"\nmajor = 1\nminor = 0\n\
+             [schemas]\njsonschema = [\"s.json\", \"common.json\"]\nprotobuf = [\"m.proto\"]\n\
+             [resources.status]\nkind = \"state\"\ntype = \"json:Status\"\n\
+             [resources.cbor]\nkind = \"stream\"\ntype = \"json:Status\"\nencoding = \"cbor\"\n\
+             [resources.pose]\nkind = \"stream\"\ntype = \"m.v1.Pose\"\n\
+             [resources.frame]\nkind = \"stream\"\ntype = { raw = \"image/jpeg\" }\n\
+             attachment = \"m.v1.Inner\"\n\
+             [resources.note]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             rate = \"low\"\nretention = \"1h\"\n\
+             [resources.set]\nkind = \"operation\"\nrequest = \"json:Tree\"\n\
+             response = \"m.v1.Inner\"\nerror = \"json:Status\"\n",
+            &[
+                ("s.json", SUBSET),
+                ("common.json", COMMON),
+                ("m.proto", PROTO),
+            ],
+        )
+    }
+
+    fn resource<'r>(rev: &'r Revision, template: &str) -> &'r Resource {
+        rev.contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == template)
+            .expect("a resource")
+    }
+
+    /// Every keyword of the §7.3 subset, satisfied: each value passes
+    /// `validate`, for every tick, and the CBOR encoding carries the same
+    /// value.
+    #[test]
+    fn a_json_schema_value_passes_validate_for_every_tick() {
+        let rev = subset();
         let synth = Synth::new(42);
-        for tick in 0..20 {
-            let v = synth
-                .instance(&schema, tick)
-                .expect("json-schema synthesizes");
-            let bytes = registry
-                .encode(&schema, &v, &WireEncoding::Json)
-                .unwrap_or_else(|e| panic!("tick {tick}: {v} refused: {e}"));
-            let back = registry
-                .decode(&schema, &WireEncoding::Json, &bytes)
+        for tick in 0..40 {
+            let s = synth
+                .sample(&rev, resource(&rev, "status"), Member::Type, tick)
+                .unwrap_or_else(|e| panic!("tick {tick}: {e}"));
+            let v = s.value.clone().expect("a JSON value");
+            assert_eq!(v["kind"], "status");
+            assert!(v.get("never").is_none(), "a `false` property is left out");
+            assert!(
+                v["tags"].is_array(),
+                "a required property `properties` lacks"
+            );
+            let load = v["load"].as_f64().unwrap();
+            assert!(load > 0.0 && load < 1.0, "exclusive bounds: {load}");
+            assert_eq!(serde_json::from_slice::<Value>(&s.bytes).unwrap(), v);
+            let cbor = synth
+                .sample(&rev, resource(&rev, "cbor"), Member::Type, tick)
                 .unwrap();
-            assert_eq!(
-                back.verdict,
-                zenkey::schema::validate::Verdict::Valid,
-                "tick {tick}"
+            let back: Value = ciborium::from_reader(cbor.bytes.as_slice()).unwrap();
+            assert_eq!(back, cbor.value.unwrap());
+        }
+        // The recursive type ends: past the soft depth only what is
+        // required, and `children` is not.
+        let set = resource(&rev, "set");
+        let tree = synth.sample(&rev, set, Member::Request, 3).unwrap();
+        assert!(tree.value.unwrap()["label"].is_string());
+    }
+
+    /// Same `(seed, tick)`, same bytes; another tick moves the numbers;
+    /// another seed moves them too.
+    #[test]
+    fn synthesis_is_deterministic_per_seed_and_tick() {
+        let rev = subset();
+        for template in ["status", "pose", "frame", "note"] {
+            let r = resource(&rev, template);
+            let a = Synth::new(7).sample(&rev, r, Member::Type, 3).unwrap();
+            let b = Synth::new(7).sample(&rev, r, Member::Type, 3).unwrap();
+            assert_eq!(a, b, "{template}: reproducible runs are the point");
+        }
+        let r = resource(&rev, "status");
+        let at = |seed, tick| {
+            Synth::new(seed)
+                .sample(&rev, r, Member::Type, tick)
+                .unwrap()
+        };
+        assert_ne!(at(7, 3).value, at(7, 4).value, "the tick moves the numbers");
+        assert_ne!(at(7, 3).value, at(8, 3).value, "and so does the seed");
+    }
+
+    /// Every field filled, none at its default, and the bytes decode
+    /// through the bundle as `zenkey_model::decode` decodes them.
+    #[test]
+    fn a_protobuf_message_fills_every_field_and_decodes() {
+        let rev = subset();
+        let r = resource(&rev, "pose");
+        let s = Synth::new(1).sample(&rev, r, Member::Type, 5).unwrap();
+        let ty = zenkey_model::decode::type_of(rev.bundle(), "stream", "pose", "type").unwrap();
+        let Rendered::Value(v) = decode(rev.bundle(), ty, Some("application/protobuf"), &s.bytes)
+        else {
+            panic!("the message decodes")
+        };
+        for field in [
+            "x", "y", "seq", "count", "delta", "big", "ok", "frame", "blob", "mode", "inner",
+            "tags", "counts", "name", "maybe", "at",
+        ] {
+            assert!(v.get(field).is_some(), "{field} is filled: {v}");
+        }
+        assert!(v.get("id").is_none(), "one field of a oneof");
+        assert!(v.get("extra").is_none(), "Any is left unset");
+        assert_eq!(v["mode"], "MODE_FAST", "not the default");
+        assert!(
+            v["inner"]["more"][0]["more"].is_array(),
+            "nesting is followed"
+        );
+
+        // An attachment and an operation's members, by kind.
+        let frame = resource(&rev, "frame");
+        let a = Synth::new(1)
+            .sample(&rev, frame, Member::Attachment, 0)
+            .unwrap();
+        let ty =
+            zenkey_model::decode::type_of(rev.bundle(), "stream", "frame", "attachment").unwrap();
+        assert!(matches!(
+            decode(rev.bundle(), ty, None, &a.bytes),
+            Rendered::Value(_)
+        ));
+        let set = resource(&rev, "set");
+        for member in [Member::Request, Member::Response, Member::Error] {
+            let s = Synth::new(1).sample(&rev, set, member, 0).unwrap();
+            let ty =
+                zenkey_model::decode::type_of(rev.bundle(), "@op", "set", member.as_str()).unwrap();
+            assert!(
+                matches!(decode(rev.bundle(), ty, None, &s.bytes), Rendered::Value(_)),
+                "{member:?}"
             );
         }
+        let e = Synth::new(1)
+            .sample(&rev, set, Member::Summary, 0)
+            .unwrap_err();
+        assert!(e.contains("declares no summary"), "{e}");
     }
 
-    /// A tagged enum behind a `$ref` — the shape `schemars` emits for every
-    /// nested named type, and the one #384 was about. Without following the
-    /// reference the synthesizer produced a wandering *number* for `value`,
-    /// which the validator on this same path then rejected: the round trip
-    /// below is what fails if the resolver goes away.
+    /// A raw type is bytes of its size class: noise for a binary type, a
+    /// line for text, and the model renders it as its media type and size.
     #[test]
-    fn a_ref_into_defs_synthesizes_the_referenced_shape() {
-        let schema = TypeSchema::json_schema(json!({
-            "type": "object",
-            "required": ["name", "value"],
-            "properties": {
-                "name": { "type": "string" },
-                "value": { "$ref": "#/$defs/TelemetryValue" },
-            },
-            "$defs": {
-                "TelemetryValue": {
-                    "oneOf": [
-                        { "type": "object",
-                          "required": ["type", "value"],
-                          "properties": {
-                              "type": { "const": "counter", "type": "string" },
-                              "value": { "type": "integer", "minimum": 0 } } },
-                        { "type": "object",
-                          "required": ["type", "value"],
-                          "properties": {
-                              "type": { "const": "gauge", "type": "string" },
-                              "value": { "type": "number" } } },
-                    ],
-                },
-            },
-        }));
-        let registry = DecoderRegistry::new();
-        let synth = Synth::new(7);
-        let v = synth.instance(&schema, 3).expect("json-schema synthesizes");
-        assert!(
-            v["value"].is_object(),
-            "the reference resolved to the enum, not to a placeholder number: {v}"
-        );
-        assert_eq!(v["value"]["type"], "counter", "the first branch, satisfied");
-
-        let bytes = registry
-            .encode(&schema, &v, &WireEncoding::Json)
-            .unwrap_or_else(|e| panic!("{v} refused: {e}"));
-        let back = registry
-            .decode(&schema, &WireEncoding::Json, &bytes)
+    fn a_raw_type_is_bytes_of_its_size_class() {
+        let rev = subset();
+        let frame = Synth::new(9)
+            .sample(&rev, resource(&rev, "frame"), Member::Type, 2)
             .unwrap();
-        assert_eq!(back.verdict, zenkey::schema::validate::Verdict::Valid);
-    }
-
-    /// Same (seed, tick) → same instance; different tick → the numerics move.
-    #[test]
-    fn synthesis_is_deterministic_and_wanders() {
-        let schema = TypeSchema::json_schema(json!({
-            "type": "object",
-            "properties": { "v": { "type": "number" } },
-        }));
-        let synth = Synth::new(7);
+        assert_eq!(frame.bytes.len(), size_class("image/jpeg"));
+        assert_eq!(frame.value, None);
+        assert!(frame.bytes.iter().any(|b| *b != frame.bytes[0]), "noise");
+        let note = Synth::new(9)
+            .sample(&rev, resource(&rev, "note"), Member::Type, 2)
+            .unwrap();
+        assert_eq!(note.bytes.len(), size_class("text/plain"));
+        assert!(std::str::from_utf8(&note.bytes).is_ok());
+        let ty = zenkey_model::decode::type_of(rev.bundle(), "stream", "frame", "type").unwrap();
         assert_eq!(
-            synth.instance(&schema, 3),
-            synth.instance(&schema, 3),
-            "reproducible runs are the point"
+            decode(rev.bundle(), ty, None, &frame.bytes),
+            Rendered::Opaque {
+                media_type: "image/jpeg".into(),
+                size: size_class("image/jpeg")
+            }
         );
-        assert_ne!(synth.instance(&schema, 3), synth.instance(&schema, 4));
+        assert_eq!(size_class("video/h264"), 16 * 1024);
+        assert_eq!(size_class("application/octet-stream"), 256);
     }
 
-    /// The cdr field list synthesizes an object its encoder accepts.
-    #[cfg(feature = "decode-cdr")]
+    /// Every member of every resource of every example contract
+    /// (`examples/zk2`): a JSON value that validates, a protobuf message
+    /// that decodes, a raw type of its size.
     #[test]
-    fn a_synthesized_cdr_instance_encodes() {
-        let schema = TypeSchema::cdr(json!({
-            "fields": [
-                { "name": "x", "type": "float64" },
-                { "name": "n", "type": "uint32" },
-                { "name": "label", "type": "string" },
-            ],
-        }));
-        let registry = DecoderRegistry::new();
-        let v = Synth::new(1).instance(&schema, 0).expect("cdr synthesizes");
-        let bytes = registry
-            .encode(&schema, &v, &WireEncoding::Cdr)
-            .expect("the instance encodes");
-        assert!(!bytes.is_empty());
-    }
-
-    /// An unknown kind is `None` — the caller states the degradation.
-    #[test]
-    fn an_unknown_kind_declines_instead_of_guessing() {
-        let set = zenkey::schema::SchemaSet::parse(
-            r#"{"schema_version":1,"app":"t",
-                "types":{"W":{"kind":"cddl","hash":"sha256:00","spec":"x = int"}}}"#,
-        )
-        .unwrap();
-        assert_eq!(Synth::new(0).instance(set.get("W").unwrap(), 0), None);
+    fn every_example_contract_synthesizes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2");
+        let mut checked = 0;
+        for dir in ["tcgui", "walkthrough", "zensight", "zenoh-modem"] {
+            // A bindings file beside the contracts is a problem to skip, not
+            // a contract.
+            let (set, _) = crate::model::catalog::ContractSet::load_path(&root.join(dir));
+            assert!(!set.is_empty(), "{dir} holds contracts");
+            for rev in set.iter() {
+                for r in &rev.contract().resources {
+                    for member in [
+                        Member::Type,
+                        Member::Attachment,
+                        Member::Request,
+                        Member::Response,
+                        Member::Error,
+                        Member::Summary,
+                    ] {
+                        let Some(_) = member_type(r, member) else {
+                            continue;
+                        };
+                        for tick in [0, 7] {
+                            let s =
+                                Synth::new(3)
+                                    .sample(rev, r, member, tick)
+                                    .unwrap_or_else(|e| {
+                                        panic!("{} {}/{}: {e}", rev.iface(), r.token, r.template)
+                                    });
+                            let ty = zenkey_model::decode::type_of(
+                                rev.bundle(),
+                                r.token.as_str(),
+                                r.template.as_str(),
+                                member.as_str(),
+                            )
+                            .unwrap();
+                            let rendered = decode(rev.bundle(), ty, None, &s.bytes);
+                            assert!(
+                                matches!(rendered, Rendered::Value(_) | Rendered::Opaque { .. }),
+                                "{} {}/{} {member:?}: {rendered:?}",
+                                rev.iface(),
+                                r.token,
+                                r.template
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 50, "the examples were walked: {checked}");
     }
 }

@@ -1,19 +1,22 @@
-//! `check conform` (#222) against a real bus — the generator is the suite's
-//! oracle. A conforming mock (`serve_describe` for the RFC 08 halves, a
-//! clean `run_gen` for the traffic, `BringUp` responders for the procedures
-//! with `alive` last) conforms; each injected fault fails exactly the one
-//! assertion it names; and the procedure rows of RFC 13 §3 land where the
-//! RFC puts them.
+//! `check conform` (#222) against a real bus. A conforming mock (the RFC 08
+//! halves served by hand, the `health` traffic published at its declared
+//! QoS, `BringUp` responders for the procedures with `alive` last)
+//! conforms; each injected fault fails exactly the one assertion it names;
+//! and the procedure rows of RFC 13 §3 land where the RFC puts them.
+//!
+//! The v1 generator was this suite's oracle until FJ8a (#612) re-cut `gen`
+//! for zk2. `check conform` still judges v1's registry (FJ9 owns it), so the
+//! three faults it needs are made here: [`Fault`] and [`traffic`].
 //! Ports are ephemeral (`util::peer_pair`), so two test runs at once
 //! cannot collide.
 
 use std::time::Duration;
 
+use zenkey::qos::QosProfile;
 use zenkey_fleet::bus::producer::{BringUp, LiveProducer, ReservedError};
 use zenkey_fleet::model::registry::SliceSource;
-use zenkey_fleet::report::{AssertionState, ConformReport, ConformVerdict, Fault};
-use zenkey_fleet::tape::generate::{GenPattern, GenSpec, build_plan, run_gen, serve_describe};
-use zenkey_fleet::{ConformSpec, Fleet, SliceSet, run_conform};
+use zenkey_fleet::report::{AssertionState, ConformReport, ConformVerdict};
+use zenkey_fleet::{ConformSpec, Fleet, SliceSet, declare_publication, run_conform};
 
 mod util;
 use util::{SETTLE, peer_pair};
@@ -93,7 +96,85 @@ const SET: &str = r#"{"schema_version":1,"app":"t","types":{
         "type":"object","required":["ok"],
         "properties":{"ok":{"type":"boolean"}}}}}}"#;
 
-/// A slice set with its verbatim TOML, which `serve_describe` serves.
+/// The deviation a traffic run injects into the `health` traffic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    /// Published under `sampled`, not its declared `transition`.
+    WrongQos,
+    /// Published on a key the registry never declared.
+    UnregisteredKey,
+    /// A bare string where an object is declared.
+    WrongType,
+}
+
+/// The served halves of RFC 08 for `demo`, alive while held: `introspect`
+/// answers the slice's verbatim TOML, `describe` the schema set. No
+/// `alive`: a fixture answering for a producer does not also claim it.
+struct Halves(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for Halves {
+    fn drop(&mut self) {
+        for t in &self.0 {
+            t.abort();
+        }
+    }
+}
+
+async fn serve_halves(session: &zenoh::Session, toml: &'static str) -> Halves {
+    let mut up = BringUp::new(session);
+    let served = [
+        ("introspect", toml.as_bytes().to_vec(), "application/toml"),
+        ("describe", SET.as_bytes().to_vec(), "application/json"),
+    ];
+    for (path, ..) in &served {
+        up.serve(&format!("v1/{ORIGIN}/@rpc/demo/{path}"))
+            .await
+            .expect("declare a half");
+    }
+    let tasks = up
+        .without_alive()
+        .into_iter()
+        .zip(served)
+        .map(|(responder, (_, body, encoding))| {
+            tokio::spawn(async move {
+                while let Some(q) = responder.next().await {
+                    let _ = responder.reply(&q, body.clone(), Some(encoding)).await;
+                }
+            })
+        })
+        .collect();
+    Halves(tasks)
+}
+
+/// The `health` traffic at 5 Hz, stamped, with `fault` injected: what the
+/// v1 generator published for this suite.
+fn traffic(session: zenoh::Session, fault: Option<Fault>) -> tokio::task::JoinHandle<()> {
+    let key = match fault {
+        Some(Fault::UnregisteredKey) => format!("v1/{ORIGIN}/state/demo/health/unregistered"),
+        _ => format!("v1/{ORIGIN}/state/demo/health"),
+    };
+    let qos = match fault {
+        Some(Fault::WrongQos) => QosProfile::Sampled,
+        _ => QosProfile::Transition,
+    };
+    let body: &[u8] = match fault {
+        Some(Fault::WrongType) => br#""fault:wrong-type""#,
+        _ => br#"{"ok":true}"#,
+    };
+    tokio::spawn(async move {
+        let p = declare_publication(&session, &key, qos, Some("application/json"))
+            .await
+            .expect("a publication");
+        loop {
+            let _ = p
+                .send_stamped(body.to_vec(), None, Some(session.new_timestamp()))
+                .await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+}
+
+/// A slice set with its verbatim TOML, which [`serve_halves`] serves.
 fn slices(toml: &str) -> (tempfile::TempDir, SliceSet) {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("demo.toml"), toml).expect("write slice");
@@ -199,15 +280,11 @@ fn not_met(report: &ConformReport) -> Vec<&str> {
 
 /// The traffic fixture, generating `faults` (none = conforming) for the
 /// whole run, judged over a two-second window.
-async fn traffic_run(faults: Vec<Fault>) -> ConformReport {
+async fn traffic_run(fault: Option<Fault>) -> ConformReport {
     let (observer, producer) = peer_pair().await;
     let (_dir, set) = slices(TRAFFIC);
-    let schemas = zenkey::schema::SchemaSet::parse(SET).expect("set");
-    let fleet = Fleet::new(&producer, "");
 
-    let _mock = serve_describe(&fleet, ORIGIN, &set, Some(&schemas), Some("demo"))
-        .await
-        .expect("serve describe");
+    let _halves = serve_halves(&producer, TRAFFIC).await;
     let (_live, _tasks) = bring_up(
         &producer,
         &[
@@ -219,28 +296,7 @@ async fn traffic_run(faults: Vec<Fault>) -> ConformReport {
     .await;
     wait_alive(&observer).await;
 
-    let gen_spec = GenSpec {
-        origin: ORIGIN.into(),
-        producer: Some("demo".into()),
-        subject: None,
-        vars: vec![],
-        rate_hz: Some(5.0),
-        pattern: GenPattern::Steady,
-        duration: Duration::from_secs(30),
-        seed: 7,
-        tool: "zenctl gen".into(),
-        faults,
-    };
-    let store = zenkey_fleet::SchemaStore::new("", Duration::from_millis(200));
-    let plan = build_plan(None, &store, &set, "", Some(&schemas), &gen_spec)
-        .await
-        .expect("plan");
-    let generating = {
-        let producer = producer.clone();
-        tokio::spawn(async move {
-            let _ = run_gen(&Fleet::new(&producer, ""), &plan, &gen_spec).await;
-        })
-    };
+    let generating = traffic(producer.clone(), fault);
 
     let report = run_conform(&Fleet::new(&observer, ""), &set, &spec(Some(2.0), None))
         .await
@@ -254,7 +310,7 @@ async fn traffic_run(faults: Vec<Fault>) -> ConformReport {
 /// called and met by its served declaration.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_conforming_mock_conforms() {
-    let report = traffic_run(vec![]).await;
+    let report = traffic_run(None).await;
     assert_eq!(report.verdict, ConformVerdict::Conforms, "{report:#?}");
     assert_eq!(report.origins_asked, [ORIGIN]);
     assert!(report.assertions.iter().all(|a| a.state.is_met()));
@@ -296,7 +352,7 @@ async fn a_conforming_mock_conforms() {
 /// names it — the oracle's other half (#163's deltas, judged).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wrong_qos_fails_only_the_qos_assertion() {
-    let report = traffic_run(vec![Fault::WrongQos]).await;
+    let report = traffic_run(Some(Fault::WrongQos)).await;
     assert_eq!(
         not_met(&report),
         ["qos-observed-mismatch/health"],
@@ -307,7 +363,7 @@ async fn wrong_qos_fails_only_the_qos_assertion() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unregistered_key_fails_only_the_unregistered_assertion() {
-    let report = traffic_run(vec![Fault::UnregisteredKey]).await;
+    let report = traffic_run(Some(Fault::UnregisteredKey)).await;
     assert_eq!(
         not_met(&report),
         ["unregistered-traffic/health/unregistered"],
@@ -320,7 +376,7 @@ async fn an_unregistered_key_fails_only_the_unregistered_assertion() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_wrong_type_fails_only_the_payload_assertion() {
-    let report = traffic_run(vec![Fault::WrongType]).await;
+    let report = traffic_run(Some(Fault::WrongType)).await;
     assert_eq!(not_met(&report), ["payload/health"], "{report:#?}");
 }
 
@@ -333,16 +389,7 @@ async fn a_wrong_type_fails_only_the_payload_assertion() {
 async fn the_procedure_rows_land_where_rfc_13_puts_them() {
     let (observer, producer) = peer_pair().await;
     let (_dir, set) = slices(PROCEDURES);
-    let schemas = zenkey::schema::SchemaSet::parse(SET).expect("set");
-    let _mock = serve_describe(
-        &Fleet::new(&producer, ""),
-        ORIGIN,
-        &set,
-        Some(&schemas),
-        Some("demo"),
-    )
-    .await
-    .expect("serve describe");
+    let _halves = serve_halves(&producer, PROCEDURES).await;
 
     // The registration document: rf0 claims rssi, sat0 does not.
     let _sensor = producer

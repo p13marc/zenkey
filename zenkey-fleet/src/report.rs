@@ -60,7 +60,9 @@
 //! domain (one verdict per check, `CheckId`, `DoctorReport`); v1's check
 //! vocabulary, which `field` and `check conform` still produce, moved to
 //! `v1_checks` under v1 names (`V1CheckId`, `V1Finding`). Their type names do
-//! not collide, so the flat namespace holds both generations.
+//! not collide, so the flat namespace holds both generations. FJ8a gave the
+//! mock owner its domain (`mock`: `gen`'s plan and report, `serve`'s calls)
+//! in place of v1's `generate`, and re-cut `bench` over zk2 calls.
 
 mod acl;
 mod admin;
@@ -79,11 +81,11 @@ mod doctor;
 mod expect;
 mod export;
 mod field;
-mod generate;
 mod graph;
 mod iface;
 mod impact;
 mod judgement;
+mod mock;
 mod node;
 mod operation;
 mod payload;
@@ -121,11 +123,11 @@ pub use doctor::*;
 pub use expect::*;
 pub use export::*;
 pub use field::*;
-pub use generate::*;
 pub use graph::*;
 pub use iface::*;
 pub use impact::*;
 pub use judgement::*;
+pub use mock::*;
 pub use node::*;
 pub use operation::*;
 pub use payload::*;

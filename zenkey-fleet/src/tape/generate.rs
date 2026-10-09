@@ -1,193 +1,54 @@
-//! `zenctl gen` (#162) — the registry-driven pattern generator.
+//! `zenctl gen` (#612, FJ8a): a contract-driven mock owner.
 //!
-//! The opposite artifact of the spray demo: spray is deliberately hardcoded
-//! adversarial weirdness; `gen` reads a registry and produces **conforming**
-//! traffic — every declared subject of a producer, schema-synthesized
-//! payloads ([`crate::tape::synth`]), declared QoS, class-conscious rates. It is a
-//! mock producer for testing consumers, not a load cannon.
+//! Given contracts and an address, it brings a zk2 service up there
+//! ([`crate::tape::mock`]: a real instance, a descriptor and tokens, P3) and
+//! publishes every stream, state and event resource of each interface
+//! through the runtime's writers, which give each sample the contract's
+//! QoS and `Encoding`, each state put the owner's stamp (S1) and each event
+//! a fresh ULID key (§2.6). Every operation is served over its template,
+//! answering each call with one synthesized `response` (and its `summary`,
+//! when `replies = "many"` declares one).
 //!
-//! Everything rides the existing seams: keys assemble from the declared
-//! patterns, bodies encode through [`SchemaStore::encode`] (the same
-//! validating ladder `zenctl pub` writes through), publications are declared
-//! (P7), and every sample carries the RFC 09 §5.3 synthetic marker (v1.19) —
-//! someone's `doctor --for` must be able to tell this traffic from real.
+//! Payloads come from [`crate::tape::synth`]: deterministic per
+//! `(seed, tick)`, and a JSON Schema value that would not validate is never
+//! sent. A templated resource publishes the members `--member` names, or a
+//! small synthetic set the plan states; the template that declares `epoch`
+//! holds a member token per value (§8.1).
+//!
+//! The plan ([`build_plan`]) is session-free and printed before anything
+//! is brought up, the replay dry-run precedent. It replaced v1's
+//! registry-driven generator: the registry walk, the schema ladder through
+//! a served `describe`, the impersonated `--origin`, `--serve-describe` and
+//! the fault injector went with it (the `v1` branch keeps them).
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::{Error, Result};
-use zenkey::grammar::with_base;
-use zenkey::pattern::{PatternChunk, SubjectPattern};
-use zenkey::qos::QosProfile;
-use zenkey::schema::SchemaSet;
-use zenkey::{Class, Declared, RateClass};
+use zenkey_model::authoring::{Kind, ParamType};
+use zenkey_model::contract::{Body, Rate, Replies, Resource};
+use zenkey_model::grammar::{Addr, IfaceId, data_key};
+use zenkey_model::template::{Bindings, Segment};
+use zenoh::Session;
+use zk2::OpError;
 
-use crate::model::decode::SchemaStore;
-use crate::model::registry::SliceSet;
-use crate::report::{Fault, GenPlanEntry, GenReport};
+use crate::model::catalog::Revision;
+use crate::model::render::Member;
+use crate::report::{GenInterface, GenPlan, GenPlanEntry, GenReport, MemberSource, QosView};
+use crate::tape::mock::{
+    MockAnswer, capabilities, check_roles, config, default_value, implementation, marker,
+    runtime_error, serve_answer,
+};
 use crate::tape::synth::Synth;
-
-/// The RFC 09 §5.3 marker (v1.19): every synthetic sample's attachment.
-pub fn synthetic_marker(tool: &str, origin: &str, fault: Option<&str>) -> Vec<u8> {
-    let mut obj = serde_json::json!({
-        "synthetic": true,
-        "tool": tool,
-        "origin": origin,
-    });
-    if let Some(kind) = fault {
-        obj["fault"] = kind.into();
-    }
-    serde_json::to_vec(&obj).expect("the marker serializes")
-}
-
-impl Fault {
-    /// The kebab-case kind name — the CLI token and the marker's `"fault"`
-    /// value.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Fault::Truncate => "truncate",
-            Fault::WrongType => "wrong-type",
-            Fault::ExtraField => "extra-field",
-            Fault::UnregisteredKey => "unregistered-key",
-            Fault::WrongQos => "wrong-qos",
-            Fault::MissingEncoding => "missing-encoding",
-            Fault::Unstamped => "unstamped",
-        }
-    }
-
-    /// Every kind, for a CLI error message and the round-trip test.
-    pub const ALL: [Fault; 7] = [
-        Fault::Truncate,
-        Fault::WrongType,
-        Fault::ExtraField,
-        Fault::UnregisteredKey,
-        Fault::WrongQos,
-        Fault::MissingEncoding,
-        Fault::Unstamped,
-    ];
-
-    /// Parse one kind, naming the vocabulary on a miss (spray's decline
-    /// precedent: an unknown kind is refused, never silently ignored).
-    pub fn parse(s: &str) -> Result<Fault> {
-        Fault::ALL
-            .into_iter()
-            .find(|f| f.as_str() == s)
-            .ok_or_else(|| {
-                let known = Fault::ALL.map(Fault::as_str).join(", ");
-                Error::unaskable(
-                    format!("--fault {s:?}"),
-                    format!("is not a known fault kind — known kinds: {known}"),
-                )
-            })
-    }
-
-    /// Perturb the wire key: only [`Fault::UnregisteredKey`] moves it (a
-    /// trailing chunk the registry never declared). Every other kind leaves
-    /// the declared key untouched and perturbs a different dimension.
-    fn perturb_key(self, key: &str) -> String {
-        match self {
-            Fault::UnregisteredKey => format!("{key}/unregistered"),
-            _ => key.to_string(),
-        }
-    }
-
-    /// Perturb the QoS profile: only [`Fault::WrongQos`] swaps it, to a
-    /// profile deliberately unlike the declared one.
-    fn perturb_qos(self, declared: QosProfile) -> QosProfile {
-        match self {
-            Fault::WrongQos if declared == QosProfile::Sampled => QosProfile::Transition,
-            Fault::WrongQos => QosProfile::Sampled,
-            _ => declared,
-        }
-    }
-
-    /// Whether this fault drops the declared wire encoding.
-    fn drops_encoding(self) -> bool {
-        matches!(self, Fault::MissingEncoding)
-    }
-
-    /// Whether this fault omits the HLC timestamp the valid path stamps.
-    fn drops_timestamp(self) -> bool {
-        matches!(self, Fault::Unstamped)
-    }
-
-    /// Perturb the encoded body bytes, post-synthesis and post-encode — so
-    /// the deviation bypasses the validating encoder that produced the valid
-    /// bytes (that is the whole point: near-valid traffic that violates on
-    /// the wire). Key/QoS/encoding/timestamp faults leave the body alone.
-    fn perturb_body(self, bytes: Vec<u8>) -> Vec<u8> {
-        match self {
-            Fault::Truncate => {
-                let n = bytes.len() / 2;
-                let mut out = bytes;
-                out.truncate(n);
-                out
-            }
-            Fault::WrongType => {
-                // A bare JSON string where a structured type is declared —
-                // built directly, never through the schema-validating encoder.
-                serde_json::to_vec(&serde_json::Value::String("fault:wrong-type".into()))
-                    .expect("a string serializes")
-            }
-            Fault::ExtraField => match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                Ok(serde_json::Value::Object(mut m)) => {
-                    m.insert("_fault".into(), serde_json::Value::Bool(true));
-                    serde_json::to_vec(&serde_json::Value::Object(m)).expect("object serializes")
-                }
-                Ok(other) => {
-                    // Not an object: wrap it so the extra key still rides.
-                    let wrapped = serde_json::json!({ "_orig": other, "_fault": true });
-                    serde_json::to_vec(&wrapped).expect("object serializes")
-                }
-                Err(_) => {
-                    // Non-JSON body (cdr/protobuf): append the marker bytes —
-                    // still an undeclared trailer the decoder must survive.
-                    let mut out = bytes;
-                    out.extend_from_slice(b"_fault");
-                    out
-                }
-            },
-            _ => bytes,
-        }
-    }
-
-    /// The printable per-key delta from valid — what the plan states before
-    /// anything touches the bus (honesty: the tool says what it will do).
-    /// `valid` is the entry as synthesized, before this fault's perturbation.
-    fn delta(self, valid: &GenPlanEntry) -> String {
-        match self {
-            Fault::Truncate => {
-                "payload truncated to half its encoded bytes — a partial frame".into()
-            }
-            Fault::WrongType => format!(
-                "body replaced with a JSON string where {} is declared",
-                valid.type_name
-            ),
-            Fault::ExtraField => "an undeclared `_fault` field added to the body".into(),
-            Fault::UnregisteredKey => format!(
-                "key → {} (an unregistered subject; RFC 09 §5.1 O1: a fact to report)",
-                self.perturb_key(&valid.key)
-            ),
-            Fault::WrongQos => format!(
-                "qos {} → {} (declared profile not honoured, RFC 04 §3)",
-                valid.qos,
-                self.perturb_qos(QosProfile::from_name(&valid.qos).unwrap_or(QosProfile::Sampled))
-                    .name()
-            ),
-            Fault::MissingEncoding => match &valid.encoding {
-                Some(e) => format!("wire encoding {e} omitted"),
-                None => "no wire encoding set (none was declared either)".into(),
-            },
-            Fault::Unstamped => "no HLC timestamp — state LWW cannot order it (RFC 04 §4)".into(),
-        }
-    }
-}
+use crate::{Error, Result};
 
 /// The send-timing shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenPattern {
     /// Fixed interval.
     Steady,
-    /// Interval jittered ±30%, seeded — reproducible irregularity.
+    /// Interval jittered ±30%, seeded: reproducible irregularity.
     Jitter,
     /// The per-second budget sent at once, then a pause.
     Burst,
@@ -195,599 +56,717 @@ pub enum GenPattern {
     Ramp,
 }
 
-/// What to generate.
+/// How many members a templated resource gets when `--member` names none.
+pub const DEFAULT_MEMBERS: usize = 2;
+
+/// One `--member`: a resource, and the members it publishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberArg {
+    /// The resource: its template, or `<kind token>/<template>`.
+    pub resource: String,
+    /// Each member's parameter values, unslugged, in template order; a
+    /// rest parameter takes the values left over.
+    pub members: Vec<Vec<String>>,
+}
+
+impl MemberArg {
+    /// Parses `<resource>=<member>[,<member>…]`, each member its parameter
+    /// values in template order joined by `/`: `bandwidth/{ns}/{iface}=
+    /// default/eth0,default/eth1`. A value holding `/` or `,` cannot be
+    /// spelled here.
+    pub fn parse(s: &str) -> Result<MemberArg> {
+        let refuse = |why: &str| Error::unaskable(format!("--member {s}"), why);
+        let (resource, members) = s
+            .split_once('=')
+            .ok_or_else(|| refuse("expected <resource>=<member>[,<member>…]"))?;
+        if resource.is_empty() {
+            return Err(refuse("names no resource"));
+        }
+        let members: Vec<Vec<String>> = members
+            .split(',')
+            .map(|m| m.split('/').map(str::to_owned).collect())
+            .collect();
+        if members
+            .iter()
+            .any(|m: &Vec<String>| m.iter().all(String::is_empty))
+        {
+            return Err(refuse("a member is empty"));
+        }
+        Ok(MemberArg {
+            resource: resource.to_owned(),
+            members,
+        })
+    }
+}
+
+/// What to bring up and publish.
 #[derive(Debug, Clone)]
 pub struct GenSpec {
-    /// The origin chunk the generated keys claim (`h-…`). Stated, printed,
-    /// and stamped into the marker — impersonation is the feature, and the
-    /// marker is what keeps it honest.
-    pub origin: String,
-    /// Only this producer's subjects (else: every host producer in the set).
-    pub producer: Option<String>,
-    /// Only subjects whose declared path contains this.
-    pub subject: Option<String>,
-    /// `{var}` values by name; unnamed vars get deterministic synthetic
-    /// values (stated in the plan).
-    pub vars: Vec<(String, String)>,
-    /// Override every entry's rate (Hz). `None` = the registry-driven
-    /// defaults: telemetry 1 Hz, state ttl/2 refresh, events inside their
-    /// declared budget.
+    /// The address the mock owner runs at: the operator's to name.
+    pub address: Addr,
+    /// The revisions it implements, one per interface.
+    pub revisions: Vec<Arc<Revision>>,
+    /// Members for templated resources (`--member`).
+    pub members: Vec<MemberArg>,
+    /// Role bindings (R1), `role → providers`.
+    pub bindings: BTreeMap<String, Vec<String>>,
+    /// Override every stream's and state's rate (Hz); an event's stays
+    /// within its declared rate whatever this says.
     pub rate_hz: Option<f64>,
     pub pattern: GenPattern,
     pub duration: Duration,
-    /// Drives synthesis and jitter — same seed, same run.
+    /// Drives synthesis and jitter: the same seed is the same run.
     pub seed: u64,
-    /// The tool name stamped into the marker.
+    /// Stamped into the descriptor's marker.
     pub tool: String,
-    /// Fault kinds to inject (#163). Empty = conforming traffic. Non-empty
-    /// expands the plan to one variant per (subject × fault), each carrying a
-    /// single `fault=<kind>` marker and a printable delta — double-guarded at
-    /// the CLI edge (`--i-know` plus an explicit endpoint/`--base`).
-    pub faults: Vec<Fault>,
 }
 
-/// A deterministic chunk-safe value for an unnamed `{var}` (lowercase
-/// alphanumerics only, RFC 03 §2's charset).
-fn synthetic_var(name: &str) -> String {
-    let clean: String = name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect();
-    if clean.is_empty() {
-        "v1".into()
-    } else {
-        format!("{clean}1")
-    }
+/// An event's cap on occurrences over a run of `duration`: its declared
+/// rate (§2.6), at least one.
+fn events_cap(rate: Rate, duration: Duration) -> u64 {
+    let per_h: u64 = match rate {
+        Rate::Rare => 1,
+        Rate::Low => 60,
+        Rate::Burst(n) => u64::from(n),
+    };
+    let run = (per_h.min(3600) as f64 * duration.as_secs_f64() / 3600.0).floor() as u64;
+    run.max(1).min(per_h)
 }
 
-/// Resolve the run's plan against the slices: which keys, which shapes,
-/// which rates. Schema ladder per type: the producer's live `describe`
-/// (when a session is given) > the offline `--schema-set` document > a
-/// placeholder `{}` body with a stated note.
-pub async fn build_plan(
-    fleet: Option<&crate::Fleet<'_>>,
-    store: &SchemaStore,
-    slices: &SliceSet,
-    base: &str,
-    schema_set: Option<&SchemaSet>,
-    spec: &GenSpec,
-) -> Result<Vec<GenPlanEntry>> {
-    let session = fleet.map(crate::Fleet::session);
+/// The base-relative key expression of every member of `r`: each parameter
+/// `*`, a rest parameter `**`.
+fn pattern_of(addr: &Addr, iface: &IfaceId, r: &Resource) -> String {
+    let mut chunks = vec![
+        "zk2".to_owned(),
+        addr.system.to_string(),
+        addr.service.to_string(),
+        iface.to_string(),
+        r.token.to_string(),
+    ];
+    chunks.extend(r.template.segments().iter().map(|seg| match seg {
+        Segment::Literal(l) => l.clone(),
+        Segment::Param(_) => "*".to_owned(),
+        Segment::Rest(_) => "**".to_owned(),
+    }));
+    chunks.join("/")
+}
 
-    let mut plan = Vec::new();
+/// Whether a `--member` names `r`.
+fn names(arg: &MemberArg, r: &Resource) -> bool {
+    arg.resource == zk2::implementation::resource_name(r) || arg.resource == r.template.as_str()
+}
 
-    for slice in slices.slices() {
-        if slice.service_origin.is_some() {
-            // Impersonating a service origin (@catalog) would collide with
-            // the real service's single-writer claim (RFC 06 §5.3) — out of
-            // scope, stated rather than silently skipped.
-            continue;
+/// The members `--member` gives `r`, refused when they do not fit its
+/// template; `None` when no `--member` names it.
+fn given_members(r: &Resource, args: &[MemberArg]) -> Result<Option<Vec<Bindings>>> {
+    let name = zk2::implementation::resource_name(r);
+    let mut out: Option<Vec<Bindings>> = None;
+    let params: Vec<(&str, bool)> = r.template.params().collect();
+    for arg in args.iter().filter(|a| names(a, r)) {
+        let what = format!("--member {}", arg.resource);
+        if r.kind == Kind::Operation {
+            return Err(Error::unaskable(
+                what,
+                format!("{name} is an operation: a mock serves it over its whole template"),
+            ));
         }
-        if let Some(p) = &spec.producer
-            && &slice.name != p
-        {
-            continue;
+        if params.is_empty() {
+            return Err(Error::unaskable(
+                what,
+                format!("{name} has no template parameters: it is its one member"),
+            ));
         }
-        for subject in &slice.subjects {
-            if let Some(filter) = &spec.subject
-                && !subject.path.contains(filter.as_str())
-            {
-                continue;
-            }
-            let pattern = SubjectPattern::parse(&subject.path).map_err(|e| {
-                Error::unaskable(format!("{}/{}", slice.name, subject.path), e.to_string())
-            })?;
-            let mut tail: Vec<String> = Vec::new();
-            let mut synthetic_vars: Vec<String> = Vec::new();
-            let mut unique_tail_idx = None;
-            for chunk in pattern.chunks() {
-                match chunk {
-                    PatternChunk::Literal(l) => tail.push(l.clone()),
-                    PatternChunk::Var(name) | PatternChunk::Rest(name) => {
-                        let value = spec
-                            .vars
-                            .iter()
-                            .find(|(k, _)| k == name)
-                            .map(|(_, v)| v.clone())
-                            .unwrap_or_else(|| {
-                                synthetic_vars.push(name.clone());
-                                synthetic_var(name)
-                            });
-                        if subject.class.is(&Class::Events) {
-                            // The last variable is the per-send unique id
-                            // (events keys are write-once, RFC 04 §1.3).
-                            unique_tail_idx = Some(tail.len());
-                        }
-                        tail.push(value);
-                    }
-                }
-            }
-            let key = with_base(
-                base,
-                format!(
-                    "v1/{}/{}/{}/{}",
-                    spec.origin,
-                    subject.class,
-                    slice.name,
-                    tail.join("/")
-                ),
-            );
-            // The unique chunk's index in the FULL key: base chunks +
-            // v1/origin/class/producer (4) + its index in the tail.
-            let base_chunks = if base.is_empty() {
-                0
+        for member in &arg.members {
+            let rest = params.last().is_some_and(|(_, rest)| *rest);
+            let fits = if rest {
+                member.len() >= params.len()
             } else {
-                base.split('/').count()
+                member.len() == params.len()
             };
-            let unique_chunk = unique_tail_idx.map(|i| base_chunks + 4 + i);
-
-            // The slice already recognised the token on parse — a declared
-            // profile this build cannot name is not a profile it can honour,
-            // so it falls to the default exactly as an absent one does.
-            let (qos, qos_source) = match subject.qos.as_ref().and_then(Declared::known) {
-                Some(q) => (*q, "declared"),
-                None => (QosProfile::Sampled, "default"),
-            };
-
-            // Rate: override > class default. Events are additionally
-            // capped at their declared budget for the run.
-            let mut events_cap = None;
-            let mut note: Option<String> = None;
-            let rate_hz = match subject.class.known() {
-                Some(Class::Events) => {
-                    let cap_h = subject
-                        .rate
-                        .as_ref()
-                        .and_then(RateClass::cap_per_hour)
-                        .unwrap_or(1);
-                    let cap_run = ((f64::from(u32::try_from(cap_h.min(3600)).unwrap_or(3600))
-                        * spec.duration.as_secs_f64())
-                        / 3600.0)
-                        .floor()
-                        .max(1.0) as u64;
-                    events_cap = Some(cap_run.min(cap_h));
-                    // Spread the budget over the run.
-                    (events_cap.unwrap_or(1) as f64 / spec.duration.as_secs_f64()).min(1.0)
-                }
-                Some(Class::State) => match subject.ttl_s {
-                    // Refresh at ttl/2 (RFC 04 §1.2).
-                    Some(ttl) if ttl > 0 => 2.0 / ttl as f64,
-                    _ => 0.5,
-                },
-                _ => 1.0,
-            };
-            let rate_hz = spec.rate_hz.unwrap_or(rate_hz).clamp(0.001, 1000.0);
-
-            // The schema ladder.
-            let mut body_source = "placeholder";
-            let mut schema = None;
-            if let Some(session) = session
-                && let Some(s) = store
-                    .schema_for(session, &slice.name, &subject.type_name)
-                    .await
-            {
-                schema = Some(s);
-                body_source = "describe";
-            }
-            if schema.is_none()
-                && let Some(set) = schema_set
-                && let Some(s) = set.get(&subject.type_name)
-            {
-                schema = Some(s.clone());
-                body_source = "schema-set";
-            }
-            if schema.is_none() {
-                note = Some(format!(
-                    "no schema for {} — sending a placeholder {{}} body, labelled",
-                    subject.type_name
+            if !fits {
+                return Err(Error::unaskable(
+                    what,
+                    format!(
+                        "{} is {} value(s), and {} takes {} ({}), in template order, joined by `/`",
+                        member.join("/"),
+                        member.len(),
+                        r.template,
+                        params.len(),
+                        params
+                            .iter()
+                            .map(|(n, _)| *n)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 ));
             }
-            if !synthetic_vars.is_empty() {
-                let vars = synthetic_vars.join(", ");
-                note = Some(match note.take() {
-                    Some(n) => format!("{n}; synthetic values for {{{vars}}}"),
-                    None => format!("synthetic values for {{{vars}}} (override with --var)"),
+            let mut values = Bindings::new();
+            for (i, (n, is_rest)) in params.iter().enumerate() {
+                let v = if *is_rest {
+                    member[i..].to_vec()
+                } else {
+                    vec![member[i].clone()]
+                };
+                values.insert((*n).to_owned(), v);
+            }
+            out.get_or_insert_with(Vec::new).push(values);
+        }
+    }
+    if let Some(members) = &out
+        && let Some(card) = r.cardinality
+        && members.len() as u64 > card
+    {
+        return Err(Error::unaskable(
+            format!("--member {name}"),
+            format!(
+                "{} members, above the contract's cardinality {card} (§2.2)",
+                members.len()
+            ),
+        ));
+    }
+    Ok(out)
+}
+
+/// The synthetic members of `r`: `<param>-1`, `<param>-2` (a `uint`
+/// parameter's are `1`, `2`), at most its cardinality.
+fn default_members(r: &Resource) -> Vec<Bindings> {
+    let n = r
+        .cardinality
+        .map_or(DEFAULT_MEMBERS, |c| {
+            DEFAULT_MEMBERS.min(usize::try_from(c).unwrap_or(usize::MAX))
+        })
+        .max(1);
+    (1..=n)
+        .map(|i| {
+            r.template
+                .params()
+                .map(|(name, _)| {
+                    let v = match r.params.get(name) {
+                        Some(ParamType::Uint) => i.to_string(),
+                        _ => default_value(name, i),
+                    };
+                    (name.to_owned(), vec![v])
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn qos_of(r: &Resource) -> Option<QosView> {
+    match &r.body {
+        Body::Data(d) => Some(QosView {
+            reliability: d.reliability,
+            congestion: d.congestion,
+            priority: d.priority,
+            express: d.express,
+        }),
+        Body::Operation(_) => None,
+    }
+}
+
+/// A type, named as §7.2 names it.
+fn declared(rev: &Revision, r: &Resource, member: Member) -> String {
+    zenkey_model::decode::type_of(
+        rev.bundle(),
+        r.token.as_str(),
+        r.template.as_str(),
+        member.as_str(),
+    )
+    .map(zenkey_model::decode::declared)
+    .unwrap_or_default()
+}
+
+/// The plan, before anything touches the bus: every member of every
+/// stream, state and event resource, and every operation, with its key,
+/// type, `Encoding`, QoS and rate. Session-free.
+///
+/// Refused (an [`Error::Unaskable`]): no contract, an interface given
+/// twice, a required role left unbound (R1), a `--member` that names no
+/// resource of these contracts or does not fit its template. A type the
+/// synthesizer cannot satisfy is not refused: its entry says so, and
+/// publishes nothing.
+pub fn build_plan(spec: &GenSpec) -> Result<GenPlan> {
+    if spec.revisions.is_empty() {
+        return Err(Error::unaskable(
+            "gen",
+            "no contract: name the interfaces to serve, with --contracts",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for rev in &spec.revisions {
+        if !seen.insert(rev.iface().clone()) {
+            return Err(Error::unaskable(
+                rev.iface().to_string(),
+                "is given twice: a service implements an interface major once",
+            ));
+        }
+    }
+    check_roles(&spec.revisions, &spec.bindings)?;
+    for arg in &spec.members {
+        let known = spec
+            .revisions
+            .iter()
+            .any(|rev| rev.contract().resources.iter().any(|r| names(arg, r)));
+        if !known {
+            return Err(Error::unaskable(
+                format!("--member {}", arg.resource),
+                "names no resource of the contracts given",
+            ));
+        }
+    }
+    let synth = Synth::new(spec.seed);
+    let secs = spec.duration.as_secs_f64();
+    let mut entries = Vec::new();
+    for rev in &spec.revisions {
+        let iface = rev.iface();
+        for r in &rev.contract().resources {
+            let name = zk2::implementation::resource_name(r);
+            // A `--member` for an operation is refused here.
+            let given = given_members(r, &spec.members)?;
+            let d = match &r.body {
+                Body::Operation(op) => {
+                    entries.push(operation_entry(spec, rev, r, op, &synth));
+                    continue;
+                }
+                Body::Data(d) => d,
+            };
+            let (members, source) = if !r.template.has_params() {
+                (vec![Bindings::new()], MemberSource::Fixed)
+            } else {
+                match given {
+                    Some(m) => (m, MemberSource::Given),
+                    None => (default_members(r), MemberSource::Default),
+                }
+            };
+            let cap = d.rate.map(|rate| events_cap(rate, spec.duration));
+            let rate_hz = match (r.kind, cap) {
+                (Kind::Event, Some(cap)) => spec
+                    .rate_hz
+                    .unwrap_or((cap as f64 / secs).min(1.0))
+                    .clamp(0.001, 1000.0),
+                (Kind::State, _) => spec.rate_hz.unwrap_or(0.5).clamp(0.001, 1000.0),
+                _ => spec.rate_hz.unwrap_or(1.0).clamp(0.001, 1000.0),
+            };
+            let made = synth.sample(rev, r, Member::Type, 0).and_then(|_| {
+                if d.attachment.is_some() {
+                    synth.sample(rev, r, Member::Attachment, 0).map(|_| ())
+                } else {
+                    Ok(())
+                }
+            });
+            let mut notes = Vec::new();
+            if let Err(e) = &made {
+                notes.push(format!("cannot synthesize ({e}): publishes nothing"));
+            }
+            if d.attachment.is_some() {
+                notes.push(if r.kind == Kind::Stream {
+                    "each sample carries a synthesized attachment".to_owned()
+                } else {
+                    "the runtime's state and event writers put no attachment: samples go \
+                     without one"
+                        .to_owned()
                 });
             }
-            let encoding =
-                crate::bus::body::encode_encoding(None, subject.encoding.as_ref(), schema.as_ref());
-
-            let valid = GenPlanEntry {
-                key,
-                class: subject.class.token().to_string(),
-                producer: slice.name.clone(),
-                type_name: subject.type_name.clone(),
-                qos: qos.name().to_string(),
-                qos_source,
-                rate_hz,
-                body_source,
-                encoding,
-                events_cap,
-                note,
-                fault: None,
-                fault_delta: None,
-                schema,
-                unique_chunk,
-            };
-
-            if spec.faults.is_empty() {
-                plan.push(valid);
-                continue;
+            if source == MemberSource::Default {
+                notes.push("synthetic members (name them with --member)".to_owned());
             }
-            // One variant per fault kind: the delta is computed against the
-            // valid entry, then the static perturbations (key/QoS/encoding)
-            // are baked into the variant's fields — the body/timestamp faults
-            // ride at send time off `fault` (see `run_gen`). Every variant
-            // carries a single `fault=<kind>` marker.
-            for &fault in &spec.faults {
-                let mut variant = valid.clone();
-                variant.fault_delta = Some(fault.delta(&valid));
-                variant.key = fault.perturb_key(&valid.key);
-                variant.qos = fault
-                    .perturb_qos(QosProfile::from_name(&valid.qos).unwrap_or(QosProfile::Sampled))
-                    .name()
+            for values in members {
+                let chunks = r
+                    .template
+                    .build(&values)
+                    .map_err(|e| Error::unaskable(format!("--member {name}"), e))?;
+                let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
+                let key = data_key(&spec.address, iface, r.token, &refs)
+                    .map_err(|e| Error::unaskable(format!("--member {name}"), e.to_string()))?
                     .to_string();
-                if fault.drops_encoding() {
-                    variant.encoding = None;
-                }
-                variant.fault = Some(fault);
-                plan.push(variant);
+                entries.push(GenPlanEntry {
+                    iface: iface.to_string(),
+                    resource: name.clone(),
+                    kind: r.kind,
+                    key,
+                    encoding: zk2::writer::wire_encoding(&d.type_, d.encoding, &values).to_string(),
+                    values,
+                    members: source,
+                    declared: declared(rev, r, Member::Type),
+                    qos: qos_of(r),
+                    rate_hz: made.is_ok().then_some(rate_hz),
+                    events_cap: cap.filter(|_| made.is_ok()),
+                    member_token: r.epoch.is_some(),
+                    note: (!notes.is_empty()).then(|| notes.join("; ")),
+                });
             }
         }
     }
-    Ok(plan)
+    Ok(GenPlan {
+        address: spec.address.to_string(),
+        interfaces: spec
+            .revisions
+            .iter()
+            .map(|r| GenInterface {
+                iface: r.iface().to_string(),
+                fingerprint: r.fingerprint().to_string(),
+            })
+            .collect(),
+        duration_s: secs,
+        seed: spec.seed,
+        marker: marker(&spec.tool, Some(spec.seed)),
+        entries,
+    })
 }
 
-/// The serving halves of a mock producer, alive while held: each declared
-/// responder is *driven* by its own task (a [`crate::bus::producer::Responder`]
-/// is pull-based — a responder nobody drives answers nobody). Dropping this
-/// aborts the drivers, which undeclares their queryables.
-#[derive(Debug)]
-pub struct MockProducer {
-    /// How many `@rpc` keys are being answered.
-    pub keys: usize,
-    tasks: Vec<tokio::task::JoinHandle<()>>,
-}
-
-impl Drop for MockProducer {
-    fn drop(&mut self) {
-        for t in &self.tasks {
-            t.abort();
-        }
-    }
-}
-
-/// Serve the RFC 08 halves for the impersonated producers (`--serve-describe`):
-/// `introspect` answers with the slice's verbatim TOML, `describe` with the
-/// schema-set document — a consumer under test can fetch shapes from this
-/// mock exactly as it would from the real producer.
-pub async fn serve_describe(
-    fleet: &crate::Fleet<'_>,
-    origin: &str,
-    slices: &SliceSet,
-    schema_set: Option<&SchemaSet>,
-    producer: Option<&str>,
-) -> Result<MockProducer> {
-    let (session, base) = (fleet.session(), fleet.base());
-
-    // The bring-up discipline (RFC 04 §5 via `crate::bus::producer::BringUp`):
-    // every queryable is declared — awaited, on its own concrete key —
-    // before this function returns, so a consumer under test that sees the
-    // mock exists can already call it, and RFC 08 §6.1's bounded grace has
-    // no spawn race to tolerate. The mock deliberately never declares
-    // `alive` (`without_alive`): a tool answering for a producer must not
-    // also claim its presence (RFC 13 §5).
-    let mut up = crate::bus::producer::BringUp::new(session);
-    let mut bodies: Vec<(Vec<u8>, &'static str)> = Vec::new();
-    for (slice, raw, format) in slices.sources() {
-        if slice.service_origin.is_some() {
-            continue;
-        }
-        if let Some(p) = producer
-            && slice.name != p
-        {
-            continue;
-        }
-        if raw.is_empty() {
-            continue; // a bus-built set has no verbatim TOML to serve
-        }
-        let introspect = with_base(base, format!("v1/{origin}/@rpc/{}/introspect", slice.name));
-        up.serve(&introspect).await?;
-        // The spelling declared, as a producer MUST (RFC 08 §6, v1.44).
-        bodies.push((raw.as_bytes().to_vec(), format.media_type()));
-        if let Some(set) = schema_set {
-            let describe = with_base(base, format!("v1/{origin}/@rpc/{}/describe", slice.name));
-            up.serve(&describe).await?;
-            bodies.push((set.to_json().into_bytes(), "application/json"));
-        }
-    }
-    // Drive each declared responder: every incoming query gets its static
-    // answer, replied on the responder's own concrete key (RFC 05 §2.1).
-    let responders = up.without_alive();
-    let keys = responders.len();
-    let mut tasks = Vec::new();
-    for (responder, (body, encoding)) in responders.into_iter().zip(bodies) {
-        tasks.push(tokio::spawn(async move {
-            while let Some(query) = responder.next().await {
-                // Surfaced, not swallowed (#346), for the same reason
-                // `MockResponder` carries `ServedQuery::reply_error`: a mock
-                // whose answers never leave the process must say so, or its
-                // silence reads as service on the asking side (RFC 05 §3.1 —
-                // silence needs attribution, on the answering side too).
-                if let Err(e) = responder.reply(&query, body.clone(), Some(encoding)).await {
-                    tracing::warn!(key = %responder.key(), "mock producer reply failed: {e}");
-                }
-            }
-        }));
-    }
-    Ok(MockProducer { keys, tasks })
-}
-
-/// Run the plan: every entry publishes on its own schedule until the
-/// duration elapses. Bodies synthesize per tick and encode through a
-/// per-task [`DecoderRegistry`](zenkey::schema::decode::DecoderRegistry);
-/// a refused body is counted and reported.
-///
-/// No [`SchemaStore`]: the plan already carries every schema the run needs
-/// ([`build_plan`] is where the store is asked), and the parameter it used
-/// to take was discarded on the first line.
-///
-/// **Nothing outlives this call** (#326). The entries run in a
-/// [`JoinSet`](tokio::task::JoinSet), which aborts what it still holds when
-/// it is dropped, and the join loop shuts the set down — aborted *and*
-/// awaited — before it returns for any reason. A detached generator is
-/// synthetic traffic with no owner and nothing left to stop it before its own
-/// deadline (RFC 13 §5: the etiquette is the generator's, and a tool that has
-/// stopped reporting must also have stopped publishing). The same holds for
-/// cancelling this future: dropping the `JoinSet` aborts every entry.
-pub async fn run_gen(
-    fleet: &crate::Fleet<'_>,
-    plan: &[GenPlanEntry],
+/// An operation's entry: served over its template, answered with one
+/// synthesized response, or `internal` when none can be made.
+fn operation_entry(
     spec: &GenSpec,
+    rev: &Revision,
+    r: &Resource,
+    op: &zenkey_model::contract::Operation,
+    synth: &Synth,
+) -> GenPlanEntry {
+    let made = synth.sample(rev, r, Member::Response, 0);
+    let mut note = match &made {
+        Ok(_) => format!(
+            "answers each call with one synthesized response{}",
+            if op.replies == Replies::Many && op.summary.is_some() {
+                ", then its summary"
+            } else {
+                ""
+            }
+        ),
+        Err(e) => format!("cannot synthesize a response ({e}): answers `internal`"),
+    };
+    if r.template.has_params() {
+        note.push_str("; served over its whole template");
+    }
+    GenPlanEntry {
+        iface: rev.iface().to_string(),
+        resource: zk2::implementation::resource_name(r),
+        kind: Kind::Operation,
+        key: pattern_of(&spec.address, rev.iface(), r),
+        values: BTreeMap::new(),
+        members: MemberSource::Fixed,
+        declared: declared(rev, r, Member::Response),
+        encoding: zk2::writer::wire_encoding(&op.response, op.encoding, &Bindings::new())
+            .to_string(),
+        qos: None,
+        rate_hz: None,
+        events_cap: None,
+        member_token: false,
+        note: Some(note),
+    }
+}
+
+/// The resource an entry names, and its revision.
+fn lookup<'a>(spec: &'a GenSpec, e: &GenPlanEntry) -> Result<(&'a Arc<Revision>, &'a Resource)> {
+    spec.revisions
+        .iter()
+        .find(|rev| rev.iface().to_string() == e.iface)
+        .and_then(|rev| {
+            rev.contract()
+                .resources
+                .iter()
+                .find(|r| zk2::implementation::resource_name(r) == e.resource)
+                .map(|r| (rev, r))
+        })
+        .ok_or_else(|| {
+            Error::Internal(format!(
+                "the plan names {} {}, which no contract declares",
+                e.iface, e.resource
+            ))
+        })
+}
+
+/// One data entry's writer.
+enum Out {
+    Stream(zk2::writer::Writer),
+    State(zk2::state::StateWriter),
+    Event(zk2::writer::EventWriter),
+}
+
+/// What one entry's task did.
+#[derive(Default)]
+struct Tally {
+    sent: u64,
+    failed: u64,
+    errors: Vec<String>,
+}
+
+impl Tally {
+    fn fail(&mut self, e: String) {
+        self.failed += 1;
+        if self.errors.len() < 3 {
+            self.errors.push(e);
+        }
+    }
+}
+
+/// The answer an operation entry is served with.
+fn answer_of(rev: &Revision, r: &Resource, synth: &Synth) -> MockAnswer {
+    let Body::Operation(op) = &r.body else {
+        return MockAnswer::Refuse(OpError::internal("not an operation"));
+    };
+    let reply = synth.sample(rev, r, Member::Response, 0);
+    let summary = match (&op.replies, &op.summary) {
+        (Replies::Many, Some(_)) => Some(synth.sample(rev, r, Member::Summary, 0)),
+        _ => None,
+    };
+    match (reply, summary) {
+        (Ok(reply), None) => MockAnswer::Reply {
+            bytes: reply.bytes,
+            summary: None,
+        },
+        (Ok(reply), Some(Ok(s))) => MockAnswer::Reply {
+            bytes: reply.bytes,
+            summary: Some(s.bytes),
+        },
+        (Err(why), _) | (_, Some(Err(why))) => MockAnswer::Refuse(OpError::internal(format!(
+            "this mock cannot synthesize its answer: {why}"
+        ))),
+    }
+}
+
+/// Brings the mock owner up and runs the plan until the duration elapses,
+/// then takes it down: its operation servers, then its tokens and
+/// queryables.
+///
+/// The caller has checked the address ([`crate::tape::mock::check_address`])
+/// and printed the plan. `on_up` is told the instance id once the service
+/// is up, before the first scheduled sample.
+///
+/// **Nothing outlives this call** (#326, kept from v1): the entries run in a
+/// `JoinSet` that is shut down, aborted *and* awaited, before it returns
+/// for any reason, and dropping the future aborts every entry.
+pub async fn run_gen(
+    session: &Session,
+    spec: &GenSpec,
+    plan: &GenPlan,
+    on_up: impl FnOnce(&str),
 ) -> Result<GenReport> {
-    let session = fleet.session();
-
     let synth = Synth::new(spec.seed);
-
-    let deadline = tokio::time::Instant::now() + spec.duration;
-
-    let total_s = spec.duration.as_secs_f64();
-
-    let mut tasks: tokio::task::JoinSet<(usize, u64, u64, Vec<String>)> =
-        tokio::task::JoinSet::new();
-
-    for (i, entry) in plan.iter().enumerate() {
-        let entry = entry.clone();
-        let session = session.clone();
-        // Per-entry marker: a faulted sample additionally carries
-        // `fault=<kind>` (RFC 09 §5.3), so a capture or doctor listen can
-        // attribute exactly which deviation it saw.
-        let marker = synthetic_marker(&spec.tool, &spec.origin, entry.fault.map(Fault::as_str));
-        let store_encoding = entry.encoding.clone();
-        let pattern = spec.pattern;
-        let seed = spec.seed;
-        tasks.spawn(async move {
-            let registry = zenkey::schema::decode::DecoderRegistry::new();
-            let started = tokio::time::Instant::now();
-            let mut sent = 0u64;
-            let mut refused = 0u64;
-            let mut first_errors: Vec<String> = Vec::new();
-            let record_err = |e: String, refused: &mut u64, errs: &mut Vec<String>| {
-                *refused += 1;
-                if errs.len() < 3 {
-                    errs.push(e);
-                }
-            };
-            // A long-lived publication for repeated keys; events declare
-            // per send on their unique key.
-            let publication = if entry.unique_chunk.is_none() {
-                match crate::bus::write::declare_publication(
-                    &session,
-                    &entry.key,
-                    QosProfile::from_name(&entry.qos).unwrap_or(QosProfile::Sampled),
-                    entry.encoding.as_deref(),
-                )
-                .await
-                {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        return (i, 0, 1, vec![format!("{}: declare: {e}", entry.key)]);
+    let held = capabilities(
+        spec.revisions
+            .iter()
+            .flat_map(|r| r.contract().resources.iter()),
+    );
+    let mut b = zk2::ServiceBuilder::new(
+        session,
+        config(
+            &spec.address,
+            held,
+            &spec.bindings,
+            marker(&spec.tool, Some(spec.seed)),
+        ),
+    );
+    for rev in &spec.revisions {
+        b.implement(implementation(rev)?)
+            .map_err(|e| runtime_error(rev, e))?;
+    }
+    let calls = Arc::new(AtomicU64::new(0));
+    let mut servers = Vec::new();
+    let mut outs: Vec<(usize, Out)> = Vec::new();
+    let mut first_errors = Vec::new();
+    let mut failed = 0u64;
+    let mut sent = 0u64;
+    for (i, e) in plan.entries.iter().enumerate() {
+        let (rev, r) = lookup(spec, e)?;
+        let iface = rev.iface();
+        if r.kind == Kind::Operation {
+            let answer = answer_of(rev, r, &synth);
+            servers.push(serve_answer(&mut b, rev, r, answer, Arc::clone(&calls), None).await?);
+            continue;
+        }
+        if e.rate_hz.is_none() {
+            // Unsynthesizable: exposed, so the service starts, and silent.
+            b.expose(iface, &e.resource)
+                .map_err(|err| runtime_error(rev, err))?;
+            continue;
+        }
+        let out = match r.kind {
+            Kind::State => {
+                let w = b
+                    .declare_state_writer(iface, &e.resource, &e.values)
+                    .await
+                    .map_err(|err| runtime_error(rev, err))?;
+                // A state value held at start goes out before the tokens
+                // (§8.2), so a GET made when they appear finds it.
+                let first = synth.sample(rev, r, Member::Type, 0);
+                match first {
+                    Ok(s) => match w.put(s.bytes).await {
+                        Ok(_) => sent += 1,
+                        Err(err) => {
+                            failed += 1;
+                            first_errors.push(format!("{}: {err}", e.key));
+                        }
+                    },
+                    Err(why) => {
+                        failed += 1;
+                        first_errors.push(format!("{}: {why}", e.key));
                     }
                 }
-            } else {
-                None
-            };
+                Out::State(w)
+            }
+            Kind::Event => Out::Event(
+                b.event_writer(iface, &e.resource, &e.values)
+                    .map_err(|err| runtime_error(rev, err))?,
+            ),
+            _ => Out::Stream(
+                b.declare_writer(iface, &e.resource, &e.values)
+                    .await
+                    .map_err(|err| runtime_error(rev, err))?,
+            ),
+        };
+        outs.push((i, out));
+    }
+    let mut service = b
+        .start()
+        .await
+        .map_err(|e| runtime_error(&spec.revisions[0], e))?;
+    // A member exists from its first declaration (§8.1): one token per
+    // value of the template that declares `epoch`.
+    let mut members = BTreeSet::new();
+    for e in plan.entries.iter().filter(|e| e.member_token) {
+        let (rev, r) = lookup(spec, e)?;
+        let Some(epoch) = &r.epoch else { continue };
+        let Some(value) = e.values.get(epoch).and_then(|v| v.first()) else {
+            continue;
+        };
+        if members.insert((rev.iface().clone(), value.clone())) {
+            service
+                .declare_member(rev.iface(), value)
+                .await
+                .map_err(|err| runtime_error(rev, err))?;
+        }
+    }
+    on_up(&service.instance().to_string());
 
-            let base_interval = Duration::from_secs_f64(1.0 / entry.rate_hz);
-            let mut tick: u64 = 0;
+    let deadline = tokio::time::Instant::now() + spec.duration;
+    let mut tasks: tokio::task::JoinSet<(usize, Tally)> = tokio::task::JoinSet::new();
+    for (i, out) in outs {
+        let e = plan.entries[i].clone();
+        let (rev, r) = lookup(spec, &e)?;
+        let (rev, r) = (Arc::clone(rev), r.clone());
+        let (pattern, seed, total) = (spec.pattern, spec.seed, spec.duration.as_secs_f64());
+        tasks.spawn(async move {
+            let mut tally = Tally::default();
+            let rate = e.rate_hz.unwrap_or(1.0);
+            let base = Duration::from_secs_f64(1.0 / rate);
+            let started = tokio::time::Instant::now();
             let run_over = tokio::time::sleep_until(deadline);
             tokio::pin!(run_over);
+            // A state's tick 0 went out before start: its first re-put
+            // waits one interval.
+            let state = matches!(out, Out::State(_));
+            let mut tick = u64::from(state);
+            if state {
+                tokio::select! {
+                    () = tokio::time::sleep(base) => {}
+                    () = &mut run_over => return (i, tally),
+                }
+            }
             loop {
-                if let Some(cap) = entry.events_cap
-                    && sent >= cap
-                {
-                    // The declared budget is spent; the entry idles out the
-                    // rest of the run rather than out-shouting the registry —
-                    // on the run's own timer, not a second one.
+                if e.events_cap.is_some_and(|cap| tally.sent >= cap) {
                     (&mut run_over).await;
                     break;
                 }
-                // Body: synthesize + encode, or the labelled placeholder.
-                let bytes = match &entry.schema {
-                    Some(schema) => match synth.instance(schema, tick) {
-                        Some(value) => {
-                            let wire = zenkey::schema::WireEncoding::from_encoding_str(
-                                store_encoding.as_deref().unwrap_or("application/json"),
-                            );
-                            match registry.encode(schema, &value, &wire) {
-                                Ok(b) => b,
-                                Err(e) => {
-                                    record_err(
-                                        format!("{}: encode: {e}", entry.key),
-                                        &mut refused,
-                                        &mut first_errors,
-                                    );
-                                    tick += 1;
-                                    continue;
+                match synth.sample(&rev, &r, Member::Type, tick) {
+                    Ok(s) => {
+                        let put = match &out {
+                            Out::State(w) => w.put(s.bytes).await.map(|_| ()),
+                            Out::Event(w) => w.put(s.bytes).await.map(|_| ()),
+                            Out::Stream(w) => {
+                                match synth.sample(&rev, &r, Member::Attachment, tick) {
+                                    Ok(a) => w.put_with(s.bytes, Some(a.bytes)).await,
+                                    Err(_) => w.put(s.bytes).await,
                                 }
                             }
-                        }
-                        None => b"{}".to_vec(),
-                    },
-                    None => b"{}".to_vec(),
-                };
-                // The fault (if any) perturbs the valid bytes post-encode, so
-                // the deviation bypasses the validating encoder that made them
-                // (#163). Key/QoS/encoding faults were already baked into the
-                // entry at plan time; here ride the body and timestamp faults.
-                let bytes = match entry.fault {
-                    Some(f) => f.perturb_body(bytes),
-                    None => bytes,
-                };
-                // Valid samples carry an HLC timestamp (state LWW, RFC 04 §4);
-                // the `unstamped` fault omits it, the one deviation a doctor
-                // freshness check can then catch.
-                let stamp = if entry.fault.map(Fault::drops_timestamp).unwrap_or(false) {
-                    None
-                } else {
-                    Some(session.new_timestamp())
-                };
-                let outcome = match &publication {
-                    Some(p) => p.send_stamped(bytes, Some(marker.clone()), stamp).await,
-                    None => {
-                        // Events: a fresh write-once key per send.
-                        let key = unique_key(&entry, seed, sent);
-                        match crate::bus::write::declare_publication(
-                            &session,
-                            &key,
-                            QosProfile::from_name(&entry.qos).unwrap_or(QosProfile::Sampled),
-                            entry.encoding.as_deref(),
-                        )
-                        .await
-                        {
-                            Ok(p) => {
-                                let r = p.send_stamped(bytes, Some(marker.clone()), stamp).await;
-                                let _ = p.undeclare().await;
-                                r
-                            }
-                            Err(e) => Err(e),
+                        };
+                        match put {
+                            Ok(()) => tally.sent += 1,
+                            Err(err) => tally.fail(format!("{}: {err}", e.key)),
                         }
                     }
-                };
-                match outcome {
-                    Ok(()) => sent += 1,
-                    Err(e) => record_err(
-                        format!("{}: send: {e}", entry.key),
-                        &mut refused,
-                        &mut first_errors,
-                    ),
+                    Err(why) => tally.fail(format!("{}: {why}", e.key)),
                 }
                 tick += 1;
-
-                // Pattern-shaped pacing, all deterministic.
                 let interval = match pattern {
-                    GenPattern::Steady => base_interval,
-                    GenPattern::Jitter => {
-                        let f = 0.7 + 0.6 * halton(seed ^ (i as u64) ^ tick);
-                        base_interval.mul_f64(f)
-                    }
+                    GenPattern::Steady => base,
+                    GenPattern::Jitter => base.mul_f64(0.7 + 0.6 * halton(seed ^ i as u64 ^ tick)),
                     GenPattern::Burst => {
-                        let per_burst = entry.rate_hz.ceil().max(1.0) as u64;
-                        if tick.is_multiple_of(per_burst) {
+                        if tick.is_multiple_of(rate.ceil().max(1.0) as u64) {
                             Duration::from_secs(1)
                         } else {
                             Duration::ZERO
                         }
                     }
                     GenPattern::Ramp => {
-                        let progress = (started.elapsed().as_secs_f64() / total_s).clamp(0.05, 1.0);
-                        base_interval.div_f64(progress)
+                        let progress = (started.elapsed().as_secs_f64() / total).clamp(0.05, 1.0);
+                        base.div_f64(progress)
                     }
                 };
-                // The run's own deadline is one timer (#346); the interval
-                // is genuinely per-iteration, because it moves — `Ramp`
-                // recomputes it every pass.
                 tokio::select! {
-                    _ = tokio::time::sleep(interval) => {}
+                    () = tokio::time::sleep(interval) => {}
                     () = &mut run_over => break,
                 }
                 if tokio::time::Instant::now() >= deadline {
                     break;
                 }
             }
-            if let Some(p) = publication {
-                let _ = p.undeclare().await;
-            }
-            (i, sent, refused, first_errors)
+            (i, tally)
         });
     }
-
-    // Joined in completion order, aggregated in plan order: the report's
-    // `first_errors` names the plan's first entries to complain, not the
-    // scheduler's.
-    let mut done: Vec<Option<(u64, u64, Vec<String>)>> = vec![None; plan.len()];
-    let mut failed: Option<Error> = None;
+    // Joined in completion order, reported in plan order.
+    let mut done: BTreeMap<usize, Tally> = BTreeMap::new();
+    let mut fatal = None;
     while let Some(joined) = tasks.join_next().await {
         match joined {
-            Ok((i, s, r, errs)) => done[i] = Some((s, r, errs)),
+            Ok((i, t)) => {
+                done.insert(i, t);
+            }
             Err(e) => {
-                failed = Some(Error::Internal(format!("a gen task did not join: {e}")));
+                fatal = Some(Error::Internal(format!("a gen task did not join: {e}")));
                 break;
             }
         }
     }
-    // Whatever is still running is aborted **and waited for** before this
-    // returns — on the happy path the set is already empty, and on a panic
-    // this is what keeps the surviving entries from publishing on into a run
-    // nobody is reporting (#326).
     tasks.shutdown().await;
-    if let Some(e) = failed {
+    let instance = service.instance().to_string();
+    // Down: the operation servers, then the tokens and queryables.
+    for s in servers {
+        if let Err(e) = s.undeclare().await {
+            tracing::warn!("a mock operation did not undeclare: {e}");
+        }
+    }
+    let closed = service.close().await;
+    if let Some(e) = fatal {
         return Err(e);
     }
-
-    let mut sent = 0u64;
-    let mut refused = 0u64;
-    let mut first_errors = Vec::new();
-    for (s, r, errs) in done.into_iter().flatten() {
-        sent += s;
-        refused += r;
-        for e in errs {
+    closed.map_err(|e| Error::bus("undeclare", "the mock owner", e))?;
+    for t in done.into_values() {
+        sent += t.sent;
+        failed += t.failed;
+        for e in t.errors {
             if first_errors.len() < 5 {
                 first_errors.push(e);
             }
         }
     }
     Ok(GenReport {
+        address: spec.address.to_string(),
+        instance,
         duration_s: spec.duration.as_secs_f64(),
-        entries: plan.len(),
+        entries: plan.entries.len(),
         sent,
-        refused,
+        calls: calls.load(Ordering::SeqCst),
+        failed,
         first_errors,
     })
 }
 
-/// Events keys are write-once: rebuild the key with the unique chunk set to
-/// a fresh, deterministic, chunk-safe id.
-fn unique_key(entry: &GenPlanEntry, seed: u64, n: u64) -> String {
-    let Some(idx) = entry.unique_chunk else {
-        return entry.key.clone();
-    };
-    let id = format!("{:012x}{:04x}", seed & 0xffff_ffff_ffff, n & 0xffff);
-    entry
-        .key
-        .split('/')
-        .enumerate()
-        .map(|(i, c)| if i == idx { id.as_str() } else { c })
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// A low-discrepancy pseudo-random in [0,1) — deterministic, no RNG dep.
+/// A low-discrepancy pseudo-random in [0,1): deterministic, no RNG.
 fn halton(n: u64) -> f64 {
     let mut f = 1.0;
     let mut r = 0.0;
-    let mut i = n.wrapping_mul(2654435761) % 4096 + 1;
+    let mut i = n.wrapping_mul(2_654_435_761) % 4096 + 1;
     while i > 0 {
         f /= 2.0;
         r += f * (i % 2) as f64;
@@ -799,237 +778,158 @@ fn halton(n: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::catalog::ContractSet;
 
-    const SLICES: &str = r#"
-[registry]
-version = "1.0"
-app = "t"
-convention = 1
-[producer]
-name = "demo"
-[[subject]]
-path = "health"
-class = "state"
-type = "Health"
-qos = "transition"
-ttl_s = 30
-[[subject]]
-path = "cpu/{core}/usage"
-class = "telemetry"
-type = "Point"
-[[subject]]
-path = "boom/{id}"
-class = "events"
-type = "Boom"
-rate = "rare"
-"#;
+    fn examples(dir: &str) -> ContractSet {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/zk2")
+            .join(dir);
+        ContractSet::load_path(&root).0
+    }
 
-    fn spec() -> GenSpec {
+    fn revision(set: &ContractSet, iface: &str) -> Arc<Revision> {
+        let iface: IfaceId = iface.parse().unwrap();
+        Arc::clone(set.of_iface(&iface).next().expect("in the examples"))
+    }
+
+    fn spec(members: Vec<MemberArg>) -> GenSpec {
+        let set = examples("tcgui");
         GenSpec {
-            origin: "h-abababababab".into(),
-            producer: None,
-            subject: None,
-            vars: vec![("core".into(), "cpu0".into())],
+            address: "host-a/tc".parse().unwrap(),
+            revisions: vec![revision(&set, "tc.netif.v1"), revision(&set, "tc.netem.v1")],
+            members,
+            bindings: BTreeMap::new(),
             rate_hz: None,
             pattern: GenPattern::Steady,
             duration: Duration::from_secs(10),
             seed: 42,
             tool: "zenctl gen".into(),
-            faults: vec![],
         }
     }
 
-    async fn plan_for(base: &str) -> Vec<GenPlanEntry> {
-        let slices =
-            SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("fixture parses")]);
-        let store = SchemaStore::new(base, Duration::from_millis(100));
-        let set = SchemaSet::parse(
-            r#"{"schema_version":1,"app":"t","types":{
-                "Health":{"kind":"json-schema","hash":"","schema":{"type":"object",
-                    "properties":{"ok":{"type":"boolean"}}}}}}"#,
-        )
-        .expect("set parses");
-        build_plan(None, &store, &slices, base, Some(&set), &spec())
-            .await
-            .expect("plan builds")
-    }
-
-    /// The plan is the registry, resolved: declared QoS with its source,
-    /// class-driven rates (state ttl/2, events inside their budget), the
-    /// schema ladder's rung named per entry, vars filled as given or
-    /// synthesized with a note.
-    #[tokio::test]
-    async fn the_plan_resolves_declared_qos_rates_and_the_schema_ladder() {
-        let plan = plan_for("").await;
-        assert_eq!(plan.len(), 3);
-
-        let health = &plan[0];
-        assert_eq!(health.key, "v1/h-abababababab/state/demo/health");
-        assert_eq!(
-            (health.qos.as_str(), health.qos_source),
-            ("transition", "declared")
-        );
-        assert!(
-            (health.rate_hz - 2.0 / 30.0).abs() < 1e-9,
-            "{}",
-            health.rate_hz
-        );
-        assert_eq!(health.body_source, "schema-set");
-        assert!(health.note.is_none());
-
-        let cpu = &plan[1];
-        assert_eq!(cpu.key, "v1/h-abababababab/telemetry/demo/cpu/cpu0/usage");
-        assert_eq!((cpu.qos.as_str(), cpu.qos_source), ("sampled", "default"));
-        assert_eq!(cpu.rate_hz, 1.0);
-        assert_eq!(cpu.body_source, "placeholder");
-        assert!(
-            cpu.note.as_deref().unwrap_or("").contains("no schema"),
-            "{:?}",
-            cpu.note
-        );
-
-        let boom = &plan[2];
-        assert_eq!(boom.class, "events");
-        assert_eq!(boom.events_cap, Some(1), "rare = 1/h caps a 10s run at 1");
-        assert!(boom.unique_chunk.is_some(), "events keys are write-once");
-        assert!(
-            boom.note.as_deref().unwrap_or("").contains("{id}"),
-            "the synthesized var is stated: {:?}",
-            boom.note
-        );
-    }
-
-    /// The unique chunk lands where the `{id}` was, under any base depth.
-    #[tokio::test]
-    async fn events_keys_get_a_fresh_id_where_the_var_was() {
-        for base in ["", "acme", "acme/fleet-a"] {
-            let plan = plan_for(base).await;
-            let boom = plan.iter().find(|e| e.class == "events").unwrap();
-            let k1 = unique_key(boom, 42, 0);
-            let k2 = unique_key(boom, 42, 1);
-            assert_ne!(k1, k2, "each send gets its own key ({base:?})");
-            let tail1: Vec<&str> = k1.split('/').collect();
-            let tail2: Vec<&str> = k2.split('/').collect();
-            assert_eq!(tail1.len(), tail2.len());
-            let diffs: Vec<usize> = (0..tail1.len()).filter(|&i| tail1[i] != tail2[i]).collect();
-            assert_eq!(diffs.len(), 1, "only the id chunk moves ({base:?})");
-            assert!(
-                k1.ends_with(tail1[diffs[0]]),
-                "the id is the declared {{id}} position ({base:?}): {k1}"
-            );
-        }
-    }
-
-    /// The marker is exactly the RFC 09 §5.3 shape #161's detector reads.
+    /// Every stream, state and event resource has an entry per member,
+    /// every operation one; keys are the runtime's, QoS the contract's;
+    /// defaults are stated.
     #[test]
-    fn the_marker_round_trips_through_the_doctors_detector() {
-        let m = synthetic_marker("zenctl gen", "h-abababababab", None);
-        let v: serde_json::Value = serde_json::from_slice(&m).unwrap();
-        assert_eq!(v["synthetic"], true);
-        assert_eq!(v["tool"], "zenctl gen");
-        assert_eq!(v["origin"], "h-abababababab");
-        assert!(v.get("fault").is_none(), "no fault key unless injecting");
-        let f = synthetic_marker("zenctl gen", "h-abababababab", Some("truncate"));
-        let v: serde_json::Value = serde_json::from_slice(&f).unwrap();
-        assert_eq!(v["fault"], "truncate");
-    }
-
-    /// Every kind's CLI token round-trips, and an unknown kind is refused with
-    /// the vocabulary named (spray's decline precedent, applied to a flag).
-    #[test]
-    fn fault_kinds_parse_and_an_unknown_is_refused() {
-        for f in Fault::ALL {
-            assert_eq!(Fault::parse(f.as_str()).unwrap(), f);
-        }
-        let err = Fault::parse("scramble").unwrap_err().to_string();
-        assert!(err.contains("is not a known fault kind"), "{err}");
-        assert!(err.contains("truncate"), "the vocabulary is named: {err}");
-    }
-
-    /// With faults requested the plan expands to one variant per (subject ×
-    /// fault); each states its printable delta and bakes the static
-    /// perturbations (key/QoS/encoding) into its fields, leaving the body and
-    /// timestamp faults for send time.
-    #[tokio::test]
-    async fn faults_expand_the_plan_one_variant_per_kind_with_a_stated_delta() {
-        let slices =
-            SliceSet::from_slices(vec![zenkey::parse_slice(SLICES).expect("fixture parses")]);
-        let store = SchemaStore::new("", Duration::from_millis(100));
-        let mut spec = spec();
-        spec.faults = Fault::ALL.to_vec();
-        let plan = build_plan(None, &store, &slices, "", None, &spec)
-            .await
-            .expect("plan builds");
-        // Three subjects × seven faults.
-        assert_eq!(plan.len(), 3 * 7);
-        assert!(
-            plan.iter()
-                .all(|e| e.fault.is_some() && e.fault_delta.is_some()),
-            "every faulted entry names its kind and delta"
-        );
-
-        // The `health` state subject, one variant per kind — the static
-        // perturbations are visible in the fields.
-        let health: Vec<&GenPlanEntry> = plan
+    fn the_plan_covers_every_resource_with_the_contracts_qos() {
+        let plan = build_plan(&spec(vec![])).unwrap();
+        assert_eq!(plan.address, "host-a/tc");
+        assert_eq!(plan.marker["synthetic"], true);
+        let ns = plan
+            .entries
             .iter()
-            .filter(|e| e.key.starts_with("v1/h-abababababab/state/demo/health"))
+            .find(|e| e.resource == "state/namespaces")
+            .unwrap();
+        assert_eq!(ns.key, "zk2/host-a/tc/tc.netif.v1/state/namespaces");
+        assert_eq!(ns.members, MemberSource::Fixed);
+        assert_eq!(ns.rate_hz, Some(0.5));
+        let q = ns.qos.unwrap();
+        assert_eq!(
+            (q.reliability, q.congestion),
+            (
+                zenkey_model::authoring::Reliability::Reliable,
+                zenkey_model::authoring::Congestion::Block
+            ),
+            "state's defaults (§2.4)"
+        );
+        let bw: Vec<&GenPlanEntry> = plan
+            .entries
+            .iter()
+            .filter(|e| e.resource == "stream/bandwidth/{ns}/{iface}")
             .collect();
-        assert_eq!(health.len(), 7);
-
-        let unregistered = health
-            .iter()
-            .find(|e| e.fault == Some(Fault::UnregisteredKey))
-            .unwrap();
+        assert_eq!(bw.len(), DEFAULT_MEMBERS);
         assert_eq!(
-            unregistered.key,
-            "v1/h-abababababab/state/demo/health/unregistered"
+            bw[0].key,
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/ns-1/iface-1"
         );
-
-        let wrong_qos = health
+        assert_eq!(bw[0].members, MemberSource::Default);
+        assert!(bw[0].note.as_deref().unwrap().contains("--member"));
+        let diag = plan
+            .entries
             .iter()
-            .find(|e| e.fault == Some(Fault::WrongQos))
+            .find(|e| e.resource == "@op/diagnostics")
             .unwrap();
-        assert_ne!(
-            wrong_qos.qos, "transition",
-            "the declared profile is not honoured"
-        );
-
-        let missing_enc = health
+        assert_eq!(diag.kind, Kind::Operation);
+        assert_eq!(diag.qos, None);
+        assert_eq!(diag.rate_hz, None);
+        assert_eq!(diag.declared, "json:DiagnosticsResponse");
+        let set = plan
+            .entries
             .iter()
-            .find(|e| e.fault == Some(Fault::MissingEncoding))
+            .find(|e| e.resource == "@op/interfaces/{ns}/{iface}/set")
             .unwrap();
-        assert!(
-            missing_enc.encoding.is_none(),
-            "the wire encoding is dropped"
-        );
-
-        // The body/timestamp faults leave the entry's fields at the valid
-        // resolution — they ride at send time.
-        let truncate = health
+        assert_eq!(set.key, "zk2/host-a/tc/tc.netif.v1/@op/interfaces/*/*/set");
+        let events: Vec<&GenPlanEntry> = plan
+            .entries
             .iter()
-            .find(|e| e.fault == Some(Fault::Truncate))
-            .unwrap();
-        assert_eq!(truncate.qos, "transition");
-        assert!(truncate.key.ends_with("/health"));
+            .filter(|e| e.kind == Kind::Event)
+            .collect();
+        assert!(!events.is_empty(), "tc.netem.v1 declares events");
+        for e in events {
+            let cap = e.events_cap.expect("an event is capped");
+            assert!(e.rate_hz.unwrap() <= 1.0 && cap >= 1, "{e:?}");
+        }
     }
 
-    /// The post-encode body perturbations produce exactly the deviation each
-    /// kind names — and never route through the validating encoder (that is
-    /// why they can violate the schema at all).
+    /// `--member` names the members, in template order; one that does not
+    /// fit, names nothing, or names an untemplated resource or an
+    /// operation is refused.
     #[test]
-    fn body_faults_perturb_the_encoded_bytes() {
-        let valid = br#"{"ok":true,"load":3}"#.to_vec();
+    fn members_are_given_or_refused() {
+        let arg = MemberArg::parse("bandwidth/{ns}/{iface}=default/eth0,lab/eth1").unwrap();
+        let plan = build_plan(&spec(vec![arg])).unwrap();
+        let keys: Vec<&str> = plan
+            .entries
+            .iter()
+            .filter(|e| e.resource == "stream/bandwidth/{ns}/{iface}")
+            .map(|e| e.key.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
+                "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/lab/eth1"
+            ]
+        );
+        for bad in [
+            "bandwidth/{ns}/{iface}=eth0",
+            "namespaces=x",
+            "nope/{x}=a",
+            "interfaces/{ns}/{iface}/set=a/b",
+        ] {
+            let e = build_plan(&spec(vec![MemberArg::parse(bad).unwrap()])).unwrap_err();
+            assert!(e.is_unaskable(), "{bad}: {e}");
+        }
+        assert!(MemberArg::parse("no-equals").is_err());
+        assert!(MemberArg::parse("x=").is_err());
+    }
 
-        let truncated = Fault::Truncate.perturb_body(valid.clone());
-        assert_eq!(truncated.len(), valid.len() / 2, "half the bytes survive");
+    /// A required role unbound is refused before anything is declared
+    /// (R1), and a binding for a role nobody declares too.
+    #[test]
+    fn a_required_role_must_be_bound() {
+        let set = examples("walkthrough");
+        let mut s = spec(vec![]);
+        s.revisions = vec![revision(&set, "detections.v1")];
+        let e = build_plan(&s).unwrap_err();
+        assert!(e.to_string().contains("--bind input="), "{e}");
+        s.bindings.insert("input".into(), vec!["v1/cam".into()]);
+        assert!(build_plan(&s).is_ok());
+        s.bindings.insert("nobody".into(), vec!["v1/cam".into()]);
+        assert!(
+            build_plan(&s)
+                .unwrap_err()
+                .to_string()
+                .contains("no implemented contract")
+        );
+    }
 
-        let wrong = Fault::WrongType.perturb_body(valid.clone());
-        let v: serde_json::Value = serde_json::from_slice(&wrong).unwrap();
-        assert!(v.is_string(), "a bare string where an object was declared");
-
-        let extra = Fault::ExtraField.perturb_body(valid.clone());
-        let v: serde_json::Value = serde_json::from_slice(&extra).unwrap();
-        assert_eq!(v["_fault"], true, "the undeclared field rides");
-        assert_eq!(v["ok"], true, "the valid fields survive alongside it");
+    #[test]
+    fn an_events_cap_follows_its_rate_over_the_run() {
+        let ten = Duration::from_secs(10);
+        assert_eq!(events_cap(Rate::Rare, ten), 1);
+        assert_eq!(events_cap(Rate::Low, Duration::from_secs(120)), 2);
+        assert_eq!(events_cap(Rate::Burst(3600), ten), 10);
+        assert_eq!(events_cap(Rate::Burst(2), Duration::from_secs(36_000)), 2);
     }
 }

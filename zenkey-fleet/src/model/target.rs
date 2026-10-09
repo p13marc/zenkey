@@ -254,14 +254,52 @@ pub fn plan_call(
 /// The value is not checked against its JSON Schema: the owner refuses a
 /// request that does not decode as `invalid_request` (§5.1).
 pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Result<Vec<u8>> {
-    let what = format!("the request for {}", plan.name);
-    let ty = &plan.operation.request;
+    encode_as(
+        revision,
+        &plan.operation.request,
+        plan.operation.encoding,
+        &format!("the request for {}", plan.name),
+        "request",
+        input,
+    )
+}
+
+/// A reply of operation `r`'s `response` type, from what the operator
+/// typed, encoded as [`encode_request`] encodes a request: `zenctl serve`'s
+/// fixed reply (#612, FJ8a). Not checked against its JSON Schema either: a
+/// mock that answers what its schema refuses is the operator's to mean.
+pub fn encode_response(revision: &Revision, r: &Resource, input: &[u8]) -> Result<Vec<u8>> {
+    let name = zk2::implementation::resource_name(r);
+    let Body::Operation(op) = &r.body else {
+        return Err(Error::unaskable(&name, "not an operation"));
+    };
+    encode_as(
+        revision,
+        &op.response,
+        op.encoding,
+        &format!("the reply of {name}"),
+        "reply",
+        input,
+    )
+}
+
+/// A value of type `ty`, from JSON text (or a raw type's bytes as given),
+/// in the wire form §7.2 gives it; `what` names it in a refusal, and
+/// `noun` says what it is.
+fn encode_as(
+    revision: &Revision,
+    ty: &TypeId,
+    encoding: Option<zenkey_model::authoring::Encoding>,
+    what: &str,
+    noun: &str,
+    input: &[u8],
+) -> Result<Vec<u8>> {
     let json = || -> Result<serde_json::Value> {
         serde_json::from_slice(input).map_err(|e| {
             Error::unaskable(
-                &what,
+                what,
                 format!(
-                    "not JSON ({e}); a {} request is given as JSON",
+                    "not JSON ({e}); a {} {noun} is given as JSON",
                     kind_word(ty)
                 ),
             )
@@ -271,8 +309,8 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
         TypeId::Raw { .. } => Ok(input.to_vec()),
         TypeId::JsonSchema { .. } => {
             use zk2::codec::Codec as _;
-            zk2::codec::Json::<serde_json::Value>::encode(&json()?, plan.operation.encoding)
-                .map_err(|e| Error::unaskable(&what, e))
+            zk2::codec::Json::<serde_json::Value>::encode(&json()?, encoding)
+                .map_err(|e| Error::unaskable(what, e))
         }
         TypeId::Protobuf { name, schema } => {
             let value = json()?;
@@ -298,7 +336,7 @@ pub fn encode_request(revision: &Revision, plan: &CallPlan, input: &[u8]) -> Res
                 )
             })?;
             let msg = DynamicMessage::deserialize(desc, &value).map_err(|e| {
-                Error::unaskable(&what, format!("not a {name} in its JSON form: {e}"))
+                Error::unaskable(what, format!("not a {name} in its JSON form: {e}"))
             })?;
             Ok(zk2::prost::Message::encode_to_vec(&msg))
         }
