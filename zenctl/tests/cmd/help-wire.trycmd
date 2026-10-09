@@ -1437,7 +1437,7 @@ Options:
 $ zenctl gen --help
 Generate test traffic from the registry: a mock producer.
 
-Registry-driven (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers. The full plan prints BEFORE anything is published; every sample carries the RFC 09 §5.3 synthetic marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen window or a capture can tell this traffic from real. Events stay inside their declared rate budget on write-once keys. A run wider than 10 subjects needs --wide; faults need --i-know.
+Registry-driven (#162): every declared subject of a producer, schema-synthesized payloads, declared QoS, class-conscious rates — a mock producer for testing consumers. The full plan prints BEFORE anything is published; every sample carries the RFC 09 §5.3 synthetic marker ({"synthetic":true,"tool":…,"origin":…}), so a `check conform --for` window or a capture can tell this traffic from real. Events stay inside their declared rate budget on write-once keys. A run wider than 10 subjects needs --wide; faults need --i-know.
 
 Usage: zenctl gen [OPTIONS]
 

@@ -812,8 +812,8 @@ pub(crate) enum Command {
     /// schema-synthesized payloads, declared QoS, class-conscious rates — a
     /// mock producer for testing consumers. The full plan prints BEFORE
     /// anything is published; every sample carries the RFC 09 §5.3 synthetic
-    /// marker ({"synthetic":true,"tool":…,"origin":…}), so a doctor listen
-    /// window or a capture can tell this traffic from real. Events stay inside
+    /// marker ({"synthetic":true,"tool":…,"origin":…}), so a `check conform
+    /// --for` window or a capture can tell this traffic from real. Events stay inside
     /// their declared rate budget on write-once keys. A run wider than 10
     /// subjects needs --wide; faults need --i-know.
     Gen(GenArgs),
@@ -969,7 +969,7 @@ pub(crate) enum CheckCmd {
     /// exempt and says so — unless the device's registration document
     /// claims the capability (RFC 04 §5) — and from any other procedure it
     /// is not met (RFC 08 §6.1). Silence from a rostered origin is not met:
-    /// alive ⇒ callable (RFC 13 §2). Then the doctor's checks, scoped to the
+    /// alive ⇒ callable (RFC 13 §2). Then v1's registry checks, scoped to the
     /// producer: slice sync, describe totality, schema drift; with `--for`,
     /// each declared subject — a window proves presence, never absence, so a
     /// subject that did not speak is unknowable. With `--registry` the suite

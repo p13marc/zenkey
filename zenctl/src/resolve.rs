@@ -245,7 +245,7 @@ pub mod notes {
             crate::render::NoteKind::Silence,
             format!(
                 "no introspect slices on base {base:?} — an empty set is not a verdict (RFC 05 §3.1); \
-             `zenctl doctor --base {base:?}` says who is actually up.\n\
+             `zenctl admin graph` says who is actually attached.\n\
              (offline alternative: --registry <dir> with the app's registry TOMLs)"
             ),
         )
@@ -409,7 +409,7 @@ mod tests {
             1,
             "the citation is spent once — `Note::silence` would append a second: {line}"
         );
-        assert!(line.contains("doctor --base"), "{line}");
+        assert!(line.contains("admin graph"), "{line}");
         assert!(
             line.contains("--registry <dir>"),
             "the offline alternative rides along: {line}"
