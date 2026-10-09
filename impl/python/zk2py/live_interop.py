@@ -618,6 +618,7 @@ BRINGUP = "impl/python/interop/zk2py_bringup.v1.toml"
 TC = "impl/python/interop/zk2py_tc.v1.toml"
 SCAN = "impl/python/interop/zk2py_scan.v1.toml"
 BRINGUP_V1_1 = "impl/python/interop/rev/zk2py_bringup.v1.toml"
+ARCHIVE_STANDIN = "impl/python/interop/stand-in/archive.v1.toml"
 THRESHOLDS = "examples/zk2/zensight/zs.thresholds.v1.toml"
 DEFAULT_CONSUME = REPO / "target" / "debug" / "examples" / "consume"
 
@@ -1712,6 +1713,143 @@ def run_python_tool_rules(report: Report) -> None:
         r1.close()
 
 
+def run_python_016(report: Report) -> None:
+    """The rules 0.16 states, where zk2py's bus shows them (no access
+    control; R1's admin space on, read-only):
+    - §4.2 "A tool's S1 check": an owner in client mode under R1 is judged
+      by its stamp against meta.zid (clean); an owner whose own session is
+      a router, linked to R1, is unobservable, neither clean nor a finding;
+    - Appendix B: without the replier id, every admin answer is unverified,
+      and S4 and S1 are unobservable, never clean;
+    - §4.4: an owner's tokenless set (U22) is honoured, and refused for
+      archive.v1;
+    - §2.6: the retention is the bound the consumer applies on replay, here
+      against a stand-in storage that ignores `_time`, as the memory backend
+      does (spike S5)."""
+    import zenoh
+
+    from . import live
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+    from .owner import Owner as PyOwner, OwnerRefused
+
+    run = "zk2py tool rules (0.16): S1 from a tool, Appendix B, §4.4's tokenless archive, §2.6's replay bound"
+    r1, r1_endpoint, r1_zid = _r1(adminspace=True)
+    owners: list[Any] = []
+    try:
+        tool = live.open_client(r1_endpoint)
+        try:
+            echo = load_contract(REPO / ECHO)
+            client_owner = PyOwner("py-site", "s1-client", [echo], connect=r1_endpoint)
+            router_owner = PyOwner("py-site", "s1-router", [echo], router_connect=r1_endpoint)
+            for o in (client_owner, router_owner):
+                o.start()
+                owners.append(o)
+            _wait_alive(tool, "zk2/py-site/s1-$*/@zk/alive/**", 2)
+            readings = {}
+            for name, o in (("client", client_owner), ("router", router_owner)):
+                d = live.get_descriptor(tool, o.instance_key)
+                doc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+                st = live.get_state(tool, f"zk2/py-site/{o.service}/zk2py_echo.v1/state/health")
+                stamp = st.replies[0].stamp_id if len(st.replies) == 1 else None
+                readings[name] = (doc, stamp, live.s1_check(tool, doc, stamp))
+            doc, stamp, (verdict, why) = readings["client"]
+            report.check(run, "S1 from a tool (§4.2, 0.16): an owner in client mode under R1, which the tool "
+                              "verified, is judged by its stamp against meta.zid: clean",
+                         verdict == "clean", f"{verdict}: {why}; stamp {stamp}, meta.zid {doc.get('meta')}")
+            doc, stamp, (verdict, why) = readings["router"]
+            report.check(run, "S1 from a tool: an owner whose own session is a router, linked to R1 (R1's document "
+                              "lists it as a router), is unobservable, neither clean nor a finding",
+                         verdict == "unobservable" and "own router" in why
+                         and live.attribute_stamp(stamp, doc) == "owner",
+                         f"{verdict}: {why}; the stamp alone reads {live.attribute_stamp(stamp, doc)!r}")
+            # Appendix B (0.16): a binding without the replier id.
+            live.READ_REPLIER = False
+            try:
+                s4 = live.check_s4(tool)
+                cdoc, cstamp, _ = readings["client"]
+                s1 = live.s1_check(tool, cdoc, cstamp)
+            finally:
+                live.READ_REPLIER = True
+            report.check(run, "Appendix B (0.16): without Reply.replier_id every admin answer is unverified (no "
+                              "replier id): S4 and S1 are unobservable, never clean",
+                         s4.verdict == "unobservable" and s4.unverified
+                         and all(u[2] == "no replier id" for u in s4.unverified) and s1[0] == "unobservable",
+                         f"S4 {s4.verdict} ({len(s4.unverified)} unverified); S1 {s1[0]}: {s1[1]}")
+            # §4.4 and U22: the tokenless set.
+            tokenless = PyOwner("py-site", "quiet", [echo], connect=r1_endpoint, tokenless={"zk2py_echo.v1"})
+            tokenless.start()
+            owners.append(tokenless)
+            time.sleep(0.5)
+            pres = live.list_presence(tool, "zk2/py-site/quiet/@zk/**")
+            d = live.get_descriptor(tool, tokenless.instance_key)
+            tdoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+            report.check(run, "U22: an interface in the owner's tokenless set has no interface token, and the "
+                              "descriptor marks it \"token\": false, with no D code",
+                         len(pres.instances) == 1 and not pres.alive
+                         and [e.get("token") for e in tdoc.get("interfaces", [])] == [False]
+                         and check_descriptor(d[0].payload, [echo]) == [],
+                         f"{pres.reading}; token {[e.get('token') for e in tdoc.get('interfaces', [])]}")
+            archive = load_contract(REPO / ARCHIVE_STANDIN)
+            control = PyOwner("py-site", "archive", [archive], connect=r1_endpoint)
+            control.start()
+            owners.append(control)
+            time.sleep(0.5)
+            held = live.list_presence(tool, "zk2/py-site/archive/@zk/alive/archive.v1/**")
+            control.close()
+            owners.remove(control)
+            time.sleep(0.5)
+            refused = PyOwner("py-site", "archive", [archive], connect=r1_endpoint, tokenless={"archive.v1"})
+            try:
+                refused.start()
+                outcome = "started"
+                owners.append(refused)
+            except OwnerRefused as e:
+                outcome = f"refused: {e}"
+            time.sleep(0.5)
+            after = live.list_presence(tool, "zk2/py-site/archive/@zk/**")
+            report.check(run, "§4.4 (0.16): an archive holds its archive.v1 token, and an owner configured with "
+                              "archive.v1 in its tokenless set refuses to start, declaring nothing",
+                         len(held.alive) == 1 and outcome.startswith("refused") and after.count == 0
+                         and after.complete,
+                         f"control: {len(held.alive)} archive.v1 token; {outcome}; after: {after.reading}")
+        finally:
+            tool.close()
+        # §2.6 (0.16): the replay bound is the consumer's. A stand-in for a
+        # union storage answers every occurrence, ignoring `_time`.
+        helper = live.open_client(r1_endpoint)
+        consumer = live.open_client(r1_endpoint)
+        try:
+            now = int(time.time() * 1000)
+            base = "zk2/py-site/sensor/zk2py_ev.v1/events/alarm"
+            keys = [f"{base}/{live.new_ulid(now - k * 5000)}" for k in range(1, 501)] + \
+                   [f"{base}/{live.new_ulid(now - 3_660_000 - k * 5000)}" for k in range(1, 501)]
+
+            def answer(q) -> None:
+                for k in keys:
+                    q.reply(k, b"occurrence")
+
+            q = helper.declare_queryable("zk2/py-site/sensor/zk2py_ev.v1/events/**", zenoh.handlers.Callback(answer),
+                                         complete=False)
+            time.sleep(0.3)
+            try:
+                kept, dropped = live.replay_events(consumer, "zk2/*/*/*/events/**", 3600, now_ms=now)
+            finally:
+                q.undeclare()
+            report.check(run, "§2.6 (0.16): retention is the consumer's bound on replay: against a storage that "
+                              "prunes and filters nothing, the consumer keeps the 500 occurrences within 1 h by "
+                              "their ULID's time (state.md §8)",
+                         sorted(kept) == sorted(keys[:500]) and sorted(dropped) == sorted(keys[500:]),
+                         f"kept {len(kept)}, dropped {len(dropped)} of {len(keys)}")
+        finally:
+            helper.close()
+            consumer.close()
+    finally:
+        for o in owners:
+            o.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -1728,6 +1866,7 @@ def main(argv: list[str] | None = None) -> int:
         "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
         "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
+        "0.16": run_python_016,
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),

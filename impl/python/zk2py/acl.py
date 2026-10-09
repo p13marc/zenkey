@@ -297,5 +297,16 @@ def generate(principals: list[Principal], posture: str, *, egress_selectors: boo
     return out
 
 
+def may_call(g: Generated, principal: str, key: str) -> bool:
+    """Whether the generated grants let ``principal`` call ``key``: its
+    ingress ``query`` includes the key, and so does its egress ``reply``
+    (a value reply is checked against its own key, 0.14). §5.1 (0.16)
+    judges O3 from outside only under such grants. A tool cannot observe
+    its grants (§11.3), so this reads them from the deployment."""
+    asked = g.grants.get((principal, "query", INGRESS), [])
+    answered = g.grants.get((principal, "reply", EGRESS), [])
+    return any(_includes(k, key) for k in asked) and any(_includes(k, key) for k in answered)
+
+
 def to_json5(g: Generated) -> str:
     return json.dumps(g.block, indent=1, sort_keys=True)

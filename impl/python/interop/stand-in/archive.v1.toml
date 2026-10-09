@@ -1,0 +1,15 @@
+# A stand-in carrying the interface id `archive.v1`, for core §4.4's "An
+# archive MUST hold its archive.v1 interface token: it is never in the
+# tokenless set" (0.16). It is not the archive profile (#613), which the
+# spec does not define: zk2py needs only an interface with that id, to show
+# that its owner refuses to put it in a tokenless set. It must load with no
+# finding at all.
+[interface]
+name    = "archive"
+major   = 1
+minor   = 0
+summary = "a stand-in with archive.v1's interface id, not the profile"
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }
