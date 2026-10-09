@@ -1,14 +1,15 @@
 # zk2 core specification
 
-**Version 0.12** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.13** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
 operations runtime's decisions and the codegen's gaps, in 0.8 what
 implementing 0.7 found, a refused presence read first, in 0.9 the
 order of an owner's refusals and a scenario 0.8 got wrong, in 0.10 what
-a doctor can and cannot decide, in 0.11 how a zid is compared, and in 0.12
-who may answer the admin space).
+a doctor can and cannot decide, in 0.11 how a zid is compared, in 0.12
+who may answer the admin space, and in 0.13 how a far router is
+verified).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -634,10 +635,20 @@ cannot tell under `Latest` which replier answered.
     answer on the router's own key is the only answer. A tool that read it
     as the router's would report S4 clean.
   - **The rule.** A tool counts an answer as a router's only when the
-    reply's replier id is the zid the key names, and that zid is a router
-    its session is connected to, or the session itself. Any other answer is
-    **unverified**, and an unverified answer never contributes to a clean
-    verdict.
+    reply's replier id is the zid the key names, and that zid is a
+    **verified router**. Any other answer is **unverified**, and an
+    unverified answer never contributes to a clean verdict.
+  - **Verified routers, outward** (0.13, F-81):
+    - the routers the tool's session is connected to, and the session
+      itself, are verified;
+    - so is every zid a verified router's own answer lists among its
+      `sessions` with `whatami` `router`;
+    - and so on, until no new router is verified.
+
+    A client connects to one router at a time (Appendix B), so without
+    this rule a far router's honest answer could never count, and S4 could
+    never be clean in a deployment with two or more routers. A session that
+    is no router is listed as a `client` or `peer`, and never qualifies.
   - **The replier id** is unstable API in zenoh 1.10.1 (Appendix B), which
     the core does not require (§0). A tool that cannot read it holds every
     answer unverified.
@@ -2357,6 +2368,8 @@ Appendix B. These are the ones the rules above cite:
 - A reply error carries a payload and an encoding, and no key expression.
   `Reply::replier_id` is behind the `unstable` feature. It names the session
   that sent the reply, whatever key the reply is on.
+- A router's admin document (`@/<zid>/router`) lists its sessions, each
+  with the peer's zid and `whatami`: `router`, `peer` or `client`.
 - A query that sets no timeout waits `queries_default_timeout`, 10 s by
   default.
 - A client connects to one endpoint at a time.

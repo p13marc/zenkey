@@ -52,6 +52,9 @@ router. The tool reads S4's two selectors (core §4.2).
    `@/*/router` and runs S4's check.
 2. The same, with R1's admin space on, read-only.
 3. Under each posture, generate R1's grants (core §11.1) and repeat step 1.
+4. **A far router** (0.13). A router R2 links to R1, both admin spaces on,
+   the tool still a client of R1. Then `S` answers `@/<S's zid>/router`
+   under its own replier id.
 
 **Expected.**
 1. `S`'s answer arrives, on R1's own key, and it is the only answer. Its
@@ -61,7 +64,11 @@ router. The tool reads S4's two selectors (core §4.2).
    `S`'s is still unverified, so the check is not clean either.
 3. R1 refuses `S`'s queryable. No principal's answer arrives, and only a
    router's remains.
+4. R1's answer lists R2 as a `router` session, so R2's answer, under its
+   own replier id, is verified, and the check covers both routers. R1
+   lists `S` as a `client`, so `S`'s answer stays unverified, and the
+   check is not clean.
 
-*Measured (0.12) on zenoh 1.10.1, steps 1 and 2: the reference runtime's
-`admin_spoof.rs` and the fleet's doctor test. Step 3 waits for the grant
-generator (#612, FJ7).*
+*Measured on zenoh 1.10.1: steps 1 and 2 (0.12) and step 4 (0.13), by the
+reference runtime's `admin_spoof.rs` and the fleet's doctor tests. Step 3
+waits for the grant generator (#612, FJ7).*

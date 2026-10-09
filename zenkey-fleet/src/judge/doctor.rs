@@ -422,9 +422,10 @@ fn served(observed: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Des
 
 /// The routers' admin space: `@/*/router` and the storages, in no
 /// namespace. Either read failing is the whole answer failing. Each answer
-/// is verified as a router's (§4.2, 0.12): its replier id is the zid its
-/// key names, and that zid is a router this session is connected to, or
-/// this session itself; or, with `trust`, on the operator's word.
+/// is verified as a router's (§4.2, 0.12–0.13): its replier id is the zid
+/// its key names, and that zid is a router this session is connected to
+/// (or the session itself), or one a verified router's document lists as
+/// a `router` session; or, with `trust`, on the operator's word.
 async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<AdminSpace, String> {
     let mut here: BTreeSet<String> = raw
         .info()
@@ -440,29 +441,60 @@ async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<Ad
     let routers = routers.map_err(|e| crate::one_line(&e))?;
     let storages = storages.map_err(|e| crate::one_line(&e))?;
     let complete = routers.complete && storages.complete;
-    let mut unverified = BTreeSet::new();
-    let mut verified = |e: &AdminEntry| -> bool {
-        let named = crate::bus::admin::admin_key_zid(&e.key).map(zid_value);
-        let by = e.replier.as_deref().map(zid_value);
-        match (&named, &by) {
-            _ if trust => true,
-            (Some(n), Some(b)) if n == b && here.contains(n) => true,
-            _ => {
-                unverified.insert(format!(
-                    "`{}`, answered by {}{}",
-                    e.key,
-                    e.replier
-                        .as_deref()
-                        .unwrap_or("a session zenoh did not name"),
-                    if named.as_ref().is_some_and(|n| here.contains(n)) {
-                        ""
-                    } else {
-                        ", for a router this session is not connected to"
+    // Routers, verified outward (§4.2, 0.12–0.13): a router this session is
+    // connected to (or the session itself) answering on its own key under
+    // its own replier id; then each session such a router's document lists
+    // as `router`, answering the same way; and so on. A client or peer is
+    // listed as such, and never qualifies.
+    let named = |e: &AdminEntry| crate::bus::admin::admin_key_zid(&e.key).map(zid_value);
+    let own = |e: &AdminEntry| {
+        named(e).is_some_and(|n| e.replier.as_deref().map(zid_value).as_ref() == Some(&n))
+    };
+    let mut ok: BTreeSet<String> = here.clone();
+    let mut verified_routers: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = verified_routers.len();
+        for e in &routers.entries {
+            let Some(n) = named(e) else { continue };
+            if trust || (own(e) && ok.contains(&n)) {
+                verified_routers.insert(n.clone());
+                for sess in e.value["sessions"].as_array().into_iter().flatten() {
+                    if sess["whatami"] == "router"
+                        && let Some(peer) = sess["peer"].as_str()
+                    {
+                        ok.insert(zid_value(peer));
                     }
-                ));
-                false
+                }
             }
         }
+        if verified_routers.len() == before {
+            break;
+        }
+    }
+    let mut unverified = BTreeSet::new();
+    let mut verified = |e: &AdminEntry| -> bool {
+        let n = named(e);
+        if trust || (own(e) && n.as_ref().is_some_and(|n| verified_routers.contains(n))) {
+            return true;
+        }
+        let why = if e.replier.is_none() {
+            "zenoh did not name who answered"
+        } else if !own(e) {
+            "its replier is not the router its key names"
+        } else if n
+            .as_ref()
+            .is_some_and(|n| here.contains(n) || ok.contains(n))
+        {
+            "its router's own answer was not verified"
+        } else {
+            "no verified router lists it as a router"
+        };
+        unverified.insert(format!(
+            "`{}`, answered by {}: {why}",
+            e.key,
+            e.replier.as_deref().unwrap_or("an unnamed session"),
+        ));
+        false
     };
     let routers: Vec<RouterInfo> = routers
         .entries

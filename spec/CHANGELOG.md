@@ -3,6 +3,51 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.13 — 2026-10-09: a far router is verified through the routers that list it (#687)
+
+The Python implementation's round against 0.12 (PR #686) found F-81.
+0.12 verified an admin answer only when it came from a router the tool's
+session is connected to, and a client connects to one router at a time
+(Appendix B). So with two linked routers, a client tool got the far
+router's honest answer and could not count it, and S4 could never be clean
+in a deployment of two or more routers.
+
+**Changed: rules stated.**
+- **Verified routers, outward (§4.2, "Who answered").**
+  - The routers a tool's session is connected to, and the session itself,
+    are verified.
+  - So is every zid a verified router's own answer lists among its
+    `sessions` with `whatami` `router`, and so on outward.
+  - An answer counts when its replier id is its key's zid and that zid is
+    a verified router.
+  - **Measured on zenoh 1.10.1** (`admin_spoof.rs`): R1's document lists a
+    linked R2 as `router` and every client as `client`, the spoofer
+    included, and each answer carries its sender's own replier id. Appendix
+    B states the document's shape.
+- **`security.md §3` step 4** runs the far router and a self-consistent
+  spoof together.
+
+**Changed: the reference, here.**
+- **The doctor** verifies routers outward through those session lists, and
+  says why each unverified answer is unverified:
+  - no replier id;
+  - a replier other than its key's router;
+  - its router's own answer unverified;
+  - no verified router lists it.
+
+  A live test runs two linked routers with a client tool: both routers are
+  verified and S4 is clean, and a spoofer on its own key is not trusted.
+
+**Deliberately not changed.**
+- **A tool need not connect as a peer to every router.** A peer tool
+  connected to each router verifies them all directly, as zk2py measured,
+  but a deployment's tools are usually clients. The outward rule gives the
+  same answer through one router.
+- **Unmeasured:** whether a storage manager's own admin replies carry the
+  router's replier id. An in-process router cannot load the plugin. If
+  they did not, their storages would read unverified, which withholds a
+  clean verdict and never invents one.
+
 ## 0.12 — 2026-10-09: who may answer the admin space (#684)
 
 The Python implementation's round against 0.11 (PR #683) found F-80:
