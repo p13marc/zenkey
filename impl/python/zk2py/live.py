@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -281,6 +282,130 @@ def retrieve_bundle(session: zenoh.Session, iface: str, fingerprint: str,
             r.data, r.verified = a.payload, v
             return r
     return r
+
+
+# -- §8.1 presence shapes, read twice (0.10) --------------------------------------
+
+#: The grace between the two reads of a presence shape: "longer than the
+#: deployment's longest re-mint overlap" (§8.1, 0.10). The caller's choice;
+#: 1 s here, as every other wait of a conformance run.
+SHAPE_GRACE_S = 1.0
+
+
+def presence_shapes(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
+                    timeout: float = PRESENCE_TIMEOUT_S) -> set[tuple[str, str, str]]:
+    """The presence shapes §8.1 (0.10) names as faults, as read once:
+    ``(instance key, what, interface)`` for
+    - ``unlisted``: an interface token its instance's descriptor does not
+      list;
+    - ``no token``: an interface the descriptor lists with ``token`` true
+      and no interface token.
+
+    An instance whose descriptor GET gets no reply has no shape here: that
+    silence is not a verdict (O5). "Exposed" is read from the descriptor
+    alone, as listed with ``token`` not false: an instance that exposes
+    none of a listed interface's resources holds no token for it (§5.1
+    "The active instance"), which only the contract can show, and zk2py
+    does not retrieve it here."""
+    p = list_presence(session, selector, timeout)
+    alive: dict[str, set[str]] = {}
+    for a in p.alive:
+        alive.setdefault(f"zk2/{a['system']}/{a['service']}/@zk/instance/{a['instance']}", set()).add(a["iface"])
+    instances = {f"zk2/{i['system']}/{i['service']}/@zk/instance/{i['instance']}" for i in p.instances}
+    shapes: set[tuple[str, str, str]] = set()
+    for key in sorted(instances | set(alive)):
+        answers = [a for a in get_descriptor(session, key) if a.ok]
+        if len(answers) != 1:
+            continue
+        try:
+            doc = json.loads(answers[0].payload)
+        except ValueError:
+            continue
+        listed = {e.get("iface"): e for e in doc.get("interfaces", []) if isinstance(e, dict)}
+        for iface in sorted(alive.get(key, set()) - set(listed)):
+            shapes.add((key, "unlisted", iface))
+        for iface, e in sorted(listed.items()):
+            if e.get("token", True) is not False and iface not in alive.get(key, set()):
+                shapes.add((key, "no token", str(iface)))
+    return shapes
+
+
+def presence_faults(session: zenoh.Session, selector: str = "zk2/*/*/@zk/**",
+                    grace_s: float = SHAPE_GRACE_S) -> tuple[set, set]:
+    """§8.1 (0.10): "A tool that decides a fault from the shape of presence
+    … MUST see it in two reads a grace apart … Start-up, re-mint and
+    teardown pass through such shapes briefly, by design."
+
+    Returns (faults: the shapes both reads saw, passing: the shapes only
+    the first saw)."""
+    first = presence_shapes(session, selector)
+    time.sleep(grace_s)
+    second = presence_shapes(session, selector)
+    return first & second, first - second
+
+
+# -- §3.3 meta.zid: whose stamp (0.10) -------------------------------------------
+
+def attribute_stamp(stamp_id: str | None, descriptor: dict[str, Any]) -> str:
+    """S1's attribution by a tool (§3.3 ``meta``, 0.10): ``owner`` when a
+    state stamp's id is the owner's ``meta.zid``, ``foreign`` when it is
+    another, ``unattributable`` when the descriptor states no zid ("Without
+    it, a stamp's clock is unattributable, never foreign"), and
+    ``unstamped`` for a reply with no timestamp.
+
+    The spec gives a zid no spelling (SPEC-FINDINGS F-77), and zenoh
+    1.10.1 writes one as hex without leading zeros (31 digits seen). So two
+    hex spellings are compared as numbers, and anything else as text."""
+    if stamp_id is None:
+        return "unstamped"
+    meta = descriptor.get("meta")
+    zid = meta.get("zid") if isinstance(meta, dict) else None
+    if not isinstance(zid, str) or not zid:
+        return "unattributable"
+    hexa = re.compile(r"[0-9a-fA-F]+")
+    if hexa.fullmatch(stamp_id) and hexa.fullmatch(zid):
+        same = int(stamp_id, 16) == int(zid, 16)
+    else:
+        same = stamp_id == zid
+    return "owner" if same else "foreign"
+
+
+# -- §4.2 S4, through the routers' admin space (0.10) -----------------------------
+
+@dataclass
+class S4Reading:
+    """A tool's S4 check (§4.2): "A tool checks S4 against the routers'
+    storage admin space … Without it, a tool reports the check
+    unobservable, never clean." ``verdict`` is ``clean`` or
+    ``unobservable``; zk2py never reads a storage's key expressions."""
+
+    verdict: str
+    routers: list[str] = field(default_factory=list)
+    detail: str = ""
+
+
+def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S) -> S4Reading:
+    """GET ``@/*/router``, each reachable router's admin record. No reply:
+    the admin space is off, as zenoh 1.10.1 has it by default (Appendix B),
+    so the check is unobservable. A router whose record lists no plugin
+    runs no storage manager, so it runs no storage. One that lists plugins
+    is beyond what zk2py inspects: unobservable, with the plugins named."""
+    records: list[tuple[str, Any]] = []
+    for a in _answers(session, "@/*/router", zenoh.QueryTarget.ALL, timeout):
+        if not a.ok or a.key is None:
+            continue
+        try:
+            records.append((a.key.split("/")[1], json.loads(a.payload)))
+        except ValueError:
+            records.append((a.key.split("/")[1], None))
+    if not records:
+        return S4Reading("unobservable", [], "no router answered @/*/router: the admin space is off")
+    routers = [zid for zid, _ in records]
+    plugins = {zid: (doc or {}).get("plugins") if isinstance(doc, dict) else "unreadable"
+               for zid, doc in records}
+    if all(p in (None, {}, []) for p in plugins.values()):
+        return S4Reading("clean", routers, "no router runs a plugin, so none runs a storage")
+    return S4Reading("unobservable", routers, f"plugins {plugins}: their storages are not read here")
 
 
 # -- §4 state, a consumer's GET --------------------------------------------------

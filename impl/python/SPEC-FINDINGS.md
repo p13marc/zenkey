@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Eight rounds.**
+**Nine rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -14,9 +14,11 @@ where that was not enough, or where the spec said two things.
 - F-64 to F-70 were found against 0.6, with the rest of the live half.
 - F-71 to F-73 were found against 0.7.
 - F-74 to F-76 were found against 0.8.
+- Nothing new was found against 0.9 (see "At 0.9").
 - Amendments 0.5 to 0.9 resolved F-01 to F-76. Each entry carries a status
   line naming its amendment.
-- **Nothing new was found against 0.9** (see "At 0.9" at the end).
+- **F-77 to F-79 are new**, found against 0.10 (see "New at 0.10" at the
+  end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -26,7 +28,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.9:** 76 entries, all resolved.
+**Counts at 0.10:** 79 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -42,18 +44,19 @@ where that was not enough, or where the spec said two things.
     text).
   - It resolved F-73 by withdrawing the scenario's claim to observe the
     tick from outside.
-- F-74 to F-76: resolved by 0.9; none left unresolved.
+- F-74 to F-76: resolved by 0.9.
   - 0.9 confirmed zk2py's two guesses, F-74 (O2 first) and F-76 (zero
     values, then completion).
   - It made zk2py's fix of F-75 the scenario's step.
   - It also fixed the owner example's silent templated operations, which
     the runner had reported as two known deviations. Both are plain checks
     now.
+- F-77 to F-79: **new**, 3 gaps.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.9 | Location | In one line |
+| Id | Severity | Status at 0.10 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -131,6 +134,9 @@ by the spec section that now states the rule.
 | F-74 | ambiguity | resolved by 0.9 | §5.1 "Over a template" against O2 (0.8) | A wildcard call to a fan-out-forbidden template, with a non-canonical parameter chunk: `fanout_forbidden` or `invalid_request`? |
 | F-75 | gap | resolved by 0.9 | presence.md §6 step 3 (0.8) | `zk2/**` selects no control token, so its stalled read's "no token" cannot fail. |
 | F-76 | ambiguity | resolved by 0.9 | §5.1 "Over a template" and "Answering" (0.8) | A template-wide `replies = "many"` handler that names no member and sends nothing: `internal`, or zero values then completion? |
+| F-77 | gap | **new** | §3.3 `requires[].optional` (0.10) | A contract role's `optional` that does not repeat its contract, or an explicit `false`: neither checked nor listed as unchecked. |
+| F-78 | gap | **new** | §3.3 `meta.zid`, §4.2 "Observing S1" (0.10) | A zid has no spelling; zenoh writes one without leading zeros, so a textual comparison can call an owner's stamp foreign. |
+| F-79 | gap | **new** | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
 
 ---
 
@@ -1788,4 +1794,117 @@ What changed in zk2py:
   - step 4's `ETH0/reset` with `invalid_request`;
   - a fan-out that leaves the parameter unbound with `internal`.
 
-Implementing 0.9 raised no new question. There is no F-77.
+Implementing 0.9 raised no new question.
+
+## New at 0.10 (#609)
+
+Found while following 0.10. `just py-conformance` passes 518 of 518, with
+`descriptors/ok-optional-role` read through zk2py's strict shape: the
+schema is read from `spec/` at run time. `just py-live` passes 190 of 190,
+with no known deviation.
+
+What zk2py does with 0.10:
+- **Its owner** writes `optional: true` for an optional role, and nothing
+  for a required one. It already stated `meta.zid`.
+- **Both owners' descriptors are checked for 0.10's additions.**
+  - The owner example's descriptor states `meta.zid`. Behind R1, the stamp
+    of the value it holds from the start is attributed to it by that zid.
+  - Serving `zs.thresholds.v1`, the owner example writes
+    `optional: true` for the optional role `desired`.
+  - zk2py's `zk2py_needs.v1` control writes it for `peer` and not for
+    `upstream`.
+- **S1 attribution.** A tool attributes a stamp by the descriptor it reads
+  (`live.attribute_stamp`). Through R1, zk2py's owner's three samples read
+  `owner`, and the router-stamped control reads `foreign`.
+- **S4 through the admin space** (`live.check_s4`).
+  - With R1's admin space off, zenoh 1.10.1's default, nothing answers
+    `@/*/router`, and the check is unobservable.
+  - Enabled read-only, R1 answers with `"plugins": null`, so it runs no
+    storage, and the check is clean.
+- **Presence shapes in two reads** (`live.presence_faults`, a 1 s grace).
+  zk2py adds an interface token that the owner's descriptor does not list,
+  under the owner's instance.
+  - Removed within the grace, it is seen once and passes.
+  - Kept, it is seen in both reads, and it is a fault.
+- **Revisions on the bus** (`compat.classify_pair`). Two zk2py owners serve
+  `zk2py_bringup.v1` at minor 0 and at minor 1, which adds an optional
+  operation.
+  - Ordered by the minors their descriptors state, the pair is
+    compatible.
+  - Classified both ways, it is undecided: the removal is breaking.
+- **Not covered:**
+  - a token count as a budget's lower bound, since zk2py counts no budget;
+  - an archive's alignment, since zk2py has no archive.
+
+**Editorial, not a finding.** In §9.8, the new bullet "On the bus,
+revisions carry no order" ends "… and undecided when they disagree. Each
+rule below is a transition from the earlier revision to the candidate, and
+its class already accounts for …". The paragraph that introduces the rules
+was swallowed into the bullet. The meaning survives.
+
+### F-77 · gap · §3.3 (0.10): an `optional` that does not repeat its contract
+
+> "`optional` (0.10) is `true` for a role the instance works without, and
+> absent otherwise: absent is required. For a role a contract declares, it
+> repeats that contract's `[requires]`."
+
+Two descriptors break that sentence, and the checks do not say what to
+report for either:
+- an entry `declared_by` a given contract whose `optional` differs from
+  that contract's `[requires]`, for instance a required role marked
+  `optional: true`;
+- an entry with `"optional": false`. The schema admits it, but the prose
+  says "absent otherwise".
+
+The D codes name no such condition. "Not checked, deliberately" does not
+list it either, though that list exists to make unchecked conditions
+explicit (F-06). Its nearest item is "that a role `declared_by` an
+interface is in that contract's `[requires]`", which suggests the role's
+agreement with its contract is unchecked as a whole. No fixture has either
+case.
+**Resolved:** a guess. zk2py's checker reports no code for either (both
+measured: `[]`), reading the unchecked item as covering `optional` too.
+zk2py's owner writes neither. Its runner checks both owners' descriptors
+against the rule as stated.
+
+### F-78 · gap · §3.3 `meta.zid` (0.10): a zid has no spelling
+
+> "an owner SHOULD state its session's zid as `meta.zid` … A tool
+> attributes a state stamp to its owner by comparing the stamp's id with
+> it"
+
+The core gives an instance id a form ("16 lowercase hex digits", D002), but
+a zid none. The fixture `ok-optional-role` writes 16 hex digits. zenoh
+1.10.1 writes a zid as hex without leading zeros: the owner example's
+`meta.zid` was `f385f26aeb53faaf5066e9b5be2aef8`, 31 digits, and so was its
+stamps' id in zenoh-python. Both sides came from one zenoh, so the texts
+matched. An owner or a tool on another binding that pads to 32 digits, or
+writes uppercase, would make a textual comparison call the owner's own
+stamp `foreign`, which 0.10's "never foreign" wording is there to prevent.
+**Resolved:** a guess. zk2py compares two hex spellings as numbers
+(`live.attribute_stamp`), so padding and case do not matter, and any other
+spelling as text.
+
+### F-79 · gap · §4.2 S4 (0.10): what "the routers' storage admin space" is
+
+> "A **tool** checks S4 against the routers' storage admin space … The
+> admin space is off by default … Without it, a tool reports the check
+> unobservable, never clean."
+
+The spec says when the check is unobservable, but not how it is made:
+- which admin keys list a router's storages;
+- how a storage's key expression is read there;
+- what shows that a router runs no storage at all.
+
+Appendix B records only that the admin space is off by default. An
+independent tool learns the rest from zenoh, not from the spec. Measured
+on zenoh 1.10.1:
+- a zenoh-python router answers `@/<zid>/router` only once
+  `adminspace.enabled` is true;
+- its record carries `"plugins": null`;
+- `@/*/router/status/plugins/**` is then empty.
+**Resolved:** zk2py reads `@/*/router`. No answer makes the check
+unobservable. A record with no plugin is clean, since there is no storage
+manager to run a storage. Any plugin is unobservable too, because zk2py
+does not guess the storage manager's keys. The storages branch could not be
+built from the spec, nor run here: zenoh-python hosts no plugin.

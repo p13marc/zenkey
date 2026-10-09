@@ -423,8 +423,10 @@ class Owner:
 
     def _descriptor(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> bytes:
         """§3.3: the record, with `profiles` the union of the `uses`, every
-        role listed (an unbound one with empty bindings), and `unavailable`
-        the listed resources only (exposure is compact)."""
+        role listed (an unbound one with empty bindings, an optional one
+        with ``optional: true``), `unavailable` the listed resources only
+        (exposure is compact), and ``meta.zid`` the session's zid, which an
+        owner SHOULD state (0.10): a tool attributes a state stamp by it."""
         assert self.session is not None
         doc = {
             "format": "zk2-descriptor/0.1",
@@ -439,9 +441,13 @@ class Owner:
                 "cardinality": {},
             } for c in self.contracts],
             "capabilities": sorted(self.capabilities),
+            # 0.10: `optional` is true for a role the instance works without,
+            # "and absent otherwise"; for a contract's role "it repeats that
+            # contract's [requires]".
             "requires": [{
                 "role": role, "interface": req["interface"], "declared_by": c.interface,
                 "bindings": list(self.bindings.get(role, [])), "params": {},
+                **({"optional": True} if req["optional"] else {}),
             } for c in self.contracts for role, req in c.canonical["requires"].items()],
             "profiles": sorted({u for c in self.contracts for u in c.canonical["uses"]}),
             "meta": {"zid": str(self.session.zid())},

@@ -838,6 +838,31 @@ def _operation_rules(v: Verdict, a: dict[str, Any], b: dict[str, Any]) -> None:
 # FULL_TRANSITIVE
 # ===========================================================================
 
+def classify_pair(a: Revision, b: Revision, minor_a: int | None = None,
+                  minor_b: int | None = None) -> tuple[str, str]:
+    """Two revisions met on the bus, with no order of their own (§9.8,
+    0.10): "A tool that classifies them against each other MAY take the
+    order from the minor their descriptors state, when the two differ.
+    Otherwise it classifies both ways: the pair is clean only when both
+    directions are compatible, a finding when neither is, and undecided
+    when they disagree."
+
+    Returns (verdict, how). Ordered, the verdict is the class of the
+    transition from the lower minor; both ways, it is ``clean``,
+    ``finding`` or ``undecided``."""
+    if isinstance(minor_a, int) and isinstance(minor_b, int) and minor_a != minor_b:
+        old, new = (a, b) if minor_a < minor_b else (b, a)
+        return contract_compare(old, new).cls, f"ordered by minor {min(minor_a, minor_b)} → " \
+                                                f"{max(minor_a, minor_b)}"
+    ab, ba = contract_compare(a, b).cls, contract_compare(b, a).cls
+    how = f"both ways: {ab}, then {ba}"
+    if ab == COMPATIBLE and ba == COMPATIBLE:
+        return "clean", how
+    if ab != COMPATIBLE and ba != COMPATIBLE:
+        return "finding", how
+    return "undecided", how
+
+
 def full_transitive(history: list[Any], candidate: Any,
                     compare: Callable[[Any, Any], Verdict]) -> tuple[Verdict, list[Verdict]]:
     """§9.8: the candidate against every revision in the history; the class
