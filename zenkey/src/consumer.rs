@@ -19,10 +19,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Contract, Resource};
+use zenkey_model::freshness::{ClockTrust, Horizon, Judged, Last, Observation, StampAge};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
@@ -143,6 +144,8 @@ pub struct Consumer {
 pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
     seen: Arc<Seen>,
+    /// When it was declared: how long it has listened (`freshness.v1` §2.5).
+    since: Instant,
 }
 
 #[derive(Default)]
@@ -150,6 +153,13 @@ struct Seen {
     discarded: AtomicU64,
     unresolved: AtomicU64,
     last: Mutex<BTreeMap<Addr, Instant>>,
+    /// Each member's last delivery, on this host's monotonic clock, and
+    /// whether it was a delete (`freshness.v1` §2.5).
+    members: Mutex<BTreeMap<String, (Instant, bool)>>,
+    /// Per stamping clock, the delivery whose stamp came closest to this
+    /// host's clock at receipt: what `freshness.v1` §2.6 measures a GET
+    /// reader's clock from.
+    clocks: Mutex<BTreeMap<String, StampAge>>,
 }
 
 impl Consumer {
@@ -300,6 +310,7 @@ impl Consumer {
         let r = self.resource(resource)?.clone();
         let name = format!("{}/{}", r.token, r.template);
         let seen = Arc::new(Seen::default());
+        let since = Instant::now();
         let callback = Arc::new(callback);
         let mut subs = Vec::new();
         for ke in self.selectors(resource)? {
@@ -342,10 +353,29 @@ impl Consumer {
                             seen.unresolved.fetch_add(1, Ordering::Relaxed);
                             return;
                         };
+                        let now = Instant::now();
                         seen.last
                             .lock()
                             .expect("not poisoned")
-                            .insert(addr.clone(), Instant::now());
+                            .insert(addr.clone(), now);
+                        seen.members.lock().expect("not poisoned").insert(
+                            key.to_owned(),
+                            (now, sample.kind() == zenoh::sample::SampleKind::Delete),
+                        );
+                        if let Some(t) = sample.timestamp() {
+                            let offset =
+                                StampAge::between(t.get_time().to_system_time(), SystemTime::now());
+                            seen.clocks
+                                .lock()
+                                .expect("not poisoned")
+                                .entry(t.get_id().to_string())
+                                .and_modify(|best| {
+                                    if offset.nanos().unsigned_abs() < best.nanos().unsigned_abs() {
+                                        *best = offset;
+                                    }
+                                })
+                                .or_insert(offset);
+                        }
                         callback(Delivery {
                             provider: addr,
                             resource: name.clone(),
@@ -357,7 +387,11 @@ impl Consumer {
                     .map_err(zenoh)?,
             );
         }
-        Ok(Subscription { _subs: subs, seen })
+        Ok(Subscription {
+            _subs: subs,
+            seen,
+            since,
+        })
     }
 
     /// Replays an event's occurrences within `retention` (§2.6): a GET on
@@ -553,8 +587,28 @@ impl Consumer {
             .and_then(Result::ok))
     }
 
+    /// The horizon `resource` declares (`freshness.v1` §2.1–§2.3), as the
+    /// contract this consumer was compiled against states it.
+    pub fn horizon(&self, resource: &str) -> Result<Horizon> {
+        Ok(zenkey_model::freshness::horizon_of(
+            self.resource(resource)?,
+        ))
+    }
+
+    /// Whether one member of `resource` is fresh (`freshness.v1` §5), from
+    /// the observations made of it: [`Subscription::freshness`], and
+    /// [`crate::state::Current::freshness`] for a GET. Combined as §2.7
+    /// says.
+    pub fn freshness(&self, resource: &str, observations: &[Observation]) -> Result<Judged> {
+        Ok(zenkey_model::freshness::judge_all(
+            &self.horizon(resource)?,
+            observations,
+        ))
+    }
+
     /// A provider's liveness (R7): from its token when presence is
     /// observable, from the freshness of `sub`'s deliveries when not.
+    /// `window` is the horizon of what crosses (`freshness.v1` §2.9).
     pub async fn liveness(
         &self,
         sub: &Subscription,
@@ -605,5 +659,62 @@ impl Subscription {
             .expect("not poisoned")
             .get(provider)
             .copied()
+    }
+
+    /// The members delivered so far, by key.
+    #[must_use]
+    pub fn members(&self) -> Vec<String> {
+        self.seen
+            .members
+            .lock()
+            .expect("not poisoned")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// How long it has listened: since it was declared.
+    #[must_use]
+    pub fn listened(&self) -> Duration {
+        self.since.elapsed()
+    }
+
+    /// The member `key` as a `freshness.v1` observation now (§2.5): its last
+    /// delivery's age on this host's monotonic clock, never against its
+    /// stamp, and how long the subscription has listened. The callback
+    /// receives every delivery, so the observation counts as complete.
+    #[must_use]
+    pub fn freshness(&self, key: &str) -> Observation {
+        let last = self
+            .seen
+            .members
+            .lock()
+            .expect("not poisoned")
+            .get(key)
+            .map(|(at, deleted)| {
+                if *deleted {
+                    Last::Delete(at.elapsed())
+                } else {
+                    Last::Put(at.elapsed())
+                }
+            });
+        Observation::Subscribed {
+            last,
+            listened: self.listened(),
+            complete: true,
+        }
+    }
+
+    /// Whether this host's clock is trusted to `delta` against `clock`, a
+    /// stamp's id (`freshness.v1` §2.6, ground 2): a delivery stamped by it
+    /// arrived with its stamp within `delta` of this host's clock.
+    #[must_use]
+    pub fn clock_trust(&self, clock: &str, delta: Duration) -> ClockTrust {
+        self.seen
+            .clocks
+            .lock()
+            .expect("not poisoned")
+            .get(clock)
+            .map_or(ClockTrust::Untrusted, |o| ClockTrust::measured(*o, delta))
     }
 }

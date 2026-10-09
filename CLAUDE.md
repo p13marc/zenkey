@@ -346,6 +346,14 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   once per run, and spells out `self.system/<svc>` providers (core 0.20);
   a test hands `ServiceBuilder::with_hostid` a minter over a temp root,
   never the host's `/etc/machine-id`.
+  `freshness.v1` (#720): a `StateWriter` on a resource whose contract
+  declares `freshness.ttl_s` above 0 re-puts its member unchanged, under a
+  fresh `Minter` stamp, whenever 95 % of ttl/2 passes without a put; on by
+  default (the contract asks it of every owner), off through
+  `set_refresh(false)`, stopped by the writer's drop, the service's close
+  or drop, a delete, and the clock guard. The judgement is
+  `zenkey_model::freshness`; `Subscription::freshness`/`clock_trust` and
+  `Current::freshness` make its observations.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. On `main` it shares the
   name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.
