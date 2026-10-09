@@ -397,8 +397,8 @@ pub enum AclGrantKind {
     /// ingress.
     DenyRead,
     /// Under `allow`: the same complement, denied on egress toward the
-    /// principal, which a wildcard selector does not escape for puts and
-    /// tokens (checked against their own concrete keys).
+    /// principal, which a wildcard selector does not escape: puts, tokens
+    /// and value replies are checked against their own concrete keys.
     DenyReceive,
     /// Under `allow` (#684, F-80): no principal declares a queryable in the
     /// routers' admin space, `@/**`, which the routers serve themselves.

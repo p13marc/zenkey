@@ -23,7 +23,7 @@ access_control: {
     { id: "fan-in:vehicle-01/thruster-l", permission: "allow", flows: ["egress"],
       messages: ["query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/*/thruster.v1/state/status"] },
-    // fan_in_reply (vehicle-01/thruster-l): §11.2: a reply to such a selector is checked against the selector, a refusal included (O2's fanout_forbidden), so the same selectors are granted for this provider's ingress reply
+    // fan_in_reply (vehicle-01/thruster-l): §11.2: the same selectors for this provider's ingress reply, refusals included. An error reply (O2's fanout_forbidden, O3's unavailable) carries no key and is checked against the selector; a value reply is checked against its own key, which Own includes (measured, #612 FJ7)
     { id: "fan-in-reply:vehicle-01/thruster-l", permission: "allow", flows: ["ingress"],
       messages: ["reply"],
       key_exprs: ["zk2/vehicle-01/*/thruster.v1/state/status"] },
@@ -55,7 +55,7 @@ access_control: {
     { id: "fan-in:vehicle-01/thruster-r", permission: "allow", flows: ["egress"],
       messages: ["query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/*/thruster.v1/state/status"] },
-    // fan_in_reply (vehicle-01/thruster-r): §11.2: a reply to such a selector is checked against the selector, a refusal included (O2's fanout_forbidden), so the same selectors are granted for this provider's ingress reply
+    // fan_in_reply (vehicle-01/thruster-r): §11.2: the same selectors for this provider's ingress reply, refusals included. An error reply (O2's fanout_forbidden, O3's unavailable) carries no key and is checked against the selector; a value reply is checked against its own key, which Own includes (measured, #612 FJ7)
     { id: "fan-in-reply:vehicle-01/thruster-r", permission: "allow", flows: ["ingress"],
       messages: ["reply"],
       key_exprs: ["zk2/vehicle-01/*/thruster.v1/state/status"] },
@@ -127,7 +127,7 @@ access_control: {
     { id: "fan-in:vehicle-01/detector", permission: "allow", flows: ["egress"],
       messages: ["query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/*/detections.v1/stream/**"] },
-    // fan_in_reply (vehicle-01/detector): §11.2: a reply to such a selector is checked against the selector, a refusal included (O2's fanout_forbidden), so the same selectors are granted for this provider's ingress reply
+    // fan_in_reply (vehicle-01/detector): §11.2: the same selectors for this provider's ingress reply, refusals included. An error reply (O2's fanout_forbidden, O3's unavailable) carries no key and is checked against the selector; a value reply is checked against its own key, which Own includes (measured, #612 FJ7)
     { id: "fan-in-reply:vehicle-01/detector", permission: "allow", flows: ["ingress"],
       messages: ["reply"],
       key_exprs: ["zk2/vehicle-01/*/detections.v1/stream/**"] },

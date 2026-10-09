@@ -36,8 +36,10 @@
 //! compiled into denies of its complement: every other enrolled service's
 //! writes, and every surface of theirs the principal's grants do not name,
 //! enumerated from the contracts (D13). Deny works by inclusion (§11.3), so
-//! a put on a wildcard key, or a GET whose selector is wider than every
-//! deny, is in none of them: P3 then rests on O2 and R6. Every principal
+//! a put on a wildcard key, or a call whose selector is wider than every
+//! deny, is in none of them: P3 then rests on O2 and R6, and an operation
+//! that allows fan-out executes for a wildcard caller nobody granted (its
+//! answers, checked by their own keys, are denied). Every principal
 //! also holds a deny of queryables in the routers' admin space, `@/**`
 //! (#684, F-80): the routers serve it themselves, and a session that
 //! answers there can turn a tool's admin-space read into a false clean.
@@ -221,9 +223,10 @@ const CITE_FAN_IN: &str = "§11.2: egress is checked by inclusion against the qu
      subscription's own key expression, so every consumer or caller selector that intersects \
      this provider's keys, and that its own patterns do not include, is granted here; without \
      it a fan-in GET gets 0 replies (spike S14)";
-const CITE_FAN_IN_REPLY: &str = "§11.2: a reply to such a selector is checked against the \
-     selector, a refusal included (O2's fanout_forbidden), so the same selectors are granted \
-     for this provider's ingress reply";
+const CITE_FAN_IN_REPLY: &str = "§11.2: the same selectors for this provider's ingress reply, \
+     refusals included. An error reply (O2's fanout_forbidden, O3's unavailable) carries no key \
+     and is checked against the selector; a value reply is checked against its own key, which \
+     Own includes (measured, #612 FJ7)";
 const CITE_CONSUME_IN: &str = "§11.1 Consume: subscribe or GET on what the bindings name, one \
      selector per bound provider (R1), R2's parameter bindings applied";
 const CITE_CONSUME_OUT: &str = "§11.1 Consume, egress: the samples and replies those selectors \
@@ -248,8 +251,8 @@ const CITE_DENY_READ: &str = "§11.2 under allow: the surfaces of other services
      principal's grants do not name, from the contracts given. Deny works by inclusion \
      (§11.3): a selector wider than every deny is in none";
 const CITE_DENY_RECEIVE: &str = "§11.2 under allow, egress: the same complement toward this \
-     principal. A put or a token is checked against its own key, so a wildcard subscription \
-     does not escape it; a reply is checked against the query's key, so a wildcard GET does";
+     principal. A put, a token and a value reply are checked against their own key, so a \
+     wildcard subscription or GET does not escape it (measured, #612 FJ7)";
 const CITE_DENY_ADMIN_SPACE: &str = "#684 (F-80, spec amendment 0.12): the routers serve the \
      admin space themselves, so no principal has a reason to declare a queryable under `@/**`; \
      one that does can answer a tool's admin-space read, and turn a check from unobservable \
@@ -1489,9 +1492,11 @@ pub fn plan_acl(
                     "under default_permission allow, zenoh evaluates no allow rule, so each \
                      grant is compiled into denies of its complement, from the contracts given \
                      (regenerate on every revision). Deny works by inclusion: a put on a \
-                     wildcard key, and a GET whose selector is wider than every deny, are in \
-                     none (R6 and O2 carry P3 there), and a session matching no subject has no \
-                     policy and is allowed everything, so authentication must refuse it"
+                     wildcard key is in none and reaches subscribers (R6 discards it), and a \
+                     wildcard call is in none either, so an operation that allows fan-out \
+                     executes on every provider for a principal never granted it, only its \
+                     answers denied (O2 refuses the others). A session matching no subject has \
+                     no policy and is allowed everything, so authentication must refuse it"
                         .to_owned(),
                 ),
             );
