@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::{DoctorSpec, run_doctor};
+use zenkey_fleet::{V1DoctorSpec, run_v1_doctor};
 
 mod util;
 use util::peer_pair;
@@ -41,8 +41,8 @@ class = "telemetry"
 type = "TelemetryPoint"
 "#;
 
-fn spec() -> DoctorSpec {
-    DoctorSpec {
+fn spec() -> V1DoctorSpec {
+    V1DoctorSpec {
         deep: false,
         sample: None,
         timeout: Duration::from_secs(2),
@@ -81,13 +81,13 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     // token and the introspect answers.
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(
+            let report = run_v1_doctor(
                 &zenkey_fleet::Fleet::new(&b, ""),
                 Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
                 &spec(),
             )
             .await
-            .expect("run_doctor");
+            .expect("run_v1_doctor");
             if report.live_producers >= 1 && report.introspect_answered >= 1 {
                 break report;
             }
@@ -100,7 +100,7 @@ async fn a_drifted_slice_is_a_sync_finding_with_its_citation() {
     let sync: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::SliceSync)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::SliceSync)
         .collect();
     assert!(
         !sync.is_empty(),
@@ -133,9 +133,9 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
 
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
+            let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
                 .await
-                .expect("run_doctor");
+                .expect("run_v1_doctor");
             if report.live_producers >= 1 {
                 break report;
             }
@@ -147,7 +147,7 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
 
     assert!(
         report.findings.iter().any(|f| f.check
-            == zenkey_fleet::report::CheckId::IntrospectCoverage
+            == zenkey_fleet::report::V1CheckId::IntrospectCoverage
             && f.citation.as_deref() == Some("RFC 04 §5")),
         "a mute live producer must be a coverage finding, got: {:?}",
         report.findings
@@ -165,9 +165,9 @@ async fn a_mute_live_producer_is_a_coverage_finding() {
 async fn an_empty_bus_is_a_run_that_judged_nothing() {
     use zenkey_fleet::report::DoctorSeverity;
     let (_a, b) = peer_pair().await;
-    let report = run_doctor(&zenkey_fleet::Fleet::new(&b, "acme"), None, &spec())
+    let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, "acme"), None, &spec())
         .await
-        .expect("run_doctor");
+        .expect("run_v1_doctor");
     assert_eq!((report.live_producers, report.routers), (0, 0));
     let why = report.unobservable.as_deref().expect("judged nothing");
     assert!(
@@ -212,9 +212,9 @@ async fn an_unreadable_introspect_is_a_parse_finding_not_silence() {
 
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            let report = run_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
+            let report = run_v1_doctor(&zenkey_fleet::Fleet::new(&b, ""), None, &spec())
                 .await
-                .expect("run_doctor");
+                .expect("run_v1_doctor");
             if report.live_producers >= 1 && report.introspect_answered >= 1 {
                 break report;
             }
@@ -224,19 +224,19 @@ async fn an_unreadable_introspect_is_a_parse_finding_not_silence() {
     .await
     .expect("the token and the reply should become visible within 10s");
 
-    use zenkey_fleet::report::CheckId;
+    use zenkey_fleet::report::V1CheckId;
     assert!(
         !report
             .findings
             .iter()
-            .any(|f| f.check == CheckId::IntrospectCoverage),
+            .any(|f| f.check == V1CheckId::IntrospectCoverage),
         "it answered, so it is not a coverage finding: {:?}",
         report.findings
     );
     let parse: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == CheckId::SliceParse)
+        .filter(|f| f.check == V1CheckId::SliceParse)
         .collect();
     assert_eq!(parse.len(), 1, "{:?}", report.findings);
     assert_eq!(parse[0].subject, "h-ffffffffffff/sysinfo");

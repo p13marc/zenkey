@@ -30,7 +30,7 @@
 use serde_json::Value;
 use zenkey::RegistrySlice;
 
-use crate::report::{CheckId, DoctorFinding, DoctorSeverity};
+use crate::report::{DoctorSeverity, V1CheckId, V1Finding};
 
 /// What a health document says about its producer's size (RFC 04 §1.2,
 /// `self_stats`). Every field is optional on the wire and stays optional
@@ -97,14 +97,14 @@ pub fn judge_self_stats(
     slice: &RegistrySlice,
     answers: &[(String, Option<SelfStats>)],
     asked: usize,
-) -> Vec<DoctorFinding> {
+) -> Vec<V1Finding> {
     let Some(budget) = &slice.budget else {
         return Vec::new();
     };
     let mut out = Vec::new();
-    let finding = |severity, subject: String, evidence: String, citation: &str| DoctorFinding {
+    let finding = |severity, subject: String, evidence: String, citation: &str| V1Finding {
         severity,
-        check: CheckId::BudgetExceeded,
+        check: V1CheckId::BudgetExceeded,
         subject,
         evidence,
         citation: Some(citation.to_string()),
@@ -238,7 +238,7 @@ mod tests {
         slice
     }
 
-    fn errors(findings: &[DoctorFinding]) -> Vec<&DoctorFinding> {
+    fn errors(findings: &[V1Finding]) -> Vec<&V1Finding> {
         findings
             .iter()
             .filter(|f| f.severity == DoctorSeverity::Error)
@@ -302,7 +302,7 @@ mod tests {
         let f = judge_self_stats(&slice, &[("h-1".into(), Some(stats(over)))], 1);
         let e = errors(&f);
         assert_eq!(e.len(), 1, "{f:?}");
-        assert_eq!(e[0].check, CheckId::BudgetExceeded);
+        assert_eq!(e[0].check, V1CheckId::BudgetExceeded);
         assert_eq!(e[0].subject, "h-1/demo");
         assert!(e[0].evidence.contains("64.0 MiB"), "{}", e[0].evidence);
         assert!(e[0].evidence.contains("64 MiB"), "{}", e[0].evidence);

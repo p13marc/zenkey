@@ -12,8 +12,8 @@
 
 use std::time::Duration;
 
-use zenkey_fleet::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
-use zenkey_fleet::{DoctorSpec, Fleet, GetOpts, declare_responder, fleet_get, run_doctor};
+use zenkey_fleet::report::{DoctorSeverity, V1CheckId, V1DoctorReport, V1Finding};
+use zenkey_fleet::{Fleet, GetOpts, V1DoctorSpec, declare_responder, fleet_get, run_v1_doctor};
 
 mod util;
 use util::peer_pair;
@@ -53,8 +53,8 @@ class = "state"
 type = "Health"
 "#;
 
-fn spec() -> DoctorSpec {
-    DoctorSpec {
+fn spec() -> V1DoctorSpec {
+    V1DoctorSpec {
         deep: true,
         sample: None,
         timeout: Duration::from_millis(500),
@@ -104,22 +104,22 @@ async fn serve_health(
     task
 }
 
-async fn doctor(client: &zenoh::Session, slice: &str) -> DoctorReport {
+async fn doctor(client: &zenoh::Session, slice: &str) -> V1DoctorReport {
     let local = zenkey::parse_slice(slice).expect("slice");
-    run_doctor(
+    run_v1_doctor(
         &Fleet::new(client, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(),
     )
     .await
-    .expect("run_doctor")
+    .expect("run_v1_doctor")
 }
 
-fn budget_findings(report: &DoctorReport) -> Vec<&DoctorFinding> {
+fn budget_findings(report: &V1DoctorReport) -> Vec<&V1Finding> {
     report
         .findings
         .iter()
-        .filter(|f| f.check == CheckId::BudgetExceeded)
+        .filter(|f| f.check == V1CheckId::BudgetExceeded)
         .collect()
 }
 

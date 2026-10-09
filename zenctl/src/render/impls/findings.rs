@@ -6,15 +6,15 @@
 //! is not a silent one.
 
 use zenkey_fleet::report::{
-    AssertionState, ConformReport, ConformVerdict, CutoverVerdict, DoctorReport, DoctorSeverity,
-    RetiredEntry, RetiredReport,
+    AssertionState, ConformReport, ConformVerdict, CutoverVerdict, DoctorSeverity, RetiredEntry,
+    RetiredReport, V1DoctorReport,
 };
 
 use crate::render::{
     BoundCost, BoundKind, Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without,
 };
 
-impl Render for DoctorReport {
+impl Render for V1DoctorReport {
     const FAMILY: &'static str = "doctor";
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {

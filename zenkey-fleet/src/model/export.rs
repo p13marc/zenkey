@@ -32,8 +32,8 @@ use crate::model::prom::metric_name;
 use crate::model::retain::RetentionStats;
 use crate::model::stats::StatsTable;
 use crate::report::{
-    Asked, ContractCounters, DoctorFindingRef, DoctorReport, DoctorSummary, ExportSnapshot,
-    ObserverCounters, QosMismatchRow, RegistryInfo, SeriesRow, SeriesState,
+    Asked, ContractCounters, DoctorFindingRef, DoctorSummary, ExportSnapshot, ObserverCounters,
+    QosMismatchRow, RegistryInfo, SeriesRow, SeriesState, V1DoctorReport,
 };
 
 /// How many top-level numeric fields one subject family may fan out into
@@ -89,7 +89,7 @@ pub struct FoldInputs<'a> {
 /// A doctor report with the time it finished.
 #[derive(Debug, Clone, Copy)]
 pub struct DoctorRun<'a> {
-    pub report: &'a DoctorReport,
+    pub report: &'a V1DoctorReport,
     pub ran_at_unix_s: u64,
 }
 

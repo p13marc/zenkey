@@ -170,7 +170,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
     let stuck: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldStuck)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::FieldStuck)
         .collect();
     assert_eq!(stuck.len(), 1, "{:?}", report.findings);
     assert_eq!(stuck[0].subject, format!("{KEY} · temperature_c"));
@@ -188,7 +188,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
         report
             .findings
             .iter()
-            .all(|f| !(f.check == zenkey_fleet::report::CheckId::FieldStuck
+            .all(|f| !(f.check == zenkey_fleet::report::V1CheckId::FieldStuck
                 && f.subject.ends_with("· seq"))),
         "the moving field is not stuck"
     );
@@ -196,7 +196,7 @@ async fn a_frozen_field_is_flagged_while_validity_and_rate_stay_green() {
         report
             .findings
             .iter()
-            .all(|f| f.check != zenkey_fleet::report::CheckId::FieldNew),
+            .all(|f| f.check != zenkey_fleet::report::V1CheckId::FieldNew),
         "both paths are declared by the served schema: {:?}",
         report.findings
     );
@@ -281,7 +281,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
     let vanished: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldVanished)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::FieldVanished)
         .collect();
     assert_eq!(vanished.len(), 1, "{:?}", report.findings);
     assert_eq!(vanished[0].subject, format!("{KEY} · opt"));
@@ -294,7 +294,7 @@ async fn vanished_and_undeclared_paths_become_their_findings() {
     let new: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldNew)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::FieldNew)
         .collect();
     assert_eq!(new.len(), 1, "{:?}", report.findings);
     assert_eq!(new[0].subject, format!("{KEY} · extra"));
@@ -368,7 +368,7 @@ async fn a_tagged_enums_fields_are_not_reported_as_drift() {
     let new: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldNew)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::FieldNew)
         .collect();
     assert!(
         new.is_empty(),
@@ -400,10 +400,10 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
         |i| serde_json::json!({"temperature_c": 21.5, "seq": i}),
     );
 
-    let report = zenkey_fleet::run_doctor(
+    let report = zenkey_fleet::run_v1_doctor(
         &zenkey_fleet::Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
-        &zenkey_fleet::DoctorSpec {
+        &zenkey_fleet::V1DoctorSpec {
             deep: false,
             sample: None,
             timeout: Duration::from_millis(500),
@@ -411,13 +411,13 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
         },
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     publisher.abort();
 
     let stuck: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::FieldStuck)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::FieldStuck)
         .collect();
     assert_eq!(stuck.len(), 1, "{:?}", report.findings);
     assert_eq!(stuck[0].subject, format!("{KEY} · temperature_c"));
@@ -427,6 +427,6 @@ async fn the_doctor_listen_phase_flags_the_frozen_field() {
         report
             .findings
             .iter()
-            .all(|f| f.check != zenkey_fleet::report::CheckId::FieldNew)
+            .all(|f| f.check != zenkey_fleet::report::V1CheckId::FieldNew)
     );
 }

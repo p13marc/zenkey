@@ -38,7 +38,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use zenkey_fleet::model::facts::Registration;
-use zenkey_fleet::report::DoctorReport;
+use zenkey_fleet::report::V1DoctorReport;
 use zenkey_fleet::{
     DoctorRun, ExportLedger, ExportSnapshot, FactsCache, FleetEvent, FoldInputs, MonitorCore,
     Observed, PayloadVerdict, RosterWatch, StreamItem, Verdict, exposition,
@@ -58,7 +58,7 @@ struct Shared {
     ledger: Mutex<ExportLedger>,
     core: Arc<MonitorCore>,
     down: Mutex<BTreeSet<(String, String)>>,
-    doctor: Mutex<Option<(DoctorReport, u64)>>,
+    doctor: Mutex<Option<(V1DoctorReport, u64)>>,
 }
 
 impl Shared {
@@ -182,7 +182,7 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
         let timeout = args.timeout();
         tokio::spawn(async move {
             let fleet = zenkey_fleet::Fleet::new(&session, &base);
-            let spec = zenkey_fleet::DoctorSpec {
+            let spec = zenkey_fleet::V1DoctorSpec {
                 deep: false,
                 sample: None,
                 timeout,
@@ -192,7 +192,7 @@ pub async fn run(cli: crate::cli::ExportArgs) -> Result<()> {
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 interval.tick().await;
-                match zenkey_fleet::run_doctor(&fleet, slices.as_ref(), &spec).await {
+                match zenkey_fleet::run_v1_doctor(&fleet, slices.as_ref(), &spec).await {
                     Ok(report) => {
                         *shared.doctor.lock().expect("doctor lock") = Some((report, unix_now()));
                     }

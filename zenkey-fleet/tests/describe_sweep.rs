@@ -16,8 +16,8 @@
 use std::time::Duration;
 
 use zenkey::schema::{SchemaSet, TypeSchema};
-use zenkey_fleet::report::CheckId;
-use zenkey_fleet::{DoctorSpec, run_doctor};
+use zenkey_fleet::report::V1CheckId;
+use zenkey_fleet::{V1DoctorSpec, run_v1_doctor};
 
 mod util;
 use util::peer_pair;
@@ -81,8 +81,8 @@ async fn serve_describe(
         .expect("describe queryable")
 }
 
-fn spec() -> DoctorSpec {
-    DoctorSpec {
+fn spec() -> V1DoctorSpec {
+    V1DoctorSpec {
         deep: false,
         sample: None,
         timeout: Duration::from_secs(2),
@@ -110,13 +110,13 @@ async fn a_schema_disagreement_names_which_host_serves_which_identity() {
     // Routing propagation is async; retry bounded until the finding appears.
     let drift = tokio::time::timeout(util::SETTLE, async {
         loop {
-            let report = run_doctor(&fleet, Some(&locals), &spec())
+            let report = run_v1_doctor(&fleet, Some(&locals), &spec())
                 .await
                 .expect("doctor");
             let drift: Vec<_> = report
                 .findings
                 .iter()
-                .filter(|f| f.check == CheckId::SchemaDrift)
+                .filter(|f| f.check == V1CheckId::SchemaDrift)
                 .cloned()
                 .collect();
             if !drift.is_empty() {
@@ -154,7 +154,7 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
 
     let report = tokio::time::timeout(util::SETTLE, async {
         loop {
-            let report = run_doctor(&fleet, Some(&locals), &spec())
+            let report = run_v1_doctor(&fleet, Some(&locals), &spec())
                 .await
                 .expect("doctor");
             if report.describe_served >= 1 {
@@ -170,7 +170,7 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
         !report
             .findings
             .iter()
-            .any(|f| f.check == CheckId::SchemaDrift),
+            .any(|f| f.check == V1CheckId::SchemaDrift),
         "one claim is nothing to compare: {:#?}",
         report.findings
     );
@@ -178,7 +178,7 @@ async fn a_single_host_serving_a_schema_is_no_finding() {
         !report
             .findings
             .iter()
-            .any(|f| f.check == CheckId::DescribeMissing),
+            .any(|f| f.check == V1CheckId::DescribeMissing),
         "the producer *is* described: {:#?}",
         report.findings
     );

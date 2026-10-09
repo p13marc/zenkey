@@ -10,17 +10,17 @@
 
 use std::collections::BTreeSet;
 
-use crate::report::{CheckId, DoctorDelta, DoctorFinding, DoctorReport};
+use crate::report::{V1CheckId, V1DoctorDelta, V1DoctorReport, V1Finding};
 
-fn key_of(f: &DoctorFinding) -> (CheckId, &str) {
+fn key_of(f: &V1Finding) -> (V1CheckId, &str) {
     (f.check, f.subject.as_str())
 }
 
 /// What `current` says that `previous` did not, and the other way round.
-pub fn doctor_delta(previous: &DoctorReport, current: &DoctorReport) -> DoctorDelta {
-    let cur_keys: BTreeSet<(CheckId, &str)> = current.findings.iter().map(key_of).collect();
-    let prev_keys: BTreeSet<(CheckId, &str)> = previous.findings.iter().map(key_of).collect();
-    DoctorDelta {
+pub fn v1_doctor_delta(previous: &V1DoctorReport, current: &V1DoctorReport) -> V1DoctorDelta {
+    let cur_keys: BTreeSet<(V1CheckId, &str)> = current.findings.iter().map(key_of).collect();
+    let prev_keys: BTreeSet<(V1CheckId, &str)> = previous.findings.iter().map(key_of).collect();
+    V1DoctorDelta {
         new: current
             .findings
             .iter()
@@ -42,8 +42,8 @@ mod tests {
     use super::*;
     use crate::report::{Asked, DoctorSeverity};
 
-    fn finding(check: CheckId, subject: &str) -> DoctorFinding {
-        DoctorFinding {
+    fn finding(check: V1CheckId, subject: &str) -> V1Finding {
+        V1Finding {
             severity: DoctorSeverity::Error,
             check,
             subject: subject.into(),
@@ -52,8 +52,8 @@ mod tests {
         }
     }
 
-    fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
-        DoctorReport {
+    fn report(findings: Vec<V1Finding>) -> V1DoctorReport {
+        V1DoctorReport {
             findings,
             synced: Asked::NotAsked,
             introspect_answered: 0,
@@ -73,29 +73,29 @@ mod tests {
     #[test]
     fn deltas_key_on_check_and_subject() {
         let prev = report(vec![
-            finding(CheckId::SliceSync, "h-1/sysinfo"),
-            finding(CheckId::StaleState, "v1/h-1/state/p/health"),
+            finding(V1CheckId::SliceSync, "h-1/sysinfo"),
+            finding(V1CheckId::StaleState, "v1/h-1/state/p/health"),
         ]);
-        let mut changed = finding(CheckId::SliceSync, "h-1/sysinfo");
+        let mut changed = finding(V1CheckId::SliceSync, "h-1/sysinfo");
         changed.evidence = "different wording".into();
         let cur = report(vec![
             changed,
-            finding(CheckId::SchemaDrift, "TelemetryPoint"),
+            finding(V1CheckId::SchemaDrift, "TelemetryPoint"),
         ]);
 
-        let d = doctor_delta(&prev, &cur);
+        let d = v1_doctor_delta(&prev, &cur);
         assert_eq!(d.unchanged, 1, "evidence drift is still the same finding");
         assert_eq!(d.fixed.len(), 1);
-        assert_eq!(d.fixed[0].check, CheckId::StaleState);
+        assert_eq!(d.fixed[0].check, V1CheckId::StaleState);
         assert_eq!(d.new.len(), 1);
-        assert!(d.is_new(&finding(CheckId::SchemaDrift, "TelemetryPoint")));
-        assert!(!d.is_new(&finding(CheckId::SliceSync, "h-1/sysinfo")));
+        assert!(d.is_new(&finding(V1CheckId::SchemaDrift, "TelemetryPoint")));
+        assert!(!d.is_new(&finding(V1CheckId::SliceSync, "h-1/sysinfo")));
     }
 
     /// Two empty runs: nothing new, nothing fixed, nothing unchanged.
     #[test]
     fn two_clean_runs_differ_in_nothing() {
-        let d = doctor_delta(&report(vec![]), &report(vec![]));
+        let d = v1_doctor_delta(&report(vec![]), &report(vec![]));
         assert!(d.new.is_empty() && d.fixed.is_empty());
         assert_eq!(d.unchanged, 0);
     }

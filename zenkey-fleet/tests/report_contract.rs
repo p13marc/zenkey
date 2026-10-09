@@ -486,9 +486,9 @@ fn doctor_severities_are_the_stable_lowercase_vocabulary() {
     ] {
         assert_eq!(serde_json::to_value(s).unwrap(), json!(wire));
     }
-    let finding = DoctorFinding {
+    let finding = V1Finding {
         severity: DoctorSeverity::Info,
-        check: zenkey_fleet::report::CheckId::TimestampStampedElsewhere,
+        check: zenkey_fleet::report::V1CheckId::TimestampStampedElsewhere,
         subject: "fleet".into(),
         evidence: "stamped by 1 node that is not the publisher".into(),
         citation: None,

@@ -2,7 +2,7 @@
 //! check the fleet against the RFC contracts it claims to follow.
 //!
 //! Since #55 the checks live in the engine (`zenkey_fleet::judge::doctor`), where
-//! the GUI doctor panel calls the exact same [`zenkey_fleet::run_doctor`];
+//! the GUI doctor panel calls the exact same [`zenkey_fleet::run_v1_doctor`];
 //! this command is orchestration and rendering: load the local slices,
 //! run, print, and exit through the report's own judgement — the opt-in
 //! `--fail-on` threshold, and the reserved 2 for a run that judged nothing
@@ -10,7 +10,7 @@
 //!
 //! `--transitions` (#227) re-runs the checks on an interval and reports
 //! **check-id transitions** as ndjson through the engine's delta machinery
-//! ([`zenkey_fleet::DoctorWatch`]): the first run states the baseline (one
+//! ([`zenkey_fleet::V1DoctorWatch`]): the first run states the baseline (one
 //! line per stable check id, from `null`), every later run prints only
 //! genuine changes — and a run that *fails* flips every check to
 //! `unobservable`, which is the third state doing its job: a doctor that
@@ -26,7 +26,7 @@
 use std::io::Write as _;
 
 use anyhow::Result;
-use zenkey_fleet::DoctorSpec;
+use zenkey_fleet::V1DoctorSpec;
 
 use crate::Bus;
 use crate::cli::{DoctorArgs, FailOn};
@@ -51,7 +51,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
     // ignoring a named context's `registry=`.
     let dirs = args.registry_dirs();
     // No `--registry` warning here: the degradation rides the report itself —
-    // `DoctorReport.synced: None` plus the O4 coverage note in its renderer —
+    // `V1DoctorReport.synced: None` plus the O4 coverage note in its renderer —
     // so every format carries it, not just a tty's stderr (review finding R1).
     // `None` when no dirs were given: the engine distinguishes "no registry
     // loaded" from "a registry that declares nothing", and an empty set said
@@ -64,7 +64,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         Some(secs) => Some(super::positive_secs("--for", secs)?),
         None => None,
     };
-    let spec = DoctorSpec {
+    let spec = V1DoctorSpec {
         deep,
         sample,
         timeout: args.timeout(),
@@ -74,7 +74,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         return transition_loop(&session, locals.as_ref(), &spec, every, count, args).await;
     }
 
-    let report = zenkey_fleet::run_doctor(&args.fleet(&session), locals.as_ref(), &spec).await?;
+    let report = zenkey_fleet::run_v1_doctor(&args.fleet(&session), locals.as_ref(), &spec).await?;
     crate::render::emit_with(&mut std::io::stdout(), &report, args.format(), args.color())?;
 
     // The exit is the report's own judgement (RFC 13 §1.2), projected by
@@ -102,7 +102,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
 async fn transition_loop(
     session: &zenoh::Session,
     locals: Option<&zenkey_fleet::SliceSet>,
-    spec: &DoctorSpec,
+    spec: &V1DoctorSpec,
     every: f64,
     count: Option<u64>,
     args: &Bus,
@@ -113,7 +113,7 @@ async fn transition_loop(
          the baseline (one ndjson line per check id), later runs print only \
          genuine transitions (#227)"
     );
-    let mut watch = zenkey_fleet::DoctorWatch::new();
+    let mut watch = zenkey_fleet::V1DoctorWatch::new();
     let mut out = std::io::stdout();
     let mut done = 0u64;
     // One listener for the whole loop, held across every iteration (#334).
@@ -134,7 +134,7 @@ async fn transition_loop(
                 eprintln!("doctor --transitions: interrupted after {done} run(s)");
                 return Ok(());
             }
-            outcome = zenkey_fleet::run_doctor(&fleet, locals, spec) => outcome,
+            outcome = zenkey_fleet::run_v1_doctor(&fleet, locals, spec) => outcome,
         };
         let at = zenkey_fleet::rfc3339_now();
         let transitions = match &outcome {

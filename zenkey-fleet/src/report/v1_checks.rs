@@ -12,7 +12,7 @@ use super::asked::{Asked, u64_is_zero};
 use super::judgement::Judgement;
 use serde::{Deserialize, Serialize};
 
-/// Every check [`run_doctor`](crate::judge::doctor::run_doctor) can emit.
+/// Every check [`run_v1_doctor`](crate::judge::registry_checks::run_v1_doctor) can emit.
 ///
 /// **Stable API**: scripts key on these through `--format json`, and the GUI
 /// keys deltas on them. New checks append; nothing renames one — which is
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 /// variant), and `check_ids_are_stable` still pins the list (#347).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum CheckId {
+pub enum V1CheckId {
     SliceParse,
     SliceSync,
     IntrospectCoverage,
@@ -60,71 +60,71 @@ pub enum CheckId {
     BudgetExceeded,
 }
 
-impl CheckId {
+impl V1CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 23] = [
-        CheckId::SliceParse,
-        CheckId::SliceSync,
-        CheckId::IntrospectCoverage,
-        CheckId::AdminUnreachable,
-        CheckId::RouterVersionSkew,
-        CheckId::DescribeTotality,
-        CheckId::SchemaDrift,
-        CheckId::DescribeMissing,
-        CheckId::StaleState,
-        CheckId::UnstampedState,
-        CheckId::StorageCoverage,
-        CheckId::PayloadUndecodable,
-        CheckId::PayloadInvalid,
-        CheckId::QosObservedMismatch,
-        CheckId::UnregisteredTraffic,
-        CheckId::RateOverDeclared,
-        CheckId::TimestampStampedElsewhere,
-        CheckId::CardinalityOverDeclared,
-        CheckId::FieldVanished,
-        CheckId::FieldStuck,
-        CheckId::FieldNew,
-        CheckId::KindMismatch,
-        CheckId::BudgetExceeded,
+    pub const ALL: [V1CheckId; 23] = [
+        V1CheckId::SliceParse,
+        V1CheckId::SliceSync,
+        V1CheckId::IntrospectCoverage,
+        V1CheckId::AdminUnreachable,
+        V1CheckId::RouterVersionSkew,
+        V1CheckId::DescribeTotality,
+        V1CheckId::SchemaDrift,
+        V1CheckId::DescribeMissing,
+        V1CheckId::StaleState,
+        V1CheckId::UnstampedState,
+        V1CheckId::StorageCoverage,
+        V1CheckId::PayloadUndecodable,
+        V1CheckId::PayloadInvalid,
+        V1CheckId::QosObservedMismatch,
+        V1CheckId::UnregisteredTraffic,
+        V1CheckId::RateOverDeclared,
+        V1CheckId::TimestampStampedElsewhere,
+        V1CheckId::CardinalityOverDeclared,
+        V1CheckId::FieldVanished,
+        V1CheckId::FieldStuck,
+        V1CheckId::FieldNew,
+        V1CheckId::KindMismatch,
+        V1CheckId::BudgetExceeded,
     ];
 
     /// The wire token, exactly as it serializes.
     pub fn as_str(self) -> &'static str {
         match self {
-            CheckId::SliceParse => "slice-parse",
-            CheckId::SliceSync => "slice-sync",
-            CheckId::IntrospectCoverage => "introspect-coverage",
-            CheckId::AdminUnreachable => "admin-unreachable",
-            CheckId::RouterVersionSkew => "router-version-skew",
-            CheckId::DescribeTotality => "describe-totality",
-            CheckId::SchemaDrift => "schema-drift",
-            CheckId::DescribeMissing => "describe-missing",
-            CheckId::StaleState => "stale-state",
-            CheckId::UnstampedState => "unstamped-state",
-            CheckId::StorageCoverage => "storage-coverage",
-            CheckId::PayloadUndecodable => "payload-undecodable",
-            CheckId::PayloadInvalid => "payload-invalid",
-            CheckId::QosObservedMismatch => "qos-observed-mismatch",
-            CheckId::UnregisteredTraffic => "unregistered-traffic",
-            CheckId::RateOverDeclared => "rate-over-declared",
-            CheckId::TimestampStampedElsewhere => "timestamp-stamped-elsewhere",
-            CheckId::CardinalityOverDeclared => "cardinality-over-declared",
-            CheckId::FieldVanished => "field-vanished",
-            CheckId::FieldStuck => "field-stuck",
-            CheckId::FieldNew => "field-new",
-            CheckId::KindMismatch => "kind-mismatch",
-            CheckId::BudgetExceeded => "budget-exceeded",
+            V1CheckId::SliceParse => "slice-parse",
+            V1CheckId::SliceSync => "slice-sync",
+            V1CheckId::IntrospectCoverage => "introspect-coverage",
+            V1CheckId::AdminUnreachable => "admin-unreachable",
+            V1CheckId::RouterVersionSkew => "router-version-skew",
+            V1CheckId::DescribeTotality => "describe-totality",
+            V1CheckId::SchemaDrift => "schema-drift",
+            V1CheckId::DescribeMissing => "describe-missing",
+            V1CheckId::StaleState => "stale-state",
+            V1CheckId::UnstampedState => "unstamped-state",
+            V1CheckId::StorageCoverage => "storage-coverage",
+            V1CheckId::PayloadUndecodable => "payload-undecodable",
+            V1CheckId::PayloadInvalid => "payload-invalid",
+            V1CheckId::QosObservedMismatch => "qos-observed-mismatch",
+            V1CheckId::UnregisteredTraffic => "unregistered-traffic",
+            V1CheckId::RateOverDeclared => "rate-over-declared",
+            V1CheckId::TimestampStampedElsewhere => "timestamp-stamped-elsewhere",
+            V1CheckId::CardinalityOverDeclared => "cardinality-over-declared",
+            V1CheckId::FieldVanished => "field-vanished",
+            V1CheckId::FieldStuck => "field-stuck",
+            V1CheckId::FieldNew => "field-new",
+            V1CheckId::KindMismatch => "kind-mismatch",
+            V1CheckId::BudgetExceeded => "budget-exceeded",
         }
     }
 
     /// Read a check id a caller supplied — `doctor --transitions`, a
     /// `check expect` condition, a script's filter.
-    pub fn parse(token: &str) -> Option<CheckId> {
-        CheckId::ALL.into_iter().find(|c| c.as_str() == token)
+    pub fn parse(token: &str) -> Option<V1CheckId> {
+        V1CheckId::ALL.into_iter().find(|c| c.as_str() == token)
     }
 }
 
-impl fmt::Display for CheckId {
+impl fmt::Display for V1CheckId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -171,12 +171,12 @@ impl DoctorSeverity {
 /// what, with the evidence and the normative citation — the shape the GUI
 /// doctor panel renders as-is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DoctorFinding {
+pub struct V1Finding {
     pub severity: DoctorSeverity,
     /// Which check fired. Serializes to the same kebab-case token it always
     /// has; it is a type now so a typo is a compile error rather than a
     /// finding nothing matches (#347).
-    pub check: CheckId,
+    pub check: V1CheckId,
     /// What the finding is about (producer, key, or mesh-level subject).
     pub subject: String,
     /// The observed evidence, human-readable.
@@ -189,21 +189,21 @@ pub struct DoctorFinding {
 
 /// What one doctor run says relative to the previous one (#389): findings
 /// keyed on `(check, subject)`, so evidence and severity drift count as
-/// unchanged. Computed by [`crate::doctor_delta`]; rendered by the GUI
+/// unchanged. Computed by [`crate::v1_doctor_delta`]; rendered by the GUI
 /// panel and routed by a notifier's `doctor` rule.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-pub struct DoctorDelta {
+pub struct V1DoctorDelta {
     /// Findings present now and absent from the previous run.
-    pub new: Vec<DoctorFinding>,
+    pub new: Vec<V1Finding>,
     /// Findings present in the previous run and gone now.
-    pub fixed: Vec<DoctorFinding>,
+    pub fixed: Vec<V1Finding>,
     /// Findings present in both runs.
     pub unchanged: usize,
 }
 
-impl DoctorDelta {
+impl V1DoctorDelta {
     /// Whether `f` is one of the new findings, by its key.
-    pub fn is_new(&self, f: &DoctorFinding) -> bool {
+    pub fn is_new(&self, f: &V1Finding) -> bool {
         self.new
             .iter()
             .any(|n| n.check == f.check && n.subject == f.subject)
@@ -214,8 +214,8 @@ impl DoctorDelta {
 /// empty findings list legible (what was checked, not just what was found —
 /// RFC 05 §3.1: silence needs attribution).
 #[derive(Debug, Clone, Serialize)]
-pub struct DoctorReport {
-    pub findings: Vec<DoctorFinding>,
+pub struct V1DoctorReport {
+    pub findings: Vec<V1Finding>,
     /// Producer slices confirmed in sync with the local registry
     /// (`origin/producer`).
     ///
@@ -290,7 +290,7 @@ pub struct ObservationSummary {
     pub facts_evicted: u64,
 }
 
-impl DoctorReport {
+impl V1DoctorReport {
     pub fn count(&self, severity: DoctorSeverity) -> usize {
         self.findings
             .iter()
@@ -305,7 +305,7 @@ impl DoctorReport {
     /// `threshold`"*, so a hit is `Established` and none is
     /// `NotEstablished`. With no threshold, findings are output rather than
     /// verdicts and the run is `NotEstablished` whatever it found. A run that
-    /// [judged nothing](DoctorReport::unobservable) is `Unobservable` under
+    /// [judged nothing](V1DoctorReport::unobservable) is `Unobservable` under
     /// every threshold, `None` included: no threshold turns an empty scope
     /// into a healthy fleet.
     pub fn judgement(&self, threshold: Option<DoctorSeverity>) -> Judgement {
@@ -334,16 +334,16 @@ mod tests {
     use super::*;
     use crate::report::Asked;
 
-    /// The serialized DoctorReport is a wire contract: `zenctl doctor
+    /// The serialized V1DoctorReport is a wire contract: `zenctl doctor
     /// --format json` scripts and the GUI panel both consume this exact
     /// shape. Field renames/removals break users — this golden pin makes
     /// that a deliberate act.
     #[test]
     fn doctor_report_json_shape_is_pinned() {
-        let report = DoctorReport {
-            findings: vec![DoctorFinding {
+        let report = V1DoctorReport {
+            findings: vec![V1Finding {
                 severity: DoctorSeverity::Error,
-                check: CheckId::SliceSync,
+                check: V1CheckId::SliceSync,
                 subject: "h-3fa9c2d41b7e/sysinfo".into(),
                 evidence: "registry version differs: served 1.0, local 2.0".into(),
                 citation: Some("RFC 08 §6".into()),
@@ -388,7 +388,7 @@ mod tests {
         // and confirmed nothing; non-empty pins above. The wire change is
         // deliberate: a no-registry run serialized nothing here before, and
         // still does — only the ran-and-empty case gains a visible `[]`.
-        let unchecked = DoctorReport {
+        let unchecked = V1DoctorReport {
             synced: Asked::NotAsked,
             ..report.clone()
         };
@@ -398,7 +398,7 @@ mod tests {
             "diff never ran: the key is absent, exactly as pre-R1 no-registry \
              runs serialized"
         );
-        let ran_empty = DoctorReport {
+        let ran_empty = V1DoctorReport {
             synced: Asked::Asked(vec![]),
             ..report.clone()
         };
@@ -412,7 +412,7 @@ mod tests {
         // `field_paths_dropped` (#223) is absent at zero — appended, like
         // #213/#221's additions, so pre-#223 consumers see an unchanged
         // document.
-        let report = DoctorReport {
+        let report = V1DoctorReport {
             observation: Some(ObservationSummary {
                 window_s: 10.0,
                 scopes: vec!["v1/*/state/**".into()],
@@ -439,7 +439,7 @@ mod tests {
         );
         // …and pins by name when the field table did drop (O6 is a wire
         // fact, not only a table note).
-        let report = DoctorReport {
+        let report = V1DoctorReport {
             observation: Some(ObservationSummary {
                 field_paths_dropped: 2,
                 ..report.observation.unwrap()
@@ -456,7 +456,7 @@ mod tests {
                 .unwrap()
                 .contains_key("facts_evicted")
         );
-        let report = DoctorReport {
+        let report = V1DoctorReport {
             observation: Some(ObservationSummary {
                 facts_evicted: 5,
                 ..report.observation.unwrap()
@@ -468,7 +468,7 @@ mod tests {
         // #510: a run that judged nothing says so, by name and with its
         // reason — appended, absent otherwise, like every addition above.
         assert!(!json.as_object().unwrap().contains_key("unobservable"));
-        let report = DoctorReport {
+        let report = V1DoctorReport {
             unobservable: Some("nothing in scope".into()),
             ..report
         };
@@ -483,14 +483,14 @@ mod tests {
     #[test]
     fn the_judgement_reads_the_threshold_and_the_empty_scope() {
         use crate::report::judgement_exit_code;
-        let warning = DoctorFinding {
+        let warning = V1Finding {
             severity: DoctorSeverity::Warning,
-            check: CheckId::SchemaDrift,
+            check: V1CheckId::SchemaDrift,
             subject: "Health".into(),
             evidence: "agreement cannot be judged".into(),
             citation: None,
         };
-        let report = DoctorReport {
+        let report = V1DoctorReport {
             findings: vec![warning],
             synced: Asked::NotAsked,
             introspect_answered: 1,
@@ -503,13 +503,13 @@ mod tests {
             observation: None,
             unobservable: None,
         };
-        let exit = |r: &DoctorReport, t| judgement_exit_code(&r.judgement(t));
+        let exit = |r: &V1DoctorReport, t| judgement_exit_code(&r.judgement(t));
         assert_eq!(exit(&report, None), 0);
         assert_eq!(exit(&report, Some(DoctorSeverity::Error)), 0);
         assert_eq!(exit(&report, Some(DoctorSeverity::Warning)), 1);
         assert_eq!(exit(&report, Some(DoctorSeverity::Info)), 1);
 
-        let empty = DoctorReport {
+        let empty = V1DoctorReport {
             findings: vec![],
             live_producers: 0,
             introspect_answered: 0,
@@ -547,7 +547,7 @@ mod check_id_tests {
     #[test]
     fn check_ids_are_stable() {
         assert_eq!(
-            CheckId::ALL.map(CheckId::as_str),
+            V1CheckId::ALL.map(V1CheckId::as_str),
             [
                 "slice-parse",
                 "slice-sync",
@@ -579,12 +579,12 @@ mod check_id_tests {
     /// `as_str`, serde and `parse` are one vocabulary, not three.
     #[test]
     fn every_check_id_round_trips_through_serde_and_parse() {
-        for id in CheckId::ALL {
+        for id in V1CheckId::ALL {
             let json = serde_json::to_string(&id).unwrap();
             assert_eq!(json, format!("\"{}\"", id.as_str()));
-            assert_eq!(serde_json::from_str::<CheckId>(&json).unwrap(), id);
-            assert_eq!(CheckId::parse(id.as_str()), Some(id));
+            assert_eq!(serde_json::from_str::<V1CheckId>(&json).unwrap(), id);
+            assert_eq!(V1CheckId::parse(id.as_str()), Some(id));
         }
-        assert_eq!(CheckId::parse("slice-sinc"), None);
+        assert_eq!(V1CheckId::parse("slice-sinc"), None);
     }
 }

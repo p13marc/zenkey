@@ -17,7 +17,7 @@
 
 use serde::Serialize;
 
-use super::doctor::ObservationSummary;
+use super::v1_checks::ObservationSummary;
 
 /// One assertion's answer (RFC 13 §3, v1.35).
 ///

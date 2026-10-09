@@ -12,14 +12,14 @@
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
-use zenkey_fleet::report::CheckId;
-use zenkey_fleet::{DoctorSpec, Fleet, declare_publication, run_doctor};
+use zenkey_fleet::report::V1CheckId;
+use zenkey_fleet::{Fleet, V1DoctorSpec, declare_publication, run_v1_doctor};
 
 mod util;
 use util::peer_pair;
 
-fn spec(listen_s: u64) -> DoctorSpec {
-    DoctorSpec {
+fn spec(listen_s: u64) -> V1DoctorSpec {
+    V1DoctorSpec {
         deep: false,
         sample: None,
         timeout: Duration::from_millis(500),
@@ -91,12 +91,12 @@ fn keep_cycling(
 }
 
 fn kind_findings(
-    report: &zenkey_fleet::report::DoctorReport,
-) -> Vec<&zenkey_fleet::report::DoctorFinding> {
+    report: &zenkey_fleet::report::V1DoctorReport,
+) -> Vec<&zenkey_fleet::report::V1Finding> {
     report
         .findings
         .iter()
-        .filter(|f| f.check == CheckId::KindMismatch)
+        .filter(|f| f.check == V1CheckId::KindMismatch)
         .collect()
 }
 
@@ -113,13 +113,13 @@ async fn a_decreasing_counter_is_a_kind_mismatch_finding() {
         .expect("declare");
     let t = keep_cycling(publication, &[b"10", b"20", b"5"]);
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");
@@ -157,13 +157,13 @@ async fn a_gauge_tagged_payload_on_a_counter_subject_is_a_finding() {
         .expect("declare");
     let t = keep_cycling(publication, &[br#"{"type":"gauge","value":1}"#]);
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let found = kind_findings(&report);
@@ -196,13 +196,13 @@ async fn a_subject_without_kind_is_never_judged() {
         &[b"10", b"20", b"5", br#"{"type":"gauge","value":1}"#],
     );
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");
@@ -264,13 +264,13 @@ async fn a_counter_reset_across_an_alive_cycle_is_not_a_finding() {
         }
     });
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(3),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");
@@ -335,13 +335,13 @@ async fn a_counter_reset_across_a_device_token_cycle_is_not_a_finding() {
         }
     });
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local])),
         &spec(3),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");

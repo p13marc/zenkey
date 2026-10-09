@@ -68,26 +68,26 @@ pub fn storage_list() -> StorageList {
 
 /// A doctor run with one finding of each severity, and the listen phase's
 /// bounded observation.
-pub fn doctor_report() -> DoctorReport {
-    DoctorReport {
+pub fn doctor_report() -> V1DoctorReport {
+    V1DoctorReport {
         findings: vec![
-            DoctorFinding {
+            V1Finding {
                 severity: DoctorSeverity::Error,
-                check: CheckId::SliceSync,
+                check: V1CheckId::SliceSync,
                 subject: format!("{ORIGIN}/sysinfo"),
                 evidence: "does not serve state health".into(),
                 citation: Some("RFC 08 §6".into()),
             },
-            DoctorFinding {
+            V1Finding {
                 severity: DoctorSeverity::Warning,
-                check: CheckId::QosObservedMismatch,
+                check: V1CheckId::QosObservedMismatch,
                 subject: format!("{ORIGIN}/sysinfo/health"),
                 evidence: "declared refreshed, observed data/drop/reliable".into(),
                 citation: None,
             },
-            DoctorFinding {
+            V1Finding {
                 severity: DoctorSeverity::Info,
-                check: CheckId::TimestampStampedElsewhere,
+                check: V1CheckId::TimestampStampedElsewhere,
                 subject: "fleet".into(),
                 evidence: "stamped by 1 node that is not the publisher".into(),
                 citation: Some("RFC 09 §5.1 O7".into()),
@@ -162,9 +162,9 @@ pub fn field_report() -> FieldReport {
                 values: Some(vec!["\"degraded\"".into(), "\"ok\"".into()]),
             },
         ],
-        findings: vec![DoctorFinding {
+        findings: vec![V1Finding {
             severity: DoctorSeverity::Warning,
-            check: CheckId::FieldStuck,
+            check: V1CheckId::FieldStuck,
             subject: format!("{key} · temperature_c"),
             evidence: "value 21.5 unchanged across 40 sample(s) spanning 29.5s — at \
                        least 3× the declared ttl_s 5s — while the key kept publishing. \
@@ -1939,7 +1939,7 @@ pub fn export_snapshot() -> ExportSnapshot {
         doctor: Asked::Asked(DoctorSummary {
             ran_at_unix_s: 1_700_000_090,
             findings: vec![DoctorFindingRef {
-                check: CheckId::StaleState,
+                check: V1CheckId::StaleState,
                 severity: DoctorSeverity::Warning,
                 subject: format!("{ORIGIN}/sysinfo"),
             }],

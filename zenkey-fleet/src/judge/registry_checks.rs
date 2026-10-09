@@ -1,12 +1,12 @@
 //! The doctor checks as engine functions (#55): every finding both frontends
 //! render comes from here — `zenctl doctor` orchestrates and renders, the
-//! zengui doctor panel calls the same [`run_doctor`] and renders the same
-//! [`DoctorReport`]. A check that lives in one frontend is a check the other
+//! zengui doctor panel calls the same [`run_v1_doctor`] and renders the same
+//! [`V1DoctorReport`]. A check that lives in one frontend is a check the other
 //! frontend's user never sees (RFC 08 §6.1's argument, applied to ourselves).
 //!
 //! Check ids are **stable API**: scripts key on them (`--format json`), the
 //! GUI keys deltas on them. New checks add ids; nothing renames one. The full
-//! set is pinned in [`crate::report::CheckId`].
+//! set is pinned in [`crate::report::V1CheckId`].
 
 use std::time::Duration;
 
@@ -17,15 +17,15 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::query::{Answer, GetOpts, RepeatingRegistry, fleet_get, state_snapshot};
 use crate::judge::common::{FINDING_CAP, is_synthetic_marker};
 use crate::model::examples::Examples;
-use crate::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity, DriftVerdict};
+use crate::report::{DoctorSeverity, DriftVerdict, V1CheckId, V1DoctorReport, V1Finding};
 
 // The run-over-run comparison lives beside the doctor by name; it is
 // ungated (no session, no decode) and so has a file of its own.
-pub use crate::judge::doctor_delta::doctor_delta;
+pub use crate::judge::doctor_delta::v1_doctor_delta;
 
 /// What a doctor run should cost.
 #[derive(Debug, Clone)]
-pub struct DoctorSpec {
+pub struct V1DoctorSpec {
     /// Run the deep checks too (per-family state snapshots for freshness,
     /// storage-coverage join) — real query load, opt-in.
     pub deep: bool,
@@ -45,12 +45,12 @@ pub struct DoctorSpec {
 
 fn finding(
     severity: DoctorSeverity,
-    check: CheckId,
+    check: V1CheckId,
     subject: impl Into<String>,
     evidence: impl Into<String>,
     citation: Option<&str>,
-) -> DoctorFinding {
-    DoctorFinding {
+) -> V1Finding {
+    V1Finding {
         severity,
         check,
         subject: subject.into(),
@@ -71,15 +71,15 @@ fn finding(
 /// policy), an empty slice could not tell the two apart, and the set arrives
 /// already indexed — doctor used to rebuild one from a clone of every slice
 /// halfway through the run.
-pub async fn run_doctor(
+pub async fn run_v1_doctor(
     fleet: &crate::Fleet<'_>,
     locals: Option<&crate::model::registry::SliceSet>,
-    spec: &DoctorSpec,
-) -> Result<DoctorReport> {
+    spec: &V1DoctorSpec,
+) -> Result<V1DoctorReport> {
     Ok(run_doctor_inner(fleet, locals, spec).await?.0)
 }
 
-/// What one doctor run saw that its [`DoctorReport`] does not carry (#222)
+/// What one doctor run saw that its [`V1DoctorReport`] does not carry (#222)
 /// — the conformance suite's inputs beside the findings, never a wire
 /// shape. `check conform` projects a scoped doctor run onto its assertions
 /// ([`crate::judge::conform`]), and a finding says what is *wrong*; what
@@ -109,14 +109,14 @@ pub(crate) struct SeenFamily {
     pub(crate) samples: u64,
 }
 
-/// [`run_doctor`], with the [`DoctorInternals`] beside the report. One run,
+/// [`run_v1_doctor`], with the [`DoctorInternals`] beside the report. One run,
 /// two readers: the public verb keeps its shape, and the conformance suite
 /// reads the same observation instead of a second copy of the checks.
 pub(crate) async fn run_doctor_inner(
     fleet: &crate::Fleet<'_>,
     locals: Option<&crate::model::registry::SliceSet>,
-    spec: &DoctorSpec,
-) -> Result<(DoctorReport, DoctorInternals)> {
+    spec: &V1DoctorSpec,
+) -> Result<(V1DoctorReport, DoctorInternals)> {
     let (session, base) = (fleet.session(), fleet.base());
     let mut internals = DoctorInternals::default();
 
@@ -126,7 +126,7 @@ pub(crate) async fn run_doctor_inner(
     let locals = locals.filter(|set| !set.slices().is_empty());
     let roster = crate::bus::roster::roster(fleet, spec.timeout).await?;
 
-    let mut findings: Vec<DoctorFinding> = Vec::new();
+    let mut findings: Vec<V1Finding> = Vec::new();
     let mut synced: Vec<String> = Vec::new();
     let mut answered = 0usize;
 
@@ -151,7 +151,7 @@ pub(crate) async fn run_doctor_inner(
                 Err(e) => {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        CheckId::SliceParse,
+                        V1CheckId::SliceParse,
                         format!("{}/{}", answer.origin, local.name),
                         format!("served slice does not parse: {e}"),
                         Some("RFC 08 §6"),
@@ -169,7 +169,7 @@ pub(crate) async fn run_doctor_inner(
                 for f in &diff {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        CheckId::SliceSync,
+                        V1CheckId::SliceSync,
                         format!("{}/{}", answer.origin, local.name),
                         f.summary(),
                         Some("RFC 08 §6"),
@@ -194,7 +194,7 @@ pub(crate) async fn run_doctor_inner(
         for u in &swept.unreadable {
             findings.push(finding(
                 DoctorSeverity::Error,
-                CheckId::SliceParse,
+                V1CheckId::SliceParse,
                 format!("{}/{}", u.origin, u.producer),
                 format!(
                     "served slice does not parse (encoding {}): {}",
@@ -232,7 +232,7 @@ pub(crate) async fn run_doctor_inner(
     if routers.is_empty() {
         findings.push(finding(
             DoctorSeverity::Info,
-            CheckId::AdminUnreachable,
+            V1CheckId::AdminUnreachable,
             "mesh",
             "no routers answered @/*/router (peer-only mesh, or the admin space is \
              disabled) — storage/version checks skipped",
@@ -246,7 +246,7 @@ pub(crate) async fn run_doctor_inner(
         if versions.len() > 1 {
             findings.push(finding(
                 DoctorSeverity::Error,
-                CheckId::RouterVersionSkew,
+                V1CheckId::RouterVersionSkew,
                 "mesh",
                 format!("router version skew across the mesh: {versions:?}"),
                 None,
@@ -292,7 +292,7 @@ pub(crate) async fn run_doctor_inner(
     for gap in crate::model::decode::totality_gaps(&described, &slice_set) {
         findings.push(finding(
             DoctorSeverity::Error,
-            CheckId::DescribeTotality,
+            V1CheckId::DescribeTotality,
             gap.producer.clone(),
             format!(
                 "describe is not total — missing: {}",
@@ -338,7 +338,7 @@ pub(crate) async fn run_doctor_inner(
         };
         findings.push(finding(
             severity,
-            CheckId::SchemaDrift,
+            V1CheckId::SchemaDrift,
             drift.type_name.clone(),
             evidence,
             Some("RFC 08 §7"),
@@ -347,7 +347,7 @@ pub(crate) async fn run_doctor_inner(
     if undescribed > 0 {
         findings.push(finding(
             DoctorSeverity::Info,
-            CheckId::DescribeMissing,
+            V1CheckId::DescribeMissing,
             "fleet",
             format!(
                 "{undescribed} producer(s) serve no describe (a SHOULD; generic tools \
@@ -433,7 +433,7 @@ pub(crate) async fn run_doctor_inner(
         if unstamped > 0 {
             findings.push(finding(
                 DoctorSeverity::Warning,
-                CheckId::UnstampedState,
+                V1CheckId::UnstampedState,
                 "fleet",
                 format!(
                     "{unstamped} state sample(s) carry no HLC timestamp — the deployment \
@@ -454,7 +454,7 @@ pub(crate) async fn run_doctor_inner(
         if !uncovered.is_empty() {
             findings.push(finding(
                 DoctorSeverity::Info,
-                CheckId::StorageCoverage,
+                V1CheckId::StorageCoverage,
                 "fleet",
                 format!(
                     "{} state famil(y|ies) have no storage coverage (volatile seeding \
@@ -522,7 +522,7 @@ pub(crate) async fn run_doctor_inner(
             )
         });
 
-    let report = DoctorReport {
+    let report = V1DoctorReport {
         findings,
         // `None` when no local registry was given: the served-vs-declared
         // diff never ran, and the report must say so rather than looking
@@ -557,9 +557,9 @@ const SAME_FINDING: &str = "more key(s) with the same finding";
 /// remainder note under-counted. [`Examples`] counts what it is offered, so
 /// the note cannot disagree with the population it summarises.
 fn emit_capped(
-    findings: &mut Vec<DoctorFinding>,
-    ex: Examples<DoctorFinding>,
-    check: CheckId,
+    findings: &mut Vec<V1Finding>,
+    ex: Examples<V1Finding>,
+    check: V1CheckId,
     tail: &str,
 ) {
     let more = ex.more(tail);
@@ -599,7 +599,7 @@ async fn observe_traffic(
     described: &[(String, zenkey::schema::SchemaSet)],
     window: Duration,
 ) -> Result<(
-    Vec<DoctorFinding>,
+    Vec<V1Finding>,
     crate::report::ObservationSummary,
     std::collections::BTreeMap<(String, String), SeenFamily>,
 )> {
@@ -908,7 +908,7 @@ async fn observe_traffic(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Error,
-                CheckId::PayloadUndecodable,
+                V1CheckId::PayloadUndecodable,
                 key.clone(),
                 format!(
                     "payload does not decode as its declared type: {error} ({n} sample(s) tried)"
@@ -917,20 +917,25 @@ async fn observe_traffic(
             )
         });
     }
-    emit_capped(&mut findings, ex, CheckId::PayloadUndecodable, SAME_FINDING);
+    emit_capped(
+        &mut findings,
+        ex,
+        V1CheckId::PayloadUndecodable,
+        SAME_FINDING,
+    );
     let mut ex = Examples::new(FINDING_CAP);
     for (key, (violations, n)) in &invalid {
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Error,
-                CheckId::PayloadInvalid,
+                V1CheckId::PayloadInvalid,
                 key.clone(),
                 format!("payload violates the served schema: {violations} ({n} sample(s) tried)"),
                 Some("RFC 08 §7"),
             )
         });
     }
-    emit_capped(&mut findings, ex, CheckId::PayloadInvalid, SAME_FINDING);
+    emit_capped(&mut findings, ex, V1CheckId::PayloadInvalid, SAME_FINDING);
     findings.extend(judge_qos_observed(&qos_bad));
     if !foreign_stampers.is_empty() {
         let mut named: Vec<String> = foreign_stampers
@@ -940,7 +945,7 @@ async fn observe_traffic(
         named.sort();
         findings.push(finding(
             DoctorSeverity::Info,
-            CheckId::TimestampStampedElsewhere,
+            V1CheckId::TimestampStampedElsewhere,
             "fleet".to_string(),
             format!(
                 "HLCs on this bus are stamped by {} node(s) that are not the publishing \
@@ -958,7 +963,7 @@ async fn observe_traffic(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Warning,
-                CheckId::UnregisteredTraffic,
+                V1CheckId::UnregisteredTraffic,
                 key.clone(),
                 format!(
                     "{n} sample(s) on a subject the producer's slice does not declare — \
@@ -971,7 +976,7 @@ async fn observe_traffic(
     emit_capped(
         &mut findings,
         ex,
-        CheckId::UnregisteredTraffic,
+        V1CheckId::UnregisteredTraffic,
         SAME_FINDING,
     );
     // Over-rate only, and only when provable: within any window no longer
@@ -985,7 +990,7 @@ async fn observe_traffic(
             if count > cap {
                 findings.push(finding(
                     DoctorSeverity::Warning,
-                    CheckId::RateOverDeclared,
+                    V1CheckId::RateOverDeclared,
                     family.clone(),
                     format!(
                         "{count} event(s) in {window_s:.0}s exceeds the declared \
@@ -1076,7 +1081,7 @@ fn field_context_from(
 /// bounds the findings; the filter decides what a finding is.
 fn judge_qos_observed(
     qos_bad: &std::collections::BTreeMap<String, (String, u64, u64)>,
-) -> Vec<DoctorFinding> {
+) -> Vec<V1Finding> {
     let mut findings = Vec::new();
 
     let mut ex = Examples::new(FINDING_CAP);
@@ -1085,7 +1090,7 @@ fn judge_qos_observed(
         ex.push_with(|| {
             finding(
                 DoctorSeverity::Warning,
-                CheckId::QosObservedMismatch,
+                V1CheckId::QosObservedMismatch,
                 key.clone(),
                 format!(
                     "{bad} of {total} sample(s) did not ride the declared {declared} — this \
@@ -1099,7 +1104,7 @@ fn judge_qos_observed(
     emit_capped(
         &mut findings,
         ex,
-        CheckId::QosObservedMismatch,
+        V1CheckId::QosObservedMismatch,
         SAME_FINDING,
     );
     findings
@@ -1125,7 +1130,7 @@ fn judge_introspect_coverage(
     roster: &std::collections::BTreeMap<String, Vec<String>>,
     locals: Option<&[RegistrySlice]>,
     answered: usize,
-) -> Option<DoctorFinding> {
+) -> Option<V1Finding> {
     let live: usize = roster.values().map(Vec::len).sum();
 
     let (in_scope, scope) = match locals {
@@ -1165,7 +1170,7 @@ fn judge_introspect_coverage(
     (answered < in_scope).then(|| {
         finding(
             DoctorSeverity::Error,
-            CheckId::IntrospectCoverage,
+            V1CheckId::IntrospectCoverage,
             "fleet",
             format!(
                 "{} of {} live producer(s) in scope did not answer introspect — \
@@ -1186,7 +1191,7 @@ fn judge_state_samples(
     samples: &[crate::StateSample],
     ttl: i64,
     now: std::time::SystemTime,
-) -> (Vec<DoctorFinding>, usize) {
+) -> (Vec<V1Finding>, usize) {
     let mut findings = Vec::new();
 
     let mut unstamped = 0usize;
@@ -1200,7 +1205,7 @@ fn judge_state_samples(
                 {
                     findings.push(finding(
                         DoctorSeverity::Error,
-                        CheckId::StaleState,
+                        V1CheckId::StaleState,
                         sample.key.clone(),
                         format!(
                             "{}s old against ttl {ttl}s (refresh <= ttl/2)",
@@ -1236,10 +1241,10 @@ fn judge_cardinality(
     slices: &crate::model::registry::SliceSet,
     observed: &crate::judge::budget::BudgetObservation,
     window_s: f64,
-) -> Vec<DoctorFinding> {
+) -> Vec<V1Finding> {
     let mut findings = Vec::new();
 
-    let mut over: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
+    let mut over: Examples<V1Finding> = Examples::new(FINDING_CAP);
 
     for slice in slices.slices() {
         for s in &slice.subjects {
@@ -1253,7 +1258,7 @@ fn judge_cardinality(
                     .unwrap_or(0);
                 findings.push(finding(
                     DoctorSeverity::Info,
-                    CheckId::CardinalityOverDeclared,
+                    V1CheckId::CardinalityOverDeclared,
                     format!("{}/{}", slice.name, s.path),
                     format!(
                         "exempt: rest-variable — a `{{var...}}` family is unbounded by \
@@ -1288,7 +1293,7 @@ fn judge_cardinality(
                 over.push_with(|| {
                     finding(
                         DoctorSeverity::Warning,
-                        CheckId::CardinalityOverDeclared,
+                        V1CheckId::CardinalityOverDeclared,
                         subject,
                         format!(
                             "{} distinct key(s) observed in {window_s:.0}s exceed the \
@@ -1306,7 +1311,7 @@ fn judge_cardinality(
     emit_capped(
         &mut findings,
         over,
-        CheckId::CardinalityOverDeclared,
+        V1CheckId::CardinalityOverDeclared,
         "more origin famil(y|ies) over their declared cardinality",
     );
     findings
@@ -1347,7 +1352,7 @@ mod tests {
         let findings = judge_cardinality(&slices, &obs, 10.0);
         assert_eq!(findings.len(), 1, "{findings:?}");
         let f = &findings[0];
-        assert_eq!(f.check, CheckId::CardinalityOverDeclared);
+        assert_eq!(f.check, V1CheckId::CardinalityOverDeclared);
         assert_eq!(f.severity, DoctorSeverity::Warning);
         assert_eq!(f.subject, "h-aaaaaaaaaaaa/sysinfo/disk/{mount}/used");
         assert!(f.evidence.contains("40 distinct key(s)"), "{}", f.evidence);
@@ -1439,7 +1444,7 @@ mod tests {
             );
         }
         let findings = judge_qos_observed(&qos_bad);
-        let per_key: Vec<&DoctorFinding> = findings
+        let per_key: Vec<&V1Finding> = findings
             .iter()
             .filter(|f| f.severity == DoctorSeverity::Warning)
             .collect();
@@ -1524,7 +1529,7 @@ mod tests {
         ]);
         let locals = [slice_named("sysinfo")];
         let f = judge_introspect_coverage(&roster, Some(&locals), 1).expect("a finding");
-        assert_eq!(f.check, CheckId::IntrospectCoverage);
+        assert_eq!(f.check, V1CheckId::IntrospectCoverage);
         assert!(f.evidence.contains("1 of 2"), "{}", f.evidence);
         assert!(
             f.evidence.contains("the local registry names (sysinfo)"),
@@ -1600,7 +1605,7 @@ mod tests {
             1,
             "only the stale stamped sample is a finding"
         );
-        assert_eq!(findings[0].check, CheckId::StaleState);
+        assert_eq!(findings[0].check, V1CheckId::StaleState);
         assert!(findings[0].subject.contains("h-bbbbbbbbbbbb"));
         assert_eq!(unstamped, 1, "the unstamped sample is counted, not judged");
     }

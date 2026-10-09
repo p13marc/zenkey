@@ -271,10 +271,10 @@ where
         let sweep = async {
             let doctor = if wants_doctor {
                 Some(
-                    crate::judge::doctor::run_doctor(
+                    crate::judge::registry_checks::run_v1_doctor(
                         fleet,
                         slices,
-                        &crate::judge::doctor::DoctorSpec {
+                        &crate::judge::registry_checks::V1DoctorSpec {
                             deep: false,
                             sample: None,
                             timeout: spec.timeout,

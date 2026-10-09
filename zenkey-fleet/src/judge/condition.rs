@@ -36,8 +36,8 @@ use crate::bus::monitor::SampleView;
 use crate::bus::query::FleetAnswer;
 use crate::model::decode::SchemaStore;
 use crate::model::registry::SliceSet;
-use crate::report::{CheckId, DoctorReport};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
+use crate::report::{V1CheckId, V1DoctorReport};
 use sipper::{Straw, sipper};
 
 /// The closed condition vocabulary (#227), over the existing observation
@@ -71,9 +71,9 @@ pub enum Condition {
     /// unjudgeable and counted in the evidence, not the state.
     QosMismatch { selector: String },
     /// A doctor run reported at least one finding with this check id
-    /// (the stable [`crate::report::CheckId`] vocabulary). A failed doctor run is
+    /// (the stable [`crate::report::V1CheckId`] vocabulary). A failed doctor run is
     /// unobservable for every doctor condition — never `ok`.
-    DoctorCheck { check: CheckId },
+    DoctorCheck { check: V1CheckId },
     /// The origin holds no `alive` token on the liveliness roster
     /// (RFC 04 §5). A roster that could not be asked is unobservable —
     /// silence is not a verdict (RFC 05 §3.1).
@@ -199,12 +199,12 @@ impl Condition {
                 selector: sel.to_string(),
             },
             ["doctor", check] => {
-                let Some(check) = CheckId::parse(check) else {
+                let Some(check) = V1CheckId::parse(check) else {
                     return Err(Error::unaskable(
                         format!("doctor {check:?}"),
                         format!(
                             "is not a check id — the stable vocabulary is: {}",
-                            CheckId::ALL
+                            V1CheckId::ALL
                                 .iter()
                                 .map(|c| c.as_str())
                                 .collect::<Vec<_>>()
@@ -460,7 +460,7 @@ impl Condition {
     /// A failed run is unobservable for every doctor condition — never `ok`
     /// — and so is a run that judged nothing (#510): an empty scope has not
     /// said any check is clean.
-    pub fn judge_doctor(&self, outcome: Result<&DoctorReport, &str>) -> Option<Eval> {
+    pub fn judge_doctor(&self, outcome: Result<&V1DoctorReport, &str>) -> Option<Eval> {
         let Condition::DoctorCheck { check } = self else {
             return None;
         };
@@ -469,7 +469,7 @@ impl Condition {
                 state: CondState::Unobservable,
                 evidence: format!("the doctor run failed: {e}"),
             },
-            Ok(DoctorReport {
+            Ok(V1DoctorReport {
                 unobservable: Some(why),
                 ..
             }) => Eval {
@@ -619,7 +619,7 @@ pub fn judge_silence(ev: SilenceEvidence) -> Judgement {
 /// `.expect("a doctor rule ran the doctor")` (#352).
 pub struct TickEvidence<'e> {
     pub window: &'e CondWindow,
-    pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
+    pub doctor: Option<Result<&'e V1DoctorReport, &'e str>>,
     pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
     /// This tick's alert-plane asks, one per distinct `alert-firing`
     /// selector; `None` when no rule wanted one (#463).
@@ -630,7 +630,10 @@ pub struct TickEvidence<'e> {
 
 /// Judge one doctor check against this tick's run — total, and total in the
 /// "did not run" direction too.
-pub fn judge_doctor_check(check: CheckId, outcome: Option<Result<&DoctorReport, &str>>) -> Eval {
+pub fn judge_doctor_check(
+    check: V1CheckId,
+    outcome: Option<Result<&V1DoctorReport, &str>>,
+) -> Eval {
     let Some(outcome) = outcome else {
         return Eval {
             state: CondState::Unobservable,
@@ -858,21 +861,21 @@ impl RuleState {
 }
 
 /// Run-over-run delta over a doctor report: one [`RuleState`] per stable
-/// check id ([`CheckId`]), fed by `doctor --transitions`. The
+/// check id ([`V1CheckId`]), fed by `doctor --transitions`. The
 /// first run states the baseline (one transition per check id); every later run yields
 /// only genuine changes. A failed run flips every check to `unobservable` —
 /// a doctor that could not run has not said the fleet is healthy.
 #[derive(Debug, Clone)]
-pub struct DoctorWatch {
+pub struct V1DoctorWatch {
     /// One state per check. A `Vec<(Condition, RuleState)>` until #352 — the
     /// condition was in both halves of the pair.
     checks: Vec<RuleState>,
 }
 
-impl DoctorWatch {
-    pub fn new() -> DoctorWatch {
-        DoctorWatch {
-            checks: CheckId::ALL
+impl V1DoctorWatch {
+    pub fn new() -> V1DoctorWatch {
+        V1DoctorWatch {
+            checks: V1CheckId::ALL
                 .iter()
                 .map(|id| RuleState::new(Condition::DoctorCheck { check: *id }))
                 .collect(),
@@ -880,7 +883,7 @@ impl DoctorWatch {
     }
 
     /// Feed one doctor run (or its failure) and collect the transitions.
-    pub fn observe(&mut self, outcome: Result<&DoctorReport, &str>, at: &str) -> Vec<Transition> {
+    pub fn observe(&mut self, outcome: Result<&V1DoctorReport, &str>, at: &str) -> Vec<Transition> {
         self.checks
             .iter_mut()
             .filter_map(|state| {
@@ -895,9 +898,9 @@ impl DoctorWatch {
     }
 }
 
-impl Default for DoctorWatch {
+impl Default for V1DoctorWatch {
     fn default() -> Self {
-        DoctorWatch::new()
+        V1DoctorWatch::new()
     }
 }
 
@@ -955,7 +958,7 @@ struct RuleRuntime {
 /// reading (#352).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SweepOutcome<'e> {
-    pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
+    pub doctor: Option<Result<&'e V1DoctorReport, &'e str>>,
     pub roster: Option<Result<&'e BTreeMap<String, Vec<String>>, &'e str>>,
     /// The alert-plane asks, one per distinct `alert-firing` selector
     /// (#463); `None` when no rule wanted one.
@@ -1367,10 +1370,10 @@ pub fn watchdog<'a>(
             let sweep = async {
                 let doctor = if wants_doctor {
                     Some(
-                        crate::judge::doctor::run_doctor(
+                        crate::judge::registry_checks::run_v1_doctor(
                             fleet,
                             slices,
-                            &crate::judge::doctor::DoctorSpec {
+                            &crate::judge::registry_checks::V1DoctorSpec {
                                 deep: false,
                                 sample: None,
                                 timeout: spec.timeout,
@@ -1517,13 +1520,13 @@ pub fn watchdog<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::{DoctorFinding, DoctorSeverity};
+    use crate::report::{DoctorSeverity, V1Finding};
 
-    fn report_with(checks: &[CheckId]) -> DoctorReport {
-        DoctorReport {
+    fn report_with(checks: &[V1CheckId]) -> V1DoctorReport {
+        V1DoctorReport {
             findings: checks
                 .iter()
-                .map(|c| DoctorFinding {
+                .map(|c| V1Finding {
                     severity: DoctorSeverity::Error,
                     check: *c,
                     subject: "s".into(),
@@ -1883,10 +1886,10 @@ mod tests {
     /// check to unobservable, never ok.
     #[test]
     fn doctor_watch_reports_deltas_not_states() {
-        let mut watch = DoctorWatch::new();
+        let mut watch = V1DoctorWatch::new();
         let clean = report_with(&[]);
         let baseline = watch.observe(Ok(&clean), "t0");
-        assert_eq!(baseline.len(), CheckId::ALL.len());
+        assert_eq!(baseline.len(), V1CheckId::ALL.len());
         assert!(baseline.iter().all(|t| t.from.is_none()));
         assert!(baseline.iter().all(|t| t.to == CondState::Ok));
 
@@ -1895,7 +1898,7 @@ mod tests {
             "an unchanged run emits nothing"
         );
 
-        let drifted = report_with(&[CheckId::SchemaDrift, CheckId::SchemaDrift]);
+        let drifted = report_with(&[V1CheckId::SchemaDrift, V1CheckId::SchemaDrift]);
         let changes = watch.observe(Ok(&drifted), "t2");
         assert_eq!(changes.len(), 1, "only the changed check transitions");
         assert_eq!(changes[0].rule, "doctor schema-drift");
@@ -1905,7 +1908,7 @@ mod tests {
         let failed = watch.observe(Err("session lost"), "t3");
         assert_eq!(
             failed.len(),
-            CheckId::ALL.len(),
+            V1CheckId::ALL.len(),
             "a failed run is unobservable for every check — never ok"
         );
         assert!(failed.iter().all(|t| t.to == CondState::Unobservable));
@@ -1916,20 +1919,20 @@ mod tests {
     /// reads `observable` again through the ordinary path.
     #[test]
     fn an_empty_scope_is_unobservable_for_every_check() {
-        let mut watch = DoctorWatch::new();
-        let empty = DoctorReport {
+        let mut watch = V1DoctorWatch::new();
+        let empty = V1DoctorReport {
             unobservable: Some("nothing in scope".into()),
-            ..report_with(&[CheckId::AdminUnreachable])
+            ..report_with(&[V1CheckId::AdminUnreachable])
         };
         let baseline = watch.observe(Ok(&empty), "t0");
-        assert_eq!(baseline.len(), CheckId::ALL.len());
+        assert_eq!(baseline.len(), V1CheckId::ALL.len());
         assert!(
             baseline.iter().all(|t| t.to == CondState::Unobservable
                 && t.evidence.contains("judged nothing: nothing in scope")),
             "{baseline:?}"
         );
         let back = watch.observe(Ok(&report_with(&[])), "t1");
-        assert_eq!(back.len(), CheckId::ALL.len());
+        assert_eq!(back.len(), V1CheckId::ALL.len());
         assert!(back.iter().all(|t| t.to == CondState::Ok));
     }
 }

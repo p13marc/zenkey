@@ -108,7 +108,7 @@ fn a_doctor_run_carries_its_coverage_and_its_bound_into_every_format() {
     // R1: with no registry the served-vs-declared diff never ran, and the
     // degradation is a note in the report — it used to be a bare eprintln in
     // the command, invisible to every machine format.
-    let unchecked = zenkey_fleet::report::DoctorReport {
+    let unchecked = zenkey_fleet::report::V1DoctorReport {
         synced: zenkey_fleet::report::Asked::NotAsked,
         ..fx::doctor_report()
     };

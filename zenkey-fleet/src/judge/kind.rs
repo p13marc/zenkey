@@ -39,7 +39,7 @@ use zenkey::{SliceToken, SubjectKind};
 
 use crate::judge::common::{EXPANSION_CAP, FINDING_CAP};
 use crate::model::examples::Examples;
-use crate::report::{CheckId, DoctorFinding, DoctorSeverity};
+use crate::report::{DoctorSeverity, V1CheckId, V1Finding};
 
 /// The producer identity a liveliness token and a data key share:
 /// `(origin, producer)`, with a service origin's producer being the origin
@@ -396,10 +396,10 @@ impl KindObservation {
 /// payloads could not be judged, both capped at the doctor's per-check
 /// finding cap with the remainder counted. Filter **then** cap, like every
 /// listen check.
-pub fn judge_kind(observation: &KindObservation, window_s: f64) -> Vec<DoctorFinding> {
+pub fn judge_kind(observation: &KindObservation, window_s: f64) -> Vec<V1Finding> {
     let mut findings = Vec::new();
-    let mut bad: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
-    let mut unjudged: Examples<DoctorFinding> = Examples::new(FINDING_CAP);
+    let mut bad: Examples<V1Finding> = Examples::new(FINDING_CAP);
+    let mut unjudged: Examples<V1Finding> = Examples::new(FINDING_CAP);
     for (key, k) in observation.iter() {
         let mismatches = k.tag_mismatches + k.value_mismatches + k.decreases;
         if mismatches > 0 {
@@ -415,9 +415,9 @@ pub fn judge_kind(observation: &KindObservation, window_s: f64) -> Vec<DoctorFin
                     parts.push(format!("{} value(s) not of that kind", k.value_mismatches));
                 }
                 let examples = k.examples.as_slice().join("; ");
-                DoctorFinding {
+                V1Finding {
                     severity: DoctorSeverity::Error,
-                    check: CheckId::KindMismatch,
+                    check: V1CheckId::KindMismatch,
                     subject: key.to_string(),
                     evidence: format!(
                         "declared `{}`, and {} of {} sample(s) from origin {} in {window_s:.0}s \
@@ -433,9 +433,9 @@ pub fn judge_kind(observation: &KindObservation, window_s: f64) -> Vec<DoctorFin
             });
         }
         if k.undecoded > 0 {
-            unjudged.push_with(|| DoctorFinding {
+            unjudged.push_with(|| V1Finding {
                 severity: DoctorSeverity::Warning,
-                check: CheckId::KindMismatch,
+                check: V1CheckId::KindMismatch,
                 subject: key.to_string(),
                 evidence: format!(
                     "kind not judged: {} payload(s) from origin {} in {window_s:.0}s could \
@@ -455,9 +455,9 @@ pub fn judge_kind(observation: &KindObservation, window_s: f64) -> Vec<DoctorFin
         let more = ex.more(tail);
         findings.extend(ex.into_vec());
         if let Some(evidence) = more {
-            findings.push(DoctorFinding {
+            findings.push(V1Finding {
                 severity: DoctorSeverity::Info,
-                check: CheckId::KindMismatch,
+                check: V1CheckId::KindMismatch,
                 subject: "fleet".into(),
                 evidence,
                 citation: None,
@@ -496,7 +496,7 @@ mod tests {
             );
             judge_kind(&obs, 10.0)
                 .into_iter()
-                .filter(|f| f.check == CheckId::KindMismatch)
+                .filter(|f| f.check == V1CheckId::KindMismatch)
                 .map(|f| f.evidence)
                 .collect::<Vec<_>>()
         };
@@ -535,7 +535,7 @@ mod tests {
         );
     }
 
-    fn mismatches(obs: &KindObservation) -> Vec<DoctorFinding> {
+    fn mismatches(obs: &KindObservation) -> Vec<V1Finding> {
         judge_kind(obs, 10.0)
             .into_iter()
             .filter(|f| f.severity == DoctorSeverity::Error)
@@ -558,7 +558,7 @@ mod tests {
         observe(&mut obs, SubjectKind::Counter, json!(5));
         let f = mismatches(&obs);
         assert_eq!(f.len(), 1, "{f:?}");
-        assert_eq!(f[0].check, CheckId::KindMismatch);
+        assert_eq!(f[0].check, V1CheckId::KindMismatch);
         assert_eq!(f[0].subject, KEY);
         assert!(
             f[0].evidence.contains("h-aaaaaaaaaaaa"),
@@ -727,7 +727,7 @@ mod tests {
         let f = judge_kind(&obs, 10.0);
         assert_eq!(f.len(), 1, "{f:?}");
         assert_eq!(f[0].severity, DoctorSeverity::Warning);
-        assert_eq!(f[0].check, CheckId::KindMismatch);
+        assert_eq!(f[0].check, V1CheckId::KindMismatch);
         assert!(
             f[0].evidence.contains("kind not judged: 2 payload(s)"),
             "{}",

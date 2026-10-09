@@ -10,13 +10,13 @@
 use std::time::Duration;
 
 use zenkey::qos::QosProfile;
-use zenkey_fleet::{DoctorSpec, Fleet, declare_publication, run_doctor};
+use zenkey_fleet::{Fleet, V1DoctorSpec, declare_publication, run_v1_doctor};
 
 mod util;
 use util::peer_pair;
 
-fn spec(listen_s: u64) -> DoctorSpec {
-    DoctorSpec {
+fn spec(listen_s: u64) -> V1DoctorSpec {
+    V1DoctorSpec {
         deep: false,
         sample: None,
         timeout: Duration::from_millis(500),
@@ -87,13 +87,13 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let t1 = keep_publishing(wrong_qos, b"{}", None);
     let t2 = keep_publishing(unregistered, b"{}", None);
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t1.abort();
     t2.abort();
 
@@ -104,7 +104,7 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let qos: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::QosObservedMismatch)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::QosObservedMismatch)
         .collect();
     assert_eq!(qos.len(), 1, "{:?}", report.findings);
     assert_eq!(qos[0].subject, "v1/h-abababababab/state/demo/health");
@@ -118,7 +118,7 @@ async fn observed_qos_and_unregistered_traffic_become_findings() {
     let unreg: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::UnregisteredTraffic)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::UnregisteredTraffic)
         .collect();
     assert_eq!(unreg.len(), 1, "{:?}", report.findings);
     assert_eq!(unreg[0].subject, "v1/h-abababababab/state/demo/undeclared");
@@ -176,13 +176,13 @@ async fn delete_tombstones_are_not_judged_as_payloads() {
         }
     });
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     t.abort();
 
     let obs = report.observation.as_ref().expect("observation ran");
@@ -194,8 +194,8 @@ async fn delete_tombstones_are_not_judged_as_payloads() {
         .filter(|f| {
             matches!(
                 f.check,
-                zenkey_fleet::report::CheckId::PayloadUndecodable
-                    | zenkey_fleet::report::CheckId::PayloadInvalid
+                zenkey_fleet::report::V1CheckId::PayloadUndecodable
+                    | zenkey_fleet::report::V1CheckId::PayloadInvalid
             )
         })
         .collect();
@@ -246,13 +246,13 @@ async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
         ));
     }
 
-    let report = run_doctor(
+    let report = run_v1_doctor(
         &Fleet::new(&b, ""),
         Some(&zenkey_fleet::SliceSet::from_slices(vec![local.clone()])),
         &spec(2),
     )
     .await
-    .expect("run_doctor");
+    .expect("run_v1_doctor");
     for t in tasks {
         t.abort();
     }
@@ -266,7 +266,7 @@ async fn over_rate_events_are_findings_and_synthetic_traffic_is_counted() {
     let over: Vec<_> = report
         .findings
         .iter()
-        .filter(|f| f.check == zenkey_fleet::report::CheckId::RateOverDeclared)
+        .filter(|f| f.check == zenkey_fleet::report::V1CheckId::RateOverDeclared)
         .collect();
     assert_eq!(over.len(), 1, "{:?}", report.findings);
     assert_eq!(over[0].subject, "demo/boom/{id}");

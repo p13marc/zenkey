@@ -29,7 +29,7 @@
 //!    unknowable.
 //! 2. **The observer's checks, projected.** One doctor run scoped to the
 //!    producer (`run_doctor_inner`), whose findings map by
-//!    [`CheckId`] onto assertions (`project_conform`, pure): slice sync,
+//!    [`V1CheckId`] onto assertions (`project_conform`, pure): slice sync,
 //!    describe totality, schema drift, and — with a `--for` window — each
 //!    declared subject's presence and what rode on it; with `--deep`,
 //!    freshness and the declared budget. The field-intelligence, stamper,
@@ -55,12 +55,12 @@ use zenkey::{Declared, RegistrySlice};
 use crate::bus::producer::ReservedError;
 use crate::bus::query::{Answer, read_introspect};
 use crate::bus::write::{CallSpec, CallTarget};
-use crate::judge::doctor::{DoctorInternals, DoctorSpec, run_doctor_inner};
+use crate::judge::registry_checks::{DoctorInternals, V1DoctorSpec, run_doctor_inner};
 use crate::model::facts::{KeyFacts, KeyShape, Registration};
 use crate::model::registry::{SliceSet, SliceSource};
 use crate::report::{
-    Assertion, AssertionState, CallOutcome, CheckId, ConformReport, ConformSource, ConformSummary,
-    ConformVerdict, DoctorFinding, DoctorReport, DoctorSeverity,
+    Assertion, AssertionState, CallOutcome, ConformReport, ConformSource, ConformSummary,
+    ConformVerdict, DoctorSeverity, V1CheckId, V1DoctorReport, V1Finding,
 };
 use crate::{Error, Result};
 
@@ -199,7 +199,7 @@ pub async fn run_conform(
     let (doctor, internals) = run_doctor_inner(
         fleet,
         Some(&locals),
-        &DoctorSpec {
+        &V1DoctorSpec {
             deep: spec.deep,
             sample: None,
             timeout: spec.timeout,
@@ -867,13 +867,13 @@ async fn fetch_capabilities(
 
 /// The listen-phase checks projected per declared subject, and whether the
 /// finding marks the assertion not met or merely unknowable.
-const LISTEN_CHECKS: [CheckId; 6] = [
-    CheckId::QosObservedMismatch,
-    CheckId::PayloadInvalid,
-    CheckId::PayloadUndecodable,
-    CheckId::KindMismatch,
-    CheckId::RateOverDeclared,
-    CheckId::CardinalityOverDeclared,
+const LISTEN_CHECKS: [V1CheckId; 6] = [
+    V1CheckId::QosObservedMismatch,
+    V1CheckId::PayloadInvalid,
+    V1CheckId::PayloadUndecodable,
+    V1CheckId::KindMismatch,
+    V1CheckId::RateOverDeclared,
+    V1CheckId::CardinalityOverDeclared,
 ];
 
 /// The doctor's findings for one producer, attributed: per declared path
@@ -883,29 +883,29 @@ const LISTEN_CHECKS: [CheckId; 6] = [
 #[derive(Debug, Default)]
 struct Attributed<'r> {
     /// `(check, declared path)` → findings.
-    by_path: BTreeMap<(CheckId, String), Vec<&'r DoctorFinding>>,
+    by_path: BTreeMap<(V1CheckId, String), Vec<&'r V1Finding>>,
     /// Unregistered keys under the producer: the tail after the producer
     /// chunk, and its class.
-    unregistered: BTreeMap<String, (String, &'r DoctorFinding)>,
+    unregistered: BTreeMap<String, (String, &'r V1Finding)>,
     /// `(check)` → producer-level findings, origin-filtered.
-    producer: BTreeMap<CheckId, Vec<&'r DoctorFinding>>,
+    producer: BTreeMap<V1CheckId, Vec<&'r V1Finding>>,
     /// Checks whose findings were capped — a `fleet` remainder note — so a
     /// clean answer about any one path is not provable.
-    capped: BTreeSet<CheckId>,
+    capped: BTreeSet<V1CheckId>,
 }
 
 fn attribute<'r>(
     slice: &RegistrySlice,
     base: &str,
     slices: &SliceSet,
-    report: &'r DoctorReport,
+    report: &'r V1DoctorReport,
     origin: Option<&str>,
 ) -> Attributed<'r> {
     let mut out = Attributed::default();
     let origin_ok = |o: &str| origin.is_none_or(|want| want == o);
     for f in &report.findings {
         match f.check {
-            CheckId::SliceSync | CheckId::SliceParse | CheckId::BudgetExceeded => {
+            V1CheckId::SliceSync | V1CheckId::SliceParse | V1CheckId::BudgetExceeded => {
                 // `origin/producer`, or the bare producer name.
                 let (o, name) = match f.subject.split_once('/') {
                     Some((o, n)) => (Some(o), n),
@@ -915,16 +915,16 @@ fn attribute<'r>(
                     out.producer.entry(f.check).or_default().push(f);
                 }
             }
-            CheckId::DescribeTotality if f.subject == slice.name => {
+            V1CheckId::DescribeTotality if f.subject == slice.name => {
                 out.producer.entry(f.check).or_default().push(f);
             }
-            CheckId::SchemaDrift => {
+            V1CheckId::SchemaDrift => {
                 out.by_path
                     .entry((f.check, f.subject.clone()))
                     .or_default()
                     .push(f);
             }
-            CheckId::RateOverDeclared => {
+            V1CheckId::RateOverDeclared => {
                 let path = match &slice.service_origin {
                     Some(s) => f.subject.strip_prefix(&format!("{}/", s.token())),
                     None => f.subject.strip_prefix(&format!("{}/", slice.name)),
@@ -936,7 +936,7 @@ fn attribute<'r>(
                         .push(f);
                 }
             }
-            CheckId::CardinalityOverDeclared => {
+            V1CheckId::CardinalityOverDeclared => {
                 // Info: `producer/path` (the rest-var exemption). Warning:
                 // `origin/producer/path`, or `origin/path` under a service.
                 let path = if f.severity == DoctorSeverity::Info {
@@ -962,12 +962,12 @@ fn attribute<'r>(
                     out.capped.insert(f.check);
                 }
             }
-            CheckId::QosObservedMismatch
-            | CheckId::PayloadInvalid
-            | CheckId::PayloadUndecodable
-            | CheckId::KindMismatch
-            | CheckId::UnregisteredTraffic
-            | CheckId::StaleState => {
+            V1CheckId::QosObservedMismatch
+            | V1CheckId::PayloadInvalid
+            | V1CheckId::PayloadUndecodable
+            | V1CheckId::KindMismatch
+            | V1CheckId::UnregisteredTraffic
+            | V1CheckId::StaleState => {
                 if f.subject == "fleet" {
                     out.capped.insert(f.check);
                     continue;
@@ -990,7 +990,7 @@ fn attribute<'r>(
                             .or_default()
                             .push(f);
                     }
-                    _ if f.check == CheckId::UnregisteredTraffic => {
+                    _ if f.check == V1CheckId::UnregisteredTraffic => {
                         out.unregistered
                             .insert(v.subject.join("/"), (v.class.clone(), f));
                     }
@@ -1010,7 +1010,7 @@ fn project_conform(
     slice: &RegistrySlice,
     base: &str,
     slices: &SliceSet,
-    report: &DoctorReport,
+    report: &V1DoctorReport,
     internals: &DoctorInternals,
     origin: Option<&str>,
     caps: &BTreeMap<String, Capabilities>,
@@ -1019,7 +1019,7 @@ fn project_conform(
     let origin_ok = |o: &str| origin.is_none_or(|want| want == o);
     let producer = slice.name.as_str();
     let mut out = Vec::new();
-    let evidence_of = |fs: &[&DoctorFinding]| {
+    let evidence_of = |fs: &[&V1Finding]| {
         fs.iter()
             .map(|f| format!("{}: {}", f.subject, f.evidence))
             .collect::<Vec<_>>()
@@ -1043,9 +1043,9 @@ fn project_conform(
         .filter(|(o, p)| p == producer && origin_ok(o))
         .map(|(o, _)| o.as_str())
         .collect();
-    let sync = a.producer.get(&CheckId::SliceSync).into_iter().flatten();
-    let parse = a.producer.get(&CheckId::SliceParse).into_iter().flatten();
-    let bad: Vec<&DoctorFinding> = sync.chain(parse).copied().collect();
+    let sync = a.producer.get(&V1CheckId::SliceSync).into_iter().flatten();
+    let parse = a.producer.get(&V1CheckId::SliceParse).into_iter().flatten();
+    let bad: Vec<&V1Finding> = sync.chain(parse).copied().collect();
     out.push(if !bad.is_empty() {
         assertion(
             "slice-sync".into(),
@@ -1079,7 +1079,7 @@ fn project_conform(
 
     // describe-totality: every type the slice names has a served shape.
     let described = internals.described.contains(producer);
-    let totality = a.producer.get(&CheckId::DescribeTotality);
+    let totality = a.producer.get(&V1CheckId::DescribeTotality);
     out.push(match (described, totality) {
         (_, Some(fs)) => assertion(
             "describe-totality".into(),
@@ -1120,7 +1120,7 @@ fn project_conform(
         let subject = format!("type/{ty}");
         let fs = a
             .by_path
-            .get(&(CheckId::SchemaDrift, ty.to_string()))
+            .get(&(V1CheckId::SchemaDrift, ty.to_string()))
             .map(Vec::as_slice)
             .unwrap_or_default();
         let (state, evidence) = if fs.iter().any(|f| f.severity == DoctorSeverity::Error) {
@@ -1203,7 +1203,7 @@ fn project_conform(
             out.push(assertion(
                 "unregistered-traffic".into(),
                 producer.into(),
-                if a.capped.contains(&CheckId::UnregisteredTraffic) {
+                if a.capped.contains(&V1CheckId::UnregisteredTraffic) {
                     AssertionState::Unknowable {
                         reason: "the doctor capped its unregistered-traffic findings, so \
                                  none can be attributed"
@@ -1238,7 +1238,7 @@ fn project_conform(
             }
             let fs = a
                 .by_path
-                .get(&(CheckId::StaleState, s.path.clone()))
+                .get(&(V1CheckId::StaleState, s.path.clone()))
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let read = internals
@@ -1248,7 +1248,7 @@ fn project_conform(
                 .unwrap_or(0);
             let (state, evidence) = if !fs.is_empty() {
                 (AssertionState::NotMet, evidence_of(fs))
-            } else if a.capped.contains(&CheckId::StaleState) {
+            } else if a.capped.contains(&V1CheckId::StaleState) {
                 (
                     AssertionState::Unknowable {
                         reason: "the doctor capped its stale-state findings".into(),
@@ -1282,7 +1282,7 @@ fn project_conform(
         if slice.budget.is_some() {
             let fs = a
                 .producer
-                .get(&CheckId::BudgetExceeded)
+                .get(&V1CheckId::BudgetExceeded)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let (state, evidence) = if fs.iter().any(|f| f.severity == DoctorSeverity::Error) {
@@ -1386,21 +1386,21 @@ fn unseen(
 /// One listen check over one seen subject, when the check applies to it —
 /// the declaration it holds the wire to is present.
 fn listen_assertion(
-    check: CheckId,
+    check: V1CheckId,
     s: &zenkey::slice::SubjectDecl,
     subject: &str,
     a: &Attributed<'_>,
     described: bool,
     window_s: f64,
 ) -> Option<Assertion> {
-    let findings = |c: CheckId| {
+    let findings = |c: V1CheckId| {
         a.by_path
             .get(&(c, s.path.clone()))
             .map(Vec::as_slice)
             .unwrap_or_default()
     };
     let (id, clean, citation): (String, String, &str) = match check {
-        CheckId::QosObservedMismatch => {
+        V1CheckId::QosObservedMismatch => {
             let q = s.qos.as_ref().and_then(Declared::known)?;
             (
                 format!("qos-observed-mismatch/{}", s.path),
@@ -1410,13 +1410,13 @@ fn listen_assertion(
         }
         // The two payload checks answer one question, "does the payload
         // conform?", so they share one assertion.
-        CheckId::PayloadInvalid => (
+        V1CheckId::PayloadInvalid => (
             format!("payload/{}", s.path),
             "the samples judged decoded and validated against the served schema".into(),
             "RFC 08 §7",
         ),
-        CheckId::PayloadUndecodable => return None,
-        CheckId::KindMismatch => {
+        V1CheckId::PayloadUndecodable => return None,
+        V1CheckId::KindMismatch => {
             let k = s.kind.as_ref().filter(|k| k.known().is_some())?;
             (
                 format!("kind-mismatch/{}", s.path),
@@ -1424,7 +1424,7 @@ fn listen_assertion(
                 "RFC 08 §2",
             )
         }
-        CheckId::RateOverDeclared => {
+        V1CheckId::RateOverDeclared => {
             let rate = s
                 .rate
                 .as_ref()
@@ -1435,7 +1435,7 @@ fn listen_assertion(
                 "RFC 04 §1.3",
             )
         }
-        CheckId::CardinalityOverDeclared => {
+        V1CheckId::CardinalityOverDeclared => {
             if !s.path.contains('{') {
                 return None;
             }
@@ -1447,13 +1447,14 @@ fn listen_assertion(
         }
         _ => return None,
     };
-    let mut fs: Vec<&DoctorFinding> = findings(check).to_vec();
-    if check == CheckId::PayloadInvalid {
-        fs.extend(findings(CheckId::PayloadUndecodable));
+    let mut fs: Vec<&V1Finding> = findings(check).to_vec();
+    if check == V1CheckId::PayloadInvalid {
+        fs.extend(findings(V1CheckId::PayloadUndecodable));
     }
     let capped = a.capped.contains(&check)
-        || (check == CheckId::PayloadInvalid && a.capped.contains(&CheckId::PayloadUndecodable));
-    let evidence = |fs: &[&DoctorFinding]| {
+        || (check == V1CheckId::PayloadInvalid
+            && a.capped.contains(&V1CheckId::PayloadUndecodable));
+    let evidence = |fs: &[&V1Finding]| {
         fs.iter()
             .map(|f| format!("{}: {}: {}", f.check, f.subject, f.evidence))
             .collect::<Vec<_>>()
@@ -1462,10 +1463,10 @@ fn listen_assertion(
     let mut exempt = None;
     let (state, evidence) = if fs.iter().any(|f| {
         f.severity == DoctorSeverity::Error
-            || (f.severity == DoctorSeverity::Warning && check != CheckId::KindMismatch)
+            || (f.severity == DoctorSeverity::Warning && check != V1CheckId::KindMismatch)
     }) {
         (AssertionState::NotMet, evidence(&fs))
-    } else if check == CheckId::CardinalityOverDeclared && !fs.is_empty() {
+    } else if check == V1CheckId::CardinalityOverDeclared && !fs.is_empty() {
         // Info: the rest-variable exemption, stated by the doctor.
         exempt = Some("rest-variable".to_string());
         (AssertionState::Met, evidence(&fs))
@@ -1488,14 +1489,14 @@ fn listen_assertion(
             },
             "not attributable".into(),
         )
-    } else if check == CheckId::PayloadInvalid && !described {
+    } else if check == V1CheckId::PayloadInvalid && !described {
         (
             AssertionState::Unknowable {
                 reason: "the producer serves no describe, so payloads were not validated".into(),
             },
             "not validated".into(),
         )
-    } else if check == CheckId::RateOverDeclared && window_s > 3600.0 {
+    } else if check == V1CheckId::RateOverDeclared && window_s > 3600.0 {
         (
             AssertionState::Unknowable {
                 reason: "over an hour, one window cannot prove an hourly cap exceeded".into(),
@@ -1796,10 +1797,10 @@ when = ["config:wifi"]
         .expect("slice");
         let set = SliceSet::from_slices(vec![slice.clone()]);
         let origin = "h-3fa9c2d41b7e";
-        let report = DoctorReport {
-            findings: vec![DoctorFinding {
+        let report = V1DoctorReport {
+            findings: vec![V1Finding {
                 severity: DoctorSeverity::Info,
-                check: CheckId::CardinalityOverDeclared,
+                check: V1CheckId::CardinalityOverDeclared,
                 subject: "demo/peers/{id...}".into(),
                 evidence: "exempt: rest-variable".into(),
                 citation: None,
