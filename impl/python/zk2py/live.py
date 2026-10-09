@@ -353,59 +353,119 @@ def attribute_stamp(stamp_id: str | None, descriptor: dict[str, Any]) -> str:
     it, a stamp's clock is unattributable, never foreign"), and
     ``unstamped`` for a reply with no timestamp.
 
-    The spec gives a zid no spelling (SPEC-FINDINGS F-77), and zenoh
-    1.10.1 writes one as hex without leading zeros (31 digits seen). So two
-    hex spellings are compared as numbers, and anything else as text."""
+    §3.3 (0.11) "How a zid compares": "A tool MUST compare two zids by
+    value, never by their text: case and leading zeros carry no meaning."
+    A zid is hexadecimal (Appendix B), so its value is that number. A
+    ``meta.zid`` that is not hexadecimal states no zid: unattributable."""
     if stamp_id is None:
         return "unstamped"
     meta = descriptor.get("meta")
     zid = meta.get("zid") if isinstance(meta, dict) else None
-    if not isinstance(zid, str) or not zid:
+    value = _zid_value(zid)
+    if value is None:
         return "unattributable"
-    hexa = re.compile(r"[0-9a-fA-F]+")
-    if hexa.fullmatch(stamp_id) and hexa.fullmatch(zid):
-        same = int(stamp_id, 16) == int(zid, 16)
-    else:
-        same = stamp_id == zid
-    return "owner" if same else "foreign"
+    return "owner" if _zid_value(stamp_id) == value else "foreign"
 
 
-# -- §4.2 S4, through the routers' admin space (0.10) -----------------------------
+def _zid_value(text: Any) -> int | None:
+    """A zid's value, or None for text that is not hexadecimal."""
+    if not isinstance(text, str) or re.fullmatch(r"[0-9a-fA-F]+", text) is None:
+        return None
+    return int(text, 16)
+
+
+# -- §4.2 S4, through the routers' admin space (0.10, 0.11) -----------------------
+
+#: §4.2 (0.11) "What the check reads".
+S4_ROUTERS = "@/*/router"
+S4_STORAGES = "@/*/router/**/storage_manager/storages/**"
+#: "an owner's state/** or @state/**", for every owner.
+S4_STATE = ("zk2/*/*/*/state/**", "zk2/*/*/*/@state/**")
+
 
 @dataclass
 class S4Reading:
-    """A tool's S4 check (§4.2): "A tool checks S4 against the routers'
-    storage admin space … Without it, a tool reports the check
-    unobservable, never clean." ``verdict`` is ``clean`` or
-    ``unobservable``; zk2py never reads a storage's key expressions."""
+    """A tool's S4 check (§4.2): ``clean``, ``broken`` (a storage answers
+    on owners' state) or ``unobservable`` ("Without it, a tool reports the
+    check unobservable, never clean")."""
 
     verdict: str
     routers: list[str] = field(default_factory=list)
+    #: (router zid, storage key, its key_expr, whether it intersects owners' state)
+    storages: list[tuple[str, str, Any, bool]] = field(default_factory=list)
+    #: each answering router's `plugins`, read beside the storages
+    plugins: dict[str, Any] = field(default_factory=dict)
+    #: answering ids that are none of the routers this session is connected
+    #: to: a session can answer @/*/router too (SPEC-FINDINGS F-80)
+    unverified: list[str] = field(default_factory=list)
     detail: str = ""
 
 
 def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S) -> S4Reading:
-    """GET ``@/*/router``, each reachable router's admin record. No reply:
-    the admin space is off, as zenoh 1.10.1 has it by default (Appendix B),
-    so the check is unobservable. A router whose record lists no plugin
-    runs no storage manager, so it runs no storage. One that lists plugins
-    is beyond what zk2py inspects: unobservable, with the plugins named."""
-    records: list[tuple[str, Any]] = []
-    for a in _answers(session, "@/*/router", zenoh.QueryTarget.ALL, timeout):
+    """§4.2 (0.11): "The reference reads two selectors: @/*/router, the
+    routers that answer; @/*/router/**/storage_manager/storages/**, one key
+    per storage a router's storage manager runs, its value the storage's
+    configuration with its key_expr. A storage whose key_expr intersects an
+    owner's state/** or @state/** breaks S4. A router that answers the
+    first selector and has nothing under the second runs no storage. When
+    no router answers the first, the check is unobservable."
+
+    Beside them, each router record's ``plugins`` is kept: one with no
+    plugin runs no storage manager, which must agree with an empty second
+    read. A storage whose configuration has no readable ``key_expr`` makes
+    the check unobservable rather than clean.
+
+    zk2py adds one condition (SPEC-FINDINGS F-80): any session can declare
+    a queryable on ``@/<id>/router``, so an answer is taken as a router's
+    only when its id is one of the routers this session is connected to
+    (``session.info.routers_zid()``, compared by value). Without one, the
+    check is unobservable. Storages listed under an unverified id still
+    count: they can only make the verdict worse."""
+    out = S4Reading("unobservable")
+    for a in _answers(session, S4_ROUTERS, zenoh.QueryTarget.ALL, timeout):
+        if not a.ok or a.key is None:
+            continue
+        zid = a.key.split("/")[1]
+        out.routers.append(zid)
+        try:
+            doc = json.loads(a.payload)
+            out.plugins[zid] = doc.get("plugins") if isinstance(doc, dict) else "unreadable"
+        except ValueError:
+            out.plugins[zid] = "unreadable"
+    if not out.routers:
+        out.detail = f"no router answered {S4_ROUTERS}: the admin space is off"
+        return out
+    mine = {_zid_value(str(z)) for z in session.info.routers_zid()}
+    out.unverified = [z for z in out.routers if _zid_value(z) not in mine]
+    if len(out.unverified) == len(out.routers):
+        out.detail = (f"no router this session is connected to answered {S4_ROUTERS}; the answers from "
+                      f"{out.unverified} cannot be told from a session's")
+        return out
+    unreadable = []
+    for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
             continue
         try:
-            records.append((a.key.split("/")[1], json.loads(a.payload)))
-        except ValueError:
-            records.append((a.key.split("/")[1], None))
-    if not records:
-        return S4Reading("unobservable", [], "no router answered @/*/router: the admin space is off")
-    routers = [zid for zid, _ in records]
-    plugins = {zid: (doc or {}).get("plugins") if isinstance(doc, dict) else "unreadable"
-               for zid, doc in records}
-    if all(p in (None, {}, []) for p in plugins.values()):
-        return S4Reading("clean", routers, "no router runs a plugin, so none runs a storage")
-    return S4Reading("unobservable", routers, f"plugins {plugins}: their storages are not read here")
+            conf = json.loads(a.payload)
+            kexpr = conf.get("key_expr") if isinstance(conf, dict) else None
+            hits = isinstance(kexpr, str) and any(
+                zenoh.KeyExpr(kexpr).intersects(zenoh.KeyExpr(s)) for s in S4_STATE)
+        except Exception:  # noqa: BLE001 - not JSON, or not a key expression
+            kexpr, hits = None, False
+        if not isinstance(kexpr, str):
+            unreadable.append(a.key)
+        out.storages.append((a.key.split("/")[1], a.key, kexpr, bool(hits)))
+    broken = [s for s in out.storages if s[3]]
+    if broken:
+        out.verdict = "broken"
+        out.detail = f"a storage answers on owners' state: {[(z, k) for z, _, k, _ in broken]}"
+    elif unreadable:
+        out.detail = f"storages whose key_expr cannot be read: {unreadable}"
+    else:
+        out.verdict = "clean"
+        out.detail = (f"{len(out.routers)} router(s), {len(out.storages)} storage(s), none on owners' state; "
+                      f"plugins {out.plugins}; unverified {out.unverified}")
+    return out
 
 
 # -- §4 state, a consumer's GET --------------------------------------------------

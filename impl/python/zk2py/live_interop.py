@@ -181,10 +181,16 @@ def _roles_optional(report: Report, run: str, doc: dict[str, Any], by_iface: dic
 
 
 def _meta_zid(report: Report, run: str, doc: dict[str, Any]) -> None:
-    """§3.3 (0.10): "an owner SHOULD state its session's zid as meta.zid"."""
+    """§3.3 (0.10): "an owner SHOULD state its session's zid as meta.zid";
+    (0.11) "An owner SHOULD write meta.zid as zenoh writes it": lowercase
+    hexadecimal without leading zeros, at most 32 digits (Appendix B)."""
+    import re
+
     zid = doc.get("meta", {}).get("zid") if isinstance(doc.get("meta"), dict) else None
-    report.check(run, "the descriptor states meta.zid, its session's zid (§3.3, 0.10)",
-                 isinstance(zid, str) and len(zid) > 0, f"meta {doc.get('meta')}")
+    report.check(run, "the descriptor states meta.zid as zenoh writes it: lowercase hex, no leading zero, at "
+                      "most 32 digits (§3.3, 0.10, 0.11)",
+                 isinstance(zid, str) and re.fullmatch(r"[1-9a-f][0-9a-f]{0,31}", zid) is not None,
+                 f"meta {doc.get('meta')}")
 
 
 def _corrupt(bundle_bytes: bytes) -> bytes:
@@ -510,6 +516,13 @@ def run_rust_behind_r1(report: Report, exe: Path) -> None:
                               "by meta.zid (§3.3, 0.10), and that zid is not R1's",
                          [r.payload for r in st.replies] == [b"ok"] and who == ["owner"] and zid != r1_zid,
                          f"{[(r.payload, r.stamp_id) for r in st.replies]} {who}, meta.zid {zid}, R1 {r1_zid}")
+            # §3.3 (0.11): "A tool MUST compare two zids by value". The same
+            # zid in capitals, padded to 32 digits, is another text.
+            respelled = str(zid).upper().rjust(32, "0")
+            again = [live.attribute_stamp(r.stamp_id, {"meta": {"zid": respelled}}) for r in st.replies]
+            report.check(run, "by value, not text: meta.zid respelled in capitals and padded to 32 digits still "
+                              "attributes the stamp to the owner (§3.3, 0.11)",
+                         again == ["owner"] and respelled != zid, f"{respelled} → {again}")
             base = f"zk2/{system}/{svc}/zk2py_tc.v1/@op"
             diag = live.call(tool, f"{base}/diagnostics", b"x")
             report.check(run, "a parameterless operation answers through R1 (O3)",
@@ -1442,9 +1455,13 @@ def run_python_fanout(report: Report) -> None:
 
 
 def run_python_tool_rules(report: Report) -> None:
-    """The rules 0.10 states for a tool, where the bus shows them:
+    """The rules 0.10 and 0.11 state for a tool, where the bus shows them:
     - S4 needs the admin space (§4.2): off, the check is unobservable; on,
-      read-only, a router that runs no plugin runs no storage;
+      read-only, it reads 0.11's two selectors, and a router with nothing
+      under the storages selector runs no storage. A stand-in admin record
+      (queryables the runner declares) shows the storages read: one on
+      ``telemetry/**`` is clean, one on ``zk2/**`` breaks S4. A client
+      answering ``@/*/router`` is not taken for a router (F-80);
     - a fault read from presence shapes holds in two reads a grace apart
       (§8.1): a shape gone by the second read passes, one still there is a
       fault;
@@ -1456,24 +1473,80 @@ def run_python_tool_rules(report: Report) -> None:
     from .contract import load_contract
     from .owner import Owner as PyOwner
 
-    run = "zk2py tool rules (0.10): S4's admin space, presence shapes, revisions on the bus"
-    # S4 (§4.2, Appendix B).
+    run = "zk2py tool rules (0.10, 0.11): S4's admin space, presence shapes, revisions on the bus"
+    # S4 (§4.2, 0.10 and 0.11; Appendix B).
+    import zenoh
+
     for admin in (False, True):
         r, endpoint, zid = _r1(adminspace=admin)
         try:
             tool = live.open_client(endpoint)
             try:
                 s4 = live.check_s4(tool)
+                if admin:
+                    report.check(run, "S4 with R1's admin space on, read-only: R1 answers @/*/router, has nothing "
+                                      "under …/storage_manager/storages/**, and its plugins agree (none): clean",
+                                 s4.verdict == "clean" and s4.routers == [zid] and not s4.storages
+                                 and s4.plugins == {zid: None}, s4.detail)
+                    # A stand-in for a router that runs storages: the
+                    # runner's own queryables on a router record and two
+                    # storage records, under an id no session has.
+                    fake = "1234567890abcdef"
+                    records = {f"@/{fake}/router": {"plugins": {"storage_manager": {}}}}
+                    helper = live.open_client(endpoint)
+                    held = []
+                    try:
+                        for name, kexpr in (("telemetry", "telemetry/**"), ("all", "zk2/**")):
+                            records[f"@/{fake}/router/status/plugins/storage_manager/storages/{name}"] = \
+                                {"key_expr": kexpr, "volume": "memory"}
+                        for key, doc in records.items():
+                            if key.endswith("/all"):
+                                continue
+                            held.append(helper.declare_queryable(key, zenoh.handlers.Callback(
+                                lambda q, k=key, d=doc: q.reply(k, json.dumps(d), encoding="application/json"))))
+                        time.sleep(0.3)
+                        quiet = live.check_s4(tool)
+                        key = f"@/{fake}/router/status/plugins/storage_manager/storages/all"
+                        held.append(helper.declare_queryable(key, zenoh.handlers.Callback(
+                            lambda q: q.reply(key, json.dumps(records[key]), encoding="application/json"))))
+                        time.sleep(0.3)
+                        loud = live.check_s4(tool)
+                    finally:
+                        for h in held:
+                            h.undeclare()
+                        helper.close()
+                    report.check(run, "S4, a stand-in router running a storage on telemetry/**: read through the "
+                                      "storages selector, it touches no owner's state: clean",
+                                 quiet.verdict == "clean" and [s[2] for s in quiet.storages] == ["telemetry/**"],
+                                 f"{quiet.verdict}: {quiet.detail}")
+                    report.check(run, "S4, the same router adding a storage on zk2/**: it intersects owners' "
+                                      "state/**, so S4 is broken (§4.2, 0.11)",
+                                 loud.verdict == "broken" and sorted(s[2] for s in loud.storages if s[3]) == ["zk2/**"],
+                                 f"{loud.verdict}: {loud.detail}")
+                else:
+                    report.check(run, "S4 with R1's admin space off, zenoh 1.10.1's default: unobservable, never "
+                                      "clean", s4.verdict == "unobservable" and not s4.routers, s4.detail)
+                    # SPEC-FINDINGS F-80: a client session answering
+                    # @/<id>/router, while R1's admin space is off.
+                    fake = "fedcba9876543210"
+                    other = live.open_client(endpoint)
+                    try:
+                        q = other.declare_queryable(f"@/{fake}/router", zenoh.handlers.Callback(
+                            lambda qq: qq.reply(f"@/{fake}/router", json.dumps({"plugins": None}),
+                                                encoding="application/json")))
+                        time.sleep(0.3)
+                        spoofed = live.check_s4(tool)
+                        q.undeclare()
+                    finally:
+                        other.close()
+                    report.check(run, "S4, admin space off and a client session answering @/*/router: its id is "
+                                      "none of this session's routers, so still unobservable (F-80)",
+                                 spoofed.verdict == "unobservable" and spoofed.unverified == [fake],
+                                 f"{spoofed.verdict}: {spoofed.detail}")
             finally:
                 tool.close()
         finally:
             r.close()
-        if admin:
-            report.check(run, "S4 with R1's admin space on, read-only: R1 answers, runs no plugin, so no "
-                              "storage: clean", s4.verdict == "clean" and s4.routers == [zid], s4.detail)
-        else:
-            report.check(run, "S4 with R1's admin space off, zenoh 1.10.1's default: unobservable, never "
-                              "clean", s4.verdict == "unobservable" and not s4.routers, s4.detail)
 
     r1, r1_endpoint, _ = _r1()
     owners: list[Any] = []

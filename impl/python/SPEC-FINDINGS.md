@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Nine rounds.**
+**Ten rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -15,10 +15,10 @@ where that was not enough, or where the spec said two things.
 - F-71 to F-73 were found against 0.7.
 - F-74 to F-76 were found against 0.8.
 - Nothing new was found against 0.9 (see "At 0.9").
-- Amendments 0.5 to 0.9 resolved F-01 to F-76. Each entry carries a status
-  line naming its amendment.
-- **F-77 to F-79 are new**, found against 0.10 (see "New at 0.10" at the
-  end).
+- F-77 to F-79 were found against 0.10.
+- Amendments 0.5 to 0.11 resolved F-01 to F-79. Each entry carries a
+  status line naming its amendment.
+- **F-80 is new**, found against 0.11 (see "New at 0.11" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -28,7 +28,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at 0.10:** 79 entries.
+**Counts at 0.11:** 80 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -51,12 +51,18 @@ where that was not enough, or where the spec said two things.
   - It also fixed the owner example's silent templated operations, which
     the runner had reported as two known deviations. Both are plain checks
     now.
-- F-77 to F-79: **new**, 3 gaps.
+- F-77 to F-79: resolved by 0.11.
+  - 0.11 confirmed all three of zk2py's guesses: `optional` unchecked
+    against the contract and `false` as absent (F-77), zids by value
+    (F-78), and the `plugins` reading as agreeing with the named storages
+    selector for a router with no plugin (F-79).
+  - F-78 was a bug in the reference's doctor, which compared zid text.
+- F-80: **new**, 1 gap.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.10 | Location | In one line |
+| Id | Severity | Status at 0.11 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -134,9 +140,10 @@ by the spec section that now states the rule.
 | F-74 | ambiguity | resolved by 0.9 | §5.1 "Over a template" against O2 (0.8) | A wildcard call to a fan-out-forbidden template, with a non-canonical parameter chunk: `fanout_forbidden` or `invalid_request`? |
 | F-75 | gap | resolved by 0.9 | presence.md §6 step 3 (0.8) | `zk2/**` selects no control token, so its stalled read's "no token" cannot fail. |
 | F-76 | ambiguity | resolved by 0.9 | §5.1 "Over a template" and "Answering" (0.8) | A template-wide `replies = "many"` handler that names no member and sends nothing: `internal`, or zero values then completion? |
-| F-77 | gap | **new** | §3.3 `requires[].optional` (0.10) | A contract role's `optional` that does not repeat its contract, or an explicit `false`: neither checked nor listed as unchecked. |
-| F-78 | gap | **new** | §3.3 `meta.zid`, §4.2 "Observing S1" (0.10) | A zid has no spelling; zenoh writes one without leading zeros, so a textual comparison can call an owner's stamp foreign. |
-| F-79 | gap | **new** | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
+| F-77 | gap | resolved by 0.11 | §3.3 `requires[].optional` (0.10) | A contract role's `optional` that does not repeat its contract, or an explicit `false`: neither checked nor listed as unchecked. |
+| F-78 | gap | resolved by 0.11 | §3.3 `meta.zid`, §4.2 "Observing S1" (0.10) | A zid has no spelling; zenoh writes one without leading zeros, so a textual comparison can call an owner's stamp foreign. |
+| F-79 | gap | resolved by 0.11 | §4.2 S4's tool check (0.10) | "The routers' storage admin space": which keys, and what shows a router runs no storage? |
+| F-80 | gap | **new** | §4.2 S4, "What the check reads" (0.11) | Any session can answer `@/*/router`: with the routers' admin space off, one record turns "unobservable" into "clean". |
 
 ---
 
@@ -1840,9 +1847,12 @@ What zk2py does with 0.10:
 revisions carry no order" ends "… and undecided when they disagree. Each
 rule below is a transition from the earlier revision to the candidate, and
 its class already accounts for …". The paragraph that introduces the rules
-was swallowed into the bullet. The meaning survives.
+was swallowed into the bullet. The meaning survives. **Fixed in 0.11:**
+the paragraph is whole again, and the bullet follows it.
 
 ### F-77 · gap · §3.3 (0.10): an `optional` that does not repeat its contract
+
+**Status at 0.11: resolved by 0.11.** §3.3: for a contract's role a tool takes the need from the contract, and a disagreeing `optional` is listed under "Not checked, deliberately". `false` written out is the same as absent. `descriptors/ok-optional-unchecked` pins both with no code, and zk2py passes it. zk2py's guess was the rule.
 
 > "`optional` (0.10) is `true` for a role the instance works without, and
 > absent otherwise: absent is required. For a role a contract declares, it
@@ -1869,6 +1879,8 @@ against the rule as stated.
 
 ### F-78 · gap · §3.3 `meta.zid` (0.10): a zid has no spelling
 
+**Status at 0.11: resolved by 0.11.** §3.3 "How a zid compares": a tool MUST compare two zids by value, never by text. An owner SHOULD write `meta.zid` as zenoh writes it, which Appendix B now records: lowercase hex without leading zeros. The reference's doctor compared text, a bug fixed with 0.11. zk2py already compared by value. It now treats a `meta.zid` that is not hex as stating no zid (unattributable), rather than comparing it as text. The runner checks that both owners write the zenoh form, and that the reference's real zid, respelled in capitals and padded to 32 digits, still attributes its stamp to it.
+
 > "an owner SHOULD state its session's zid as `meta.zid` … A tool
 > attributes a state stamp to its owner by comparing the stamp's id with
 > it"
@@ -1886,6 +1898,8 @@ stamp `foreign`, which 0.10's "never foreign" wording is there to prevent.
 spelling as text.
 
 ### F-79 · gap · §4.2 S4 (0.10): what "the routers' storage admin space" is
+
+**Status at 0.11: resolved by 0.11.** §4.2 "What the check reads": `@/*/router` for the routers that answer, and `@/*/router/**/storage_manager/storages/**`, one key per storage with its `key_expr`. A storage intersecting an owner's `state/**` or `@state/**` breaks S4. A router answering the first with nothing under the second runs no storage, and with no router answering the check is unobservable. zk2py now reads both selectors (`live.check_s4`) and keeps `plugins` beside them; the two agree on R1. A stand-in admin record shows the storages read: a storage on `telemetry/**` is clean, and one on `zk2/**` breaks S4. A gap remains in who may answer the first selector: F-80.
 
 > "A **tool** checks S4 against the routers' storage admin space … The
 > admin space is off by default … Without it, a tool reports the check
@@ -1908,3 +1922,51 @@ unobservable. A record with no plugin is clean, since there is no storage
 manager to run a storage. Any plugin is unobservable too, because zk2py
 does not guess the storage manager's keys. The storages branch could not be
 built from the spec, nor run here: zenoh-python hosts no plugin.
+
+## New at 0.11 (#609)
+
+Found while following 0.11. `just py-conformance` passes 519 of 519, with
+`descriptors/ok-optional-unchecked`. `just py-live` passes 194 of 194, with
+no known deviation.
+
+What changed in zk2py:
+- **S4** reads 0.11's two selectors. `plugins` is kept beside them, and
+  the two agree on a router with no plugin. With no router to run a real
+  storage on, a stand-in admin record (queryables the runner declares)
+  shows the storages read:
+  - a storage on `telemetry/**` leaves S4 clean;
+  - one on `zk2/**` intersects owners' `state/**`, and breaks it.
+- **zids compare by value only.** A non-hex `meta.zid` is unattributable.
+  The runner checks that both owners write `meta.zid` as zenoh writes it,
+  and that a respelling of the reference's zid still attributes its stamp
+  to it.
+
+### F-80 · gap · §4.2 S4 (0.11): who answers `@/*/router`
+
+> "`@/*/router`, the routers that answer … A router that answers the first
+> selector and has nothing under the second runs no storage. When no router
+> answers the first, the check is unobservable."
+
+A queryable on `@/<id>/router` is not a router's alone: any session can
+declare one. Measured on zenoh 1.10.1, with R1's admin space off (the
+default):
+- the check is unobservable, as it should be;
+- once a client session of R1 declares a queryable on
+  `@/fedcba9876543210/router` answering `{"plugins": null}`, that answer
+  is "a router that answers the first selector and has nothing under the
+  second". The check then reads clean.
+
+The same session could make a real storage disappear from the reading
+only by hiding the real router's answer, which it cannot do. It can,
+though, turn "unobservable", the one verdict 0.10 guards ("never clean"),
+into "clean". The spec says nothing about telling a router's record from
+a session's. The grants (§11.1) give no principal declarations under `@/`,
+but under `allow`, the default the core assumes elsewhere, nothing stops
+one. A tool's own grants do not help either.
+**Resolved:** zk2py takes an answer for a router's only when its id is one
+of the routers its own session is connected to (`session.info.routers_zid()`,
+compared by value). With none of those answering, the check stays
+unobservable, and the other ids are reported as unverified. Storages
+listed under an unverified id still count, since they can only make the
+verdict worse. A router further away is then unverified too, which costs a
+clean verdict, never a false one.
