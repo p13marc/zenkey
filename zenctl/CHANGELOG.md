@@ -6,7 +6,61 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
-## Unreleased (`main`, zk2) — acting and reading through a contract (#612, FJ5)
+## Unreleased (`main`, zk2) — `doctor` judges a zk2 deployment (#612, FJ6)
+
+`doctor` is zk2's now: thirteen checks of a deployment against the core, each
+a question whose finding is the *yes*, each answered in the judgement shape —
+a finding, clean with its evidence, unobservable with what stood in the way,
+or not asked. The deployment is read through a session in its namespace
+(`--namespace`, alias `--base`); the routers' admin space and the presence
+domain through one in no namespace. v1's checks are not the doctor's any more:
+the slice diff, describe coverage, schema drift by registry, the listen phase,
+fields, kind and budget live on only as `check conform`'s projection, and leave
+with it.
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| `doctor --registry <dir>` | `check conform <producer> --registry <dir>` | the served-vs-declared diff is conform's; the doctor reads no registry |
+| `doctor --for <SECS>` | — | the listen phase (payloads, QoS, unregistered traffic, rate, kind, fields) is conform's `--for`; a zk2 subscription is `watch` |
+| `doctor --deep [--sample N]` | `doctor --deep` | now asks `state-stamp-foreign`: each owner's state GET, every reply's stamp against the owner's session (S1–S2) |
+| — | `doctor --grace SECS` | the two presence reads split-brain and token-missing compare (default 2 s) |
+| — | `doctor --presence-budget N` | what `presence-over-budget` judges the domain's token count against (default 10000) |
+| — | `doctor --check ID … \| --skip ID …` | ask only some checks; the rest read `not_asked`, which neither passes nor fails |
+| `doctor --fail-on error\|warning`, default: always 0 | `doctor --fail-on error\|warning`, default **warning** | exit **1** on a finding at or above the floor; an info finding never fails |
+| a run that judged nothing: exit 2 | an empty scope, or a check left unobservable, with no finding at or above the floor: exit **2** | a wrong namespace or endpoint is never green; a pre-run failure is the reserved 2 too |
+| findings as rows (`finding`), coverage counts on the envelope | one `check` row per check: `check`, `section`, `verdict` (`answer`: `established`, `not_established`, `unobservable`, `not_asked`), `findings`, `unjudged`; `scope` and `unobservable` on the envelope | a finding is `severity`, `check`, `subject`, `evidence` |
+| `doctor --transitions` | `doctor --transitions` | one baseline line per check asked; firing on a finding, ok when clean, unobservable otherwise |
+| `watchdog --rule 'doctor <v1 id>'`, `record --on 'doctor …'`, `export --doctor-every` | the same, over zk2's ids | the rule's doctor runs in `--base`, through a second session; a run asks only the checks its rules name |
+
+The checks, and what each enforces:
+
+| id | the question (the finding is the yes) | spec |
+|---|---|---|
+| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? | §6 |
+| `binding-unsatisfied` | does a role's binding select no provider visible to this reader? | §3.2 R5 |
+| `contract-drift` | do providers of one interface serve revisions the classifier calls review or breaking against each other? | §9.8 |
+| `contract-unavailable` | does a descriptor name a revision no holder serves verified? | §8.4 |
+| `descriptor-invalid` | does a descriptor fail the descriptor check (a D-code)? | §3.3 |
+| `token-missing` | do an instance's tokens disagree with its descriptor? | §8.1 |
+| `presence-over-budget` | does the presence domain hold more tokens than its budget? | §8.3 |
+| `storage-on-state` | does a router storage answer on an owner's state keys? | §4.2 S4 |
+| `archive-unaligned` | does an archive serve keys its alignment has not confirmed? | §4.4 |
+| `state-stamp-foreign` | does an owner answer its state with a stamp that is not its own? (`--deep`) | §4.2 S1–S2 |
+| `shm-memlock-low` | is this host's `RLIMIT_MEMLOCK` below what a shared-memory pool needs? | §7.4 |
+| `admin-unreachable` | does no router answer the admin space? | §4.2 |
+| `router-version-skew` | do the routers run different zenoh versions? | App. B |
+
+v1's check ids are not the doctor's any more. `check conform` and `field`
+still report the ones they project (`slice-parse`, `slice-sync`,
+`describe-totality`, `schema-drift`, `stale-state`, `payload-undecodable`,
+`payload-invalid`, `qos-observed-mismatch`, `unregistered-traffic`,
+`rate-over-declared`, `cardinality-over-declared`, `field-*`, `kind-mismatch`,
+`budget-exceeded`); the ones only the doctor filed (`introspect-coverage`,
+`describe-missing`, `unstamped-state`, `storage-coverage`,
+`timestamp-stamped-elsewhere`) are gone from `main`. `admin-unreachable` and
+`router-version-skew` keep their spelling with zk2's meaning. The `v1` branch keeps the v1 doctor whole.
+
+## FJ5 — acting and reading through a contract (#612, FJ5)
 
 zk2's acts and reads, each aimed at an address, an interface revision and one
 resource of its contract, through the zk2 runtime's own client and consumer in
