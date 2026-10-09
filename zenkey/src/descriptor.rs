@@ -62,6 +62,7 @@ pub(crate) fn build(
                 declared_by: r.declared_by.as_ref().map(ToString::to_string),
                 bindings: b.map(|b| b.providers.clone()).unwrap_or_default(),
                 params: b.map(|b| b.params.clone()).unwrap_or_default(),
+                optional: r.optional,
             }
         })
         .collect();

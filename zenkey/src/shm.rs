@@ -3,16 +3,42 @@
 //! back to TCP (spike S9: under an 8 MiB `RLIMIT_MEMLOCK`). The runtime
 //! cannot see the fallback, so it checks the limit and says so.
 
-/// The soft `RLIMIT_MEMLOCK`, in bytes; `None` when unlimited or unknown.
+/// The soft `RLIMIT_MEMLOCK`, as this process reads it (#677).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Memlock {
+    /// A limit, in bytes.
+    Limited(u64),
+    /// No limit.
+    Unlimited,
+    /// The limit could not be read: neither a limit nor its absence is
+    /// known.
+    Unknown,
+}
+
+/// The soft `RLIMIT_MEMLOCK`: a limit, none, or unknown (§7.4).
 #[must_use]
-pub fn memlock_limit() -> Option<u64> {
+pub fn memlock() -> Memlock {
     let mut r = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
     };
     // SAFETY: `getrlimit` writes one `rlimit` through a valid pointer.
     let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &raw mut r) };
-    (rc == 0 && r.rlim_cur != libc::RLIM_INFINITY).then_some(r.rlim_cur)
+    match (rc, r.rlim_cur) {
+        (0, libc::RLIM_INFINITY) => Memlock::Unlimited,
+        (0, limit) => Memlock::Limited(limit),
+        _ => Memlock::Unknown,
+    }
+}
+
+/// The soft `RLIMIT_MEMLOCK`, in bytes; `None` when unlimited **or
+/// unknown**, which [`memlock`] tells apart.
+#[must_use]
+pub fn memlock_limit() -> Option<u64> {
+    match memlock() {
+        Memlock::Limited(l) => Some(l),
+        Memlock::Unlimited | Memlock::Unknown => None,
+    }
 }
 
 /// The limit spike S9 saw SHM fall back under. A pool needs at least its own
@@ -25,7 +51,9 @@ pub const MEMLOCK_FLOOR: u64 = 8 * 1024 * 1024;
 pub(crate) fn warn_if_memlock_low() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        if let Some(limit) = memlock_limit().filter(|l| *l < MEMLOCK_FLOOR) {
+        if let Memlock::Limited(limit) = memlock()
+            && limit < MEMLOCK_FLOOR
+        {
             tracing::warn!(
                 limit,
                 floor = MEMLOCK_FLOOR,

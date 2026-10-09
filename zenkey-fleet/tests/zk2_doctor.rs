@@ -348,7 +348,7 @@ async fn tcgui(owners: &zenoh::Session) -> Vec<Service> {
     );
     gui.require("netif", iface("tc.netif.v1"), false);
     gui.require("netem", iface("tc.netem.v1"), false);
-    gui.require("scenario", iface("tc.scenario.v1"), false);
+    gui.require("scenario", iface("tc.scenario.v1"), true);
     vec![a, b, gui.start().await.expect("the frontend")]
 }
 
@@ -385,8 +385,8 @@ async fn a_conforming_deployment_is_clean_and_an_unreachable_admin_space_is_no_v
     );
     assert_eq!(
         f.severity,
-        DoctorSeverity::Warning,
-        "a manifest role's need is not in its descriptor"
+        DoctorSeverity::Info,
+        "an optional manifest role, as its descriptor says (§3.3, 0.10)"
     );
     assert_eq!(verdict(&r, CheckId::BindingUnsatisfied).findings.len(), 1);
     // The admin space is off: a finding worth knowing, and no verdict on S4.
@@ -405,10 +405,11 @@ async fn a_conforming_deployment_is_clean_and_an_unreachable_admin_space_is_no_v
     let scope = r.scope.presence.as_option().expect("presence was read");
     assert_eq!(scope.services, 3);
     assert!(scope.complete);
-    // The binding's warning is the run's finding; under `--fail-on error`
-    // the unobservable admin checks make it no verdict.
+    // The optional binding's info is the run's finding under `--fail-on
+    // info`; above that, the unobservable admin checks make it no verdict.
     let exit = |floor| zenkey_fleet::judgement_exit_code(&r.judgement(floor));
-    assert_eq!(exit(DoctorSeverity::Warning), 1);
+    assert_eq!(exit(DoctorSeverity::Info), 1);
+    assert_eq!(exit(DoctorSeverity::Warning), 2);
     assert_eq!(exit(DoctorSeverity::Error), 2);
 
     // §8.3, against a budget this deployment is over.
@@ -845,6 +846,10 @@ async fn a_bound_role_is_clean_while_its_provider_is_present() {
     tokens(&tool, "zk2/host-a/tc/@zk/instance/*", 0).await;
     let r = doctor(&bus(&tool, &tool, ""), &only).await;
     let f = found(&r, CheckId::BindingUnsatisfied, "ws-01/gui netif");
-    assert_eq!(f.severity, DoctorSeverity::Warning);
+    assert_eq!(
+        f.severity,
+        DoctorSeverity::Error,
+        "a required manifest role (§3.3, 0.10)"
+    );
     assert!(f.evidence.contains("host-a/tc"), "{f:?}");
 }

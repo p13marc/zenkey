@@ -3,6 +3,72 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.10 — 2026-10-09: what a doctor can and cannot decide (#677)
+
+Writing zk2's `doctor` (#612, FJ6, PR #678) found eight places where a
+check was undecidable, or rested on something the spec called
+informative. The doctor's behaviour becomes the rule, as the reference's
+has since 0.5. Two items are runtime fixes, made here.
+
+**Changed: two wire additions.**
+- **`requires[].optional` (§3.3).** A role a component's manifest declares
+  (`declared_by: null`) had no way to say whether it is required, so a
+  tool could not grade an unsatisfied one.
+  - The entry now carries `optional: true` for a role the instance works
+    without, and nothing otherwise: absent is required.
+  - For a contract's role, it repeats the contract.
+  - The reference runtime fills it from the role. It writes it only when
+    `true`, so a descriptor without optional roles is byte-identical to
+    0.9's. An older strict reader refuses an entry that carries it (D000).
+  - `descriptors/ok-optional-role` pins it, and `descriptor.schema.json`
+    is regenerated.
+- **`meta.zid` (§3.3).** S1's attribution, and the tooling guide's O7,
+  compare a state stamp's id with the owner's zid. The only place a tool
+  learns that zid is the descriptor's `meta`, which 0.9 called
+  informative.
+  - An owner SHOULD now state `meta.zid`, as the reference always has.
+  - The rest of `meta` stays unchecked.
+  - Without it, a stamp's clock is unattributable, never foreign.
+
+**Changed: rules stated.**
+- **S4 needs the admin space (§4.2, Appendix B).** A tool checks S4 in the
+  routers' storage admin space, which zenoh 1.10.1 disables by default. A
+  deployment that wants the check enables it, read-only, for its tools.
+  Without it, the check is unobservable, never clean.
+- **A fault read from presence shapes holds in two reads (§8.1).** §6's
+  grace rule for split-brain now covers every shape: a token a descriptor
+  does not list, or an exposed interface with no token. Start-up, re-mint
+  and teardown pass through those shapes briefly, by design. The doctor
+  already required two reads.
+- **What a tool can count (§8.3).** A reader lists only liveliness tokens,
+  and only those its selectors and grants reach. Its count is a lower bound
+  of the budget's declarations, and it says so.
+- **Revisions carry no order on the bus (§9.8).** A bundle keeps no
+  `minor`. A tool MAY order two revisions by the `minor` their descriptors
+  state, when the two differ. Otherwise it classifies both ways: clean only
+  when both directions are compatible, a finding when neither is, and
+  undecided when they disagree. `minor` stays unchecked (§3.3).
+- **What a tool can see of an archive (§4.4).** No alignment status is
+  published at this version: a tool sees each key's `confirmed`, so an
+  empty archive reads as aligned, and the tool says so. A status is
+  profile work (#613).
+
+**Changed: the runtime, here.**
+- **`zenkey::shm::memlock()`** returns `Limited`, `Unlimited` or
+  `Unknown`. `memlock_limit()` folded the last two into `None`, so the
+  doctor read an unreadable limit as unlimited. The doctor's
+  `shm-memlock-low` is now unobservable when the limit is unknown.
+- **The doctor reads `optional`** for a manifest role. A required one
+  unbound is an error, and an optional one is info, where 0.9's doctor
+  could only warn.
+
+**Deliberately not changed.**
+- **The descriptor's `format` stays `zk2-descriptor/0.1`.** The addition
+  is optional and written only when `true`. The core is pre-1.0, and every
+  implementation follows each amendment.
+- **No alignment status is invented for `archive.v1` here.** That belongs
+  to the profile's own spec (#613), not to the core.
+
 ## 0.9 — 2026-10-08: the order of an owner's refusals, and a scenario 0.8 got wrong (#670)
 
 The Python implementation's round against 0.8 (PR #669) found three things,
