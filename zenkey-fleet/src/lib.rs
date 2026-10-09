@@ -70,16 +70,20 @@
 //!
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. `facts`, `registry`, `project`, `stats`, `tree`, `skeleton`,
-//!   `diff`, `decode`, `retain`, zk2's `catalog` and `render`, the
-//!   `structural` ladder both generations fall back to, plus the two
+//!   `diff`, `decode`, `retain`, zk2's `catalog`, `render`, `target` and
+//!   `lens` (FJ8b: a raw observer's key resolved rung by rung, its payload
+//!   checked, its stamp attributed), `timeline`, `snapshot` and
+//!   `snapshot_diff` over it, the `structural` ladder both generations fall
+//!   back to, plus the two
 //!   mechanisms every long-running
 //!   projection shares (`bounded`, `examples`). Nothing here takes a
 //!   session, and that is load-bearing: it is what lets a frontend replay a
 //!   `.zrec` through the same projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` (zk2's, FJ6)
-//!   and its `doctor_delta`, `expect`, `condition`, `conform` and the v1
-//!   `registry_checks` it projects, `field`, `why`, `cutover`, `retired`,
+//!   and its `doctor_delta`, `expect`, `probe` and `condition` (zk2's,
+//!   FJ8b), `conform` and the v1 `registry_checks` it projects, `field`,
+//!   `why`, `cutover`, `retired`,
 //!   `budget`, and [`judge::common`] for the vocabulary they share. The honesty rules
 //!   (RFC 13, v1.24) bite hardest here, so the layer states them once.
 //!
@@ -87,7 +91,9 @@
 //!   domain. Its module doc carries the placement rule, which is the answer
 //!   to "where does this struct go?" whenever the struct has a `Serialize`
 //!   on it. zk2's shapes are domains of their own (`presence`, `iface`,
-//!   `graph`, `contract`, `payload`) beside v1's until FJ9.
+//!   `graph`, `contract`, `payload`, and `observe` for what every raw
+//!   observer says of a key: its identity, its conformance, its QoS against
+//!   the declared one) beside v1's until FJ9.
 //!
 //! * **[`tape`]** — traffic as a thing rather than an event. `record`,
 //!   `ingest`, `generate`, `synth`, `bench`. It sits beside the others
