@@ -37,6 +37,10 @@
 //!   from it.
 //! - [`envelope`]: the error envelope of a failed call, decoded and
 //!   checked by its Zenoh encoding (`spec/core/error.proto`).
+//! - [`decode`]: a payload decoded from a bundle alone, for tools (§7.2).
+//! - [`validate`]: a value checked against a JSON Schema type of a bundle,
+//!   the §7.3 subset and nothing more, for tools that build a payload from
+//!   JSON (#671).
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -59,3 +63,4 @@ mod strict;
 pub mod template;
 mod toml10;
 mod unbundle;
+pub mod validate;

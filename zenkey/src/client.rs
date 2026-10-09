@@ -30,7 +30,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zenkey_model::contract::{Contract, Fanout, Operation, Replies as RepliesKind, Resource};
 use zenkey_model::envelope::{self, Envelope};
-use zenkey_model::grammar::{Addr, IfaceId, Key, KindToken, ZkKey, data_key};
+use zenkey_model::grammar::{Addr, IfaceId, Key, KindToken, ZkKey, data_key, parse};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::bytes::{Encoding, ZBytes};
@@ -497,6 +497,13 @@ impl Client {
 
     /// The providers holding this interface's token now (§8.1).
     pub async fn present(&self, timeout: Duration) -> Result<Vec<Addr>> {
+        Ok(self.presence(timeout).await?.providers)
+    }
+
+    /// [`Client::present`], with whether the reads were complete (§8.1):
+    /// a provider missing from a possibly incomplete read is not absent
+    /// (O5, #671).
+    pub async fn presence(&self, timeout: Duration) -> Result<Present> {
         present(
             &self.session,
             &self.providers,
@@ -520,18 +527,36 @@ impl Client {
     }
 }
 
+/// Who holds an interface's token, read from presence (§8.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Present {
+    /// The providers holding the token, sorted.
+    pub providers: Vec<Addr>,
+    /// `false` when any read behind it got an error reply, the timeout's
+    /// included: a provider missing from it may be there (§8.1, O5). A
+    /// complete read can still have been refused by access control, which
+    /// looks the same as absence (§8.1, 0.8).
+    pub complete: bool,
+    /// Every error reply of those reads, as
+    /// [`crate::presence::PresenceRead::errors`] spells them.
+    pub errors: Vec<String>,
+}
+
 async fn present(
     session: &zenoh::Session,
     providers: &[Provider],
     iface: &IfaceId,
     timeout: Duration,
-) -> Result<Vec<Addr>> {
+) -> Result<Present> {
     let mut out = Vec::new();
+    let mut errors = Vec::new();
     for p in providers {
         let (sys, svc) = p.chunks();
         let sel = format!("zk2/{sys}/{svc}/@zk/alive/{iface}/**");
-        for t in crate::presence::tokens(session, &sel, timeout).await? {
-            if let ZkKey::Alive { addr, .. } = t
+        let read = crate::presence::liveliness_read(session, &sel, timeout).await?;
+        errors.extend(read.errors);
+        for key in &read.keys {
+            if let Ok(ZkKey::Alive { addr, .. }) = parse(key)
                 && !out.contains(&addr)
             {
                 out.push(addr);
@@ -539,7 +564,11 @@ async fn present(
         }
     }
     out.sort();
-    Ok(out)
+    Ok(Present {
+        providers: out,
+        complete: errors.is_empty(),
+        errors,
+    })
 }
 
 /// The selection without the providers another one already covers, so that
@@ -733,6 +762,13 @@ impl Fleet {
     /// The selected services holding this interface's token now (§8.1): who
     /// a fan-out should hear from, to attribute silence (O5).
     pub async fn present(&self, timeout: Duration) -> Result<Vec<Addr>> {
+        Ok(self.presence(timeout).await?.providers)
+    }
+
+    /// [`Fleet::present`], with whether the reads were complete (§8.1): a
+    /// service missing from a possibly incomplete read is not one that sent
+    /// nothing (O5, #671).
+    pub async fn presence(&self, timeout: Duration) -> Result<Present> {
         present(
             &self.session,
             &self.selection,
