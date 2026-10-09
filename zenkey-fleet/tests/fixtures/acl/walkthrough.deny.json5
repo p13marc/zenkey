@@ -35,13 +35,13 @@ access_control: {
     { id: "consume-out:vehicle-01/thruster-l", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd", "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd", "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd"] },
-    // presence (vehicle-01/thruster-l): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/thruster-l): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/thruster-l", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/safety/@zk/**", "zk2/vehicle-01/teleop/@zk/**", "zk2/vehicle-01/autopilot/@zk/**"] },
-    // presence (vehicle-01/thruster-l): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/thruster-l): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/thruster-l", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/vehicle-01/safety/@zk/**", "zk2/vehicle-01/teleop/@zk/**", "zk2/vehicle-01/autopilot/@zk/**"] },
     // own (vehicle-01/thruster-r): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/thruster-r", permission: "allow", flows: ["ingress"],
@@ -67,13 +67,13 @@ access_control: {
     { id: "consume-out:vehicle-01/thruster-r", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/vehicle-01/safety/twist_cmd.v1/stream/cmd", "zk2/vehicle-01/teleop/twist_cmd.v1/stream/cmd", "zk2/vehicle-01/autopilot/twist_cmd.v1/stream/cmd"] },
-    // presence (vehicle-01/thruster-r): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/thruster-r): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/thruster-r", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/safety/@zk/**", "zk2/vehicle-01/teleop/@zk/**", "zk2/vehicle-01/autopilot/@zk/**"] },
-    // presence (vehicle-01/thruster-r): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/thruster-r): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/thruster-r", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/vehicle-01/safety/@zk/**", "zk2/vehicle-01/teleop/@zk/**", "zk2/vehicle-01/autopilot/@zk/**"] },
     // own (vehicle-01/teleop): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/teleop", permission: "allow", flows: ["ingress"],
@@ -139,13 +139,13 @@ access_control: {
     { id: "consume-out:vehicle-01/detector", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/vehicle-01/cam-front/camera.v1/@stream/image"] },
-    // presence (vehicle-01/detector): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/detector): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/detector", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/cam-front/@zk/**"] },
-    // presence (vehicle-01/detector): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/detector): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/detector", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/vehicle-01/cam-front/@zk/**"] },
     // own (vehicle-01/tracker): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/tracker", permission: "allow", flows: ["ingress"],
@@ -163,13 +163,13 @@ access_control: {
     { id: "consume-out:vehicle-01/tracker", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/vehicle-01/*/detections.v1/stream/**"] },
-    // presence (vehicle-01/tracker): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/tracker): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/tracker", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/*/@zk/**"] },
-    // presence (vehicle-01/tracker): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/tracker): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/tracker", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/vehicle-01/*/@zk/**"] },
     // own (vehicle-01/executor): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/executor", permission: "allow", flows: ["ingress"],
@@ -187,13 +187,13 @@ access_control: {
     { id: "consume-out:vehicle-01/executor", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"] },
-    // presence (vehicle-01/executor): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/executor): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/executor", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**"] },
-    // presence (vehicle-01/executor): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/executor): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/executor", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**"] },
     // own (vehicle-01/archive): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:vehicle-01/archive", permission: "allow", flows: ["ingress"],
@@ -211,13 +211,13 @@ access_control: {
     { id: "consume-out:vehicle-01/archive", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01", "zk2/ground/archive/archive.v1/@state/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"] },
-    // presence (vehicle-01/archive): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (vehicle-01/archive): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:vehicle-01/archive", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**", "zk2/ground/archive/@zk/**"] },
-    // presence (vehicle-01/archive): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (vehicle-01/archive): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:vehicle-01/archive", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**", "zk2/ground/archive/@zk/**"] },
     // own (ground/fleet-mgr): §11.1 Own: the service puts, deletes, serves and declares tokens under its prefix, each verbatim subtree spelled out because `**` never crosses one (§1.3), its `@adv` subtrees where it uses advanced publication (§2.5); reply covers its answers to queries on its own keys
     { id: "own-in:ground/fleet-mgr", permission: "allow", flows: ["ingress"],
@@ -243,13 +243,13 @@ access_control: {
     { id: "consume-out:ground/archive", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*"] },
-    // presence (ground/archive): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (ground/archive): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:ground/archive", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**"] },
-    // presence (ground/archive): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (ground/archive): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:ground/archive", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/ground/fleet-mgr/@zk/**"] },
     // consume (tool.ops): §11.1 Consume: subscribe or GET on what the bindings name, one selector per bound provider (R1), R2's parameter bindings applied
     { id: "consume-in:tool.ops", permission: "allow", flows: ["ingress"],
@@ -259,13 +259,13 @@ access_control: {
     { id: "consume-out:tool.ops", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/vehicle-01/navigation/nav.v2/state/**", "zk2/vehicle-01/navigation/nav.v2/stream/**", "zk2/vehicle-01/*/thruster.v1/state/status"] },
-    // presence (tool.ops): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (tool.ops): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:tool.ops", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/vehicle-01/navigation/@zk/**", "zk2/vehicle-01/*/@zk/**", "zk2/vehicle-01/thruster-l/@zk/**", "zk2/vehicle-01/thruster-r/@zk/**"] },
-    // presence (tool.ops): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (tool.ops): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:tool.ops", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/vehicle-01/navigation/@zk/**", "zk2/vehicle-01/*/@zk/**", "zk2/vehicle-01/thruster-l/@zk/**", "zk2/vehicle-01/thruster-r/@zk/**"] },
     // call (tool.ops): §11.1 Call: query on the specific `…/@op/<op>` keys called
     { id: "call-in:tool.ops", permission: "allow", flows: ["ingress"],

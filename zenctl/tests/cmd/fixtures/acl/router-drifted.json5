@@ -64,13 +64,13 @@ access_control: {
     { id: "consume-out:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["egress"],
       messages: ["put", "delete", "reply"],
       key_exprs: ["zk2/*/tc/tc.netem.v1/events/**", "zk2/*/tc/tc.netem.v1/state/**", "zk2/*/tc/tc.netem.v1/stream/**", "zk2/*/tc/tc.netif.v1/state/**", "zk2/*/tc/tc.netif.v1/stream/**", "zk2/*/tc/tc.scenario.v1/state/**"] },
-    // presence (h-0123456789ab/tcgui-frontend): §11.1 Consume and Call (0.8), §8.1: liveliness reads on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
+    // presence (h-0123456789ab/tcgui-frontend): §11.1 Consume and Call (0.8, 0.14), §8.1, §3.3: liveliness reads and the descriptor's GET and subscription on the `@zk` subtree of each service named. A refused read is answered complete and empty, so a reader the grants refuse would attribute silence to absence (§11.3)
     { id: "presence-in:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["ingress"],
-      messages: ["declare_liveliness_subscriber", "liveliness_query"],
+      messages: ["declare_liveliness_subscriber", "liveliness_query", "query", "declare_subscriber"],
       key_exprs: ["zk2/*/tc/@zk/**"] },
-    // presence (h-0123456789ab/tcgui-frontend): §11.1 (0.8), §8.1, egress: the tokens those reads receive
+    // presence (h-0123456789ab/tcgui-frontend): §11.1 (0.8, 0.14), §8.1, §3.3, egress: the tokens and the descriptors those reads receive
     { id: "presence-out:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["egress"],
-      messages: ["liveliness_token"],
+      messages: ["liveliness_token", "reply", "put"],
       key_exprs: ["zk2/*/tc/@zk/**"] },
     // call (h-0123456789ab/tcgui-frontend): §11.1 Call: query on the specific `…/@op/<op>` keys called
     { id: "call-in:h-0123456789ab/tcgui-frontend", permission: "allow", flows: ["ingress"],
