@@ -177,20 +177,38 @@ impl Render for TopologyView<'_> {
 
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         // The rows carry these; the envelope carries what was asked and how
-        // much of it answered.
-        envelope_without(self.report, &["nodes", "edges"])
+        // much of it answered — and, for the instance join, what it read in
+        // which namespace, without the instances themselves (#705).
+        let mut e = envelope_without(self.report, &["nodes", "edges", "instances"]);
+        if let Some(join) = self.report.instances.as_option() {
+            e.insert(
+                "instances".into(),
+                serde_json::Value::Object(envelope_without(join, &["instances"])),
+            );
+        }
+        e
     }
 
-    /// **Two row kinds on one stream.** They used to be concatenated with no
-    /// discriminator at all, so a consumer told a node from an edge by
-    /// probing for fields — the same defect `storage list` had, one command
-    /// over.
+    /// **Three row kinds on one stream.** Nodes and edges used to be
+    /// concatenated with no discriminator at all, so a consumer told a node
+    /// from an edge by probing for fields — the same defect `storage list`
+    /// had, one command over. zk2's instances are the third (#705), each
+    /// with its `attachment` tag.
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for n in &self.report.nodes {
             out(Row::of("node", n));
         }
         for e in &self.report.edges {
             out(Row::of("edge", e));
+        }
+        for i in self
+            .report
+            .instances
+            .as_option()
+            .into_iter()
+            .flat_map(|j| &j.instances)
+        {
+            out(Row::of("instance", i));
         }
     }
 
@@ -247,9 +265,124 @@ impl Render for TopologyView<'_> {
             ))]);
         }
         t.grid(rest);
+
+        // zk2's instances (#705): each attachment its own mark and word, so
+        // stripping colour or reading in black and white loses nothing.
+        if let Some(join) = self.report.instances.as_option()
+            && !join.instances.is_empty()
+        {
+            use zenkey_fleet::report::Attachment;
+            t.blank().line("zk2 instances:");
+            let mut g = Grid::unheaded(3);
+            for i in &join.instances {
+                let what = match &i.attachment {
+                    Attachment::Attached { routers } => format!(
+                        "→ {}",
+                        routers
+                            .iter()
+                            .map(|r| format!("{} (as {})", r.router, r.listed_as))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    Attachment::Unattached { reason } => format!("✗ unattached: {reason}"),
+                    Attachment::Unattributable { reason } => {
+                        format!("? unattributable: {reason}")
+                    }
+                };
+                g.row([
+                    Cell::text(format!("{}@{}", i.address, i.instance)),
+                    // No zid is not an empty one: the descriptor named none.
+                    Cell::asked(i.zid.clone()),
+                    Cell::text(what),
+                ]);
+            }
+            t.grid(g);
+        }
     }
 
     fn notes(&self) -> Vec<Note> {
+        let mut notes = self.mesh_notes();
+        if let Some(join) = self.report.instances.as_option() {
+            notes.extend(instance_notes(join));
+        }
+        notes
+    }
+
+    fn scope(&self) -> Option<ObservedScope> {
+        let mut asked = vec![self.report.asked.clone()];
+        if let Some(join) = self.report.instances.as_option() {
+            asked.push(join.selector.clone());
+        }
+        Some(ObservedScope {
+            asked,
+            window_s: None,
+        })
+    }
+}
+
+/// What the instance join read and how far it got (#705): in which
+/// namespace, through which routers, and what it could not count.
+fn instance_notes(join: &zenkey_fleet::report::InstanceJoin) -> Vec<Note> {
+    let ns = if join.namespace.is_empty() {
+        "the bus root".to_owned()
+    } else {
+        format!("namespace {:?}", join.namespace)
+    };
+    let mut notes = Vec::new();
+    if let Some(why) = &join.unobservable {
+        notes.push(Note::silence(format!(
+            "zk2 instances in {ns}: {why} — no instance is attached or unattached, the join \
+             is unobservable"
+        )));
+        return notes;
+    }
+    let (attached, unattached, unattributable) = join.counts();
+    notes.push(
+        Note::coverage(format!(
+            "{} zk2 instance(s) read in {ns} through `{}`: {attached} attached, {unattached} \
+             unattached, {unattributable} unattributable; each joined by the zid its \
+             descriptor states, compared by value, onto {} verified router(s) — only a \
+             router's own answer counts",
+            join.instances.len(),
+            join.selector,
+            join.verified.len()
+        ))
+        .cite("spec §3.3, §4.2"),
+    );
+    if join.instances.is_empty() {
+        notes.push(
+            Note::coverage(format!(
+                "no zk2 token visible to this reader in {ns}: nothing to join"
+            ))
+            .cite("spec §8.1"),
+        );
+    }
+    if !join.complete {
+        notes.push(
+            Note::coverage(
+                "the presence read ran to its timeout, so it is possibly incomplete: an \
+                 instance missing here may still be up",
+            )
+            .cite("spec §8.1"),
+        );
+    }
+    if !join.unverified.is_empty() {
+        notes.push(
+            Note::caveat(format!(
+                "{} admin answer(s) could not be shown to be a router's and attach nothing: {}",
+                join.unverified.len(),
+                join.unverified.join("; ")
+            ))
+            .cite("spec §4.2"),
+        );
+    }
+    notes
+}
+
+impl TopologyView<'_> {
+    /// The mesh's own notes: what answered, and what an empty locator
+    /// column means.
+    fn mesh_notes(&self) -> Vec<Note> {
         match self.report.answered {
             0 => vec![Note::silence(format!(
                 "no admin space answered {} — adminspace.enabled defaults off; this is \
@@ -285,13 +418,6 @@ impl Render for TopologyView<'_> {
                 notes
             }
         }
-    }
-
-    fn scope(&self) -> Option<ObservedScope> {
-        Some(ObservedScope {
-            asked: vec![self.report.asked.clone()],
-            window_s: None,
-        })
     }
 }
 

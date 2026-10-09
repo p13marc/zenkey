@@ -589,6 +589,61 @@ pub fn topology() -> zenkey_fleet::TopologyReport {
             region: None,
             links: vec!["tcp".into()],
         }],
+        instances: zenkey_fleet::report::Asked::NotAsked,
+    }
+}
+
+/// [`topology`] with zk2's instances joined onto it (#705): one attached
+/// to the verified router that lists its session, one no verified router
+/// lists (an unverified answer claims it), one whose descriptor names no
+/// zid — every attachment non-empty, so a renderer that merged two fails.
+pub fn topology_with_instances() -> zenkey_fleet::TopologyReport {
+    use zenkey_fleet::report::{AttachedTo, Attachment, InstanceAttachment, InstanceJoin};
+    zenkey_fleet::TopologyReport {
+        instances: zenkey_fleet::report::Asked::Asked(InstanceJoin {
+            namespace: "acme".into(),
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            verified: vec!["aabbccdd".into()],
+            unverified: vec![
+                "`@/99887766/router`, answered by 12345678: its replier is not the router its key \
+                 names"
+                    .into(),
+            ],
+            unobservable: None,
+            instances: vec![
+                InstanceAttachment {
+                    address: "host-a/tc".into(),
+                    instance: "3fa9c2d41b7e0012".into(),
+                    zid: Some("eeff0011".into()),
+                    attachment: Attachment::Attached {
+                        routers: vec![AttachedTo {
+                            router: "aabbccdd".into(),
+                            listed_as: "peer".into(),
+                        }],
+                    },
+                },
+                InstanceAttachment {
+                    address: "host-b/tc".into(),
+                    instance: "3fa9c2d41b7e0013".into(),
+                    zid: Some("c0ffee".into()),
+                    attachment: Attachment::Unattached {
+                        reason: "no verified router (aabbccdd) lists zid c0ffee among its \
+                                 sessions, compared by value"
+                            .into(),
+                    },
+                },
+                InstanceAttachment {
+                    address: "ws-01/tcgui-frontend".into(),
+                    instance: "3fa9c2d41b7e0014".into(),
+                    zid: None,
+                    attachment: Attachment::Unattributable {
+                        reason: "its descriptor names no session zid (`meta.zid`)".into(),
+                    },
+                },
+            ],
+        }),
+        ..topology()
     }
 }
 
@@ -660,6 +715,7 @@ pub fn storage_plan() -> StoragePlan {
                     "overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both",
                     "RFC 09 §2",
                 )],
+                derived: None,
             },
             PlannedStorage {
                 name: "links".into(),
@@ -688,6 +744,7 @@ pub fn storage_plan() -> StoragePlan {
                         "RFC 09 §2",
                     ),
                 ],
+                derived: None,
             },
             PlannedStorage {
                 name: "timeseries".into(),
@@ -705,6 +762,7 @@ pub fn storage_plan() -> StoragePlan {
                     "retention is the database's policy, not zenoh config",
                     "RFC 09 §2.3",
                 )],
+                derived: None,
             },
         ],
         refusals: vec![Refusal {
@@ -714,6 +772,178 @@ pub fn storage_plan() -> StoragePlan {
             reason: "names volume \"rocks\", which [volumes] does not declare".into(),
             cite: "RFC 09 §2".into(),
         }],
+        enrollment: zenkey_fleet::report::Asked::NotAsked,
+    }
+}
+
+/// `why` stopped at a cause (#702): the namespace, the key and presence
+/// healthy, the descriptor listing the resource `unavailable` with its
+/// cause, and every rung past it not asked.
+pub fn why_report_cause() -> WhyReport {
+    WhyReport {
+        target: "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0".into(),
+        subject: WhySubject::Key,
+        namespace: "acme".into(),
+        asked: vec!["zk2/host-a/tc/@zk/**".into()],
+        window_s: None,
+        rungs: vec![
+            WhyRung::healthy(
+                RungId::Namespace,
+                "§1.6",
+                "the key sits under namespace \"acme\"",
+            ),
+            WhyRung::healthy(
+                RungId::Key,
+                "§1.1",
+                "a stream key of host-a/tc, interface tc.netif.v1",
+            ),
+            WhyRung::healthy(
+                RungId::Presence,
+                "§8.1",
+                "1 instance(s) of host-a/tc hold their token; 1 hold tc.netif.v1's interface token",
+            ),
+            WhyRung::cause(
+                RungId::Descriptor,
+                "§3.3",
+                "stream/bandwidth/{ns}/{iface} is unavailable at host-a/tc@3fa9c2d41b7e0012 \
+                 (config: no bandwidth probe)",
+            ),
+            WhyRung::not_asked(RungId::Contract, "§8.4"),
+            WhyRung::not_asked(RungId::Answer, "§2.1"),
+            WhyRung::not_asked(RungId::LastKnown, "§4.2 S6"),
+        ],
+        verdict: Judgement::Established,
+        stopped_at: Some(RungId::Descriptor),
+        value: None,
+        last_known: None,
+    }
+}
+
+/// `why` at the owner's silence (#702): every rung healthy up to the
+/// answer, the S4 GET unanswered, and an archive's last-known value read
+/// after it — last-known, never current.
+pub fn why_report_silent() -> WhyReport {
+    let key = "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    WhyReport {
+        target: format!("acme/{key}"),
+        subject: WhySubject::Key,
+        namespace: "acme".into(),
+        asked: vec![
+            "zk2/host-a/tc/@zk/**".into(),
+            key.into(),
+            "zk2/*/*/@zk/alive/archive.v1/**".into(),
+        ],
+        window_s: None,
+        rungs: vec![
+            WhyRung::healthy(
+                RungId::Namespace,
+                "§1.6",
+                "the key sits under namespace \"acme\"",
+            ),
+            WhyRung::healthy(
+                RungId::Key,
+                "§1.1",
+                "a state key of host-a/tc, interface tc.netif.v1",
+            ),
+            WhyRung::healthy(
+                RungId::Presence,
+                "§8.1",
+                "1 instance(s) of host-a/tc hold their token",
+            ),
+            WhyRung::healthy(
+                RungId::Descriptor,
+                "§3.3",
+                "implements tc.netif.v1 at 5d1c0a9b2e3f4a6b, exposing state/interfaces/{ns}/{iface}",
+            ),
+            WhyRung::healthy(
+                RungId::Contract,
+                "§8.4",
+                "tc.netif.v1, retrieved from a holder and verified: the key is \
+                 state/interfaces/{ns}/{iface}",
+            ),
+            WhyRung::unobservable(
+                RungId::Answer,
+                "§4.2 S4",
+                "host-a/tc holds its tokens and sent no reply within 2s: silence is not a verdict",
+            ),
+            WhyRung::healthy(
+                RungId::LastKnown,
+                "§4.2 S6",
+                "ground/archive holds its last-known value, not confirmed by alignment: \
+                 last-known, never current (S6)",
+            ),
+        ],
+        verdict: Judgement::Unobservable {
+            reason: "answer: host-a/tc holds its tokens and sent no reply within 2s".into(),
+        },
+        stopped_at: Some(RungId::Answer),
+        value: None,
+        last_known: Some(WhyLastKnown {
+            archive: "ground/archive".into(),
+            key: key.into(),
+            value: None,
+            timestamp: Some(Stamp {
+                time: "2026-10-09T10:00:00.000000000Z".into(),
+                clock: "a1b2c3".into(),
+            }),
+            confirmed: false,
+        }),
+    }
+}
+
+/// `check conform` over one service (#703): every pole on some case — a
+/// pass, a violation, a resource unobservable in its window, an operation
+/// not called and the profile cases not asked — so a renderer that merged
+/// two fails.
+pub fn conform_report() -> ConformReport {
+    let fp = format!("sha256:{}", "5d1c0a9b2e3f4a6b".repeat(4));
+    ConformReport {
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: Some(fp.clone()),
+        namespace: "acme".into(),
+        window_s: 5.0,
+        asked: vec![
+            "zk2/host-a/tc/@zk/**".into(),
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*".into(),
+            "zk2/host-a/tc/tc.netif.v1/@op/diagnostics".into(),
+        ],
+        cases: vec![
+            ConformCase::passed(
+                CaseId::ContractServed,
+                format!("tc.netif.v1 {fp}"),
+                "a holder served the bundle the descriptor names, and it verified",
+            ),
+            ConformCase::passed(
+                CaseId::ResourceServed,
+                "stream/bandwidth/{ns}/{iface}",
+                "12 sample(s) in the 5s window",
+            ),
+            ConformCase::failed(
+                CaseId::PayloadType,
+                "stream/bandwidth/{ns}/{iface}",
+                "1 of 12 value(s) do not conform to the declared type; the first, \
+                 zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object",
+            ),
+            ConformCase::unobservable(
+                CaseId::ResourceServed,
+                "state/namespaces",
+                "nothing heard in the 5s window, and the state GET drew no reply",
+            ),
+            ConformCase::failed(
+                CaseId::Operation,
+                "@op/diagnostics",
+                "host-a/tc holds its tokens, and the call drew neither a value nor an envelope \
+                 within 1s: never silence (O3)",
+            ),
+            ConformCase::not_asked(
+                CaseId::Operation,
+                "@op/interfaces/{ns}/{iface}/set",
+                "not idempotent: each call is a write, which this suite makes only under --i-know",
+            ),
+            ConformCase::not_asked(CaseId::Freshness, "service", "a profile (#613)"),
+        ],
+        unobservable: None,
     }
 }
 
@@ -732,6 +962,7 @@ pub fn storage_check() -> StorageCheck {
         };
     StorageCheck {
         base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::AdminSpace,
         asked: "@/*/router/**/storage_manager/storages/**".into(),
         planned: 3,
         observed: 3,
@@ -776,6 +1007,7 @@ pub fn storage_check() -> StorageCheck {
 pub fn storage_check_unobservable() -> StorageCheck {
     StorageCheck {
         base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::AdminSpace,
         asked: "@/*/router/**/storage_manager/storages/**".into(),
         planned: 3,
         observed: 0,
@@ -784,6 +1016,112 @@ pub fn storage_check_unobservable() -> StorageCheck {
         judgement: Judgement::Unobservable {
             reason: "the admin space answered no storages".into(),
         },
+    }
+}
+
+/// A plan derived from an enrollment (#704): the tcgui pilot's audit
+/// event as a union storage on the implicit memory volume, an interface
+/// whose contract was not given, one without events, an archive never
+/// planned, and an S4 refusal of the file's state storage — every list
+/// non-empty, so a renderer that dropped one fails.
+pub fn storage_plan_enrolled() -> StoragePlan {
+    use zenkey_fleet::report::{DerivedEvent, EnrollmentDerivation};
+    StoragePlan {
+        base: "acme".into(),
+        volumes: vec![PlannedVolume {
+            id: "memory".into(),
+            plugin: "memory".into(),
+            history: HistoryMode::Latest,
+            persistence: Some(Persistence::Volatile),
+            params: std::collections::BTreeMap::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::ImplicitVolume,
+                text: "no deployment file names an [events] volume: volatile".into(),
+                cite: "RFC 09 §2.1".into(),
+            }],
+        }],
+        storages: vec![PlannedStorage {
+            name: "events-tc.netem.v1-applied".into(),
+            key_expr: "acme/zk2/*/*/tc.netem.v1/events/applied/*".into(),
+            strip_prefix: "acme/zk2".into(),
+            volume: "memory".into(),
+            history: HistoryMode::Latest,
+            replication: None,
+            complete: false,
+            garbage_collection: GarbageCollection {
+                period_s: 30,
+                lifespan_s: 604_800,
+                derivation: "the contract's retention for tc.netem.v1 events/applied, 7d \
+                             (604800 s, spec §2.6)"
+                    .into(),
+            },
+            retention: None,
+            params: std::collections::BTreeMap::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::RetentionNotEnforced,
+                text: "the contract's retention (7d) bounds a replay, not this storage".into(),
+                cite: "spec §2.6".into(),
+            }],
+            derived: Some(DerivedEvent {
+                iface: "tc.netem.v1".into(),
+                resource: "events/applied".into(),
+                retention_s: 604_800,
+                providers: vec!["h-20609002f7b6/tc".into(), "h-3fa9c2d41b7e/tc".into()],
+            }),
+        }],
+        refusals: vec![Refusal {
+            storage: Some("latest".into()),
+            volume: None,
+            key_expr: Some("acme/zk2/*/*/*/state/**".into()),
+            reason: "\"acme/zk2/*/*/*/state/**\" intersects owners' state keys".into(),
+            cite: "spec §4.2 S4".into(),
+        }],
+        enrollment: zenkey_fleet::report::Asked::Asked(EnrollmentDerivation {
+            contract_not_given: vec!["nav.v2".into()],
+            without_events: vec!["tc.netif.v1".into()],
+            archives: vec!["ground/archive".into()],
+        }),
+    }
+}
+
+/// `--check --against` a router file (#704): the derived storage's
+/// lifespan below the retention, and a storage the file runs on owners'
+/// state — both from the file, so no zid.
+pub fn storage_check_file() -> StorageCheck {
+    StorageCheck {
+        base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::File,
+        asked: "router.json5".into(),
+        planned: 1,
+        observed: 2,
+        findings: vec![
+            CheckFinding {
+                kind: CheckKind::LifespanBelowMinimum,
+                storage: "events-tc.netem.v1-applied".into(),
+                zid: None,
+                planned: Some("604800".into()),
+                observed: Some("86400".into()),
+            },
+            CheckFinding {
+                kind: CheckKind::Extra,
+                storage: "latest".into(),
+                zid: None,
+                planned: None,
+                observed: Some("acme/zk2/*/*/*/state/**".into()),
+            },
+            CheckFinding {
+                kind: CheckKind::OnOwnerState,
+                storage: "latest".into(),
+                zid: None,
+                planned: None,
+                observed: Some(
+                    "acme/zk2/*/*/*/state/** (intersects `acme/zk2/*/*/*/state/**`, spec §4.2 S4)"
+                        .into(),
+                ),
+            },
+        ],
+        unjudged: vec![],
+        judgement: Judgement::Established,
     }
 }
 

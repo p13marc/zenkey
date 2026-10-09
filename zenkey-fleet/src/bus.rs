@@ -30,6 +30,7 @@
 //! resolves its keys through, read once in the namespace.
 
 pub mod admin;
+pub mod conform;
 pub mod consume;
 pub mod contracts;
 pub mod lens;
@@ -42,4 +43,5 @@ pub mod seed;
 pub mod serve;
 pub mod session;
 pub(crate) mod teardown;
+pub mod why;
 pub mod write;

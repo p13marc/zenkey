@@ -1,0 +1,174 @@
+`check conform` (#703) runs one zk2 service against the contract revision its
+descriptor claims, as a suite: one verdict per case and resource, the finding on
+the yes. A verdict verb: 0 every case asked passed, 1 a violation, 2 no
+verdict — and every failure before the run is that 2.
+
+```console
+$ zenctl check conform --help
+Run one service against the contract revision it claims, as a suite
+
+zk2's conformance suite (#703): the service at SYSTEM/SERVICE, against
+the revision of IFACE its descriptor claims (spec §3.3), read through
+a session in the deployment's namespace. Every case is one verdict,
+on one resource:
+
+  contract-served  the bundle the descriptor names is served and
+                   verifies (§8.4)
+  resource-served  each exposed stream, state and event resource is
+                   heard in the --for window, or answers a GET (§8.2)
+  payload-type     every sample and reply decodes as its declared type
+                   and satisfies it (§7.2, §7.3)
+  qos              every sample rode the declared QoS (§2.4)
+  operation        a call draws a value on its own key or a valid
+                   envelope, never silence (O3); one summary per
+                   replier (O6); a response of its type
+  fanout-refused   a call over a template's wildcard to an operation
+                   that forbids fan-out is refused fanout_forbidden
+                   (O2)
+  state-stamp      every state mutation and reply carries the owner's
+                   own stamp, its clock the descriptor's meta.zid,
+                   compared by value (S1)
+  state-get        the owner answers a GET, each reply stamped (S2)
+  freshness, budget  not asked: their profiles do not exist yet
+
+Only operations declared idempotent are called — with a request
+synthesized from the bundle — unless --i-know: every other call is a
+write. A resource silent in the window is unobservable, never a pass
+and never unserved; an operation silent while its service holds its
+tokens is a finding (O3), its message naming the access control that
+returns empty too (O5).
+
+Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
+left unobservable, the service not visible, or the run could not
+start. --junit FILE also writes the suite as JUnit XML: a failure per
+violation, an error per unobservable case, skipped per case not asked.
+
+Usage: zenctl check conform [OPTIONS] <SYSTEM/SERVICE> <IFACE[@FP]>
+
+Arguments:
+  <SYSTEM/SERVICE>
+          The service, `<system>/<service>`: one service, since a suite judges one owner
+
+  <IFACE[@FP]>
+          `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one): the revision under test is the one the service's descriptor claims, and a fingerprint given here must be it
+
+Options:
+      --for <SECS>
+          How long the stream, state and event resources are listened to, seconds
+          
+          [default: 5]
+
+      --i-know
+          Call every exposed operation, not only those declared idempotent: each call is a write, with a synthesized request
+
+      --junit <FILE>
+          Also write the suite as JUnit XML to FILE
+
+      --seed <SEED>
+          The seed requests are synthesized with — same seed, same requests
+          
+          [default: 42]
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+A suite reads one service: an address with a `*` is refused, as an interface
+that is not one is — clap's refusals, exit 2.
+
+```console
+$ zenctl check conform '*/tc' tc.netif.v1
+? 2
+error: invalid value '*/tc' for '<SYSTEM/SERVICE>': system "*" is not a plain chunk ([a-z0-9]([a-z0-9._-]*[a-z0-9])?)
+
+For more information, try '--help'.
+
+```
+
+```console
+$ zenctl check conform host-a/tc tc-netif
+? 2
+error: invalid value 'tc-netif' for '<IFACE[@FP]>': interface "tc-netif" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
+
+For more information, try '--help'.
+
+```
+
+A window of no time is refused before anything opens, and a bus that will not
+open is the reserved 2: no violation is claimed about a service nobody read.
+
+```console
+$ zenctl check conform host-a/tc tc.netif.v1 --for 0
+? 2
+Error: --for must be a positive number of seconds, got 0
+check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+```console
+$ zenctl check conform host-a/tc tc.netif.v1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

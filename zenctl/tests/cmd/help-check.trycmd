@@ -20,10 +20,11 @@ All on one contract: 0 = clean, 1 = a finding, 2 = no verdict (the question coul
 Usage: zenctl check <COMMAND>
 
 Commands:
-  expect  Wait for an expectation on a zk2 resource, exit-coded for CI
-  probe   Read a zk2 resource as a consumer does; do values arrive in a window?
-  schema  Check one payload against a type of a zk2 contract, exit-coded for CI
-  help    Print this message or the help of the given subcommand(s)
+  expect   Wait for an expectation on a zk2 resource, exit-coded for CI
+  probe    Read a zk2 resource as a consumer does; do values arrive in a window?
+  conform  Run one service against the contract revision it claims, as a suite
+  schema   Check one payload against a type of a zk2 contract, exit-coded for CI
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help

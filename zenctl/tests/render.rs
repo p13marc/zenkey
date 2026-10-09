@@ -184,6 +184,133 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     );
 }
 
+/// zk2's `why` (#702): one row per rung, every pole spelled apart in every
+/// medium — a mark and a word in the table, an `answer` in the row, the
+/// cause only on the rung that established it — and the stop, the verdict
+/// and what was asked on the envelope. Between the two fixtures every pole
+/// appears; an archive's value is said to be last-known, never current.
+#[test]
+fn a_why_ladder_spells_every_rung_pole_apart_in_every_medium() {
+    let cause = fx::why_report_cause();
+    assert_data_eq!(
+        table(&cause),
+        str![[r#"
+why acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0 — a cause, at descriptor
+✓  namespace (§1.6)      healthy — the key sits under namespace "acme"
+✓  key (§1.1)            healthy — a stream key of host-a/tc, interface tc.netif.v1
+✓  presence (§8.1)       healthy — 1 instance(s) of host-a/tc hold their token; 1 hold tc.netif.v1's interface token
+✗  descriptor (§3.3)     cause — stream/bandwidth/{ns}/{iface} is unavailable at host-a/tc@3fa9c2d41b7e0012 (config: no bandwidth probe)
+—  contract (§8.4)       not asked
+—  answer (§2.1)         not asked
+—  last-known (§4.2 S6)  not asked
+
+"#]]
+    );
+    let silent = fx::why_report_silent();
+    let mut answers = std::collections::BTreeSet::new();
+    for report in [&cause, &silent] {
+        let lines: Vec<serde_json::Value> = ndjson(report)
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("one object per line"))
+            .collect();
+        let envelope = &lines[0];
+        assert_eq!(envelope["report"], "why");
+        assert!(envelope.get("rungs").is_none(), "rungs are rows");
+        assert!(envelope.get("verdict").is_some() && envelope.get("stopped_at").is_some());
+        let rows = &lines[1..];
+        assert_eq!(rows.len(), 7, "every rung, asked or not");
+        for r in rows {
+            assert_eq!(r["row"], "rung");
+            let answer = r["verdict"]["answer"].as_str().expect("an answer");
+            answers.insert(answer.to_owned());
+            assert_eq!(
+                r.get("cause").is_some(),
+                answer == "established",
+                "a cause rides only the rung that established it: {r}"
+            );
+        }
+    }
+    assert_eq!(
+        answers,
+        [
+            "established",
+            "not_asked",
+            "not_established",
+            "unobservable"
+        ]
+        .map(str::to_owned)
+        .into(),
+        "four poles, four spellings"
+    );
+    let said = notes(&silent);
+    assert!(said.contains("last-known, never current"), "{said}");
+    assert!(said.contains("no verdict"), "{said}");
+    assert!(notes(&cause).contains("a cause at descriptor"));
+}
+
+/// zk2's `check conform` (#703): one row per case, every pole spelled apart
+/// in every medium — a mark and a word in the table, an `answer` in the
+/// row, `detail` on a violation and on a case not asked — and the run's
+/// own judgement on the envelope. The fixture has every pole non-empty.
+#[test]
+fn a_conform_suite_spells_every_case_pole_apart_in_every_medium() {
+    let report = fx::conform_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b
+✓  contract-served (§8.4)    tc.netif.v1 sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b  passed — a holder served the bundle the descriptor names, and it verified
+✓  resource-served (§8.2)    stream/bandwidth/{ns}/{iface}                                                        passed — 12 sample(s) in the 5s window
+✗  payload-type (§7.2)       stream/bandwidth/{ns}/{iface}                                                        violation — 1 of 12 value(s) do not conform to the declared type; the first, zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object
+?  resource-served (§8.2)    state/namespaces                                                                     unobservable — nothing heard in the 5s window, and the state GET drew no reply
+✗  operation (§5.1)          @op/diagnostics                                                                      violation — host-a/tc holds its tokens, and the call drew neither a value nor an envelope within 1s: never silence (O3)
+—  operation (§5.1)          @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
+—  freshness (freshness.v1)  service                                                                              not asked — a profile (#613)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "conform");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("cases").is_none(), "cases are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.cases.len());
+    let answers: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r["verdict"]["answer"].as_str().expect("an answer"))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "established",
+            "not_asked",
+            "not_established",
+            "unobservable"
+        ]
+        .into(),
+        "four poles, four spellings"
+    );
+    for r in rows {
+        let answer = r["verdict"]["answer"].as_str().unwrap();
+        assert_eq!(
+            r.get("detail").is_some(),
+            answer == "established" || answer == "not_asked",
+            "{r}"
+        );
+    }
+    let said = notes(&report);
+    assert!(said.contains("pass --i-know"), "{said}");
+    assert!(said.contains("their profiles do not exist yet"), "{said}");
+    assert!(
+        said.contains("7 case(s): 2 violation(s), 2 passed, 1 unobservable, 2 not asked."),
+        "{said}"
+    );
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -201,6 +328,12 @@ fn no_family_emits_trailing_whitespace() {
         table(&zk2fx::schema_view()),
         table(&zk2fx::compat_report()),
         table(&zk2fx::namespace_listing()),
+        table(&zenctl::render::TopologyView {
+            report: &fx::topology_with_instances(),
+        }),
+        table(&fx::why_report_cause()),
+        table(&fx::why_report_silent()),
+        table(&fx::conform_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -808,6 +941,72 @@ eeff0011  peer    —      (heard of, not queryable)
     );
 }
 
+/// zk2's instances on the mesh (#705): each of the three attachments is
+/// spelled apart in every medium — a mark and a word in the table, an
+/// `attachment` tag on its row — a missing zid is `—`, never an empty
+/// one, and what the join read (namespace, verified routers, the answers
+/// that count for nothing) reaches a script as notes and an envelope.
+/// Every count in the fixture is non-zero, so a renderer that merged two
+/// attachments fails here (tooling guide §7).
+#[test]
+fn an_admin_graph_spells_each_instance_attachment_apart() {
+    let report = fx::topology_with_instances();
+    let view = zenctl::render::TopologyView { report: &report };
+    assert_data_eq!(
+        table(&view),
+        str![[r#"
+aabbccdd  router  1.9.0  tcp/10.0.0.1:7447
+eeff0011  peer    —      (heard of, not queryable)
+  aabbccdd —— eeff0011  [tcp]
+
+zk2 instances:
+host-a/tc@3fa9c2d41b7e0012             eeff0011  → aabbccdd (as peer)
+host-b/tc@3fa9c2d41b7e0013             c0ffee    ✗ unattached: no verified router (aabbccdd) lists zid c0ffee among its sessions, compared by value
+ws-01/tcgui-frontend@3fa9c2d41b7e0014  —         ? unattributable: its descriptor names no session zid (`meta.zid`)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&view)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "admin-graph");
+    assert_eq!(envelope["instances"]["namespace"], "acme");
+    assert_eq!(
+        envelope["instances"]["verified"],
+        serde_json::json!(["aabbccdd"])
+    );
+    assert!(
+        envelope["instances"].get("instances").is_none(),
+        "instances are rows, not an envelope field"
+    );
+    let attachments: Vec<&str> = lines
+        .iter()
+        .filter(|r| r["row"] == "instance")
+        .map(|r| r["attachment"].as_str().expect("a tag"))
+        .collect();
+    assert_eq!(attachments, ["attached", "unattached", "unattributable"]);
+    let unattributable = lines
+        .iter()
+        .find(|r| r["attachment"] == "unattributable")
+        .expect("one");
+    assert!(
+        unattributable.get("zid").is_none(),
+        "no zid is absence: {unattributable}"
+    );
+    let said = notes(&view);
+    assert!(
+        said.contains("3 zk2 instance(s) read in namespace \"acme\""),
+        "{said}"
+    );
+    assert!(
+        said.contains("1 attached, 1 unattached, 1 unattributable"),
+        "{said}"
+    );
+    assert!(said.contains("attach nothing"), "{said}");
+}
+
 /// The ACL plan draws its three lists as two tables (principals with what
 /// they run and their rules, rules with their grant and key expressions)
 /// and tags its row kinds on the stream.
@@ -1277,6 +1476,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cache",
         "cache-action",
         "compat",
+        "conform",
         "context",
         "context-action",
         "context-list",
@@ -1310,6 +1510,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "storage-list",
         "storage-plan",
         "timeline",
+        "why",
     ];
 
     fn families(dir: &std::path::Path, out: &mut Vec<String>) {
@@ -1424,6 +1625,27 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, None);
     let report = fx::topology();
     scoped(&zenctl::render::TopologyView { report: &report });
+    // `check conform` (#703): what the suite put to the bus, over its
+    // window.
+    let s = scoped(&fx::conform_report());
+    assert_eq!(s.asked.len(), 3);
+    assert_eq!(s.window_s, Some(5.0));
+    // `why` (#702): what the ladder put to the bus — presence, the key, the
+    // archives after a silence — and no window unless a stream was heard.
+    let s = scoped(&fx::why_report_silent());
+    assert_eq!(
+        s.asked,
+        [
+            "zk2/host-a/tc/@zk/**",
+            "zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0",
+            "zk2/*/*/@zk/alive/archive.v1/**"
+        ]
+    );
+    assert_eq!(s.window_s, None);
+    // With the instance join (#705), the presence selector it read too.
+    let report = fx::topology_with_instances();
+    let s = scoped(&zenctl::render::TopologyView { report: &report });
+    assert_eq!(s.asked, ["@/*/router", "zk2/*/*/@zk/**"]);
     // zk2's acts and reads (#612, FJ5): the keys a call or a state GET
     // went out on, over its reply wait.
     let s = scoped(&actfx::value());
@@ -1666,7 +1888,7 @@ fn a_storage_check_draws_each_finding_and_keeps_unjudged_apart() {
     assert_data_eq!(
         table(&fx::storage_check()),
         str![[r#"
-storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s)
+storage check for namespace "acme" against the admin space: 3 planned, 3 observed row(s) — 4 finding(s)
   ✗ events@aabbccdd  strip_prefix differs          planned acme/zk2, observed acme
   ✗ events@aabbccdd  gc.lifespan below the plan's  planned 86400, observed 600
   ✗ timeseries       missing                       planned acme/zk2/*/*/*/stream/**
@@ -1683,11 +1905,91 @@ storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s
     assert_data_eq!(
         table(&fx::storage_check_unobservable()),
         str![[r#"
-storage check for namespace "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
+storage check for namespace "acme" against the admin space: 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
 
 "#]]
     );
     assert!(notes(&fx::storage_check_unobservable()).contains("RFC 05 §3.1"));
+}
+
+/// #704: a plan derived from an enrollment names where each union storage
+/// came from, and every list the derivation keeps — interfaces whose
+/// contract was not given, interfaces without events, archives never
+/// planned, the S4 refusal — reaches the notes, a script included, each
+/// its own sentence; the derived storage's row carries `derived`.
+#[test]
+fn an_enrolled_storage_plan_names_its_union_storages_and_what_it_left_out() {
+    let plan = fx::storage_plan_enrolled();
+    assert_data_eq!(
+        table(&plan),
+        str![[r#"
+storage plan for namespace "acme"
+
+volumes:
+  memory  memory  volatile · latest
+    ! implicit_volume: no deployment file names an [events] volume: volatile (RFC 09 §2.1)
+
+storages:
+  events-tc.netem.v1-applied  acme/zk2/*/*/tc.netem.v1/events/applied/*  memory (latest)
+    union storage for tc.netem.v1 events/applied, implemented by h-20609002f7b6/tc, h-3fa9c2d41b7e/tc
+    strip acme/zk2
+    gc lifespan 604800 s (period 30 s): the contract's retention for tc.netem.v1 events/applied, 7d (604800 s, spec §2.6)
+    ! retention_not_enforced: the contract's retention (7d) bounds a replay, not this storage (spec §2.6)
+
+"#]]
+    );
+    let said = notes(&plan);
+    for want in [
+        "refused storage latest:",
+        "from the enrollment: 1 union storage(s)",
+        "not planned: nav.v2",
+        "tc.netif.v1 declare(s) no event resource",
+        "archive ground/archive: not planned",
+    ] {
+        assert!(said.contains(want), "{want:?} in {said}");
+    }
+    let lines: Vec<serde_json::Value> = ndjson(&plan)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(
+        envelope["enrollment"]["archives"],
+        serde_json::json!(["ground/archive"])
+    );
+    let notes_text = envelope["notes"].to_string();
+    assert!(
+        notes_text.contains("not planned: nav.v2") && notes_text.contains("archive ground/archive"),
+        "a script reads what was left out: {envelope}"
+    );
+    let storage = lines.iter().find(|l| l["row"] == "storage").expect("a row");
+    assert_eq!(storage["derived"]["resource"], "events/applied");
+    let refusal = lines.iter().find(|l| l["row"] == "refusal").expect("a row");
+    assert_eq!(refusal["cite"], "spec §4.2 S4");
+}
+
+/// #704: a check against a router file names the file, carries no zid on
+/// its findings, keeps a storage on owners' state its own kind, and claims
+/// no scope on the bus — a file is read, not observed.
+#[test]
+fn a_storage_check_against_a_file_names_it_and_its_s4_finding() {
+    let check = fx::storage_check_file();
+    assert_data_eq!(
+        table(&check),
+        str![[r#"
+storage check for namespace "acme" against router.json5: 1 planned, 2 observed row(s) — 3 finding(s)
+  ✗ events-tc.netem.v1-applied  gc.lifespan below the plan's  planned 604800, observed 86400
+  ✗ latest                      extra                         observed acme/zk2/*/*/*/state/**
+  ✗ latest                      on owners' state (S4)         observed acme/zk2/*/*/*/state/** (intersects `acme/zk2/*/*/*/state/**`, spec §4.2 S4)
+
+"#]]
+    );
+    assert!(notes(&check).contains("what zenohd would run"));
+    assert!(check.scope().is_none(), "a file is not a bus observation");
+    let out = ndjson(&check);
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["source"], "file");
+    assert!(out.contains("\"kind\":\"on_owner_state\""), "{out}");
 }
 
 /// `--explain`: the taker with its reason, or the reason there is none.

@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — zk2's coverage completed (#585, FK1)
+
+Four follow-ups of #612 bring back, in zk2's terms, the questions FJ9 left
+unasked on `main`.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform --producer P [--origin] [--for] [--deep] [--junit]` (v1, left at FJ9) | `check conform <SYSTEM/SERVICE> <IFACE[@FP]> [--for SECS] [--i-know] [--junit FILE] [--seed N]` | #703: one service against the revision its descriptor claims, one verdict per case and resource — `contract-served`, `resource-served`, `payload-type`, `qos`, `operation` (O3, O6, the response type), `fanout-refused` (O2), `state-stamp` (S1, by `meta.zid` compared by value), `state-get` (S2); `freshness` and `budget` not asked until their profiles exist (#613). Only idempotent operations are called unless `--i-know`. Exit 0 every case asked passed, 1 a violation, 2 a case unobservable. `--junit`: a failure per violation, an error per unobservable case, skipped per case not asked |
+| — (v1's `why` left at FJ9) | `why <KEY\|SYSTEM/SERVICE> [--for SECS] [--contracts PATH] [--namespace NS]` | #702: zk2's ladder, stopped at the first rung that establishes a cause — `namespace`, `key`, `presence` ("no token visible to this reader", 0.8), `descriptor` (implemented, exposed, or `unavailable` with its cause), `contract` (retrievable, verified, declaring the resource), `answer` (S4's GET, a stream's sample within `--for`, a union storage's occurrence; an operation is never called) and `last-known` (S6, after the owner's silence only). Exit 1 a cause, 0 every rung healthy and the key answering, 2 a rung unobservable. A key outside the namespace, or not zk2, opens no session. Rows tagged `rung`, each with its `verdict` |
+| `storage gen --deployment FILE` (required) | `storage gen [--enrollment FILE --contracts PATH] [--deployment FILE]`, one at least | #704: from the enrollment `acl gen` reads, a union storage per event resource of every interface an enrolled service implements (spec §2.6), keyed `zk2/*/*/<iface>/events/<template>/<ulid>`, its `garbage_collection.lifespan` the contract's `retention`. The file's new `[events]` block names their volume (an implicit memory volume otherwise, warned). Nothing on any owner's `state/**` or `@state/**`: a file's selector that intersects one is refused citing S4, **exit 2** in every mode. Enrolled archives are listed, never planned (§4.4). New plan fields `enrollment` and a storage's `derived`; warnings `retention_not_enforced`, `implicit_volume` |
+| `storage gen --check` (the admin space) | `storage gen --check [--against <router.json5>]` | #704: `--against` compares a router config file read through zenoh's loader, as `acl gen` does, and opens no session; without it, the admin space as before. The check report gains `source` (`admin_space` \| `file`) and the finding kind `on_owner_state` (S4), planned or not |
+| `admin graph` (session flags) | `admin graph [--namespace NS] [--trust-admin-space]` | #705: each zk2 instance of the deployment is joined onto the routers by its descriptor's `meta.zid`, compared by value, through verified routers' session lists only (spec §4.2, 0.12–0.13). New `instance` rows, tagged `attachment`: `attached` (with its routers), `unattached`, `unattributable`; `--dot` draws them. The envelope's `instances` says what the join read |
+
 ## Unreleased (`main`, zk2) — what was left of v1 (#612, FJ9)
 
 The last of v1 leaves `main`'s zenctl, and the binary no longer links v1's

@@ -20,6 +20,7 @@ pub mod bench;
 pub mod cache;
 pub mod call;
 pub mod compat;
+pub mod conform;
 pub mod doctor;
 pub mod echo;
 pub mod expect;
@@ -46,6 +47,7 @@ pub mod subscribe;
 pub mod timeline;
 pub mod watch;
 pub mod watchdog;
+pub mod why;
 pub mod zk2;
 
 use anyhow::Result;

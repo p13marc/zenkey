@@ -428,6 +428,23 @@ pub(crate) struct DoctorArgs {
     pub(crate) ns: NamespaceArgs,
 }
 
+/// `why`'s flags (#702) — one struct, the `GenArgs` pattern.
+#[derive(clap::Args)]
+pub(crate) struct WhyArgs {
+    /// A wire key, the namespace included (`prod/zk2/<system>/<service>/…`),
+    /// or a service address, `<system>/<service>`. A key expression with a
+    /// wildcard is refused: `why` explains one key.
+    #[arg(value_name = "KEY|SYSTEM/SERVICE", add = ArgValueCandidates::new(completion::services))]
+    pub(crate) target: String,
+    /// How long a stream key is listened to for a sample, seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 3.0)]
+    pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
 /// A doctor check id, refused with the vocabulary when it is not one.
 fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
     use zenkey_fleet::report::CheckId;
@@ -733,6 +750,37 @@ pub(crate) enum Command {
     /// flows both ways.
     #[command(subcommand)]
     Check(CheckCmd),
+    /// Explain why a key or a service is silent, rung by rung
+    ///
+    /// zk2's ladder (#702), read through a session in the deployment's
+    /// namespace and stopped at the first rung that establishes a cause:
+    ///
+    ///   namespace   the wire key sits under --namespace (spec §1.6); a key of
+    ///               another deployment is not guessed at
+    ///   key         it is a zk2 key (§1.1); a control key is judged as its
+    ///               service
+    ///   presence    a token of its service is visible to this reader (§8.1);
+    ///               none is "no token visible to this reader", since a read
+    ///               access control refuses is complete and empty too
+    ///   descriptor  served, implementing the interface, exposing the
+    ///               resource — or `unavailable` with its cause, or gated on
+    ///               a capability not held (§3.3)
+    ///   contract    the revision it names is retrievable and verifies, and
+    ///               declares the resource (§8.4)
+    ///   answer      the owner's state GET (S4: a deletion is a cause), a
+    ///               stream's sample within --for, a union storage's
+    ///               occurrence (§2.6); an operation is never called
+    ///   last-known  after the owner's silence only: what an archive still
+    ///               holds — last-known, never current (S6)
+    ///
+    /// TARGET is a wire key, the namespace included (`prod/zk2/…`), or a
+    /// service address `<system>/<service>`, judged up to its contracts. Exit
+    /// 1 when a cause is established — a cause is the finding — 0 when every
+    /// rung is healthy and the key answers, 2 when a rung is unobservable (a
+    /// read that timed out, a descriptor or an owner that did not answer), an
+    /// operation's answer was not asked, or the run could not start.
+    #[command(verbatim_doc_comment)]
+    Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
     /// Thirteen checks, each a question whose finding is the yes: split-brain
@@ -822,6 +870,45 @@ pub(crate) enum CheckCmd {
     /// values arrived and none decoded as their type; 2 the presence read
     /// timed out, or the probe could not stand up.
     Probe(CheckProbeArgs),
+    /// Run one service against the contract revision it claims, as a suite
+    ///
+    /// zk2's conformance suite (#703): the service at SYSTEM/SERVICE, against
+    /// the revision of IFACE its descriptor claims (spec §3.3), read through
+    /// a session in the deployment's namespace. Every case is one verdict,
+    /// on one resource:
+    ///
+    ///   contract-served  the bundle the descriptor names is served and
+    ///                    verifies (§8.4)
+    ///   resource-served  each exposed stream, state and event resource is
+    ///                    heard in the --for window, or answers a GET (§8.2)
+    ///   payload-type     every sample and reply decodes as its declared type
+    ///                    and satisfies it (§7.2, §7.3)
+    ///   qos              every sample rode the declared QoS (§2.4)
+    ///   operation        a call draws a value on its own key or a valid
+    ///                    envelope, never silence (O3); one summary per
+    ///                    replier (O6); a response of its type
+    ///   fanout-refused   a call over a template's wildcard to an operation
+    ///                    that forbids fan-out is refused fanout_forbidden
+    ///                    (O2)
+    ///   state-stamp      every state mutation and reply carries the owner's
+    ///                    own stamp, its clock the descriptor's meta.zid,
+    ///                    compared by value (S1)
+    ///   state-get        the owner answers a GET, each reply stamped (S2)
+    ///   freshness, budget  not asked: their profiles do not exist yet
+    ///
+    /// Only operations declared idempotent are called — with a request
+    /// synthesized from the bundle — unless --i-know: every other call is a
+    /// write. A resource silent in the window is unobservable, never a pass
+    /// and never unserved; an operation silent while its service holds its
+    /// tokens is a finding (O3), its message naming the access control that
+    /// returns empty too (O5).
+    ///
+    /// Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
+    /// left unobservable, the service not visible, or the run could not
+    /// start. --junit FILE also writes the suite as JUnit XML: a failure per
+    /// violation, an error per unobservable case, skipped per case not asked.
+    #[command(verbatim_doc_comment)]
+    Conform(CheckConformArgs),
     /// Check one payload against a type of a zk2 contract, exit-coded for CI.
     ///
     /// No bus write (#159): 0 = it conforms, 1 = it does not, 2 = could not
@@ -965,12 +1052,22 @@ pub(crate) enum AdminCmd {
         #[command(flatten)]
         session: SessionArgs,
     },
-    /// The mesh as the admin space answers it: nodes, edges, mentions.
+    /// The mesh as the admin space answers it, with each zk2 instance on it.
     ///
     /// #118: nodes, edges, and who only got mentioned. Their pictures are
     /// unlabeled circles; ours says which of admin space and liveliness backs
     /// each element. Nodes whose admin space is off render "heard of, not
     /// queryable" — never omitted.
+    ///
+    /// #705: every zk2 instance of the deployment (`--namespace`) is joined
+    /// onto the routers by the session zid its descriptor states (`meta.zid`,
+    /// spec §3.3), compared by value: it is attached to each router whose
+    /// session list names that zid. Only a verified router's list counts — its
+    /// own answer, outward from the routers this session is connected to
+    /// (§4.2, 0.12–0.13), as the doctor verifies them. An instance no verified
+    /// router lists is reported unattached, and one whose descriptor names no
+    /// zid unattributable — never omitted. The admin space is read in no
+    /// namespace, presence in the deployment's.
     Graph(AdminGraphArgs),
 }
 
@@ -1044,48 +1141,71 @@ pub(crate) enum StorageCmd {
     /// state families against the storages) left with the v1 registry; a
     /// storage on an owner's state keys is the doctor's `storage-on-state`.
     List(StorageListArgs),
-    /// Generate the router's storage config from a deployment file
+    /// Generate the router's storage config from the deployment
     ///
-    /// Plan the router's storages from a small deployment file, and emit the
-    /// `plugins.storage_manager` block (RFC 09 §2, #393).
+    /// Plan the router's storages, and emit the `plugins.storage_manager`
+    /// block (RFC 09 §2, #393; zk2's since #704), from either or both of:
     ///
-    /// Each storage names its selector, relative to the deployment namespace;
-    /// the `strip_prefix` is derived as the selector's literal leftmost run,
-    /// and a volume's capability pair comes from RFC 09 §2.1's table (per
-    /// volume — one volume per history mode from the same plugin). A
-    /// `garbage_collection.lifespan` is the file's, or zenoh's 24 h default,
-    /// and says which: a zk2 contract declares no tombstone lifetime to
-    /// derive one from.
+    ///   --enrollment   the enrollment `acl gen` reads, with --contracts: a
+    ///                  UNION STORAGE per event resource of every interface an
+    ///                  enrolled service implements (spec §2.6), keyed
+    ///                  zk2/*/*/<iface>/events/<template>/<ulid>, its
+    ///                  garbage_collection.lifespan the contract's retention
+    ///   --deployment   a file naming volumes, storages by selector, and the
+    ///                  [events] block the union storages use
+    ///
+    /// NEVER ON STATE (spec §4.2 S4): nothing is derived on any owner's
+    /// state/** or @state/**, and a file's selector that intersects one is
+    /// refused, citing S4 — exit 2, whatever else the plan holds. Current
+    /// state is the owner's answer; last-known state is an archive's. An
+    /// enrolled archive is listed and never planned: zenoh 1.10.1's storage
+    /// manager accepts a put older than a delete it holds, so it cannot be an
+    /// archive's store (§4.4).
+    ///
+    /// Each storage's `strip_prefix` is derived as its selector's literal
+    /// leftmost run, and a volume's capability pair comes from RFC 09 §2.1's
+    /// table (per volume — one volume per history mode from the same plugin).
+    /// A file's storage takes its lifespan from the file, or zenoh's 24 h
+    /// default, and says which. With no [events] volume, the union storages
+    /// use an implicit memory volume, and the plan says it is volatile.
     ///
     /// The plan refuses what the router would refuse — replication on an
     /// all-mode volume (§2.2), a volume nobody declared, a selector that is
     /// not a key expression — and warns where a caveat applies: overlapping
     /// selectors (§2), `complete = true` off a replicated latest-mode storage
-    /// (§2.2), retention that is the database's and not zenoh's (§2.3),
-    /// redb's mandatory retention in all mode (§2.1).
+    /// (§2.2), retention that is the database's and not zenoh's (§2.3) or a
+    /// replay's and not the storage's (spec §2.6), redb's mandatory retention
+    /// in all mode (§2.1).
     ///
     /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
     /// the zenohd block with every derivation and warning as a comment beside
-    /// the storage it concerns; `--check`, an exit-coded comparison with what
-    /// a live router runs (0 as planned, 1 a difference, 2 no verdict); and
-    /// `--explain <key>`, which planned storage takes a key and why. `gen`
-    /// alone is an act: exit 0, or 2 when every storage was refused.
+    /// the storage it concerns; `--check`, an exit-coded comparison (0 as
+    /// planned, 1 a difference, 2 no verdict) with a router config file
+    /// (`--against`, as `acl gen` has it) or, without it, with what a live
+    /// router's admin space reports; and `--explain <key>`, which planned
+    /// storage takes a key and why. `gen` alone is an act: exit 0, or 2 when
+    /// every storage was refused or one sits on owners' state.
     ///
     /// The deployment file, in full:
     ///
-    ///   base = "fleet-a"               # the namespace; default = --namespace / context / ""
+    ///   base = "fleet-a"               # the namespace; default = the enrollment's / --namespace / ""
     ///
     ///   [volumes.fs]                   # id; `backend` is emitted when it differs
     ///   plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
     ///   # history = "latest"           # fixed by the plugin; per volume for redb
     ///   dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
     ///
-    ///   [storages.events]
-    ///   selector = "zk2/*/*/*/events/**"   # relative to the namespace
+    ///   [events]                       # where the enrollment's union storages go
+    ///   volume = "fs"
+    ///   replication = true             # as below; the selector and lifespan are derived
+    ///   params = { dir = "events" }
+    ///
+    ///   [storages.plant]
+    ///   selector = "plant/**"          # relative to the namespace; never on state/**
     ///   volume = "fs"
     ///   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
     ///   complete = true                # honoured only where §2.2 allows it
-    ///   params = { dir = "events" }    # merged into `volume: { id: "fs", … }`
+    ///   params = { dir = "plant" }     # merged into `volume: { id: "fs", … }`
     ///   # retention = { … }            # the backend's own block (redb), verbatim
     ///   # gc_period_s = 30             # garbage_collection.period
     ///   # gc_lifespan_s = 86400        # garbage_collection.lifespan; default zenoh's 24 h
@@ -2195,6 +2315,41 @@ pub(crate) struct CheckProbeArgs {
     pub(crate) ns: NamespaceArgs,
 }
 
+/// The `check conform` verb's flags (#703) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckConformArgs {
+    /// The service, `<system>/<service>`: one service, since a suite judges
+    /// one owner.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one):
+    /// the revision under test is the one the service's descriptor claims,
+    /// and a fingerprint given here must be it.
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// How long the stream, state and event resources are listened to,
+    /// seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 5.0)]
+    pub(crate) for_secs: f64,
+    /// Call every exposed operation, not only those declared idempotent:
+    /// each call is a write, with a synthesized request.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    /// Also write the suite as JUnit XML to FILE.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) junit: Option<PathBuf>,
+    /// The seed requests are synthesized with — same seed, same requests.
+    #[arg(long, default_value_t = 42)]
+    pub(crate) seed: u64,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
 /// The `check schema` verb's flags (zk2's since #612, FJ8b) — one struct the
 /// dispatcher hands over whole, destructured in the verb rather than in
 /// `run()` (#354).
@@ -2320,8 +2475,15 @@ pub(crate) struct AdminGraphArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long)]
     pub(crate) dot: bool,
+    /// Trust every answer from the routers' admin space. Without it, a
+    /// router's session list attaches an instance only when its answer is
+    /// verifiably the router's own, outward from the routers this session is
+    /// connected to (spec §4.2, 0.12–0.13). Pass it only when the
+    /// deployment's grants deny `@/**` queryables to every principal (§11.1).
+    #[arg(long)]
+    pub(crate) trust_admin_space: bool,
     #[command(flatten)]
-    pub(crate) session: SessionArgs,
+    pub(crate) ns: NamespaceArgs,
 }
 
 /// The `acl gen` verb's flags — one struct the dispatcher hands over whole,
@@ -2429,13 +2591,22 @@ pub(crate) struct StorageListArgs {
     pub(crate) session: SessionArgs,
 }
 
-/// The `storage gen` verb's flags (#393) — one struct the dispatcher hands
-/// over whole, destructured in the verb rather than in `run()` (#354).
+/// The `storage gen` verb's flags (#393, #704) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("input").required(true).multiple(true)
+    .args(["enrollment", "deployment"])))]
 pub(crate) struct StorageGenArgs {
+    /// The enrollment (TOML) `acl gen` reads: the services and the
+    /// interfaces they implement, whose contracts' event resources become
+    /// union storages (spec §2.6). Needs --contracts.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) enrollment: Option<PathBuf>,
     /// The deployment file (TOML) — see the long help for its shape.
     #[arg(long, value_name = "FILE")]
-    pub(crate) deployment: PathBuf,
+    pub(crate) deployment: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     /// Emit the zenohd `plugins.storage_manager` block (JSON5, with every
     /// derivation and warning as a comment beside the storage it concerns)
     /// instead of the plan report.
@@ -2445,13 +2616,20 @@ pub(crate) struct StorageGenArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long, conflicts_with_all = ["check", "explain"])]
     pub(crate) json5: bool,
-    /// Compare the plan against the storages a live router runs (the admin
-    /// space): missing, extra, a differing key_expr / strip_prefix / volume,
-    /// a gc.lifespan below the plan's. Exit 0 = as planned, 1 = a
-    /// difference, 2 = no verdict (the admin space answered nothing, or the
-    /// question could not be put).
+    /// Compare the plan against what a router runs: missing, extra, a
+    /// differing key_expr / strip_prefix / volume, a gc.lifespan below the
+    /// plan's, and any storage on owners' state (S4). Against a router config
+    /// file with --against; otherwise the storages a live router's admin
+    /// space reports. Exit 0 = as planned, 1 = a difference, 2 = no verdict
+    /// (an admin space that answered nothing, a file zenoh refuses, or a
+    /// question that could not be put).
     #[arg(long, conflicts_with = "explain")]
     pub(crate) check: bool,
+    /// With --check: the router's JSON5 config file, read through zenoh's
+    /// own loader, so what is compared is what zenohd would run. Opens no
+    /// session.
+    #[arg(long, value_name = "FILE", requires = "check")]
+    pub(crate) against: Option<PathBuf>,
     /// Which planned storage(s) would take this key, and why — pure over the
     /// plan, exit 0.
     #[arg(long, value_name = "KEY")]

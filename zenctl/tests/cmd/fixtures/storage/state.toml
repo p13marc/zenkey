@@ -1,0 +1,17 @@
+# A deployment file asking for a storage on owners' state (#704): a storage
+# answering on `state/**` would answer GETs on an owner's state, which spec
+# §4.2 S4 forbids. `zenctl storage gen` refuses it, citing S4, and exits 2;
+# the foreign `plant/**` beside it is planned all the same.
+base = "fleet-a"
+
+[volumes.fs]
+plugin = "fs"
+
+[storages.latest]
+selector = "zk2/*/*/*/state/**"
+volume = "fs"
+
+[storages.plant]
+selector = "plant/**"
+volume = "fs"
+params = { dir = "plant" }

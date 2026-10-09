@@ -1,0 +1,18 @@
+// A router running exactly what `zenctl storage gen` plans from the tcgui
+// enrollment (#704): the union storage for tc.netem.v1's audit events, its
+// lifespan the contract's retention, and nothing on owners' state.
+{
+  mode: "router",
+  plugins: {
+    storage_manager: {
+      storages: {
+        "events-tc.netem.v1-applied": {
+          key_expr: "zk2/*/*/tc.netem.v1/events/applied/*",
+          strip_prefix: "zk2",
+          volume: { id: "memory" },
+          garbage_collection: { period: 30, lifespan: 604800 },
+        },
+      },
+    },
+  },
+}

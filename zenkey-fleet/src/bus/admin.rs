@@ -13,14 +13,27 @@
 //! deployment namespace. v1's origin join (`origin_attachments`, v1's
 //! `alive` tokens attached to the sessions holding them) and its state
 //! coverage (declared v1 state families against the storages) left with the
-//! v1 grammar (#612, FJ9).
+//! v1 grammar (#612, FJ9). zk2's join is [`topology_with_instances`]
+//! (#705): a deployment's instances, read through a session in its
+//! namespace, attached by the zid their descriptors state to the routers
+//! whose answers [`RouterVerification`] verifies.
+//!
+//! **Who answered** (spec §4.2, 0.12–0.13). Any session can answer under
+//! `@/<zid>/router`, a real router's zid included, so an answer counts as a
+//! router's only when its replier id is the zid its key names, and that
+//! zid is verified: this session, a router it is connected to, or one a
+//! verified router's document lists as a `router` session, outward.
+//! [`RouterVerification`] is that rule, once, for the doctor and for
+//! `admin graph`.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use crate::{Error, Result};
 use zenoh::Session;
 
 use crate::bus::query::GetOpts;
+use crate::model::catalog::zid_value;
 use crate::report::{
     DeclaredEntities, DeclaredEntity, EntityKind, MeshLink, RouterInfo, StorageInfo, TopologyEdge,
     TopologyNode, TopologyReport,
@@ -131,6 +144,139 @@ pub fn admin_key_zid(key: &str) -> Option<&str> {
 
 /// The selector [`routers`] reads.
 pub const ROUTERS: &str = "@/*/router";
+
+/// The routers whose admin answers count (spec §4.2, 0.12–0.13), verified
+/// outward from one session.
+///
+/// - **Here**: the session itself and the routers it is connected to.
+/// - **A verified router** is one of those, or a zid a verified router's
+///   own document lists among its `sessions` with `whatami` `router`,
+///   answering on its own key (`@/<zid>/router`) under its own replier id;
+///   and so on, until no new router is verified. A client or a peer is
+///   listed as such, and never qualifies.
+/// - **Trust** (the operator's word, §4.2): every answer counts, which an
+///   operator may ask for only when the grants deny `@/**` queryables to
+///   every principal (§11.1). No tool can observe that.
+///
+/// Pure: what was read is handed in, so the rule is testable from values.
+#[derive(Debug, Clone, Default)]
+pub struct RouterVerification {
+    /// This session and the routers it is connected to, by zid value.
+    here: BTreeSet<String>,
+    /// `here`, and every zid a verified router lists as a `router`.
+    listed: BTreeSet<String>,
+    /// The verified routers, by zid value.
+    routers: BTreeSet<String>,
+    trust: bool,
+}
+
+impl RouterVerification {
+    /// Verifies the router documents in `entries` (answers to
+    /// `@/<zid>/router`; anything else is ignored) outward from `here`.
+    pub fn new(here: BTreeSet<String>, entries: &[AdminEntry], trust: bool) -> RouterVerification {
+        let here: BTreeSet<String> = here.iter().map(|z| zid_value(z)).collect();
+        let mut listed = here.clone();
+        let mut routers: BTreeSet<String> = BTreeSet::new();
+        loop {
+            let before = routers.len();
+            for e in entries.iter().filter(|e| is_router_doc(&e.key)) {
+                let Some(n) = admin_key_zid(&e.key).map(zid_value) else {
+                    continue;
+                };
+                if trust || (own_answer(e) && listed.contains(&n)) {
+                    routers.insert(n);
+                    for sess in e.value["sessions"].as_array().into_iter().flatten() {
+                        if sess["whatami"] == "router"
+                            && let Some(peer) = sess["peer"].as_str()
+                        {
+                            listed.insert(zid_value(peer));
+                        }
+                    }
+                }
+            }
+            if routers.len() == before {
+                break;
+            }
+        }
+        RouterVerification {
+            here,
+            listed,
+            routers,
+            trust,
+        }
+    }
+
+    /// The verified routers, by zid value.
+    pub fn routers(&self) -> &BTreeSet<String> {
+        &self.routers
+    }
+
+    /// Whether the router `zid` names, however it is spelled, is verified.
+    pub fn is_verified(&self, zid: &str) -> bool {
+        self.routers.contains(&zid_value(zid))
+    }
+
+    /// Whether every answer is trusted on the operator's word.
+    pub fn trusts(&self) -> bool {
+        self.trust
+    }
+
+    /// `Ok` when `e` is a verified router's own answer; otherwise the line
+    /// that says why it is not counted.
+    pub fn check(&self, e: &AdminEntry) -> std::result::Result<(), String> {
+        let n = admin_key_zid(&e.key).map(zid_value);
+        if self.trust || (own_answer(e) && n.as_ref().is_some_and(|n| self.routers.contains(n))) {
+            return Ok(());
+        }
+        let why = if e.replier.is_none() {
+            "zenoh did not name who answered"
+        } else if !own_answer(e) {
+            "its replier is not the router its key names"
+        } else if n
+            .as_ref()
+            .is_some_and(|n| self.here.contains(n) || self.listed.contains(n))
+        {
+            "its router's own answer was not verified"
+        } else {
+            "no verified router lists it as a router"
+        };
+        Err(format!(
+            "`{}`, answered by {}: {why}",
+            e.key,
+            e.replier.as_deref().unwrap_or("an unnamed session"),
+        ))
+    }
+}
+
+/// Whether `key` is a router's root document, `@/<zid>/router`.
+fn is_router_doc(key: &str) -> bool {
+    let mut c = key.split('/');
+    matches!(
+        (c.next(), c.next(), c.next(), c.next()),
+        (Some("@"), Some(z), Some("router"), None) if !z.is_empty()
+    )
+}
+
+/// Whether `e` was answered by the session its key names: the replier id
+/// is that zid, compared by value.
+fn own_answer(e: &AdminEntry) -> bool {
+    admin_key_zid(&e.key).is_some_and(|n| {
+        e.replier.as_deref().map(zid_value).as_deref() == Some(zid_value(n).as_str())
+    })
+}
+
+/// This session and the routers it is connected to, by zid value: where
+/// [`RouterVerification`] starts.
+pub async fn here(raw: &Session) -> BTreeSet<String> {
+    let mut here: BTreeSet<String> = raw
+        .info()
+        .routers_zid()
+        .await
+        .map(|z| zid_value(&z.to_string()))
+        .collect();
+    here.insert(zid_value(&raw.zid().to_string()));
+    here
+}
 
 /// The selector [`storages`] reads.
 pub const STORAGES: &str = "@/*/router/**/storage_manager/storages/**";
@@ -440,6 +586,36 @@ pub fn render_dot(report: &TopologyReport) -> String {
             }
         );
     }
+    // zk2's instances (#705): an attached one hangs off each router that
+    // lists its session; an unattached or unattributable one stands alone,
+    // dashed, and is drawn all the same — never omitted.
+    if let Some(join) = report.instances.as_option() {
+        use crate::report::Attachment;
+        for i in &join.instances {
+            let id = format!("{}@{}", i.address, i.instance);
+            let (style, why) = match &i.attachment {
+                Attachment::Attached { .. } => ("", ""),
+                Attachment::Unattached { .. } => (", style=\"dashed\"", "\\n(unattached)"),
+                Attachment::Unattributable { .. } => {
+                    (", style=\"dashed\"", "\\n(unattributable: no zid)")
+                }
+            };
+            let _ = writeln!(
+                out,
+                "  \"{id}\" [shape=note, label=\"{}\\n{}{why}\"{style}];",
+                i.address, i.instance
+            );
+            if let Attachment::Attached { routers } = &i.attachment {
+                for r in routers {
+                    let _ = writeln!(
+                        out,
+                        "  \"{}\" -- \"{id}\" [style=\"dotted\", label=\"{}\"];",
+                        r.router, r.listed_as
+                    );
+                }
+            }
+        }
+    }
     out.push('}');
     out
 }
@@ -479,11 +655,78 @@ pub fn admin_doc_omits_loopback(version: &str) -> bool {
 /// `locators` because it is link evidence, not a listen-endpoint claim.
 /// Nothing is invented: a node no link names stays honestly empty.
 pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyReport> {
-    const ASKED: &str = "@/*/*";
-    let entries = admin_get(session, ASKED, timeout).await?;
+    let entries = admin_get(session, TOPOLOGY, timeout).await?;
+    Ok(topology_of(&entries, &session.zid().to_string()))
+}
+
+/// The selector [`topology`] sweeps: every node's root document.
+pub const TOPOLOGY: &str = "@/*/*";
+
+/// `admin graph` (#705): [`topology`], and every zk2 instance of the
+/// deployment `deployment` is in, joined onto the routers by the session
+/// zid its descriptor states (spec §3.3, §4.2).
+///
+/// Two sessions, as the doctor reads (decided 2026-10-08): the admin space
+/// through `raw`, in no namespace; presence and the descriptors through
+/// `deployment`, in `namespace`. Only a router whose own answer is verified
+/// ([`RouterVerification`], or every answer under `trust`) attaches an
+/// instance. A presence read that cannot be put on the bus leaves the join
+/// unobservable, never empty.
+pub async fn topology_with_instances(
+    raw: &Session,
+    deployment: &Session,
+    namespace: &str,
+    timeout: Duration,
+    trust: bool,
+) -> Result<TopologyReport> {
+    let scope = crate::bus::presence::Scope::all();
+    let (entries, here, observed) = tokio::join!(
+        admin_get(raw, TOPOLOGY, timeout),
+        here(raw),
+        crate::bus::presence::observe(deployment, &scope, timeout)
+    );
+    let entries = entries?;
+    let mut report = topology_of(&entries, &raw.zid().to_string());
+    let verification = RouterVerification::new(here, &entries, trust);
+    // Each router document's session list, kept apart by whether its answer
+    // was verified: only a verified list attaches an instance.
+    let (mut verified, mut unverified) = (Vec::new(), Vec::new());
+    for e in entries.iter().filter(|e| is_router_doc(&e.key)) {
+        let sessions: Vec<(String, String)> = e.value["sessions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| {
+                Some((
+                    s["peer"].as_str()?.to_owned(),
+                    s["whatami"].as_str().unwrap_or("unknown").to_owned(),
+                ))
+            })
+            .collect();
+        match verification.check(e) {
+            Ok(()) => verified.push(crate::model::attach::RouterSessions {
+                router: admin_key_zid(&e.key).unwrap_or("?").to_owned(),
+                sessions,
+            }),
+            Err(why) => unverified.push(crate::model::attach::Unverified { why, sessions }),
+        }
+    }
+    let observed = observed.map_err(|e| crate::one_line(&e));
+    report.instances = crate::report::Asked::Asked(crate::model::attach::join(
+        namespace,
+        &scope.selector(),
+        observed.as_ref().map_err(Clone::clone),
+        &verified,
+        &unverified,
+    ));
+    Ok(report)
+}
+
+/// The join of [`topology`], over entries already read. Pure.
+fn topology_of(entries: &[AdminEntry], self_zid: &str) -> TopologyReport {
     let mut nodes: Vec<TopologyNode> = Vec::new();
     let mut edges: Vec<TopologyEdge> = Vec::new();
-    for e in &entries {
+    for e in entries {
         // Root docs only: @/<zid>/<whatami>. Anything deeper is a
         // different handler and not a node document.
         let mut chunks = e.key.split('/');
@@ -594,13 +837,14 @@ pub async fn topology(session: &Session, timeout: Duration) -> Result<TopologyRe
             }
         }
     }
-    Ok(TopologyReport {
+    TopologyReport {
         nodes,
         edges,
-        asked: ASKED.to_string(),
+        asked: TOPOLOGY.to_string(),
         answered,
-        self_zid: session.zid().to_string(),
-    })
+        self_zid: self_zid.to_owned(),
+        instances: crate::report::Asked::NotAsked,
+    }
 }
 
 #[cfg(test)]
@@ -754,7 +998,107 @@ mod tests {
             asked: "@/*/*".into(),
             answered: 1,
             self_zid: "bbb".into(),
+            instances: crate::report::Asked::NotAsked,
         }
+    }
+
+    fn doc(key: &str, replier: Option<&str>, sessions: serde_json::Value) -> AdminEntry {
+        AdminEntry {
+            key: key.into(),
+            value: serde_json::json!({ "sessions": sessions }),
+            replier: replier.map(str::to_owned),
+        }
+    }
+
+    /// §4.2, 0.12–0.13: a router this session is connected to, answering
+    /// on its own key under its own replier id, is verified; so is a far
+    /// router it lists as `router`, outward; a client it lists never is;
+    /// an answer whose replier is not the zid its key names never is; and
+    /// under trust every answer counts. Zids compare by value.
+    #[test]
+    fn routers_are_verified_outward_from_here() {
+        let near = doc(
+            "@/00a1/router",
+            Some("A1"),
+            serde_json::json!([
+                {"peer": "b2", "whatami": "router"},
+                {"peer": "c3", "whatami": "client"},
+            ]),
+        );
+        let far = doc("@/b2/router", Some("b2"), serde_json::json!([]));
+        let client = doc("@/c3/router", Some("c3"), serde_json::json!([]));
+        let spoof = doc("@/a1/router", Some("dd"), serde_json::json!([]));
+        let here: BTreeSet<String> = ["a1".to_owned(), "ee".to_owned()].into();
+        let v = RouterVerification::new(
+            here.clone(),
+            &[far.clone(), near.clone(), client.clone(), spoof.clone()],
+            false,
+        );
+        assert_eq!(
+            v.routers().iter().map(String::as_str).collect::<Vec<_>>(),
+            ["a1", "b2"]
+        );
+        assert!(v.is_verified("00A1"));
+        assert!(v.check(&near).is_ok());
+        assert!(
+            v.check(&far).is_ok(),
+            "listed as a router by a verified one"
+        );
+        let why = v.check(&client).expect_err("a client never qualifies");
+        assert!(
+            why.contains("no verified router lists it as a router"),
+            "{why}"
+        );
+        let why = v.check(&spoof).expect_err("a spoofed answer");
+        assert!(why.contains("its replier is not the router"), "{why}");
+        let trusting = RouterVerification::new(here, std::slice::from_ref(&spoof), true);
+        assert!(trusting.trusts() && trusting.check(&spoof).is_ok());
+    }
+
+    /// The instance join reaches the DOT form: an attached instance hangs
+    /// off its router, an unattached one stands alone, dashed.
+    #[test]
+    fn the_dot_form_draws_the_instances() {
+        use crate::report::{AttachedTo, Attachment, InstanceAttachment, InstanceJoin};
+        let mut r = report();
+        r.instances = crate::report::Asked::Asked(InstanceJoin {
+            namespace: String::new(),
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            verified: vec!["aaa".into()],
+            unverified: vec![],
+            unobservable: None,
+            instances: vec![
+                InstanceAttachment {
+                    address: "host-a/tc".into(),
+                    instance: "3fa9c2d41b7e0012".into(),
+                    zid: Some("bbb".into()),
+                    attachment: Attachment::Attached {
+                        routers: vec![AttachedTo {
+                            router: "aaa".into(),
+                            listed_as: "peer".into(),
+                        }],
+                    },
+                },
+                InstanceAttachment {
+                    address: "host-b/tc".into(),
+                    instance: "3fa9c2d41b7e0013".into(),
+                    zid: Some("ccc".into()),
+                    attachment: Attachment::Unattached { reason: "r".into() },
+                },
+            ],
+        });
+        let dot = render_dot(&r);
+        assert!(
+            dot.contains(
+                "\"aaa\" -- \"host-a/tc@3fa9c2d41b7e0012\" [style=\"dotted\", label=\"peer\"];"
+            ),
+            "{dot}"
+        );
+        assert!(
+            dot.contains("\"host-b/tc@3fa9c2d41b7e0013\" [shape=note, label=\"host-b/tc\\n3fa9c2d41b7e0013\\n(unattached)\", style=\"dashed\"];"),
+            "{dot}"
+        );
     }
 
     /// The version gate for the 1.10 loopback filter: judged from the

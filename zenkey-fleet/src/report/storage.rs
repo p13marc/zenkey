@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::asked::Asked;
 use super::judgement::Judgement;
 
 // ── The deployment file ───────────────────────────────────────────────────
@@ -66,6 +67,36 @@ pub struct Deployment {
     pub volumes: BTreeMap<String, VolumeSpec>,
     #[serde(default)]
     pub storages: BTreeMap<String, StorageSpec>,
+    /// Where the union storages derived from an enrollment go (#704): the
+    /// volume and its knobs, one block for every one of them. Absent: an
+    /// implicit `memory` volume, and the plan says so.
+    pub events: Option<EventsSpec>,
+}
+
+/// The `[events]` block of a deployment file (#704): how the union
+/// storages `storage gen --enrollment` derives from the contracts' event
+/// resources are stored. Their selectors and lifespans are derived, so the
+/// block names neither.
+///
+/// ```toml
+/// [events]
+/// volume = "fs"                     # declared under [volumes]
+/// replication = true                # as a storage's (RFC 09 §2.2)
+/// params = { dir = "events" }       # merged into each storage's volume block
+/// # gc_period_s = 30
+/// ```
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventsSpec {
+    /// The volume id, declared under `[volumes]`.
+    pub volume: String,
+    #[serde(default)]
+    pub params: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub replication: Replication,
+    #[serde(default)]
+    pub complete: bool,
+    pub gc_period_s: Option<u64>,
 }
 
 /// One volume of the deployment file.
@@ -179,6 +210,48 @@ pub struct StoragePlan {
     /// What the plan left out, and why. A refused storage is **omitted** from
     /// `storages` and named here — the plan is still emitted around it.
     pub refusals: Vec<Refusal>,
+    /// What an enrollment contributed (#704): absent when none was read.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub enrollment: Asked<EnrollmentDerivation>,
+}
+
+/// What `storage gen --enrollment` read (#704), beside the union storages
+/// it derived (each [`PlannedStorage::derived`]).
+///
+/// The storages it plans are **union storages on events** (spec §2.6): one
+/// per event resource of each interface an enrolled service implements,
+/// its lifespan the contract's `retention`. Nothing is planned on any
+/// owner's `state/**` or `@state/**` (S4): current state is the owner's
+/// answer, and last-known state is an archive's.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct EnrollmentDerivation {
+    /// Interfaces enrolled services implement and whose contract
+    /// `--contracts` did not give: their events cannot be planned.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contract_not_given: Vec<String>,
+    /// Interfaces whose contract declares no event resource: nothing of
+    /// theirs is a storage's to keep.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub without_events: Vec<String>,
+    /// The enrolled archives (§4.4). None is planned on the storage
+    /// manager: zenoh 1.10.1's accepts a put older than a delete it holds
+    /// and resurrects the key, so it cannot be an archive's store. Each is
+    /// an `archive.v1` service, its own store.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archives: Vec<String>,
+}
+
+/// Where a derived union storage came from (#704).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DerivedEvent {
+    /// `<name>.v<major>`.
+    pub iface: String,
+    /// `events/<template>`.
+    pub resource: String,
+    /// The contract's `retention`, in seconds (spec §2.6).
+    pub retention_s: u64,
+    /// The enrolled services implementing the interface.
+    pub providers: Vec<String>,
 }
 
 impl StoragePlan {
@@ -233,6 +306,10 @@ pub struct PlannedStorage {
     pub params: BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<PlanWarning>,
+    /// The event resource a union storage was derived from (#704); absent
+    /// for a storage the deployment file names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived: Option<DerivedEvent>,
 }
 
 /// `garbage_collection: { period, lifespan }` with the computation shown
@@ -279,6 +356,14 @@ pub enum WarningKind {
     /// A plugin this tool does not know; the declared capability is taken on
     /// trust.
     UnknownPlugin,
+    /// A union storage keeps every occurrence until its backend prunes it:
+    /// the contract's retention bounds what a replay asks for, which only a
+    /// time-series backend or the consumer's own filter enforces (spec
+    /// §2.6; the memory backend ignores `_time`, spike S5).
+    RetentionNotEnforced,
+    /// No `[events]` volume was named, so the derived storages use an
+    /// implicit `memory` volume: volatile, lost on a router restart.
+    ImplicitVolume,
 }
 
 /// One storage or volume the plan refused to emit.
@@ -298,11 +383,15 @@ pub struct Refusal {
 
 // ── --check ───────────────────────────────────────────────────────────────
 
-/// `zenctl storage gen --check`: the plan against what a live router runs.
+/// `zenctl storage gen --check`: the plan against what a router runs — its
+/// admin space, live, or its config file (`--against`, #704).
 #[derive(Debug, Clone, Serialize)]
 pub struct StorageCheck {
     pub base: String,
-    /// The admin selector put to the bus (RFC 13 §3 O5).
+    /// What was compared: the admin space, or a config file.
+    pub source: CheckSource,
+    /// The admin selector put to the bus (RFC 13 §3 O5), or the config
+    /// file read.
     pub asked: String,
     pub planned: usize,
     pub observed: usize,
@@ -327,6 +416,17 @@ pub struct CheckFinding {
     pub observed: Option<String>,
 }
 
+/// What `storage gen --check` compared the plan with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckSource {
+    /// The storages a live router's admin space reports.
+    AdminSpace,
+    /// A router config file's `plugins.storage_manager` block, read
+    /// through zenoh's own loader (`--against`, #704).
+    File,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckKind {
@@ -340,6 +440,10 @@ pub enum CheckKind {
     /// The running `garbage_collection.lifespan` is below the plan's — a
     /// slow replica may resurrect a retired key (RFC 09 §2.3).
     LifespanBelowMinimum,
+    /// A storage whose key expression intersects an owner's `state/**` or
+    /// `@state/**`: it would answer GETs on an owner's state, which spec
+    /// §4.2 S4 forbids (#704). Planned or not.
+    OnOwnerState,
 }
 
 // ── --explain ─────────────────────────────────────────────────────────────
@@ -465,6 +569,7 @@ mod tests {
                     text: "t".into(),
                     cite: "RFC 09 §2.2".into(),
                 }],
+                derived: None,
             }],
             refusals: vec![Refusal {
                 storage: Some("stray".into()),
@@ -473,6 +578,7 @@ mod tests {
                 reason: "r".into(),
                 cite: "RFC 09 §2".into(),
             }],
+            enrollment: Asked::NotAsked,
         };
         let v = serde_json::to_value(&plan).unwrap();
         assert_eq!(v["volumes"][0]["persistence"], json!("durable"));
@@ -486,6 +592,11 @@ mod tests {
         assert_eq!(s["warnings"][0]["kind"], json!("complete_refused"));
         assert_eq!(v["refusals"][0]["storage"], json!("stray"));
         assert!(v["refusals"][0].get("volume").is_none());
+        assert!(
+            s.get("derived").is_none(),
+            "a file's storage was not derived"
+        );
+        assert!(v.get("enrollment").is_none(), "no enrollment read: absent");
     }
 
     /// `--check` carries its selector, its judgement and the finding
@@ -494,6 +605,7 @@ mod tests {
     fn the_check_pins_its_shape() {
         let check = StorageCheck {
             base: "".into(),
+            source: CheckSource::AdminSpace,
             asked: "@/*/router/**/storage_manager/storages/**".into(),
             planned: 1,
             observed: 1,
@@ -509,6 +621,7 @@ mod tests {
         };
         let v = serde_json::to_value(&check).unwrap();
         assert_eq!(v["findings"][0]["kind"], json!("lifespan_below_minimum"));
+        assert_eq!(v["source"], json!("admin_space"));
         assert_eq!(v["judgement"], json!({"answer": "established"}));
         assert!(v.get("unjudged").is_none(), "empty unjudged is absence");
     }
@@ -533,5 +646,68 @@ mod tests {
         assert_eq!(v["takers"][0]["relation"], json!("includes"));
         assert!(v.get("none_reason").is_none());
         assert!(v.get("refused_takers").is_none());
+    }
+
+    /// #704's additions on the wire: a derived storage names its event
+    /// resource, retention and providers; the enrollment's derivation lists
+    /// what it could not plan and the archives it never plans; a check
+    /// against a file says so, and a storage on an owner's state is a
+    /// finding kind of its own. The `[events]` block parses, and refuses a
+    /// key it does not know.
+    #[test]
+    fn the_enrollment_derivation_pins_its_shape() {
+        let derived = DerivedEvent {
+            iface: "tc.netem.v1".into(),
+            resource: "events/applied".into(),
+            retention_s: 604_800,
+            providers: vec!["h-3fa9c2d41b7e/tc".into()],
+        };
+        assert_eq!(
+            serde_json::to_value(&derived).unwrap(),
+            json!({
+                "iface": "tc.netem.v1",
+                "resource": "events/applied",
+                "retention_s": 604_800,
+                "providers": ["h-3fa9c2d41b7e/tc"],
+            })
+        );
+        let d = EnrollmentDerivation {
+            contract_not_given: vec!["nav.v2".into()],
+            without_events: vec![],
+            archives: vec!["ground/archive".into()],
+        };
+        assert_eq!(
+            serde_json::to_value(&d).unwrap(),
+            json!({"contract_not_given": ["nav.v2"], "archives": ["ground/archive"]}),
+            "an empty list is absent"
+        );
+        assert_eq!(
+            serde_json::to_value(CheckKind::OnOwnerState).unwrap(),
+            json!("on_owner_state")
+        );
+        assert_eq!(
+            serde_json::to_value(CheckSource::File).unwrap(),
+            json!("file")
+        );
+        assert_eq!(
+            serde_json::to_value(WarningKind::RetentionNotEnforced).unwrap(),
+            json!("retention_not_enforced")
+        );
+
+        let dep: Deployment = serde_json::from_value(json!({
+            "volumes": {"fs": {"plugin": "fs"}},
+            "events": {"volume": "fs", "replication": true, "params": {"dir": "events"}},
+        }))
+        .unwrap();
+        let events = dep.events.expect("the [events] block");
+        assert_eq!(events.volume, "fs");
+        assert_eq!(events.replication, Replication::Enabled(true));
+        let typo: Result<Deployment, _> = serde_json::from_value(json!({
+            "events": {"volume": "fs", "selector": "zk2/**"}
+        }));
+        assert!(
+            typo.is_err(),
+            "a derived storage's selector is not the file's"
+        );
     }
 }

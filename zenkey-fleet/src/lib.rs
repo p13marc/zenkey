@@ -44,7 +44,9 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
-//!   zk2's `presence`, `contracts`, `operation`, `consume` and `lens`. The
+//!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens`, `why`
+//!   (the reads a silence is explained from, #702) and `conform` (a
+//!   service's suite, #703). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -82,7 +84,9 @@
 //!   projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
-//!   `doctor_delta`, `expect`, `probe`, `condition` and `field`, and
+//!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
+//!   silence explained rung by rung, #702) and `conform` (a service against
+//!   the revision it claims, #703), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -166,9 +170,9 @@ pub use tape::synth::{Synth, Synthesized, member_type, size_class};
 pub use tape::trigger::{TriggerEvent, TriggerSpec, record_on, state_projection};
 
 pub use bus::admin::{
-    AdminEntry, admin_doc_omits_loopback, admin_get, admin_get_within, declared_entities,
-    declared_entities_within, declared_entity_selectors, mesh_links, render_dot, routers, storages,
-    topology,
+    AdminEntry, RouterVerification, admin_doc_omits_loopback, admin_get, admin_get_within,
+    declared_entities, declared_entities_within, declared_entity_selectors, mesh_links, render_dot,
+    routers, storages, topology, topology_with_instances,
 };
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
@@ -198,6 +202,20 @@ pub use judge::doctor::{
     observe as observe_doctor, run_doctor,
 };
 pub use judge::doctor_delta::doctor_delta;
+// zk2's `why` (#702): a key's or a service's silence, rung by rung — the
+// reads, the session-free judge, and the two in a row.
+pub use bus::why::{
+    ArchiveRead, KeyAnswer, KeyReply, WhyObservation, WhySpec, WhyTarget, observe as observe_why,
+    run_why,
+};
+pub use judge::why::judge as judge_why;
+// zk2's `check conform` (#703): one service against the revision it claims,
+// as a suite — the reads, the session-free judge, and the two in a row.
+pub use bus::conform::{
+    ConformObservation, ConformSpec, FanoutSeen, Heard, OpObserved,
+    SAMPLE_CAP as CONFORM_SAMPLE_CAP, observe as observe_conform, run_conform,
+};
+pub use judge::conform::judge as judge_conform;
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -268,7 +286,8 @@ pub use model::snapshot::{fold_latest, holder_of, row_of as snapshot_row, stampe
 pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
-    check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
+    StorageInputs, check_storages, check_storages_against, explain as explain_storage,
+    on_owner_state, plan as plan_storages_from, plan_storages, to_json5 as storage_plan_json5,
 };
 pub use model::timeline::{
     ArrivalAxis, ArrivalOrdering, Break, HlcAxis, HlcOrdering, HlcStamp, Ingested, Order, Placed,
@@ -276,11 +295,11 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    BenchReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport, EntityKind,
-    ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
+    BenchReport, ConformReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport,
+    EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
     LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport, RouterInfo, SampleRow,
     SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow,
-    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, ZrecHeader,
+    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, WhyReport, ZrecHeader,
     ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs

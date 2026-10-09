@@ -94,10 +94,23 @@ fn base_config() -> zenoh::Config {
 
 /// A router on an ephemeral loopback port, and the endpoint it bound.
 async fn router() -> (zenoh::Session, String) {
+    router_with(false, None).await
+}
+
+/// [`router`], its admin space on or off (zenoh's default is off), linked
+/// to the router at `upstream` when given (FK1: `admin graph`, `storage gen
+/// --check` beside a live router).
+async fn router_with(admin: bool, upstream: Option<&str>) -> (zenoh::Session, String) {
     let mut c = base_config();
     c.insert_json5("mode", "\"router\"").expect("config");
     c.insert_json5("listen/endpoints", r#"["tcp/127.0.0.1:0"]"#)
         .expect("config");
+    c.insert_json5("adminspace/enabled", if admin { "true" } else { "false" })
+        .expect("config");
+    if let Some(up) = upstream {
+        c.insert_json5("connect/endpoints", &format!("[\"{up}\"]"))
+            .expect("config");
+    }
     let r = zenoh::open(c).await.expect("a router");
     let ep = r
         .info()
@@ -198,8 +211,17 @@ impl Bus {
     /// A router and an owners' session, in `namespace` when given, and no
     /// service yet: for a case that brings up its own (FJ5).
     async fn bare(namespace: Option<&str>) -> Bus {
+        Bus::on(router().await, namespace).await
+    }
+
+    /// [`Bus::bare`] on a router whose admin space is on (FK1).
+    async fn admin(namespace: Option<&str>) -> Bus {
+        Bus::on(router_with(true, None).await, namespace).await
+    }
+
+    /// The bus around a router already up.
+    async fn on((router, endpoint): (zenoh::Session, String), namespace: Option<&str>) -> Bus {
         static NTH: AtomicU64 = AtomicU64::new(0);
-        let (router, endpoint) = router().await;
         let owners = client(&endpoint, namespace).await;
         let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
             .join("live-zk2-home")
@@ -3524,4 +3546,561 @@ async fn a_base_relative_zk2_selector_is_hinted_on_stderr() {
             .any(|g| g["is"] == "resource" && g["address"] == "host-a/tc"),
         "the wire key under the namespace resolves: {run}"
     );
+}
+
+// ── FK1: why, check conform, storage gen, admin graph (#702–#705) ──────────
+
+/// The rows of a `--format json` document tagged `instance`, by address.
+fn instance_row<'a>(doc: &'a Value, address: &str) -> Option<&'a Value> {
+    rows_of(doc, "instance")
+        .into_iter()
+        .find(|r| r["address"] == address)
+}
+
+/// #705: `admin graph` joins each instance onto the router whose verified
+/// document lists its session (spec §3.3, §4.2). `host-a/tc` is a client of
+/// the router zenctl reads, whose admin space is on: attached, listed as a
+/// client, its zid the one its descriptor states. `host-b/tc` is a client
+/// of a second router, linked to the first, whose admin space is off: the
+/// first lists that router and not its clients, so `host-b/tc` is reported
+/// unattached — never omitted — and its router is only heard of.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn admin_graph_attaches_an_instance_to_its_router_and_reports_the_unattached() {
+    let mut bus = Bus::admin(Some("acme")).await;
+    let (far, far_endpoint) = router_with(false, Some(&bus.endpoint)).await;
+    let far_owners = client(&far_endpoint, Some("acme")).await;
+    let addr = |s: &str| s.parse().expect("an address");
+    let near = bring_up(
+        &bus.owners,
+        ServiceConfig::new(addr("host-a/tc")),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    let remote = bring_up(
+        &far_owners,
+        ServiceConfig::new(addr("host-b/tc")),
+        &["tcgui/tc.netif.v1"],
+    )
+    .await;
+    bus.services.extend([near, remote]);
+    let far_zid = far.zid().to_string();
+    bus.keep((far, far_owners.clone()));
+
+    let args = [
+        "admin",
+        "graph",
+        "--namespace",
+        "acme",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 0
+                && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    ["host-a/tc", "host-b/tc"].iter().all(|a| {
+                        instance_row(&d, a).is_some_and(|i| i["attachment"] != "unattributable")
+                    })
+                })
+        })
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "admin-graph");
+    assert_eq!(doc["instances"]["namespace"], "acme", "{run}");
+    let router_zid = bus._router.zid().to_string();
+    assert_eq!(
+        doc["instances"]["verified"],
+        json!([router_zid]),
+        "the router zenctl is connected to, verified by its own answer: {run}"
+    );
+    let a = instance_row(&doc, "host-a/tc").expect("host-a/tc");
+    assert_eq!(a["attachment"], "attached", "{run}");
+    assert_eq!(a["zid"], bus.owners.zid().to_string(), "its meta.zid");
+    assert_eq!(a["routers"][0]["router"], router_zid);
+    assert_eq!(a["routers"][0]["listed_as"], "client");
+    let b = instance_row(&doc, "host-b/tc").expect("host-b/tc is never omitted");
+    assert_eq!(b["attachment"], "unattached", "{run}");
+    assert_eq!(b["zid"], far_owners.zid().to_string());
+    assert!(
+        b["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("no verified router")),
+        "{run}"
+    );
+    assert!(
+        rows_of(&doc, "node")
+            .iter()
+            .any(|n| n["zid"] == far_zid.as_str() && n["answered"] == false),
+        "the far router is heard of, not queryable: {run}"
+    );
+
+    // The picture carries the join too, and its notes ride stderr.
+    let run = bus
+        .zenctl(&[
+            "admin",
+            "graph",
+            "--namespace",
+            "acme",
+            "--timeout",
+            "2",
+            "--dot",
+        ])
+        .await;
+    exits(&run, 0);
+    assert!(
+        run.stdout
+            .contains(&format!("\"{router_zid}\" -- \"host-a/tc@")),
+        "{run}"
+    );
+    assert!(run.stdout.contains("(unattached)"), "{run}");
+    assert!(run.stderr.contains("1 attached, 1 unattached"), "{run}");
+}
+
+/// #704: the union storage `storage gen` derives from the tcgui enrollment
+/// takes the occurrences a real owner publishes (spec §2.6). A `tc.netem.v1`
+/// owner puts one audit event through the runtime's event writer, a raw
+/// subscriber on the planned key expression receives it, and `--explain`
+/// names the derived storage for its key. Checked against a live router
+/// whose admin space answers and runs no storage manager, the plan has
+/// nothing to be compared with: exit 2, never clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
+    let mut bus = Bus::admin(None).await;
+    let enrollment = examples().join("acl/tcgui.enrollment.toml");
+    let history = examples().join(".history");
+    let (enrollment, history) = (
+        enrollment.to_str().expect("a UTF-8 path").to_owned(),
+        history.to_str().expect("a UTF-8 path").to_owned(),
+    );
+    let plan_args = [
+        "storage",
+        "gen",
+        "--enrollment",
+        &enrollment,
+        "--contracts",
+        &history,
+        "--format",
+        "json",
+    ];
+    let run = bus.offline(&plan_args).await;
+    exits(&run, 0);
+    let doc = run.json();
+    let storage = rows_of(&doc, "storage")
+        .into_iter()
+        .find(|s| s["name"] == "events-tc.netem.v1-applied")
+        .unwrap_or_else(|| panic!("the audit event's union storage: {run}"));
+    assert_eq!(storage["garbage_collection"]["lifespan_s"], 604_800);
+    assert_eq!(storage["derived"]["retention_s"], 604_800);
+    let key_expr = storage["key_expr"]
+        .as_str()
+        .expect("a key expression")
+        .to_owned();
+    assert!(
+        rows_of(&doc, "storage").iter().all(|s| {
+            let k = s["key_expr"].as_str().unwrap_or_default();
+            !k.contains("/state/") && !k.contains("/@state/")
+        }),
+        "nothing on an owner's state (S4): {run}"
+    );
+
+    // An owner's occurrence lands under the planned key expression.
+    let owner = bring_up(
+        &bus.owners,
+        ServiceConfig::new("h-3fa9c2d41b7e/tc".parse().expect("an address")),
+        &["tcgui/tc.netem.v1"],
+    )
+    .await;
+    let tool = client(&bus.endpoint, None).await;
+    let sub = tool
+        .declare_subscriber(key_expr.as_str())
+        .await
+        .expect("a subscriber on the planned key expression");
+    let events = owner
+        .event_writer(&iface("tc.netem.v1"), "events/applied", &Bindings::new())
+        .expect("an event writer");
+    let deadline = Instant::now() + SETTLE;
+    let key = loop {
+        let put = events
+            .put(br#"{"ulid":"x"}"#.to_vec())
+            .await
+            .expect("an occurrence");
+        match tokio::time::timeout(Duration::from_millis(200), sub.recv_async()).await {
+            Ok(Ok(sample)) => {
+                assert_eq!(sample.key_expr().as_str(), put);
+                break put;
+            }
+            _ if Instant::now() < deadline => continue,
+            _ => panic!("no occurrence reached {key_expr}"),
+        }
+    };
+    bus.services.push(owner);
+
+    let mut explain = plan_args.to_vec();
+    explain.extend(["--explain", &key]);
+    let run = bus.offline(&explain).await;
+    exits(&run, 0);
+    let doc = run.json();
+    let taker = &rows_of(&doc, "taker")[0];
+    assert_eq!(taker["storage"], "events-tc.netem.v1-applied", "{run}");
+    assert_eq!(taker["relation"], "includes");
+
+    // The admin space answers, and no storage runs: nothing to compare.
+    let mut check = plan_args.to_vec();
+    check.extend(["--check", "--timeout", "2"]);
+    let run = bus.zenctl(&check).await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["source"], "admin_space");
+    assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
+}
+
+/// One rung's row in a `why --format json` document.
+fn rung<'a>(doc: &'a Value, id: &str) -> &'a Value {
+    rows_of(doc, "rung")
+        .into_iter()
+        .find(|r| r["rung"] == id)
+        .unwrap_or_else(|| panic!("{id} has a row: {doc}"))
+}
+
+/// #702: `why` over a live tcgui owner in a namespace, through the runtime
+/// (state.md §1's owner, the FJ8b publishing owner). Healthy — the owner
+/// answers its state GET with its own stamp (S1), and its stream within the
+/// window — exit 0; a service judged up to its contracts, exit 0. A cause
+/// at each live rung, exit 1: no token visible (presence), an interface
+/// the descriptor does not list (descriptor), a resource the revision does
+/// not declare (contract). And the owner's silence on a member it never
+/// wrote, exit 2: unobservable, the archives asked after it (S6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn why_explains_a_silence_rung_by_rung_over_a_live_owner() {
+    let mut bus = Bus::bare(Some("acme")).await;
+    let (owner, task) = publishing_owner(&bus, json!({}), true).await;
+    bus.services.push(owner);
+    bus.keep(task);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let why = |target: &str| -> Vec<String> {
+        [
+            "why",
+            target,
+            "--namespace",
+            "acme",
+            "--timeout",
+            "2",
+            "--for",
+            "1",
+            "--format",
+            "json",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+    };
+    let run_of = |args: Vec<String>| {
+        let bus = &bus;
+        async move {
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            bus.until(&refs, |r| r.code != 2).await
+        }
+    };
+
+    // Healthy: the owner's current state, its own stamp.
+    let state = "acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let run = run_of(why(state)).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "why");
+    assert_eq!(doc["verdict"]["answer"], "not_established", "{run}");
+    assert!(doc.get("stopped_at").is_none());
+    let answer = rung(&doc, "answer")["verdict"]["reason"].to_string();
+    assert!(answer.contains("the owner answers its state GET"), "{run}");
+    assert!(answer.contains("the owner's own clock"), "S1: {run}");
+    assert_eq!(
+        doc["value"]["value"],
+        eth0(true),
+        "rendered through the contract"
+    );
+    assert_eq!(rung(&doc, "last-known")["verdict"]["answer"], "not_asked");
+
+    // Healthy: a stream sample within the window.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0",
+    ))
+    .await;
+    exits(&run, 0);
+    assert_eq!(run.json()["window_s"], 1.0, "{run}");
+
+    // Healthy: the service, up to its contracts.
+    let run = run_of(why("host-a/tc")).await;
+    exits(&run, 0);
+    assert_eq!(run.json()["subject"], "service", "{run}");
+
+    // A cause at presence: nothing of host-z/tc is visible to this reader.
+    let run = bus
+        .zenctl(
+            &why("acme/zk2/host-z/tc/tc.netif.v1/state/interfaces/default/eth0")
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "presence", "{run}");
+    assert!(
+        doc["rows"]
+            .to_string()
+            .contains("no token of host-z/tc visible to this reader"),
+        "{run}"
+    );
+
+    // A cause at the descriptor: host-a/tc does not implement tc.netem.v1.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netem.v1/state/qdisc/default/eth0",
+    ))
+    .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "descriptor", "{run}");
+    assert!(
+        rung(&doc, "descriptor")["cause"]
+            .as_str()
+            .is_some_and(|c| c.contains("does not implement tc.netem.v1")),
+        "{run}"
+    );
+
+    // A cause at the contract: no state resource of tc.netif.v1 matches.
+    let run = run_of(why(
+        "acme/zk2/host-a/tc/tc.netif.v1/state/nothing/here/at/all",
+    ))
+    .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "contract", "{run}");
+    assert_eq!(rung(&doc, "contract")["verdict"]["answer"], "established");
+
+    // Unobservable: the owner never wrote eth9 — silence, never a verdict;
+    // the archives asked after it, and none visible.
+    let args = why("acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth9");
+    let run = bus
+        .zenctl(&args.iter().map(String::as_str).collect::<Vec<_>>())
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["stopped_at"], "answer", "{run}");
+    assert_eq!(doc["verdict"]["answer"], "unobservable");
+    assert!(
+        doc["verdict"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("silence is not a verdict") && r.contains("last-known")),
+        "{run}"
+    );
+    assert_eq!(
+        rung(&doc, "last-known")["verdict"]["answer"],
+        "unobservable"
+    );
+    assert!(
+        run.stderr.contains("exit 2, the reserved non-verdict"),
+        "{run}"
+    );
+}
+
+/// Until `service list` in `namespace` shows every one of `addresses`
+/// with its descriptor served.
+async fn wait_for_ns(bus: &Bus, namespace: &str, addresses: &[&str]) {
+    let want: BTreeSet<String> = addresses.iter().map(|a| (*a).to_owned()).collect();
+    let run = bus
+        .until(
+            &[
+                "service",
+                "list",
+                "--namespace",
+                namespace,
+                "--timeout",
+                "2",
+                "--format",
+                "json",
+            ],
+            |r| {
+                r.code == 0
+                    && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                        let served: BTreeSet<String> = d["rows"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|i| i["descriptor"]["answer"] == "served")
+                            .filter_map(|i| i["address"].as_str().map(str::to_owned))
+                            .collect();
+                        want.is_subset(&served)
+                    })
+            },
+        )
+        .await;
+    exits(&run, 0);
+}
+
+/// One case's row in a `check conform --format json` document.
+fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
+    rows_of(doc, "case")
+        .into_iter()
+        .find(|r| r["case"] == case && r["subject"] == subject)
+        .unwrap_or_else(|| panic!("{case} {subject} has a row: {doc}"))
+}
+
+/// #703: a conforming service — FJ8a's mock owner, `gen`, publishing every
+/// resource of `tc.netif.v1` through the runtime's writers and answering
+/// every operation — passes every case asked, exit 0; the operation that
+/// is not idempotent is not called, and freshness and budget are not
+/// asked. `--junit` writes the suite.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_passes_a_conforming_service() {
+    let bus = Bus::bare(Some("acme")).await;
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path").to_owned();
+    let _mock = bus.spawn(&[
+        "gen",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--contracts",
+        &netif,
+        "--rate",
+        "5",
+        "--duration",
+        "15",
+        "--namespace",
+        "acme",
+        "--format",
+        "json",
+    ]);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let junit = bus.home.join("conform.xml");
+    let junit = junit.to_str().expect("a UTF-8 path").to_owned();
+    let args = [
+        "check",
+        "conform",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--namespace",
+        "acme",
+        "--for",
+        "2",
+        "--timeout",
+        "2",
+        "--junit",
+        &junit,
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "conform");
+    assert_eq!(doc["judgement"]["answer"], "not_established", "{run}");
+    for (case, subject) in [
+        ("resource-served", "stream/bandwidth/{ns}/{iface}"),
+        ("resource-served", "state/namespaces"),
+        ("payload-type", "stream/bandwidth/{ns}/{iface}"),
+        ("payload-type", "state/interfaces/{ns}/{iface}"),
+        ("qos", "stream/bandwidth/{ns}/{iface}"),
+        ("state-stamp", "state/interfaces/{ns}/{iface}"),
+        ("state-get", "state/namespaces"),
+        ("operation", "@op/diagnostics"),
+    ] {
+        assert_eq!(
+            conform_case(&doc, case, subject)["verdict"]["answer"],
+            "not_established",
+            "{case} {subject}: {run}"
+        );
+    }
+    assert!(
+        rows_of(&doc, "case")
+            .iter()
+            .any(|c| c["case"] == "contract-served" && c["verdict"]["answer"] == "not_established"),
+        "{run}"
+    );
+    let set = conform_case(&doc, "operation", "@op/interfaces/{ns}/{iface}/set");
+    assert_eq!(
+        set["verdict"]["answer"], "not_asked",
+        "not idempotent: {run}"
+    );
+    assert_eq!(
+        conform_case(&doc, "freshness", "service")["verdict"]["answer"],
+        "not_asked"
+    );
+    let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
+    assert!(xml.contains("failures=\"0\" errors=\"0\""), "{xml}");
+    assert!(xml.contains("<skipped message=\"not asked:"), "{xml}");
+}
+
+/// #703: a service that breaks its contract three ways — a stream value
+/// that does not satisfy its type, a sample off the declared QoS, an
+/// operation it exposes and leaves silent while holding its tokens — is a
+/// violation per case, exit 1, and `--junit` says so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation() {
+    let mut bus = Bus::bare(Some("acme")).await;
+    // `stats` a string, where `json:BandwidthUpdate` declares an object.
+    let (owner, task) = publishing_owner(&bus, json!({"stats": "broken"}), true).await;
+    bus.services.push(owner);
+    bus.keep(task);
+    // A sample on the owner's stream at a priority its contract does not
+    // declare.
+    let off = intruder(
+        &bus,
+        "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1",
+        r#"{"namespace":"default","interface":"eth1","stats":{"rx_bytes":1,"tx_bytes":1}}"#,
+        Priority::RealTime,
+    )
+    .await;
+    bus.keep(off);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let junit = bus.home.join("conform.xml");
+    let junit = junit.to_str().expect("a UTF-8 path").to_owned();
+    let args = [
+        "check",
+        "conform",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--namespace",
+        "acme",
+        "--for",
+        "2",
+        "--timeout",
+        "1",
+        "--junit",
+        &junit,
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 1
+                && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    rows_of(&d, "case")
+                        .iter()
+                        .filter(|c| c["verdict"]["answer"] == "established")
+                        .count()
+                        >= 3
+                })
+        })
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["judgement"]["answer"], "established");
+    let bandwidth = "stream/bandwidth/{ns}/{iface}";
+    let t = conform_case(&doc, "payload-type", bandwidth);
+    assert_eq!(t["verdict"]["answer"], "established", "{run}");
+    assert!(t["detail"].to_string().contains("/stats"), "{run}");
+    let q = conform_case(&doc, "qos", bandwidth);
+    assert_eq!(q["verdict"]["answer"], "established", "{run}");
+    assert!(q["detail"].to_string().contains("real_time"), "{run}");
+    let s = conform_case(&doc, "operation", "@op/diagnostics");
+    assert_eq!(s["verdict"]["answer"], "established", "{run}");
+    assert!(
+        s["detail"].to_string().contains("never silence (O3)"),
+        "{run}"
+    );
+    let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
+    assert!(xml.contains("<failure type=\"violation\""), "{xml}");
 }

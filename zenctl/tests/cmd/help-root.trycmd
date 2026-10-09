@@ -54,6 +54,7 @@ Commands:
   gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
+  why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
@@ -119,6 +120,7 @@ Commands:
   gen          Bring up a mock owner publishing every resource of its contracts
   scout        Listen for raw scouting Hellos: zid, whatami, locators
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
+  why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
