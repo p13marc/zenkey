@@ -127,6 +127,24 @@
       "salt": "zk2-hostid-v1"
     },
     {
+      "expect": null,
+      "input": "+642b4217b34b1e8d3bd915fc65c4452",
+      "note": "refused: a sign is not a hex digit, although a number parse accepts it",
+      "salt": "zk2-hostid-v1"
+    },
+    {
+      "expect": null,
+      "input": "b642b4217b34b1e8_3bd915fc65c4452",
+      "note": "refused: an underscore is not a hex digit, although Python's int() accepts it",
+      "salt": "zk2-hostid-v1"
+    },
+    {
+      "expect": null,
+      "input": "b642b4217b34b1e8d3bd915fc65c44ﬀ",
+      "note": "refused: U+FB00 is not lowercased to ff: only A-Z are lowercased",
+      "salt": "zk2-hostid-v1"
+    },
+    {
       "expect": "h-eed9ac91da20",
       "input": "b642b4217b34b1e8d3bd915fc65c4452",
       "note": "migration (Appendix B): tcgui's v1 origin, salt from tcgui/tcgui-shared/src/identity.rs:30",
@@ -151,5 +169,5 @@
       "salt": "zenwatch-host-id-v1"
     }
   ],
-  "description": "hostid.v1 §2.1: a machine id and a salt -> the minted system, or null when the input is refused. Normalise the input: remove the bytes 0x09, 0x0A, 0x0C, 0x0D and 0x20 (and no other character) from both ends, then lowercase A-Z. The result must be exactly 32 hex digits [0-9a-f] and not all zeros; anything else is refused. The system is \"h-\" followed by the first 12 lowercase hex digits of sha256(norm ++ salt), both UTF-8, no separator. A deployment always uses the salt zk2-hostid-v1 (§2.2); other salts appear only for v1's vector and the migration table (Appendix B). Each case's note says what it pins."
+  "description": "hostid.v1 §2.1: a machine id and a salt -> the minted system, or null when the input is refused. The input is a JSON string, whose UTF-8 encoding is the file's bytes. Normalise it: remove the bytes 0x09, 0x0A, 0x0C, 0x0D and 0x20 (and no other character) from both ends, then lowercase A-Z. The result must be exactly 32 hex digits [0-9a-f] and not all zeros; anything else is refused. The system is \"h-\" followed by the first 12 lowercase hex digits of sha256(norm ++ salt), both UTF-8, no separator. A deployment always uses the salt zk2-hostid-v1 (§2.2); other salts appear only for v1's vector and the migration table (Appendix B). Each case's note says what it pins."
 }

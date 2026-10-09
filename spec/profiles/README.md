@@ -58,6 +58,8 @@ thing in the same place.
   - *unestablished*: **not asked** (nobody put the question) or
     **unobservable** (the question was put, and the observation could not
     be had, with why), never folded into *no* (core O5);
+  - **not this profile's**, where the question's premise does not hold
+    (an address whose system the profile did not mint);
   - the **polarity**: which pole, if either, is the finding.
 - **An appendix against v1:** what is new, what deliberately is not, and
   what v1 had that is not ported. Further appendices as the profile needs.

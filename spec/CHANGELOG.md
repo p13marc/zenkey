@@ -47,9 +47,9 @@ core had no place for such a profile:
   reads such a listing as unobservable.
 - **`descriptor.schema.json`.** Its wording, "the profiles this instance
   follows", already covers both halves of the union.
-- **`meta` stays informative.** `hostid.v1`'s `meta.host` is the core's own
-  member, recommended there and checked nowhere. A profile has no point
-  in `meta`.
+- **`meta` stays informative.** `hostid.v1` recommends `meta.host`, and
+  `meta.zid` of consumers as well as owners. Both are the core's own
+  members, and no checker reads them. A profile has no point in `meta`.
 - **How a binding names a provider on its own system**
   (`self.system/<service>`, decided with `hostid.v1`) is not in this
   amendment. It comes with `hostid.v1`'s runtime (#719).

@@ -37,7 +37,9 @@ pub const DIGITS: usize = 12;
 ///
 /// Trims the five ASCII whitespace bytes (TAB, LF, FF, CR, SPACE) from both
 /// ends, and no other character: not 0x0B, as Python's `strip()` would, and
-/// not Unicode spaces, as Rust's `str::trim` would. Then lowercases `A–Z`.
+/// not Unicode spaces, as Rust's `str::trim` would. Then lowercases `A–Z`,
+/// and nothing else (no Unicode case folding). The check is on characters,
+/// never a number parse, which would accept a sign.
 /// The result must be exactly 32 hex digits and not all zeros (an all-zero
 /// id is not a machine id, machine-id(5)). Anything else is refused with
 /// `None`: absent, empty, systemd's `uninitialized`, a UUID with hyphens,
@@ -146,6 +148,9 @@ mod tests {
             "b642b4217b34b1e8 d3bd915fc65c4452",
             "\x0bb642b4217b34b1e8d3bd915fc65c4452\x0b",
             "\u{a0}b642b4217b34b1e8d3bd915fc65c4452\u{a0}",
+            "+642b4217b34b1e8d3bd915fc65c4452",
+            "b642b4217b34b1e8_3bd915fc65c4452",
+            "b642b4217b34b1e8d3bd915fc65c44\u{fb00}",
         ] {
             assert_eq!(normalise(input), None, "{input:?}");
             assert_eq!(derive(input, SALT), None, "{input:?}");
