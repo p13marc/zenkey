@@ -20,6 +20,7 @@ pub mod bench;
 pub mod cache;
 pub mod call;
 pub mod compat;
+pub mod conform;
 pub mod doctor;
 pub mod echo;
 pub mod expect;

@@ -44,8 +44,9 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
-//!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens` and `why`
-//!   (the reads a silence is explained from, #702). The
+//!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens`, `why`
+//!   (the reads a silence is explained from, #702) and `conform` (a
+//!   service's suite, #703). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -83,8 +84,9 @@
 //!   projections it runs live.
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
-//!   `doctor_delta`, `expect`, `probe`, `condition`, `field` and `why` (a
-//!   silence explained rung by rung, #702), and
+//!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
+//!   silence explained rung by rung, #702) and `conform` (a service against
+//!   the revision it claims, #703), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -207,6 +209,13 @@ pub use bus::why::{
     run_why,
 };
 pub use judge::why::judge as judge_why;
+// zk2's `check conform` (#703): one service against the revision it claims,
+// as a suite — the reads, the session-free judge, and the two in a row.
+pub use bus::conform::{
+    ConformObservation, ConformSpec, FanoutSeen, Heard, OpObserved,
+    SAMPLE_CAP as CONFORM_SAMPLE_CAP, observe as observe_conform, run_conform,
+};
+pub use judge::conform::judge as judge_conform;
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -286,8 +295,8 @@ pub use model::timeline::{
 };
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
-    BenchReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport, EntityKind,
-    ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
+    BenchReport, ConformReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport,
+    EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
     LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport, RouterInfo, SampleRow,
     SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow,
     StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, WhyReport, ZrecHeader,

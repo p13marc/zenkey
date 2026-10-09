@@ -30,6 +30,7 @@
 //! resolves its keys through, read once in the namespace.
 
 pub mod admin;
+pub mod conform;
 pub mod consume;
 pub mod contracts;
 pub mod lens;

@@ -10,7 +10,8 @@
 //! Two kinds of verb, by session (decided 2026-10-08):
 //!
 //! * a **resolved** verb — `service`, `iface`, `schema`, `graph`, `compat`,
-//!   `call`, `get state`, `watch`, `check expect|probe|schema`, `doctor` —
+//!   `call`, `get state`, `watch`, `check expect|probe|schema|conform`,
+//!   `why`, `doctor` and `admin graph`'s instance join —
 //!   reads through a session opened **in** the deployment's namespace
 //!   (`--namespace`, alias `--base`; the active context's `base`), as the
 //!   deployment's own consumers do;
@@ -144,6 +145,7 @@ pub async fn run() -> Result<()> {
         Command::Check(CheckCmd::Expect(a)) => cmd::expect::run(a).await,
         Command::Check(CheckCmd::Probe(a)) => cmd::probe::run(a).await,
         Command::Check(CheckCmd::Schema(a)) => cmd::schema::check(a).await,
+        Command::Check(CheckCmd::Conform(a)) => cmd::conform::run(a).await,
         Command::Why(a) => cmd::why::run(a).await,
         Command::Doctor(a) => cmd::doctor::run(a).await,
         Command::Watchdog(a) => cmd::watchdog::run(a).await,

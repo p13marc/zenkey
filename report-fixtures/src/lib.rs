@@ -891,6 +891,62 @@ pub fn why_report_silent() -> WhyReport {
     }
 }
 
+/// `check conform` over one service (#703): every pole on some case — a
+/// pass, a violation, a resource unobservable in its window, an operation
+/// not called and the profile cases not asked — so a renderer that merged
+/// two fails.
+pub fn conform_report() -> ConformReport {
+    let fp = format!("sha256:{}", "5d1c0a9b2e3f4a6b".repeat(4));
+    ConformReport {
+        address: "host-a/tc".into(),
+        iface: "tc.netif.v1".into(),
+        fingerprint: Some(fp.clone()),
+        namespace: "acme".into(),
+        window_s: 5.0,
+        asked: vec![
+            "zk2/host-a/tc/@zk/**".into(),
+            "zk2/host-a/tc/tc.netif.v1/stream/bandwidth/*/*".into(),
+            "zk2/host-a/tc/tc.netif.v1/@op/diagnostics".into(),
+        ],
+        cases: vec![
+            ConformCase::passed(
+                CaseId::ContractServed,
+                format!("tc.netif.v1 {fp}"),
+                "a holder served the bundle the descriptor names, and it verified",
+            ),
+            ConformCase::passed(
+                CaseId::ResourceServed,
+                "stream/bandwidth/{ns}/{iface}",
+                "12 sample(s) in the 5s window",
+            ),
+            ConformCase::failed(
+                CaseId::PayloadType,
+                "stream/bandwidth/{ns}/{iface}",
+                "1 of 12 value(s) do not conform to the declared type; the first, \
+                 zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object",
+            ),
+            ConformCase::unobservable(
+                CaseId::ResourceServed,
+                "state/namespaces",
+                "nothing heard in the 5s window, and the state GET drew no reply",
+            ),
+            ConformCase::failed(
+                CaseId::Operation,
+                "@op/diagnostics",
+                "host-a/tc holds its tokens, and the call drew neither a value nor an envelope \
+                 within 1s: never silence (O3)",
+            ),
+            ConformCase::not_asked(
+                CaseId::Operation,
+                "@op/interfaces/{ns}/{iface}/set",
+                "not idempotent: each call is a write, which this suite makes only under --i-know",
+            ),
+            ConformCase::not_asked(CaseId::Freshness, "service", "a profile (#613)"),
+        ],
+        unobservable: None,
+    }
+}
+
 /// A check with one of each finding kind the diff can draw, and one
 /// comparison the admin document could not carry.
 pub fn storage_check() -> StorageCheck {

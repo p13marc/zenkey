@@ -870,6 +870,45 @@ pub(crate) enum CheckCmd {
     /// values arrived and none decoded as their type; 2 the presence read
     /// timed out, or the probe could not stand up.
     Probe(CheckProbeArgs),
+    /// Run one service against the contract revision it claims, as a suite
+    ///
+    /// zk2's conformance suite (#703): the service at SYSTEM/SERVICE, against
+    /// the revision of IFACE its descriptor claims (spec §3.3), read through
+    /// a session in the deployment's namespace. Every case is one verdict,
+    /// on one resource:
+    ///
+    ///   contract-served  the bundle the descriptor names is served and
+    ///                    verifies (§8.4)
+    ///   resource-served  each exposed stream, state and event resource is
+    ///                    heard in the --for window, or answers a GET (§8.2)
+    ///   payload-type     every sample and reply decodes as its declared type
+    ///                    and satisfies it (§7.2, §7.3)
+    ///   qos              every sample rode the declared QoS (§2.4)
+    ///   operation        a call draws a value on its own key or a valid
+    ///                    envelope, never silence (O3); one summary per
+    ///                    replier (O6); a response of its type
+    ///   fanout-refused   a call over a template's wildcard to an operation
+    ///                    that forbids fan-out is refused fanout_forbidden
+    ///                    (O2)
+    ///   state-stamp      every state mutation and reply carries the owner's
+    ///                    own stamp, its clock the descriptor's meta.zid,
+    ///                    compared by value (S1)
+    ///   state-get        the owner answers a GET, each reply stamped (S2)
+    ///   freshness, budget  not asked: their profiles do not exist yet
+    ///
+    /// Only operations declared idempotent are called — with a request
+    /// synthesized from the bundle — unless --i-know: every other call is a
+    /// write. A resource silent in the window is unobservable, never a pass
+    /// and never unserved; an operation silent while its service holds its
+    /// tokens is a finding (O3), its message naming the access control that
+    /// returns empty too (O5).
+    ///
+    /// Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
+    /// left unobservable, the service not visible, or the run could not
+    /// start. --junit FILE also writes the suite as JUnit XML: a failure per
+    /// violation, an error per unobservable case, skipped per case not asked.
+    #[command(verbatim_doc_comment)]
+    Conform(CheckConformArgs),
     /// Check one payload against a type of a zk2 contract, exit-coded for CI.
     ///
     /// No bus write (#159): 0 = it conforms, 1 = it does not, 2 = could not
@@ -2270,6 +2309,41 @@ pub(crate) struct CheckProbeArgs {
     /// How long a value has to arrive, seconds.
     #[arg(long = "for", value_name = "SECS", default_value_t = 10.0)]
     pub(crate) for_secs: f64,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// The `check conform` verb's flags (#703) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct CheckConformArgs {
+    /// The service, `<system>/<service>`: one service, since a suite judges
+    /// one owner.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: zenkey_model::grammar::Addr,
+    /// `<name>.v<major>`, optionally `@<fingerprint>` (or a prefix of one):
+    /// the revision under test is the one the service's descriptor claims,
+    /// and a fingerprint given here must be it.
+    #[arg(value_name = "IFACE[@FP]", value_parser = revision_arg,
+          add = ArgValueCandidates::new(completion::ifaces))]
+    pub(crate) target: RevisionSpec,
+    /// How long the stream, state and event resources are listened to,
+    /// seconds.
+    #[arg(long = "for", value_name = "SECS", default_value_t = 5.0)]
+    pub(crate) for_secs: f64,
+    /// Call every exposed operation, not only those declared idempotent:
+    /// each call is a write, with a synthesized request.
+    #[arg(long = "i-know")]
+    pub(crate) i_know: bool,
+    /// Also write the suite as JUnit XML to FILE.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) junit: Option<PathBuf>,
+    /// The seed requests are synthesized with — same seed, same requests.
+    #[arg(long, default_value_t = 42)]
+    pub(crate) seed: u64,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

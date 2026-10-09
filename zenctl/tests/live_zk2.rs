@@ -3939,3 +3939,168 @@ async fn wait_for_ns(bus: &Bus, namespace: &str, addresses: &[&str]) {
         .await;
     exits(&run, 0);
 }
+
+/// One case's row in a `check conform --format json` document.
+fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
+    rows_of(doc, "case")
+        .into_iter()
+        .find(|r| r["case"] == case && r["subject"] == subject)
+        .unwrap_or_else(|| panic!("{case} {subject} has a row: {doc}"))
+}
+
+/// #703: a conforming service — FJ8a's mock owner, `gen`, publishing every
+/// resource of `tc.netif.v1` through the runtime's writers and answering
+/// every operation — passes every case asked, exit 0; the operation that
+/// is not idempotent is not called, and freshness and budget are not
+/// asked. `--junit` writes the suite.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_passes_a_conforming_service() {
+    let bus = Bus::bare(Some("acme")).await;
+    let netif = examples().join("tcgui/tc.netif.v1.toml");
+    let netif = netif.to_str().expect("a UTF-8 path").to_owned();
+    let _mock = bus.spawn(&[
+        "gen",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--contracts",
+        &netif,
+        "--rate",
+        "5",
+        "--duration",
+        "15",
+        "--namespace",
+        "acme",
+        "--format",
+        "json",
+    ]);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let junit = bus.home.join("conform.xml");
+    let junit = junit.to_str().expect("a UTF-8 path").to_owned();
+    let args = [
+        "check",
+        "conform",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--namespace",
+        "acme",
+        "--for",
+        "2",
+        "--timeout",
+        "2",
+        "--junit",
+        &junit,
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["report"], "conform");
+    assert_eq!(doc["judgement"]["answer"], "not_established", "{run}");
+    for (case, subject) in [
+        ("resource-served", "stream/bandwidth/{ns}/{iface}"),
+        ("resource-served", "state/namespaces"),
+        ("payload-type", "stream/bandwidth/{ns}/{iface}"),
+        ("payload-type", "state/interfaces/{ns}/{iface}"),
+        ("qos", "stream/bandwidth/{ns}/{iface}"),
+        ("state-stamp", "state/interfaces/{ns}/{iface}"),
+        ("state-get", "state/namespaces"),
+        ("operation", "@op/diagnostics"),
+    ] {
+        assert_eq!(
+            conform_case(&doc, case, subject)["verdict"]["answer"],
+            "not_established",
+            "{case} {subject}: {run}"
+        );
+    }
+    assert!(
+        rows_of(&doc, "case")
+            .iter()
+            .any(|c| c["case"] == "contract-served" && c["verdict"]["answer"] == "not_established"),
+        "{run}"
+    );
+    let set = conform_case(&doc, "operation", "@op/interfaces/{ns}/{iface}/set");
+    assert_eq!(
+        set["verdict"]["answer"], "not_asked",
+        "not idempotent: {run}"
+    );
+    assert_eq!(
+        conform_case(&doc, "freshness", "service")["verdict"]["answer"],
+        "not_asked"
+    );
+    let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
+    assert!(xml.contains("failures=\"0\" errors=\"0\""), "{xml}");
+    assert!(xml.contains("<skipped message=\"not asked:"), "{xml}");
+}
+
+/// #703: a service that breaks its contract three ways — a stream value
+/// that does not satisfy its type, a sample off the declared QoS, an
+/// operation it exposes and leaves silent while holding its tokens — is a
+/// violation per case, exit 1, and `--junit` says so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation() {
+    let mut bus = Bus::bare(Some("acme")).await;
+    // `stats` a string, where `json:BandwidthUpdate` declares an object.
+    let (owner, task) = publishing_owner(&bus, json!({"stats": "broken"}), true).await;
+    bus.services.push(owner);
+    bus.keep(task);
+    // A sample on the owner's stream at a priority its contract does not
+    // declare.
+    let off = intruder(
+        &bus,
+        "acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth1",
+        r#"{"namespace":"default","interface":"eth1","stats":{"rx_bytes":1,"tx_bytes":1}}"#,
+        Priority::RealTime,
+    )
+    .await;
+    bus.keep(off);
+    wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
+    let junit = bus.home.join("conform.xml");
+    let junit = junit.to_str().expect("a UTF-8 path").to_owned();
+    let args = [
+        "check",
+        "conform",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--namespace",
+        "acme",
+        "--for",
+        "2",
+        "--timeout",
+        "1",
+        "--junit",
+        &junit,
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 1
+                && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    rows_of(&d, "case")
+                        .iter()
+                        .filter(|c| c["verdict"]["answer"] == "established")
+                        .count()
+                        >= 3
+                })
+        })
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["judgement"]["answer"], "established");
+    let bandwidth = "stream/bandwidth/{ns}/{iface}";
+    let t = conform_case(&doc, "payload-type", bandwidth);
+    assert_eq!(t["verdict"]["answer"], "established", "{run}");
+    assert!(t["detail"].to_string().contains("/stats"), "{run}");
+    let q = conform_case(&doc, "qos", bandwidth);
+    assert_eq!(q["verdict"]["answer"], "established", "{run}");
+    assert!(q["detail"].to_string().contains("real_time"), "{run}");
+    let s = conform_case(&doc, "operation", "@op/diagnostics");
+    assert_eq!(s["verdict"]["answer"], "established", "{run}");
+    assert!(
+        s["detail"].to_string().contains("never silence (O3)"),
+        "{run}"
+    );
+    let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
+    assert!(xml.contains("<failure type=\"violation\""), "{xml}");
+}

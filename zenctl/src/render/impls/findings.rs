@@ -291,6 +291,118 @@ impl Render for zenkey_fleet::WhyReport {
     }
 }
 
+/// zk2's `check conform` (#703): one row per case and subject, each pole
+/// its own mark and word — `✗ violation`, `✓ passed`, `? unobservable`,
+/// `— not asked` — and its own `answer` in a `case` row. A violation is
+/// the yes of every case's question (tooling guide §1).
+impl Render for zenkey_fleet::ConformReport {
+    const FAMILY: &'static str = "conform";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = envelope_without(self, &["cases"]);
+        // The run's own judgement leads, so a document cut short still
+        // says whether the service conformed.
+        e.insert(
+            "judgement".into(),
+            serde_json::to_value(self.judgement()).expect("a judgement serializes"),
+        );
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for c in &self.cases {
+            out(Row::of("case", c));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        use crate::render::style;
+        t.line(format!(
+            "conform {} {} at {}",
+            self.address,
+            self.iface,
+            self.fingerprint.as_deref().unwrap_or("no revision")
+        ));
+        let mut grid = Grid::unheaded(4);
+        for c in &self.cases {
+            let (mark, st, word) = match &c.verdict {
+                Judgement::Established => {
+                    ("✗", style::severity(DoctorSeverity::Error), "violation")
+                }
+                Judgement::NotEstablished { .. } => ("✓", style::PASS, "passed"),
+                Judgement::Unobservable { .. } => ("?", style::UNPROVEN, "unobservable"),
+                Judgement::NotAsked => ("—", style::UNPROVEN, "not asked"),
+            };
+            let what = match (&c.verdict, &c.detail) {
+                (Judgement::NotEstablished { reason }, _)
+                | (Judgement::Unobservable { reason }, _) => format!("{word} — {reason}"),
+                (_, Some(d)) => format!("{word} — {d}"),
+                _ => word.to_owned(),
+            };
+            grid.row([
+                Cell::styled(mark, st),
+                Cell::text(format!("{} ({})", c.case, c.section)),
+                Cell::text(&c.subject),
+                Cell::text(what),
+            ]);
+        }
+        t.grid(grid);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        let mut notes = Vec::new();
+        if let Some(why) = &self.unobservable {
+            notes.push(Note::silence(why.clone()));
+        }
+        let not_called = self
+            .cases
+            .iter()
+            .filter(|c| {
+                c.verdict.is_not_asked()
+                    && matches!(
+                        c.case,
+                        zenkey_fleet::report::CaseId::Operation
+                            | zenkey_fleet::report::CaseId::FanoutRefused
+                    )
+            })
+            .count();
+        if not_called > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{not_called} operation case(s) not asked: their operations are not \
+                     idempotent, and a call is a write — pass --i-know to call every one"
+                ))
+                .cite("tooling guide O4"),
+            );
+        }
+        notes.push(
+            Note::coverage(
+                "freshness and budget are not asked: their profiles do not exist yet (#613) — \
+                 not asked is neither a pass nor a violation",
+            )
+            .cite("tooling guide O4"),
+        );
+        let count = |p: fn(&Judgement) -> bool| self.cases.iter().filter(|c| p(&c.verdict)).count();
+        notes.push(Note::summary(format!(
+            "{} case(s): {} violation(s), {} passed, {} unobservable, {} not asked.",
+            self.cases.len(),
+            count(|j| *j == Judgement::Established),
+            count(|j| matches!(j, Judgement::NotEstablished { .. })),
+            count(Judgement::is_unobservable),
+            count(Judgement::is_not_asked),
+        )));
+        notes
+    }
+
+    /// What the suite put to the bus, over its window.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.asked.clone(),
+            window_s: Some(self.window_s),
+        })
+    }
+}
+
 /// A check's pole as the table spells it: the mark, its style, and the word.
 fn verdict_cell(c: &CheckReport) -> (&'static str, anstyle::Style, &'static str) {
     use crate::render::style;

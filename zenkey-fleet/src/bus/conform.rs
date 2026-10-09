@@ -1,0 +1,447 @@
+//! zk2's `check conform` (#703), the reads: one service, read through a
+//! session in the deployment's namespace as its consumers and callers read
+//! it, against the contract revision its descriptor claims.
+//!
+//! What is read, in order:
+//! 1. presence and every instance's descriptor (§8.1, §3.3), and from the
+//!    descriptors the revision claimed and the resources exposed;
+//! 2. the claimed bundle, from its holders through a store of its own, so a
+//!    holder is asked even when `--contracts` holds the revision (§8.4);
+//! 3. over one window, at once: a subscription on every exposed stream,
+//!    state and event resource through the runtime's consumer (R1, R6); a
+//!    state GET on every exposed state resource (S4's GET, which S2 says
+//!    the owner answers); a call of every exposed operation the run may
+//!    call — an `idempotent` one, or every one under `call_all` — with a
+//!    request synthesized from the bundle; and, for a templated operation
+//!    that forbids fan-out, a call over its template's wildcard (O2), whose
+//!    refusal must come before any handler runs.
+//!
+//! Nothing is judged here: [`crate::judge::conform`] decides every case
+//! from the [`ConformObservation`] this returns.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+use std::time::Duration;
+
+use zenkey_model::authoring::Kind;
+use zenkey_model::canonical::Fingerprint;
+use zenkey_model::contract::{Body, Fanout, Resource};
+use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId};
+use zenkey_model::template::{Bindings, Segment};
+use zenoh::Session;
+use zenoh::query::{ConsolidationMode, QueryTarget};
+
+use crate::bus::contracts::BundleStore;
+use crate::bus::presence::Scope;
+use crate::model::catalog::{ContractSet, ContractState, Observed, Revision};
+use crate::model::render::Member;
+use crate::model::target::Target;
+use crate::report::{OperationReport, StateReport, WatchSample};
+
+/// How many samples a resource's subscription keeps for the judge; past
+/// it they are counted, and the cases say what they judged.
+pub const SAMPLE_CAP: usize = 256;
+
+/// What a `check conform` run waits for and may do.
+#[derive(Debug, Clone, Copy)]
+pub struct ConformSpec {
+    /// Each read's timeout: presence, a descriptor, a retrieval, a GET, a
+    /// call.
+    pub timeout: Duration,
+    /// How long the data resources are listened to.
+    pub window: Duration,
+    /// Call every exposed operation, not only the `idempotent` ones: each
+    /// call is a write (`--i-know`).
+    pub call_all: bool,
+    /// The seed requests are synthesized with.
+    pub seed: u64,
+}
+
+/// What one resource's subscription heard in the window.
+#[derive(Debug, Clone, Default)]
+pub struct Heard {
+    /// The samples kept, at most [`SAMPLE_CAP`].
+    pub samples: Vec<WatchSample>,
+    /// Samples delivered, kept or not.
+    pub received: u64,
+    /// Samples this tool fell behind on, discarded on a wildcard key (R6),
+    /// and on a concrete key no member of the resource names.
+    pub lagged: u64,
+    pub discarded: u64,
+    pub unresolved: u64,
+    /// The key expressions subscribed, base-relative.
+    pub selectors: Vec<String>,
+}
+
+/// What a call over an operation's template wildcard drew (O2).
+#[derive(Debug, Clone, Default)]
+pub struct FanoutSeen {
+    /// The key expression called, base-relative.
+    pub selector: String,
+    /// Value replies: the operation ran for a call it forbids.
+    pub values: usize,
+    /// The envelope codes of the refusals, decoded (§5.2).
+    pub codes: Vec<String>,
+    /// Replies that claim an envelope encoding and do not decode.
+    pub malformed: Vec<String>,
+    /// The transport's error replies, a timeout among them.
+    pub transport: Vec<String>,
+}
+
+/// One operation, as the run treated it.
+#[derive(Debug, Clone)]
+pub enum OpObserved {
+    /// Not called: not `idempotent`, and the run was not told to call every
+    /// operation.
+    NotCalled,
+    /// Called, and what came back; with the fan-out probe for a templated
+    /// operation that forbids fan-out.
+    Called {
+        call: std::result::Result<Box<OperationReport>, String>,
+        fanout: Option<std::result::Result<FanoutSeen, String>>,
+    },
+}
+
+/// Everything one `check conform` run read, as values.
+#[derive(Debug, Clone)]
+pub struct ConformObservation {
+    /// The namespace the session is in; empty for the bus root.
+    pub namespace: String,
+    pub address: Addr,
+    pub iface: IfaceId,
+    pub spec: ConformSpec,
+    /// A fingerprint, or a prefix of one, the caller named: the service
+    /// must claim it.
+    pub asked_fp: Option<String>,
+    /// The service's presence and descriptors.
+    pub presence: std::result::Result<Observed, String>,
+    /// The claimed bundle, as its holders served it (§8.4); `None` when no
+    /// revision could be told from the descriptors.
+    pub served: Option<std::result::Result<ContractState, String>>,
+    /// The revision the suite decodes with: the one served, else the one
+    /// `--contracts` holds.
+    pub revision: Option<Arc<Revision>>,
+    /// Each exposed stream, state and event resource's subscription.
+    pub heard: BTreeMap<String, std::result::Result<Heard, String>>,
+    /// Each exposed state resource's GET (S2).
+    pub gets: BTreeMap<String, std::result::Result<StateReport, String>>,
+    /// Each exposed operation.
+    pub calls: BTreeMap<String, OpObserved>,
+}
+
+impl ConformObservation {
+    /// The revision the served descriptors claim for the interface: one
+    /// fingerprint, or why there is none to test.
+    pub fn claimed(&self) -> std::result::Result<Fingerprint, String> {
+        let o = self
+            .presence
+            .as_ref()
+            .map_err(|e| format!("the presence read could not be made: {e}"))?;
+        let want = self.iface.to_string();
+        let fps: BTreeSet<&str> = o
+            .descriptors
+            .iter()
+            .flatten()
+            .filter_map(|(_, r)| r.descriptor())
+            .flat_map(|d| d.interfaces.iter())
+            .filter(|e| e.iface == want)
+            .map(|e| e.contract.as_str())
+            .collect();
+        match fps.len() {
+            0 => Err(format!("no descriptor of {} lists {want}", self.address)),
+            1 => {
+                let fp = fps.into_iter().next().expect("one");
+                Fingerprint::parse(fp).map_err(|e| format!("{fp:?} is not a fingerprint: {e}"))
+            }
+            _ => Err(format!(
+                "{} claims {want} at {} revisions ({}): one service, one revision under test",
+                self.address,
+                fps.len(),
+                fps.into_iter().collect::<Vec<_>>().join(", ")
+            )),
+        }
+    }
+
+    /// The resources of the revision the service exposes, by its
+    /// descriptors' compact rule (§3.3), across its instances.
+    pub fn exposed(&self) -> Vec<&Resource> {
+        let (Ok(o), Some(rev)) = (&self.presence, &self.revision) else {
+            return Vec::new();
+        };
+        let mut names: BTreeSet<String> = BTreeSet::new();
+        let mut out = Vec::new();
+        for d in o
+            .descriptors
+            .iter()
+            .flatten()
+            .filter_map(|(_, r)| r.descriptor())
+        {
+            for r in d.exposed(rev.contract()).unwrap_or_default() {
+                if names.insert(zenkey::implementation::resource_name(r)) {
+                    out.push(r);
+                }
+            }
+        }
+        out
+    }
+}
+
+/// One `check conform` run: [`observe`], then
+/// [`crate::judge::conform::judge`].
+pub async fn run_conform(
+    session: &Session,
+    offline: &ContractSet,
+    namespace: &str,
+    address: Addr,
+    iface: IfaceId,
+    asked_fp: Option<String>,
+    spec: ConformSpec,
+) -> crate::report::ConformReport {
+    let obs = observe(session, offline, namespace, address, iface, asked_fp, spec).await;
+    crate::judge::conform::judge(&obs)
+}
+
+/// The reads of the module doc.
+pub async fn observe(
+    session: &Session,
+    offline: &ContractSet,
+    namespace: &str,
+    address: Addr,
+    iface: IfaceId,
+    asked_fp: Option<String>,
+    spec: ConformSpec,
+) -> ConformObservation {
+    let t = spec.timeout;
+    let presence = crate::bus::presence::observe(session, &Scope::service(&address), t)
+        .await
+        .map_err(|e| crate::one_line(&e));
+    let mut obs = ConformObservation {
+        namespace: namespace.to_owned(),
+        address,
+        iface,
+        spec,
+        asked_fp,
+        presence,
+        served: None,
+        revision: None,
+        heard: BTreeMap::new(),
+        gets: BTreeMap::new(),
+        calls: BTreeMap::new(),
+    };
+    let Ok(fp) = obs.claimed() else {
+        return obs;
+    };
+    if obs
+        .asked_fp
+        .as_deref()
+        .is_some_and(|p| !fp.hex().to_string().starts_with(p))
+    {
+        return obs;
+    }
+    // A store of its own: the holders are asked whatever --contracts holds.
+    let served = BundleStore::new(t)
+        .fetch(session, &obs.iface, &fp)
+        .await
+        .map_err(|e| crate::one_line(&e));
+    obs.revision = match &served {
+        Ok(ContractState::Held(r)) => Some(Arc::clone(r)),
+        _ => offline.get(&obs.iface, &fp).cloned(),
+    };
+    obs.served = Some(served);
+    let Some(rev) = obs.revision.clone() else {
+        return obs;
+    };
+    let target = match Target::parse(&obs.address.to_string()) {
+        Ok(t) => t,
+        Err(_) => return obs,
+    };
+    let exposed: Vec<Resource> = obs.exposed().into_iter().cloned().collect();
+
+    // The subscriptions first, so what the GETs and the calls stir up is
+    // heard too.
+    let deadline = tokio::time::Instant::now() + spec.window;
+    let mut watches = Vec::new();
+    for r in exposed.iter().filter(|r| r.kind != Kind::Operation) {
+        let name = zenkey::implementation::resource_name(r);
+        match crate::bus::consume::watch(session, &rev, &target, r, &Bindings::new()).await {
+            Ok(w) => watches.push((name, w)),
+            Err(e) => {
+                obs.heard.insert(name, Err(crate::one_line(&e)));
+            }
+        }
+    }
+    let listen =
+        futures_util::future::join_all(watches.into_iter().map(|(name, mut w)| async move {
+            let mut heard = Heard {
+                selectors: w.selectors().to_vec(),
+                ..Heard::default()
+            };
+            while let Ok(Some(sample)) = tokio::time::timeout_at(deadline, w.next()).await {
+                heard.received += 1;
+                if heard.samples.len() < SAMPLE_CAP {
+                    heard.samples.push(sample);
+                }
+            }
+            heard.lagged = w.lagged();
+            heard.discarded = w.discarded();
+            heard.unresolved = w.unresolved();
+            (name, heard)
+        }));
+    let asks = async {
+        let mut gets = BTreeMap::new();
+        for r in exposed.iter().filter(|r| r.kind == Kind::State) {
+            let read = crate::bus::consume::StateRead {
+                revision: &rev,
+                owner: &obs.address,
+                resource: r,
+                values: &Bindings::new(),
+                timeout: t,
+            };
+            gets.insert(
+                zenkey::implementation::resource_name(r),
+                crate::bus::consume::get_state(session, read)
+                    .await
+                    .map_err(|e| crate::one_line(&e)),
+            );
+        }
+        let mut calls = BTreeMap::new();
+        for r in exposed.iter().filter(|r| r.kind == Kind::Operation) {
+            let name = zenkey::implementation::resource_name(r);
+            calls.insert(
+                name,
+                call(session, &rev, &target, &obs.address, r, spec).await,
+            );
+        }
+        (gets, calls)
+    };
+    let (heard, (gets, calls)) = tokio::join!(listen, asks);
+    obs.heard.extend(heard.into_iter().map(|(n, h)| (n, Ok(h))));
+    obs.gets = gets;
+    obs.calls = calls;
+    obs
+}
+
+/// A member value per template parameter: what a concrete call to a
+/// templated operation names. The owner may hold no such member; its
+/// refusal (`not_found`) is an answer all the same.
+fn member(r: &Resource) -> Bindings {
+    r.template
+        .params()
+        .map(|(name, _)| (name.to_owned(), vec!["conform".to_owned()]))
+        .map(|(name, mut v)| {
+            if r.params.get(&name) == Some(&zenkey_model::authoring::ParamType::Uint) {
+                v = vec!["0".to_owned()];
+            }
+            (name, v)
+        })
+        .collect()
+}
+
+/// One operation: called when the run may (an `idempotent` one, or every
+/// one under `call_all`), with a request synthesized from the bundle; and
+/// for a templated one that forbids fan-out, called over its wildcard too.
+async fn call(
+    session: &Session,
+    rev: &Revision,
+    target: &Target,
+    addr: &Addr,
+    r: &Resource,
+    spec: ConformSpec,
+) -> OpObserved {
+    let Body::Operation(op) = &r.body else {
+        return OpObserved::NotCalled;
+    };
+    if !(op.idempotent || spec.call_all) {
+        return OpObserved::NotCalled;
+    }
+    let name = zenkey::implementation::resource_name(r);
+    let request = crate::tape::synth::Synth::new(spec.seed)
+        .sample(rev, r, Member::Request, 0)
+        .map(|s| s.bytes);
+    let call = match &request {
+        Err(why) => Err(format!("no request could be synthesized: {why}")),
+        Ok(bytes) => match crate::model::target::plan_call(rev, target.clone(), &name, member(r)) {
+            Err(e) => Err(crate::one_line(&e)),
+            Ok(plan) => crate::bus::operation::call(
+                session,
+                crate::bus::operation::OperationCall {
+                    revision: rev,
+                    plan: &plan,
+                    request: bytes.clone(),
+                    timeout: spec.timeout,
+                    retries: 0,
+                },
+            )
+            .await
+            .map(Box::new)
+            .map_err(|e| crate::one_line(&e)),
+        },
+    };
+    let fanout = (r.template.has_params() && op.fanout != Fanout::Allowed).then(|| {
+        let bytes = request.clone().unwrap_or_default();
+        (rev.iface().clone(), bytes)
+    });
+    let fanout = match fanout {
+        Some((iface, bytes)) => {
+            Some(fanout_probe(session, addr, &iface, r, bytes, spec.timeout).await)
+        }
+        None => None,
+    };
+    OpObserved::Called { call, fanout }
+}
+
+/// A call over the template's wildcard (O2): target `All`, consolidation
+/// `None`, every reply kept apart — a value (the operation ran), an
+/// envelope (decoded, §5.2), the transport's own error.
+async fn fanout_probe(
+    session: &Session,
+    addr: &Addr,
+    iface: &IfaceId,
+    r: &Resource,
+    request: Vec<u8>,
+    timeout: Duration,
+) -> std::result::Result<FanoutSeen, String> {
+    let mut chunks: Vec<String> = vec![
+        GRAMMAR.to_owned(),
+        addr.system.to_string(),
+        addr.service.to_string(),
+        iface.to_string(),
+        "@op".to_owned(),
+    ];
+    for seg in r.template.segments() {
+        chunks.push(match seg {
+            Segment::Literal(l) => l.clone(),
+            Segment::Param(_) | Segment::Rest(_) => "*".to_owned(),
+        });
+    }
+    let selector = chunks.join("/");
+    let replies = session
+        .get(&selector)
+        .payload(request)
+        .target(QueryTarget::All)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .await
+        .map_err(|e| format!("GET {selector}: {e}"))?;
+    let mut seen = FanoutSeen {
+        selector,
+        ..FanoutSeen::default()
+    };
+    while let Ok(reply) = replies.recv_async().await {
+        match reply.result() {
+            Ok(_) => seen.values += 1,
+            Err(e) => {
+                let encoding = e.encoding().to_string();
+                let bytes = e.payload().to_bytes();
+                match zenkey_model::envelope::decode(&encoding, &bytes) {
+                    Ok(env) => seen.codes.push(env.code),
+                    Err(zenkey_model::envelope::EnvelopeError::Encoding(_)) => seen
+                        .transport
+                        .push(format!("{encoding}: {}", String::from_utf8_lossy(&bytes))),
+                    Err(err) => seen.malformed.push(format!("{encoding}: {err}")),
+                }
+            }
+        }
+    }
+    Ok(seen)
+}

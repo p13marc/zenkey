@@ -340,7 +340,10 @@ window: samples, rates, values against their type, the declared QoS,
 presence) · `zenctl check probe <address> <iface> <resource>` (a resource
 read the way a consumer reads it: did a value arrive, and if not, who was up
 and silent) · `zenctl check schema <iface> <resource> --from …` (one payload
-against a type of a revision) · `zenctl why <key|address>` (a key's or a
+against a type of a revision) · `zenctl check conform <address> <iface>` (one
+service against the revision it claims, as a suite: served, typed, on its QoS,
+its operations answering as O1–O7 say, its state stamped by its own session
+and answering a GET — exit 1 on a violation; `--junit` for CI) · `zenctl why <key|address>` (a key's or a
 service's silence, rung by rung — namespace, presence, descriptor, contract,
 the owner's answer, an archive's last-known — stopped at the first cause:
 exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·

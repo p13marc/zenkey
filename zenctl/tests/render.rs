@@ -248,6 +248,69 @@ why acme/zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0 — a cause, at
     assert!(notes(&cause).contains("a cause at descriptor"));
 }
 
+/// zk2's `check conform` (#703): one row per case, every pole spelled apart
+/// in every medium — a mark and a word in the table, an `answer` in the
+/// row, `detail` on a violation and on a case not asked — and the run's
+/// own judgement on the envelope. The fixture has every pole non-empty.
+#[test]
+fn a_conform_suite_spells_every_case_pole_apart_in_every_medium() {
+    let report = fx::conform_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b
+✓  contract-served (§8.4)    tc.netif.v1 sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b  passed — a holder served the bundle the descriptor names, and it verified
+✓  resource-served (§8.2)    stream/bandwidth/{ns}/{iface}                                                        passed — 12 sample(s) in the 5s window
+✗  payload-type (§7.2)       stream/bandwidth/{ns}/{iface}                                                        violation — 1 of 12 value(s) do not conform to the declared type; the first, zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object
+?  resource-served (§8.2)    state/namespaces                                                                     unobservable — nothing heard in the 5s window, and the state GET drew no reply
+✗  operation (§5.1)          @op/diagnostics                                                                      violation — host-a/tc holds its tokens, and the call drew neither a value nor an envelope within 1s: never silence (O3)
+—  operation (§5.1)          @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
+—  freshness (freshness.v1)  service                                                                              not asked — a profile (#613)
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "conform");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert!(envelope.get("cases").is_none(), "cases are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.cases.len());
+    let answers: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r["verdict"]["answer"].as_str().expect("an answer"))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "established",
+            "not_asked",
+            "not_established",
+            "unobservable"
+        ]
+        .into(),
+        "four poles, four spellings"
+    );
+    for r in rows {
+        let answer = r["verdict"]["answer"].as_str().unwrap();
+        assert_eq!(
+            r.get("detail").is_some(),
+            answer == "established" || answer == "not_asked",
+            "{r}"
+        );
+    }
+    let said = notes(&report);
+    assert!(said.contains("pass --i-know"), "{said}");
+    assert!(said.contains("their profiles do not exist yet"), "{said}");
+    assert!(
+        said.contains("7 case(s): 2 violation(s), 2 passed, 1 unobservable, 2 not asked."),
+        "{said}"
+    );
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -270,6 +333,7 @@ fn no_family_emits_trailing_whitespace() {
         }),
         table(&fx::why_report_cause()),
         table(&fx::why_report_silent()),
+        table(&fx::conform_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -1412,6 +1476,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "cache",
         "cache-action",
         "compat",
+        "conform",
         "context",
         "context-action",
         "context-list",
@@ -1560,6 +1625,11 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, None);
     let report = fx::topology();
     scoped(&zenctl::render::TopologyView { report: &report });
+    // `check conform` (#703): what the suite put to the bus, over its
+    // window.
+    let s = scoped(&fx::conform_report());
+    assert_eq!(s.asked.len(), 3);
+    assert_eq!(s.window_s, Some(5.0));
     // `why` (#702): what the ladder put to the bus — presence, the key, the
     // archives after a silence — and no window unless a stream was heard.
     let s = scoped(&fx::why_report_silent());
