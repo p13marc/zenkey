@@ -150,10 +150,18 @@
         "D010"
       ]
     },
+    "d011-tokenless-archive": {
+      "codes": [
+        "D011"
+      ]
+    },
     "not-json": {
       "codes": [
         "D000"
       ]
+    },
+    "ok-archive": {
+      "codes": []
     },
     "ok-full": {
       "codes": []

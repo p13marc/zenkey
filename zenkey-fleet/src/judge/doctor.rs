@@ -58,7 +58,7 @@ use crate::bus::admin::{
 };
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
-use crate::judge::common::FINDING_CAP;
+use crate::judge::common::{FINDING_CAP, s1_premise};
 use crate::model::catalog::zid_value;
 use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Revision};
 use crate::model::examples::Examples;
@@ -137,6 +137,9 @@ impl DoctorSpec {
             CheckId::StorageOnState,
             CheckId::AdminUnreachable,
             CheckId::RouterVersionSkew,
+            // §4.2 (0.17): an owner's stamp is clean only against the
+            // routers this run verified.
+            CheckId::StateStampForeign,
         ]
         .into_iter()
         .any(|c| self.asks(c))
@@ -194,6 +197,11 @@ pub struct AdminSpace {
     pub storages: Vec<StorageInfo>,
     /// Whether both reads ended at the routers' final reply.
     pub complete: bool,
+    /// Every zid this run knows to be a router, by value (§4.2, "A tool's
+    /// S1 check", 0.17): the routers its session is connected to, the
+    /// verified ones, and every zid a verified router lists as a `router`
+    /// session. Never this session's own.
+    pub router_zids: BTreeSet<String>,
     /// Answers that could not be shown to be a router's (§4.2, 0.12,
     /// F-80), one line each: any session can answer under
     /// `@/<zid>/router`. An answer is verified when its replier id is the
@@ -427,7 +435,11 @@ fn served(observed: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Des
 /// its key names, and that zid is a router this session is connected to
 /// (or the session itself), or one a verified router's document lists as
 /// a `router` session; or, with `trust`, on the operator's word.
-async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<AdminSpace, String> {
+pub(crate) async fn admin_space(
+    raw: &Session,
+    timeout: Duration,
+    trust: bool,
+) -> Result<AdminSpace, String> {
     let here = crate::bus::admin::here(raw).await;
     let (routers, storages) = tokio::join!(
         admin_read(raw, ROUTERS, timeout),
@@ -439,6 +451,14 @@ async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<Ad
     // Routers, verified outward (§4.2, 0.12–0.13): the rule is the admin
     // module's, shared with `admin graph`'s instance join (#705).
     let verification = RouterVerification::new(here, &routers.entries, trust);
+    let own = zid_value(&raw.zid().to_string());
+    let router_zids = verification
+        .listed()
+        .iter()
+        .chain(verification.routers())
+        .filter(|z| **z != own)
+        .cloned()
+        .collect();
     let mut unverified = BTreeSet::new();
     let mut verified = |e: &AdminEntry| -> bool {
         match verification.check(e) {
@@ -466,6 +486,7 @@ async fn admin_space(raw: &Session, timeout: Duration, trust: bool) -> Result<Ad
     Ok(AdminSpace {
         complete,
         routers,
+        router_zids,
         storages,
         unverified: unverified.into_iter().collect(),
     })
@@ -1697,21 +1718,6 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
             ));
             continue;
         };
-        // §4.2 "Observing S1" (0.16): an owner whose session is a verified
-        // router stamps with the router's own id, so its stamp and the
-        // router's cannot be told apart, and the check proves nothing.
-        if let Some(Ok(a)) = &p.obs.admin
-            && a.routers.iter().any(|r| own.contains(&zid_value(&r.zid)))
-        {
-            undecided.push(unjudged(
-                subject,
-                "the owner's session is a router this run verified: its stamp and the router's \
-                 carry one id, so S1 cannot be observed here (§4.2, \"Observing S1\")",
-            ));
-            continue;
-        }
-        owners += 1;
-        replies += n;
         let mut wrong = Vec::new();
         for (clock, (count, keys)) in &stamps.by_clock {
             match clock {
@@ -1726,6 +1732,9 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                 Some(_) => {}
             }
         }
+        // §4.2 "A tool's S1 check" (0.16, 0.17): a foreign stamp is a
+        // finding whatever else was read, since an owner that is its own
+        // router stamps with its own `meta.zid`.
         if !wrong.is_empty() {
             findings.push(finding(
                 C,
@@ -1737,11 +1746,18 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                     own.iter().cloned().collect::<Vec<_>>().join(", ")
                 ),
             ));
+            continue;
+        }
+        if let Err(why) = s1_premise(p.obs.admin.as_ref(), own) {
+            undecided.push(unjudged(subject, why));
         } else if !stamps.complete {
             undecided.push(unjudged(
                 subject,
                 "the GET ended at its timeout: a reply unseen may be stamped elsewhere",
             ));
+        } else {
+            owners += 1;
+            replies += n;
         }
     }
     CheckReport::of(
@@ -2575,6 +2591,7 @@ mod tests {
         o.namespace = "wrong".into();
         o.admin = Some(Ok(AdminSpace {
             routers: vec![router("r1", Some("1.10.1"))],
+            router_zids: ["r1".to_owned()].into(),
             storages: vec![],
             complete: true,
             unverified: vec![],
@@ -2681,6 +2698,7 @@ mod tests {
         DoctorObservation {
             namespace: "acme".into(),
             admin: Some(Ok(AdminSpace {
+                router_zids: routers.iter().map(|r| zid_value(&r.zid)).collect(),
                 routers,
                 storages,
                 complete,
@@ -2813,7 +2831,7 @@ mod tests {
             &[],
         );
         let at: (Addr, IfaceId) = ("h1/tc".parse().unwrap(), "tc.v1".parse().unwrap());
-        let mut read = |clocks: &[Option<&str>]| {
+        let read = |o: &mut DoctorObservation, clocks: &[Option<&str>]| {
             let mut s = StateStamps {
                 complete: true,
                 ..Default::default()
@@ -2824,32 +2842,39 @@ mod tests {
                 e.1.push("zk2/h1/tc/tc.v1/state/x".into());
             }
             o.stamps = [(at.clone(), Ok(s))].into();
-            check(&o, CheckId::StateStampForeign)
+            check(o, CheckId::StateStampForeign)
         };
         let own = format!("zid-{A}");
-        clean(&read(&[Some(&own)]));
-        assert!(
-            found(&read(&[Some("feed")]))
-                .evidence
-                .contains("clock feed")
-        );
-        assert!(found(&read(&[None])).evidence.contains("unstamped"));
-        assert!(clean(&read(&[])).contains("no stamp to attribute"));
-        // §4.2 (0.16): an owner that is itself a verified router proves
-        // nothing by its stamp.
+        let foreign = |r: &CheckReport| found(r).evidence.contains("clock feed");
+        // §4.2 (0.17): with no router verified, a foreign stamp is still the
+        // finding, and the owner's own proves nothing.
+        assert!(unseen(&read(&mut o, &[Some(&own)])).contains("the admin space was not read"));
+        assert!(foreign(&read(&mut o, &[Some("feed")])));
+        assert!(found(&read(&mut o, &[None])).evidence.contains("unstamped"));
+        assert!(clean(&read(&mut o, &[])).contains("no stamp to attribute"));
+        o.admin = Some(Ok(AdminSpace::default()));
+        assert!(unseen(&read(&mut o, &[Some(&own)])).contains("no router's admin answer"));
+        o.admin = Some(Err("refused".into()));
+        assert!(unseen(&read(&mut o, &[Some(&own)])).contains("could not be read"));
+        // Against a verified router that is not the owner, the owner's stamp
+        // is clean.
         o.admin = Some(Ok(AdminSpace {
-            routers: vec![router(&own, Some("1.10.1"))],
+            routers: vec![router("r1", Some("1.10.1"))],
+            router_zids: ["r1".to_owned()].into(),
             ..Default::default()
         }));
-        let mut s = StateStamps {
-            complete: true,
+        clean(&read(&mut o, &[Some(&own)]));
+        assert!(foreign(&read(&mut o, &[Some("feed")])));
+        // §4.2 (0.16): an owner that is a router this run knows, verified or
+        // only listed, proves nothing by its stamp; a foreign stamp is still
+        // the finding (0.17).
+        o.admin = Some(Ok(AdminSpace {
+            routers: vec![router("r1", Some("1.10.1"))],
+            router_zids: ["r1".to_owned(), zid_value(&own)].into(),
             ..Default::default()
-        };
-        let e = s.by_clock.entry(Some(own.clone())).or_default();
-        e.0 += 1;
-        e.1.push("zk2/h1/tc/tc.v1/state/x".into());
-        o.stamps = [(at.clone(), Ok(s))].into();
-        assert!(unseen(&check(&o, CheckId::StateStampForeign)).contains("Observing S1"));
+        }));
+        assert!(unseen(&read(&mut o, &[Some(&own)])).contains("A tool's S1 check"));
+        assert!(foreign(&read(&mut o, &[Some("feed")])));
     }
 
     // ── shm-memlock-low (§7.4) ──────────────────────────────────────────

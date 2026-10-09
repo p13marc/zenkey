@@ -79,7 +79,7 @@ Worked mappings in the zk2 tools:
 | Split-brain: do two instances serve one exclusive operation at once? (§6) | `split-brain`: the finding | none seen | a holder whose descriptor or bundle could not be read (`undecided`) |
 | A `doctor` check: does its condition fire? Every id names the condition, `split-brain` to `router-version-skew` (#612, FJ6) | a finding, with its severity, subject and evidence | clean, with the evidence that makes it clean as the reason | a subject it could not decide (Unobservable, each listed `unjudged` with why); every check that reads presence over an empty scope (Unobservable); a check the run did not ask (NotAsked) |
 | A `why` rung: is the silence caused here? `namespace` to `last-known` (#702) | a cause: the finding, and the ladder stops | healthy, with its evidence | a rung whose read could not be had, the owner's silence included (Unobservable); every rung past the stop, and an operation's answer, never called (NotAsked) |
-| A `check conform` case: does the service break this rule here? `contract-served` to `state-get` (#703) | a violation, with what broke it | passed, with the evidence | a resource silent in the window, a stamp no `meta.zid` attributes (Unobservable); an operation not idempotent without `--i-know`, a raw type, the profile-backed cases (NotAsked) |
+| A `check conform` case: does the service break this rule here? `contract-served` to `state-get` (#703) | a violation, with what broke it | passed, with the evidence | a resource silent in the window, a stamp no `meta.zid` attributes, a present service's silent call without `--calls-granted` (§5.1, 0.17) (Unobservable); an operation not idempotent without `--i-know`, a raw type, the profile-backed cases (NotAsked) |
 
 ## 2. Silence is never a verdict
 

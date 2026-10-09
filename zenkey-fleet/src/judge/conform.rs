@@ -25,6 +25,8 @@ use zenkey_model::contract::{Body, Fanout, Resource};
 use zenkey_model::schema::TypeId;
 
 use crate::bus::conform::{ConformObservation, FanoutSeen, Heard, OpObserved};
+use crate::judge::common::s1_premise;
+use crate::judge::doctor::AdminSpace;
 use crate::model::catalog::{ContractState, Revision, zid_value};
 use crate::model::lens::conformance;
 use crate::report::{
@@ -156,9 +158,12 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
                         if let Ok(seen) = f {
                             report.asked.push(seen.selector.clone());
                         }
-                        report
-                            .cases
-                            .push(fanout_refused(&name, f.as_ref(), present));
+                        report.cases.push(fanout_refused(
+                            &name,
+                            f.as_ref(),
+                            present,
+                            obs.spec.calls_granted,
+                        ));
                     }
                 }
             }
@@ -178,7 +183,9 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report.cases.push(payload_type(rev, r, &name, heard, get));
         report.cases.push(qos(&name, heard));
         if r.kind == Kind::State {
-            report.cases.push(state_stamp(&name, &owners, heard, get));
+            report
+                .cases
+                .push(state_stamp(&name, &owners, obs.admin.as_ref(), heard, get));
             report.cases.push(state_get(&name, get));
         }
     }
@@ -467,6 +474,7 @@ fn qos(name: &str, heard: Option<&Result<Heard, String>>) -> ConformCase {
 fn state_stamp(
     name: &str,
     owners: &BTreeSet<String>,
+    admin: Option<&Result<AdminSpace, String>>,
     heard: Option<&Result<Heard, String>>,
     get: Option<&Result<StateReport, String>>,
 ) -> ConformCase {
@@ -534,13 +542,21 @@ fn state_stamp(
             ),
         );
     }
+    // §4.2 "A tool's S1 check" (0.17): the owner's own stamp passes only
+    // against the routers this run verified.
+    if let Err(why) = s1_premise(admin, owners) {
+        return ConformCase::unobservable(C, name, why);
+    }
     ConformCase::passed(
         C,
         name,
         format!(
             "{} mutation(s) and repl(ies), every one stamped by the owner's own session, \
-             compared by value",
-            stamps.len()
+             compared by value, against {} verified router(s)",
+            stamps.len(),
+            admin
+                .and_then(|a| a.as_ref().ok())
+                .map_or(0, |a| a.routers.len())
         ),
     )
 }
@@ -594,6 +610,12 @@ fn state_get(name: &str, get: Option<&Result<StateReport, String>>) -> ConformCa
     )
 }
 
+/// Why a present owner's silence is not the O3 finding without the
+/// operator's word (§5.1, 0.17).
+const UNGRANTED: &str = "an access-control refusal is silent too (O5), and no tool can observe \
+                         its grants (§11.3); this is the O3 finding only when the operator says \
+                         the grants let this tool call (§5.1)";
+
 /// O1–O7: what one call drew.
 fn operation(
     obs: &ConformObservation,
@@ -623,7 +645,16 @@ fn operation(
         }
     };
     let silent = |present_now: bool| {
-        if present_now {
+        if present_now && !obs.spec.calls_granted {
+            ConformCase::unobservable(
+                C,
+                name,
+                format!(
+                    "{} holds its tokens, and the call drew silence within {t}s: {UNGRANTED}",
+                    obs.address
+                ),
+            )
+        } else if present_now {
             ConformCase::failed(
                 C,
                 name,
@@ -738,7 +769,12 @@ fn operation(
 }
 
 /// O2: a call over the template's wildcard, refused `fanout_forbidden`.
-fn fanout_refused(name: &str, seen: Result<&FanoutSeen, &String>, present: bool) -> ConformCase {
+fn fanout_refused(
+    name: &str,
+    seen: Result<&FanoutSeen, &String>,
+    present: bool,
+    granted: bool,
+) -> ConformCase {
     const C: CaseId = CaseId::FanoutRefused;
     let seen = match seen {
         Ok(s) => s,
@@ -788,7 +824,16 @@ fn fanout_refused(name: &str, seen: Result<&FanoutSeen, &String>, present: bool)
             ),
         );
     }
-    if present {
+    if present && !granted {
+        ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "a call over `{}` drew no refusal while the service holds its tokens: {UNGRANTED}",
+                seen.selector
+            ),
+        )
+    } else if present {
         ConformCase::failed(
             C,
             name,
@@ -1064,6 +1109,8 @@ mod tests {
                 window: Duration::from_secs(2),
                 call_all: false,
                 seed: 42,
+                trust_admin: false,
+                calls_granted: true,
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
@@ -1072,6 +1119,16 @@ mod tests {
             heard: BTreeMap::new(),
             gets: BTreeMap::new(),
             calls: BTreeMap::new(),
+            admin: Some(Ok(AdminSpace {
+                routers: vec![crate::report::RouterInfo {
+                    zid: "r1".into(),
+                    version: None,
+                    locators: vec![],
+                    raw: json!({}),
+                }],
+                router_zids: ["r1".to_owned()].into(),
+                ..Default::default()
+            })),
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -1161,6 +1218,16 @@ mod tests {
             "{:?}",
             r.asked
         );
+        // §4.2 (0.17): without a verified router, the owner's own stamp
+        // proves nothing, and the run is no pass.
+        let mut o = conforming();
+        o.admin = Some(Err("refused".into()));
+        let r = judge(&o);
+        assert!(matches!(
+            &case(&r, CaseId::StateStamp, "state/status/{dev}").verdict,
+            Judgement::Unobservable { reason } if reason.contains("could not be read")
+        ));
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
     }
 
     /// A wrong type, a QoS mismatch, a silent operation while present: three
@@ -1228,6 +1295,15 @@ mod tests {
         let st = failed(&r, CaseId::StateStamp, "state/status/{dev}");
         assert!(st.contains("stamped by clock ffff"), "{st}");
         assert_eq!(r.failures().count(), 4);
+        // §5.1 (0.17): without the operator's word on the grants, the
+        // silence is unobservable, never the finding.
+        o.spec.calls_granted = false;
+        let r = judge(&o);
+        assert!(matches!(
+            &case(&r, CaseId::Operation, "@op/diag").verdict,
+            Judgement::Unobservable { reason } if reason.contains("§11.3")
+        ));
+        assert_eq!(r.failures().count(), 3);
     }
 
     /// O6 and O2: a replier without exactly one summary, a fan-out that ran
@@ -1252,6 +1328,18 @@ mod tests {
         let r = judge(&o);
         assert!(failed(&r, CaseId::Operation, "@op/list").contains("possibly partial (O6)"));
         assert!(failed(&r, CaseId::FanoutRefused, "@op/set/{dev}").contains("ran: 2 value"));
+        // No refusal and no value from a present service: the O3 finding
+        // only on the operator's word (§5.1, 0.17).
+        o.calls.insert("@op/set/{dev}".into(), fanout(seen(0, &[])));
+        let r = judge(&o);
+        assert!(failed(&r, CaseId::FanoutRefused, "@op/set/{dev}").contains("drew no refusal"));
+        o.spec.calls_granted = false;
+        let r = judge(&o);
+        assert!(matches!(
+            &case(&r, CaseId::FanoutRefused, "@op/set/{dev}").verdict,
+            Judgement::Unobservable { reason } if reason.contains("§11.3")
+        ));
+        o.spec.calls_granted = true;
         o.calls
             .insert("@op/set/{dev}".into(), fanout(seen(0, &["not_found"])));
         let r = judge(&o);

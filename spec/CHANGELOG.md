@@ -3,6 +3,67 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.17 — 2026-10-09: what a tool needs that it cannot read off the bus (#713)
+
+The Python implementation read 0.16 cold (PR #712, F-89 to F-91). Its rules
+held, but three of them left an implementation guessing about something no
+tool can observe: whether an owner is its own router, what its grants are,
+and where a tokenless archive is refused. Each gap becomes a rule. In two
+places the reference changes, because it was the implementation that guessed
+wrong.
+
+**Changed: rules stated.**
+- **S1 without a verified router (§4.2, "A tool's S1 check"; F-89).** A
+  foreign stamp is a finding whatever else the tool read: an owner that is
+  its own router stamps with its own `meta.zid`. An owner's own stamp is
+  clean only when the tool verified at least one router, and `meta.zid` is
+  none of the zids it knows to be routers. Those are the routers its session
+  is connected to, the routers it verified, and every zid a verified router
+  lists as a `router` session. Otherwise S1 is unobservable for that owner.
+  - The reference doctor used to judge by `meta.zid` alone when it had not
+    read the admin space, and read it only for other checks.
+    `state-stamp-foreign` now reads it, and `check conform`'s `state-stamp`
+    does too, so that a conforming service can still pass. Both apply the
+    rule through one function, with a unit test for each pole and a live
+    one beside a router whose admin space is on.
+  - Python's guess differed in one place. It held a foreign stamp
+    unobservable when no router was verified. That stamp is a finding,
+    because the owner's own router could not have made it.
+- **Where a tool learns its grants (§5.1 O3; F-90).** No tool can observe
+  its grants (§11.3). It learns that they let it call from its operator, or
+  from the deployment's §11.1 input. A deployment without access control
+  lets everyone call. Told so, a silence from a present owner is the
+  finding. Not told, the silence is unobservable, because O5 forbids taking
+  an empty reply set as a verdict.
+  - The reference `check conform` had held such a silence as a finding,
+    with a caveat, which is the reading O5 rules out.
+  - It now takes `--calls-granted`, the operator's word, after the operator
+    alternative of §4.2 (`--trust-admin-space`). Its live test passes the
+    flag, and checks that without it the silence is unobservable.
+- **Where a tokenless archive is refused (§4.4, §8.2 step 2; F-91).** Step 2
+  refuses an owner whose tokenless set names `archive.v1`, whether or not
+  it implements the interface, because the set is the deployment's
+  configuration. A descriptor that marks `archive.v1` `"token": false` is the
+  new D011.
+  - The reference moved its refusal from `Archive::start` into the runtime's
+    step 2, so every owner is checked.
+  - `presence.md` §2 gains step 6, watched through R1 against a control.
+  - New descriptor fixtures: `d011-tokenless-archive` and `ok-archive`.
+
+**What this costs.** zenoh leaves a router's admin space off by default. A
+tool that cannot read it now reports S1 unobservable, where it used to read
+clean. That is the honest outcome, and the same one the doctor gives for a
+storage it cannot see. A deployment that wants S1 judged from outside turns
+its routers' admin space on, and grants its tools the admin read (§11.1).
+
+**Deliberately not changed.**
+- **No operator word that owners are not routers.** The S1 premise could
+  have had a flag like `--calls-granted`. It is not needed, because the
+  admin space answers the question when it is on.
+- **The descriptor does not state its session's mode.** `meta` stays
+  informative and unchecked (§3.3). A mode no tool could verify would not
+  replace the routers' own word.
+
 ## 0.16 — 2026-10-09: what the tools' last verbs could not decide (#708)
 
 FK1 built zenctl's `why`, `check conform`, `storage gen` and `admin graph`

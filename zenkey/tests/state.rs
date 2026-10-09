@@ -789,7 +789,8 @@ async fn state_and_events_carry_their_attachments() {
 }
 
 /// Core §4.4 (0.16): an archive is never tokenless, because consumers and
-/// tools find it by its interface token (S6); one configured so is refused.
+/// tools find it by its interface token (S6); one configured so is refused
+/// at §8.2 step 2 (0.17).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_archive_is_never_tokenless() {
     let (_r1, ep) = router(None).await;

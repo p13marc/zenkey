@@ -206,6 +206,13 @@ impl RouterVerification {
         }
     }
 
+    /// This session, the routers it is connected to, and every zid a
+    /// verified router lists as a `router` session, by zid value: the zids
+    /// known to be routers, verified or not (§4.2, 0.17), and this session.
+    pub fn listed(&self) -> &BTreeSet<String> {
+        &self.listed
+    }
+
     /// The verified routers, by zid value.
     pub fn routers(&self) -> &BTreeSet<String> {
         &self.routers

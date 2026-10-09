@@ -69,7 +69,7 @@ pub fn contract() -> Contract {
     l.contract.expect("archive.v1's contract loads")
 }
 
-fn iface() -> IfaceId {
+pub(crate) fn iface() -> IfaceId {
     "archive.v1".parse().expect("an interface id")
 }
 
@@ -450,15 +450,8 @@ impl Archive {
                     .map_err(zenoh)?,
             );
         }
-        // §4.4 (0.16): an archive holds its interface token, because
-        // consumers and tools find it by that token (S6).
-        if config.service.tokenless.contains(&iface()) {
-            return Err(Error::Contract(
-                "archive.v1 is never tokenless: consumers and tools find an archive by its \
-                 interface token (§4.4)"
-                    .to_owned(),
-            ));
-        }
+        // §4.4: an archive holds its interface token; `start` refuses a
+        // tokenless set that names it (§8.2 step 2, 0.17).
         let mut b = ServiceBuilder::new(session, config.service);
         b.implement(Implementation::new(contract()))?;
         let i = Arc::clone(&inner);

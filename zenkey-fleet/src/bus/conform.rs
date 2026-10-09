@@ -33,6 +33,7 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
+use crate::judge::doctor::DoctorBus;
 use crate::model::catalog::{ContractSet, ContractState, Observed, Revision};
 use crate::model::render::Member;
 use crate::model::target::Target;
@@ -55,6 +56,14 @@ pub struct ConformSpec {
     pub call_all: bool,
     /// The seed requests are synthesized with.
     pub seed: u64,
+    /// Trust every admin-space answer on the operator's word (§4.2), as
+    /// the doctor's `trust_admin`.
+    pub trust_admin: bool,
+    /// The operator's word that this tool's grants let it call the service,
+    /// or that the deployment runs no access control (§5.1, 0.17). No tool
+    /// can observe its grants (§11.3): without this, a present owner's
+    /// silence is unobservable, never the O3 finding (O5).
+    pub calls_granted: bool,
 }
 
 /// What one resource's subscription heard in the window.
@@ -127,6 +136,9 @@ pub struct ConformObservation {
     pub gets: BTreeMap<String, std::result::Result<StateReport, String>>,
     /// Each exposed operation.
     pub calls: BTreeMap<String, OpObserved>,
+    /// The routers' admin space, read un-namespaced: an owner's own stamp
+    /// proves S1 only against the routers it verified (§4.2, 0.17).
+    pub admin: Option<std::result::Result<crate::judge::doctor::AdminSpace, String>>,
 }
 
 impl ConformObservation {
@@ -189,34 +201,38 @@ impl ConformObservation {
 /// One `check conform` run: [`observe`], then
 /// [`crate::judge::conform::judge`].
 pub async fn run_conform(
-    session: &Session,
+    bus: &DoctorBus,
     offline: &ContractSet,
-    namespace: &str,
     address: Addr,
     iface: IfaceId,
     asked_fp: Option<String>,
     spec: ConformSpec,
 ) -> crate::report::ConformReport {
-    let obs = observe(session, offline, namespace, address, iface, asked_fp, spec).await;
+    let obs = observe(bus, offline, address, iface, asked_fp, spec).await;
     crate::judge::conform::judge(&obs)
 }
 
-/// The reads of the module doc.
+/// The reads of the module doc: the service's through `bus.session`, in
+/// the deployment's namespace, and the routers' admin space through
+/// `bus.raw`, in none (S1, §4.2, 0.17).
 pub async fn observe(
-    session: &Session,
+    bus: &DoctorBus,
     offline: &ContractSet,
-    namespace: &str,
     address: Addr,
     iface: IfaceId,
     asked_fp: Option<String>,
     spec: ConformSpec,
 ) -> ConformObservation {
     let t = spec.timeout;
-    let presence = crate::bus::presence::observe(session, &Scope::service(&address), t)
-        .await
-        .map_err(|e| crate::one_line(&e));
+    let session = &bus.session;
+    let scope = Scope::service(&address);
+    let (presence, admin) = tokio::join!(
+        crate::bus::presence::observe(session, &scope, t),
+        crate::judge::doctor::admin_space(&bus.raw, t, spec.trust_admin),
+    );
+    let presence = presence.map_err(|e| crate::one_line(&e));
     let mut obs = ConformObservation {
-        namespace: namespace.to_owned(),
+        namespace: bus.namespace.clone(),
         address,
         iface,
         spec,
@@ -227,6 +243,7 @@ pub async fn observe(
         heard: BTreeMap::new(),
         gets: BTreeMap::new(),
         calls: BTreeMap::new(),
+        admin: Some(admin),
     };
     let Ok(fp) = obs.claimed() else {
         return obs;

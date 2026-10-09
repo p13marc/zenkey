@@ -3952,10 +3952,12 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// resource of `tc.netif.v1` through the runtime's writers and answering
 /// every operation — passes every case asked, exit 0; the operation that
 /// is not idempotent is not called, and freshness and budget are not
-/// asked. `--junit` writes the suite.
+/// asked. `--junit` writes the suite. The router's admin space is on: the
+/// owner's own stamp passes only against a router this run verified (S1,
+/// §4.2, 0.17).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_passes_a_conforming_service() {
-    let bus = Bus::bare(Some("acme")).await;
+    let bus = Bus::admin(Some("acme")).await;
     let netif = examples().join("tcgui/tc.netif.v1.toml");
     let netif = netif.to_str().expect("a UTF-8 path").to_owned();
     let _mock = bus.spawn(&[
@@ -4072,6 +4074,9 @@ async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation(
         &junit,
         "--format",
         "json",
+        // No access control here: the operator's word that a silent call is
+        // the O3 finding (§5.1, 0.17).
+        "--calls-granted",
     ];
     let run = bus
         .until(&args, |r| {
@@ -4103,4 +4108,21 @@ async fn check_conform_names_a_wrong_type_a_qos_mismatch_and_a_silent_operation(
     );
     let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
     assert!(xml.contains("<failure type=\"violation\""), "{xml}");
+    // Without that word, the same silence is unobservable: no tool can
+    // observe its grants (§5.1, §11.3).
+    let unsaid = &args[..args.len() - 1];
+    let run = bus
+        .until(unsaid, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                conform_case(&d, "operation", "@op/diagnostics")["verdict"]["answer"]
+                    == "unobservable"
+            })
+        })
+        .await;
+    let doc = run.json();
+    let s = conform_case(&doc, "operation", "@op/diagnostics");
+    assert!(
+        s["verdict"]["reason"].to_string().contains("§11.3"),
+        "{run}"
+    );
 }

@@ -2344,6 +2344,18 @@ pub(crate) struct CheckConformArgs {
     /// The seed requests are synthesized with — same seed, same requests.
     #[arg(long, default_value_t = 42)]
     pub(crate) seed: u64,
+    /// Trust every admin-space answer, not only a verified router's: an
+    /// owner's own stamp passes `state-stamp` only against the routers this
+    /// run verified (spec §4.2, 0.17). Pass it only when the deployment's
+    /// grants deny `@/**` queryables to every principal (§11.1).
+    #[arg(long)]
+    pub(crate) trust_admin_space: bool,
+    /// This tool's grants let it call the service, or the deployment runs no
+    /// access control: a silent call to a present service is then a finding
+    /// (O3). No tool can observe its grants (spec §5.1, 0.17), so without
+    /// this flag such a silence is unobservable.
+    #[arg(long)]
+    pub(crate) calls_granted: bool,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

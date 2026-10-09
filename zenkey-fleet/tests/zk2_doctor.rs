@@ -731,11 +731,12 @@ async fn an_archive_serving_unconfirmed_keys_is_unaligned() {
 // ─── state-stamp-foreign: state.md §1 (deep) ────────────────────────────────
 
 /// state.md §1 under `deep`: the runtime's owner answers its state with its
-/// own session's stamp (S1, S2), which is clean; an owner answering a state
-/// GET unstamped is the finding.
+/// own session's stamp (S1, S2), which is clean against the router this run
+/// verified (§4.2, 0.17); an owner answering a state GET unstamped is the
+/// finding.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
-    let (_r, ep) = router(false).await;
+    let (_r, ep) = router(true).await;
     let (owners, tool, raw) = (client(&ep).await, client(&ep).await, client(&ep).await);
     let netif = example("tcgui/tc.netif.v1");
     let mut b = ServiceBuilder::new(&owners, config("host-a/tc"));
@@ -797,7 +798,11 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
     assert!(
         !c.findings
             .iter()
-            .any(|f| f.subject.starts_with("host-a/tc")),
+            .any(|f| f.subject.starts_with("host-a/tc"))
+            && !c
+                .unjudged
+                .iter()
+                .any(|u| u.subject.starts_with("host-a/tc")),
         "the owner's own stamp is clean: {c:#?}"
     );
     // Without `deep`, the data plane is not asked.

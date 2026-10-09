@@ -146,6 +146,10 @@ pub const CODES: &[(&str, &str)] = &[
         "a profile id is not <name>.v<major>, or is listed twice",
     ),
     (
+        "D011",
+        "archive.v1 is marked tokenless: an archive is never tokenless",
+    ),
+    (
         "E000",
         "the file is not valid TOML 1.0, or does not fit the authoring format's shape",
     ),
