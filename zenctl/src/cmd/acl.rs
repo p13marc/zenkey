@@ -51,7 +51,7 @@ pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("acl gen --chec
 
 /// The enrollment file, parsed: a shape the engine owns
 /// (`report::Enrollment`) and a file only the frontend reads.
-fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrollment> {
+pub(crate) fn load_enrollment(path: &Path) -> Result<zenkey_fleet::report::Enrollment> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("enrollment {}", path.display()))
         .map_err(|e| unaskable!("{e:#}"))?;

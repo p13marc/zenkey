@@ -1054,48 +1054,71 @@ pub(crate) enum StorageCmd {
     /// state families against the storages) left with the v1 registry; a
     /// storage on an owner's state keys is the doctor's `storage-on-state`.
     List(StorageListArgs),
-    /// Generate the router's storage config from a deployment file
+    /// Generate the router's storage config from the deployment
     ///
-    /// Plan the router's storages from a small deployment file, and emit the
-    /// `plugins.storage_manager` block (RFC 09 §2, #393).
+    /// Plan the router's storages, and emit the `plugins.storage_manager`
+    /// block (RFC 09 §2, #393; zk2's since #704), from either or both of:
     ///
-    /// Each storage names its selector, relative to the deployment namespace;
-    /// the `strip_prefix` is derived as the selector's literal leftmost run,
-    /// and a volume's capability pair comes from RFC 09 §2.1's table (per
-    /// volume — one volume per history mode from the same plugin). A
-    /// `garbage_collection.lifespan` is the file's, or zenoh's 24 h default,
-    /// and says which: a zk2 contract declares no tombstone lifetime to
-    /// derive one from.
+    ///   --enrollment   the enrollment `acl gen` reads, with --contracts: a
+    ///                  UNION STORAGE per event resource of every interface an
+    ///                  enrolled service implements (spec §2.6), keyed
+    ///                  zk2/*/*/<iface>/events/<template>/<ulid>, its
+    ///                  garbage_collection.lifespan the contract's retention
+    ///   --deployment   a file naming volumes, storages by selector, and the
+    ///                  [events] block the union storages use
+    ///
+    /// NEVER ON STATE (spec §4.2 S4): nothing is derived on any owner's
+    /// state/** or @state/**, and a file's selector that intersects one is
+    /// refused, citing S4 — exit 2, whatever else the plan holds. Current
+    /// state is the owner's answer; last-known state is an archive's. An
+    /// enrolled archive is listed and never planned: zenoh 1.10.1's storage
+    /// manager accepts a put older than a delete it holds, so it cannot be an
+    /// archive's store (§4.4).
+    ///
+    /// Each storage's `strip_prefix` is derived as its selector's literal
+    /// leftmost run, and a volume's capability pair comes from RFC 09 §2.1's
+    /// table (per volume — one volume per history mode from the same plugin).
+    /// A file's storage takes its lifespan from the file, or zenoh's 24 h
+    /// default, and says which. With no [events] volume, the union storages
+    /// use an implicit memory volume, and the plan says it is volatile.
     ///
     /// The plan refuses what the router would refuse — replication on an
     /// all-mode volume (§2.2), a volume nobody declared, a selector that is
     /// not a key expression — and warns where a caveat applies: overlapping
     /// selectors (§2), `complete = true` off a replicated latest-mode storage
-    /// (§2.2), retention that is the database's and not zenoh's (§2.3),
-    /// redb's mandatory retention in all mode (§2.1).
+    /// (§2.2), retention that is the database's and not zenoh's (§2.3) or a
+    /// replay's and not the storage's (spec §2.6), redb's mandatory retention
+    /// in all mode (§2.1).
     ///
     /// Four ways out. The plan report (`--format` as everywhere); `--json5`,
     /// the zenohd block with every derivation and warning as a comment beside
-    /// the storage it concerns; `--check`, an exit-coded comparison with what
-    /// a live router runs (0 as planned, 1 a difference, 2 no verdict); and
-    /// `--explain <key>`, which planned storage takes a key and why. `gen`
-    /// alone is an act: exit 0, or 2 when every storage was refused.
+    /// the storage it concerns; `--check`, an exit-coded comparison (0 as
+    /// planned, 1 a difference, 2 no verdict) with a router config file
+    /// (`--against`, as `acl gen` has it) or, without it, with what a live
+    /// router's admin space reports; and `--explain <key>`, which planned
+    /// storage takes a key and why. `gen` alone is an act: exit 0, or 2 when
+    /// every storage was refused or one sits on owners' state.
     ///
     /// The deployment file, in full:
     ///
-    ///   base = "fleet-a"               # the namespace; default = --namespace / context / ""
+    ///   base = "fleet-a"               # the namespace; default = the enrollment's / --namespace / ""
     ///
     ///   [volumes.fs]                   # id; `backend` is emitted when it differs
     ///   plugin = "fs"                  # memory | fs | rocksdb | influxdb | redb | other
     ///   # history = "latest"           # fixed by the plugin; per volume for redb
     ///   dir = "/var/lib/zenoh/fs"      # any other key passes through verbatim
     ///
-    ///   [storages.events]
-    ///   selector = "zk2/*/*/*/events/**"   # relative to the namespace
+    ///   [events]                       # where the enrollment's union storages go
+    ///   volume = "fs"
+    ///   replication = true             # as below; the selector and lifespan are derived
+    ///   params = { dir = "events" }
+    ///
+    ///   [storages.plant]
+    ///   selector = "plant/**"          # relative to the namespace; never on state/**
     ///   volume = "fs"
     ///   replication = true             # or { interval = 10.0, … } (RFC 09 §2.2)
     ///   complete = true                # honoured only where §2.2 allows it
-    ///   params = { dir = "events" }    # merged into `volume: { id: "fs", … }`
+    ///   params = { dir = "plant" }     # merged into `volume: { id: "fs", … }`
     ///   # retention = { … }            # the backend's own block (redb), verbatim
     ///   # gc_period_s = 30             # garbage_collection.period
     ///   # gc_lifespan_s = 86400        # garbage_collection.lifespan; default zenoh's 24 h
@@ -2446,13 +2469,22 @@ pub(crate) struct StorageListArgs {
     pub(crate) session: SessionArgs,
 }
 
-/// The `storage gen` verb's flags (#393) — one struct the dispatcher hands
-/// over whole, destructured in the verb rather than in `run()` (#354).
+/// The `storage gen` verb's flags (#393, #704) — one struct the dispatcher
+/// hands over whole, destructured in the verb rather than in `run()` (#354).
 #[derive(clap::Args)]
+#[command(group(clap::ArgGroup::new("input").required(true).multiple(true)
+    .args(["enrollment", "deployment"])))]
 pub(crate) struct StorageGenArgs {
+    /// The enrollment (TOML) `acl gen` reads: the services and the
+    /// interfaces they implement, whose contracts' event resources become
+    /// union storages (spec §2.6). Needs --contracts.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) enrollment: Option<PathBuf>,
     /// The deployment file (TOML) — see the long help for its shape.
     #[arg(long, value_name = "FILE")]
-    pub(crate) deployment: PathBuf,
+    pub(crate) deployment: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     /// Emit the zenohd `plugins.storage_manager` block (JSON5, with every
     /// derivation and warning as a comment beside the storage it concerns)
     /// instead of the plan report.
@@ -2462,13 +2494,20 @@ pub(crate) struct StorageGenArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long, conflicts_with_all = ["check", "explain"])]
     pub(crate) json5: bool,
-    /// Compare the plan against the storages a live router runs (the admin
-    /// space): missing, extra, a differing key_expr / strip_prefix / volume,
-    /// a gc.lifespan below the plan's. Exit 0 = as planned, 1 = a
-    /// difference, 2 = no verdict (the admin space answered nothing, or the
-    /// question could not be put).
+    /// Compare the plan against what a router runs: missing, extra, a
+    /// differing key_expr / strip_prefix / volume, a gc.lifespan below the
+    /// plan's, and any storage on owners' state (S4). Against a router config
+    /// file with --against; otherwise the storages a live router's admin
+    /// space reports. Exit 0 = as planned, 1 = a difference, 2 = no verdict
+    /// (an admin space that answered nothing, a file zenoh refuses, or a
+    /// question that could not be put).
     #[arg(long, conflicts_with = "explain")]
     pub(crate) check: bool,
+    /// With --check: the router's JSON5 config file, read through zenoh's
+    /// own loader, so what is compared is what zenohd would run. Opens no
+    /// session.
+    #[arg(long, value_name = "FILE", requires = "check")]
+    pub(crate) against: Option<PathBuf>,
     /// Which planned storage(s) would take this key, and why — pure over the
     /// plan, exit 0.
     #[arg(long, value_name = "KEY")]

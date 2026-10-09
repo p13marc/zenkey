@@ -1739,7 +1739,7 @@ fn a_storage_check_draws_each_finding_and_keeps_unjudged_apart() {
     assert_data_eq!(
         table(&fx::storage_check()),
         str![[r#"
-storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s)
+storage check for namespace "acme" against the admin space: 3 planned, 3 observed row(s) — 4 finding(s)
   ✗ events@aabbccdd  strip_prefix differs          planned acme/zk2, observed acme
   ✗ events@aabbccdd  gc.lifespan below the plan's  planned 86400, observed 600
   ✗ timeseries       missing                       planned acme/zk2/*/*/*/stream/**
@@ -1756,11 +1756,91 @@ storage check for namespace "acme": 3 planned, 3 observed row(s) — 4 finding(s
     assert_data_eq!(
         table(&fx::storage_check_unobservable()),
         str![[r#"
-storage check for namespace "acme": 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
+storage check for namespace "acme" against the admin space: 3 planned, 0 observed row(s) — no verdict — the admin space answered no storages
 
 "#]]
     );
     assert!(notes(&fx::storage_check_unobservable()).contains("RFC 05 §3.1"));
+}
+
+/// #704: a plan derived from an enrollment names where each union storage
+/// came from, and every list the derivation keeps — interfaces whose
+/// contract was not given, interfaces without events, archives never
+/// planned, the S4 refusal — reaches the notes, a script included, each
+/// its own sentence; the derived storage's row carries `derived`.
+#[test]
+fn an_enrolled_storage_plan_names_its_union_storages_and_what_it_left_out() {
+    let plan = fx::storage_plan_enrolled();
+    assert_data_eq!(
+        table(&plan),
+        str![[r#"
+storage plan for namespace "acme"
+
+volumes:
+  memory  memory  volatile · latest
+    ! implicit_volume: no deployment file names an [events] volume: volatile (RFC 09 §2.1)
+
+storages:
+  events-tc.netem.v1-applied  acme/zk2/*/*/tc.netem.v1/events/applied/*  memory (latest)
+    union storage for tc.netem.v1 events/applied, implemented by h-20609002f7b6/tc, h-3fa9c2d41b7e/tc
+    strip acme/zk2
+    gc lifespan 604800 s (period 30 s): the contract's retention for tc.netem.v1 events/applied, 7d (604800 s, spec §2.6)
+    ! retention_not_enforced: the contract's retention (7d) bounds a replay, not this storage (spec §2.6)
+
+"#]]
+    );
+    let said = notes(&plan);
+    for want in [
+        "refused storage latest:",
+        "from the enrollment: 1 union storage(s)",
+        "not planned: nav.v2",
+        "tc.netif.v1 declare(s) no event resource",
+        "archive ground/archive: not planned",
+    ] {
+        assert!(said.contains(want), "{want:?} in {said}");
+    }
+    let lines: Vec<serde_json::Value> = ndjson(&plan)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(
+        envelope["enrollment"]["archives"],
+        serde_json::json!(["ground/archive"])
+    );
+    let notes_text = envelope["notes"].to_string();
+    assert!(
+        notes_text.contains("not planned: nav.v2") && notes_text.contains("archive ground/archive"),
+        "a script reads what was left out: {envelope}"
+    );
+    let storage = lines.iter().find(|l| l["row"] == "storage").expect("a row");
+    assert_eq!(storage["derived"]["resource"], "events/applied");
+    let refusal = lines.iter().find(|l| l["row"] == "refusal").expect("a row");
+    assert_eq!(refusal["cite"], "spec §4.2 S4");
+}
+
+/// #704: a check against a router file names the file, carries no zid on
+/// its findings, keeps a storage on owners' state its own kind, and claims
+/// no scope on the bus — a file is read, not observed.
+#[test]
+fn a_storage_check_against_a_file_names_it_and_its_s4_finding() {
+    let check = fx::storage_check_file();
+    assert_data_eq!(
+        table(&check),
+        str![[r#"
+storage check for namespace "acme" against router.json5: 1 planned, 2 observed row(s) — 3 finding(s)
+  ✗ events-tc.netem.v1-applied  gc.lifespan below the plan's  planned 604800, observed 86400
+  ✗ latest                      extra                         observed acme/zk2/*/*/*/state/**
+  ✗ latest                      on owners' state (S4)         observed acme/zk2/*/*/*/state/** (intersects `acme/zk2/*/*/*/state/**`, spec §4.2 S4)
+
+"#]]
+    );
+    assert!(notes(&check).contains("what zenohd would run"));
+    assert!(check.scope().is_none(), "a file is not a bus observation");
+    let out = ndjson(&check);
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    assert_eq!(envelope["source"], "file");
+    assert!(out.contains("\"kind\":\"on_owner_state\""), "{out}");
 }
 
 /// `--explain`: the taker with its reason, or the reason there is none.

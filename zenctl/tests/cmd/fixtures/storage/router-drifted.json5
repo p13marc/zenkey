@@ -1,0 +1,21 @@
+// The same router, drifted (#704): the audit storage keeps tombstones for
+// zenoh's default 24 h, below the contract's 7 d retention, and a storage
+// nobody planned answers on owners' state keys (spec §4.2 S4).
+{
+  mode: "router",
+  plugins: {
+    storage_manager: {
+      storages: {
+        "events-tc.netem.v1-applied": {
+          key_expr: "zk2/*/*/tc.netem.v1/events/applied/*",
+          strip_prefix: "zk2",
+          volume: { id: "memory" },
+        },
+        latest: {
+          key_expr: "zk2/*/*/*/state/**",
+          volume: "memory",
+        },
+      },
+    },
+  },
+}

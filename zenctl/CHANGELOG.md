@@ -13,6 +13,8 @@ unasked on `main`.
 
 | Before | Now | Notes |
 |---|---|---|
+| `storage gen --deployment FILE` (required) | `storage gen [--enrollment FILE --contracts PATH] [--deployment FILE]`, one at least | #704: from the enrollment `acl gen` reads, a union storage per event resource of every interface an enrolled service implements (spec §2.6), keyed `zk2/*/*/<iface>/events/<template>/<ulid>`, its `garbage_collection.lifespan` the contract's `retention`. The file's new `[events]` block names their volume (an implicit memory volume otherwise, warned). Nothing on any owner's `state/**` or `@state/**`: a file's selector that intersects one is refused citing S4, **exit 2** in every mode. Enrolled archives are listed, never planned (§4.4). New plan fields `enrollment` and a storage's `derived`; warnings `retention_not_enforced`, `implicit_volume` |
+| `storage gen --check` (the admin space) | `storage gen --check [--against <router.json5>]` | #704: `--against` compares a router config file read through zenoh's loader, as `acl gen` does, and opens no session; without it, the admin space as before. The check report gains `source` (`admin_space` \| `file`) and the finding kind `on_owner_state` (S4), planned or not |
 | `admin graph` (session flags) | `admin graph [--namespace NS] [--trust-admin-space]` | #705: each zk2 instance of the deployment is joined onto the routers by its descriptor's `meta.zid`, compared by value, through verified routers' session lists only (spec §4.2, 0.12–0.13). New `instance` rows, tagged `attachment`: `attached` (with its routers), `unattached`, `unattributable`; `--dot` draws them. The envelope's `instances` says what the join read |
 
 ## Unreleased (`main`, zk2) — what was left of v1 (#612, FJ9)

@@ -10,7 +10,7 @@
 //! table, and `zenkey_fleet::storage_plan_json5` is the file.
 
 use zenkey_fleet::report::{
-    CheckKind, Judgement, StorageCheck, StorageExplain, StoragePlan, TakerRelation,
+    CheckKind, CheckSource, Judgement, StorageCheck, StorageExplain, StoragePlan, TakerRelation,
 };
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
@@ -98,6 +98,14 @@ impl Render for StoragePlan {
                     Cell::text(format!("{} ({})", s.volume, s.history.as_str())),
                     Cell::text(flags.join(", ")),
                 ]);
+                if let Some(d) = &s.derived {
+                    g.detail([format!(
+                        "    union storage for {} {}, implemented by {}",
+                        d.iface,
+                        d.resource,
+                        d.providers.join(", ")
+                    )]);
+                }
                 g.detail([
                     format!("    strip {}", s.strip_prefix),
                     format!(
@@ -118,6 +126,40 @@ impl Render for StoragePlan {
     fn notes(&self) -> Vec<Note> {
         let mut notes = Vec::new();
         notes.extend(refusal_notes(self));
+        if let Some(e) = self.enrollment.as_option() {
+            notes.push(
+                Note::coverage(format!(
+                    "from the enrollment: {} union storage(s), one per event resource of an \
+                     interface an enrolled service implements; none on an owner's state/** or \
+                     @state/** — current state is the owner's, last-known an archive's",
+                    self.storages.iter().filter(|s| s.derived.is_some()).count()
+                ))
+                .cite("spec §2.6, §4.2 S4"),
+            );
+            if !e.contract_not_given.is_empty() {
+                notes.push(Note::coverage(format!(
+                    "not planned: {} — their contracts were not given (--contracts), so their \
+                     events are unknown, not absent",
+                    e.contract_not_given.join(", ")
+                )));
+            }
+            if !e.without_events.is_empty() {
+                notes.push(Note::summary(format!(
+                    "{} declare(s) no event resource: nothing of theirs is a storage's to keep",
+                    e.without_events.join(", ")
+                )));
+            }
+            for a in &e.archives {
+                notes.push(
+                    Note::caveat(format!(
+                        "archive {a}: not planned on the storage manager, which accepts a put \
+                         older than a delete it holds and so cannot be an archive's store; the \
+                         archive.v1 service is its own"
+                    ))
+                    .cite("spec §4.4"),
+                );
+            }
+        }
         notes.push(Note::summary(format!(
             "{} storage(s) on {} volume(s) planned, {} refused",
             self.storages.len(),
@@ -141,6 +183,7 @@ fn kind_word(k: CheckKind) -> &'static str {
         CheckKind::StripPrefixDiffers => "strip_prefix differs",
         CheckKind::VolumeDiffers => "volume differs",
         CheckKind::LifespanBelowMinimum => "gc.lifespan below the plan's",
+        CheckKind::OnOwnerState => "on owners' state (S4)",
     }
 }
 
@@ -166,8 +209,13 @@ impl Render for StorageCheck {
             Judgement::NotAsked => "no verdict — not asked".to_string(),
             Judgement::Unobservable { reason } => format!("no verdict — {reason}"),
         };
+        let against = match self.source {
+            CheckSource::AdminSpace => "the admin space".to_owned(),
+            CheckSource::File => self.asked.clone(),
+        };
         t.line(format!(
-            "storage check for namespace {:?}: {} planned, {} observed row(s) — {verdict}",
+            "storage check for namespace {:?} against {against}: {} planned, {} observed \
+             row(s) — {verdict}",
             self.base, self.planned, self.observed
         ));
         if !self.findings.is_empty() {
@@ -210,11 +258,20 @@ impl Render for StorageCheck {
                  reserved non-verdict",
             ));
         }
+        if self.source == CheckSource::File {
+            notes.push(Note::coverage(format!(
+                "compared with {} as zenoh's loader reads it — what zenohd would run, not \
+                 what a router runs now",
+                self.asked
+            )));
+        }
         notes
     }
 
+    /// The admin sweep, when that is what was compared; a config file is
+    /// read, not observed, so it claims no scope on the bus.
     fn scope(&self) -> Option<ObservedScope> {
-        Some(ObservedScope {
+        (self.source == CheckSource::AdminSpace).then(|| ObservedScope {
             asked: vec![self.asked.clone()],
             window_s: None,
         })

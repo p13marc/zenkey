@@ -3658,3 +3658,101 @@ async fn admin_graph_attaches_an_instance_to_its_router_and_reports_the_unattach
     assert!(run.stdout.contains("(unattached)"), "{run}");
     assert!(run.stderr.contains("1 attached, 1 unattached"), "{run}");
 }
+
+/// #704: the union storage `storage gen` derives from the tcgui enrollment
+/// takes the occurrences a real owner publishes (spec §2.6). A `tc.netem.v1`
+/// owner puts one audit event through the runtime's event writer, a raw
+/// subscriber on the planned key expression receives it, and `--explain`
+/// names the derived storage for its key. Checked against a live router
+/// whose admin space answers and runs no storage manager, the plan has
+/// nothing to be compared with: exit 2, never clean.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
+    let mut bus = Bus::admin(None).await;
+    let enrollment = examples().join("acl/tcgui.enrollment.toml");
+    let history = examples().join(".history");
+    let (enrollment, history) = (
+        enrollment.to_str().expect("a UTF-8 path").to_owned(),
+        history.to_str().expect("a UTF-8 path").to_owned(),
+    );
+    let plan_args = [
+        "storage",
+        "gen",
+        "--enrollment",
+        &enrollment,
+        "--contracts",
+        &history,
+        "--format",
+        "json",
+    ];
+    let run = bus.offline(&plan_args).await;
+    exits(&run, 0);
+    let doc = run.json();
+    let storage = rows_of(&doc, "storage")
+        .into_iter()
+        .find(|s| s["name"] == "events-tc.netem.v1-applied")
+        .unwrap_or_else(|| panic!("the audit event's union storage: {run}"));
+    assert_eq!(storage["garbage_collection"]["lifespan_s"], 604_800);
+    assert_eq!(storage["derived"]["retention_s"], 604_800);
+    let key_expr = storage["key_expr"]
+        .as_str()
+        .expect("a key expression")
+        .to_owned();
+    assert!(
+        rows_of(&doc, "storage").iter().all(|s| {
+            let k = s["key_expr"].as_str().unwrap_or_default();
+            !k.contains("/state/") && !k.contains("/@state/")
+        }),
+        "nothing on an owner's state (S4): {run}"
+    );
+
+    // An owner's occurrence lands under the planned key expression.
+    let owner = bring_up(
+        &bus.owners,
+        ServiceConfig::new("h-3fa9c2d41b7e/tc".parse().expect("an address")),
+        &["tcgui/tc.netem.v1"],
+    )
+    .await;
+    let tool = client(&bus.endpoint, None).await;
+    let sub = tool
+        .declare_subscriber(key_expr.as_str())
+        .await
+        .expect("a subscriber on the planned key expression");
+    let events = owner
+        .event_writer(&iface("tc.netem.v1"), "events/applied", &Bindings::new())
+        .expect("an event writer");
+    let deadline = Instant::now() + SETTLE;
+    let key = loop {
+        let put = events
+            .put(br#"{"ulid":"x"}"#.to_vec())
+            .await
+            .expect("an occurrence");
+        match tokio::time::timeout(Duration::from_millis(200), sub.recv_async()).await {
+            Ok(Ok(sample)) => {
+                assert_eq!(sample.key_expr().as_str(), put);
+                break put;
+            }
+            _ if Instant::now() < deadline => continue,
+            _ => panic!("no occurrence reached {key_expr}"),
+        }
+    };
+    bus.services.push(owner);
+
+    let mut explain = plan_args.to_vec();
+    explain.extend(["--explain", &key]);
+    let run = bus.offline(&explain).await;
+    exits(&run, 0);
+    let doc = run.json();
+    let taker = &rows_of(&doc, "taker")[0];
+    assert_eq!(taker["storage"], "events-tc.netem.v1-applied", "{run}");
+    assert_eq!(taker["relation"], "includes");
+
+    // The admin space answers, and no storage runs: nothing to compare.
+    let mut check = plan_args.to_vec();
+    check.extend(["--check", "--timeout", "2"]);
+    let run = bus.zenctl(&check).await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["source"], "admin_space");
+    assert_eq!(doc["judgement"]["answer"], "unobservable", "{run}");
+}

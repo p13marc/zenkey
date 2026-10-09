@@ -715,6 +715,7 @@ pub fn storage_plan() -> StoragePlan {
                     "overlaps links (acme/zk2/*/*/*/events/link/**): a GET under both selectors is answered by both",
                     "RFC 09 §2",
                 )],
+                derived: None,
             },
             PlannedStorage {
                 name: "links".into(),
@@ -743,6 +744,7 @@ pub fn storage_plan() -> StoragePlan {
                         "RFC 09 §2",
                     ),
                 ],
+                derived: None,
             },
             PlannedStorage {
                 name: "timeseries".into(),
@@ -760,6 +762,7 @@ pub fn storage_plan() -> StoragePlan {
                     "retention is the database's policy, not zenoh config",
                     "RFC 09 §2.3",
                 )],
+                derived: None,
             },
         ],
         refusals: vec![Refusal {
@@ -769,6 +772,7 @@ pub fn storage_plan() -> StoragePlan {
             reason: "names volume \"rocks\", which [volumes] does not declare".into(),
             cite: "RFC 09 §2".into(),
         }],
+        enrollment: zenkey_fleet::report::Asked::NotAsked,
     }
 }
 
@@ -787,6 +791,7 @@ pub fn storage_check() -> StorageCheck {
         };
     StorageCheck {
         base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::AdminSpace,
         asked: "@/*/router/**/storage_manager/storages/**".into(),
         planned: 3,
         observed: 3,
@@ -831,6 +836,7 @@ pub fn storage_check() -> StorageCheck {
 pub fn storage_check_unobservable() -> StorageCheck {
     StorageCheck {
         base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::AdminSpace,
         asked: "@/*/router/**/storage_manager/storages/**".into(),
         planned: 3,
         observed: 0,
@@ -839,6 +845,112 @@ pub fn storage_check_unobservable() -> StorageCheck {
         judgement: Judgement::Unobservable {
             reason: "the admin space answered no storages".into(),
         },
+    }
+}
+
+/// A plan derived from an enrollment (#704): the tcgui pilot's audit
+/// event as a union storage on the implicit memory volume, an interface
+/// whose contract was not given, one without events, an archive never
+/// planned, and an S4 refusal of the file's state storage — every list
+/// non-empty, so a renderer that dropped one fails.
+pub fn storage_plan_enrolled() -> StoragePlan {
+    use zenkey_fleet::report::{DerivedEvent, EnrollmentDerivation};
+    StoragePlan {
+        base: "acme".into(),
+        volumes: vec![PlannedVolume {
+            id: "memory".into(),
+            plugin: "memory".into(),
+            history: HistoryMode::Latest,
+            persistence: Some(Persistence::Volatile),
+            params: std::collections::BTreeMap::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::ImplicitVolume,
+                text: "no deployment file names an [events] volume: volatile".into(),
+                cite: "RFC 09 §2.1".into(),
+            }],
+        }],
+        storages: vec![PlannedStorage {
+            name: "events-tc.netem.v1-applied".into(),
+            key_expr: "acme/zk2/*/*/tc.netem.v1/events/applied/*".into(),
+            strip_prefix: "acme/zk2".into(),
+            volume: "memory".into(),
+            history: HistoryMode::Latest,
+            replication: None,
+            complete: false,
+            garbage_collection: GarbageCollection {
+                period_s: 30,
+                lifespan_s: 604_800,
+                derivation: "the contract's retention for tc.netem.v1 events/applied, 7d \
+                             (604800 s, spec §2.6)"
+                    .into(),
+            },
+            retention: None,
+            params: std::collections::BTreeMap::new(),
+            warnings: vec![PlanWarning {
+                kind: WarningKind::RetentionNotEnforced,
+                text: "the contract's retention (7d) bounds a replay, not this storage".into(),
+                cite: "spec §2.6".into(),
+            }],
+            derived: Some(DerivedEvent {
+                iface: "tc.netem.v1".into(),
+                resource: "events/applied".into(),
+                retention_s: 604_800,
+                providers: vec!["h-20609002f7b6/tc".into(), "h-3fa9c2d41b7e/tc".into()],
+            }),
+        }],
+        refusals: vec![Refusal {
+            storage: Some("latest".into()),
+            volume: None,
+            key_expr: Some("acme/zk2/*/*/*/state/**".into()),
+            reason: "\"acme/zk2/*/*/*/state/**\" intersects owners' state keys".into(),
+            cite: "spec §4.2 S4".into(),
+        }],
+        enrollment: zenkey_fleet::report::Asked::Asked(EnrollmentDerivation {
+            contract_not_given: vec!["nav.v2".into()],
+            without_events: vec!["tc.netif.v1".into()],
+            archives: vec!["ground/archive".into()],
+        }),
+    }
+}
+
+/// `--check --against` a router file (#704): the derived storage's
+/// lifespan below the retention, and a storage the file runs on owners'
+/// state — both from the file, so no zid.
+pub fn storage_check_file() -> StorageCheck {
+    StorageCheck {
+        base: "acme".into(),
+        source: zenkey_fleet::report::CheckSource::File,
+        asked: "router.json5".into(),
+        planned: 1,
+        observed: 2,
+        findings: vec![
+            CheckFinding {
+                kind: CheckKind::LifespanBelowMinimum,
+                storage: "events-tc.netem.v1-applied".into(),
+                zid: None,
+                planned: Some("604800".into()),
+                observed: Some("86400".into()),
+            },
+            CheckFinding {
+                kind: CheckKind::Extra,
+                storage: "latest".into(),
+                zid: None,
+                planned: None,
+                observed: Some("acme/zk2/*/*/*/state/**".into()),
+            },
+            CheckFinding {
+                kind: CheckKind::OnOwnerState,
+                storage: "latest".into(),
+                zid: None,
+                planned: None,
+                observed: Some(
+                    "acme/zk2/*/*/*/state/** (intersects `acme/zk2/*/*/*/state/**`, spec §4.2 S4)"
+                        .into(),
+                ),
+            },
+        ],
+        unjudged: vec![],
+        judgement: Judgement::Established,
     }
 }
 

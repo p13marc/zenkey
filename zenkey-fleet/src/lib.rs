@@ -268,7 +268,8 @@ pub use model::snapshot::{fold_latest, holder_of, row_of as snapshot_row, stampe
 pub use model::snapshot_diff::{DiffOpts, diff_snapshots};
 pub use model::stats::{KeyStats, StampClass, StatsTable};
 pub use model::storage::{
-    check_storages, explain as explain_storage, plan_storages, to_json5 as storage_plan_json5,
+    StorageInputs, check_storages, check_storages_against, explain as explain_storage,
+    on_owner_state, plan as plan_storages_from, plan_storages, to_json5 as storage_plan_json5,
 };
 pub use model::timeline::{
     ArrivalAxis, ArrivalOrdering, Break, HlcAxis, HlcOrdering, HlcStamp, Ingested, Order, Placed,

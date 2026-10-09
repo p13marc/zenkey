@@ -346,9 +346,12 @@ transitions).
 
 **Router configuration — generated, then checked.**
 `zenctl storage list` (the storages the routers' admin space reports) ·
-`zenctl storage gen --deployment storages.toml --json5` (the
-`plugins.storage_manager` block, each storage's selector under the namespace,
-`strip_prefix` derived; `--check` compares a live router) · `zenctl acl gen --enrollment
+`zenctl storage gen --enrollment enroll.toml --contracts <dir> --json5` (the
+`plugins.storage_manager` block: a union storage per event resource the
+enrolled services' contracts declare, its lifespan the contract's retention,
+and never one on an owner's state — a `--deployment` file's selector there is
+refused, S4; `--check --against router.json5` compares a router's config file,
+`--check` alone a live router) · `zenctl acl gen --enrollment
 enroll.toml --contracts <dir> --json5` (zk2's `access_control` block,
 compiled from the contracts and the enrollment's principals, bindings and
 calls; `--check` compares a router's config file).
