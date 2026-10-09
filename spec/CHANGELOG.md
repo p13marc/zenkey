@@ -3,6 +3,69 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.15 — 2026-10-09: what §11 needs to be built from (#695)
+
+The Python implementation built §11's access control from the spec alone
+(PR #694): a generator for both postures, run live on zenoh-python
+routers. **§11 was not enough on its own.** It had to invent or measure
+the input, the message pairs, a tool's admin read and the complement's
+key set. It also found two errors, one of them mine in 0.12. These are
+F-82..F-88. The reference generator (FJ7) is the rule where it was right,
+and it is extended where it lacked a grant.
+
+**Changed: rules stated, so that §11 can be built from.**
+- **The input (F-82, §11.1)** is stated abstractly:
+  - principals, each bound to a user or a CN;
+  - services, with the contracts they implement;
+  - bindings, calls and inspected services;
+  - whether a tool reads the admin space;
+  - archives, and the namespace.
+
+  The format is a generator's own. The reference's enrollment is
+  informative.
+- **Messages and flows (F-83, §11.2)** are a table per grant. Both
+  implementations measured the same pairs. A liveliness read needs its
+  egress `liveliness_token` too.
+- **The complement's key set (F-85, §11.2)** is the deployment's own keys:
+  declared resources, each service's `@zk/**`, and the contract keys.
+  Undeclared keys stay open under `allow`.
+- **"Every principal" is compiled into each policy (F-87, §11.2).** In
+  zenoh 1.10.1, measured, a catch-all subject makes the per-user subjects
+  lose their denies. The reference already compiled the `@/**` deny into
+  each policy.
+
+**Changed: a grant added, and the reference generator extended.**
+- **The admin read (F-84, §11.1 Tool).** Under `deny`, no grant reached the
+  admin space, so a tool could not check S4.
+  - A tool that checks S4 or runs a doctor now holds `query` on
+    `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced.
+  - The reference enrollment's `[[tool]]` takes `admin = true`. The
+    generator emits `admin-read-in` and `admin-read-out` (grant
+    `admin_read`).
+  - The walkthrough enrollment's `ops` tool uses it, and the pinned plans
+    are re-blessed.
+
+**Changed: two errors fixed.**
+- **What a storage is (F-86, §4.2, against 0.11).** A router's admin space
+  records each queryable as `@/<zid>/router/queryable/<key expr>`. The
+  record of a `**` queryable, such as an owner's `…/state/**`, answers
+  S4's storages selector. So 0.11's "nothing under the second selector"
+  never held with an owner present.
+  - A storage is now an answer whose key the selector includes, ending
+    `…/storage_manager/storages/<name>`.
+  - The reference's parser already read it that way. The text was wrong.
+- **`security.md §3` step 3 (F-88, against 0.12).** It expected R1 to
+  refuse `S` under each posture. Under `allow`, a session that is no
+  principal matches no subject and gets everything (§11.3), so its spoof
+  is answered, and only the replier check keeps S4 from clean. The step
+  now runs `S` as a principal and as a non-principal, with the right
+  expectation for each.
+
+**Deliberately not changed.**
+- **No input format is made normative.** Deployments describe themselves
+  in many ways. The spec states what a generator must know, not how it is
+  written.
+
 ## 0.14 — 2026-10-09: what access control measured (#689)
 
 zk2's `acl gen` (#612, FJ7, PR #692) was built against spike S14's

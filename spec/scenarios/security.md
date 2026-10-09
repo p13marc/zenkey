@@ -51,7 +51,9 @@ router. The tool reads S4's two selectors (core §4.2).
    `@/<R1's zid>/router` and answers `{"plugins": null}`. The tool reads
    `@/*/router` and runs S4's check.
 2. The same, with R1's admin space on, read-only.
-3. Under each posture, generate R1's grants (core §11.1) and repeat step 1.
+3. Under each posture, generate R1's grants (core §11.1) and repeat step 1
+   twice: once with `S` an enrolled principal, and once with `S` an
+   authenticated session that is no principal.
 4. **A far router** (0.13). A router R2 links to R1, both admin spaces on,
    the tool still a client of R1. Then `S` answers `@/<S's zid>/router`
    under its own replier id.
@@ -62,13 +64,21 @@ router. The tool reads S4's two selectors (core §4.2).
    unverified, and the check stays unobservable, never clean.
 2. R1 answers too, under its own replier id, and that answer is verified.
    `S`'s is still unverified, so the check is not clean either.
-3. R1 refuses `S`'s queryable. No principal's answer arrives, and only a
-   router's remains.
+3. An enrolled principal's queryable is refused under both postures. A
+   session that is no principal is refused under `deny`. Under `allow` it
+   matches no subject and gets everything (core §11.3), so its answer
+   arrives, and only step 1's rule (the replier id) keeps the check from
+   clean. (0.12 wrote that R1 refuses `S` under each posture, which
+   `allow` cannot do: F-88, fixed in 0.15.)
 4. R1's answer lists R2 as a `router` session, so R2's answer, under its
    own replier id, is verified, and the check covers both routers. R1
    lists `S` as a `client`, so `S`'s answer stays unverified, and the
    check is not clean.
 
-*Measured on zenoh 1.10.1: steps 1 and 2 (0.12) and step 4 (0.13), by the
-reference runtime's `admin_spoof.rs` and the fleet's doctor tests. Step 3
-waits for the grant generator (#612, FJ7).*
+*Measured on zenoh 1.10.1:
+- steps 1 and 2 (0.12) and step 4 (0.13), by the reference runtime's
+  `admin_spoof.rs` and the fleet's doctor tests;
+- step 3, for an enrolled principal under `allow`, by the reference
+  generator's live test (#612, FJ7);
+- step 3, in both cases under both postures, by zk2py's generator, built
+  from §11 alone (0.15).*

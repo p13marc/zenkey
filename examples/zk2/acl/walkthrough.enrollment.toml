@@ -157,6 +157,9 @@ records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*"]
 # set_origin. Nothing else on the vehicle is callable from the ground.
 [[tool]]
 name = "ops"
+# Reads the routers' admin space, for S4's check and the doctor (core
+# §4.2, §11.1 Tool, 0.15): under deny, no other grant reaches it.
+admin = true
 
 [tool.bindings.nav]
 interface = "nav.v2"

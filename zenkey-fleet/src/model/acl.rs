@@ -214,6 +214,15 @@ const BOTH: &[AclFlow] = &[AclFlow::Egress, AclFlow::Ingress];
 /// Every contract bundle (§8.4), relative to the namespace.
 pub const CONTRACTS: &str = "zk2/@zk/contract/**";
 
+/// What a tool reading the admin space queries (§4.2, §11.1 Tool, 0.15):
+/// the router documents and everything under them, S4's storages included.
+const ADMIN_READ: [&str; 2] = ["@/*/router", "@/*/router/**"];
+const CITE_ADMIN_READ_IN: &str = "§11.1 Tool (0.15), §4.2: a tool reads the routers' admin \
+     space to check S4 and the doctor's router checks; under deny no other grant reaches it. \
+     Never namespaced";
+const CITE_ADMIN_READ_OUT: &str = "§11.1 Tool (0.15), §4.2, egress: the routers' answers, \
+     each checked against its own key";
+
 /// The routers' admin space, which no namespace prefixes (#684).
 pub const ADMIN_SPACE: &str = "@/**";
 
@@ -480,6 +489,8 @@ struct Holder {
     history: Vec<String>,
     presence: Vec<String>,
     calls: Vec<String>,
+    /// A tool that reads the routers' admin space (0.15).
+    admin: bool,
     warnings: Vec<AclWarning>,
 }
 
@@ -494,6 +505,7 @@ impl Holder {
             history: Vec::new(),
             presence: Vec::new(),
             calls: Vec::new(),
+            admin: false,
             warnings: Vec::new(),
         }
     }
@@ -1021,6 +1033,7 @@ fn compile_tool(
 ) -> std::result::Result<Holder, Refused> {
     let label = format!("tool.{}", spec.name);
     let mut h = Holder::new(label, HolderKind::Tool);
+    h.admin = spec.admin;
     for (role, b) in &spec.bindings {
         compile_binding(&mut h, dep, contracts, None, role, b, None)?;
     }
@@ -1442,6 +1455,24 @@ pub fn plan_acl(
                         Some(label),
                         g.cite_out,
                     ));
+                }
+                if h.admin {
+                    // Not under the namespace: the admin space has none.
+                    for (side, flows, msgs, cite) in [
+                        ("in", IN, &[AclMessage::Query][..], CITE_ADMIN_READ_IN),
+                        ("out", OUT, &[AclMessage::Reply][..], CITE_ADMIN_READ_OUT),
+                    ] {
+                        add(AclRule {
+                            id: format!("admin-read-{side}:{label}"),
+                            permission: AclPermission::Allow,
+                            flows: flows.to_vec(),
+                            messages: msgs.to_vec(),
+                            key_exprs: ADMIN_READ.iter().map(|k| (*k).to_owned()).collect(),
+                            grant: AclGrantKind::AdminRead,
+                            holder: Some(label.clone()),
+                            cite: cite.to_owned(),
+                        });
+                    }
                 }
                 by_holder.insert(label.clone(), ids);
             }
@@ -3145,6 +3176,36 @@ type = { raw = "text/plain" }
     /// space. Under deny, no allow rule includes one there; under allow,
     /// every principal holds the deny, un-namespaced, whose `@/**` includes
     /// `@/<zid>/router` by inclusion.
+    /// §11.1 Tool (0.15, F-84): a tool enrolled with `admin` reads the
+    /// routers' admin space under `deny`, unprefixed by any namespace; no
+    /// other holder does, and under `allow` nothing is needed.
+    #[test]
+    fn a_tool_enrolled_with_admin_reads_the_admin_space() {
+        let plan = walkthrough(AclPermission::Deny);
+        for (id, msgs) in [
+            ("admin-read-in:tool.ops", vec![AclMessage::Query]),
+            ("admin-read-out:tool.ops", vec![AclMessage::Reply]),
+        ] {
+            let r = rule_of(&plan, id);
+            assert_eq!(r.key_exprs, ["@/*/router", "@/*/router/**"], "{id}");
+            assert_eq!(r.messages, msgs, "{id}");
+            assert_eq!(r.grant, AclGrantKind::AdminRead);
+        }
+        let admin_rules = plan
+            .rules
+            .iter()
+            .filter(|r| r.grant == AclGrantKind::AdminRead)
+            .count();
+        assert_eq!(admin_rules, 2, "the tool alone");
+        let allow = walkthrough(AclPermission::Allow);
+        assert!(
+            allow
+                .rules
+                .iter()
+                .all(|r| r.grant != AclGrantKind::AdminRead)
+        );
+    }
+
     #[test]
     fn no_principal_serves_the_admin_space() {
         let router = "@/0123456789abcdef0123456789abcdef/router";
