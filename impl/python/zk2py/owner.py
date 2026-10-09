@@ -222,7 +222,8 @@ class Owner:
                  connect: str | None = None, bindings: dict[str, list[str]] | None = None,
                  capabilities: set[str] | None = None, unavailable: dict[str, str] | None = None,
                  withhold: set[str] | None = None, handlers: dict[str, Any] | None = None,
-                 members: dict[str, list[dict[str, Any]]] | None = None, hold_s: float = 0.0):
+                 members: dict[str, list[dict[str, Any]]] | None = None, hold_s: float = 0.0,
+                 auth: tuple[str, str] | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -239,7 +240,9 @@ class Owner:
           parameter, a list for a rest parameter) to serve with a queryable
           each, instead of one over the template.
         - ``hold_s``: how long each operation query stays open after its
-          handler returns (operations.md §1)."""
+          handler returns (operations.md §1).
+        - ``auth``: a usrpwd (user, password), the principal it is bound to
+          as a client (§11.3)."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -252,6 +255,7 @@ class Owner:
         self.handlers = dict(handlers or {})
         self.members = dict(members or {})
         self.hold_s = hold_s
+        self.auth = auth
         self.port = None if connect else (port or free_loopback_port())
         self.endpoint = connect or f"tcp/127.0.0.1:{self.port}"
         #: core.md §1.2: 64 random bits, 16 lowercase hex digits.
@@ -339,6 +343,9 @@ class Owner:
         if self.connect:
             conf.insert_json5("mode", json.dumps("client"))
             conf.insert_json5("connect/endpoints", json.dumps([self.connect]))
+            if self.auth is not None:
+                conf.insert_json5("transport/auth/usrpwd",
+                                  json.dumps({"user": self.auth[0], "password": self.auth[1]}))
         else:
             conf.insert_json5("mode", json.dumps("router"))
             conf.insert_json5("listen/endpoints", json.dumps([self.endpoint]))

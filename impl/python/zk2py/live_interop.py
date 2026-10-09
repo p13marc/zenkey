@@ -28,8 +28,10 @@ the owner example as R1's client (state.md §1's stamp, and its templated
 operations), zk2py's own owner read by the Rust ``consume`` example, the
 refusals of presence.md §2, state.md §1, presence.md §1, presence.md §6 (a
 read refused by access control, and one stalled past its timeout),
-operations.md §1 (target and consolidation shown by behaviour) and
-operations.md §2 (fan-out over templates). ``--only`` picks some of them.
+operations.md §1 (target and consolidation shown by behaviour),
+operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
+and access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
+generated grants). ``--only`` picks some of them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -1726,6 +1728,7 @@ def main(argv: list[str] | None = None) -> int:
         "owner": lambda r: run_python_owner(r, args.consume), "refusal": run_python_refusal,
         "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
+        "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
                     help="run only these runs, the ones behind a router of the runner's (repeatable), "

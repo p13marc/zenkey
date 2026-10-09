@@ -52,13 +52,16 @@ GET_TIMEOUT_S = 1.0
 _DONE = object()
 
 
-def open_client(endpoint: str) -> zenoh.Session:
+def open_client(endpoint: str, auth: tuple[str, str] | None = None) -> zenoh.Session:
     """A *client* session to one router endpoint, multicast scouting off: a
-    tool that sees exactly the router it is pointed at."""
+    tool that sees exactly the router it is pointed at. ``auth`` is a
+    usrpwd (user, password), the principal's binding (§11.3)."""
     conf = zenoh.Config()
     conf.insert_json5("mode", json.dumps("client"))
     conf.insert_json5("connect/endpoints", json.dumps([endpoint]))
     conf.insert_json5("scouting/multicast/enabled", "false")
+    if auth is not None:
+        conf.insert_json5("transport/auth/usrpwd", json.dumps({"user": auth[0], "password": auth[1]}))
     return zenoh.open(conf)
 
 
@@ -531,8 +534,15 @@ def check_s4(session: zenoh.Session, timeout: float = GET_TIMEOUT_S, trust: bool
         out.detail = f"no router answered {S4_ROUTERS}: the admin space is off"
         return out
     unreadable = []
+    storages_sel = zenoh.KeyExpr(S4_STORAGES)
     for a in _answers(session, S4_STORAGES, zenoh.QueryTarget.ALL, timeout):
         if not a.ok or a.key is None:
+            continue
+        # A router's admin space also holds `router/queryable/<key expr>`,
+        # whose key embeds a declared key expression: one ending in `**`
+        # (every owner's `state/**`, S2) intersects the storages selector.
+        # Only a key the selector includes is a storage (SPEC-FINDINGS F-86).
+        if not storages_sel.includes(zenoh.KeyExpr(a.key)):
             continue
         why = None if trust else unverified_why(a, verified, storage=True)
         if why is not None:
