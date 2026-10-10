@@ -292,6 +292,15 @@ impl Bus {
         tokio::task::spawn_blocking(move || run(&argv, &home, None, None))
     }
 
+    /// [`Bus::spawn`], killed at `limit` rather than [`RUN_LIMIT`]: a
+    /// window longer than a minute (#721).
+    fn spawn_within(&self, args: &[&str], limit: Duration) -> tokio::task::JoinHandle<Run> {
+        let mut argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        argv.extend(["-c".into(), self.endpoint.clone()]);
+        let home = self.home.clone();
+        tokio::task::spawn_blocking(move || run_within(&argv, &home, None, None, limit))
+    }
+
     /// Rerun until `done` holds, within [`SETTLE`]; the last run either way.
     async fn until(&self, args: &[&str], done: impl Fn(&Run) -> bool) -> Run {
         let deadline = Instant::now() + SETTLE;
@@ -339,6 +348,18 @@ impl std::fmt::Display for Run {
 /// memlock limit, through `sh` and `ulimit -l` — lowering a soft limit
 /// needs no privilege.
 fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>, stdin: Option<Vec<u8>>) -> Run {
+    run_within(argv, home, memlock_kib, stdin, RUN_LIMIT)
+}
+
+/// [`run`], killed at `limit`: a case whose window is longer than
+/// [`RUN_LIMIT`] (health.v1's 65 s waits, #721).
+fn run_within(
+    argv: &[String],
+    home: &Path,
+    memlock_kib: Option<u64>,
+    stdin: Option<Vec<u8>>,
+    limit: Duration,
+) -> Run {
     use std::io::{Read as _, Write as _};
     let zenctl = env!("CARGO_BIN_EXE_zenctl");
     let mut command = match memlock_kib {
@@ -385,7 +406,7 @@ fn run(argv: &[String], home: &Path, memlock_kib: Option<u64>, stdin: Option<Vec
     };
     let out = drain(Box::new(child.stdout.take().expect("stdout")));
     let err = drain(Box::new(child.stderr.take().expect("stderr")));
-    let deadline = Instant::now() + RUN_LIMIT;
+    let deadline = Instant::now() + limit;
     let status = loop {
         if let Some(status) = child.try_wait().expect("wait on zenctl") {
             break Some(status);
@@ -4286,4 +4307,486 @@ async fn check_conform_judges_a_stopped_refresher_stale() {
     );
     // Present throughout: stale is the value's, never the owner's presence.
     wait_for(&bus, &["lab/beacon"]).await;
+}
+
+// ── health.v1 (#721, PF): spec/profiles/health/scenarios.md §6–§8 ──────────
+//
+// The tool's sections. T takes the deployment's word for its clock in §6
+// and §7 (`--clocks-synced`, the conventions, text 0.2): every session here
+// runs on one host. §8's ground measures nothing either: across the face it
+// judges by its subscription's receive clock.
+
+/// One service's row in a `health --format json` document.
+fn health_row<'a>(doc: &'a Value, address: &str) -> &'a Value {
+    rows_of(doc, "service")
+        .into_iter()
+        .find(|r| r["address"] == address)
+        .unwrap_or_else(|| panic!("{address} has a row: {doc}"))
+}
+
+/// `health`'s run, its document, and `address`'s row in it, when it parses.
+fn health_of(run: &Run, address: &str) -> Option<Value> {
+    let doc: Value = serde_json::from_str(&run.stdout).ok()?;
+    rows_of(&doc, "service")
+        .into_iter()
+        .find(|r| r["address"] == address)
+        .cloned()
+}
+
+/// An owner of `health.v1` at `address` through the runtime's `Health`, its
+/// status declared at `level` with `reason`, started.
+async fn health_owner(
+    s: &zenoh::Session,
+    address: &str,
+    level: zenkey::health::Level,
+    reason: &str,
+) -> (Service, zenkey::health::Health) {
+    let mut b = ServiceBuilder::new(s, ServiceConfig::new(address.parse().expect("an address")));
+    let h = b.health().await.expect("health.v1");
+    h.set_status(level, reason).await.expect("a status");
+    (b.start().await.expect("start"), h)
+}
+
+/// health.v1 `scenarios.md` §6 (§2.1): an owner holding DEGRADED reads
+/// unhealthy, degraded. Once its process ends, a complete presence read
+/// holds no token of it and its GET draws no reply: not asked, absent —
+/// never FAILED, never stale — with the archive's status shown last-known,
+/// its stamp and the archive's `confirmed`, never as current. Nothing was
+/// asked, so the run is no verdict, exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_s6_an_absent_owner_is_not_asked_and_its_archive_last_known() {
+    use zenkey::health::Level;
+    let bus = Bus::bare(None).await;
+    let origin = "zk2/lab/svc/health.v1/state/status";
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("lab/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "lab/svc".parse().expect("an address"),
+                selector: "zk2/lab/svc/health.v1/state/**".to_owned(),
+                implementation: zenkey::health::implementation(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let owning = client(&bus.endpoint, None).await;
+    let (svc, h) = health_owner(&owning, "lab/svc", Level::Degraded, "upstream lost").await;
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(origin).is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        archive.confirmed(origin).is_some(),
+        "the archive recorded it"
+    );
+
+    // Step 1: T reads the owner.
+    let args = [
+        "health",
+        "lab/svc",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["report"], "health");
+    assert_eq!(doc["clock"], "deployment_word");
+    let row = health_row(&doc, "lab/svc");
+    assert_eq!(row["verdict"], "unhealthy", "{run}");
+    assert_eq!(row["reason"], "degraded");
+    assert_eq!(row["level"], "degraded");
+    assert_eq!(row["status"]["reason"], "upstream lost");
+
+    // Step 2: the owner's process ends.
+    drop(h);
+    svc.close().await.expect("the owner closes");
+    owning.close().await.expect("its session ends");
+
+    // Step 3: a complete presence read, the owner's GET, the archive's form.
+    let run = bus
+        .until(&args, |r| {
+            health_of(r, "lab/svc").is_some_and(|row| row["verdict"] == "not_asked")
+        })
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let row = health_row(&doc, "lab/svc");
+    assert_eq!(row["reason"], "absent", "{run}");
+    assert!(row.get("level").is_none(), "absent is no level: {run}");
+    assert!(
+        row.get("status").is_none(),
+        "the GET drew no reply, and nothing is shown as current: {run}"
+    );
+    for r in row["readings"].as_array().expect("readings") {
+        assert_eq!(
+            r["verdict"], "not_asked",
+            "never FAILED, never stale: {run}"
+        );
+    }
+    let lk = &row["last_known"];
+    assert_eq!(lk["archive"], "lab/archive", "{run}");
+    assert_eq!(lk["level"], "degraded");
+    assert_eq!(lk["reason"], "upstream lost");
+    assert!(lk["confirmed"].is_boolean(), "{run}");
+    assert!(lk["stamp"]["clock"].is_string(), "its stamp: {run}");
+    let table = bus
+        .zenctl(&[
+            "health",
+            "lab/svc",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(
+        table.stdout.contains("last-known, never current"),
+        "{table}"
+    );
+    drop(archive);
+}
+
+/// health.v1 `scenarios.md` §7 (§2.2): `lab/liar` holds status OK and check
+/// `disk` FAILED, which §2.2 forbids and `Health` would never put, so it is
+/// written through the bare contract; `lab/frank` holds FAILED and `disk`
+/// OK. Read twice, 2 s apart: the liar reads unhealthy, inconsistent, at
+/// FAILED, in each reading, and the break is the finding about the owner,
+/// seen in both; frank reads unhealthy, failed, with no break — a status may
+/// be worse than its checks.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_s7_an_inconsistent_status_is_a_finding_in_both_readings() {
+    use zenkey::health::{Level, v1};
+    use zenkey::prost::Message as _;
+    let mut bus = Bus::bare(None).await;
+    let id = zenkey::health::iface();
+    let none = Bindings::new();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/liar".parse().expect("an address")),
+    );
+    b.implement(zenkey::health::implementation())
+        .expect("implement");
+    let status = b
+        .declare_state_writer(&id, zenkey::health::STATUS, &none)
+        .await
+        .expect("the status");
+    b.expose(&id, zenkey::health::CHECKS).expect("the checks");
+    let faults = b
+        .declare_writer(&id, zenkey::health::FAULTS, &none)
+        .await
+        .expect("the faults");
+    status
+        .put(
+            v1::Status {
+                level: v1::Level::Ok as i32,
+                reason: "serving".into(),
+                since_ns: 1,
+            }
+            .encode_to_vec(),
+        )
+        .await
+        .expect("a status");
+    let mut liar = b.start().await.expect("start");
+    let disk = liar
+        .state_writer(
+            &id,
+            zenkey::health::CHECKS,
+            &[("check".to_owned(), vec!["disk".to_owned()])].into(),
+        )
+        .await
+        .expect("a check");
+    disk.put(
+        v1::Check {
+            level: v1::Level::Failed as i32,
+            detail: "full".into(),
+            checked_at_ns: 1,
+        }
+        .encode_to_vec(),
+    )
+    .await
+    .expect("a check put");
+    let (frank, fh) = {
+        let mut b = ServiceBuilder::new(
+            &bus.owners,
+            ServiceConfig::new("lab/frank".parse().expect("an address")),
+        );
+        let h = b.health().await.expect("health.v1");
+        h.set_status(Level::Failed, "down").await.expect("a status");
+        h.set_check("disk", Level::Ok, "").await.expect("a check");
+        (b.start().await.expect("start"), h)
+    };
+    bus.services.extend([liar, frank]);
+    bus.keep((status, disk, faults, fh));
+    wait_for(&bus, &["lab/liar", "lab/frank"]).await;
+
+    let args = [
+        "health",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 1
+                && health_of(r, "lab/liar").is_some_and(|row| row["agrees"]["answer"] == "no")
+                && health_of(r, "lab/frank").is_some_and(|row| row["reason"] == "failed")
+        })
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert!(
+        doc["apart_s"].as_f64().expect("apart_s") >= 1.9,
+        "two readings 2 s apart: {run}"
+    );
+    let liar = health_row(&doc, "lab/liar");
+    assert_eq!(
+        (&liar["verdict"], &liar["reason"], &liar["level"]),
+        (
+            &json!("unhealthy"),
+            &json!("inconsistent"),
+            &json!("failed")
+        ),
+        "{run}"
+    );
+    let readings = liar["readings"].as_array().expect("readings");
+    assert_eq!(readings.len(), 2);
+    for r in readings {
+        assert_eq!(
+            r,
+            &json!({"verdict": "unhealthy", "reason": "inconsistent", "level": "failed"}),
+            "each reading, never healthy: {run}"
+        );
+    }
+    assert_eq!(liar["agrees"]["answer"], "no");
+    assert_eq!(liar["agrees"]["reason"], "inconsistent");
+    let frank = health_row(&doc, "lab/frank");
+    assert_eq!(frank["verdict"], "unhealthy");
+    assert_eq!(frank["level"], "failed");
+    assert_eq!(frank["agrees"]["answer"], "yes", "no break: {run}");
+    assert_eq!(doc["rollup"]["worst"], "failed");
+    assert_eq!(doc["rollup"]["unhealthy"], 2);
+}
+
+/// The vehicle router of health.v1 `scenarios.md` §8: the ground segment G
+/// attached as a client (`spec/scenarios/constrained.md` §1, step 2) and
+/// authenticated as the usrpwd principal `ground`, denied `zk2/**/@zk/**`
+/// on its face both ways; with `deny_state`, `zk2/vehicle-01/*/*/state/**`
+/// too, as zenoh-modem's `face-deny-device-state` does (run B). The owners
+/// authenticate as `vehicle`, whom nothing denies. The returned path is the
+/// ground's `--zenoh-config`.
+async fn face_bus(deny_state: bool) -> (Bus, PathBuf) {
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("live-zk2-home")
+        .join(format!(
+            "face-{}-{}",
+            std::process::id(),
+            NTH.fetch_add(1, Ordering::Relaxed)
+        ));
+    std::fs::create_dir_all(&home).expect("a config root of its own");
+    let dict = home.join("users.txt");
+    std::fs::write(
+        &dict,
+        "router:router-pw\nvehicle:vehicle-pw\nground:ground-pw\n",
+    )
+    .expect("the dictionary");
+    let messages = "[\"put\", \"delete\", \"declare_subscriber\", \"query\", \
+                    \"declare_queryable\", \"reply\", \"liveliness_token\", \
+                    \"declare_liveliness_subscriber\", \"liveliness_query\"]";
+    let rule = |id: &str, ke: &str| {
+        format!(
+            "{{ id: \"{id}\", permission: \"deny\", flows: [\"egress\", \"ingress\"], \
+             messages: {messages}, key_exprs: [\"{ke}\"] }}"
+        )
+    };
+    let mut rules = vec![rule("face-deny-presence", "zk2/**/@zk/**")];
+    let mut ids = vec!["\"face-deny-presence\""];
+    if deny_state {
+        rules.push(rule(
+            "face-deny-device-state",
+            "zk2/vehicle-01/*/*/state/**",
+        ));
+        ids.push("\"face-deny-device-state\"");
+    }
+    let text = format!(
+        "{{\n  mode: \"router\",\n  \
+         scouting: {{ multicast: {{ enabled: false }}, gossip: {{ enabled: false }} }},\n  \
+         listen: {{ endpoints: [\"tcp/127.0.0.1:0\"] }},\n  \
+         adminspace: {{ enabled: false }},\n  \
+         transport: {{ auth: {{ usrpwd: {{ user: \"router\", password: \"router-pw\", \
+         dictionary_file: {:?} }} }} }},\n  \
+         access_control: {{\n    enabled: true,\n    default_permission: \"allow\",\n    \
+         rules: [{}],\n    subjects: [{{ id: \"ground\", usernames: [\"ground\"] }}],\n    \
+         policies: [{{ id: \"face\", rules: [{}], subjects: [\"ground\"] }}],\n  }},\n}}\n",
+        dict.display().to_string(),
+        rules.join(", "),
+        ids.join(", ")
+    );
+    let router = zenoh::open(
+        zenoh::Config::from_json5(&text)
+            .unwrap_or_else(|e| panic!("the vehicle router's config: {e}\n{text}")),
+    )
+    .await
+    .expect("the vehicle router accepts the face");
+    let endpoint = router
+        .info()
+        .locators()
+        .await
+        .into_iter()
+        .map(|l| l.to_string())
+        .find(|l| l.starts_with("tcp/127.0.0.1:"))
+        .expect("the router listens on loopback");
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .expect("config");
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        "{ user: \"vehicle\", password: \"vehicle-pw\" }",
+    )
+    .expect("config");
+    let owners = zenoh::open(c).await.expect("the vehicle's session");
+    let ground = home.join("ground.json5");
+    std::fs::write(
+        &ground,
+        "{ mode: \"client\", transport: { auth: { usrpwd: { user: \"ground\", password: \
+         \"ground-pw\" } } } }\n",
+    )
+    .expect("the ground's config");
+    (
+        Bus {
+            endpoint,
+            home,
+            _router: router,
+            owners,
+            services: Vec::new(),
+            keep: Vec::new(),
+        },
+        ground,
+    )
+}
+
+/// health.v1 `scenarios.md` §8 (§2.8): across a constrained face, where
+/// presence does not cross and G knows from its configuration that
+/// `vehicle-01/nav` implements health.v1 (`--across-face`). Run A, the face
+/// letting the status cross: before the owner starts, G hears nothing and
+/// reads unobservable, `nothing_crossed` — it knows of no status, and calls
+/// none stale; once the owner runs, healthy, `ok`; once it stops confirming,
+/// stale — never down, never FAILED, never absent. Run B, the face denying
+/// the vehicle's state: nothing of the status crosses at any step, and G
+/// reads unobservable, `face_closed`, each time. The two runs share no
+/// router and run at once; each waits 65 s a step, as the scenario does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_s8_across_a_constrained_face() {
+    use zenkey::health::Level;
+    const NAV: &str = "vehicle-01/nav";
+    const LIMIT: Duration = Duration::from_secs(120);
+    let health = |ground: &Path, face: &str, window: &str| -> Vec<String> {
+        [
+            "health",
+            NAV,
+            "--across-face",
+            face,
+            "--for",
+            window,
+            "--timeout",
+            "1",
+            "--zenoh-config",
+            ground.to_str().expect("a UTF-8 path"),
+            "--format",
+            "json",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    };
+    let run_a = async {
+        let (bus, ground) = face_bus(false).await;
+        let args = health(&ground, "crosses", "65");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        // Step 1: G listens before the owner starts.
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 2);
+        let row = health_of(&run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
+        assert_eq!(row["verdict"], "unobservable", "{run}");
+        assert_eq!(row["reason"], "nothing_crossed", "never stale: {run}");
+        // Step 2: the owner starts; G listens 65 s.
+        let (svc, h) = health_owner(&bus.owners, NAV, Level::Ok, "serving").await;
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 0);
+        let doc = run.json();
+        assert!(
+            doc.get("presence").is_none(),
+            "presence does not cross: {run}"
+        );
+        assert_eq!(doc["face"]["status_crosses"], true);
+        let row = health_row(&doc, NAV);
+        assert_eq!(
+            (&row["verdict"], &row["reason"], &row["level"]),
+            (&json!("healthy"), &json!("ok"), &json!("ok")),
+            "{run}"
+        );
+        // Step 3: the owner stops confirming its status, once G hears it.
+        let writer = h.status_writer().writer();
+        let matching = |want: bool| async move {
+            let deadline = Instant::now() + SETTLE;
+            while writer.matching().await.expect("matching") != want {
+                assert!(Instant::now() < deadline, "the status never matched {want}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        matching(false).await;
+        let args = health(&ground, "crosses", "70");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let pending = bus.spawn_within(&args, LIMIT);
+        matching(true).await;
+        h.set_status(Level::Ok, "serving, its last word")
+            .await
+            .expect("a last put");
+        h.set_confirming(false);
+        let run = pending.await.expect("the runner");
+        exits(&run, 1);
+        let row = health_of(&run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
+        assert_eq!(
+            row["verdict"], "stale",
+            "never down, FAILED or absent: {run}"
+        );
+        assert_eq!(row["reason"], "beyond_horizon", "{run}");
+        assert!(row.get("level").is_none(), "stale is no level: {run}");
+        drop((svc, h, bus));
+    };
+    let run_b = async {
+        let (bus, ground) = face_bus(true).await;
+        let args = health(&ground, "denied", "65");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let closed = |run: &Run| {
+            exits(run, 2);
+            let row = health_of(run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
+            assert_eq!(row["verdict"], "unobservable", "{run}");
+            assert_eq!(row["reason"], "face_closed", "{run}");
+            assert!(
+                row.get("status").is_none() && row.get("faults").is_none(),
+                "nothing of the status crossed: {run}"
+            );
+        };
+        // Step 1, before the owner starts.
+        closed(&bus.spawn_within(&args, LIMIT).await.expect("the runner"));
+        // Step 2, once it runs.
+        let (svc, h) = health_owner(&bus.owners, NAV, Level::Ok, "serving").await;
+        closed(&bus.spawn_within(&args, LIMIT).await.expect("the runner"));
+        drop((svc, h, bus));
+    };
+    tokio::join!(run_a, run_b);
 }
