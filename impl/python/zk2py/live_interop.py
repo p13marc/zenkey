@@ -31,9 +31,9 @@ read refused by access control, and one stalled past its timeout),
 operations.md §1 (target and consolidation shown by behaviour),
 operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
 access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
-generated grants), and ``hostid.v1`` 0.2 with core R1's ``self.system``
-providers (0.20) across both implementations. ``--only`` picks some of
-them.
+generated grants), ``hostid.v1`` with core R1's ``self.system``
+providers (0.20), and ``freshness.v1``'s re-puts and judgements (0.21),
+across both implementations. ``--only`` picks some of them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -1900,9 +1900,12 @@ def run_python_016(report: Report) -> None:
 
 
 ORDER = "impl/python/interop/zk2py_order.v1.toml"
+#: Core 0.22: one major of a profile per contract (E002), so the uses that
+#: test 0.20's order are split between two contracts.
+ORDER_B = "impl/python/interop/zk2py_order_b.v1.toml"
 SYSINFO = "impl/python/interop/zk2py_sysinfo.v1.toml"
 TRACKER = "impl/python/interop/zk2py_tracker.v1.toml"
-#: Core §3.3 (0.20): zk2py_order.v1's uses and hostid.v1, "sorted as §9.5
+#: Core §3.3 (0.20): zk2py_order.v1's and zk2py_order_b.v1's uses and hostid.v1, "sorted as §9.5
 #: sorts a contract's uses: by name as a string, then by major as a number".
 #: A bytewise sort would give a.b.v1, a.v1, hostid.v1, views.v10, views.v2.
 ORDER_PROFILES = ["a.v1", "a.b.v1", "hostid.v1", "views.v2", "views.v10"]
@@ -1963,31 +1966,34 @@ def run_python_hostid(report: Report, exe: Path) -> None:
     tool = live.open_client(ep)
     want = SYSTEM[M1]
     SHARED_PATH = hostid.SHARED
-    echo, needs, order = (load_contract(REPO / p) for p in (ECHO, NEEDS, ORDER))
+    echo, needs, order, order_b = (load_contract(REPO / p) for p in (ECHO, NEEDS, ORDER, ORDER_B))
     try:
         # -- the owner example minted, seen by zk2py ---------------------
         run = "hostid.v1 0.2: the owner example minted over a root holding M1"
         root = make_root(base_dir, {"etc/machine-id": M1 + "\n"})
-        rust = Owner(exe, "@hostid.v1/echo", [REPO / ECHO, REPO / ORDER], connect=ep, hostid_root=root)
+        rust = Owner(exe, "@hostid.v1/echo", [REPO / ECHO, REPO / ORDER, REPO / ORDER_B], connect=ep,
+                     hostid_root=root)
         rusts.append(rust)
         ready = rust.wait_for("ready ", 120)
         if not report.check(run, f"it starts, and its instance key names the minted system {want} (§2.2, §2.7)",
                             ready is not None and ready.startswith(f"zk2/{want}/echo/@zk/instance/"),
                             f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
             return
-        pres = _presence(tool, f"zk2/{want}/echo/@zk/**", 1, 2)
-        report.check(run, "presence through R1 at the minted address: one instance token, two interface tokens",
-                     len(pres.instances) == 1 and len(pres.alive) == 2 and pres.complete, pres.reading)
+        pres = _presence(tool, f"zk2/{want}/echo/@zk/**", 1, 3)
+        report.check(run, "presence through R1 at the minted address: one instance token, three interface "
+                          "tokens",
+                     len(pres.instances) == 1 and len(pres.alive) == 3 and pres.complete, pres.reading)
         rdoc, rraw = _doc(tool, ready)
-        report.check(run, "its descriptor has no D code against its two contracts",
-                     bool(rdoc) and check_descriptor(rraw, [echo, order]) == [], f"{len(rraw)} bytes")
+        report.check(run, "its descriptor has no D code against its three contracts",
+                     bool(rdoc) and check_descriptor(rraw, [echo, order, order_b]) == [], f"{len(rraw)} bytes")
         meta = rdoc.get("meta") or {}
         report.check(run, "its descriptor names the minted service and lists hostid.v1, with meta.host and "
                           "meta.zid (§2.8, §2.13)",
                      rdoc.get("service") == f"{want}/echo" and "hostid.v1" in (rdoc.get("profiles") or [])
                      and isinstance(meta.get("host"), str) and bool(meta.get("host")) and bool(meta.get("zid")),
                      f"service {rdoc.get('service')}, profiles {rdoc.get('profiles')}, meta {meta}")
-        report.check(run, "its profiles: zk2py_order.v1's uses and hostid.v1, in §3.3's order (0.20)",
+        report.check(run, "its profiles: the union of zk2py_order.v1's and zk2py_order_b.v1's uses (one "
+                          "major each, 0.22) and hostid.v1, in §3.3's order (0.20)",
                      rdoc.get("profiles") == ORDER_PROFILES, str(rdoc.get("profiles")))
         uuid = f"{M1[:8]}-{M1[8:12]}-{M1[12:16]}-{M1[16:20]}-{M1[20:]}"
         report.check(run, "no machine id on the bus (§2.11): M1 is in its descriptor in no spelling",
@@ -2001,7 +2007,7 @@ def run_python_hostid(report: Report, exe: Path) -> None:
 
         # -- a zk2py consumer on the same system --------------------------
         run = "core R1 0.20: a zk2py consumer minted over the same root, bound to self.system"
-        consumer = PyOwner("@hostid.v1", "needs", [needs, order], connect=ep, hostid=hostid.Runtime(root),
+        consumer = PyOwner("@hostid.v1", "needs", [needs, order, order_b], connect=ep, hostid=hostid.Runtime(root),
                            bindings={"upstream": ["self.system/echo"], "peer": ["self.system/*"]},
                            capabilities={"cal"})
         consumer.start()
@@ -2010,10 +2016,10 @@ def run_python_hostid(report: Report, exe: Path) -> None:
                           f"agree on the system: {want}",
                      consumer.system == want and ready.split("/")[1] == want,
                      f"zk2py {consumer.system}, Rust {ready.split('/')[1]}")
-        _presence(tool, f"zk2/{want}/needs/@zk/**", 1, 2)
+        _presence(tool, f"zk2/{want}/needs/@zk/**", 1, 3)
         cdoc, craw = _doc(tool, consumer.instance_key)
-        report.check(run, "its descriptor has no D code against its two contracts",
-                     bool(cdoc) and check_descriptor(craw, [needs, order]) == [], f"{len(craw)} bytes")
+        report.check(run, "its descriptor has no D code against its three contracts",
+                     bool(cdoc) and check_descriptor(craw, [needs, order, order_b]) == [], f"{len(craw)} bytes")
         bound = {r.get("role"): r.get("bindings") for r in cdoc.get("requires") or []}
         report.check(run, "its descriptor lists the self.system providers resolved (R3, 0.20)",
                      bound == {"upstream": [f"{want}/echo"], "peer": [f"{want}/*"]}, str(bound))
@@ -2125,17 +2131,23 @@ def run_python_hostid(report: Report, exe: Path) -> None:
                          system is not None and hostid.is_minted_shape(system) and not os.listdir(zk2dir),
                          f"system {system}, var/lib/zk2 {os.listdir(zk2dir)}; stderr {o.stderr[-2:]}")
             # scenarios §4 expected 1: "Each start logs that the system is
-            # ephemeral, and names the three paths with their outcomes." A
-            # black box shows its output streams alone.
-            said = [x for x in o.stderr + o.seen if "ephemeral" in x]
-            report.known_deviation(run, "its start says the system is ephemeral, naming the three paths (§2.6, "
-                                        "scenarios §4 expected 1), on stdout or stderr",
-                                   bool(said) and all(p in said[0] for p in ("/etc/machine-id",
-                                                                             "/var/lib/dbus/machine-id",
-                                                                             SHARED_PATH)),
-                                   f"stdout {o.seen}, stderr {o.stderr}",
-                                   "SPEC-FINDINGS F-99: the text does not say where the log goes, and the "
-                                   "example shows none, RUST_LOG set or not")
+            # ephemeral, and names the three paths with their outcomes."
+            # hostid.v1 0.3 (F-99): "wherever the process's operational logs
+            # go, at its warning level or the equivalent", which a black-box
+            # runner reads in "the process's own log output": the owner
+            # example's stderr.
+            deadline = time.monotonic() + 3.0
+            said: list[str] = []
+            while time.monotonic() < deadline and not said:
+                # Its log lines carry terminal colours even on a pipe.
+                said = [re.sub(r"\x1b\[[0-9;]*m", "", x) for x in o.stderr if "ephemeral" in x.lower()]
+                time.sleep(0.05)
+            report.check(run, "its start logs, at the warning level on its stderr, that the system is ephemeral, "
+                              "naming the three paths with their outcomes (§2.6, scenarios §4 expected 1; "
+                              "hostid.v1 0.3, F-99)",
+                         bool(said) and "WARN" in said[0].upper()
+                         and all(p in said[0] for p in ("/etc/machine-id", "/var/lib/dbus/machine-id", SHARED_PATH)),
+                         f"stderr {o.stderr[-3:]}")
             stop(o)
         finally:
             os.chmod(zk2dir, 0o755)
@@ -2207,6 +2219,215 @@ def run_python_hostid(report: Report, exe: Path) -> None:
         shutil.rmtree(base_dir, ignore_errors=True)
 
 
+BEACON = "impl/python/interop/freshness/beacon.v1.toml"
+FRESH_CONTRACT = "impl/python/interop/freshness/zk2py_fresh.v1.toml"
+
+
+def run_python_freshness(report: Report, exe: Path, consume: Path) -> None:
+    """freshness.v1 (text 0.1) and core 0.21's re-put across the two
+    implementations, through a router R1 of the runner's:
+    - the owner example serving ``beacon.v1`` (``lab/beacon``) re-puts its
+      state on its own (§2.4). zk2py's subscriber S, declared before it
+      starts, and its GET reader G, which measures its clock from S's
+      deliveries (§2.6, ground 2), judge its members, and zk2py's tool reads
+      one verdict per resource (§5, scenarios §6);
+    - a stopped re-put goes stale: the owner example stopped (SIGSTOP), its
+      tokens still held, is stale to S and present to presence, both
+      reported (§2.11). Continued (SIGCONT), it is fresh again. Closed, its
+      tokens go and S still measures the age;
+    - zk2py's owner of ``zk2py_fresh.v1`` re-puts, and the Rust ``consume``
+      example sees each re-put as the stamp of the owner's GET answer (core
+      S2, 0.21). Once zk2py closes the member's writer, it sees one stamp."""
+    import signal
+
+    from . import freshness as fr
+    from . import live
+    from .contract import load_contract
+    from .owner import Owner as PyOwner
+
+    if not consume.is_file():
+        raise CannotRun(f"{consume} not found: build it with `cargo build -q -p zenkey --example consume`")
+    beacon = load_contract(REPO / BEACON)
+    h_status = fr.horizon("state", {"freshness.ttl_s": 2})
+    base = "zk2/lab/beacon/beacon.v1"
+    status, intent, note = f"{base}/state/status", f"{base}/state/intent", f"{base}/state/note"
+    r1, ep, _ = _r1()
+    s_session, g_session = live.open_client(ep), live.open_client(ep)
+    trust = fr.ClockTrust()
+    subs: list[fr.Subscriber] = []
+    rust: Owner | None = None
+    py: Any = None
+    try:
+        # -- the owner example re-puts; zk2py judges ----------------------
+        run = "freshness.v1 0.1: the owner example serving beacon.v1 (lab/beacon), judged by zk2py"
+        s = fr.Subscriber(s_session, [f"{base}/state/*", f"{base}/stream/*"], trust)
+        subs.append(s)
+        time.sleep(0.3)
+        rust = Owner(exe, "lab/beacon", [REPO / BEACON], connect=ep)
+        ready = rust.wait_for("ready ", 120)
+        if not report.check(run, "it starts behind R1", ready is not None,
+                            f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
+            return
+        doc, _ = _doc(g_session, ready)
+        zid = live._zid_value((doc.get("meta") or {}).get("zid"))
+        report.check(run, "its descriptor lists freshness.v1, the profile its contract uses (§1, core §3.3)",
+                     "freshness.v1" in (doc.get("profiles") or []), str(doc.get("profiles")))
+        time.sleep(5.0)
+        got = s.of(status)
+        first = got[0].arrival_ns if got else 0
+        window = [r for r in got if r.arrival_ns <= first + 5 * fr.NS]
+        gaps = [(b.arrival_ns - a.arrival_ns) / fr.NS for a, b in zip(got, got[1:])]
+        report.check(run, "status (ttl 2) is re-put on its own: at least 4 more puts in the 5 s after the first, no "
+                          "two more than 1 s apart (with 200 ms of jitter), each the same payload and Encoding, each "
+                          "stamped by the owner's zid, each stamp above the one before (§2.4, core S1)",
+                     len(window) >= 5 and max(gaps, default=9) <= 1.2
+                     and len({(r.payload, r.encoding) for r in got}) == 1
+                     and all(live._zid_value(r.stamp_id) == zid and zid is not None for r in got)
+                     and all(b.stamp_ns > a.stamp_ns for a, b in zip(got, got[1:])),
+                     f"{len(got)} deliveries, {len(window)} in 5 s, largest gap {max(gaps, default=0):.3f} s, values "
+                     f"{sorted({(r.payload, r.encoding) for r in got})}")
+        report.check(run, "intent (ttl 0) and note (no horizon) are put once, never re-put (§2.3, §2.4)",
+                     len(s.of(intent)) == 1 and len(s.of(note)) == 1,
+                     f"intent {len(s.of(intent))}, note {len(s.of(note))} deliveries")
+        before = s.of(status)[-1]
+        reading = fr.get_reading(g_session, status)
+        delivered = {r.stamp for r in s.of(status)}
+        report.check(run, "G's reply carries the stamp of a re-put S received, the latest: a re-put is a mutation, "
+                          "and the owner answers with its stamp (core S2, 0.21)",
+                     reading.stamp in delivered and reading.stamp_ns is not None and before.stamp_ns is not None
+                     and reading.stamp_ns >= before.stamp_ns,
+                     f"reply {reading.stamp}, latest before {before.stamp}")
+        v_s = fr.judge_observation("state", h_status, s.observation(status))
+        v_g = fr.judge_observation("state", h_status, reading.observation(trust))
+        measured = any(trust.measured(k) for k in trust.measurements if live._zid_value(k) == zid)
+        report.check(run, "S and G both judge status fresh; G trusts its clock by measuring the owner's live puts "
+                          "(§2.5, §2.6 ground 2)",
+                     v_s.verdict == fr.FRESH and v_g.verdict == fr.FRESH and measured,
+                     f"S {v_s.pair()}, G {v_g.pair()}, measured {measured}")
+        fp = live.fingerprint_of(doc, "beacon.v1")
+        r = live.retrieve_bundle(g_session, "beacon.v1", fp) if fp else None
+        canon = r.verified.contract if r is not None and r.verified is not None else None
+        report.check(run, "its bundle, retrieved by the descriptor's fingerprint (§8.4), is the contract zk2py "
+                          "builds", canon is not None and canon == beacon.canonical, f"fingerprint {fp}")
+        if canon is not None:
+            got_r = fr.read_service(g_session, "lab/beacon", [canon], 3.0, fr.ClockTrust())
+            verdicts = {k: v.verdict for k, (v, _) in got_r.items()}
+            report.check(run, "zk2py's tool, over a 3 s window from the bundle (§5, scenarios §6): status fresh, "
+                              "intent fresh, note not asked; level unobservable, since the example publishes no "
+                              "stream sample and no member of it is known (§2.5)",
+                         verdicts == {"state/status": fr.FRESH, "state/intent": fr.FRESH,
+                                      "state/note": fr.NOT_ASKED, "stream/level": fr.UNOBSERVABLE},
+                         str({k: (v.pair(), m) for k, (v, m) in got_r.items()}))
+
+        # -- a stopped re-put goes stale ----------------------------------
+        run = "freshness.v1 0.1: the owner example's re-puts stopped"
+        rust.proc.send_signal(signal.SIGSTOP)
+        try:
+            t_stop = time.monotonic_ns()
+            time.sleep(0.1)
+            last = s.of(status)[-1].arrival_ns
+            _sleep_until(last + fr.NS)
+            v1 = fr.judge_observation("state", h_status, s.observation(status))
+            _sleep_until(max(last + 3 * fr.NS, t_stop + 3 * fr.NS))
+            v3 = fr.judge_observation("state", h_status, s.observation(status))
+            pres = live.list_presence(g_session, "zk2/lab/beacon/@zk/**")
+            silent = fr.get_reading(g_session, status)
+            v_get = fr.judge_observation("state", h_status, silent.observation(trust))
+            both = fr.judge("state", h_status, [s.observation(status), silent.observation(trust)])
+            report.check(run, "stopped (SIGSTOP): S fresh 1 s after its last delivery, stale 3 s after it (§2.5)",
+                         v1.verdict == fr.FRESH and v3.verdict == fr.STALE, f"{v1.pair()} then {v3.pair()}")
+            report.check(run, "its instance and interface tokens are still present while status is stale: both "
+                          "reported, neither folded into the other (§2.11)",
+                         len(pres.instances) == 1 and len(pres.alive) == 1 and pres.complete
+                         and v3.verdict == fr.STALE,
+                         f"presence {len(pres.instances)}+{len(pres.alive)} tokens; status {v3.verdict}")
+            report.check(run, "a GET of the stopped owner is silent, unobservable; with S's stale observation, the "
+                              "member is stale (§2.6, §2.7)",
+                         v_get.pair() == {"verdict": "unobservable", "reason": "silent"}
+                         and both.verdict == fr.STALE, f"GET {v_get.pair()}, combined {both.pair()}")
+        finally:
+            rust.proc.send_signal(signal.SIGCONT)
+        time.sleep(2.5)
+        v_again = fr.judge_observation("state", h_status, s.observation(status))
+        report.check(run, "continued (SIGCONT): the re-puts resume, and S judges status fresh again",
+                     v_again.verdict == fr.FRESH, str(v_again.pair()))
+        code = rust.close()
+        rust = None
+        t_close = time.monotonic_ns()
+        last = s.of(status)[-1].arrival_ns
+        _sleep_until(max(last + 3 * fr.NS, t_close + fr.NS))
+        v_closed = fr.judge_observation("state", h_status, s.observation(status))
+        after = [x for x in s.of(status) if x.arrival_ns > t_close]
+        pres = live.list_presence(g_session, "zk2/lab/beacon/@zk/**")
+        report.check(run, "closed: no re-put after it ends, its tokens are gone, and S still measures the age: "
+                          "stale, not \"down\" (§2.4, §2.11)",
+                     code == 0 and not after and pres.count == 0 and pres.complete and v_closed.verdict == fr.STALE,
+                     f"exit {code}, {len(after)} deliveries after, {pres.count} tokens, status {v_closed.pair()}")
+
+        # -- zk2py's re-puts, seen by the Rust consumer -------------------
+        run = "freshness.v1 0.1: zk2py's owner of zk2py_fresh.v1 (lab/fresh), read by the Rust consume example"
+        contract = load_contract(REPO / FRESH_CONTRACT)
+        py = PyOwner("lab", "fresh", [contract], connect=ep)
+        py.start()
+        key = "zk2/lab/fresh/zk2py_fresh.v1/state/status"
+        time.sleep(0.3)
+        py.set_state(key, b"up")
+
+        def consumed() -> tuple[int, list[str], str]:
+            p = subprocess.run([str(consume), ep, "lab/fresh", str(REPO / FRESH_CONTRACT), "state/status",
+                                "@op/echo"], capture_output=True, text=True, timeout=60)
+            return p.returncode, p.stdout.splitlines(), p.stderr.strip()[-200:]
+
+        def stamp_of(lines: list[str]) -> str | None:
+            st = [x.split(" ") for x in lines if x.startswith("state ")]
+            return st[0][2] if st and len(st[0]) == 4 and st[0][1] == key and st[0][3] == "up" else None
+
+        time.sleep(1.5)
+        c1 = consumed()
+        time.sleep(1.5)
+        c2 = consumed()
+        s1, s2 = stamp_of(c1[1]), stamp_of(c2[1])
+        reput_stamps = {str(st) for k, st in py.reputs if k == key}
+        mine = live._zid_value(str(py.session.zid()))
+        report.check(run, "two reads 1.5 s apart: the same value under two stamps, both re-puts zk2py made, both "
+                          "with zk2py's zid, the second later (§2.4, core S2, 0.21)",
+                     c1[0] == c2[0] == 0 and s1 is not None and s2 is not None and s1 != s2
+                     and {s1, s2} <= reput_stamps
+                     and live._zid_value(s1.split("/")[1]) == live._zid_value(s2.split("/")[1]) == mine
+                     and int(s2.split("/")[0]) > int(s1.split("/")[0]),
+                     f"exit {c1[0]}, {c2[0]}; stamps {s1}, {s2}; {len(reput_stamps)} re-puts; stderr {c1[2]!r}")
+        py.close_writer(key)
+        time.sleep(0.2)
+        c3 = consumed()
+        time.sleep(1.5)
+        c4 = consumed()
+        s3, s4 = stamp_of(c3[1]), stamp_of(c4[1])
+        report.check(run, "the member's writer closed: two reads 1.5 s apart carry one stamp, the last re-put's: "
+                          "the value is held, and nobody confirms it (§2.4)",
+                     s3 is not None and s3 == s4 and s3 in reput_stamps | {str(py._held[key].stamp)},
+                     f"stamps {s3}, {s4}")
+    finally:
+        if rust is not None:
+            try:
+                rust.proc.send_signal(signal.SIGCONT)
+            except OSError:
+                pass
+            rust.close()
+        if py is not None:
+            py.close()
+        for x in subs:
+            x.close()
+        s_session.close()
+        g_session.close()
+        r1.close()
+
+
+def _sleep_until(mono_ns: int) -> None:
+    d = (mono_ns - time.monotonic_ns()) / 1e9
+    if d > 0:
+        time.sleep(d)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -2224,6 +2445,7 @@ def main(argv: list[str] | None = None) -> int:
         "s1": run_python_s1, "bringup": run_python_bringup, "presence-refused": run_python_presence_refused,
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
         "0.16": run_python_016, "hostid": lambda r: run_python_hostid(r, args.owner),
+        "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),

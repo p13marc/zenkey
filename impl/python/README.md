@@ -69,6 +69,7 @@ case name. It exits with:
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
+| freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon) and `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond). An unknown file there fails. |
 | examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
 
 The result at the time of writing:
@@ -77,7 +78,7 @@ The result at the time of writing:
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
-contracts      96 passed     0 failed
+contracts      97 passed     0 failed
 sets            4 passed     0 failed
 bundles        24 passed     0 failed
 history        10 passed     0 failed
@@ -86,22 +87,26 @@ errors         42 passed     0 failed
 compat        100 passed     0 failed
 examples       97 passed     0 failed
 hostid         42 passed     0 failed
-total         565 passed     0 failed
+freshness      87 passed     0 failed
+total         653 passed     0 failed
 ```
 
-The figures are against `core.md` 0.20 and `hostid.v1` 0.2, which added
-no fixture. Five earlier releases added descriptor fixtures:
+The figures are against `core.md` 0.22, `hostid.v1` 0.3 and
+`freshness.v1` 0.1. 0.22 added `contracts/e002-two-majors`, and
+`freshness.v1` its own two fixture files. Five earlier releases added
+descriptor fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
 - 0.17, `d011-tokenless-archive` and `ok-archive`;
 - 0.18, `d011-bad-fingerprint`;
 - 0.19, `ok-derivation-profile`.
 
-- Amendments 0.5 to 0.18 resolved F-01 to F-93, and `hostid.v1` 0.2
-  resolved F-94 to F-97. F-98 (core 0.20) and F-99 (`hostid.v1` 0.2) are
-  open.
-- They decided 13, 3, 1 and 2 of zk2py's guesses the other way, and
-  `hostid.v1` 0.2 two more (F-96, F-97).
+- Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
+  F-94 to F-97, core 0.22 F-98, and `hostid.v1` 0.3 F-99. F-100 to F-102
+  are open, all against `freshness.v1` 0.1.
+- They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
+  then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), and
+  0.22 one (F-98).
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 - 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
@@ -393,10 +398,9 @@ ending `…/storage_manager/storages/<name>` (§4.2, 0.15). A router's
   (simulated by `live.READ_REPLIER = False`), every admin answer is
   unverified, and S4 and S1 are unobservable, never clean.
 
-**Known deviations:** one, since `hostid.v1` 0.2. With
-`--hostid-ephemeral`, the owner example says nothing on stdout or stderr
-about its ephemeral system, where scenarios §4 expects each start to log it
-(F-99). The XFAIL/XPASS mechanism reports it without failing the run.
+**Known deviations:** none. `hostid.v1` 0.3 resolved F-99, and the owner
+example now logs its ephemeral start at WARN on stderr. The runner keeps
+the XFAIL/XPASS mechanism for a rule the owner example does not meet yet.
 
 The runner adds a third Rust-owner run, on `interop/zk2py_echo.v1.toml`,
 whose state zk2py GETs and whose operations it calls. It also adds two
@@ -406,7 +410,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 262 passed, 0 failed, 1 known deviations of the Rust
+Result: `live interop: 278 passed, 0 failed, 0 known deviations of the Rust
 owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
@@ -495,6 +499,51 @@ in as described below.
   - the owner example fails closed on an unwritable root, naming the three
     paths, and with `--hostid-ephemeral` starts and writes nothing;
   - bindings.md §5, with zk2py's detectors and trackers.
+
+## freshness.v1 (profile text 0.1, core 0.21 and 0.22)
+
+```bash
+just py-freshness
+```
+
+`freshness.v1` is the second profile (`spec/profiles/freshness/`), and the
+first to publish an annotation vocabulary: `freshness.ttl_s`. zk2py takes
+it in as described below.
+- **The `freshness` conformance family:** `horizons.json` and
+  `judgements.json`, 87 of 87.
+- **The linter:** W105 reads a profile's published table before its
+  interim one (core 0.21). Two majors of one profile in one contract's
+  `uses` are E002 (core 0.22).
+- **`zk2py.freshness`, the session-free half:** `horizon` (§2.1–§2.3),
+  `judge_subscription` (§2.5), `judge_get` (§2.6, the band),
+  `judge_observation` (§2.7's order of checks), `combine` and `judge`
+  (§2.7), and `resource_verdict` (§5's second question). Ages are integers
+  of nanoseconds.
+- **The runtime half:**
+  - the owner re-puts every state member whose ttl is above 0, unchanged
+    under a fresh minted stamp, at most ttl/2 after its last put (§2.4). It
+    stops for a deleted member, a closed writer (`close_writer`), and
+    while its clock guard holds (`heartbeat=`, core §4.3, §2.10);
+  - `Subscriber` ages members on its monotonic clock from its declaration
+    (§2.5);
+  - `ClockTrust` is a GET reader's trust in a stamping clock: the
+    deployment's word, or a measurement of a live put (§2.6);
+  - `get_reading` is the S4 GET, judged at a later instant;
+  - `read_service` is a tool's verdict per resource, as scenarios §6 reads.
+- **`python -m zk2py.freshness_scenarios`** runs scenarios.md §1 to §6, 21
+  of 21, on an in-process zenoh-python router. The owner, S and G are its
+  clients. A skewed clock is the owner's offset.
+- **Across the two implementations** (`just py-live`, `--only freshness`):
+  - the owner example serving `beacon.v1` re-puts `status` on its own.
+    zk2py's subscriber and GET reader judge it fresh, and the GET's stamp
+    is the latest re-put's (core S2, 0.21). zk2py's tool reads its bundle
+    and gives one verdict per resource;
+  - stopped with SIGSTOP, it is stale to the subscriber while its tokens
+    are present, both reported. Continued, it is fresh again. Closed, it
+    is stale with no tokens;
+  - zk2py's owner of `zk2py_fresh.v1` re-puts, and the Rust `consume`
+    example reads two different re-put stamps 1.5 s apart, then one once
+    the writer closes.
 
 ## What it does not cover
 
@@ -587,8 +636,10 @@ impl/python/
     acl_interop.py    §11       the access-control run (`--only acl`)
     hostid.py         hostid.v1 the derivation, the shape, the runtime over a root
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
+    freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
+    freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order;
+                      sysinfo_x, tracker, order, order_b; freshness/ holds beacon.v1 and zk2py_fresh.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

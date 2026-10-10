@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Nineteen rounds.**
+**Twenty rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -31,8 +31,12 @@ where that was not enough, or where the spec said two things.
   profile, read cold with core 0.19 (see "At 0.19: hostid.v1 0.1").
   From here, an entry's location says which text it is against.
 - `hostid.v1` 0.2 resolved F-94 to F-97.
-- **F-98 and F-99 are new** (see "At core 0.20 and hostid.v1 0.2" at the
-  end). F-98 is against core 0.20, and F-99 against `hostid.v1` 0.2.
+- F-98 was found against core 0.20, and F-99 against `hostid.v1` 0.2 (see
+  "At core 0.20 and hostid.v1 0.2"). Core 0.22 resolved F-98, and
+  `hostid.v1` 0.3 resolved F-99.
+- **F-100 to F-102 are new**, found against `freshness.v1`'s text 0.1, the
+  second profile, read cold with core 0.21 and 0.22 (see "At 0.21–0.22:
+  freshness.v1 0.1" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -42,7 +46,7 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.20 and hostid.v1 0.2:** 99 entries.
+**Counts at core 0.22, hostid.v1 0.3 and freshness.v1 0.1:** 102 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -99,13 +103,19 @@ where that was not enough, or where the spec said two things.
     first question establishes, where zk2py had counted by the listing.
   - F-94 changed zk2py's root from a plain seam to a chroot-like resolution
     of paths. zk2py had kept links out of its seam's reach.
-- F-98 and F-99: **new**. F-98 is a gap against core 0.20. F-99 is a gap
-  against `hostid.v1` 0.2.
+- F-98: resolved by core 0.22, against zk2py's guess. Two majors of one
+  profile in one contract's `uses` are now E002. zk2py's linter reports it,
+  and zk2py splits `zk2py_order.v1` in two.
+- F-99: resolved by `hostid.v1` 0.3. The ephemeral start is logged wherever
+  the process's logs go, at its warning level. The owner example writes its
+  runtime's logs to stderr, and py-live's check passes, no longer XFAIL.
+- F-100 to F-102: **new**, against `freshness.v1` 0.1: one contradiction,
+  one ambiguity, one gap.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.20 | Location | In one line |
+| Id | Severity | Status at 0.22 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -204,8 +214,11 @@ by the spec section that now states the rule.
 | F-95 | ambiguity | resolved by hostid 0.2 | hostid.v1 0.1 §2.3, §2.7 | When the first service's mint fails closed, is the setting fixed, and does a later service read the inputs again? |
 | F-96 | gap | resolved by hostid 0.2 | hostid.v1 0.1 §2.5 step 4, §2.6 | `EEXIST`, then the winner's file absent: is that "not created", which the ephemeral rung replaces? |
 | F-97 | ambiguity | resolved by hostid 0.2 | hostid.v1 0.1 §2.12 against §5 | §2.12 counts every instance that lists `hostid.v1`; §5 holds such a listing unobservable when a contract uses it. |
-| F-98 | gap | **new** | core 0.20 §3.3 and §9.5, with E020 and §10 point 2 | Two majors of one profile in one contract's `uses` are sorted, but an annotation key names the profile without its major. |
-| F-99 | gap | **new** | hostid.v1 0.2 §2.6, scenarios.md §4 expected 1 | "The runtime logs" the ephemeral system, but not where, so a runner of a binary has nowhere to look. |
+| F-98 | gap | resolved by 0.22 | core 0.20 §3.3 and §9.5, with E020 and §10 point 2 | Two majors of one profile in one contract's `uses` are sorted, but an annotation key names the profile without its major. |
+| F-99 | gap | resolved by hostid 0.3 | hostid.v1 0.2 §2.6, scenarios.md §4 expected 1 | "The runtime logs" the ephemeral system, but not where, so a runner of a binary has nowhere to look. |
+| F-100 | contradiction | **new** | freshness.v1 0.1 §2.3 against §2.5 and judgements.json | "No value, no verdict … whatever the horizon: unobservable", yet a subscriber that heard nothing is stale past ttl, and fresh at ttl 0. |
+| F-101 | ambiguity | **new** | freshness.v1 0.1 §2.7 and judgements.json's description, against §2.3 and §5 | A member of a resource with no horizon that nobody observed: unobservable (`no_observation`), or not asked? |
+| F-102 | gap | **new** | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
 
 ---
 
@@ -2902,6 +2915,8 @@ against the name alone, as E020 and Appendix D are written.
 `zk2py_order.v1` carries no annotation, so the question does not arise in
 its runs.
 
+**Status at 0.22: resolved by 0.22, against zk2py's guess.** §10 point 2 and E002: "Two entries naming one profile at two majors are E002, reported once per profile". Keys stay major-free. zk2py had refused nothing. Its linter now reports E002 once per profile listed at more than one major, and the new fixture `contracts/e002-two-majors` passes. `zk2py_order.v1` tripped it, so its `uses` are split with a new `zk2py_order_b.v1`: `views.v10` and `a.b.v1` in one, `views.v2` and `a.v1` in the other. An instance implementing both lists the same union, which 0.22 allows (§3.3). The owner example and zk2py's consumer still list it in §9.5's order, `a.v1, a.b.v1, hostid.v1, views.v2, views.v10`.
+
 ### F-99 · gap · hostid.v1 0.2 §2.6 and scenarios.md §4 expected 1: where the ephemeral log goes
 
 > §2.6: "It says so. At every start of a service whose system is ephemeral,
@@ -2923,3 +2938,176 @@ make the log observable to an operator by default, as the error is.
 `log` callable, and its own scenarios check that log. `py-live` reports
 the owner example's silence as a known deviation, XFAIL, not as a
 failure.
+
+**Status at hostid 0.3: resolved by hostid 0.3.** §2.6: the ephemeral start goes "wherever the process's operational logs go, at its warning level or the equivalent", and a scenario reads it "through a log capture in process, or the process's own log output for a black-box runner". The owner example now writes its runtime's logs to stderr. py-live reads a `WARN` line there that names the three paths with their outcomes, and the check is a plain PASS, no longer XFAIL. The line carries terminal colour codes even on a pipe, which the runner strips. zk2py's runtime now logs through Python's `logging` by default (logger `zk2py.hostid`, at WARNING). Its scenarios' §4 step 1 reads the record there, through a handler.
+
+## At 0.21–0.22: freshness.v1 0.1 (#609)
+
+Core 0.21 publishes the first annotation vocabulary and makes a re-put a
+mutation. Core 0.22 resolves F-98, and `hostid.v1` 0.3 resolves F-99.
+`freshness.v1` (text 0.1, draft) is the second profile. zk2py read all four
+cold, from `spec/` alone. The Rust examples were used as black boxes: their
+usage was read by running them, and the owner example re-puts on its own
+when its contract gives a `ttl_s`.
+
+**`just py-conformance`: 653 of 653.**
+- A new family, `freshness`, runs every file under
+  `spec/profiles/freshness/conformance/`, from the text alone. An unknown
+  file there fails.
+  - `horizons.json`: 30 cases.
+  - `judgements.json`: 57 cases, with every number of seconds read exactly
+    to the nanosecond.
+
+  All 87 passed the first time.
+- `contracts/e002-two-majors` passes (0.22, F-98).
+- W105 reads a profile's published table before its interim one (0.21),
+  and says which it read. No code changes.
+
+**`just py-freshness`** (`python -m zk2py.freshness_scenarios`, new):
+21 of 21, on an in-process zenoh-python router R1 with timestamping on.
+The owner, S and G are its clients, each with a session of its own.
+- §1 to §5 are the runtime's, as the text says. §6, a tool's verdict per
+  resource, runs zk2py's tool.
+- The contract is `beacon.v1`, copied from the text into
+  `interop/freshness/beacon.v1.toml`.
+- G measures its clock from S's deliveries.
+- §2 step 5's owner, 2 s ahead, watches a heartbeat that the runner puts
+  through R1 without a stamp, so R1 stamps it. Its guard trips, a put is
+  refused (`ClockAhead`), S receives nothing more and judges `status`
+  stale, and its tokens stay present.
+
+**`just py-hostid`: 34 of 34.** §4 step 1 now reads the ephemeral start's
+WARNING through a logging handler (0.3).
+
+**`just py-live`: 278 passed, 0 failed, 0 known deviations.**
+- F-99's check passes, where it was an XFAIL.
+- `zk2py_order.v1` is split, and §9.5's order still holds on both sides.
+- The new run `freshness` adds 15 checks:
+  - **The owner example serving `beacon.v1`** (`lab/beacon`) re-puts
+    `status` (ttl 2) on its own. S, declared before it started, received 6
+    deliveries in 5 s, at most 0.951 s apart. Each had the same payload and
+    Encoding, was stamped by its `meta.zid`, and was stamped above the one
+    before.
+    - `intent` (ttl 0) and `note` (no horizon) are put once.
+    - G's reply carries the latest re-put's stamp (core S2, 0.21).
+    - S and G judge `status` fresh, G's clock measured from the owner's live
+      puts.
+    - Its bundle, retrieved by fingerprint, is zk2py's build. zk2py's tool
+      reads it over 3 s: `status` fresh, `intent` fresh (`never_stale`),
+      `note` not asked. `level` is unobservable: the example publishes no
+      stream sample, so no member of it is known (§2.5).
+  - **Its re-puts stopped.**
+    - Stopped with SIGSTOP, it is fresh to S 1 s after its last delivery and
+      stale 3 s after it. Its instance and interface tokens are still
+      present, and both facts are reported (§2.11).
+    - A GET of it is silent, so unobservable, and the member's combined
+      verdict is stale (§2.7).
+    - Continued with SIGCONT, it re-puts again, and S judges it fresh.
+    - Closed, it re-puts nothing more and its tokens go, while S still
+      measures the age: stale.
+  - **zk2py's owner of `interop/freshness/zk2py_fresh.v1.toml`**
+    (`lab/fresh`), read by the Rust `consume` example. Two reads 1.5 s apart
+    show the same value under two stamps. Both are re-puts zk2py made, with
+    zk2py's zid, the second later. Once zk2py closes the member's writer,
+    two reads show one stamp.
+
+**What changed in zk2py.**
+- **`zk2py.freshness`**, new:
+  - the session-free half: `horizon`, `judge_subscription`, `judge_get`,
+    `judge_observation` (§2.7's order of checks), `combine`, `judge`, and
+    `resource_verdict` (§5's second question);
+  - the runtime half: `ClockTrust` (the deployment's word, or a
+    measurement), `Subscriber` (a monotonic receive clock from its
+    declaration, R6's discard), `get_reading` (S4), and `read_service`,
+    the tool of scenarios §6.
+- **The owner** re-puts every state member whose ttl is above 0, unchanged
+  under a fresh minted stamp, once ttl/2 less a margin has passed since its
+  last put (§2.4). Its GET answers then carry that stamp.
+  - A deleted member, one whose writer closed (`close_writer`), and every
+    member while the clock guard holds, are not re-put.
+  - The guard is a router-stamped heartbeat subscription (core §4.3
+    "Ahead", `heartbeat=`). While it holds, `set_state` raises
+    `ClockAhead` (§2.10).
+- `live.StateReply` carries the stamp's time in nanoseconds.
+- **The linter:** E002 for two majors, and W105's published table.
+- **hostid's log** goes through Python's logging.
+- **New interop contracts:** `freshness/beacon.v1`, `freshness/zk2py_fresh.v1`
+  and `zk2py_order_b.v1`.
+
+**Implementation notes, not findings.**
+- zenoh-python's own session replaces a stamp that is more than its HLC
+  delta ahead of the session's clock, before R1 sees it. An offset
+  simulated on top of the session's HLC, as §2 step 5 asks, therefore shows
+  in the guard's comparisons, not in the stamps the owner's puts carry. On
+  a real host the session's clock is the owner's, and the two cannot part.
+- An owner re-putting exactly at ttl/2 shows gaps above ttl/2 at a
+  subscriber, from scheduling and transit. zk2py re-puts a fifth of ttl/2
+  early, at most 200 ms. The text allows it ("An owner MAY put more often"),
+  and the reference's scenarios allow 200 ms of jitter.
+
+### F-100 · contradiction · freshness.v1 0.1 §2.3 against §2.5 and `judgements.json`: a verdict with no value
+
+> §2.3: "**No value, no verdict.** A reader that read no value of a member,
+> a GET that drew no reply, has nothing to call fresh, whatever the
+> horizon: unobservable (§2.6)."
+
+> §2.5: "5. There was no delivery, and it has listened for longer than ttl:
+> **stale**." and "At ttl 0, a member is fresh unless its last delivery is
+> a delete (§2.3)."
+
+> judgements.json: "ttl 0: never stale, no delivery needed (§2.3)", a
+> subscription with no delivery, `fresh`, `never_stale`.
+
+Read literally, §2.3 makes every reader that read no value unobservable,
+"whatever the horizon". Yet §2.5 gives a subscriber that received nothing a
+verdict both ways: stale after more than ttl of listening, and fresh at
+ttl 0. The fixture cites §2.3 for the second. At ttl 0, a GET with no reply
+is unobservable (`silent`, also in the fixture). So a subscriber that heard
+nothing and a GET that drew nothing disagree, though neither read a value.
+The reading that reconciles them makes "No value, no verdict" a GET
+reader's rule: its example is a GET, and it cites §2.6. A subscriber judges
+"a member it knows exists" (§2.5) instead of a value it read.
+**Resolved:** the fixture decides. zk2py's subscriber judges a member it
+heard nothing of as `stale` (`no_delivery`) past ttl and `fresh`
+(`never_stale`) at ttl 0. Its GET reader gives `silent`, as
+`judgements.json` does.
+
+### F-101 · ambiguity · freshness.v1 0.1 §2.7 and `judgements.json`'s description, against §2.3 and §5: nothing observed of a resource with no horizon
+
+> judgements.json: "no observation at all is unobservable, no_observation."
+
+> §2.7, the order of the checks: "For each observation, a reader asks in
+> this order … 1. the resource declares no horizon: not asked (§2.3)".
+
+> §5: "'Not asked' (nobody put the question) and 'unobservable' (it was
+> put, and the observation could not be had) are different facts".
+
+§2.7 asks its order per observation. With no observation, a resource's
+absent horizon is never reached, and the description's rule answers
+unobservable. §2.3 says that freshness is not asked of a resource without
+a horizon, whatever was observed. §5's second question answers such a
+resource "not asked" before it looks at any member. So a member of such a
+resource that nobody observed is unobservable by the description and not
+asked by §2.3, which §5 holds apart. No case pins it: every `no_horizon`
+case has an observation.
+**Resolved:** a guess. zk2py's member judgement follows the description:
+no observation is `unobservable`, `no_observation`, whatever the horizon.
+Its per-resource verdict asks the horizon first, so there a resource
+without one is `not_asked`.
+
+### F-102 · gap · freshness.v1 0.1 §2.6, ground 2: how long a measurement holds
+
+> §2.6: "2. **A measurement:** it received, live, a put stamped by that
+> clock whose stamp was within the delta of its own clock at receipt."
+
+One put within the delta grounds the trust. The text does not say for how
+long, or what a later put by the same clock outside the delta does. It
+could withdraw the trust, or do nothing, since one delivery can be late.
+A reader that measured once at its start keeps trusting a clock that has
+drifted since. §2.6's band then catches only a stamp ahead beyond δ
+(`clock_disagrees`). A clock that fell behind makes its members read older
+than they are, so stale. Scenarios §4 measures a clock that never agreed,
+and §6 a window of 4 s, so neither shows it.
+**Resolved:** a guess. zk2py's `ClockTrust` trusts a clock once any put by
+it was within the delta, for the reader's life. It keeps the measurements
+that fail, and does not act on them.

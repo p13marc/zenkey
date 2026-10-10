@@ -61,7 +61,7 @@ from typing import Any
 
 import zenoh
 
-from . import bundle, envelope, templates
+from . import bundle, envelope, freshness, templates
 from .contract import Contract
 from .lexical import parse_interface_id
 from .slug import slug
@@ -110,6 +110,11 @@ TOMBSTONE_WINDOW_S = 60.0
 
 class OwnerRefused(RuntimeError):
     """The owner must not start (§3.2, §8.2 step 2)."""
+
+
+class ClockAhead(RuntimeError):
+    """Core §4.3 "Ahead": a detection shows the owner's clock beyond its
+    router's delta, so it "MUST stop writing state, re-puts included"."""
 
 
 def free_loopback_port() -> int:
@@ -260,7 +265,7 @@ class Owner:
                  auth: tuple[str, str] | None = None, tokenless: set[str] | None = None,
                  router_connect: str | None = None, hostid: Any = None,
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
-                 state_zid: bool = True):
+                 state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -294,7 +299,18 @@ class Owner:
         - ``meta_host``: the descriptor's ``meta.host``; a minted service
           states the host name by default (hostid.v1 §2.13).
         - ``state_zid``: False leaves ``meta.zid`` out (hostid scenarios
-          §6 step 3)."""
+          §6 step 3).
+        - ``heartbeat``: a router-stamped key the owner subscribes to as its
+          clock reference (core §4.3 "Ahead"), with ``delta_s`` the
+          router's HLC delta. While its clock reads beyond the delta ahead
+          of a heartbeat's stamp, it writes no state: :meth:`set_state`
+          raises :class:`ClockAhead`, and no re-put is made
+          (freshness.v1 §2.10).
+
+        Every state member whose resource has a ``freshness.ttl_s`` above 0
+        is re-put, unchanged under a fresh stamp, once ttl/2 has passed
+        since its last put, until its writer closes (:meth:`close_writer`)
+        or the owner closes (freshness.v1 §2.4)."""
         for c in contracts:
             if not c.valid or c.canonical is None:
                 raise ValueError(f"{c.path}: not a valid contract: {c.codes}")
@@ -337,6 +353,21 @@ class Owner:
         self.calls: list[str] = []
         #: the calls a handler ran for (refusals before a handler excluded)
         self.handled: list[str] = []
+        #: freshness.v1 §2.4: each re-put state member's horizon
+        self.horizons: dict[str, freshness.Horizon] = {}
+        #: members whose writer closed: no re-put until a new writer puts
+        self.closed_writers: set[str] = set()
+        #: every re-put made, (key, stamp)
+        self.reputs: list[tuple[str, zenoh.Timestamp]] = []
+        self.heartbeat, self.delta_ns = heartbeat, int(delta_s * 1e9)
+        #: core §4.3 "Ahead": the guard holds every state write
+        self.ahead = False
+        #: what the owner reports: the guard's transitions (core §4.3: it
+        #: "SHOULD report it")
+        self.events: list[str] = []
+        self._writes = threading.RLock()
+        self._stop = threading.Event()
+        self._refresher: threading.Thread | None = None
 
     # -- keys -------------------------------------------------------------
 
@@ -453,6 +484,10 @@ class Owner:
     def _bring_up(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> None:
         s = self.session
         assert s is not None
+        if self.heartbeat is not None:
+            # Core §4.3: "a reference it holds for the purpose, such as a
+            # subscription to a router-stamped heartbeat key".
+            self._entities.append(s.declare_subscriber(self.heartbeat, zenoh.handlers.Callback(self._beat)))
         # Step 1: resources, publishers and queryables.
         for c in self.contracts:
             for r, status in plan[c.interface]:
@@ -486,6 +521,9 @@ class Owner:
                     self._entities.append(pub)
                     self._publishers[key] = pub
                     self._encodings[key] = enc
+                    h = freshness.horizon(r["kind"], r["annotations"])
+                    if r["kind"] == "state" and h.horizon == "within":
+                        self.horizons[key] = h
             for token in ("state", "@state"):
                 self._entities.append(s.declare_queryable(
                     f"{self.prefix(c)}/{token}/**", zenoh.handlers.Callback(self._state_handler),
@@ -518,6 +556,9 @@ class Owner:
                 fp16 = c.fingerprint.removeprefix("sha256:")[:16]
                 self._entities.append(lv.declare_token(
                     f"zk2/{self.system}/{self.service}/@zk/alive/{c.interface}/{self.instance}/{fp16}"))
+        if self.horizons:
+            self._refresher = threading.Thread(target=self._refresh_loop, daemon=True)
+            self._refresher.start()
 
     def _descriptor(self, plan: dict[str, list[tuple[dict[str, Any], str]]]) -> bytes:
         """§3.3: the record, with `profiles` the union of the `uses`, every
@@ -561,20 +602,85 @@ class Owner:
     # -- state mutations (S1–S3) ------------------------------------------
 
     def set_state(self, key: str, payload: bytes) -> zenoh.Timestamp:
-        """Put a state value, stamped by the owner (S1)."""
-        stamp = self.mint()
-        enc = self._encodings[key]
-        self._publishers[key].put(payload, encoding=enc, timestamp=stamp)
-        self._held[key] = _Held(payload, enc, stamp, time.monotonic())
-        return stamp
+        """Put a state value, stamped by the owner (S1). Every change starts
+        the re-put interval again (freshness.v1 §2.4). A put after
+        :meth:`close_writer` is a new writer's."""
+        with self._writes:
+            if self.ahead:
+                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
+            stamp = self.mint()
+            enc = self._encodings[key]
+            self._publishers[key].put(payload, encoding=enc, timestamp=stamp)
+            self._held[key] = _Held(payload, enc, stamp, time.monotonic())
+            self.closed_writers.discard(key)
+            return stamp
 
     def delete_state(self, key: str) -> zenoh.Timestamp:
         """Delete a state key, stamped (S1); answered with ``reply_del`` within
-        the tombstone window (S3)."""
-        stamp = self.mint()
-        self._publishers[key].delete(timestamp=stamp)
-        self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
-        return stamp
+        the tombstone window (S3). "A deleted member is not re-put"."""
+        with self._writes:
+            if self.ahead:
+                raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
+            stamp = self.mint()
+            self._publishers[key].delete(timestamp=stamp)
+            self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
+            return stamp
+
+    def close_writer(self, key: str) -> None:
+        """freshness.v1 §2.4: "The re-puts stop … when its writer for that
+        member closes." The owner still holds the value and answers GETs
+        with it, under its last stamp; nobody confirms it."""
+        with self._writes:
+            self.closed_writers.add(key)
+
+    # -- freshness.v1 §2.4 and core §4.3 -----------------------------------
+
+    def _now_ns(self) -> int:
+        """The owner's clock, as it stamps (``clock`` when set)."""
+        assert self.session is not None
+        ts = self.clock() if self.clock is not None else self.session.new_timestamp()
+        return ts.get_time_as_ntp64().as_nanos()
+
+    def _beat(self, sample: zenoh.Sample) -> None:
+        """Core §4.3: a heartbeat's router stamp against the owner's clock."""
+        if sample.timestamp is None or self.session is None:
+            return
+        off = self._now_ns() - sample.timestamp.get_time_as_ntp64().as_nanos()
+        with self._writes:
+            if off > self.delta_ns and not self.ahead:
+                self.ahead = True
+                self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: state writes held (core §4.3)")
+            elif off <= self.delta_ns and self.ahead:
+                self.ahead = False
+                self.events.append(f"within the delta again ({off / 1e9:.3f} s): state writes released")
+
+    def _refresh_loop(self) -> None:
+        """freshness.v1 §2.4: re-put each held member once ttl/2 has passed
+        since its last put, less a margin for the scheduler (a fifth of
+        ttl/2, at most 200 ms), so that two puts are never more than ttl/2
+        apart. A deleted member, one whose writer closed, and every member
+        while the clock guard holds, are not re-put (§2.10). When the guard
+        releases, the members whose interval ran out are re-put at the next
+        tick."""
+        refresh = min(h.refresh_ns for h in self.horizons.values() if h.refresh_ns)
+        tick = min(max(refresh / 10 / 1e9, 0.01), 0.1)
+        while not self._stop.wait(tick):
+            for key, h in list(self.horizons.items()):
+                due = h.refresh_ns - min(h.refresh_ns // 5, 200_000_000)
+                with self._writes:
+                    held = self._held.get(key)
+                    if self._stop.is_set() or self.session is None or held is None or held.payload is None \
+                            or key in self.closed_writers or self.ahead:
+                        continue
+                    if (time.monotonic() - held.at) * 1e9 < due:
+                        continue
+                    # "the owner re-puts the member's current value,
+                    # unchanged: the same payload, Encoding and attachment",
+                    # under "a fresh timestamp the owner set" (core S1, §4.3).
+                    stamp = self.mint()
+                    self._publishers[key].put(held.payload, encoding=held.encoding, timestamp=stamp)
+                    self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic())
+                    self.reputs.append((key, stamp))
 
     def publish(self, key: str, payload: bytes) -> None:
         """Put a stream sample on its declared publisher, with the
@@ -737,6 +843,12 @@ class Owner:
             call.refuse("app", "this owner decodes no protobuf schema")
 
     def close(self) -> None:
+        # freshness.v1 §2.4: "The re-puts stop when the owner stops".
+        self._stop.set()
+        if self._refresher is not None and self._refresher is not threading.current_thread():
+            self._refresher.join(timeout=2.0)
+        with self._writes:
+            pass
         for e in reversed(self._entities):
             try:
                 e.undeclare()

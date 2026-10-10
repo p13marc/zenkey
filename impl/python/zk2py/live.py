@@ -802,6 +802,7 @@ class StateReply:
     encoding: str
     stamp: str | None            # Zenoh's "<ntp64>/<id hex>" text
     stamp_id: str | None         # the id half: the HLC that issued it (§4.1)
+    stamp_ns: int | None = None  # the stamp's time, ns since the UNIX epoch
 
 
 @dataclass
@@ -845,7 +846,8 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         out.replies.append(StateReply(
             key, s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(), str(s.encoding),
             None if ts is None else str(ts),
-            None if ts is None else str(ts).split("/", 1)[1]))
+            None if ts is None else str(ts).split("/", 1)[1],
+            None if ts is None else ts.get_time_as_ntp64().as_nanos()))
     return out
 
 

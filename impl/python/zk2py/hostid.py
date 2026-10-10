@@ -1,5 +1,5 @@
-"""``hostid.v1``: a system minted from the machine id (profile text 0.2,
-draft, written against core 0.20; ``spec/profiles/hostid/v1.md``).
+"""``hostid.v1``: a system minted from the machine id (profile text 0.3,
+draft, written against core 0.22; ``spec/profiles/hostid/v1.md``).
 
 The session-free half:
 - :func:`derive`, §2.1 with the salt of §2.2;
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import logging
 import os
 import re
 import stat
@@ -169,7 +170,10 @@ class Runtime:
         self.root = os.fspath(root)
         self._link = link
         self._random = random_bytes
-        self._log = log or (lambda message: None)
+        # hostid.v1 0.3 (§2.6): "wherever the process's operational logs go,
+        # at its warning level or the equivalent". A Python process's are
+        # the logging module's: the logger zk2py.hostid, at WARNING.
+        self._log = log or logging.getLogger("zk2py.hostid").warning
         self.logs: list[str] = []
         #: §2.7: the system, once minted
         self.minted: Minted | None = None

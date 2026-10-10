@@ -1,0 +1,13 @@
+# The second half of zk2py_order.v1's uses (core §3.3, 0.20; one major of a
+# profile per contract, 0.22): views.v2 and a.v1, whose other majors and
+# longer names zk2py_order.v1 uses. It must load with no finding at all.
+[interface]
+name    = "zk2py_order_b"
+major   = 1
+minor   = 0
+summary = "zk2py's contract for the order of a descriptor's profiles, second half"
+uses    = ["views.v2", "a.v1"]
+
+[resources.health]
+kind = "state"
+type = { raw = "text/plain" }

@@ -46,9 +46,15 @@ REQUIRED = {
     "operation": ("request", "response"),
 }
 
-#: Appendix D, interim annotation vocabularies (W105 outside them).
-VOCABULARY = {
-    "freshness": {"ttl_s"},
+#: Appendix D (0.21), published annotation vocabularies: "the profile's own
+#: table replaces its interim one". W105 reads one of these first.
+PUBLISHED_VOCABULARY = {
+    "freshness": {"ttl_s"},  # profiles/freshness/v1.md §4
+}
+
+#: Appendix D, interim annotation vocabularies (W105 outside them, until each
+#: profile publishes its own). freshness's row moved to the published table.
+INTERIM_VOCABULARY = {
     "timing": {"period_ms", "deadline_ms", "lifespan_ms"},
     "telemetry": {"unit", "kind", "buckets", "semantic"},
     "link": {"exposure", "downsample_ms"},
@@ -59,6 +65,10 @@ VOCABULARY = {
     "views": {"document"},
     "redundancy": {"election"},
 }
+
+#: W105's table for a profile: "the table the profile publishes, else its
+#: interim one (Appendix D, 0.21)".
+VOCABULARY = {**INTERIM_VOCABULARY, **PUBLISHED_VOCABULARY}
 
 # -- §2.4 / §9.3: built-in defaults -----------------------------------------
 
@@ -232,6 +242,16 @@ class _Loader:
                 self.diag("E002", f"uses entry {u!r} is not <name>.v<major>")
             else:
                 self.uses.append(pid)
+        # E002 (0.22): "two entries name one profile at two majors … once per
+        # profile listed at more than one major". A repeat of one id is the
+        # canonical form's to remove (§9.5), not a second major.
+        majors: dict[str, set[int]] = {}
+        for pid in self.uses:
+            majors.setdefault(pid.name, set()).add(pid.major)
+        for name, ms in majors.items():
+            if len(ms) > 1:
+                self.diag("E002", f"uses names {name!r} at {len(ms)} majors "
+                                  f"({', '.join(f'v{m}' for m in sorted(ms))}): one major per contract (§10)")
         self.profile_names = {u.name for u in self.uses}
         # W104: minor absent.
         if self.c.minor is None:
@@ -282,10 +302,12 @@ class _Loader:
             if _holds_datetime(v):
                 self.diag("E020", f"{where}: annotation {k!r} holds a datetime", resource)
             if well_formed and profile in self.profile_names:
-                # W105; a profile without an interim table has none (§10).
+                # W105: the profile's published table, else its interim
+                # one (0.21); a profile with neither has none (§10).
                 vocab = VOCABULARY.get(profile)
                 if vocab is not None and key not in vocab:
-                    self.diag("W105", f"{where}: {k!r} is outside the interim vocabulary", resource)
+                    which = "published" if profile in PUBLISHED_VOCABULARY else "interim"
+                    self.diag("W105", f"{where}: {k!r} is outside the {which} vocabulary", resource)
 
     def check_history_depth(self, value: Any, where: str, resource: str | None = None) -> None:
         if isinstance(value, dict) and value.get("depth") == 0:
