@@ -52,9 +52,11 @@ pub struct StorageInfo {
     /// does not say, which is not the same as "none configured".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strip_prefix: Option<String>,
-    /// The backing volume's id — `memory` is volatile and loses late-joiner
-    /// seeds on a router restart, `fs`/`rocksdb` are the durable LWW stores
-    /// (RFC 09 §2). Spelled either as a bare string or as `{ id: "fs", … }`
+    /// The backing volume's id — `memory` is volatile and loses what it
+    /// stored on a router restart, `fs`/`rocksdb` are the durable LWW stores
+    /// (RFC 09 §2). A storage is never an owner's state seed in zk2: a late
+    /// joiner seeds from the owner (core §4.2, S4), and a storage answering
+    /// on an owner's state is a finding. Spelled either as a bare string or as `{ id: "fs", … }`
     /// depending on version; both are absorbed here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<String>,

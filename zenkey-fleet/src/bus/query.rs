@@ -1,5 +1,10 @@
 //! The fan-in query discipline (RFC 05 §2.1) — moved verbatim from
 //! zenctl's `bus.rs`; this stays the single chokepoint for fleet GETs.
+//!
+//! Two disciplines, one `session.get`: the fan-in's (target `All`,
+//! consolidation `None`, every reply attributed by its key) and spec §4.2's
+//! state GET (target `All`, consolidation `Latest`, S4), which a late
+//! joiner seeds from (0.26; #614, FL4).
 
 use std::time::Duration;
 
@@ -214,9 +219,9 @@ impl GetOpts {
     }
 }
 
-/// **The** `session.get` of this crate (RFC 05 §2.1) — no other module issues
-/// one, which is what makes the discipline checkable by grep rather than by
-/// review.
+/// The fan-in GET of this crate (RFC 05 §2.1) — no other module issues
+/// a `session.get`: this and [`state_get`] share the one call, which is what
+/// makes the discipline checkable by grep rather than by review.
 ///
 /// Two of the three things §2.1 requires are set here, once:
 ///
@@ -238,10 +243,44 @@ pub(crate) async fn disciplined_get(
     selector: &str,
     opts: &GetOpts,
 ) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
+    issue(session, selector, opts, ConsolidationMode::None).await
+}
+
+/// **The** state GET of this crate: spec §4.2's S4, target `All` and
+/// consolidation **`Latest`**, both set explicitly — the GET a late joiner
+/// seeds from after its subscription is declared (0.26), and the only GET
+/// here that consolidates.
+///
+/// `Latest` keeps, per key, the reply with the greatest timestamp, ranks an
+/// unstamped one lowest, and delivers at the GET's completion (§4.1). That
+/// is the whole reason it is not [`disciplined_get`]: a fan-out under
+/// RFC 05 §2.1 wants every reply, a state read wants each key's newest.
+/// One selector over several owners is still "addressed to the owner's
+/// keys" (0.26): each key it matches has one owner (P3), so `Latest`
+/// consolidates each key over that owner's answers; a foreign key is
+/// outside S4 and answered by whatever holds it.
+///
+/// Attribution is unchanged: each reply is drained by its own key.
+pub(crate) async fn state_get(
+    session: &Session,
+    selector: &str,
+    opts: &GetOpts,
+) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
+    issue(session, selector, opts, ConsolidationMode::Latest).await
+}
+
+/// The one `session.get` behind [`disciplined_get`] and [`state_get`]:
+/// target `All` always, the consolidation the caller's discipline names.
+async fn issue(
+    session: &Session,
+    selector: &str,
+    opts: &GetOpts,
+    consolidation: ConsolidationMode,
+) -> Result<zenoh::handlers::FifoChannelHandler<zenoh::query::Reply>> {
     let mut builder = session
         .get(selector)
         .target(QueryTarget::All)
-        .consolidation(ConsolidationMode::None)
+        .consolidation(consolidation)
         .priority(opts.priority)
         .timeout(opts.timeout);
     if let Some(body) = opts.payload.clone() {

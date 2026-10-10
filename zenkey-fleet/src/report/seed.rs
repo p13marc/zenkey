@@ -1,21 +1,91 @@
-//! The seeding plane: what each path of a seeded subscription contributed.
+//! The seeding plane: what each leg of a seeded subscription contributed
+//! (core §4.2's late joiner, 0.26; #614, FL4).
 //!
-//! Every count here reads three ways on purpose — `None` is a path that was
-//! switched off, `Some(0)` is a path that ran and nobody answered, and a
-//! number is a number (RFC 09 §5.1 O4).
+//! A leg reads three ways on purpose — absent is a leg that was switched
+//! off ([`Asked::NotAsked`]), zero replies is a leg that ran and nobody
+//! answered, and a number is a number (the tooling guide's O4) — and a leg
+//! that ran says whether it ran to its final reply, since a GET that
+//! reached its timeout seeds possibly incompletely (§8.1's reading, applied
+//! to state by 0.26).
 
-/// What each seed path contributed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+use serde::Serialize;
+
+use crate::report::Asked;
+
+/// What one seed leg's GET brought back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SeedLeg {
+    /// Replies received, the error replies aside. Zero is "ran, and nobody
+    /// answered": an observation, never a verdict (O5).
+    pub replies: usize,
+    /// Whether the GET ran to its final reply with no error reply. `false`
+    /// is possibly incomplete: in zenoh 1.10.1 a GET that reached its
+    /// timeout ends with an error reply (core Appendix B), so a replier the
+    /// GET did not wait for may hold state this seed lacks.
+    pub complete: bool,
+}
+
+/// What each seed leg contributed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SeedCoverage {
-    /// Replies from the `@adv` cache query (`None` = the history path was
-    /// disabled; `Some(0)` = ran and no cache answered — an observation,
-    /// not a verdict).
-    pub history_replies: Option<usize>,
-    /// Replies from the storage GET (same `None`/`Some(0)` reading).
-    pub storage_replies: Option<usize>,
-    /// Samples suppressed by the merge — not newer than what was already
-    /// seen for their key. The honesty counter: a seed that arrived late
-    /// and lost (or duplicated the other path) is counted, never silently
-    /// absorbed.
+    /// The history leg: the `@adv` caches of the advanced publishers present
+    /// (core §2.5), for resources that declare `history`. Absent when it was
+    /// switched off.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub history: Asked<SeedLeg>,
+    /// The state leg: S4's GET on the watched selector, target `All` and
+    /// consolidation `Latest` (core §4.2). Answered by each key's owner, and
+    /// for a foreign key by whatever answers it. Absent when it was switched
+    /// off.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub state: Asked<SeedLeg>,
+    /// Samples suppressed by the merge — not newer, by the owner's stamp,
+    /// than what was already held for their key (0.26's merge): a reply
+    /// older than a live sample, a live sample older than a reply, or one
+    /// mutation that both paths carried. Counted, never silently absorbed.
     pub superseded: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The coverage's wire shape, pinned: a leg switched off is absent, a
+    /// leg that ran carries its replies and whether it ran to its end, and
+    /// v1's `storage_replies` is gone with the storage it named.
+    #[test]
+    fn seed_coverage_json_shape_is_pinned() {
+        let both = SeedCoverage {
+            history: Asked::Asked(SeedLeg {
+                replies: 1,
+                complete: true,
+            }),
+            state: Asked::Asked(SeedLeg {
+                replies: 0,
+                complete: false,
+            }),
+            superseded: 2,
+        };
+        assert_eq!(
+            serde_json::to_value(both).expect("serializes"),
+            json!({
+                "history": {"replies": 1, "complete": true},
+                "state": {"replies": 0, "complete": false},
+                "superseded": 2,
+            })
+        );
+        let state_only = SeedCoverage {
+            history: Asked::NotAsked,
+            state: Asked::Asked(SeedLeg {
+                replies: 3,
+                complete: true,
+            }),
+            superseded: 0,
+        };
+        assert_eq!(
+            serde_json::to_value(state_only).expect("serializes"),
+            json!({"state": {"replies": 3, "complete": true}, "superseded": 0})
+        );
+    }
 }

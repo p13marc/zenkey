@@ -213,7 +213,7 @@ pub enum FleetEvent {
     /// The watch set changed ([`Monitor::watch`]/[`Monitor::unwatch`]) —
     /// coverage labels should refresh; pull the set via [`Monitor::watched`].
     WatchChanged,
-    /// A seeded watch's seed phase resolved (issue #92): both seed paths of
+    /// A seeded watch's seed phase resolved (issue #92): every seed leg of
     /// [`Monitor::watch_seeded`] finished, with what each contributed.
     /// Everything on this watch after this event is live-only — "seeding"
     /// panes flip to "live" here, never on a guess.
@@ -832,36 +832,40 @@ impl Monitor {
         Ok(self)
     }
 
-    /// Observe a selector **with a correct seed phase** (issue #92; the
-    /// RFC 04 §3.2 discipline of [`crate::seed_subscribe`], run through this
-    /// monitor's bounded broadcast):
+    /// Observe a selector **as a late joiner** (core §4.2, 0.26; issue #92
+    /// first, re-cut onto S4 at #614's FL4): the discipline of
+    /// [`crate::seed_subscribe`], run through this monitor's bounded
+    /// broadcast.
     ///
-    /// - the subscriber is declared first, then both seed paths run as
-    ///   bounded GETs (`@adv` caches for live publishers, the selector
-    ///   itself for router storages — the crashed-producer case);
-    /// - one per-key LWW merge spans seed *and* live samples until the
-    ///   boundary, so a transition in the seed window lands exactly once and
-    ///   a stale seed cannot regress a key. Suppressions are counted in the
-    ///   coverage, never silently absorbed (O6) — and they are *not* part of
-    ///   `Dropped(n)`, which counts only broadcast lag;
-    /// - [`FleetEvent::WatchSeeded`] fires once **both** paths resolve,
-    ///   carrying this id and the [`crate::SeedCoverage`]. After it, the
-    ///   merge is dropped and live samples flow untouched (the merge map is
-    ///   a seed-phase structure, not a per-watch leak).
+    /// - the subscriber is declared first, then the seed legs run as bounded
+    ///   GETs: S4's state GET on the selector (target `All`, consolidation
+    ///   `Latest`: each key's owner answers, and whatever holds a foreign
+    ///   key), and the `@adv` caches of the advanced publishers present
+    ///   (spec §2.5);
+    /// - one per-key merge by the owner's stamp spans seed *and* live
+    ///   samples until the boundary, so a mutation in the seed window lands
+    ///   exactly once and a stale reply cannot regress a key. Suppressions
+    ///   are counted in the coverage, never silently absorbed (O6) — and
+    ///   they are *not* part of `Dropped(n)`, which counts only broadcast
+    ///   lag;
+    /// - [`FleetEvent::WatchSeeded`] fires once **every** leg resolves,
+    ///   carrying this id and the [`crate::SeedCoverage`] (a leg that ran to
+    ///   its timeout says so: it seeded possibly incompletely). After it,
+    ///   the merge is dropped and live samples flow untouched (the merge map
+    ///   is a seed-phase structure, not a per-watch leak).
     pub async fn watch_seeded(
         &self,
         selector: &str,
         policy: crate::bus::seed::SeedPolicy,
     ) -> Result<WatchId> {
-        use crate::bus::seed::{Merge, cache_selector, seed_get, view_of};
-        use crate::report::SeedCoverage;
+        use crate::bus::seed::{Merge, run_legs, view_of};
 
         // The merge gate: `Some` while seeding (both live callback and seed
         // replies pass `admit`), swapped to `None` at the boundary.
         let gate: Arc<arc_swap::ArcSwapOption<Merge>> =
             Arc::new(arc_swap::ArcSwapOption::from_pointee(Merge::new()));
 
-        // 1) The subscriber, FIRST (RFC 04 §3.2).
+        // 1) The subscriber, FIRST (core §4.2, 0.26).
         let core = Arc::clone(&self.core);
         let cb_gate = Arc::clone(&gate);
         let subscriber = crate::bus::teardown::declared(
@@ -898,7 +902,7 @@ impl Monitor {
             },
         );
 
-        // 3) The seed GETs, AFTER — attached to the entry so `unwatch` during
+        // 3) The seed legs, AFTER — attached to the entry so `unwatch` during
         //    the seed phase aborts them.
         let seed_task = {
             let session = self.session.clone();
@@ -908,37 +912,10 @@ impl Monitor {
                 let merge = gate
                     .load_full()
                     .expect("gate holds the merge while seeding");
-                let history = async {
-                    if policy.history {
-                        let sel = cache_selector(&selector);
-                        Some(
-                            seed_get(&session, &sel, policy.timeout, &merge, |view| {
-                                core.ingest(view, None);
-                            })
-                            .await,
-                        )
-                    } else {
-                        None
-                    }
-                };
-                let storage = async {
-                    if policy.storage {
-                        Some(
-                            seed_get(&session, &selector, policy.timeout, &merge, |view| {
-                                core.ingest(view, None);
-                            })
-                            .await,
-                        )
-                    } else {
-                        None
-                    }
-                };
-                let (history_replies, storage_replies) = tokio::join!(history, storage);
-                let coverage = SeedCoverage {
-                    history_replies,
-                    storage_replies,
-                    superseded: merge.superseded(),
-                };
+                let coverage = run_legs(&session, &selector, policy, &merge, |view| {
+                    core.ingest(view, None);
+                })
+                .await;
                 gate.store(None);
                 // Seeded keys should be visible on the very tick that
                 // announces the boundary, not one tick later.

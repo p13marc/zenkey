@@ -136,7 +136,7 @@ async fn a_seeded_subscription_streams_seed_then_boundary_then_live() {
         "the seed arrived before the boundary"
     );
     assert!(
-        coverage.history_replies.is_some() || coverage.storage_replies.is_some(),
+        coverage.history.is_asked() && coverage.state.is_asked(),
         "the seed was asked for: {coverage:?}"
     );
 
