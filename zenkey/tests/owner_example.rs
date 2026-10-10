@@ -3,7 +3,9 @@
 //! owner a black-box scenario watches through R1.
 //!
 //! The example is compiled into this suite and run in process, through the
-//! same `run` its `main` calls, so the suite needs no built binary.
+//! same `run` (and `run_with`, for its commands) its `main` calls, so the
+//! suite needs no built binary. Its `health.v1` (#721) is here too: the
+//! knobs and commands a black-box runner drives.
 
 mod common;
 
@@ -283,4 +285,216 @@ async fn the_owner_example_with_a_minted_system() {
     );
     stop.send(()).unwrap();
     running.await.unwrap().unwrap();
+}
+
+/// A running owner example: its output lines, its command sender, its
+/// stop, and its task.
+struct Running {
+    lines: flume::Receiver<String>,
+    send: flume::Sender<String>,
+    stop: tokio::sync::oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<Result<(), String>>,
+}
+
+/// Starts the owner example with `args`, through `run_with`.
+fn spawn_owner(args: &[&str]) -> Running {
+    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+    let opts = owner::Options::parse(&args).unwrap();
+    let (say, lines) = flume::unbounded::<String>();
+    let (send, commands) = flume::unbounded::<String>();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let task = tokio::spawn(async move {
+        owner::run_with(
+            opts,
+            move |l| {
+                let _ = say.send(l);
+            },
+            commands,
+            async {
+                let _ = stopped.await;
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())
+    });
+    Running {
+        lines,
+        send,
+        stop,
+        task,
+    }
+}
+
+impl Running {
+    /// The owner's answer to one command line.
+    async fn ask(&self, cmd: &str) -> String {
+        self.send.send(cmd.to_owned()).unwrap();
+        line(&self.lines).await
+    }
+
+    async fn stop(self) {
+        self.stop.send(()).unwrap();
+        self.task.await.unwrap().unwrap();
+    }
+}
+
+/// The payloads of a state GET (All + Latest).
+async fn state(tool: &zenoh::Session, key: &str) -> Vec<Vec<u8>> {
+    get(tool, key, b"", QueryTarget::All, ConsolidationMode::Latest)
+        .await
+        .into_iter()
+        .filter_map(|r| r.into_result().ok())
+        .map(|s| s.payload().to_bytes().into_owned())
+        .collect()
+}
+
+/// `health.v1` in the owner example (#721): the standard contract among
+/// the files is the runtime's to implement, the status and checks given on
+/// the command line are put before the tokens, and the commands move them,
+/// each answered with what is published.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_health() {
+    use zenkey::health::v1;
+    use zenkey::prost::Message as _;
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let faults = tool
+        .declare_subscriber("zk2/ex/healthy/health.v1/stream/faults")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let standard =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/health/health.v1.toml");
+    let standard = standard.display().to_string();
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--health-status",
+        "OK:serving",
+        "--health-check",
+        "disk=OK:70% used",
+        "--tokenless",
+        "health.v1",
+        "ex/healthy",
+        &standard,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let instance = ready.rsplit('/').next().unwrap().parse().unwrap();
+    let d = presence::descriptor(&tool, &"ex/healthy".parse().unwrap(), &instance, T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    let e = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "health.v1")
+        .unwrap();
+    assert_eq!(
+        e.contract,
+        format!("sha256:{}", zenkey::health::FINGERPRINT)
+    );
+    assert!(!e.token, "in the tokenless set");
+    let status = state(&tool, "zk2/ex/healthy/health.v1/state/status").await;
+    let s = v1::Status::decode(status[0].as_slice()).unwrap();
+    assert_eq!((s.level, s.reason.as_str()), (1, "serving"));
+
+    assert_eq!(
+        o.ask("check disk FAILED full").await,
+        "health status=FAILED declared=OK raised_by=disk"
+    );
+    let check = state(&tool, "zk2/ex/healthy/health.v1/state/checks/disk").await;
+    assert_eq!(v1::Check::decode(check[0].as_slice()).unwrap().level, 3);
+    assert_eq!(
+        o.ask("fault ex_restart DEGRADED the poller restarted")
+            .await,
+        "health status=FAILED declared=OK raised_by=disk"
+    );
+    let f = tokio::time::timeout(SETTLE, faults.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    let f = v1::Fault::decode(&*f.payload().to_bytes()).unwrap();
+    assert_eq!(
+        (f.code.as_str(), f.level, f.detail.as_str()),
+        ("ex_restart", 2, "the poller restarted")
+    );
+    let refused = o.ask("fault clock_ahead FAILED x").await;
+    assert!(
+        refused.starts_with("refused fault clock_ahead FAILED x: clock_ahead is a code of"),
+        "{refused}"
+    );
+    let refused = o.ask("fault Bad FAILED x").await;
+    assert!(
+        refused.starts_with("refused fault Bad FAILED x: fault code \"Bad\""),
+        "{refused}"
+    );
+    assert!(o.ask("status UNSPECIFIED").await.starts_with("refused"));
+    assert_eq!(
+        o.ask("retire disk").await,
+        "health status=OK declared=OK raised_by=-"
+    );
+    assert_eq!(
+        o.ask("check probe UNSPECIFIED cannot reach it").await,
+        "health status=OK declared=OK raised_by=-"
+    );
+    assert_eq!(
+        o.ask("confirm off").await,
+        "health status=OK declared=OK raised_by=-"
+    );
+    assert!(o.ask("nonsense").await.starts_with("refused nonsense"));
+    o.stop().await;
+}
+
+/// `--clock-reference` and `--clock-offset-ms` (health.v1 §2.5): an owner
+/// 2 s ahead publishes `clock_ahead` once its guard holds, and R1 re-stamps
+/// it, the session's HLC being left off under a simulated offset; the
+/// `clock-offset` command sets the clock right.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_reports_a_clock_ahead() {
+    use zenkey::health::v1;
+    use zenkey::prost::Message as _;
+
+    let (r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let faults = tool
+        .declare_subscriber("zk2/ex/ahead/health.v1/stream/faults")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--health",
+        "--clock-reference",
+        "clock/heartbeat",
+        "--clock-offset-ms",
+        "2000",
+        "ex/ahead",
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    assert!(
+        ready.starts_with("ready zk2/ex/ahead/@zk/instance/"),
+        "{ready}"
+    );
+    let fault = loop {
+        tool.put("clock/heartbeat", "tick").await.unwrap();
+        if let Ok(Ok(s)) =
+            tokio::time::timeout(Duration::from_millis(100), faults.recv_async()).await
+        {
+            break s;
+        }
+    };
+    let f = v1::Fault::decode(&*fault.payload().to_bytes()).unwrap();
+    assert_eq!((f.code.as_str(), f.level), ("clock_ahead", 3));
+    assert_eq!(
+        fault.timestamp().unwrap().get_id().to_string(),
+        r1.zid().to_string(),
+        "re-stamped by R1"
+    );
+    assert_eq!(o.ask("clock-offset 0").await, "clock-offset 0");
+    o.stop().await;
 }
