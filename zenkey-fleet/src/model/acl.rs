@@ -2690,17 +2690,19 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
     }
 
-    /// The example directories' contracts, with the profiles' standard
-    /// contracts an example deployment implements beside its own:
-    /// `health.v1` (`spec/profiles/health/`, #721).
+    /// The example directories' contracts, with the contracts an example
+    /// deployment implements beside its own: the profiles' standard
+    /// `health.v1` (`spec/profiles/health/`, #721), and zenwatch's own
+    /// `zenwatch.v1`, which lives with zenwatch (#614, FL3).
     fn contracts(dirs: &[&str]) -> ContractSet {
         let mut set = ContractSet::new();
         for d in dirs {
             let (s, _) = ContractSet::load_path(&examples().join(d));
             set.extend(s);
         }
-        let standard = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/health");
-        set.extend(ContractSet::load_path(&standard).0);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        set.extend(ContractSet::load_path(&root.join("spec/profiles/health")).0);
+        set.extend(ContractSet::load_path(&root.join("zenwatch/contracts/zenwatch.v1.toml")).0);
         set
     }
 
@@ -2993,7 +2995,6 @@ type = { raw = "text/plain" }
         let plan = walkthrough(AclPermission::Deny);
         for not_a_provider in [
             "vehicle-01/teleop",
-            "vehicle-01/navigation",
             "vehicle-01/cam-front",
             // A pure consumer serves its presence alone.
             "vehicle-01/tracker",
@@ -3014,6 +3015,16 @@ type = { raw = "text/plain" }
             rule_of(&plan, "fan-in:vehicle-01/thruster-l").key_exprs,
             ["zk2/vehicle-01/*/thruster.v1/state/status"]
         );
+        // The vehicle's notifier reads health.v1 on `*/*` (#614, FL3): the
+        // two providers of health.v1 get that selector, and nothing of the
+        // tracker's detections, whose providers they are not.
+        for provider in ["vehicle-01/navigation", "vehicle-01/zenwatch"] {
+            assert_eq!(
+                rule_of(&plan, &format!("fan-in:{provider}")).key_exprs,
+                ["zk2/*/*/health.v1/state/**", "zk2/*/*/health.v1/stream/**"],
+                "{provider}"
+            );
+        }
     }
 
     /// §11.1 Consume: the bindings' selectors (R1), a requirement's
@@ -3187,21 +3198,39 @@ type = { raw = "text/plain" }
     #[test]
     fn a_tool_enrolled_with_admin_reads_the_admin_space() {
         let plan = walkthrough(AclPermission::Deny);
-        for (id, msgs) in [
-            ("admin-read-in:tool.ops", vec![AclMessage::Query]),
-            ("admin-read-out:tool.ops", vec![AclMessage::Reply]),
-        ] {
-            let r = rule_of(&plan, id);
-            assert_eq!(r.key_exprs, ["@/*/router", "@/*/router/**"], "{id}");
-            assert_eq!(r.messages, msgs, "{id}");
-            assert_eq!(r.grant, AclGrantKind::AdminRead);
+        // The ground's `ops`, and the vehicle notifier's tool (#614, FL3),
+        // whose principal also runs a service: the admin read is the tool's
+        // grant, never the service's.
+        for tool in ["ops", "zenwatch"] {
+            for (id, msgs) in [
+                (
+                    format!("admin-read-in:tool.{tool}"),
+                    vec![AclMessage::Query],
+                ),
+                (
+                    format!("admin-read-out:tool.{tool}"),
+                    vec![AclMessage::Reply],
+                ),
+            ] {
+                let r = rule_of(&plan, &id);
+                assert_eq!(r.key_exprs, ["@/*/router", "@/*/router/**"], "{id}");
+                assert_eq!(r.messages, msgs, "{id}");
+                assert_eq!(r.grant, AclGrantKind::AdminRead);
+            }
         }
         let admin_rules = plan
             .rules
             .iter()
             .filter(|r| r.grant == AclGrantKind::AdminRead)
             .count();
-        assert_eq!(admin_rules, 2, "the tool alone");
+        assert_eq!(admin_rules, 4, "the two tools alone");
+        assert!(
+            policy_of(&plan, "zenwatch")
+                .rules
+                .iter()
+                .any(|r| r == "admin-read-in:tool.zenwatch"),
+            "one principal, both grant sets"
+        );
         let allow = walkthrough(AclPermission::Allow);
         assert!(
             allow
