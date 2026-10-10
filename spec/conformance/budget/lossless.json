@@ -1,0 +1,243 @@
+{
+  "description": "core §2.7 (0.25), whether a window lost no delivery: the resource's declared QoS (`qos.reliability`: best_effort or reliable; `qos.congestion`: drop or block), the deliveries the window's own reader lost (`reader_lost`: its queue overflowed or fell behind, or a cap kept them out of its count), and miss detection (`miss_detection.declared`: the resource declares `history.miss_detection_ms`; `used`: the window's subscription detects misses; `misses`: how many it detected) → whether the window is shown to have lost no delivery (`expect.lossless`) and the reason class (`expect.reason`). Miss detection counts only when the resource declares it and the subscription uses it; a detected miss is a loss, and none detected establishes nothing. Reasons are chosen in this order: reader_lost (reader_lost above 0); misses_detected (declared and used, misses above 0); best_effort (reliability best_effort, whatever the congestion); congestion_drop (reliable with drop); else lossless, reliable_block. Only reliable_block is lossless.",
+  "cases": [
+    {
+      "note": "reliable and block, nothing lost by the reader: a router's queue never drops such a sample, so the window lost none",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": true,
+        "reason": "reliable_block"
+      }
+    },
+    {
+      "note": "reliable and block, but the reader's own queue fell behind",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 3,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_lost"
+      }
+    },
+    {
+      "note": "best effort and drop: a sample dropped on the path leaves no trace",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "best_effort"
+      }
+    },
+    {
+      "note": "best effort with block: a best-effort sample is droppable whatever its congestion",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "best_effort"
+      }
+    },
+    {
+      "note": "reliable with drop: a full queue drops a sample and leaves no trace",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "congestion_drop"
+      }
+    },
+    {
+      "note": "the reader's own loss comes before the QoS",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 1,
+      "miss_detection": {
+        "declared": false,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_lost"
+      }
+    },
+    {
+      "note": "the reader's own loss comes before a detected miss",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 2,
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 5
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "reader_lost"
+      }
+    },
+    {
+      "note": "best effort, miss detection used and nothing detected: no detected miss establishes nothing, since a publisher none of whose samples arrived is never reported",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "best_effort"
+      }
+    },
+    {
+      "note": "best effort, misses detected: a loss shown, and named before the QoS",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 2
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "misses_detected"
+      }
+    },
+    {
+      "note": "reliable and block, yet a miss detected: positive evidence of a loss wins over the QoS",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 1
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "misses_detected"
+      }
+    },
+    {
+      "note": "reliable and block, miss detection used and nothing detected: lossless by the QoS",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": true,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": true,
+        "reason": "reliable_block"
+      }
+    },
+    {
+      "note": "declared, but the window's subscription does not detect misses: the QoS decides",
+      "qos": {
+        "reliability": "best_effort",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "best_effort"
+      }
+    },
+    {
+      "note": "declared and not used, over a reliable, blocking path: lossless by the QoS",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "block"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": true,
+        "used": false,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": true,
+        "reason": "reliable_block"
+      }
+    },
+    {
+      "note": "used where the resource does not declare it: its samples carry no number, so there is nothing to detect, and the QoS decides",
+      "qos": {
+        "reliability": "reliable",
+        "congestion": "drop"
+      },
+      "reader_lost": 0,
+      "miss_detection": {
+        "declared": false,
+        "used": true,
+        "misses": 0
+      },
+      "expect": {
+        "lossless": false,
+        "reason": "congestion_drop"
+      }
+    }
+  ]
+}

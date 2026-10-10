@@ -18,6 +18,7 @@ the runtime (#610 onward).
 | [`types.md`](types.md) | §2.4 QoS, §7.1–§7.2 |
 | [`security.md`](security.md) | §11; §4.2's admin space |
 | [`constrained.md`](constrained.md) | §1.6, R7, §8.5, §12 |
+| [`budget.md`](budget.md) | §2.7: what a path drops and a reader sees (0.25); an owner keeping its bound and its rate |
 
 Conventions: R1 and R2 are routers, linked R2 → R1 unless a scenario says
 otherwise. "Owner", "consumer" and "caller" are client sessions. Timeouts
