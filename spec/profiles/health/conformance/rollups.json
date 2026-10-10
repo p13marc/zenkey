@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "counts": {
+          "healthy": 0,
+          "not_asked": 0,
+          "stale": 0,
+          "unhealthy": 0,
+          "unobservable": 0
+        },
+        "worst": null
+      },
+      "judged": [],
+      "note": "no service"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 1,
+          "not_asked": 0,
+          "stale": 0,
+          "unhealthy": 0,
+          "unobservable": 0
+        },
+        "worst": "ok"
+      },
+      "judged": [
+        {
+          "level": "ok",
+          "verdict": "healthy"
+        }
+      ],
+      "note": "one healthy"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 1,
+          "not_asked": 0,
+          "stale": 0,
+          "unhealthy": 1,
+          "unobservable": 0
+        },
+        "worst": "degraded"
+      },
+      "judged": [
+        {
+          "level": "ok",
+          "verdict": "healthy"
+        },
+        {
+          "level": "degraded",
+          "verdict": "unhealthy"
+        }
+      ],
+      "note": "the worst established level"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 1,
+          "not_asked": 0,
+          "stale": 0,
+          "unhealthy": 2,
+          "unobservable": 0
+        },
+        "worst": "failed"
+      },
+      "judged": [
+        {
+          "level": "failed",
+          "verdict": "unhealthy"
+        },
+        {
+          "level": "ok",
+          "verdict": "healthy"
+        },
+        {
+          "level": "degraded",
+          "verdict": "unhealthy"
+        }
+      ],
+      "note": "FAILED over DEGRADED"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 0,
+          "not_asked": 0,
+          "stale": 1,
+          "unhealthy": 0,
+          "unobservable": 0
+        },
+        "worst": null
+      },
+      "judged": [
+        {
+          "level": null,
+          "verdict": "stale"
+        }
+      ],
+      "note": "stale alone: counted apart, never a level, never FAILED"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 1,
+          "not_asked": 0,
+          "stale": 1,
+          "unhealthy": 0,
+          "unobservable": 0
+        },
+        "worst": "ok"
+      },
+      "judged": [
+        {
+          "level": "ok",
+          "verdict": "healthy"
+        },
+        {
+          "level": null,
+          "verdict": "stale"
+        }
+      ],
+      "note": "stale beside healthy: the worst is still OK"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 0,
+          "not_asked": 1,
+          "stale": 1,
+          "unhealthy": 0,
+          "unobservable": 1
+        },
+        "worst": null
+      },
+      "judged": [
+        {
+          "level": null,
+          "verdict": "unobservable"
+        },
+        {
+          "level": null,
+          "verdict": "not_asked"
+        },
+        {
+          "level": null,
+          "verdict": "stale"
+        }
+      ],
+      "note": "nothing established"
+    },
+    {
+      "expect": {
+        "counts": {
+          "healthy": 1,
+          "not_asked": 1,
+          "stale": 1,
+          "unhealthy": 2,
+          "unobservable": 1
+        },
+        "worst": "failed"
+      },
+      "judged": [
+        {
+          "level": "ok",
+          "verdict": "healthy"
+        },
+        {
+          "level": "failed",
+          "verdict": "unhealthy"
+        },
+        {
+          "level": null,
+          "verdict": "stale"
+        },
+        {
+          "level": null,
+          "verdict": "unobservable"
+        },
+        {
+          "level": null,
+          "verdict": "not_asked"
+        },
+        {
+          "level": "degraded",
+          "verdict": "unhealthy"
+        }
+      ],
+      "note": "every verdict"
+    }
+  ],
+  "description": "health.v1 §2.2, §5: the judged readings of several services, each {\"verdict\", \"level\"} as judgements.json's expect writes them -> a tool's roll-up: worst, the worst level among the established verdicts (healthy and unhealthy), or null when none is; and counts, the number of each verdict. Stale, unobservable and not_asked are counted apart, and never enter worst."
+}

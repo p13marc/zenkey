@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.22** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.23** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -15,8 +15,10 @@ what a tool needs that it cannot read off the bus, in 0.18 two words
 0.17 left loose, in 0.19 profiles that only derive, and where
 profiles live, in 0.20 a provider on the service's own system, the
 order of `profiles`, and a derived address, in 0.21 the first
-vocabulary a profile publishes, `freshness.v1`'s, with a re-put, and in
-0.22 one major of a profile per contract).
+vocabulary a profile publishes, `freshness.v1`'s, with a re-put, in
+0.22 one major of a profile per contract, and in 0.23 what `health.v1`
+needed: a clock ahead reported by a stream, and the first standard
+contract a profile publishes).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -424,7 +426,7 @@ the required interface, and MUST NOT be empty.
 | R4 | A consumer compiled against `X.vN` binds to providers of any revision of `X.vN` (§9.8). | `[F: compat/]` |
 | R5 | A consumer MAY wait on presence for its bound providers. A binding resolves at once without it. | `[Sc: bindings.md §1]` |
 | R6 | **Consumer:** MUST discard a sample, or a GET reply, whose key expression is not concrete. Zenoh delivers a put on a wildcard key with the publisher's key. | `[Sc: bindings.md §4]` |
-| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it (0.21). Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. | `[Sc: constrained.md §3]` |
+| R7 | A binding MUST NOT require presence. Across a constrained face, a consumer binds statically and judges liveness from the freshness of what crosses, as [`freshness.v1`](profiles/freshness/v1.md) §2.9 measures it (0.21). Where nothing crosses, liveness is *unobservable*, and a tool MUST say so rather than report the provider down. A `health.v1` status that crosses is such evidence, and its health is unobservable where the face closes it ([`health.v1`](profiles/health/v1.md) §2.8, 0.23). | `[Sc: constrained.md §3]` |
 
 When several providers are bound, choosing between them is the consumer's
 (`arbitration.v1`).
@@ -656,6 +658,9 @@ and reports these codes. `[F: descriptors/]`
 - Routers stamp puts, where timestamping is enabled. Peers and clients do
   not stamp by default. Deletes and query replies are never stamped by the
   network.
+- A session whose HLC is enabled, as a serving session's is (§4.3), stamps
+  every put it is not given a timestamp for, a stream sample included, from
+  its own clock (0.23).
 - `Latest` consolidation keeps, per key, the reply with the greatest
   timestamp, ranks an unstamped reply lowest, and delivers at query
   completion.
@@ -747,7 +752,8 @@ session is itself the router, the two zids are one, and the check proves
 nothing. A tester therefore runs the owner as a client of a router with
 timestamping enabled, which keeps the stamp a put carries unless it is
 future-dated (§4.1), and checks the check against a control: a put without
-a timestamp, through the same router, arrives with the router's zid.
+a timestamp, from a session whose HLC is not enabled (§4.1, 0.23), through
+the same router, arrives with the router's zid.
 `[Sc: state.md §1]`
 - **A tool's S1 check** (0.16, 0.17). A tool attributes a state reply's
   stamp by comparing its id with the owner's `meta.zid` (§3.3), by value.
@@ -803,10 +809,18 @@ a timestamp, through the same router, arrives with the router's zid.
     such as a subscription to a router-stamped heartbeat key, because its
     own puts are never echoed back.
   - When a detection shows it beyond the delta, it MUST stop writing
-    state, re-puts included, and SHOULD report it (`health.v1` is the
-    standard way). Its members then go stale, by design
-    ([`freshness.v1`](profiles/freshness/v1.md) §2.10, 0.21).
-    `[Sc: profiles/freshness/scenarios.md §2]`
+    state, re-puts included, and SHOULD report it. Its members then go
+    stale, by design ([`freshness.v1`](profiles/freshness/v1.md) §2.10,
+    0.21). `[Sc: profiles/freshness/scenarios.md §2]`
+  - **The report is not state** (0.23). A state value saying so would be
+    a write the rule stops. The standard way is a stream sample: a
+    `health.v1` owner publishes a `faults` sample with code
+    `clock_ahead`, and its status goes stale
+    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5).
+    `[Sc: profiles/health/scenarios.md §4]`
+    - The sample carries a stamp from the owner's clock (§4.1), so a
+      router re-stamps it, or drops it under
+      `timestamping.drop_future_timestamp`, which loses the report.
   - Spike S12 showed the harm: a clock 2 s ahead produced a revision with
     two timestamps, and the next correctly clocked write looked stale.
 
@@ -1358,7 +1372,9 @@ Liveliness tokens carry no payload; everything is in the key.
 - **The tokenless set** (U22, decided at acceptance).
   - A deployment MAY configure an owner with interfaces for which it holds
     no interface token. These SHOULD be the interfaces every service of the
-    deployment implements: `health.v1` and the rest of a framework set.
+    deployment implements: `health.v1`
+    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7) and the rest
+    of a framework set.
   - The owner's descriptor marks each such interface `"token": false`
     (§3.3).
   - Their providers are found through instance tokens and descriptors, not
@@ -1498,6 +1514,11 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   written yet is absent from its answer, which a consumer cannot tell from
   a reply that has not crossed: silence is not a verdict (S6).
   `[Sc: presence.md §1]`
+  - A profile MAY make it a MUST for its own resources. `health.v1` does
+    for its status, which a reader then finds when the instance token
+    appears, tokenless or not
+    ([`profiles/health/v1.md`](profiles/health/v1.md) §2.3, 0.23).
+    `[Sc: profiles/health/scenarios.md §1]`
 
 ### 8.3 The presence budget
 
@@ -1566,6 +1587,11 @@ only the two facts.
 - **No `@zk` traffic is required across it.** Bindings resolve statically
   (R7), and bundles come from holders on the same side or are
   pre-provisioned.
+- **Liveness and health across it** come from what crosses (R7). A
+  `health.v1` status re-put every 30 s is one put per service across the
+  face, and the far side's only word on that service's health
+  ([`profiles/health/v1.md`](profiles/health/v1.md) §2.8, 0.23). A face
+  that closes it leaves health unobservable there.
 - **Attachment decides what crosses.**
   - A router-to-router link carries every declaration of both sides. A
     `@zk` deny on it hides presence from the far side, but the denied
@@ -2071,7 +2097,14 @@ The steps' details `[F: bundles/*]`:
     of many interfaces.
   - By convention the root is `.history` beside the contracts:
     `contracts/.history`, or `examples/zk2/.history` for every example in
-    that tree.
+    that tree, or `spec/profiles/.history` for the profiles' standard
+    contracts (§10).
+  - **One revision, two roots** (0.23). A contract that moves to a new
+    root keeps its published revisions in the old one, which is
+    append-only, and is published in the new one from then on, its
+    revisions copied there byte for byte. A bundle's file name is its
+    fingerprint, so the copies are one revision. `health.v1`'s revision
+    1.0 is in `examples/zk2/.history` and `spec/profiles/.history`.
 - **The history check** MUST verify:
   - every bundle (§9.6);
   - its fingerprint against its file name;
@@ -2365,12 +2398,19 @@ the new variant, and an old reader refuses it. A branch added to an
 
 A **profile** is an independently versioned specification, such as
 `timing.v1` or `archive.v1`. The core never depends on one. Where a rule
-here names a profile (`health.v1` for reporting, `link.v1` for face
-configuration, `archive.v1` for archives, `freshness.v1` for a value's
-age), it names the standard way to
-meet the rule, which the core states in its own terms. A profile
-contributes through these four points, and through no other:
-1. **A standard contract**: an interface it defines.
+here names a profile ([`health.v1`](profiles/health/v1.md) for reporting,
+`link.v1` for face configuration, `archive.v1` for archives,
+[`freshness.v1`](profiles/freshness/v1.md) for a value's age), it names
+the standard way to meet the rule, which the core states in its own
+terms. A profile contributes through these four points, and through no
+other:
+1. **A standard contract**: an interface it defines. It lives in the
+   profile's directory, published in [`profiles/.history/`](profiles/.history/)
+   (§9.7). The first is `health.v1`'s
+   ([`profiles/health/health.v1.toml`](profiles/health/health.v1.toml),
+   0.23). An instance implementing it lists the contract's `uses` in its
+   descriptor's `profiles`, as for any contract (§3.3), and the interface
+   in its `interfaces`.
 2. **An annotation vocabulary.** Keys are `<profile>.<key>`. A contract
    that uses one MUST list the profile in `uses`, which is fingerprinted.
    `[F: contracts/e020-annotation]` Until a profile publishes its
@@ -2623,6 +2663,9 @@ Appendix B. These are the ones the rules above cite:
 - `BestMatching` reaches the nearest `complete` queryable on each router.
 - Routers stamp puts, not deletes or replies, and re-stamp future-dated puts
   beyond the HLC delta (500 ms).
+- A session with its HLC enabled stamps every put it is not given a
+  timestamp for, a publisher's included, from its own HLC
+  (`Session::resolve_put`).
 - The admin space is disabled by default (`adminspace.enabled: false`).
 - A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
@@ -2673,6 +2716,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
+| `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
 
 The compatibility cases (`compat/`) are evaluated by the reference
 classifier (#618). [`compat/README.md`](conformance/compat/README.md)

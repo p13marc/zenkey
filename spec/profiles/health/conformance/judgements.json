@@ -1,0 +1,1793 @@
+{
+  "cases": [
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "absent",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "absent: presence's word, not a level (§2.1)",
+      "presence": "absent",
+      "status": {
+        "level": null,
+        "observations": []
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "absent",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "absent, with an archive's status FAILED: last-known, never current, never FAILED (§2.1, core S6)",
+      "presence": "absent",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "via": "archive"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "absent",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "absent, though a subscriber still holds a fresh delivery: presence first (§2.11)",
+      "presence": "absent",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "presence_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "its token not seen in a read possibly incomplete: unobservable, never absent (core §8.1)",
+      "presence": "incomplete",
+      "status": {
+        "level": null,
+        "observations": []
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "presence_incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "not seen in an incomplete read, whatever a subscription heard: presence first (§2.11)",
+      "presence": "incomplete",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": false
+      },
+      "expect": {
+        "level": null,
+        "reason": "not_listed",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "present, and its descriptor does not list health.v1: not asked (§2.7)",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": []
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": false
+      },
+      "expect": {
+        "level": null,
+        "reason": "not_listed",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "not listed, whatever its status says: listing before the status (§2.11)",
+      "presence": "present",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "no_descriptor",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "present, and its descriptor could not be read (§2.7)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "listed with its interface token",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": false
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "listed in the tokenless set, with no alive/health.v1 token: implemented all the same (§2.7)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": false
+      },
+      "expect": {
+        "level": null,
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "face": null,
+      "note": "tokenless and stale: stale, never not implemented (§2.7)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "OK",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "degraded",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "DEGRADED: the finding",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "failed",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "FAILED: the finding",
+      "presence": "present",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "unknown_level",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "UNSPECIFIED is unknown, never OK (§2.6)",
+      "presence": "present",
+      "status": {
+        "level": "unspecified",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "unknown_level",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a number the enum does not list is unknown, never OK (§2.6)",
+      "presence": "present",
+      "status": {
+        "level": 7,
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "unknown_level",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a negative number is unknown too (§2.6)",
+      "presence": "present",
+      "status": {
+        "level": -1,
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "undecodable",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a payload that does not decode as health.v1.Status (§2.6)",
+      "presence": "present",
+      "status": {
+        "level": "undecodable",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "fresh by a GET against a trusted clock",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "failed",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "FAILED by a GET against a trusted clock",
+      "presence": "present",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "face": null,
+      "note": "stale FAILED: stale, never FAILED (§2.4, freshness.v1 §2.11)",
+      "presence": "present",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "degraded",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a delivery exactly 60 s old is fresh (freshness.v1 §2.5)",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 60,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "no_delivery",
+        "verdict": "stale"
+      },
+      "face": null,
+      "note": "nothing delivered in 61 s of listening to a status that exists (§2.3): stale",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "complete": true,
+            "last": null,
+            "listened_s": 61,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "listened_too_short",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "nothing delivered in 30 s: not long enough to tell",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "complete": true,
+            "last": null,
+            "listened_s": 30,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "incomplete",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "deliveries lost, and none fresh",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": false,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a GET that drew no reply: silence is not a verdict (core O5)",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": null,
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "no_stamp",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a reply without a stamp",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": null
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a reply against an untrusted clock",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "trusted": false
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "near_horizon",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a reply within the delta of the horizon",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 60
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "face": null,
+      "note": "a reply aged beyond the horizon and the delta",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 61
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "clock_disagrees",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a stamp ahead beyond the delta",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": -1
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "no_observation",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "no observation of the status at all",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": []
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "deleted",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "the owner answered a reply_del: it deleted its status, which §2.3 forbids",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "delete"
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "deleted",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a subscriber's last delivery is a delete of the status (§2.3)",
+      "presence": "present",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 1,
+              "kind": "delete"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "last_known",
+        "verdict": "not_asked"
+      },
+      "face": null,
+      "note": "present and listed, and only an archive read: last-known, never current (core S6)",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "via": "archive"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "a stale subscription and a fresh GET: fresh wins (freshness.v1 §2.7)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          },
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "ok"
+        },
+        {
+          "check": "net",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "every check OK",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        },
+        {
+          "check": "net",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "inconsistent",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a check FAILED under a status OK: H2 broken, read at the worse level (§2.2)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "inconsistent",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a check FAILED under a status DEGRADED",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "degraded"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "inconsistent",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a check DEGRADED under a status OK",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "failed",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a status FAILED over checks OK: worse is allowed (§2.2)",
+      "presence": "present",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "degraded"
+        },
+        {
+          "check": "net",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "degraded",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a status and its worst check alike",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "unspecified"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "a check UNSPECIFIED bounds nothing (§2.2, §2.6)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": 9
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "a check at a number the enum does not list bounds nothing",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "undecodable"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "a check that does not decode bounds nothing",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": null,
+      "note": "no check",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "degraded",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "checks not read: the status alone",
+      "presence": "present",
+      "status": {
+        "level": "degraded",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "face": null,
+      "note": "a stale status: its checks are its last word, not current (§2.4)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "an unobservable status vouches for no check (§2.4)",
+      "presence": "present",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "trusted": false
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "failed",
+        "reason": "check",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a status at an unknown level, and a check FAILED: the no stands on the check (§2.11)",
+      "presence": "present",
+      "status": {
+        "level": "unspecified",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "degraded"
+        },
+        {
+          "check": "net",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": "degraded",
+        "reason": "check",
+        "verdict": "unhealthy"
+      },
+      "face": null,
+      "note": "a status that does not decode, and a check DEGRADED",
+      "presence": "present",
+      "status": {
+        "level": "undecodable",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "ok"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "unknown_level",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a status at an unknown level over checks OK: a check never says yes (§2.11)",
+      "presence": "present",
+      "status": {
+        "level": "unspecified",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "unspecified"
+        }
+      ],
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "level": null,
+        "reason": "undecodable",
+        "verdict": "unobservable"
+      },
+      "face": null,
+      "note": "a status that does not decode, and no bad check",
+      "presence": "present",
+      "status": {
+        "level": "undecodable",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": "ok",
+        "reason": "ok",
+        "verdict": "healthy"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face that lets the status cross: fresh OK",
+      "presence": "across_face",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": "failed",
+        "reason": "failed",
+        "verdict": "unhealthy"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, a status crossing FAILED",
+      "presence": "across_face",
+      "status": {
+        "level": "failed",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 10,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "beyond_horizon",
+        "verdict": "stale"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, stale: never down (§2.8, freshness.v1 §2.9)",
+      "presence": "across_face",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "complete": true,
+            "last": {
+              "age_s": 61,
+              "kind": "put"
+            },
+            "listened_s": 120,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "nothing_crossed",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, nothing delivered in 300 s: no status known to exist, so unobservable, never stale or down (§2.8, freshness.v1 §2.5)",
+      "presence": "across_face",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "complete": true,
+            "last": null,
+            "listened_s": 300,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, a GET silent too: nothing crossed",
+      "presence": "across_face",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": null,
+            "via": "get"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "face_closed",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": false
+      },
+      "note": "across a face closed to the status: unobservable, never down (§2.8)",
+      "presence": "across_face",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "complete": true,
+            "last": null,
+            "listened_s": 300,
+            "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": [
+        {
+          "check": "disk",
+          "level": "failed"
+        }
+      ],
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "face_closed",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": false
+      },
+      "note": "a face closed to the status, whatever was heard otherwise",
+      "presence": "across_face",
+      "status": {
+        "level": null,
+        "observations": []
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "clock_untrusted",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, a GET against an untrusted clock (freshness.v1 §2.9)",
+      "presence": "across_face",
+      "status": {
+        "level": "ok",
+        "observations": [
+          {
+            "clock": {
+              "trusted": false
+            },
+            "reply": {
+              "kind": "put",
+              "stamp_age_s": 10
+            },
+            "via": "get"
+          }
+        ]
+      }
+    }
+  ],
+  "description": "health.v1 §2.11: one reading of one service -> the answer to \"is this service healthy?\". A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, {\"lists\": false}, or {\"lists\": true, \"token\": true | false}, false being health.v1 in the tokenless set; the interface token plays no part. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: {\"observations\": the observations of state/status, as freshness.v1's judgements.json writes them, judged at the standard contract's horizon, freshness.ttl_s = 60; \"level\": the level of the latest value read, \"ok\" | \"degraded\" | \"failed\" | \"unspecified\" | an integer the enum does not list | \"undecodable\" (a payload that does not decode as health.v1.Status) | null (no value read)}. checks: null when not read, or the checks the owner answered, [{\"check\": its name, \"level\": as status.level, never null}]. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, nothing_crossed, absent, not_listed, last_known, or freshness.v1's own reason for a stale or unobservable status (beyond_horizon, no_delivery, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation); expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise. Seconds are compared exactly, to the nanosecond."
+}

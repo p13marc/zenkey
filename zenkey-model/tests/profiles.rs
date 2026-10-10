@@ -18,6 +18,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use zenkey_model::authoring::Kind;
 use zenkey_model::freshness::{self, ClockTrust, Horizon, Last, Observation, Reply, StampAge};
+use zenkey_model::health::{self, Judged, Level, Listing, Presence, Read, Reading};
 use zenkey_model::hostid;
 use zenkey_model::slug::chunk_slug;
 
@@ -27,6 +28,9 @@ const KNOWN: &[(&str, &str)] = &[
     ("hostid", "shapes.json"),
     ("freshness", "horizons.json"),
     ("freshness", "judgements.json"),
+    ("health", "judgements.json"),
+    ("health", "rollups.json"),
+    ("health", "codes.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -74,8 +78,9 @@ fn every_profile_fixture_is_known() {
     let mut seen = Vec::new();
     for dir in sorted_entries(&profiles()) {
         let profile = dir.file_name().unwrap().to_string_lossy().into_owned();
-        // `README.md` is the index; `.history/` holds published contracts
-        // (core §9.7), checked like `examples/zk2/.history` once one exists.
+        // `README.md` is the index; `.history/` holds the published standard
+        // contracts (core §9.7), checked by
+        // `every_standard_contract_is_published_and_compatible`.
         if !dir.is_dir() || profile == ".history" {
             continue;
         }
@@ -103,6 +108,87 @@ fn every_profile_fixture_is_known() {
         assert!(
             seen.iter().any(|(p, n)| p == profile && n == name),
             "{profile}/conformance/{name} is listed in KNOWN but missing"
+        );
+    }
+}
+
+/// Every profile's standard contract, `spec/profiles/<name>/<name>.v<N>.toml`
+/// (`spec/profiles/README.md`), with its file named by its interface id.
+fn standard_contracts() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in sorted_entries(&profiles()) {
+        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        if !dir.is_dir() || name.starts_with('.') {
+            continue;
+        }
+        for file in sorted_entries(&dir) {
+            let f = file.file_name().unwrap().to_string_lossy().into_owned();
+            if file.is_file() && f.starts_with(&format!("{name}.v")) && f.ends_with(".toml") {
+                out.push(file);
+            }
+        }
+    }
+    out
+}
+
+/// Every standard contract loads with no finding at all, fingerprints and
+/// bundles, is named by its interface id, and is published in
+/// `spec/profiles/.history` (core §9.7), compatible with every earlier
+/// revision of its interface there, as `tests/examples.rs` requires of
+/// `examples/zk2/`. Every interface published there has its contract in the
+/// tree. After an intended change, publish the new revision with
+/// `zk2 contract bundle <file> --history spec/profiles/.history`.
+#[test]
+fn every_standard_contract_is_published_and_compatible() {
+    use zenkey_model::bundle::Bundle;
+    use zenkey_model::canonical::Fingerprint;
+    use zenkey_model::compat::{Class, Revision, check_history, same_revision};
+    use zenkey_model::contract::load_path;
+
+    let root = profiles().join(".history");
+    let problems = zenkey_model::history::check_tagged(&root);
+    assert!(problems.is_empty(), "{problems:#?}");
+    let files = standard_contracts();
+    assert!(
+        files.iter().any(|p| p.ends_with("health/health.v1.toml")),
+        "health.v1's standard contract: {files:?}"
+    );
+    let mut ifaces = Vec::new();
+    for p in &files {
+        let rel = p.strip_prefix(profiles()).unwrap().display().to_string();
+        let l = load_path(p);
+        assert!(l.report.0.is_empty(), "{rel}:\n{}", l.report);
+        let c = l.contract.expect("no finding, so a contract");
+        assert_eq!(
+            p.file_stem().unwrap().to_string_lossy(),
+            c.iface.to_string(),
+            "{rel}: a standard contract's file is named by its interface id"
+        );
+        let b = Bundle::build(&c);
+        let v = Bundle::verify_expecting(&b.to_bytes(), &Fingerprint::of(&c));
+        assert!(v.is_ok(), "{rel}: {:?}", v.err());
+        let dir = root.join(c.iface.to_string());
+        let mut revs = Vec::new();
+        for e in std::fs::read_dir(&dir)
+            .unwrap_or_else(|_| panic!("{rel}: no history at {}", dir.display()))
+        {
+            let bytes = std::fs::read(e.unwrap().path()).unwrap();
+            revs.push(Revision::of_bundle(&Bundle::verify(&bytes).unwrap()));
+        }
+        let new = Revision::of(&c);
+        assert!(
+            revs.iter().any(|r| same_revision(r, &new)),
+            "{rel}: the current revision is not published; run zk2 contract bundle spec/profiles/{rel} --history spec/profiles/.history"
+        );
+        let v = check_history(&revs, &new);
+        assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
+        ifaces.push(c.iface.to_string());
+    }
+    for dir in sorted_entries(&root) {
+        let iface = dir.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            ifaces.contains(&iface),
+            "spec/profiles/.history/{iface} has no standard contract in the tree"
         );
     }
 }
@@ -271,6 +357,174 @@ fn freshness_judgements() {
             case,
             json!({"verdict": j.verdict.as_str(), "reason": j.reason.as_str()}),
             &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// A level as `health/conformance/` writes it: a token, or an integer the
+/// enum does not list.
+fn level_read(v: &Value) -> Read {
+    match v {
+        Value::String(s) => match s.as_str() {
+            "ok" => Read::Level(Level::Ok),
+            "degraded" => Read::Level(Level::Degraded),
+            "failed" => Read::Level(Level::Failed),
+            "unspecified" => Read::Unspecified,
+            "undecodable" => Read::Undecodable,
+            other => panic!("level {other:?}"),
+        },
+        Value::Number(n) => {
+            let n = i32::try_from(n.as_i64().expect("an integer level")).expect("an i32");
+            let r = Read::from_wire(n);
+            assert!(
+                matches!(r, Read::Unlisted(_)),
+                "{n}: an integer level is one the enum does not list"
+            );
+            r
+        }
+        other => panic!("level {other}"),
+    }
+}
+
+fn level_token(l: Option<Level>) -> Value {
+    l.map_or(Value::Null, |l| json!(l.as_str()))
+}
+
+/// `health/conformance/judgements.json`: one reading of one service → the
+/// answer to "is this service healthy?" (health.v1 §2.11).
+#[test]
+fn health_judgements() {
+    let path = profiles().join("health/conformance/judgements.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let presence = match case["presence"].as_str().expect("presence") {
+            "present" => Presence::Present(match &case["descriptor"] {
+                Value::Null => Listing::Unread,
+                d if d["lists"] == json!(false) => Listing::NotListed,
+                d => Listing::Listed {
+                    token: d["token"].as_bool().expect("descriptor.token"),
+                },
+            }),
+            "absent" => Presence::Absent,
+            "incomplete" => Presence::Incomplete,
+            "across_face" => Presence::AcrossFace {
+                status_crosses: case["face"]["status_crosses"]
+                    .as_bool()
+                    .expect("face.status_crosses"),
+            },
+            other => panic!("presence {other:?}"),
+        };
+        let observations: Vec<Observation> = case["status"]["observations"]
+            .as_array()
+            .expect("status.observations")
+            .iter()
+            .map(observation)
+            .collect();
+        let level = match &case["status"]["level"] {
+            Value::Null => None,
+            v => Some(level_read(v)),
+        };
+        let checks: Option<Vec<Read>> = match &case["checks"] {
+            Value::Null => None,
+            v => Some(
+                v.as_array()
+                    .expect("checks")
+                    .iter()
+                    .map(|c| level_read(&c["level"]))
+                    .collect(),
+            ),
+        };
+        let j = health::judge(&Reading {
+            presence,
+            status: &observations,
+            level,
+            checks: checks.as_deref(),
+        });
+        let what = format!("{}", case["note"]);
+        expect(
+            case,
+            json!({
+                "verdict": j.verdict.as_str(),
+                "reason": j.reason.as_str(),
+                "level": level_token(j.level),
+            }),
+            &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `health/conformance/rollups.json`: several judged readings → a tool's
+/// roll-up (health.v1 §2.2, §5).
+#[test]
+fn health_rollups() {
+    let path = profiles().join("health/conformance/rollups.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let judged: Vec<Judged> = case["judged"]
+            .as_array()
+            .expect("judged")
+            .iter()
+            .map(|j| {
+                let verdict = match j["verdict"].as_str().expect("verdict") {
+                    "healthy" => health::Verdict::Healthy,
+                    "unhealthy" => health::Verdict::Unhealthy,
+                    "stale" => health::Verdict::Stale,
+                    "unobservable" => health::Verdict::Unobservable,
+                    "not_asked" => health::Verdict::NotAsked,
+                    other => panic!("verdict {other:?}"),
+                };
+                let level = match &j["level"] {
+                    Value::Null => None,
+                    v => level_read(v).level(),
+                };
+                // The reason plays no part in a roll-up.
+                Judged {
+                    verdict,
+                    reason: health::Reason::Ok,
+                    level,
+                }
+            })
+            .collect();
+        let r = health::rollup(judged);
+        let what = format!("{}", case["note"]);
+        expect(
+            case,
+            json!({
+                "worst": level_token(r.worst),
+                "counts": {
+                    "healthy": r.healthy,
+                    "unhealthy": r.unhealthy,
+                    "stale": r.stale,
+                    "unobservable": r.unobservable,
+                    "not_asked": r.not_asked,
+                },
+            }),
+            &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `health/conformance/codes.json`: a fault's code → profile, application
+/// or malformed (health.v1 §2.10).
+#[test]
+fn health_codes() {
+    let path = profiles().join("health/conformance/codes.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let code = case["code"].as_str().expect("code").to_owned();
+        expect(
+            case,
+            json!(health::code(&code).as_str()),
+            &format!("{code:?}"),
         );
     }
     if bless() {

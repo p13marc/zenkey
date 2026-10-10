@@ -201,6 +201,8 @@ fn contracts() -> ContractSet {
         let (s, _) = ContractSet::load_path(&util::zk2::examples().join(dir));
         set.extend(s);
     }
+    // `health.v1`, its profile's standard contract (#721).
+    set.extend(ContractSet::load_path(&util::zk2::profiles().join("health")).0);
     let beacon = zenkey_model::contract::load_str(BEACON, std::path::Path::new("."), None)
         .contract
         .expect("the beacon contract loads");

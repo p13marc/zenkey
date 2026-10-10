@@ -1,0 +1,34 @@
+# health.v1's standard contract (spec/profiles/health/v1.md §3), the one a
+# service implements to say how well it serves. Published in
+# spec/profiles/.history/health.v1/ (revision 1.0, sha256:e9dbcdcb…), and,
+# from before the contract moved here (#721), in examples/zk2/.history.
+# Doc strings are outside the fingerprint (core §9.5), and so are comments.
+[interface]
+name    = "health"
+major   = 1
+minor   = 0
+summary = "The health of one service"
+uses    = ["freshness.v1"]
+
+[schemas]
+protobuf = ["proto/health/v1/health.proto"]
+
+[resources.status]
+kind        = "state"
+type        = "health.v1.Status"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "The service's level, never better than its worst current check (health.v1 §2.2). Put before the service's tokens, re-put at least every 30 s (§2.3)."
+
+[resources."checks/{check}"]
+kind        = "state"
+type        = "health.v1.Check"
+params      = { check = "string" }
+cardinality = 64
+doc         = "One named check of the service: put on change, deleted when retired (health.v1 §2.3). No horizon of its own: the status vouches for it (§2.4)."
+
+[resources.faults]
+kind        = "stream"
+type        = "health.v1.Fault"
+reliability = "reliable"
+congestion  = "block"
+doc         = "Occurrences a level would lose, clock_ahead first (health.v1 §2.3, §2.5, §2.10)."

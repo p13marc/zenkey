@@ -14,16 +14,25 @@ use zenkey_fleet::model::catalog::{ContractSet, Contracts};
 use zenkey_fleet::model::render::{Member, render_with};
 use zenkey_fleet::report::{ContractSource, Rendered};
 
-/// The committed history verifies, and holds the current revision of every
-/// walkthrough and tcgui contract, read back from its bundle alone.
+/// The committed histories verify (`examples/zk2/.history`, and the
+/// profiles' `spec/profiles/.history`), and hold the current revision of
+/// every walkthrough and tcgui contract and of `health.v1`'s standard
+/// contract, read back from its bundle alone.
 #[test]
 fn a_history_root_loads_every_revision() {
-    let (set, problems) = ContractSet::load_history(&examples().join(".history"));
+    let (mut set, problems) = ContractSet::load_history(&examples().join(".history"));
     assert!(problems.is_empty(), "{problems:?}");
+    let (profiles, problems) = ContractSet::load_history(&util::zk2::profiles().join(".history"));
+    assert!(problems.is_empty(), "{problems:?}");
+    assert!(
+        profiles.of_iface(&iface("health.v1")).next().is_some(),
+        "health.v1 is published in the profiles' own root"
+    );
+    set.extend(profiles);
     for path in [
         "walkthrough/camera.v1",
         "walkthrough/detections.v1",
-        "walkthrough/health.v1",
+        "profiles/health/health.v1",
         "tcgui/tc.netif.v1",
         "tcgui/tc.netem.v1",
     ] {

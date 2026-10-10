@@ -5,7 +5,7 @@
 # All hosts:  zk2/*/*/zs.sysinfo.v1/stream/**   (the interface chunk, so `sysinfo-2` or a
 #             per-computer `sysinfo.c2` is included: r3.2 §0.2, shapes.md row 9)
 #
-# The service also implements health.v1 (../walkthrough/health.v1.toml), alarms.v1, zs.evidence.v1
+# The service also implements health.v1 (spec/profiles/health/health.v1.toml), alarms.v1, zs.evidence.v1
 # (self only), zs.thresholds.v1 and zs.artifacts.v1 (jobs.v1 + blob.v1, not written in this cut).
 # v1's framework rows map there; `sensor`, `introspect` and `describe` are deleted (descriptor,
 # bundle). See README "Mapping".

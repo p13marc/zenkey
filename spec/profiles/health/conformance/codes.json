@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "code": "clock_ahead",
+      "expect": "profile"
+    },
+    {
+      "code": "tc_netns_gone",
+      "expect": "application"
+    },
+    {
+      "code": "modem_link_down",
+      "expect": "application"
+    },
+    {
+      "code": "a",
+      "expect": "application"
+    },
+    {
+      "code": "x9",
+      "expect": "application"
+    },
+    {
+      "code": "a_",
+      "expect": "application"
+    },
+    {
+      "code": "a__b",
+      "expect": "application"
+    },
+    {
+      "code": "clock_ahead_",
+      "expect": "application"
+    },
+    {
+      "code": "clock_ahead2",
+      "expect": "application"
+    },
+    {
+      "code": "",
+      "expect": "malformed"
+    },
+    {
+      "code": "Clock_ahead",
+      "expect": "malformed"
+    },
+    {
+      "code": "CLOCK_AHEAD",
+      "expect": "malformed"
+    },
+    {
+      "code": "1clock",
+      "expect": "malformed"
+    },
+    {
+      "code": "_clock",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock-ahead",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock.ahead",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock ahead",
+      "expect": "malformed"
+    },
+    {
+      "code": " clock_ahead",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock_ahead ",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock_ahead\n",
+      "expect": "malformed"
+    },
+    {
+      "code": "clöck",
+      "expect": "malformed"
+    },
+    {
+      "code": "clock/ahead",
+      "expect": "malformed"
+    }
+  ],
+  "description": "health.v1 §2.10: a fault's code -> \"profile\" (a code of the profile's table), \"application\" (any other code of the form [a-z][a-z0-9_]*: an ASCII lowercase letter, then ASCII lowercase letters, digits and underscores) or \"malformed\" (anything else, the empty string included). The comparison is exact: no trimming and no case folding."
+}

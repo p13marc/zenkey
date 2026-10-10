@@ -134,8 +134,10 @@ window": wrong without replication).*
    ordering.
 3. **Ahead.** The owner's clock runs 2 s ahead, beyond the router's HLC
    delta, and it holds a subscription to a router-stamped heartbeat. It
-   detects the drift and stops writing state; it reports the drift (through
-   `health.v1`, where it implements it).
+   detects the drift and stops writing state. Where it implements
+   `health.v1`, it reports the drift as a `faults` sample with code
+   `clock_ahead`, not through its status, which is state (0.23;
+   `profiles/health/scenarios.md` §4).
 
 *Spike S12: without the catch-up, rev 14 was rejected as stale and never
 converged; with a clock 2 s ahead, the next right-clocked write looked

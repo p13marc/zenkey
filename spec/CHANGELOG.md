@@ -3,6 +3,73 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.23 — 2026-10-10: a clock ahead reported by a stream, and the first standard contract a profile publishes (#721, PD)
+
+`health.v1` (text 0.1, draft) is the third profile written, and the first
+with a standard contract (core §10, point 1). The contract was written
+with the walkthrough, and moves under the profile unchanged. Writing the
+text showed one place where the core asked for what its own rule forbids,
+and three it left unsaid.
+
+**Changed: rules stated.**
+- **Ahead (§4.3): the report is not state.** 0.21 said an owner ahead MUST
+  stop writing state and SHOULD report it, "`health.v1` is the standard
+  way". `health.v1`'s status is state, so the owner could not. The core
+  now says the report is a stream sample: a `health.v1` owner publishes a
+  `faults` sample with code `clock_ahead`, and its status goes stale
+  (`profiles/health/v1.md` §2.5). The core keeps its SHOULD, and the
+  profile adds its MUST.
+  - Evidence: `profiles/health/scenarios.md` §4, and `scenarios/state.md`
+    §7's step 3, reworded to match.
+- **A session's own stamps (§4.1, Appendix B).** A session with its HLC
+  enabled, as every serving session's is (§4.3), stamps every put it is
+  not given a timestamp for, a stream sample included
+  (`Session::resolve_put`, zenoh 1.10.1). So an owner ahead puts its
+  `clock_ahead` fault future-dated, and a router re-stamps it, or drops it
+  under `timestamping.drop_future_timestamp`: §4.3 says so, since that
+  setting loses the report. The same fact bounds §4.2's S1 control: the
+  control's put comes from a session whose HLC is not enabled, as a
+  client's is not by default, or it arrives with that session's own stamp.
+- **One revision, two roots (§9.7).** A contract that moves keeps its
+  revisions in the old root, which is append-only, and is published in the
+  new one, copied byte for byte. `spec/profiles/.history` is the
+  conventional root of the profiles' standard contracts. `health.v1`'s
+  revision 1.0 (`sha256:e9dbcdcb…`) is in both, and `zk2 contract
+  fingerprint` gives it before and after the move.
+
+**Changed: wording.**
+- **§8.2, "State values"** keeps its SHOULD, and says that a profile may
+  make it a MUST for its own resources, as `health.v1` does for its status
+  (§2.3). Evidence: `profiles/health/scenarios.md` §1.
+- **§10** links `health.v1` among the profiles a rule names, and says where
+  a standard contract lives: the profile's directory, published in
+  `profiles/.history/`, the first being `health.v1`'s. An instance lists
+  its `uses` in `profiles` and the interface in `interfaces`, as for any
+  contract.
+- **R7 and §8.5** point at `health.v1` §2.8: a status that crosses is
+  liveness evidence, and health is unobservable where the face closes it.
+- **§8.1**, the tokenless set, links `health.v1` §2.7. **Appendix C**
+  indexes the two health scenarios the core now cites.
+
+**Deliberately not changed.**
+- **§4.3's SHOULD.** The core does not require any report, and still names
+  no profile as a dependency: `health.v1` is the standard way, stated in
+  the core's own terms (a stream sample).
+- **§8.2's SHOULD.** Every other state value keeps it. An owner that holds
+  no value at start has nothing to put, and `health.v1`'s status is the one
+  every service has.
+- **`profiles` in the descriptor (§3.3).** A profile that only defines a
+  contract is neither a `uses` entry nor derivation-only, so an instance
+  does not list `health.v1` there: its `interfaces` carry it, and a reader
+  asks them (`health.v1` §2.7). The union stays as 0.19 defined it.
+- **No W105 for `health.*`.** `health.v1` publishes no vocabulary, and
+  Appendix D has no interim `health` table, so none of its keys is outside
+  one (§10).
+- **The tokenless set (§8.1, U22)** is unchanged. `health.v1` recommends
+  itself for it near the budget, which §8.1 already says.
+- **The archive (§4.4).** A health status is state like any other: an
+  archive records it, and its answer is last-known.
+
 ## 0.22 — 2026-10-09: one major of a profile per contract (#726)
 
 The Python implementation's live round against 0.20 (PR #725, F-98) built

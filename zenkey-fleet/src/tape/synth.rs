@@ -899,9 +899,16 @@ message Pose {
     /// that decodes, a raw type of its size.
     #[test]
     fn every_example_contract_synthesizes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut checked = 0;
-        for dir in ["tcgui", "walkthrough", "zensight", "zenoh-modem"] {
+        for dir in [
+            "examples/zk2/tcgui",
+            "examples/zk2/walkthrough",
+            "examples/zk2/zensight",
+            "examples/zk2/zenoh-modem",
+            // `health.v1`, its profile's standard contract (#721).
+            "spec/profiles/health",
+        ] {
             // A bindings file beside the contracts is a problem to skip, not
             // a contract.
             let (set, _) = crate::model::catalog::ContractSet::load_path(&root.join(dir));

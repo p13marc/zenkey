@@ -5,8 +5,13 @@
 # constrained face (§8.5) `ground` is the far router, or the gateway session:
 #
 #   zenctl acl gen --enrollment examples/zk2/acl/walkthrough.enrollment.toml \
-#                  --contracts examples/zk2/walkthrough --json5
+#                  --contracts examples/zk2/walkthrough \
+#                  --contracts spec/profiles/health --json5
 #   … --face constrained --attach south-region --far ground --region ground
+#
+# `health.v1`, which navigation implements, is a profile's standard contract
+# (spec/profiles/health/health.v1.toml, #721), so it comes by a second
+# `--contracts`; `--contracts examples/zk2/.history` holds it as well.
 #
 # Access control is enforced per hop (§11.3): the ground router's own block
 # enrolls the ground services one by one, and vehicle-01 as one principal.

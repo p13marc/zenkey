@@ -47,6 +47,10 @@
 //! - [`freshness`]: `freshness.v1`'s horizon and its pure judgement of a
 //!   member's freshness (`spec/profiles/freshness/v1.md`, #720). The
 //!   owner's re-puts are the runtime's.
+//! - [`health`]: `health.v1`'s levels, fault codes, and its pure judgement
+//!   of one reading of a service, on top of [`freshness`]
+//!   (`spec/profiles/health/v1.md`, #721). The owner's puts and its
+//!   `clock_ahead` fault are the runtime's.
 //!
 //! No item here opens a session or depends on `zenoh`: build scripts, CI
 //! tools and the Python verifier's fixtures all stand on this crate.
@@ -63,6 +67,7 @@ pub mod diag;
 pub mod envelope;
 pub mod freshness;
 pub mod grammar;
+pub mod health;
 pub mod history;
 pub mod hostid;
 pub mod schema;

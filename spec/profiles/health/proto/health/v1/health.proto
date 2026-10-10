@@ -1,0 +1,46 @@
+// health.v1's payload types (spec/profiles/health/v1.md §3). Comments are
+// outside the fingerprint: a file is compiled without source info (core §9.4).
+syntax = "proto3";
+package health.v1;
+
+// The order is OK < DEGRADED < FAILED (§2.1). UNSPECIFIED is no level: it
+// reads unknown, never OK (§2.6), and so does a number not listed here.
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_OK = 1;
+  LEVEL_DEGRADED = 2;
+  LEVEL_FAILED = 3;
+}
+
+// state status (§2.2, §2.3).
+message Status {
+  Level level = 1;
+  // Why the level is what it is, for a person. Free text.
+  string reason = 2;
+  // When the level last changed: nanoseconds since the Unix epoch, on the
+  // owner's clock. A re-put keeps it (§2.3).
+  uint64 since_ns = 3;
+}
+
+// state checks/{check} (§2.2, §2.3).
+message Check {
+  Level level = 1;
+  // What the check found, for a person. Free text.
+  string detail = 2;
+  // When the check found the value put: nanoseconds since the Unix epoch,
+  // on the owner's clock. Informative: a check is not aged by it (§2.3).
+  uint64 checked_at_ns = 3;
+}
+
+// stream faults (§2.3, §2.5).
+message Fault {
+  // A fault code (§2.10): [a-z][a-z0-9_]*, from the profile's table or
+  // an application's own.
+  string code = 1;
+  Level level = 2;
+  // What happened, for a person. Free text.
+  string detail = 3;
+  // When it happened: nanoseconds since the Unix epoch, on the owner's
+  // clock.
+  uint64 at_ns = 4;
+}
