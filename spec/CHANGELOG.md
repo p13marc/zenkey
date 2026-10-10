@@ -3,6 +3,35 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.22 — 2026-10-09: one major of a profile per contract (#726)
+
+The Python implementation's live round against 0.20 (PR #725, F-98) built
+a contract whose `uses` listed `views.v2` and `views.v10`, to test 0.20's
+order. Both implementations accepted it. Yet nothing said which major a
+key `views.<key>` belongs to, or which vocabulary W105 reads.
+
+**Changed: a rule stated.**
+- **One major per contract (§10 point 2; E002).** An annotation key names
+  its profile without a major, so a contract uses one major of a profile.
+  Two entries naming one profile at two majors are E002, reported once per
+  profile, beside its malformed-entry case. New fixture:
+  `contracts/e002-two-majors`. The reference lint now reports it, and no
+  contract in `examples/zk2/` is affected.
+- **A descriptor may still list both.** Two contracts of one instance can
+  each use a different major, so the union in `profiles` (§3.3) can hold
+  `views.v2` and `views.v10`. 0.20's order exists for that case.
+
+**Deliberately not changed.**
+- **Keys stay major-free.** A key spelled `views.v2.<key>` would make two
+  majors expressible, but it changes every fingerprint that holds an
+  annotation, for a case no contract has. A profile that needs both majors
+  in one contract can publish a new major whose vocabulary holds both.
+- **No new code.** E002 already covered `uses`' entries, and D010 is the
+  descriptor's analogue: malformed, or listed twice.
+
+hostid.v1 0.3 (#726, F-99) is its own changelog's: where an ephemeral
+start is logged.
+
 ## 0.21 — 2026-10-09: the first published vocabulary, and a re-put (#720, PC)
 
 `freshness.v1` (text 0.1, draft) is the second profile written, and the

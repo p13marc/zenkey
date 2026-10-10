@@ -316,6 +316,23 @@ fn resolve(
             )),
         }
     }
+    // §9.1 E002 (0.22): an annotation key names its profile without a
+    // major, so one contract cannot use two majors of one profile.
+    let mut majors: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for p in &uses {
+        majors.entry(p.name()).or_default().push(p.to_string());
+    }
+    for (name, ids) in majors.iter().filter(|(_, ids)| ids.len() > 1) {
+        report.push(Diagnostic::error(
+            "E002",
+            "interface.uses",
+            format!(
+                "profile {name:?} is listed at more than one major ({}): an annotation key \
+                 names its profile without a major, so a contract uses one major of it",
+                ids.join(", ")
+            ),
+        ));
+    }
     let profiles = uses.iter().map(|p| p.name().to_owned()).collect();
     let schemas = SchemaSet::load(dir, &file.schemas, report);
     let defaults = file.defaults.clone().unwrap_or_default();

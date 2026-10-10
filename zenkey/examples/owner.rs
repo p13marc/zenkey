@@ -252,6 +252,16 @@ pub async fn run(
 
 #[tokio::main]
 async fn main() {
+    // The runtime's logs go to stderr (warnings unless `RUST_LOG` says
+    // otherwise), so a runner driving this owner as a black box sees what
+    // the runtime says, such as hostid.v1's ephemeral warning (§2.6, 0.3).
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let opts = match Options::parse(&args) {
         Ok(o) => o,
