@@ -495,3 +495,126 @@ async fn a_reseed_cut_short_by_a_select_is_read_again() {
     drop(feed);
     monitor.shutdown().await.expect("monitor shutdown");
 }
+
+/// A lens feed follows presence (#614, FL4): an owner that appears after
+/// the feed's read is described alone the moment its instance appears, its
+/// revisions retrieved, and its interfaces resolve — `tc.netem.v1` from its
+/// tokenless set (U22) too, which no token shows — without a re-read: this
+/// test never nudges the feed, so the only way its catalog moves is
+/// `on_presence`. An identity cache keyed on the feed's generation resolves
+/// the key again; and the instance that leaves takes its provider away.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lens_feed_resolves_an_appearing_instance_without_a_reread() {
+    use util::zk2::example;
+    use zenkey_fleet::report::Unresolved;
+    use zenkey_fleet::{BundleStore, IdentityCache, Lens, LensFeed};
+
+    let (_router, ep) = router(None).await;
+    let owners = client(&ep).await;
+    let tool = client(&ep).await;
+    let raw = client(&ep).await;
+    let store = BundleStore::new(T);
+    let (lens, error) = LensFeed::open(&tool, &store, T).await;
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(lens.catalog().expect("a read").service_count(), 0);
+
+    let netif_key = "zk2/host-b/tc/tc.netif.v1/state/interfaces/default/eth0";
+    let netem_key = "zk2/host-b/tc/tc.netem.v1/state/config/default/eth0";
+    let mut cache = IdentityCache::default();
+    let before = lens.generation();
+    {
+        let catalog = lens.catalog();
+        let at = Lens::new("", catalog.as_deref(), &store).at_generation(before);
+        assert_eq!(
+            cache.ensure(&at, netif_key).identity.unresolved,
+            Some(Unresolved::NoProvider),
+            "nobody provides it yet"
+        );
+    }
+
+    let scope = PresenceScope::all();
+    let monitor = Monitor::start(&raw, MonitorSpec::default().with_presence("", &scope))
+        .await
+        .expect("monitor");
+    let (mut feed, seeded) =
+        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    assert!(
+        !lens.on_presence(&seeded).await,
+        "an empty seed moves no token, and swaps nothing"
+    );
+
+    let both = [example("tcgui/tc.netif.v1"), example("tcgui/tc.netem.v1")];
+    let mut b = ServiceBuilder::new(&owners, config("host-b/tc").tokenless(iface("tc.netem.v1")));
+    for c in &both {
+        b.implement(Implementation::new(c.clone()))
+            .expect("implement");
+        for r in &c.resources {
+            let _ = b.expose(&c.iface, &zenkey::implementation::resource_name(r));
+        }
+    }
+    let service = b.start().await.expect("the owner");
+    let instance = service.instance().clone();
+
+    let resolves = |key: &str| {
+        let catalog = lens.catalog();
+        Lens::new("", catalog.as_deref(), &store)
+            .resolve(key)
+            .resolved
+            .is_some()
+    };
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    let mut seen = Vec::new();
+    while !(resolves(netif_key) && resolves(netem_key)) {
+        let moved = tokio::time::timeout_at(deadline, feed.next())
+            .await
+            .unwrap_or_else(|_| panic!("never resolved; saw {seen:#?}"))
+            .expect("the monitor's broadcast");
+        lens.on_presence(&moved).await;
+        seen.extend(moved);
+    }
+    assert!(has(
+        &seen,
+        &PresenceChange::InstanceAppeared {
+            instance: instance.clone()
+        }
+    ));
+    assert!(
+        !seen.iter().any(|t| matches!(
+            &t.change,
+            PresenceChange::InterfaceAppeared { iface: f, .. } if *f == iface("tc.netem.v1")
+        )),
+        "tc.netem.v1 holds no token: its descriptor alone made it resolve"
+    );
+    let after = lens.generation();
+    assert!(after > before, "{before} → {after}");
+    assert!(store.retrievals() >= 2, "both revisions retrieved");
+    {
+        let catalog = lens.catalog();
+        let at = Lens::new("", catalog.as_deref(), &store).at_generation(after);
+        assert!(
+            cache.ensure(&at, netif_key).resolved.is_some(),
+            "the cache resolved it again under the new generation"
+        );
+        assert_eq!(cache.invalidated(), 1);
+    }
+
+    // The instance leaves: its provider goes with it.
+    service.close().await.expect("close");
+    let deadline = tokio::time::Instant::now() + util::SETTLE;
+    while resolves(netif_key) {
+        let moved = tokio::time::timeout_at(deadline, feed.next())
+            .await
+            .unwrap_or_else(|_| panic!("the provider never went"))
+            .expect("the monitor's broadcast");
+        lens.on_presence(&moved).await;
+    }
+    let catalog = lens.catalog();
+    assert_eq!(
+        Lens::new("", catalog.as_deref(), &store)
+            .resolve(netem_key)
+            .identity
+            .unresolved,
+        Some(Unresolved::NoProvider),
+        "the tokenless interface left with its instance's descriptor"
+    );
+}

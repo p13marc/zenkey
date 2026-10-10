@@ -47,9 +47,10 @@ use zenkey_model::schema::{ArtifactData, TypeId};
 use crate::report::{
     Asked, BindingGraph, ContractAnswer, ContractSource, ContractView, DescriptorAnswer, GraphEdge,
     GraphNode, GraphRole, IfaceConsumer, IfaceListing, IfaceProvider, IfaceRevision, IfaceSighting,
-    IfaceSummary, IfaceView, InstanceRef, InstanceSighting, MemberSighting, NamespaceListing,
-    NamespaceSighting, RequirementView, ResourceBody, ResourceView, SchemaArtifact, SchemaDocument,
-    SchemaMember, SchemaView, ServiceListing, ServiceSighting, ServiceView, TypeView,
+    IfaceSummary, IfaceView, InstanceRef, InstanceSighting, MemberId, MemberSighting,
+    NamespaceListing, NamespaceSighting, PresenceChange, PresenceTransition, RequirementView,
+    ResourceBody, ResourceView, SchemaArtifact, SchemaDocument, SchemaMember, SchemaView,
+    ServiceListing, ServiceSighting, ServiceView, TypeView,
 };
 
 // ─── what presence brought back ─────────────────────────────────────────────
@@ -109,6 +110,145 @@ impl Observed {
                 _ => None,
             })
             .collect()
+    }
+
+    // ─── patched from presence (#614, FL4) ──────────────────────────────────
+    //
+    // A read is a value, so a live feed keeps it current by patching it with
+    // what presence moved rather than reading the whole scope again: an
+    // instance that appears is described alone, and its interfaces resolve
+    // at once — a tokenless one (U22) included, which no token selector
+    // would ever show. Session-free, so a replay can patch a read from a
+    // file's presence moves exactly as a live feed does. `complete` stays
+    // the last full read's: a patch adds what an event showed, and says
+    // nothing about what a read would have missed.
+
+    /// Hold the presence token `key` (an instance, interface or member
+    /// token), once. Returns whether it was new; any other key form is not a
+    /// token, and is refused.
+    pub fn with_token(&mut self, key: ZkKey) -> bool {
+        let token = matches!(
+            key,
+            ZkKey::Instance { .. } | ZkKey::Alive { .. } | ZkKey::Member { .. }
+        );
+        if !token || self.tokens.contains(&key) {
+            return false;
+        }
+        self.tokens.push(key);
+        true
+    }
+
+    /// Forget the token `key`. Returns whether it was held.
+    pub fn without_token(&mut self, key: &ZkKey) -> bool {
+        let before = self.tokens.len();
+        self.tokens.retain(|k| k != key);
+        self.tokens.len() != before
+    }
+
+    /// Record what one instance's descriptor GET found, replacing an earlier
+    /// read of it. A read whose descriptors were never asked for starts
+    /// asking here.
+    pub fn with_descriptor(&mut self, addr: &Addr, instance: &InstanceId, read: DescriptorRead) {
+        self.descriptors
+            .get_or_insert_with(BTreeMap::new)
+            .insert((addr.clone(), instance.clone()), read);
+    }
+
+    /// What an instance that left takes with it: its instance token and its
+    /// descriptor read. Its interface tokens are each their own move
+    /// (`InterfaceGone`), and an interface token still held is still shown,
+    /// as found. Returns whether anything was held.
+    pub fn without_instance(&mut self, addr: &Addr, instance: &InstanceId) -> bool {
+        let token = self.without_token(&ZkKey::Instance {
+            addr: addr.clone(),
+            instance: instance.clone(),
+        });
+        let read = self
+            .descriptors
+            .as_mut()
+            .and_then(|d| d.remove(&(addr.clone(), instance.clone())))
+            .is_some();
+        token || read
+    }
+
+    /// Fold presence moves into the read, token by token
+    /// ([`crate::model::presence_live::LivePresence`]'s transitions, a live
+    /// feed's or a replay's), in order. A status move changes no token.
+    /// Returns whether the read changed; [`Observed::undescribed`] then
+    /// names the instances whose descriptor is owed.
+    pub fn follow(&mut self, moved: &[PresenceTransition]) -> bool {
+        let mut changed = false;
+        for t in moved {
+            let addr = t.address.clone();
+            changed |= match &t.change {
+                PresenceChange::Status { .. } => false,
+                PresenceChange::InstanceAppeared { instance } => self.with_token(ZkKey::Instance {
+                    addr,
+                    instance: instance.clone(),
+                }),
+                PresenceChange::InstanceGone { instance } => self.without_instance(&addr, instance),
+                PresenceChange::InterfaceAppeared {
+                    instance,
+                    iface,
+                    fp,
+                } => self.with_token(ZkKey::Alive {
+                    addr,
+                    iface: iface.clone(),
+                    instance: instance.clone(),
+                    fp: fp.clone(),
+                }),
+                PresenceChange::InterfaceGone {
+                    instance,
+                    iface,
+                    fp,
+                } => self.without_token(&ZkKey::Alive {
+                    addr,
+                    iface: iface.clone(),
+                    instance: instance.clone(),
+                    fp: fp.clone(),
+                }),
+                PresenceChange::MemberAppeared { member, epoch } => {
+                    self.with_token(member_token(&addr, member, epoch))
+                }
+                PresenceChange::MemberHandover { member, from, to } => {
+                    let gone = self.without_token(&member_token(&addr, member, from));
+                    self.with_token(member_token(&addr, member, to)) || gone
+                }
+                PresenceChange::MemberGone { member, epoch } => {
+                    self.without_token(&member_token(&addr, member, epoch))
+                }
+            };
+        }
+        changed
+    }
+
+    /// The instances holding an instance token whose descriptor was never
+    /// read here: what a feed describes after [`Observed::follow`]. An
+    /// instance whose read was silent or failed has its answer, and waits
+    /// for the next full read.
+    pub fn undescribed(&self) -> Vec<(Addr, InstanceId)> {
+        self.tokens
+            .iter()
+            .filter_map(|k| match k {
+                ZkKey::Instance { addr, instance } => Some((addr.clone(), instance.clone())),
+                _ => None,
+            })
+            .filter(|key| {
+                self.descriptors
+                    .as_ref()
+                    .is_none_or(|d| !d.contains_key(key))
+            })
+            .collect()
+    }
+}
+
+/// A member's token key, its address put back.
+fn member_token(addr: &Addr, member: &MemberId, epoch: &InstanceId) -> ZkKey {
+    ZkKey::Member {
+        addr: addr.clone(),
+        iface: member.iface.clone(),
+        member: member.member.clone(),
+        epoch: epoch.clone(),
     }
 }
 
@@ -1869,5 +2009,95 @@ mod tests {
         assert_eq!(view.undescribed.len(), 1);
         assert_eq!(view.undescribed[0].descriptor, "silent");
         assert_eq!(c.graph().undescribed.len(), 1);
+    }
+
+    /// A read patched from presence (#614, FL4): an instance that appears is
+    /// held once and owed a descriptor; described, its interfaces — a
+    /// tokenless one too — are the catalog's; a member's handover moves one
+    /// token; an instance that leaves takes its token and its descriptor.
+    #[test]
+    fn a_read_follows_presence_moves() {
+        use crate::report::PresenceSource;
+        let mut o = observed(&[]);
+        o.descriptors = Some(BTreeMap::new());
+        let addr: Addr = "host-b/tc".parse().expect("addr");
+        let inst = InstanceId::from_u64(9);
+        let netem: IfaceId = "tc.netem.v1".parse().expect("iface");
+        let t = |change| PresenceTransition {
+            at: std::time::SystemTime::UNIX_EPOCH,
+            source: PresenceSource::Event,
+            address: addr.clone(),
+            change,
+        };
+        let appeared = t(PresenceChange::InstanceAppeared {
+            instance: inst.clone(),
+        });
+        let up = t(PresenceChange::Status {
+            from: crate::report::AddressStatus::Unobservable,
+            to: crate::report::AddressStatus::Up,
+        });
+        assert!(o.follow(&[appeared.clone(), up.clone()]));
+        assert_eq!(o.undescribed(), [(addr.clone(), inst.clone())]);
+        assert!(
+            !o.follow(&[appeared, up]),
+            "held once; a status moves no token"
+        );
+        assert!(
+            !Catalog::new(&o).provides(&addr, &netem),
+            "not described yet"
+        );
+
+        o.with_descriptor(
+            &addr,
+            &inst,
+            DescriptorRead::Served(Box::new(descriptor(
+                "host-b/tc",
+                &inst.to_string(),
+                json!({"interfaces": [
+                    {"iface": "tc.netem.v1", "contract": format!("sha256:{NETIF_FP}"), "minor": 0, "token": false},
+                ]}),
+            ))),
+        );
+        assert!(o.undescribed().is_empty());
+        assert!(
+            Catalog::new(&o).provides(&addr, &netem),
+            "a tokenless interface, from its descriptor alone"
+        );
+
+        let member = MemberId {
+            iface: netem.clone(),
+            member: "eth0".into(),
+        };
+        let (e1, e2) = (InstanceId::from_u64(1), InstanceId::from_u64(2));
+        assert!(o.follow(&[
+            t(PresenceChange::MemberAppeared {
+                member: member.clone(),
+                epoch: e1.clone(),
+            }),
+            t(PresenceChange::MemberHandover {
+                member: member.clone(),
+                from: e1,
+                to: e2.clone(),
+            }),
+        ]));
+        let members: Vec<&ZkKey> = o
+            .tokens
+            .iter()
+            .filter(|k| matches!(k, ZkKey::Member { .. }))
+            .collect();
+        assert_eq!(members, [&member_token(&addr, &member, &e2)]);
+
+        assert!(o.follow(&[t(PresenceChange::InstanceGone {
+            instance: inst.clone(),
+        })]));
+        assert!(!Catalog::new(&o).provides(&addr, &netem));
+        assert!(o.descriptors.as_ref().is_some_and(BTreeMap::is_empty));
+        assert!(
+            !o.with_token(ZkKey::Contract {
+                iface: netem,
+                fingerprint: NETIF_FP.parse().expect("a sha256"),
+            }),
+            "a contract key is not a token"
+        );
     }
 }

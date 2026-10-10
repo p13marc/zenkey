@@ -74,6 +74,9 @@ struct Inner {
     clock: AtomicU64,
     retrievals: AtomicU64,
     evicted: AtomicU64,
+    /// Bumped whenever an answer [`Contracts::state`] gives can change: an
+    /// answer stored, an absence forgotten (#614, FL4).
+    generation: AtomicU64,
 }
 
 /// Contract revisions, retrieved from the bus by `(iface, fingerprint)`
@@ -100,6 +103,7 @@ impl BundleStore {
                 clock: AtomicU64::new(0),
                 retrievals: AtomicU64::new(0),
                 evicted: AtomicU64::new(0),
+                generation: AtomicU64::new(0),
             }),
         }
     }
@@ -233,6 +237,15 @@ impl BundleStore {
         self.inner.evicted.load(Ordering::Relaxed)
     }
 
+    /// A number that moves whenever an answer this store gives may have
+    /// changed — a revision retrieved, an absence stored or forgotten, an
+    /// eviction (#614, FL4) — so a frontend that resolved keys through it
+    /// knows when to resolve them again ([`crate::Lens::at_generation`]).
+    /// It never moves for a cache hit.
+    pub fn generation(&self) -> u64 {
+        self.inner.generation.load(Ordering::Relaxed)
+    }
+
     /// Forgets every answer that is not a revision in hand, so the next ask
     /// retrieves again.
     pub fn forget_absences(&self) {
@@ -242,8 +255,12 @@ impl BundleStore {
             .filter(|(_, e)| e.state.revision().is_none())
             .map(|(k, _)| k.clone())
             .collect();
+        let forgot = !absent.is_empty();
         for k in absent {
             entries.remove(&k);
+        }
+        if forgot {
+            self.inner.generation.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -278,6 +295,7 @@ impl BundleStore {
                 used: self.inner.clock.fetch_add(1, Ordering::Relaxed),
             },
         );
+        self.inner.generation.fetch_add(1, Ordering::Relaxed);
     }
 
     fn ungate(&self, key: &Key) {
