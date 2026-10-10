@@ -13,7 +13,7 @@ measurements behind it are [`docs/zk2/spike-report.md`](../docs/zk2/spike-report
 | [`core/`](core/) | The error envelope's definitions: `error.proto`, `error.schema.json` (core §5.2) | |
 | [`conformance/`](conformance/) | Fixtures: keys, slugs, templates, contract lints, canonical forms, fingerprints, bundles, set checks, history, descriptors, error envelopes, the compatibility matrix. Seeded by `zenkey-model` (#608), completed by #607. | `zenkey-model/tests/conformance.rs` |
 | [`scenarios/`](scenarios/) | Network rules that a fixture cannot check: setup, steps, expected observations. | the spike's runs |
-| [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. The index, the template and the process are in [`profiles/README.md`](profiles/README.md). First: `hostid.v1`, text 0.3, draft; then `freshness.v1`, text 0.1, draft; then `health.v1`, text 0.1, draft, with its standard contract and `.history/`. | `zenkey-model/tests/profiles.rs` |
+| [`profiles/`](profiles/) | The profiles (core §10), one directory each, with its own text version, changelog, fixtures and scenarios. The index, the template and the process are in [`profiles/README.md`](profiles/README.md). First: `hostid.v1`, text 0.3, draft; then `freshness.v1`, text 0.2, draft; then `health.v1`, text 0.1, draft, with its standard contract and `.history/`. | `zenkey-model/tests/profiles.rs` |
 | [`CHANGELOG.md`](CHANGELOG.md) | Amendments after version 0.1 is accepted | |
 
 **License.** The spec, its fixtures and its scenarios ship under the

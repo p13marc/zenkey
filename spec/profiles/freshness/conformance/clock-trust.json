@@ -1,0 +1,119 @@
+{
+  "cases": [
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": true
+      },
+      "note": "one put, close",
+      "offsets_s": [
+        0.1
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": true
+      },
+      "note": "one put at the delta exactly",
+      "offsets_s": [
+        0.5
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": false
+      },
+      "note": "one put just beyond: slow transit or a clock behind cannot be told apart",
+      "offsets_s": [
+        0.500000001
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": true
+      },
+      "note": "the closest of several decides",
+      "offsets_s": [
+        2.0,
+        0.4,
+        0.45
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": true
+      },
+      "note": "a stamp ahead at the delta exactly",
+      "offsets_s": [
+        -0.5
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": false
+      },
+      "note": "a stamp ahead beyond the delta: no transit causes it",
+      "offsets_s": [
+        -0.500000001
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": false
+      },
+      "note": "a later stamp ahead beyond the delta withdraws the trust a close one gave (F-102)",
+      "offsets_s": [
+        0.1,
+        -0.7
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": false
+      },
+      "note": "the order does not matter",
+      "offsets_s": [
+        -0.7,
+        0.1
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": true
+      },
+      "note": "late puts behind by more than the delta do not withdraw it: transit cannot be told from drift",
+      "offsets_s": [
+        0.1,
+        3.0,
+        9.0
+      ]
+    },
+    {
+      "delta_s": 0.5,
+      "expect": {
+        "trusted": false
+      },
+      "note": "no measurement: not trusted",
+      "offsets_s": []
+    },
+    {
+      "delta_s": 2,
+      "expect": {
+        "trusted": true
+      },
+      "note": "a wider delta",
+      "offsets_s": [
+        1.9
+      ]
+    }
+  ],
+  "description": "freshness.v1 §2.6, ground 2 (0.2): the offsets a reader measured of one stamping clock during one reading (each: its own clock at receipt of a live put, minus the put's stamp, in seconds; negative when the stamp is ahead), and the delta -> whether the reader trusts its clock against that clock. Trusted when the offset closest to zero is within the delta (inclusive), and no offset is below minus the delta: transit only adds to an offset, so a stamp ahead by more than the delta proves the clocks disagree. No offset at all is not trusted. Seconds are compared exactly, to the nanosecond."
+}

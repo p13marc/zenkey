@@ -31,6 +31,7 @@ const KNOWN: &[(&str, &str)] = &[
     ("health", "judgements.json"),
     ("health", "rollups.json"),
     ("health", "codes.json"),
+    ("freshness", "clock-trust.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -526,6 +527,33 @@ fn health_codes() {
             json!(health::code(&code).as_str()),
             &format!("{code:?}"),
         );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
+/// `freshness/conformance/clock-trust.json`: a reading's offsets of one
+/// stamping clock and a delta → whether the reader trusts its clock
+/// (freshness.v1 §2.6, ground 2, 0.2).
+#[test]
+fn freshness_clock_trust() {
+    let path = profiles().join("freshness/conformance/clock-trust.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let offsets: Vec<StampAge> = case["offsets_s"]
+            .as_array()
+            .expect("offsets_s")
+            .iter()
+            .map(|o| StampAge::from_secs_f64(o.as_f64().expect("seconds")))
+            .collect();
+        let delta = std::time::Duration::from_secs_f64(case["delta_s"].as_f64().expect("delta_s"));
+        let trusted = matches!(
+            ClockTrust::from_offsets(offsets, delta),
+            ClockTrust::Trusted { .. }
+        );
+        let what = format!("{}: {}", case["note"], case["offsets_s"]);
+        expect(case, json!({ "trusted": trusted }), &what);
     }
     if bless() {
         write_json(&path, &doc);
