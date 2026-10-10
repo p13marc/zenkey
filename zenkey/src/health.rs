@@ -59,7 +59,10 @@
 //! re-stamps a fault dated beyond its HLC delta, as a `clock_ahead` fault
 //! from a clock ahead is, and drops it under
 //! `timestamping.drop_future_timestamp` (§2.5): both are measured in
-//! `tests/profile_health.rs`.
+//! `tests/profile_health.rs`. So is §2.5's "a simulated offset is not a
+//! drift" (text 0.2): a session whose HLC runs re-stamps a stamp that far
+//! ahead itself, before the put leaves it, so a test's offset reaches a
+//! router only from a session without an HLC.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
