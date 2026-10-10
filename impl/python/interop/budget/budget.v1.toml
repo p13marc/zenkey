@@ -1,0 +1,31 @@
+# spec/scenarios/budget.md's contract, `budget.v1` (core §2.7, 0.25), copied
+# from that text, with `minor` and `summary` added so that it loads with no
+# finding at all (W104). zk2py's budget scenarios and its live run give it
+# to zk2py's owner and to the Rust owner example.
+[interface]
+name    = "budget"
+major   = 1
+minor   = 0
+summary = "scenarios/budget.md's contract"
+
+[resources."items/{item}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { item = "string" }
+cardinality = 3
+
+[resources."load/{cpu}"]
+kind = "stream"
+type = { raw = "text/plain" }
+params = { cpu = "string" }
+cardinality = 3
+reliability = "reliable"
+congestion = "block"
+
+[resources."alarms/{src}"]
+kind = "event"
+type = { raw = "text/plain" }
+params = { src = "string" }
+cardinality = 2
+rate = "burst(3/h)"
+retention = "2s"

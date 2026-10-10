@@ -709,17 +709,31 @@ class Owner:
     def bound_of(self, c: Any, r: dict[str, Any]) -> int | None:
         """§2.7 "The bound": the cardinality this instance states, when from
         1 to the contract's, else the contract's; None for no ceiling."""
+        return self.bound_and_source(c, r)[0]
+
+    def bound_and_source(self, c: Any, r: dict[str, Any]) -> tuple[int | None, str]:
+        """The bound and where it comes from: ``descriptor`` or ``contract``."""
         contract = r["cardinality"]
         stated = self.cardinality.get(c.interface, {}).get(f"{r['token']}/{r['template']}")
-        b = stated if stated is not None and 1 <= stated <= contract else contract
-        return None if b == 4294967295 else b
+        if stated is not None and 1 <= stated <= contract:
+            b, source = stated, "descriptor"
+        else:
+            b, source = contract, "contract"
+        return (None if b == 4294967295 else b), source
+
+    def _refusal(self, key: str, c: Any, r: dict[str, Any], live: int) -> BudgetExceeded:
+        """§2.7 "Keeping it" (0.25): "A refused write publishes nothing, and
+        its writer is told". The refusal names the resource, the bound and
+        its source (scenarios budget.md §4)."""
+        b, source = self.bound_and_source(c, r)
+        return BudgetExceeded(f"{key}: refused, {c.interface} {r['token']}/{r['template']} holds {live} live members, "
+                              f"at its bound {b}, the {source}'s (core §2.7)")
 
     def _check_budget(self, key: str, live_others: int) -> None:
         c, r = self._member_of[key]
         b = self.bound_of(c, r)
         if self.budget and b is not None and live_others >= b:
-            raise BudgetExceeded(f"{key}: {live_others} live members of {r['token']}/{r['template']} already, "
-                                 f"the bound {b} (core §2.7)")
+            raise self._refusal(key, c, r, live_others)
 
     def occur(self, member: str, payload: bytes) -> str:
         """An event occurrence (§2.6): one put on ``<member>/<ulid>``, the
@@ -745,14 +759,13 @@ class Owner:
                 n, period = bg.parse_rate(r["rate"])
                 recent = [x for x in self._occurrences.get(member, []) if now - x < period / 1e9]
                 if len(recent) >= n:
-                    raise BudgetExceeded(f"{member}: {len(recent)} occurrence(s) within the period of "
-                                         f"{r['rate']} already (core §2.7)")
+                    raise BudgetExceeded(f"{member}: refused, an occurrence beyond its rate {r['rate']}: "
+                                         f"{len(recent) + 1} of one member within its period (core §2.7)")
                 if r["params"] and member not in self._occurrences_live(c, r, now):
                     b = self.bound_of(c, r)
                     live = self._occurrences_live(c, r, now)
                     if b is not None and len(live) >= b:
-                        raise BudgetExceeded(f"{member}: {len(live)} live members of {r['template']}, the bound "
-                                             f"{b} (core §2.7)")
+                        raise self._refusal(member, c, r, len(live))
             key = f"{member}/{new_ulid(int(time.time() * 1000))}"
             enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else "application/protobuf"
             self.session.put(key, payload, encoding=enc)

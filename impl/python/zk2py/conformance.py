@@ -578,12 +578,27 @@ def _budget_rate(path: Path) -> list[Result]:
     for c in _load_json(path)["cases"]:
         r = c["reading"]
         members = {m: [seconds_to_ns(x) for x in ts] for m, ts in r["members"].items()}
-        got = budget.rate(c["rate"], members, seconds_to_ns(r["listened_s"]), r["complete"])
+        got = budget.rate(c["rate"], members, seconds_to_ns(r["listened_s"]), r["lossless"], r["present"])
         out.append(_check(f"rate: {c['note']}", got.pair(), c["expect"]))
     return out
 
 
-BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate}
+def _budget_lossless(path: Path) -> list[Result]:
+    """Core §2.7 (0.25): the declared QoS, the reader's own loss and miss
+    detection -> whether a window is shown to have lost no delivery."""
+    from . import budget
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        q, m = c["qos"], c["miss_detection"]
+        ok, reason = budget.lossless(q["reliability"], q["congestion"], c["reader_lost"],
+                                     m["declared"], m["used"], m["misses"])
+        out.append(_check(f"lossless: {c['note']}", {"lossless": ok, "reason": reason}, c["expect"]))
+    return out
+
+
+BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate,
+                   "lossless.json": _budget_lossless}
 
 
 def family_budget(root: Path) -> list[Result]:
