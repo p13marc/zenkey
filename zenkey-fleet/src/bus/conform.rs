@@ -164,6 +164,9 @@ pub struct ConformObservation {
     /// freshness is judged at, a GET reply's stamp aged against it
     /// (`freshness.v1` §2.6). `None` when no window ran.
     pub read_at: Option<SystemTime>,
+    /// The service's `health.v1` reading (#721, PF), over the same window,
+    /// when a descriptor of it lists `health.v1` (§2.7); `None` otherwise.
+    pub health: Option<crate::bus::health::HealthObservation>,
 }
 
 impl ConformObservation {
@@ -239,7 +242,9 @@ pub async fn run_conform(
 
 /// The reads of the module doc: the service's through `bus.session`, in
 /// the deployment's namespace, and the routers' admin space through
-/// `bus.raw`, in none (S1, §4.2, 0.17).
+/// `bus.raw`, in none (S1, §4.2, 0.17). When a descriptor of the service
+/// lists `health.v1`, its health is read over the same window, beside the
+/// suite (#721, PF).
 pub async fn observe(
     bus: &DoctorBus,
     offline: &ContractSet,
@@ -256,6 +261,62 @@ pub async fn observe(
         crate::judge::doctor::admin_space(&bus.raw, t, spec.trust_admin),
     );
     let presence = presence.map_err(|e| crate::one_line(&e));
+    let listed = match &presence {
+        Ok(o) => matches!(
+            crate::model::health::listing(o, &address),
+            zenkey_model::health::Listing::Listed { .. }
+        ),
+        Err(_) => false,
+    };
+    let health = async {
+        let Ok(o) = &presence else {
+            return None;
+        };
+        if !listed {
+            return None;
+        }
+        let spec = crate::bus::health::HealthSpec {
+            timeout: t,
+            window: Some(spec.window),
+            grace: crate::judge::doctor::DEFAULT_GRACE,
+            clocks_synced: spec.clocks_synced,
+            face: None,
+        };
+        let target = crate::bus::health::HealthTarget::One(address.clone());
+        Some(
+            crate::bus::health::observe(session, &bus.namespace, target, spec, Some(o.clone()))
+                .await,
+        )
+    };
+    let suite = suite(
+        bus,
+        offline,
+        address.clone(),
+        iface,
+        asked_fp,
+        spec,
+        presence.clone(),
+        admin,
+    );
+    let (mut obs, health) = tokio::join!(suite, health);
+    obs.health = health;
+    obs
+}
+
+/// The suite's reads, after presence and the admin space.
+#[allow(clippy::too_many_arguments)]
+async fn suite(
+    bus: &DoctorBus,
+    offline: &ContractSet,
+    address: Addr,
+    iface: IfaceId,
+    asked_fp: Option<String>,
+    spec: ConformSpec,
+    presence: std::result::Result<Observed, String>,
+    admin: std::result::Result<crate::judge::doctor::AdminSpace, String>,
+) -> ConformObservation {
+    let t = spec.timeout;
+    let session = &bus.session;
     let mut obs = ConformObservation {
         namespace: bus.namespace.clone(),
         address,
@@ -270,6 +331,7 @@ pub async fn observe(
         calls: BTreeMap::new(),
         admin: Some(admin),
         read_at: None,
+        health: None,
     };
     let Ok(fp) = obs.claimed() else {
         return obs;

@@ -35,8 +35,9 @@ use crate::judge::doctor::AdminSpace;
 use crate::model::catalog::{ContractState, Revision, zid_value};
 use crate::model::lens::conformance;
 use crate::report::{
-    CaseId, ConformCase, ConformReport, Conformance, OperationAnswer, OperationReport,
-    PayloadRendering, PresenceAttribution, Stamp, StateReport, StateValue, WatchEvent,
+    CaseId, ConformCase, ConformReport, Conformance, HealthAnswerToken, HealthVerdict,
+    OperationAnswer, OperationReport, PayloadRendering, PresenceAttribution, Stamp, StateReport,
+    StateValue, WatchEvent,
 };
 
 /// Every case `obs` supports, in [`CaseId::ALL`] order per resource.
@@ -61,6 +62,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             why.clone(),
         ));
         report.cases.extend(profile_cases());
+        report.cases.extend(health_cases(obs));
         report.unobservable = Some(why);
         report
     };
@@ -118,6 +120,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             obs.iface
         ));
         report.cases.extend(profile_cases());
+        report.cases.extend(health_cases(obs));
         return report;
     };
     let owners: BTreeSet<String> = match &obs.presence {
@@ -199,6 +202,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             .push(freshness(obs, r, &name, heard, get, &clocks));
     }
     report.cases.extend(profile_cases());
+    report.cases.extend(health_cases(obs));
     let mut seen = BTreeSet::new();
     report.asked.retain(|s| seen.insert(s.clone()));
     report
@@ -212,6 +216,133 @@ fn profile_cases() -> [ConformCase; 1] {
         "judged against a declared rate and population budget, a profile that does not \
          exist yet (#613): not asked is neither a pass nor a violation",
     )]
+}
+
+/// `health.v1` (#721, PF): §5's "is this service healthy?" (`health`) and
+/// "does its status agree with its checks?" (`health-aggregation`), from
+/// the reading taken over the suite's window, its subject the service.
+/// Unhealthy or stale, and a break of §2.2 seen in both readings, are the
+/// findings: `health.v1`'s own, about the service. A reply's stamp is aged
+/// on the operator's word, or against a clock measured on a live put of the
+/// same clock — the suite's subscriptions' puts included, since the owner
+/// stamps every one with its session's clock. Not asked of a service whose
+/// descriptor does not list `health.v1` (§2.7).
+fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
+    const S: &str = "service";
+    fn unseen(c: CaseId, why: String) -> ConformCase {
+        ConformCase::unobservable(c, S, why)
+    }
+    fn not(c: CaseId, why: String) -> ConformCase {
+        ConformCase::not_asked(c, S, why)
+    }
+    let both = |f: fn(CaseId, String) -> ConformCase, why: String| {
+        [
+            f(CaseId::Health, why.clone()),
+            f(CaseId::HealthAggregation, why),
+        ]
+    };
+    let Some(h) = &obs.health else {
+        return match &obs.presence {
+            Err(e) => both(unseen, format!("the presence read could not be made: {e}")),
+            Ok(o) => match crate::model::health::presence_in(o, &obs.address) {
+                zenkey_model::health::Presence::Absent => both(
+                    not,
+                    format!(
+                        "no instance token of {} visible to this reader: absent, which is \
+                         presence's word, not a level (health.v1 §2.1)",
+                        obs.address
+                    ),
+                ),
+                zenkey_model::health::Presence::Present(
+                    zenkey_model::health::Listing::NotListed,
+                ) => both(
+                    not,
+                    "its descriptor does not list health.v1, so health is not asked of it \
+                     (health.v1 §2.7)"
+                        .to_owned(),
+                ),
+                _ => both(
+                    unseen,
+                    "its presence or its descriptor could not be read: whether it implements \
+                     health.v1 cannot be told, and its interface token says nothing (health.v1 \
+                     §2.7)"
+                        .to_owned(),
+                ),
+            },
+        };
+    };
+    let mut h = h.clone();
+    if let Some(Ok(w)) = &mut h.window {
+        for (clock, m) in clock_offsets(obs) {
+            w.clocks
+                .entry(clock)
+                .and_modify(|all| *all = all.merge(m))
+                .or_insert(m);
+        }
+    }
+    let report = crate::judge::health::judge(&h);
+    let address = obs.address.to_string();
+    let Some(row) = report.services.iter().find(|r| r.address == address) else {
+        return both(unseen, "the health reading read no row of it".to_owned());
+    };
+    let hint = |reason: &str| {
+        if reason == "clock_untrusted" {
+            "; a reply is aged only against a clock trusted to the HLC delta, measured on a live \
+             put of the same clock or on the operator's word (--clocks-synced, freshness.v1 §2.6)"
+        } else {
+            ""
+        }
+    };
+    let level = row
+        .level
+        .map(|l| format!(", at {}", l.as_str()))
+        .unwrap_or_default();
+    let health = match row.verdict {
+        HealthVerdict::Healthy => ConformCase::passed(
+            CaseId::Health,
+            S,
+            format!("healthy ({}{level}): {}", row.reason, row.says),
+        ),
+        HealthVerdict::Unhealthy | HealthVerdict::Stale => ConformCase::failed(
+            CaseId::Health,
+            S,
+            format!(
+                "{} ({}{level}): {} — health.v1's finding about the service (§5); stale is never \
+                 a level, and never down",
+                row.verdict.as_str(),
+                row.reason,
+                row.says
+            ),
+        ),
+        HealthVerdict::Unobservable => ConformCase::unobservable(
+            CaseId::Health,
+            S,
+            format!("{} ({}){}", row.says, row.reason, hint(&row.reason)),
+        ),
+        HealthVerdict::NotAsked => {
+            ConformCase::not_asked(CaseId::Health, S, format!("{} ({})", row.says, row.reason))
+        }
+    };
+    let a = &row.agrees;
+    let aggregation = match a.answer {
+        HealthAnswerToken::Yes => ConformCase::passed(CaseId::HealthAggregation, S, a.says.clone()),
+        HealthAnswerToken::No => ConformCase::failed(
+            CaseId::HealthAggregation,
+            S,
+            format!("{} (health.v1 §2.2)", a.says),
+        ),
+        HealthAnswerToken::Unobservable => ConformCase::unobservable(
+            CaseId::HealthAggregation,
+            S,
+            format!("{} ({}){}", a.says, a.reason, hint(&a.reason)),
+        ),
+        HealthAnswerToken::NotAsked => ConformCase::not_asked(
+            CaseId::HealthAggregation,
+            S,
+            format!("{} ({})", a.says, a.reason),
+        ),
+    };
+    [health, aggregation]
 }
 
 /// A stamp's time, as [`crate::bus::consume::stamp`] writes it (RFC 3339).
@@ -1394,6 +1525,7 @@ mod tests {
                 ..Default::default()
             })),
             read_at: Some(read_at()),
+            health: None,
         };
         o.heard.insert(
             "stream/bandwidth/{dev}".into(),
@@ -1771,5 +1903,121 @@ mod tests {
             ),
             "{r:#?}"
         );
+    }
+
+    /// health.v1 (#721, PF): a service whose descriptor does not list it is
+    /// not asked; one that does is asked "is it healthy?" and "does its
+    /// status agree with its checks?" from the reading over the window —
+    /// FAILED and a break in both readings are findings, a fresh OK passes,
+    /// and a reply aged against no trusted clock is unobservable.
+    #[test]
+    fn the_health_cases_read_health_v1_over_the_window() {
+        use crate::bus::health::{
+            CheckValue, HealthGet, HealthObservation, HealthSpec, HealthTarget, Replied,
+            ServiceGot, Stamped, StatusValue,
+        };
+        use zenkey_model::health::{Level, Read};
+        let r = judge(&conforming());
+        for id in [CaseId::Health, CaseId::HealthAggregation] {
+            let c = case(&r, id, "service");
+            assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+            assert!(
+                c.detail.as_deref().unwrap().contains("does not list"),
+                "{c:#?}"
+            );
+        }
+        let at = read_at();
+        let got = |status: Level, check: Level| HealthGet {
+            selector: "zk2/lab/m/health.v1/state/**".into(),
+            read_at: at,
+            complete: true,
+            services: BTreeMap::from([(
+                "lab/m".parse().unwrap(),
+                ServiceGot {
+                    status: Some(Replied {
+                        value: Some(StatusValue {
+                            level: Read::Level(status),
+                            reason: "r".into(),
+                            since_ns: 1,
+                        }),
+                        stamp: Some(Stamped {
+                            time: at - Duration::from_secs(5),
+                            clock: OWNER.into(),
+                        }),
+                    }),
+                    checks: BTreeMap::from([(
+                        "disk".to_owned(),
+                        Replied {
+                            value: Some(CheckValue {
+                                level: Read::Level(check),
+                                detail: String::new(),
+                            }),
+                            stamp: None,
+                        },
+                    )]),
+                },
+            )]),
+        };
+        let with = |first: HealthGet, second: HealthGet, synced: bool| {
+            let mut o = conforming();
+            let mut p = presence(Some(OWNER));
+            if let Some(ds) = &mut p.descriptors {
+                for read in ds.values_mut() {
+                    if let DescriptorRead::Served(d) = read {
+                        d.interfaces.push(
+                            serde_json::from_value(json!({
+                                "iface": "health.v1",
+                                "contract": format!("sha256:{}", zenkey::health::FINGERPRINT),
+                                "minor": 0, "token": false,
+                            }))
+                            .unwrap(),
+                        );
+                    }
+                }
+            }
+            o.health = Some(HealthObservation {
+                namespace: String::new(),
+                target: HealthTarget::One("lab/m".parse().unwrap()),
+                spec: HealthSpec {
+                    timeout: WINDOW,
+                    window: None,
+                    grace: WINDOW,
+                    clocks_synced: synced,
+                    face: None,
+                },
+                presence: Some(Ok(p)),
+                first: Ok(first),
+                second: Ok(second),
+                window: None,
+                archived: None,
+            });
+            judge(&o)
+        };
+        let liar = || got(Level::Ok, Level::Failed);
+        let r = with(liar(), liar(), true);
+        assert!(failed(&r, CaseId::Health, "service").contains("inconsistent"));
+        assert!(failed(&r, CaseId::HealthAggregation, "service").contains("§2.2"));
+        assert_eq!(judgement_exit_code(&r.judgement()), 1);
+        let ok = || got(Level::Ok, Level::Ok);
+        let r = with(ok(), ok(), true);
+        for id in [CaseId::Health, CaseId::HealthAggregation] {
+            let c = case(&r, id, "service");
+            assert!(
+                matches!(c.verdict, Judgement::NotEstablished { .. }),
+                "{c:#?}"
+            );
+        }
+        // A break in one reading only: unobservable, never the finding.
+        let r = with(ok(), liar(), true);
+        assert!(matches!(
+            &case(&r, CaseId::HealthAggregation, "service").verdict,
+            Judgement::Unobservable { reason } if reason.contains("one_reading")
+        ));
+        // No word, and no window measured the owner's clock: unobservable.
+        let r = with(ok(), ok(), false);
+        assert!(matches!(
+            &case(&r, CaseId::Health, "service").verdict,
+            Judgement::Unobservable { reason } if reason.contains("--clocks-synced")
+        ));
     }
 }
