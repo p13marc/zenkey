@@ -397,24 +397,24 @@ impl Render for zenkey_fleet::ConformReport {
                 .cite("tooling guide O4"),
             );
         }
-        // §2.7 (0.24): a window bounds a population from below only, so a
-        // stream's or an event's budget within its bound reads unobservable.
+        // §2.7 (0.24): a window shows a stream's or an event's population
+        // within its bound only once it is complete — a whole liveness span,
+        // lossless, the owner present throughout.
         let windowed = self
             .cases
             .iter()
             .filter(|c| {
-                c.case == zenkey_fleet::report::CaseId::Budget
-                    && matches!(&c.verdict, Judgement::Unobservable { reason }
-                        if reason.contains("from below only"))
+                c.case == zenkey_fleet::report::CaseId::BudgetWindow && c.verdict.is_unobservable()
             })
             .count();
         if windowed > 0 {
             notes.push(
                 Note::coverage(format!(
-                    "{windowed} budget case(s) unobservable: a window never shows a member it \
-                     did not hear, so it bounds a stream's or an event's population from below \
-                     only — more than the bound would be a violation; --skip budget leaves the \
-                     case unasked"
+                    "{windowed} budget-window case(s) unobservable: a window shows a stream's or \
+                     an event's population within its bound only over a whole liveness span (an \
+                     hour, or the retention: --for), nothing lost, the owner present throughout \
+                     — more than the bound would be a violation; --skip budget-window leaves the \
+                     case unasked and the state's budget asked"
                 ))
                 .cite("spec §2.7"),
             );

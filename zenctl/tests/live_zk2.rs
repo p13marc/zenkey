@@ -3974,8 +3974,9 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// every operation — passes every case asked, exit 0; the operation that
 /// is not idempotent is not called, and a resource with no horizon is not
 /// asked its freshness. Its state's population passes `budget` by the
-/// owner's complete GET, and its stream's, which a window bounds from below
-/// only, is unobservable (§2.7, #735): exit 2 until `--skip budget`.
+/// owner's complete GET, and its stream's `budget-window`, over a window
+/// short of an hour, is unobservable (§2.7, #735): exit 2 until `--skip
+/// budget-window`, which leaves the state's `budget` asked and passing.
 /// `--junit` writes the suite. The router's admin space is on: the owner's
 /// own stamp passes only against a router this run verified (S1, §4.2,
 /// 0.17).
@@ -4002,8 +4003,9 @@ async fn check_conform_passes_a_conforming_service() {
     wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
     let junit = bus.home.join("conform.xml");
     let junit = junit.to_str().expect("a UTF-8 path").to_owned();
-    // §2.7 (#735): the stream's budget is the one case a window cannot
-    // pass; the state's passes by the owner's GET.
+    // §2.7 (#735): a 2 s window is short of the stream's hour, so its
+    // `budget-window` is the one case left unobservable; the state's
+    // `budget` passes by the owner's GET.
     let unskipped = [
         "check",
         "conform",
@@ -4032,18 +4034,18 @@ async fn check_conform_passes_a_conforming_service() {
         .await;
     exits(&run, 2);
     let doc = run.json();
-    let bw = conform_case(&doc, "budget", "stream/bandwidth/{ns}/{iface}");
+    let bw = conform_case(&doc, "budget-window", "stream/bandwidth/{ns}/{iface}");
     assert_eq!(bw["verdict"]["answer"], "unobservable", "{run}");
     assert!(
         bw["verdict"]["reason"]
             .to_string()
-            .contains("from below only"),
+            .contains("at least 3600 s (`--for 3600`)"),
         "{run}"
     );
     assert!(
-        doc["judgement"]["reason"]
-            .to_string()
-            .contains("budget stream/bandwidth/{ns}/{iface}"),
+        doc["judgement"]["reason"].to_string().contains(
+            "1 case(s) could not be established: budget-window stream/bandwidth/{ns}/{iface}"
+        ),
         "{run}"
     );
     let args = [
@@ -4058,7 +4060,7 @@ async fn check_conform_passes_a_conforming_service() {
         "--timeout",
         "2",
         "--skip",
-        "budget",
+        "budget-window",
         "--junit",
         &junit,
         "--format",
@@ -4108,14 +4110,19 @@ async fn check_conform_passes_a_conforming_service() {
         conform_case(&doc, "freshness", "state/namespaces")["verdict"]["answer"],
         "not_asked"
     );
-    for subject in [
-        "stream/bandwidth/{ns}/{iface}",
-        "state/interfaces/{ns}/{iface}",
-    ] {
-        let b = conform_case(&doc, "budget", subject);
-        assert_eq!(b["verdict"]["answer"], "not_asked", "{run}");
-        assert_eq!(b["detail"], "skipped by the operator", "{run}");
-    }
+    // Skipped, the stream's window case; still asked, and passing by the
+    // owner's GET of gen's two members, the state's budget.
+    let bw = conform_case(&doc, "budget-window", "stream/bandwidth/{ns}/{iface}");
+    assert_eq!(bw["verdict"]["answer"], "not_asked", "{run}");
+    assert_eq!(bw["detail"], "skipped by the operator", "{run}");
+    let state = conform_case(&doc, "budget", "state/interfaces/{ns}/{iface}");
+    assert_eq!(state["verdict"]["answer"], "not_established", "{run}");
+    assert!(
+        state["verdict"]["reason"]
+            .to_string()
+            .contains("ran to its final reply"),
+        "{run}"
+    );
     let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
     assert!(xml.contains("failures=\"0\" errors=\"0\""), "{xml}");
     assert!(xml.contains("<skipped message=\"not asked:"), "{xml}");
@@ -4247,8 +4254,8 @@ fn alarms() -> Contract {
 /// sources every 300 ms breaks both of an event's budgets — two occurrences
 /// of one source within a minute, beyond `low`, and three sources within
 /// the retention, above its two — and a window of two seconds shows both:
-/// `rate` and `budget` are violations, exit 1. A window that heard no
-/// excess could only say `low` kept after a whole minute (unit-tested; a
+/// `rate` and `budget-window` are violations, exit 1. A window that heard
+/// no excess could only say `low` kept after a whole minute (unit-tested; a
 /// live minute is not spent here).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_judges_an_events_rate_and_population() {
@@ -4293,7 +4300,7 @@ async fn check_conform_judges_an_events_rate_and_population() {
     let both = |r: &Run| {
         r.code == 1
             && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
-                ["rate", "budget"].iter().all(|case| {
+                ["rate", "budget-window"].iter().all(|case| {
                     rows_of(&d, "case")
                         .iter()
                         .any(|c| c["case"] == *case && c["verdict"]["answer"] == "established")
@@ -4310,7 +4317,7 @@ async fn check_conform_judges_an_events_rate_and_population() {
             && rate["detail"].to_string().contains("its rate low allows 1"),
         "{run}"
     );
-    let budget = conform_case(&doc, "budget", events);
+    let budget = conform_case(&doc, "budget-window", events);
     assert!(
         budget["detail"]
             .to_string()
@@ -5043,4 +5050,118 @@ async fn health_s8_across_a_constrained_face() {
         drop((svc, h, bus));
     };
     tokio::join!(run_a, run_b);
+}
+
+/// `pulse.v1`: an event of two sources at most, live for its 2 s retention,
+/// its rate no question here.
+fn pulses() -> Contract {
+    contract_text(
+        "pulse.v1",
+        "[interface]\nname = \"pulse\"\nmajor = 1\n\
+         [resources.\"pulses/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+         params = { src = \"string\" }\ncardinality = 2\nrate = \"burst(100000/h)\"\n\
+         retention = \"2s\"\n",
+    )
+}
+
+/// Core §2.7 (#735), a window's clean pole: an owner publishing two
+/// sources every 200 ms, within its bound of two, read over a 3 s window —
+/// longer than its 2 s retention, nothing lost, its instance token held
+/// throughout — passes `budget-window`. The same owner closed a second into
+/// the window was not present throughout: unobservable, and said so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
+    let mut bus = Bus::admin(None).await;
+    let id = iface("pulse.v1");
+    let start = |bus: &Bus| {
+        let mut b = ServiceBuilder::new(
+            &bus.owners,
+            ServiceConfig::new("host-a/pulse".parse().expect("an address")),
+        );
+        b.implement(Implementation::new(pulses()))
+            .expect("implement");
+        let writers: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|src| {
+                let v: Bindings = [("src".to_owned(), vec![src.to_owned()])].into();
+                b.event_writer(&id, "events/pulses/{src}", &v)
+                    .expect("an event writer")
+            })
+            .collect();
+        (b, writers)
+    };
+    let (b, writers) = start(&bus);
+    let owner = b.start().await.expect("start");
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            for w in &writers {
+                let _ = w.put("pulse").await;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/pulse"]).await;
+    let args = [
+        "check",
+        "conform",
+        "host-a/pulse",
+        "pulse.v1",
+        "--for",
+        "3",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let events = "events/pulses/{src}";
+    let run = bus
+        .until(&args, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                conform_case(&d, "budget-window", events)["verdict"]["answer"] == "not_established"
+            })
+        })
+        .await;
+    let doc = run.json();
+    let w = conform_case(&doc, "budget-window", events);
+    assert!(
+        w["verdict"]["reason"]
+            .to_string()
+            .contains("the owner present throughout"),
+        "{run}"
+    );
+    // Half a second into the window, the owner closes: its token goes. The
+    // window has opened once the tool's subscription matches a probe
+    // publisher on the event's keys (its presence read comes before it).
+    let probe = bus
+        .owners
+        .declare_publisher(
+            "zk2/host-a/pulse/pulse.v1/events/pulses/probe/01hzzzzzzzzzzzzzzzzzzzzzzz",
+        )
+        .await
+        .expect("a probe publisher");
+    let matching = |want: bool| {
+        let probe = &probe;
+        async move {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while probe.matching_status().await.expect("matching").matching() != want {
+                assert!(Instant::now() < deadline, "the probe never matched {want}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+    matching(false).await;
+    let pending = bus.spawn(&args);
+    matching(true).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    owner.close().await.expect("close");
+    let run = pending.await.expect("the zenctl runner");
+    let doc = run.json();
+    let w = conform_case(&doc, "budget-window", events);
+    assert_eq!(w["verdict"]["answer"], "unobservable", "{run}");
+    assert!(
+        w["verdict"]["reason"]
+            .to_string()
+            .contains("not present throughout"),
+        "{run}"
+    );
 }

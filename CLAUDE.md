@@ -191,8 +191,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
   `health-aggregation` case. #735 lights the population budget (core 0.24,
   §2.7) through `zenkey_model::budget`: `check conform`'s `budget` (per
-  templated resource) and `rate` (per event) cases, `--skip <CASE>`, and the
-  doctor's `population-over-bound` under `--deep`.
+  templated state, by the owner's GET), `budget-window` (per templated
+  stream or event, complete over a whole liveness span, lossless, the owner
+  present throughout) and `rate` (per event) cases, `--skip <CASE>`, and
+  the doctor's `population-over-bound` under `--deep`.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,

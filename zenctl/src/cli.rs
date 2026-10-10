@@ -965,15 +965,12 @@ pub(crate) enum CheckCmd {
     ///                    clock, or a reply's stamp against a clock trusted
     ///                    to the HLC delta (freshness.v1); a resource with no
     ///                    horizon is not asked
-    ///   budget           each templated stream, state or event resource
-    ///                    holds no more live members than its bound, the
-    ///                    descriptor's lowered cardinality else the
-    ///                    contract's (§2.7): more is the finding, from any
-    ///                    reading; within it is a pass only by the owner's
-    ///                    GET of a state that ran to its final reply, and
-    ///                    unobservable from a window, which never shows a
-    ///                    member it did not hear; no ceiling and an
-    ///                    operation are not asked
+    ///   budget           each templated state holds no more live members
+    ///                    than its bound, the descriptor's lowered
+    ///                    cardinality else the contract's (§2.7), by the
+    ///                    owner's GET: more is the finding, within it a pass
+    ///                    only when the GET ran to its final reply; no
+    ///                    ceiling and an operation are not asked
     ///   health           the service, when its descriptor lists health.v1,
     ///                    is healthy: unhealthy or stale is the finding
     ///                    (health.v1 §5)
@@ -985,6 +982,13 @@ pub(crate) enum CheckCmd {
     ///                    finding in any window; kept is a pass only over a
     ///                    window of a whole period (a minute for low, an
     ///                    hour for rare and burst) that lost nothing
+    ///   budget-window    each templated stream or event holds no more live
+    ///                    members than its bound, over the window (§2.7): a
+    ///                    stream's heard within an hour, an event's within
+    ///                    its retention; more is the finding in any window,
+    ///                    within it a pass only over a window of at least
+    ///                    that span (--for), nothing lost, the owner present
+    ///                    throughout
     ///
     /// A reply's stamp is aged only against a clock this run measured on a
     /// live put of the same clock, or on --clocks-synced; otherwise its age
@@ -1000,9 +1004,9 @@ pub(crate) enum CheckCmd {
     ///
     /// Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
     /// left unobservable, the service not visible, or the run could not
-    /// start. A case this run cannot judge here — budget on a stream, which
-    /// a window bounds from below only — is --skip'ped rather than left to
-    /// read 2: not asked neither passes nor fails. --junit FILE also writes
+    /// start. A case this run cannot judge here — budget-window over a
+    /// window shorter than an hour — is --skip'ped rather than left to read
+    /// 2: not asked neither passes nor fails. --junit FILE also writes
     /// the suite as JUnit XML: a failure per violation, an error per
     /// unobservable case, skipped per case not asked.
     #[command(verbatim_doc_comment)]

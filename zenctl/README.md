@@ -218,7 +218,7 @@ esac
 zenctl doctor --namespace prod --fail-on error
 zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state, and populations over their bounds; no admin space here
 zenctl doctor --namespace prod --clocks-synced         # + health.v1's checks, on the word that the clocks agree
-zenctl check conform host-a/tc tc.netif.v1 --namespace prod --skip budget   # a suite in CI; a stream's population is a window's lower bound only
+zenctl check conform host-a/tc tc.netif.v1 --namespace prod --skip budget-window   # a suite in CI; a stream's population needs an hour's window
 
 # Every service's health.v1: exit 1 on unhealthy, stale, a status better than its checks.
 zenctl health --namespace prod --clocks-synced
@@ -356,9 +356,10 @@ and answering a GET, its populations within their bounds and its events
 within their rates (spec §2.7) — exit 1 on a violation; `--junit` for CI; a
 silent call to a present service is a violation only with `--calls-granted`,
 the operator's word that no access control refused it, and unobservable
-without; a stream's population, which a window bounds from below only, is
-unobservable within its bound, so `--skip budget` where that is all a run
-can say) · `zenctl why <key|address>` (a key's or a
+without; a stream's or an event's population is `budget-window`'s, a pass
+within its bound only over a window of a whole liveness span — an hour, or
+the retention — so `--skip budget-window` where a run cannot listen that
+long, the state's `budget` still asked) · `zenctl why <key|address>` (a key's or a
 service's silence, rung by rung — namespace, presence, descriptor, contract,
 the owner's answer, an archive's last-known — stopped at the first cause:
 exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·
