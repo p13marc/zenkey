@@ -4,6 +4,61 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.2 — 2026-10-10: a clock ahead without root, and the tool's clock (#721, PE)
+
+Two findings of the Python implementation's cold read of 0.1 (#609),
+resolved with the runtime that implements the text (`zenkey::health`, PE)
+and measured where zenoh decides.
+
+**Changed.**
+- **F-103: what `scenarios.md` §4 checks without root.** Its expected 2
+  wanted the `clock_ahead` fault re-stamped by R1, which needs the fault to
+  reach R1 dated ahead. A runner without root cannot move a host's clock,
+  and zenoh lets no program move its session's HLC, so the offset is
+  simulated in the owner's runtime. Measured on zenoh 1.10.1, from Rust
+  (`zenkey/tests/profile_health.rs`) and from Python: a session whose HLC
+  runs re-stamps a put given a stamp 2 s ahead of that HLC before the put
+  leaves it, so the fault reaches R1 under the owner's honest stamp, as an
+  unstamped one does.
+  - §2.5 now states that fact: a simulated offset is not a drift. It says
+    that nothing a reader concludes rests on the fault's stamp, and that
+    an owner MAY set the stamp itself from the clock it mints state stamps
+    with, which the reference runtime does.
+  - §4 marks the stamp check **[moved clock]**, with a new step 4 under
+    `timestamping.drop_future_timestamp`: the fault and the status put
+    while ahead are dropped, and the owner's GET still answers. Every
+    other expectation of §4 holds without root.
+  - A runner meets the [moved clock] tier by moving the owner host's
+    clock, or with an owner that stamps from its offset clock on a session
+    without an HLC. The reference does the second: in-process client
+    owners, whose HLC is off by default, and its owner example under
+    `--clock-offset-ms`.
+- **F-104: the tool's clock in `scenarios.md` §5 to §7.** T reads by GET
+  alone, and `freshness.v1` §2.6 ages a reply only with a trusted clock,
+  so read literally every status there was unobservable,
+  `clock_untrusted`. T now takes the deployment's word (`freshness.v1`
+  §2.6, ground 1), stated in the conventions and in each setup. Every
+  session of a scenario runs on one host, so the word holds.
+- **The conventions' waits:** §4 waits about 100 s (65 s, then 35 s), not
+  70 s.
+- **Uses `freshness.v1` text 0.2.** §2.8 already cited its §2.5, "a
+  member it knows", and F-104 reads its §2.6.
+
+**Deliberately not changed.**
+- **The rule.** An owner whose guard holds still publishes `clock_ahead`
+  at `FAILED`, at once, then once per status interval, and none after
+  release. Only what a runner can observe of the stamp moved.
+- **Measuring T's clock** was the other way. T would subscribe to the
+  statuses before the owners start, and measure from their first puts.
+  It was not chosen: it ties §5–§7 to a subscription and a start order,
+  and a tool reaching a running deployment would hear a re-put only every
+  30 s. What those sections check is health's reading. The grounds of a
+  clock's trust are `freshness.v1`'s, which its scenarios §4 and §6 check.
+  G in §1 to §4 still measures from S's deliveries.
+- **Core 0.23 §4.1 and Appendix B** are not amended here. The session's
+  re-stamp is a zenoh fact, recorded in §2.5 where this text relies on it.
+  The core may list it among its §4.1 facts at its next version.
+
 ## 0.1 — 2026-10-10: the first text, draft (#721, PD)
 
 `health.v1` is the third profile of #613's first tier, after `hostid.v1`
