@@ -23,7 +23,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Contract, Resource};
-use zenkey_model::freshness::{ClockTrust, Horizon, Judged, Last, Observation, StampAge};
+use zenkey_model::freshness::{
+    ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, StampAge,
+};
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::slug::chunk_slug;
 use zenkey_model::template::{Bindings, Segment};
@@ -159,7 +161,7 @@ struct Seen {
     /// Per stamping clock, the delivery whose stamp came closest to this
     /// host's clock at receipt: what `freshness.v1` §2.6 measures a GET
     /// reader's clock from.
-    clocks: Mutex<BTreeMap<String, StampAge>>,
+    clocks: Mutex<BTreeMap<String, ClockMeasure>>,
 }
 
 impl Consumer {
@@ -369,12 +371,8 @@ impl Consumer {
                                 .lock()
                                 .expect("not poisoned")
                                 .entry(t.get_id().to_string())
-                                .and_modify(|best| {
-                                    if offset.nanos().unsigned_abs() < best.nanos().unsigned_abs() {
-                                        *best = offset;
-                                    }
-                                })
-                                .or_insert(offset);
+                                .and_modify(|m| m.record(offset))
+                                .or_insert(ClockMeasure::new(offset));
                         }
                         callback(Delivery {
                             provider: addr,
@@ -705,17 +703,18 @@ impl Subscription {
         }
     }
 
-    /// Per stamping clock (a stamp's id), the offset of the delivery whose
-    /// stamp came closest to this host's clock at receipt: the receipt
-    /// minus the stamp (`freshness.v1` §2.6, ground 2).
+    /// Per stamping clock (a stamp's id), what this subscription measured
+    /// of it, receipt minus stamp, over its lifetime, which is its reading
+    /// (`freshness.v1` §2.6, ground 2, 0.2).
     #[must_use]
-    pub fn clock_offsets(&self) -> BTreeMap<String, StampAge> {
+    pub fn clock_offsets(&self) -> BTreeMap<String, ClockMeasure> {
         self.seen.clocks.lock().expect("not poisoned").clone()
     }
 
     /// Whether this host's clock is trusted to `delta` against `clock`, a
-    /// stamp's id (`freshness.v1` §2.6, ground 2): a delivery stamped by it
-    /// arrived with its stamp within `delta` of this host's clock.
+    /// stamp's id (`freshness.v1` §2.6, ground 2, 0.2): a delivery stamped by
+    /// it arrived within `delta` of this host's clock, and none arrived
+    /// stamped further ahead than `delta`.
     #[must_use]
     pub fn clock_trust(&self, clock: &str, delta: Duration) -> ClockTrust {
         self.seen
@@ -723,6 +722,6 @@ impl Subscription {
             .lock()
             .expect("not poisoned")
             .get(clock)
-            .map_or(ClockTrust::Untrusted, |o| ClockTrust::measured(*o, delta))
+            .map_or(ClockTrust::Untrusted, |m| m.trust(delta))
     }
 }

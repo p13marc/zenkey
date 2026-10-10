@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime};
 use zenkey_model::authoring::Kind;
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Fanout, Resource};
-use zenkey_model::freshness::{Observation, StampAge};
+use zenkey_model::freshness::{ClockMeasure, Observation};
 use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId};
 use zenkey_model::template::{Bindings, Segment};
 use zenoh::Session;
@@ -97,7 +97,7 @@ pub struct Heard {
     /// Per stamping clock, the offset at receipt of the delivery whose
     /// stamp came closest to this host's clock: what a GET reply's stamp is
     /// trusted against (§2.6, ground 2).
-    pub clocks: BTreeMap<String, StampAge>,
+    pub clocks: BTreeMap<String, ClockMeasure>,
     /// How long the subscription listened: from its declaration to the
     /// window's end. A member it never heard is judged on this (§2.5).
     pub listened: Duration,

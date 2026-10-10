@@ -1297,7 +1297,53 @@
           "via": "subscription"
         }
       ]
+    },
+    {
+      "annotations": {},
+      "expect": {
+        "reason": "no_horizon",
+        "verdict": "not_asked"
+      },
+      "kind": "state",
+      "note": "no horizon, nothing observed: not asked, not unobservable (§2.7 step 1 needs no observation; 0.2, F-101)",
+      "observations": []
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 60
+      },
+      "expect": {
+        "reason": "kind",
+        "verdict": "not_asked"
+      },
+      "kind": "event",
+      "note": "an event, nothing observed: not this profile's (§2.7 step 2; 0.2)",
+      "observations": []
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 1.5
+      },
+      "expect": {
+        "reason": "not_a_horizon",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "not a horizon, nothing observed (§2.7 step 4; 0.2)",
+      "observations": []
+    },
+    {
+      "annotations": {
+        "freshness.ttl_s": 0
+      },
+      "expect": {
+        "reason": "no_observation",
+        "verdict": "unobservable"
+      },
+      "kind": "state",
+      "note": "never stale, nothing observed: no value, no verdict (§2.3; 0.2)",
+      "observations": []
     }
   ],
-  "description": "freshness.v1 §2.3, §2.5–§2.8: a resource's kind and merged annotations (read as horizons.json reads them), and the observations a reader made of one member -> the combined verdict. Each observation is judged in §2.7's order, then combined: fresh if any is fresh, else stale if any is, else unobservable if any is (the first one's reason), else not_asked (the first one's reason); no observation at all is unobservable, no_observation. Observations: {\"via\": \"subscription\", \"listened_s\": seconds since the subscription was declared, \"complete\": false when it lost deliveries, \"last\": null or {\"kind\": \"put\" | \"delete\", \"age_s\": seconds since that delivery, on the subscriber's monotonic clock}}; {\"via\": \"get\", \"reply\": null (no reply for the member) or {\"kind\": \"delete\"} or {\"kind\": \"put\", \"stamp_age_s\": the reader's clock minus the stamp's time, negative when the stamp is ahead, or null when the reply has no stamp}, \"clock\": {\"trusted\": false} or {\"trusted\": true, \"delta_s\": the delta the clocks are trusted to}}; {\"via\": \"archive\"}. expect.verdict is fresh, stale, unobservable or not_asked (a premise that does not hold, an event or a deleted member, is not_asked), and expect.reason its class: within_horizon, never_stale, beyond_horizon, no_delivery, not_a_horizon, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation, no_horizon, kind, last_known, deleted. Seconds are compared exactly, to the nanosecond."
+  "description": "freshness.v1 §2.3, §2.5–§2.8: a resource's kind and merged annotations (read as horizons.json reads them), and the observations a reader made of one member -> the combined verdict. Each observation is judged in §2.7's order, then combined: fresh if any is fresh, else stale if any is, else unobservable if any is (the first one's reason), else not_asked (the first one's reason); with no observation at all, §2.7's steps 1, 2 and 4 still answer (no horizon: not_asked, no_horizon; an event or operation: not_asked, kind; no horizon in the value: unobservable, not_a_horizon), and a member with a horizon is unobservable, no_observation (0.2). Observations: {\"via\": \"subscription\", \"listened_s\": seconds since the subscription was declared, \"complete\": false when it lost deliveries, \"last\": null or {\"kind\": \"put\" | \"delete\", \"age_s\": seconds since that delivery, on the subscriber's monotonic clock}}; {\"via\": \"get\", \"reply\": null (no reply for the member) or {\"kind\": \"delete\"} or {\"kind\": \"put\", \"stamp_age_s\": the reader's clock minus the stamp's time, negative when the stamp is ahead, or null when the reply has no stamp}, \"clock\": {\"trusted\": false} or {\"trusted\": true, \"delta_s\": the delta the clocks are trusted to}}; {\"via\": \"archive\"}. expect.verdict is fresh, stale, unobservable or not_asked (a premise that does not hold, an event or a deleted member, is not_asked), and expect.reason its class: within_horizon, never_stale, beyond_horizon, no_delivery, not_a_horizon, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation, no_horizon, kind, last_known, deleted. Seconds are compared exactly, to the nanosecond."
 }

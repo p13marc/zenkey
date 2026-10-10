@@ -192,7 +192,85 @@ pub enum ClockTrust {
     Untrusted,
 }
 
+/// What a reader measured of one stamping clock during a reading (§2.6,
+/// ground 2, 0.2): the offset closest to its own clock, since transit only
+/// adds to an offset, and the offset furthest ahead, since a stamp ahead of
+/// the reader's clock by more than the delta proves the clocks disagree
+/// whatever the transit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockMeasure {
+    closest: StampAge,
+    most_ahead: StampAge,
+}
+
+impl ClockMeasure {
+    /// A first measurement.
+    #[must_use]
+    pub fn new(offset: StampAge) -> Self {
+        Self {
+            closest: offset,
+            most_ahead: offset,
+        }
+    }
+
+    /// Another live put's offset, in the same reading.
+    pub fn record(&mut self, offset: StampAge) {
+        if offset.nanos().unsigned_abs() < self.closest.nanos().unsigned_abs() {
+            self.closest = offset;
+        }
+        if offset < self.most_ahead {
+            self.most_ahead = offset;
+        }
+    }
+
+    /// Two readers' measurements of one clock, as one reading's.
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        self.record(other.closest);
+        self.record(other.most_ahead);
+        self
+    }
+
+    /// The offset closest to the reader's clock.
+    #[must_use]
+    pub fn closest(&self) -> StampAge {
+        self.closest
+    }
+
+    /// The offset furthest ahead (the most negative).
+    #[must_use]
+    pub fn most_ahead(&self) -> StampAge {
+        self.most_ahead
+    }
+
+    /// §2.6, ground 2 (0.2): trusted when the closest offset is within
+    /// `delta`, and no stamp was ahead by more than `delta`.
+    #[must_use]
+    pub fn trust(&self, delta: Duration) -> ClockTrust {
+        let d = delta.as_nanos() as i128;
+        if self.closest.nanos().unsigned_abs() <= delta.as_nanos() && self.most_ahead.nanos() >= -d
+        {
+            ClockTrust::Trusted { delta }
+        } else {
+            ClockTrust::Untrusted
+        }
+    }
+}
+
 impl ClockTrust {
+    /// §2.6, ground 2 (0.2), over a reading's measurements of one clock:
+    /// untrusted when there are none.
+    #[must_use]
+    pub fn from_offsets(offsets: impl IntoIterator<Item = StampAge>, delta: Duration) -> Self {
+        let mut it = offsets.into_iter();
+        let Some(first) = it.next() else {
+            return Self::Untrusted;
+        };
+        let mut m = ClockMeasure::new(first);
+        it.for_each(|o| m.record(o));
+        m.trust(delta)
+    }
+
     /// §2.6, ground 2: a live put whose stamp was `offset` from the reader's
     /// clock at receipt (the receipt minus the stamp) shows the clocks agree
     /// within `delta` when the offset is within it, either way.
@@ -497,9 +575,23 @@ pub fn combine(judged: impl IntoIterator<Item = Judged>) -> Judged {
         .unwrap_or(Judged::new(Verdict::Unobservable, Reason::NoObservation))
 }
 
-/// [`judge`] each observation, then [`combine`] them.
+/// [`judge`] each observation, then [`combine`] them. With no observation,
+/// §2.7's steps that need none still answer (0.2): no horizon is not
+/// asked, an event or operation is not this profile's, a value that is no
+/// horizon is unobservable; only a member with a horizon is unobservable
+/// for want of an observation.
 #[must_use]
 pub fn judge_all(h: &Horizon, observations: &[Observation]) -> Judged {
+    if observations.is_empty() {
+        return match h {
+            Horizon::Undeclared => Judged::new(Verdict::NotAsked, Reason::NoHorizon),
+            Horizon::Ignored => Judged::new(Verdict::NotAsked, Reason::Kind),
+            Horizon::Invalid(_) => Judged::new(Verdict::Unobservable, Reason::NotAHorizon),
+            Horizon::Never | Horizon::Within(_) => {
+                Judged::new(Verdict::Unobservable, Reason::NoObservation)
+            }
+        };
+    }
     combine(observations.iter().map(|o| judge(h, o)))
 }
 

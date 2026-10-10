@@ -24,7 +24,8 @@ use std::time::SystemTime;
 use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Body, Fanout, Resource};
 use zenkey_model::freshness::{
-    self as fresh, ClockTrust, Horizon, Judged, Observation, Reason, Reply, StampAge, Verdict,
+    self as fresh, ClockMeasure, ClockTrust, Horizon, Judged, Observation, Reason, Reply, StampAge,
+    Verdict,
 };
 use zenkey_model::schema::TypeId;
 
@@ -221,18 +222,15 @@ fn stamp_time(s: &Stamp) -> Option<SystemTime> {
 }
 
 /// The window's measurements of every stamping clock, across every
-/// resource's subscription: the offset closest to this host's clock.
-fn clock_offsets(obs: &ConformObservation) -> BTreeMap<String, StampAge> {
-    let mut out: BTreeMap<String, StampAge> = BTreeMap::new();
+/// resource's subscription, as one reading's (`freshness.v1` §2.6,
+/// ground 2, 0.2).
+fn clock_offsets(obs: &ConformObservation) -> BTreeMap<String, ClockMeasure> {
+    let mut out: BTreeMap<String, ClockMeasure> = BTreeMap::new();
     for h in obs.heard.values().flatten() {
-        for (clock, o) in &h.clocks {
+        for (clock, m) in &h.clocks {
             out.entry(zid_value(clock))
-                .and_modify(|best| {
-                    if o.nanos().unsigned_abs() < best.nanos().unsigned_abs() {
-                        *best = *o;
-                    }
-                })
-                .or_insert(*o);
+                .and_modify(|all| *all = all.merge(*m))
+                .or_insert(*m);
         }
     }
     out
@@ -251,7 +249,7 @@ fn freshness(
     name: &str,
     heard: Option<&Result<Heard, String>>,
     get: Option<&Result<StateReport, String>>,
-    clocks: &BTreeMap<String, StampAge>,
+    clocks: &BTreeMap<String, ClockMeasure>,
 ) -> ConformCase {
     const C: CaseId = CaseId::Freshness;
     let h = fresh::horizon_of(r);
@@ -291,7 +289,7 @@ fn freshness(
         }
         clocks
             .get(&zid_value(clock))
-            .map_or(ClockTrust::Untrusted, |o| ClockTrust::measured(*o, delta))
+            .map_or(ClockTrust::Untrusted, |m| m.trust(delta))
     };
     let mut members: BTreeMap<String, Vec<Observation>> = BTreeMap::new();
     let sub = match heard {
@@ -1248,7 +1246,12 @@ mod tests {
         let clocks = samples
             .iter()
             .filter_map(|s| s.timestamp.as_ref())
-            .map(|t| (t.clock.clone(), StampAge::behind(Duration::from_millis(10))))
+            .map(|t| {
+                (
+                    t.clock.clone(),
+                    ClockMeasure::new(StampAge::behind(Duration::from_millis(10))),
+                )
+            })
             .collect();
         Ok(Heard {
             received: samples.len() as u64,
