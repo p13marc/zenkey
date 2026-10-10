@@ -64,4 +64,13 @@
     sinks: ["ops"],
     severity_floor: "warning",        // info findings stay in the report, never a notification
   },
+  // The daemon as a zk2 service of its own: health.v1, and zenwatch.v1's
+  // firing/{rule_id}, doctor and counters. Its address is
+  // @hostid.v1/zenwatch, minted from this host's machine id; a host with no
+  // id refuses to start (hostid.v1 §2.6) unless one of these says otherwise.
+  publish: {
+    // address: "ops-1/zenwatch",     // name the system (or @hostid.v1/<service>)
+    // ephemeral: true,               // allow an ephemeral system: one run's, another at the next start
+  },
+  // publish: false,                  // or run no service at all
 }

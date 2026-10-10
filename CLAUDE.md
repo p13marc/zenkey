@@ -25,8 +25,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   module (deduped `Tier` enum across all declaring producers, typed key
   builders, the probe form).
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; 0.18.x on
-  crates.io is the v1 engine zengui pins (and zenwatch's write side, until
-  FL3), the in-tree 0.20.0 is
+  crates.io is the v1 engine zengui pins, the in-tree 0.20.0 is
   zk2's and `publish = false` until the port completes): the shared core of
   the zk2 explorers, zenctl first — `fleet_get` (the RFC 05 §2.1 chokepoint,
   moved verbatim from zenctl), presence and contract retrieval
@@ -243,10 +242,13 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   config > env > context > empty) for presence, descriptors, contracts and
   the doctor, one in none for wire selectors, foreign tokens and the admin
   space; contracts by `contracts` and `--contracts` (zenctl's loading),
-  never a named context. The write side (`publish.rs`, the build script's
-  registry) is still v1's until FL3, under renamed dependencies
-  (`zenkey-v1`, `zenkey-fleet-v1`, `zenkey-build-v1`; `build.rs` re-paths
-  the generated `::zenkey::`). A rule is one spelling of the **closed**
+  never a named context. **The write side since FL3**: the daemon is a zk2
+  service on the namespaced session (`publish.rs`, `SelfService` over
+  `ServiceBuilder`), `health.v1` through `zenkey::health` and its own
+  **`zenwatch.v1`** (`contracts/`, its own `.history`; Rust-first: its
+  types are `publish.rs`'s structs bound by `json_type`, the committed
+  schema held to them by `check_schema`; `build.rs` is zk2's
+  `zenkey-build`). zenwatch links no v1 crate. A rule is one spelling of the **closed**
   vocabulary — `zenctl watchdog`'s zk2 seven on the fleet's watchdog
   (`rate-above`, `rate-below`, `silent-for`, `invalid-payload`,
   `qos-mismatch`, `doctor`, `dropped`) plus two of its own:
@@ -282,11 +284,19 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   repeat, the four resolved kinds. The ledger is bounded and survives a
   restart in `state_file`, **version 2** (zk2 identities, the namespace
   they were judged in; missing is fresh, malformed, version 1 or another
-  namespace's is exit 2). **A real daemon, explicitly launched, publishes
-  its own state like a producer** (v1's `publish.rs` until FL3: `health`
-  every 30 s, one `firing/{rule_id}` per rule with something announced,
-  `doctor` after every scheduled run), and it caches no discovery: it is
-  not the noun `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
+  namespace's is exit 2). **A real daemon, explicitly launched, is a zk2
+  service** at `@hostid.v1/zenwatch` (minted in `load_checked` before any
+  session opens; a host with no id is exit 2 unless `publish.address`,
+  `publish.ephemeral: true` or `publish: false`), up after its observers
+  are seeded: zenwatch.v1's `firing/{rule_id}` (cardinality 256, the
+  runtime's `Error::Budget` past it counted in `firing_refused`), `doctor`
+  (optional, gated `config:doctor`, after every scheduled run) and
+  `counters` (what the bounds cost); health.v1's status declared `OK` and
+  raised to its worst check (`sinks`, `presence`, `tokens`, `doctor`,
+  `state-file`, `firing`). It stops last — the final tick, the observers,
+  the sinks drained, then its tokens — so it never pages about its own
+  clean stop; and it caches no discovery: it is not the noun
+  `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
   doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
   (`deep`; top-level `clocks_synced` for the `health-*` checks, which a
   `doctor` rule reads too) every few **hours** beside the drain, as a rule
@@ -302,18 +312,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
 **Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
 described above, and the `fixture-tests` crate, now live on the **`v1`
 branch**. On `main` zengui, the v1 tool still there, builds against
-`zenkey`/`zenkey-build` `=0.11.1` from crates.io
-(`[workspace.dependencies]`), and since FJ1 (#612) pins `zenkey-fleet
-=0.18.0` from crates.io too, until #614 ports it. zenwatch's read side is
-ported (FL2): only its write side keeps the three, renamed
-(`zenkey-v1`, `zenkey-fleet-v1`, `zenkey-build-v1`), until FL3 —
-`cargo tree -p zenwatch -i zenkey-fleet@0.18.0` names zenwatch alone, and
-`-i zenkey@0.11.1` that and the build script's `zenkey-build`. With both
-fleets in the graph, `-p zenkey-fleet` is ambiguous: say
-`-p zenkey-fleet@0.20.0`, as `-p zenkey@0.20.0`. The in-tree
-`zenkey-fleet` 0.20.0 (`publish = false`) is zk2's, and zenctl depends on it
-by path; since FJ9 neither links v1's `zenkey` (`cargo tree -p zenctl -i
-zenkey@0.11.1` matches nothing). `fixture-tests/registry`
+`zenkey =0.11.1` from crates.io (`[workspace.dependencies]`), and since
+FJ1 (#612) pins `zenkey-fleet =0.18.0` from crates.io too, until #614
+ports it. zenwatch no longer pins v1 (FL2 its read side, FL3 its write
+side): `cargo tree -p zenwatch -i zenkey@0.11.1` and `-i
+zenkey-fleet@0.18.0` match nothing, and no member uses v1's
+`zenkey-build`, so its pin left the workspace. With both fleets in the
+graph, `-p zenkey-fleet` is ambiguous: say `-p zenkey-fleet@0.20.0`, as
+`-p zenkey@0.20.0`. The in-tree `zenkey-fleet` 0.20.0 (`publish = false`)
+is zk2's, and zenctl and zenwatch depend on it by path; neither links v1's
+`zenkey` (`cargo tree -p zenctl -i zenkey@0.11.1` matches nothing). `fixture-tests/registry`
 (+ `registry-kdl/`) stays on `main` as test data that the tools' tests read.
 The `registry-conventions` skill describes the v1 registry format.
 

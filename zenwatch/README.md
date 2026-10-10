@@ -11,10 +11,11 @@ zenwatch check-config --config zenwatch.json5 [--context NAME] [--namespace NS] 
 zenwatch test-sink --config zenwatch.json5 <NAME>
 ```
 
-On `main`, zk2 since FL2 (#614): the rules, presence, contracts and the doctor
-read a zk2 deployment through the in-tree engine. What changed from the v1
-notifier is in [`CHANGELOG.md`](CHANGELOG.md), old spelling by old
-spelling. What zenwatch publishes about itself is still v1's until FL3.
+On `main`, zk2 throughout (#614): the rules, presence, contracts and the
+doctor read a zk2 deployment through the in-tree engine (FL2), and the
+daemon is a zk2 service of its own, `health.v1` and its own `zenwatch.v1`
+(FL3). What changed from the v1 notifier is in
+[`CHANGELOG.md`](CHANGELOG.md), old spelling by old spelling.
 
 ## Rules
 
@@ -235,32 +236,75 @@ sink not in `sinks`, a floor outside `info | warning | error`, v1's
 
 ## What it publishes
 
-A real daemon, explicitly launched, publishes its own state like every
-producer, so `zengui` and `zenctl` see the notifier without SSH. **This is
-still v1's write side** (`registry/zenwatch.kdl`, RFC 08 §5.1) until FL3
-gives zenwatch a zk2 contract: v1 keys under the deployment's namespace as
-their base, on the session in no namespace.
+A real daemon, explicitly launched, is a **zk2 service** of its own (FL3,
+#614), so `zengui` and `zenctl` see the notifier without SSH and something
+else can watch the watcher. It comes up on the session in the deployment's
+namespace, after its observers are seeded, in spec §8.2's order: its
+resources declared, its descriptor and both bundles served, then its
+instance token and interface tokens. `zenctl service show`, `zenctl health`
+and `zenctl check conform <address> zenwatch.v1` read it like any service.
 
-- **`…/@rpc/zenwatch/introspect`** and **`describe`** are served first,
-  then the **`…/state/zenwatch/alive`** token — RFC 04 §5's order.
-- **`…/state/zenwatch/health`** every 30 s: `status` (`ok`, or
-  `degraded` when the last persist failed or a delivery failed since the
-  last document), `host_id`, `started_at`, `rules`, `sinks`, `firing`,
-  `unobservable`, `notifications_sent`, `deliveries_failed`, `inhibited`
-  (always `0` since inhibition was removed), `dropped_total` (liveliness
-  events the presence and token observers dropped), `state_entries`,
-  `state_evicted`, `firing_refused`, `last_persist_error`, and the
-  doctor's schedule: `doctor`, `doctor_last`, `doctor_next`.
-- **`…/state/zenwatch/firing/{rule_id}`** — one document per rule with
-  something announced: `rule`, the most severe (then oldest) notice's
-  `id`, `state`, `severity`, `since`, `labels`, and `count`. Tombstoned
-  when the rule goes quiet; never more than 256, refusals counted.
-- **`…/state/zenwatch/doctor`** after every scheduled run (retained, never
-  tombstoned): `ran_at`, `next_at`, `every_s`, `outcome`, `error`,
-  `findings`, `new`, `fixed`, `report` — zk2's `DoctorReport` exactly as
-  `zenctl doctor --format json` prints it; after a failed run the last one
-  that succeeded, `report_at` saying from when — and `delta` (`new`,
-  `fixed`, `unchanged`; absent on the baseline).
+**The address** is `@hostid.v1/zenwatch`: the system minted from the host's
+machine id (`spec/profiles/hostid/v1.md`), before any session opens. A host
+with no id refuses to start (exit 2, every path tried named, hostid.v1
+§2.6), and so does `check-config` — the two pass one gate:
+
+```json5
+publish: { address: "ops-1/zenwatch" },  // name the system (or @hostid.v1/<service>)
+publish: { ephemeral: true },            // or allow an ephemeral system on a host with no id
+publish: false,                          // or run no service at all
+```
+
+**`health.v1`** (`spec/profiles/health/v1.md`, through the runtime): the
+status says whether zenwatch can do its job — declared `OK`, raised by the
+runtime to its worst check, re-put every 28.5 s. One check per part of the
+job, at most six of the profile's 64:
+
+| Check | `OK` | `DEGRADED` | `FAILED` | `UNSPECIFIED` |
+|---|---|---|---|---|
+| `sinks` | no sink's last delivery failed | some sinks' last delivery failed | every sink's: no notification can go out | — |
+| `presence`, `tokens` (when a rule reads them) | a complete read, nothing lost | a read that timed out, events dropped (`Dropped(n)`) until a complete re-read, or the monitor stopped | — | not read yet |
+| `doctor` (when scheduled) | not run yet, or the last run happened | the last run could not happen | — | — |
+| `state-file` (when configured) | the last save went through | the last save failed | — | — |
+| `firing` | every rule with something announced is published | the bound refuses some | — | — |
+
+**`zenwatch.v1`** ([`contracts/zenwatch.v1.toml`](contracts/zenwatch.v1.toml),
+its own append-only [`.history`](contracts/.history)), Rust-first: its types
+are the daemon's structs, and [`schemas/zenwatch.json`](contracts/schemas/zenwatch.json)
+is what they derive.
+
+- **`state/firing/{rule_id}`** (cardinality 256, `freshness.ttl_s` 300) —
+  one document per rule with something announced: `rule`, the most severe
+  (then oldest) notice's `id`, `state`, `severity`, `since`, `labels`, and
+  `count`. Deleted when the rule goes quiet and at a clean stop. A rule
+  past the bound is refused by the runtime (core §2.7), counted in
+  `firing_refused` and the `firing` check — never published past it.
+- **`state/doctor`** (optional, gated `config:doctor`; background priority;
+  no horizon) after every scheduled run: `ran_at`, `next_at`, `every_s`,
+  `outcome`, `error`, `findings`, `new`, `fixed`, `report` — zk2's
+  `DoctorReport` exactly as `zenctl doctor --format json` prints it; after
+  a failed run the last one that succeeded, `report_at` saying from when —
+  and `delta` (`new`, `fixed`, `unchanged`; absent on the baseline).
+  Unavailable (cause `config`) in the descriptor when no `doctor` block is
+  configured; not deleted at a clean stop.
+- **`state/counters`** (`data_low`, `freshness.ttl_s` 60) — what the bounds
+  cost (RFC 13 §3 O6), put on change at most once per tick: `started_at`,
+  `rules`, `sinks`, `firing`, `unobservable`, `delivered`,
+  `deliveries_failed`, `dropped`, `forgotten`, `state_entries`,
+  `firing_refused`, `doctor_runs`, and the discipline's `sent`, `deduped`,
+  `cancelled`, `baseline`, `grouped`, `repeats`, `evicted`.
+
+**Its own stop is not news.** On a stop, the last tick flushes, the
+observers stop and the sinks drain, and only then are the firing documents
+deleted and the tokens withdrawn: a rule over its own address
+(`instance-gone */*`) is not excluded — two zenwatches watching each other
+is a deployment — but nothing is left to see it go, so it never pages
+about its own clean stop.
+
+Under access control, zenwatch is **one principal with two grant sets**:
+Own on its service's prefix, and the Tool shape for what it reads — its
+bindings, the presence they bring, and the admin read its doctor needs
+(core §11.1). `examples/zk2/acl/walkthrough.enrollment.toml` enrolls one.
 
 ## Secrets
 
@@ -298,6 +342,7 @@ name. The whole example is [`examples/zenwatch.json5`](examples/zenwatch.json5):
   state_file: "/var/lib/zenwatch/state.json",
   state_max_entries: 4096,
   doctor: { every_h: 6, deep: false, sinks: ["ops"], severity_floor: "warning" },
+  publish: {},                        // @hostid.v1/zenwatch; or { address }, { ephemeral: true }, false
   sinks: {
     ops:  { kind: "ntfy", url: "https://ntfy.example.org", topic: "fleet", token: { env: "NTFY_TOKEN" }, priority: { error: 5, warning: 4, info: 2, resolved: 1 }, tags: ["zenoh"] },
     hook: { kind: "webhook", url: "https://hooks.example.org/zenwatch", method: "POST", headers: { "X-Api-Key": { env: "HOOK_KEY" } }, timeout_s: 10 },
@@ -360,7 +405,7 @@ One contract, cited from `src/exit.rs`:
 |---|---|
 | 0 | clean — `run` stopped on SIGINT/SIGTERM or after `--once`; `check-config` found nothing to refuse; `test-sink` delivered |
 | 1 | the act failed — the transport would not open; the test delivery did not go out. A sink failing *during* a run is counted and logged, never fatal |
-| 2 | refused input — a config that does not parse or does not check (a dark or v1 spelling among them), a context that names nothing, a namespace that is not one, contracts that load nothing, a state file malformed, version 1 or another namespace's, a sink name `test-sink` cannot find; the same code as clap's usage errors |
+| 2 | refused input — a config that does not parse or does not check (a dark or v1 spelling among them), a context that names nothing, a namespace that is not one, contracts that load nothing, a state file malformed, version 1 or another namespace's, a host with no id for the default `@hostid.v1/zenwatch` (hostid.v1 §2.6), a sink name `test-sink` cannot find; the same code as clap's usage errors |
 
 ## What it is not
 
