@@ -265,7 +265,8 @@ class Owner:
                  auth: tuple[str, str] | None = None, tokenless: set[str] | None = None,
                  router_connect: str | None = None, hostid: Any = None,
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
-                 state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5):
+                 state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
+                 initial: dict[str, bytes] | None = None):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -306,6 +307,11 @@ class Owner:
           of a heartbeat's stamp, it writes no state: :meth:`set_state`
           raises :class:`ClockAhead`, and no re-put is made
           (freshness.v1 §2.10).
+
+        - ``initial``: state values held at start, by key relative to the
+          address (``health.v1/state/status``), put with the others before
+          the tokens (§8.2 "State values"; a MUST for health.v1's status,
+          health.v1 §2.3).
 
         Every state member whose resource has a ``freshness.ttl_s`` above 0
         is re-put, unchanged under a fresh stamp, once ttl/2 has passed
@@ -368,6 +374,9 @@ class Owner:
         self._writes = threading.RLock()
         self._stop = threading.Event()
         self._refresher: threading.Thread | None = None
+        self.initial = dict(initial or {})
+        #: called with (held, offset in ns) on each of the guard's transitions
+        self.on_guard: Any = None
 
     # -- keys -------------------------------------------------------------
 
@@ -536,6 +545,8 @@ class Owner:
                 if status == "exposed" and r["kind"] == "state" and not r["params"] \
                         and r["type"]["kind"] == "raw":
                     self.set_state(key, b"ok")
+        for rel, payload in self.initial.items():
+            self.set_state(f"zk2/{self.system}/{self.service}/{rel}", payload)
         # Step 3: the descriptor's queryable and its first put (§3.3), then a
         # contract queryable per interface.
         self.descriptor = self._descriptor(plan)
@@ -608,6 +619,7 @@ class Owner:
         with self._writes:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
+            self._member_publisher(key)
             stamp = self.mint()
             enc = self._encodings[key]
             self._publishers[key].put(payload, encoding=enc, timestamp=stamp)
@@ -621,10 +633,39 @@ class Owner:
         with self._writes:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
+            self._member_publisher(key)
             stamp = self.mint()
             self._publishers[key].delete(timestamp=stamp)
             self._held[key] = _Held(None, self._encodings[key], stamp, time.monotonic())
             return stamp
+
+    def _member_publisher(self, key: str) -> None:
+        """A publisher for a member of a templated state resource, declared
+        at its first put (``checks/disk`` of ``checks/{check}``), with the
+        resource's QoS and Encoding. The key is concrete, its parameter
+        chunks slugged by the caller (§1.4)."""
+        if key in self._publishers:
+            return
+        assert self.session is not None
+        if "*" in key or "$" in key:
+            raise ValueError(f"{key}: a member key is concrete (R6)")
+        for c in self.contracts:
+            for r in c.canonical["resources"]:
+                if r["kind"] != "state" or not r["params"]:
+                    continue
+                pattern = zenoh.KeyExpr(f"{self.prefix(c)}/{r['token']}/{_template_key(r['template'])}")
+                if pattern.intersects(zenoh.KeyExpr(key)):
+                    enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
+                        "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
+                        if r["type"]["kind"] == "jsonschema" else "application/protobuf"
+                    pub = self.session.declare_publisher(
+                        key, encoding=enc,
+                        congestion_control=getattr(zenoh.CongestionControl, _CONGESTION[r["congestion"]]),
+                        priority=getattr(zenoh.Priority, _PRIORITY[r["priority"]]), express=r["express"])
+                    self._entities.append(pub)
+                    self._publishers[key], self._encodings[key] = pub, enc
+                    return
+        raise KeyError(f"{key}: no state resource of this owner holds it")
 
     def close_writer(self, key: str) -> None:
         """freshness.v1 §2.4: "The re-puts stop … when its writer for that
@@ -646,13 +687,18 @@ class Owner:
         if sample.timestamp is None or self.session is None:
             return
         off = self._now_ns() - sample.timestamp.get_time_as_ntp64().as_nanos()
+        changed = None
         with self._writes:
             if off > self.delta_ns and not self.ahead:
-                self.ahead = True
+                self.ahead = changed = True
                 self.events.append(f"ahead by {off / 1e9:.3f} s, beyond the delta: state writes held (core §4.3)")
             elif off <= self.delta_ns and self.ahead:
-                self.ahead = False
+                self.ahead, changed = False, False
                 self.events.append(f"within the delta again ({off / 1e9:.3f} s): state writes released")
+        if changed is not None and self.on_guard is not None:
+            # Core §4.3 (0.23): the report is a stream sample, which the
+            # guard does not hold (health.v1 §2.5).
+            self.on_guard(changed, off)
 
     def _refresh_loop(self) -> None:
         """freshness.v1 §2.4: re-put each held member once ttl/2 has passed
