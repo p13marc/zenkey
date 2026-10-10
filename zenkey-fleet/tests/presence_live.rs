@@ -140,6 +140,17 @@ async fn an_address_goes_up_and_down_as_its_instances_come_and_go() {
     })
     .await;
     assert_eq!(feed.presence().status(&h1), Up);
+    // Each instance says since when its token is held: the time of the fold
+    // that heard it, the first's before the second's (#614, FL4).
+    let since = |i: &zenkey_model::grammar::InstanceId| {
+        feed.presence()
+            .address(&h1)
+            .and_then(|a| a.instances.get(i))
+            .and_then(|i| i.since)
+    };
+    let (sa, sb) = (since(&ia), since(&ib));
+    assert!(sa.is_some() && sb.is_some(), "{sa:?} {sb:?}");
+    assert!(sa <= sb, "{sa:?} {sb:?}");
     // 3. The first stops: still up.
     a.close().await.expect("close");
     until(&mut feed, &mut seen, "the first instance gone", |s| {
