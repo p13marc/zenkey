@@ -696,6 +696,54 @@ async fn s3_aggregation() {
     svc.close().await.unwrap();
 }
 
+/// §3's rule beside it (v1.md §2.3): at most the contract's 64 checks, or
+/// the bound the descriptor lowers it to; a retired check frees its place.
+/// A check it cannot run is put UNSPECIFIED, and bounds the status no more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s3_the_checks_bound() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+
+    let (b, h) = owner(&os, config("lab/many")).await;
+    assert_eq!(h.max_checks(), 64);
+    for i in 0..64 {
+        h.set_check(&format!("c{i}"), Level::Ok, "").await.unwrap();
+    }
+    assert!(matches!(
+        h.set_check("c64", Level::Ok, "").await,
+        Err(zenkey::Error::Contract(_))
+    ));
+    let svc = b.start().await.unwrap();
+    let got = split(get_state(&rs, "lab/many").await);
+    assert_eq!(got.checks.len(), 64);
+    svc.close().await.unwrap();
+
+    let (mut b, h) = owner(&os, config("lab/few")).await;
+    b.cardinality(&health::iface(), health::CHECKS, 2).unwrap();
+    assert_eq!(h.max_checks(), 2);
+    h.set_status(Level::Ok, "serving").await.unwrap();
+    h.set_check("a", Level::Failed, "x").await.unwrap();
+    h.set_check("b", Level::Ok, "").await.unwrap();
+    assert!(h.set_check("c", Level::Ok, "").await.is_err());
+    let svc = b.start().await.unwrap();
+    let unknown = h
+        .set_check_unknown("a", "its probe cannot reach it")
+        .await
+        .unwrap();
+    assert_eq!(
+        (unknown.level, unknown.raised_by, unknown.checks["a"]),
+        (Some(Level::Ok), None, None),
+        "UNSPECIFIED bounds nothing"
+    );
+    let got = split(get_state(&rs, "lab/few").await);
+    assert_eq!(got.checks["a"].as_ref().unwrap().read(), Read::Unspecified);
+    assert_eq!(got.status.unwrap().1.read(), Read::Level(Level::Ok));
+    h.retire_check("a").await.unwrap();
+    h.set_check("c", Level::Ok, "").await.unwrap();
+    svc.close().await.unwrap();
+}
+
 /// §4: a clock 2 s ahead: `clock_ahead` at the first hold, re-stamped by
 /// R1, again within a status interval; the status stale, never FAILED;
 /// after the correction, the status re-put and no more faults.

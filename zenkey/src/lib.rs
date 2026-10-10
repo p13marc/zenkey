@@ -36,6 +36,13 @@
 //! dependency beyond `zenoh-keyexpr` (#611). **The `hostid` feature**, which
 //! `zenoh` turns on, is `hostid.v1`'s runtime: it reads the host and holds no
 //! session, so a tool can mint without one (#719).
+//!
+//! **The profiles' owner halves** (`spec/profiles/`): `hostid.v1` is
+//! [`hostid`]; `freshness.v1` is the [`state`] writers' refresher (#720);
+//! `health.v1` is [`health`], through [`ServiceBuilder::health`] (#721): the
+//! status never better than its worst check, put before the tokens and
+//! confirmed every 30 s, checks on change, faults, and `clock_ahead` while
+//! the clock guard holds.
 
 #[cfg(feature = "zenoh")]
 pub mod archive;

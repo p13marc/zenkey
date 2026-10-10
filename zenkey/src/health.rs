@@ -25,9 +25,15 @@
 //! | §2.3 never deleted while the service runs | no call deletes it; closing the service leaves it |
 //! | §2.3 checks on change, deleted when retired, at most 64 | [`Health::set_check`] puts only a change; [`Health::retire_check`] deletes; the 65th is refused, or past a lowered bound |
 //! | §2.3 faults as occurrences | [`Health::fault`]: one sample each, on the stream, with the contract's QoS |
-//! | §2.5 `clock_ahead` | on the guard's first hold, again every status interval while it holds, none after it releases |
+//! | §2.5 `clock_ahead` | on the guard's first hold, again every status interval (28.5 s, the refresher's period) while it holds, none after it releases; the `detail` names the offset |
+//! | §2.5 the status stale, then re-put | the guard stops the refresher and every state call ([`Error::ClockAhead`]); once it releases, the held re-put goes out within a second (`freshness.v1` §2.10) |
 //! | §2.6 `UNSPECIFIED` | the status only at start; a check only through [`Health::set_check_unknown`] |
 //! | §2.10 fault codes | an application's code in the form, or refused; the profile's codes are the runtime's |
+//!
+//! **An unknown status bounds nothing.** Before a level is declared, the
+//! status stays `UNSPECIFIED` whatever the checks say: the owner has not
+//! established its level, and §2.11 step 5 reads a bad check under an
+//! unknown status as unhealthy without the owner claiming a level.
 //!
 //! **The contract is the published bundle**, revision 1.0
 //! ([`FINGERPRINT`]), embedded byte for byte from
@@ -1015,5 +1021,21 @@ mod tests {
         checks.clear();
         checks.insert("cpu", None);
         assert_eq!(aggregate(Some(&declared), &checks).level, Some(Level::Ok));
+    }
+
+    /// An application shares the handle across tasks, and spawns its calls.
+    #[test]
+    fn the_handle_is_shared_across_tasks() {
+        fn shared<T: Clone + Send + Sync + 'static>() {}
+        fn spawnable<F: std::future::Future + Send>(_: F) {}
+        shared::<super::Health>();
+        let _ = |h: super::Health| {
+            spawnable(async move {
+                let _ = h.set_status(Level::Ok, "serving").await;
+                let _ = h.set_check("disk", Level::Ok, "").await;
+                let _ = h.retire_check("disk").await;
+                let _ = h.fault("app_x", Level::Ok, "").await;
+            });
+        };
     }
 }
