@@ -25,7 +25,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   module (deduped `Tier` enum across all declaring producers, typed key
   builders, the probe form).
 - `zenkey-fleet/` — the **fleet engine crate** (Apache-2.0; 0.18.x on
-  crates.io is the v1 engine zengui and zenwatch pin, the in-tree 0.20.0 is
+  crates.io is the v1 engine zengui pins (and zenwatch's write side, until
+  FL3), the in-tree 0.20.0 is
   zk2's and `publish = false` until the port completes): the shared core of
   the zk2 explorers, zenctl first — `fleet_get` (the RFC 05 §2.1 chokepoint,
   moved verbatim from zenctl), presence and contract retrieval
@@ -235,60 +236,81 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   release binaries, like zenctl and zengui; #388, epic #387). The third
   binary on the same engine: zenctl explores a bus, zengui renders one,
   zenwatch tells you when something is wrong while you are asleep. One
-  process, one JSON5 config, N rules, M sinks. A rule is one spelling of the
-  **closed** vocabulary — `zenctl watchdog`'s eight (`rate-above`,
-  `rate-below`, `silent-for`, `invalid-payload`, `qos-mismatch`, `doctor`,
-  `origin-down`, `dropped`) plus two of its own: `alerts <SEL>` (the
-  producers' alert documents, RFC 04 §1.2 — a put is firing, a delete is
-  resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive
-  tokens, RFC 04 §5). Sinks: `ntfy`, `smtp`, `webhook`, `exec` — the one
-  that runs code, deliberately last. **Secrets are env-var names or file
-  paths, never inline**: a bare string in a secret position fails to parse.
-  **The three states are preserved** into every sink payload, and a
-  `Dropped(n)` from the monitor is `unobservable` on every `alerts`/
-  `liveliness-gone` rule, never `ok`. **The layering split**: the alert
-  projection (`AlertTransition`, `alert_transition`, the RFC 11 §3.2
-  `alert_ref`) is the engine's, because a `.zrec` replay and a GUI pane want
-  the same reading; routing — which rule, which sink, whether it is a
-  duplicate — is the daemon's (`engine::route`, over a `Notice` seam the
-  discipline chunk hangs off). `alerts`/`liveliness-gone` are **not**
-  `Condition` variants: a `Condition` is one state per rule, these are one
-  state per key. `check-config` refuses exactly what `run` would (exit 2);
-  `--dry-run` swaps every sink for a printing one. **The discipline**
-  (#389, `discipline/`) sits between `route` and delivery and takes the
-  clock as an argument: `for`, dedup, grouping by a label set, repeat, the
-  four resolved kinds, and inhibition — the engine's impact attribution
-  (`zenkey_fleet::attribute`, RFC 06 §5.6) over the catalog's `edge/*`,
-  `entity/*`, `alias/*` documents (`zenkey_fleet::report::{EdgeDoc,
-  EntityDoc, AliasDoc}`) with *down* decided from the daemon's own token
-  ledger; a symptom is delivered `inhibited_by` its root or held and
-  counted, never dropped silently. The ledger is bounded and survives a
-  restart in `state_file` (missing is fresh, malformed is exit 2). **A
-  real daemon, explicitly launched, publishes its own state like a
-  producer** (`publish.rs`: `introspect`/`describe` served before the
-  `alive` token through the engine's `BringUp`; `health` every 30 s, one
-  `firing/{rule_id}` document per rule with something announced,
-  tombstoned when it clears; `doctor` after every scheduled run), and it
-  caches no discovery: it is not the noun `docs/redesign-2026-07.md` §6.1
-  rejected. **The scheduled doctor** (#390, `doctor.rs`): a `doctor` block
-  runs the engine's `run_doctor` every few **hours** — beside the drain,
-  like the schema sweep — and the `doctor` block is a rule of its own
-  (`RuleKind::ScheduledDoctor`, id `doctor`) so its notices ride the same
-  `Notice` → `route` → discipline → sinks path. The first run is a
-  **baseline** (one `info` notification; every finding *assumed* into the
-  ledger — `NoticeMeta::assume`, announced without a delivery — so its
-  fix is a `resolved`); later runs are `doctor_delta` — one notification
-  per new finding, one `resolved` per fixed, keyed `(check, subject)`; a
-  run that could not happen is `unobservable` with the previous report
-  retained. `synced: not asked` and the other unasked poles are stated in
-  every message and ride the published `ZenwatchDoctor.report` verbatim.
+  process, one JSON5 config, N rules, M sinks. **zk2's read side since FL2
+  (#614)**: the rules, presence, contracts and doctor run on the in-tree
+  fleet, on **two sessions** (`bus.rs`) — one in the deployment namespace
+  (`bus.namespace`, alias `base`; `--namespace`/`--base`, resolved flag >
+  config > env > context > empty) for presence, descriptors, contracts and
+  the doctor, one in none for wire selectors, foreign tokens and the admin
+  space; contracts by `contracts` and `--contracts` (zenctl's loading),
+  never a named context. The write side (`publish.rs`, the build script's
+  registry) is still v1's until FL3, under renamed dependencies
+  (`zenkey-v1`, `zenkey-fleet-v1`, `zenkey-build-v1`; `build.rs` re-paths
+  the generated `::zenkey::`). A rule is one spelling of the **closed**
+  vocabulary — `zenctl watchdog`'s zk2 seven on the fleet's watchdog
+  (`rate-above`, `rate-below`, `silent-for`, `invalid-payload`,
+  `qos-mismatch`, `doctor`, `dropped`) plus two of its own:
+  `instance-gone <SYSTEM/SERVICE>` (either position `*`) and
+  `liveliness-gone <SEL>`. They are **not** `Condition`s: a `Condition` is
+  one state per rule, these are one state per address or token. `presence.rs`
+  reads FL1's live projection (a `PresenceFeed` on its own monitor; patterns
+  tracked): an address up while an instance token is held, gone only under
+  a complete read; `liveliness-gone` on the deployment's zk2 tokens rides it
+  per address / address+iface / address+iface+member (a handover is no
+  gap); on anything else `liveliness.rs` keeps the daemon's own ledger,
+  seeded by liveliness reads that say when they ran to their timeout. Both
+  are cancel-safe in the `select!`, and a `Dropped(n)` or an incomplete
+  read is the rule's `<rule_id>:observer` going `unobservable`, never `ok`.
+  The **first look is a baseline**: an address down at start is *assumed*
+  (`NoticeMeta::assume`) and said once in a `baseline` notification;
+  under a wildcard nothing can be gone that was never seen. **Refused by
+  name, exit 2, never ignored**: `alerts` (dark until alarms.v1, #613),
+  `origin-down`, inhibition switched on (removed with v1's catalog),
+  `group_by: ["origin"]` (zk2 groups by `system`/`address`),
+  `bus.registry`, the doctor's `sample`, a version-1 state file.
+  `check-config` and `run` pass one gate (`load_checked`: the file, the
+  context, the namespace, the contracts, the state file). Sinks: `ntfy`,
+  `smtp`, `webhook`, `exec` — the one that runs code, deliberately last.
+  **Secrets are env-var names or file paths, never inline**: a bare string
+  in a secret position fails to parse. **The three states are preserved**
+  into every sink payload; a presence notice carries the engine's pinned
+  `PresenceTransition` (`report::presence`). Routing — which rule, which
+  sink, whether it is a duplicate — is the daemon's (`engine::route`, over
+  a `Notice` seam). `--dry-run` swaps every sink for a printing one. **The
+  discipline** (#389, `discipline/`) sits between `route` and delivery and
+  takes the clock as an argument: `for`, dedup, grouping by a label set,
+  repeat, the four resolved kinds. The ledger is bounded and survives a
+  restart in `state_file`, **version 2** (zk2 identities, the namespace
+  they were judged in; missing is fresh, malformed, version 1 or another
+  namespace's is exit 2). **A real daemon, explicitly launched, publishes
+  its own state like a producer** (v1's `publish.rs` until FL3: `health`
+  every 30 s, one `firing/{rule_id}` per rule with something announced,
+  `doctor` after every scheduled run), and it caches no discovery: it is
+  not the noun `docs/redesign-2026-07.md` §6.1 rejected. **The scheduled
+  doctor** (#390, `doctor.rs`): a `doctor` block runs zk2's `run_doctor`
+  (`deep`; top-level `clocks_synced` for the `health-*` checks, which a
+  `doctor` rule reads too) every few **hours** beside the drain, as a rule
+  of its own (`RuleKind::ScheduledDoctor`, id `doctor`). The first run is a
+  **baseline** (one `info` notification; every finding assumed); later runs
+  notify each new finding and `resolved` each fixed one, keyed `(check,
+  subject)` on zk2's `CheckId` — fixed only where the run established the
+  check, carried otherwise; a run over an empty scope is `unobservable`
+  with the previous report retained, and every message ends with the
+  coverage (scope read, checks established / unobservable / not asked).
+  `zenwatch/CHANGELOG.md` carries the old→new tables.
 
 **Strangler layout (#615).** The `zenkey/` and `zenkey-build/` sources
 described above, and the `fixture-tests` crate, now live on the **`v1`
-branch**. On `main` the v1 tools still there — zengui and zenwatch — build
-against `zenkey`/`zenkey-build` `=0.11.1` from crates.io
-(`[workspace.dependencies]`), and since FJ1 (#612) pin `zenkey-fleet
-=0.18.0` from crates.io too, until #614 ports them. The in-tree
+branch**. On `main` zengui, the v1 tool still there, builds against
+`zenkey`/`zenkey-build` `=0.11.1` from crates.io
+(`[workspace.dependencies]`), and since FJ1 (#612) pins `zenkey-fleet
+=0.18.0` from crates.io too, until #614 ports it. zenwatch's read side is
+ported (FL2): only its write side keeps the three, renamed
+(`zenkey-v1`, `zenkey-fleet-v1`, `zenkey-build-v1`), until FL3 —
+`cargo tree -p zenwatch -i zenkey-fleet@0.18.0` names zenwatch alone, and
+`-i zenkey@0.11.1` that and the build script's `zenkey-build`. With both
+fleets in the graph, `-p zenkey-fleet` is ambiguous: say
+`-p zenkey-fleet@0.20.0`, as `-p zenkey@0.20.0`. The in-tree
 `zenkey-fleet` 0.20.0 (`publish = false`) is zk2's, and zenctl depends on it
 by path; since FJ9 neither links v1's `zenkey` (`cargo tree -p zenctl -i
 zenkey@0.11.1` matches nothing). `fixture-tests/registry`

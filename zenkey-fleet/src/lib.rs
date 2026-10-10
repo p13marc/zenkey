@@ -25,8 +25,9 @@
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
 //! and the profile-backed features (configuration, blobs, the exporter,
 //! alerts, kinds and budgets) live on the `v1` branch, which releases
-//! 0.14.x. zengui and zenwatch build against that engine from crates.io
-//! (`zenkey-fleet =0.18.0`) until #614 re-targets them.
+//! 0.14.x. zengui builds against that engine from crates.io
+//! (`zenkey-fleet =0.18.0`) until #614 re-targets it, and zenwatch's write
+//! side does until FL3; zenwatch's read side runs on this crate since FL2.
 //!
 //! # The map
 //!
