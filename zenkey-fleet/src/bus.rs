@@ -33,6 +33,7 @@ pub mod admin;
 pub mod conform;
 pub mod consume;
 pub mod contracts;
+pub mod health;
 pub mod lens;
 pub mod monitor;
 pub mod operation;
