@@ -197,7 +197,16 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   templated state, by the owner's GET), `budget-window` (per templated
   stream or event, complete over a whole liveness span, lossless, the owner
   present throughout) and `rate` (per event) cases, `--skip <CASE>`, and
-  the doctor's `population-over-bound` under `--deep`.
+  the doctor's `population-over-bound` under `--deep`. Core 0.25 (#740)
+  establishes "lossless" rather than assuming it: the reader lost nothing
+  and the resource is `reliable` with `block` (`budget::lossless`), the
+  owner held its token until a lease after the window (`--lease`, zenoh's
+  10 s by default), and the window counts from its declaration plus the
+  reply timeout; the run's subscription detects no misses. The runtime
+  keeps §2.7 (#741): `zenkey::budget` refuses a new member at the bound,
+  an occurrence beyond the rate and a lowering below the live members
+  (`Error::Budget`), so a test that needs an owner over its bound uses
+  two instances of one service, or raw puts.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
@@ -412,7 +421,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.24 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.25 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
