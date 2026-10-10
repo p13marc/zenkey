@@ -276,6 +276,15 @@ pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
     qos_mismatch,
 };
+// A tree's model (#614, FL4): the declared keyspace from the lens, merged
+// with the observed snapshot and the watch set; and each key's identity,
+// resolved once. `merge` keeps a name of its own at the root, as `diff`
+// does: alone it would read as the crate's.
+pub use model::identity::IdentityCache;
+pub use model::skeleton::{
+    DeclBasis, DeclRef, Evidence, MergedNode, NodeStats, NodeStatus, Skeleton, SkeletonChunk,
+    SkeletonCoverage, SkeletonNode, merge as merge_skeleton,
+};
 // zk2's acts and reads through a contract (#612, FJ5): planned and refused
 // without a session (`model::target`), then made through the runtime's
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).

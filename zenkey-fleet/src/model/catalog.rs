@@ -643,6 +643,16 @@ impl ContractState {
 /// view reports as absence, never as unavailable (O4).
 pub trait Contracts {
     fn state(&self, iface: &IfaceId, fingerprint: &Fingerprint) -> Option<ContractState>;
+
+    /// Every revision of `iface` in hand, for what only a held revision can
+    /// answer: an interface token's fingerprint prefix (§8.1), which cannot
+    /// be retrieved by (§8.4), matched against what is held. Empty by
+    /// default, for a source that cannot list what it holds; that is "not
+    /// asked", never "none held".
+    fn held_of(&self, iface: &IfaceId) -> Vec<Arc<Revision>> {
+        let _ = iface;
+        Vec::new()
+    }
 }
 
 /// Contract revisions loaded offline: from authoring files, or from a
@@ -862,6 +872,10 @@ impl Contracts for ContractSet {
         self.get(iface, fingerprint)
             .map(|r| ContractState::Held(Arc::clone(r)))
     }
+
+    fn held_of(&self, iface: &IfaceId) -> Vec<Arc<Revision>> {
+        self.of_iface(iface).cloned().collect()
+    }
 }
 
 /// A zid by its value (§3.3, 0.11): zenoh writes it as lowercase hex
@@ -1071,6 +1085,39 @@ impl Catalog {
                         .is_some_and(|d| d.interfaces.iter().any(|e| e.iface == iface.to_string()))
             })
         })
+    }
+
+    /// Every interface some instance of `addr` provides, by token or by
+    /// descriptor, sorted. A tokenless interface (U22, `"token": false`) is
+    /// here by its descriptor alone.
+    pub fn provided(&self, addr: &Addr) -> BTreeSet<IfaceId> {
+        let mut out = BTreeSet::new();
+        for i in self.services.get(addr).into_iter().flat_map(|m| m.values()) {
+            out.extend(i.alive.keys().cloned());
+            if let Some(d) = i.descriptor.as_ref().and_then(DescriptorRead::descriptor) {
+                out.extend(
+                    d.interfaces
+                        .iter()
+                        .filter_map(|e| IfaceId::from_str(&e.iface).ok()),
+                );
+            }
+        }
+        out
+    }
+
+    /// The fingerprint prefixes `addr`'s interface tokens for `iface` carry
+    /// (§8.1). A prefix cannot be retrieved by (§8.4): it can only be
+    /// matched against a revision already held
+    /// ([`Contracts::held_of`]).
+    pub fn token_prefixes(&self, addr: &Addr, iface: &IfaceId) -> BTreeSet<Fp16> {
+        self.services
+            .get(addr)
+            .into_iter()
+            .flat_map(|m| m.values())
+            .filter_map(|i| i.alive.get(iface))
+            .flatten()
+            .cloned()
+            .collect()
     }
 
     /// The revisions of `iface` that `addr`'s instances' descriptors name.

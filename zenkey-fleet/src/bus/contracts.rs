@@ -292,4 +292,14 @@ impl Contracts for BundleStore {
         self.cached(&(iface.clone(), fingerprint.clone()), false)
             .map(|(state, _)| state)
     }
+
+    fn held_of(&self, iface: &IfaceId) -> Vec<Arc<Revision>> {
+        let mut held: Vec<Arc<Revision>> = self
+            .held()
+            .into_iter()
+            .filter(|r| r.iface() == iface)
+            .collect();
+        held.sort_by(|a, b| a.fingerprint().cmp(b.fingerprint()));
+        held
+    }
 }
