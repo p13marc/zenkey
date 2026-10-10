@@ -69,8 +69,9 @@ case name. It exits with:
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
-| freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon) and `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond). An unknown file there fails. |
-| examples | §9.6–§9.8 | | Every `examples/zk2/**/<name>.v<major>.toml`: loads with **no finding at all**, W107 included; its built bundle verifies; it is published in `examples/zk2/.history`, **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. `examples/zk2/.history` passes the §9.7 check. |
+| freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
+| health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up) and `codes.json` (fault codes). An unknown file there fails. |
+| examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
@@ -85,16 +86,18 @@ history        10 passed     0 failed
 descriptors    42 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
-examples       97 passed     0 failed
+examples       99 passed     0 failed
 hostid         42 passed     0 failed
-freshness      87 passed     0 failed
-total         653 passed     0 failed
+freshness     102 passed     0 failed
+health         91 passed     0 failed
+total         761 passed     0 failed
 ```
 
-The figures are against `core.md` 0.22, `hostid.v1` 0.3 and
-`freshness.v1` 0.1. 0.22 added `contracts/e002-two-majors`, and
-`freshness.v1` its own two fixture files. Five earlier releases added
-descriptor fixtures:
+The figures are against `core.md` 0.23, `hostid.v1` 0.3, `freshness.v1`
+0.2 and `health.v1` 0.1. 0.22 added `contracts/e002-two-majors`.
+`freshness.v1` 0.2 added `clock-trust.json` and four judgement cases, and
+`health.v1` its three fixture files. Five earlier releases added descriptor
+fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
 - 0.17, `d011-tokenless-archive` and `ok-archive`;
@@ -102,11 +105,12 @@ descriptor fixtures:
 - 0.19, `ok-derivation-profile`.
 
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
-  F-94 to F-97, core 0.22 F-98, and `hostid.v1` 0.3 F-99. F-100 to F-102
-  are open, all against `freshness.v1` 0.1.
+  F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, and `freshness.v1`
+  0.2 F-100 to F-102. F-103 and F-104 are open, both against `health.v1`
+  0.1's scenarios.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
-  then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), and
-  0.22 one (F-98).
+  then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
+  one (F-98), and `freshness.v1` 0.2 two (F-101, F-102).
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 - 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
@@ -500,7 +504,7 @@ in as described below.
     paths, and with `--hostid-ephemeral` starts and writes nothing;
   - bindings.md §5, with zk2py's detectors and trackers.
 
-## freshness.v1 (profile text 0.1, core 0.21 and 0.22)
+## freshness.v1 (profile text 0.2, core 0.21 to 0.23)
 
 ```bash
 just py-freshness
@@ -509,8 +513,8 @@ just py-freshness
 `freshness.v1` is the second profile (`spec/profiles/freshness/`), and the
 first to publish an annotation vocabulary: `freshness.ttl_s`. zk2py takes
 it in as described below.
-- **The `freshness` conformance family:** `horizons.json` and
-  `judgements.json`, 87 of 87.
+- **The `freshness` conformance family:** `horizons.json`, `judgements.json`
+  and `clock-trust.json` (0.2), 102 of 102.
 - **The linter:** W105 reads a profile's published table before its
   interim one (core 0.21). Two majors of one profile in one contract's
   `uses` are E002 (core 0.22).
@@ -527,7 +531,9 @@ it in as described below.
   - `Subscriber` ages members on its monotonic clock from its declaration
     (§2.5);
   - `ClockTrust` is a GET reader's trust in a stamping clock: the
-    deployment's word, or a measurement of a live put (§2.6);
+    deployment's word, or the live puts measured over one reading: the
+    offset closest to zero within the delta, and none ahead beyond it (§2.6,
+    0.2);
   - `get_reading` is the S4 GET, judged at a later instant;
   - `read_service` is a tool's verdict per resource, as scenarios §6 reads.
 - **`python -m zk2py.freshness_scenarios`** runs scenarios.md §1 to §6, 21
@@ -544,6 +550,39 @@ it in as described below.
   - zk2py's owner of `zk2py_fresh.v1` re-puts, and the Rust `consume`
     example reads two different re-put stamps 1.5 s apart, then one once
     the writer closes.
+
+## health.v1 (profile text 0.1, core 0.23)
+
+```bash
+just py-health
+```
+
+`health.v1` is the third profile (`spec/profiles/health/`), and the first
+with a standard contract: `health.v1.toml`, moved from the walkthrough
+unchanged and published in `spec/profiles/.history`. zk2py takes it in as
+described below.
+- **The `health` conformance family:** `judgements.json`, `rollups.json`
+  and `codes.json`, 91 of 91. The examples family walks the profiles'
+  standard contracts against `spec/profiles/.history` too.
+- **`zk2py.health`, the reader's half:**
+  - the levels, unknown kept apart (§2.1, §2.6);
+  - `judge`, §2.11's procedure, the status's freshness judged by
+    `zk2py.freshness` at 60 s;
+  - `rollup`, `code_class`, `status_agrees` and `clock_ahead` (§5);
+  - proto3 codecs for `Status`, `Check` and `Fault`;
+  - `read_near` and `read_across`, a reading on a bus.
+- **`HealthOwner`, the owner's half,** over zk2py's owner:
+  - the status put before step 4, re-put by freshness, never deleted
+    while the service runs (§2.3);
+  - checks put on change and deleted when retired, with §2.2's rule and
+    the order of the puts. A status better than a current check is refused;
+  - faults with codes of §2.10's form;
+  - `clock_ahead` when the guard first holds, every 30 s while it holds,
+    and none after it releases (§2.5).
+- **`python -m zk2py.health_scenarios`** runs scenarios.md §1 to §8, 28
+  of 28, on in-process zenoh-python routers. §2, §4 and §8 wait out the
+  60 s horizon. §6's archive is a stand-in, and §8's face is a router with
+  usrpwd and access control.
 
 ## What it does not cover
 
@@ -638,6 +677,8 @@ impl/python/
     hostid_scenarios.py hostid.v1 scenarios.md §1–§6 in temporary roots
     freshness.py      freshness.v1 horizons, judgements, the clock trust, a subscriber, a tool's read
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
+    health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
+    health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b; freshness/ holds beacon.v1 and zk2py_fresh.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)

@@ -273,25 +273,57 @@ def family_compat(root: Path) -> list[Result]:
 # -- examples/zk2 (not a fixture family: extra inputs) -----------------------
 
 def family_examples(root: Path) -> list[Result]:
-    """``examples/zk2/``: every contract (``<name>.v<major>.toml``) loads
-    with no finding at all, W107 included, and its built bundle verifies
-    with its fingerprint; every bundle under a ``.history`` directory there
-    passes the §9.7 history check."""
+    """``examples/zk2/``, and the profiles' standard contracts under
+    ``spec/profiles/`` (core §10 point 1, 0.23): every contract
+    (``<name>.v<major>.toml``) loads with no finding at all, W107 included,
+    and its built bundle verifies with its fingerprint. It is published in
+    its tree's history root, ``examples/zk2/.history`` or
+    ``spec/profiles/.history`` (§9.7), byte-identical, and compatible with
+    it. Every bundle under a ``.history`` directory passes the §9.7 history
+    check, and a revision held in both roots is one file, byte for byte
+    ("One revision, two roots", 0.23)."""
+    ex = root.parent.parent / "examples" / "zk2"
+    if not ex.is_dir():
+        print(f"note: {ex} not found; examples skipped", file=sys.stderr)
+        return []
+    profiles = root.parent / "profiles"
+    out = _walk_contracts(root, ex, ex / ".history", "")
+    if profiles.is_dir():
+        out += _walk_contracts(root, profiles, profiles / ".history", "spec/profiles/", skip=("conformance",))
+        out += _two_roots(ex / ".history", profiles / ".history")
+    return out
+
+
+def _two_roots(old: Path, new: Path) -> list[Result]:
+    """§9.7 (0.23): "A contract that moves to a new root keeps its published
+    revisions in the old one … and is published in the new one from then
+    on, its revisions copied there byte for byte"."""
+    out: list[Result] = []
+    if not old.is_dir() or not new.is_dir():
+        return out
+    for d in sorted(x for x in new.iterdir() if x.is_dir() and (old / x.name).is_dir()):
+        for b in sorted(d.glob("*.bundle.json")):
+            twin = old / d.name / b.name
+            if twin.is_file():
+                same = twin.read_bytes() == b.read_bytes()
+                out.append((f"{d.name}/{b.name[:16]}… in both history roots, byte for byte (§9.7, 0.23)", same,
+                            "" if same else "the two copies differ"))
+    return out
+
+
+def _walk_contracts(root: Path, ex: Path, history: Path, label: str, skip: tuple[str, ...] = ()) -> list[Result]:
     import re
 
     from . import bundle
     from .contract import load_contract
     from .history import check_history
 
-    ex = root.parent.parent / "examples" / "zk2"
-    if not ex.is_dir():
-        print(f"note: {ex} not found; examples skipped", file=sys.stderr)
-        return []
     out = []
     for path in sorted(ex.rglob("*.toml")):
-        if ".history" in path.parts or not re.fullmatch(r".+\.v[0-9]+\.toml", path.name):
+        if ".history" in path.parts or any(s in path.relative_to(ex).parts for s in skip) \
+                or not re.fullmatch(r".+\.v[0-9]+\.toml", path.name):
             continue
-        rel = path.relative_to(ex).as_posix()
+        rel = label + path.relative_to(ex).as_posix()
         c = load_contract(path, check_file_name=True, spec_dir=root.parent)
         ok = not c.diagnostics
         out.append((rel, ok, "" if ok else "; ".join(f"{d.code} {d.message}" for d in c.diagnostics)))
@@ -308,17 +340,19 @@ def family_examples(root: Path) -> list[Result]:
         except bundle.BundleError as e:
             out.append((f"{rel} (bundle round trip)", False, e.tag))
             continue
-        out += _example_against_history(ex, rel, c, data)
+        out += _example_against_history(history, rel, c, data)
     histories = sorted(p for p in ex.rglob(".history") if p.is_dir())
     for h in histories:
         problems = check_history(h)
-        out.append((h.relative_to(ex).as_posix(), not problems, "" if not problems else str(problems)))
+        out.append((label + h.relative_to(ex).as_posix(), not problems, "" if not problems else str(problems)))
     return out
 
 
-def _example_against_history(ex: Path, rel: str, c, built: bytes) -> list[Result]:
-    """An example must be published in ``examples/zk2/.history`` and be
-    compatible with its history (§9.7, §9.8):
+def _example_against_history(root: Path, rel: str, c, built: bytes) -> list[Result]:
+    """An example must be published in its tree's history root
+    (``examples/zk2/.history``, or ``spec/profiles/.history`` for a
+    profile's standard contract) and be compatible with its history (§9.7,
+    §9.8):
     - its fingerprint names a published bundle, and the bundle zk2py builds
       is byte-identical to it (§9.6: "one contract revision has one
       bundle");
@@ -326,11 +360,11 @@ def _example_against_history(ex: Path, rel: str, c, built: bytes) -> list[Result
       the class is ``compatible``."""
     from . import bundle, compat
 
-    hist = ex / ".history" / c.interface
+    hist = root / c.interface
     published = hist / f"{c.fingerprint.removeprefix('sha256:')}.bundle.json"
     out: list[Result] = []
     if not published.is_file():
-        return [(f"{rel} (published)", False, f"{published.relative_to(ex)} is missing")]
+        return [(f"{rel} (published)", False, f"{published.relative_to(root.parent)} is missing")]
     same = published.read_bytes() == built
     out.append((f"{rel} (published, byte-identical)", same, "" if same else "the built bundle differs"))
     revisions = [bundle.revision(bundle.verify(p.read_bytes()))
@@ -411,12 +445,66 @@ def _freshness_judgements(path: Path) -> list[Result]:
     return out
 
 
+def _freshness_clock_trust(path: Path) -> list[Result]:
+    """freshness.v1 §2.6 ground 2 (0.2): the offsets of one reading, and the
+    delta -> whether the clock is trusted."""
+    from . import freshness
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        trust = freshness.ClockTrust(freshness.seconds_to_ns(c["delta_s"]))
+        for off in c["offsets_s"]:
+            trust.record("clock", freshness.seconds_to_ns(off))
+        out.append(_check(f"clock-trust: {c['offsets_s']} at {c['delta_s']} s ({c['note']})",
+                          {"trusted": trust.measured("clock")}, c["expect"]))
+    return out
+
+
+def _health_judgements(path: Path) -> list[Result]:
+    """health.v1 §2.11: one reading of one service -> the answer to "is this
+    service healthy?"."""
+    from . import health
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        st = c.get("status") or {}
+        reading = health.Reading(
+            presence=c["presence"], descriptor=c.get("descriptor"), face=c.get("face"),
+            observations=[_freshness_observation(o) for o in st.get("observations") or []],
+            level=health.level_of(st.get("level")),
+            checks=None if c.get("checks") is None
+            else [(x["check"], health.level_of(x["level"])) for x in c["checks"]])
+        out.append(_check(f"judgements: {c['note']}", health.judge(reading).expect(), c["expect"]))
+    return out
+
+
+def _health_rollups(path: Path) -> list[Result]:
+    """health.v1 §2.2, §5: judged readings -> a tool's roll-up."""
+    from . import health
+
+    return [_check(f"rollups: {c['note']}",
+                   health.rollup([health.Answer(j["verdict"], "", j["level"]) for j in c["judged"]]), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _health_codes(path: Path) -> list[Result]:
+    """health.v1 §2.10: a fault's code -> profile, application or
+    malformed."""
+    from . import health
+
+    return [_check(f"codes: {c['code']!r}", health.code_class(c["code"]), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
 PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "hostid": {"vectors.json": _hostid_vectors, "shapes.json": _hostid_shapes},
-    "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements},
+    "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements,
+                  "clock-trust.json": _freshness_clock_trust},
+    "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
+               "codes.json": _health_codes},
 }
 
 

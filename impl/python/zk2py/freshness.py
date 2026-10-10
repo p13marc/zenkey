@@ -192,10 +192,10 @@ Observation = Subscription | Get | Archive
 
 
 def judge_subscription(h: Horizon, obs: Subscription) -> Verdict:
-    """§2.5, for a member with a horizon (``within`` or ``never``). A member
-    it heard nothing of is judged too, stale past ttl and fresh at ttl 0, as
-    judgements.json does, though §2.3 says "No value, no verdict"
-    (SPEC-FINDINGS F-100)."""
+    """§2.5, for a member with a horizon (``within`` or ``never``). Rules 5
+    and 6 and the ttl-0 line judge a member the reader knows from another
+    observation, whose silence since is the evidence (0.2): the caller
+    judges a subscription with no delivery only for such a member."""
     last = obs.last
     if h.horizon == "never":
         # "At ttl 0, a member is fresh unless its last delivery is a delete."
@@ -265,9 +265,9 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     """§2.7: "Fresh when any observation is judged fresh. Else stale when
     any is judged stale. Else unobservable when any is. Else not asked, or
     not this profile's, as the observations are." The reason is the first
-    of the winning verdict's (judgements.json). No observation at all is
-    unobservable, ``no_observation``, whatever the horizon (SPEC-FINDINGS
-    F-101)."""
+    of the winning verdict's (judgements.json). No verdict at all is
+    unobservable, ``no_observation``: :func:`judge` asks the horizon's steps
+    first (§2.7, 0.2)."""
     vs = list(verdicts)
     if not vs:
         return Verdict(UNOBSERVABLE, "no_observation", "nothing observed")
@@ -279,8 +279,21 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
 
 
 def judge(kind: str, annotations: dict[str, Any] | Horizon, observations: Iterable[Observation]) -> Verdict:
-    """One member, observed one or several ways (§2.7)."""
-    return combine(judge_observation(kind, annotations, o) for o in observations)
+    """One member, observed one or several ways (§2.7). "With no observation
+    at all (0.2), steps 1, 2 and 4 still answer, since they need none … Only
+    a member whose resource has a horizon is unobservable for want of an
+    observation (§2.3)." """
+    h = annotations if isinstance(annotations, Horizon) else horizon(kind, annotations)
+    obs = list(observations)
+    if not obs:
+        if h.horizon == "none":
+            return Verdict(NOT_ASKED, "no_horizon", "the resource declares no horizon (§2.3)")
+        if h.horizon == "ignored":
+            return Verdict(NOT_ASKED, "kind", "an event or an operation is not this profile's (§2.2)")
+        if h.horizon == "invalid":
+            return Verdict(UNOBSERVABLE, "not_a_horizon", f"freshness.ttl_s = {h.value!r} is not a horizon (§2.1)")
+        return Verdict(UNOBSERVABLE, "no_observation", "no observation showed a value (§2.3)")
+    return combine(judge_observation(kind, h, o) for o in obs)
 
 
 def resource_verdict(kind: str, annotations: dict[str, Any] | Horizon,
@@ -313,26 +326,33 @@ def resource_verdict(kind: str, annotations: dict[str, Any] | Horizon,
 
 @dataclass
 class ClockTrust:
-    """§2.6 "Only with a trusted clock": a GET reader trusts its clock and a
-    stamping clock (by the stamp's id) to agree within the delta, on the
-    deployment's word (``word``), or by a measurement: "it received, live,
-    a put stamped by that clock whose stamp was within the delta of its own
-    clock at receipt". One such put suffices; a measurement that fails is
-    kept, and trusts nothing: how long a measurement holds is not said
-    (SPEC-FINDINGS F-102)."""
+    """§2.6 "Only with a trusted clock", over one reading: a GET reader
+    trusts its clock and a stamping clock (by the stamp's id) to agree
+    within the delta, on the deployment's word (``word``), or by a
+    measurement (0.2): of the offsets of the live puts it received from that
+    clock (its clock at receipt minus the stamp), "the clocks are trusted
+    when the offset closest to zero is within the delta", and "a stamp ahead
+    of the reader's clock by more than the delta … withdraws the trust for
+    the rest of the reading". A later offset above the delta withdraws
+    nothing. One object is one reading: "Trust from a measurement lasts
+    that reading and no longer"."""
 
     delta_ns: int = DEFAULT_DELTA_NS
     word: bool = False
     #: stamp id -> [(receipt minus stamp, in ns), …]
     measurements: dict[str, list[int]] = field(default_factory=dict)
 
+    def record(self, stamp_id: str, offset_ns: int) -> None:
+        self.measurements.setdefault(stamp_id, []).append(offset_ns)
+
     def measure(self, stamp_id: str, stamp_ns: int, receipt_ns: int) -> bool:
-        off = receipt_ns - stamp_ns
-        self.measurements.setdefault(stamp_id, []).append(off)
-        return abs(off) <= self.delta_ns
+        self.record(stamp_id, receipt_ns - stamp_ns)
+        return self.measured(stamp_id)
 
     def measured(self, stamp_id: str) -> bool:
-        return any(abs(off) <= self.delta_ns for off in self.measurements.get(stamp_id, []))
+        offs = self.measurements.get(stamp_id, [])
+        return bool(offs) and min(abs(o) for o in offs) <= self.delta_ns \
+            and not any(o < -self.delta_ns for o in offs)
 
     def trusted(self, stamp_id: str | None) -> bool:
         if self.word:

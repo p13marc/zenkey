@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty rounds.**
+**Twenty-one rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -34,9 +34,12 @@ where that was not enough, or where the spec said two things.
 - F-98 was found against core 0.20, and F-99 against `hostid.v1` 0.2 (see
   "At core 0.20 and hostid.v1 0.2"). Core 0.22 resolved F-98, and
   `hostid.v1` 0.3 resolved F-99.
-- **F-100 to F-102 are new**, found against `freshness.v1`'s text 0.1, the
-  second profile, read cold with core 0.21 and 0.22 (see "At 0.21–0.22:
-  freshness.v1 0.1" at the end).
+- F-100 to F-102 were found against `freshness.v1`'s text 0.1, the second
+  profile, read cold with core 0.21 and 0.22 (see "At 0.21–0.22:
+  freshness.v1 0.1"). `freshness.v1` 0.2 resolved them.
+- **F-103 and F-104 are new**, found against `health.v1`'s text 0.1, the
+  third profile, read cold with core 0.23 and `freshness.v1` 0.2 (see "At
+  0.23: health.v1 0.1" at the end). Both are about its scenarios.
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -46,7 +49,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.22, hostid.v1 0.3 and freshness.v1 0.1:** 102 entries.
+**Counts at core 0.23, hostid.v1 0.3, freshness.v1 0.2 and health.v1 0.1:**
+104 entries.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -109,13 +113,20 @@ where that was not enough, or where the spec said two things.
 - F-99: resolved by `hostid.v1` 0.3. The ephemeral start is logged wherever
   the process's logs go, at its warning level. The owner example writes its
   runtime's logs to stderr, and py-live's check passes, no longer XFAIL.
-- F-100 to F-102: **new**, against `freshness.v1` 0.1: one contradiction,
-  one ambiguity, one gap.
+- F-100 to F-102: resolved by `freshness.v1` 0.2.
+  - F-100 in wording, as zk2py read it. zk2py's subscriber and GET reader
+    are unchanged.
+  - It overturned two of zk2py's guesses. F-101: with no observation at
+    all, the horizon's steps still answer, so no horizon is not asked.
+    F-102: over one reading, the offset closest to zero decides, and a
+    stamp ahead beyond the delta withdraws the trust. zk2py had trusted on
+    any one put for the reader's life.
+- F-103 and F-104: **new**, two gaps against `health.v1` 0.1's scenarios.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.22 | Location | In one line |
+| Id | Severity | Status at 0.23 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -216,9 +227,11 @@ by the spec section that now states the rule.
 | F-97 | ambiguity | resolved by hostid 0.2 | hostid.v1 0.1 §2.12 against §5 | §2.12 counts every instance that lists `hostid.v1`; §5 holds such a listing unobservable when a contract uses it. |
 | F-98 | gap | resolved by 0.22 | core 0.20 §3.3 and §9.5, with E020 and §10 point 2 | Two majors of one profile in one contract's `uses` are sorted, but an annotation key names the profile without its major. |
 | F-99 | gap | resolved by hostid 0.3 | hostid.v1 0.2 §2.6, scenarios.md §4 expected 1 | "The runtime logs" the ephemeral system, but not where, so a runner of a binary has nowhere to look. |
-| F-100 | contradiction | **new** | freshness.v1 0.1 §2.3 against §2.5 and judgements.json | "No value, no verdict … whatever the horizon: unobservable", yet a subscriber that heard nothing is stale past ttl, and fresh at ttl 0. |
-| F-101 | ambiguity | **new** | freshness.v1 0.1 §2.7 and judgements.json's description, against §2.3 and §5 | A member of a resource with no horizon that nobody observed: unobservable (`no_observation`), or not asked? |
-| F-102 | gap | **new** | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
+| F-100 | contradiction | resolved by freshness 0.2 | freshness.v1 0.1 §2.3 against §2.5 and judgements.json | "No value, no verdict … whatever the horizon: unobservable", yet a subscriber that heard nothing is stale past ttl, and fresh at ttl 0. |
+| F-101 | ambiguity | resolved by freshness 0.2 | freshness.v1 0.1 §2.7 and judgements.json's description, against §2.3 and §5 | A member of a resource with no horizon that nobody observed: unobservable (`no_observation`), or not asked? |
+| F-102 | gap | resolved by freshness 0.2 | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
+| F-103 | gap (measured) | **new** | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
+| F-104 | gap | **new** | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
 
 ---
 
@@ -3072,6 +3085,8 @@ heard nothing of as `stale` (`no_delivery`) past ttl and `fresh`
 (`never_stale`) at ttl 0. Its GET reader gives `silent`, as
 `judgements.json` does.
 
+**Status at freshness 0.2: resolved by freshness 0.2, in wording, as zk2py read it.** §2.3: "A member that no observation showed a value for … has nothing to call fresh or stale, whatever the horizon: unobservable". §2.5's rules 5 and 6, and the ttl-0 line, "judge a member the reader knows": one that another observation, a GET's value, showed, whose silence since is the evidence. No expected value changed, and zk2py's judgements are unchanged. Its tool already judged only members a delivery or a GET made known (`read_service`).
+
 ### F-101 · ambiguity · freshness.v1 0.1 §2.7 and `judgements.json`'s description, against §2.3 and §5: nothing observed of a resource with no horizon
 
 > judgements.json: "no observation at all is unobservable, no_observation."
@@ -3095,6 +3110,8 @@ no observation is `unobservable`, `no_observation`, whatever the horizon.
 Its per-resource verdict asks the horizon first, so there a resource
 without one is `not_asked`.
 
+**Status at freshness 0.2: resolved by freshness 0.2, against zk2py's guess.** §2.7: "With no observation at all, steps 1, 2 and 4 still answer, since they need none: no horizon is not asked, an event or an operation is not this profile's, a value that is no horizon is unobservable." `judgements.json` gained four cases, three of which zk2py failed until `freshness.judge` asked the horizon's steps before combining. All 61 now pass.
+
 ### F-102 · gap · freshness.v1 0.1 §2.6, ground 2: how long a measurement holds
 
 > §2.6: "2. **A measurement:** it received, live, a put stamped by that
@@ -3111,3 +3128,149 @@ and §6 a window of 4 s, so neither shows it.
 **Resolved:** a guess. zk2py's `ClockTrust` trusts a clock once any put by
 it was within the delta, for the reader's life. It keeps the measurements
 that fail, and does not act on them.
+
+**Status at freshness 0.2: resolved by freshness 0.2, against zk2py's guess.** §2.6 ground 2: over one reading, "the clocks are trusted when the offset closest to zero is within the delta". "A stamp ahead of the reader's clock by more than the delta … withdraws the trust for the rest of the reading", and "a later offset above the delta does not withdraw it". "A reading is the span the reader judges in: a tool's window, or the lifetime of the subscription". zk2py's `ClockTrust.measured` now follows the rule, one object per reading, and the new fixture `clock-trust.json` (11 cases) passes. zk2py had trusted on any one put, and would have kept trusting through a stamp ahead beyond the delta.
+
+## At 0.23: health.v1 0.1 (#609)
+
+Core 0.23 says how a clock ahead is reported (a `faults` sample), that a
+session with its HLC on stamps every put it is not given a stamp for,
+where a standard contract lives, and that one revision may sit in two
+history roots. `freshness.v1` 0.2 resolves F-100 to F-102. `health.v1`
+(text 0.1, draft) is the third profile, and the first with a standard
+contract. zk2py read all three cold, from `spec/` alone. This round ran no
+`py-live` and built no Rust: the Rust health runtime is being written in
+parallel.
+
+**`just py-conformance`: 761 of 761.**
+- A new family, `health`, runs every file under
+  `spec/profiles/health/conformance/`. An unknown file there fails.
+  - `judgements.json`: 61 cases.
+  - `rollups.json`: 8 cases.
+  - `codes.json`: 22 cases.
+
+  All 91 passed the first time.
+- `freshness` is 102. `clock-trust.json` (11 cases) passed once
+  `ClockTrust` followed 0.2, and the 4 new judgement cases once `judge`
+  did (F-101, F-102).
+- The examples family walks the profiles' standard contracts too.
+  `spec/profiles/health/health.v1.toml` loads with no finding. Its bundle
+  is byte-identical to the one in `spec/profiles/.history`, and compatible
+  with it. That root passes the §9.7 check. The revision held in both roots
+  is one file, byte for byte (0.23).
+  - `examples/zk2` has 4 checks fewer, since the contract moved: 93 there,
+    6 for the profiles.
+
+**`just py-health`** (`python -m zk2py.health_scenarios`, new): 28 of 28,
+on in-process zenoh-python routers, in about 8 minutes.
+- **§1, bring-up:** both of T's GETs, made the moment it saw the instance
+  token and the `alive/health.v1` token, answer `UNSPECIFIED`,
+  `"starting"`, stamped by the owner's session. `lab/quiet`, tokenless, has
+  no `alive/health.v1` token, and its descriptor says `"token": false`. In
+  35 s, one re-put arrived 29.8 s after the change. No delete, before or
+  after the close.
+- **§2, a stale status:** 65 s after the writer closed, S and G both judge
+  `stale`, `beyond_horizon`, with the tokens present. G's reply is 65 s old
+  against its measured clock.
+- **§3, aggregation:** the status `FAILED` before `checks/disk` `FAILED`,
+  and the check `OK` before the status `OK`. No delivery shows a status
+  better than its check. A retired check is a `reply_del`, and no check is
+  re-put. The owner refuses a status better than its worst current check.
+- **§4, clock ahead:**
+  - `clock_ahead` arrives within 1 s of the detection, and again 30.0 s
+    later.
+  - No status put is made from the detection on. At 65 s the status is
+    `stale`, and the clock question answers yes.
+  - Set right, the owner re-puts within 0.1 s of the release, and
+    publishes no fault after. The verdict is `healthy`, and the clock
+    question answers no.
+  - The fault's stamp is the owner's session's, not R1's (F-103).
+- **§5, a tokenless set of 100:** 200 tokens, none `alive/health.v1`,
+  every descriptor `"token": false`, all 100 `healthy`. The tool's clock is
+  measured from a subscription declared before the owners started (F-104).
+- **§6, an absent owner:** `not_asked`, `absent`, and the stand-in
+  archive's status shown as last-known, `DEGRADED`, with its stamp and
+  `confirmed`.
+- **§7:** `lab/liar` is `unhealthy`, `inconsistent`, at `FAILED` in both
+  readings, a finding. `lab/frank` is `unhealthy`, `failed`, and agrees
+  with its checks.
+- **§8, a constrained face:** two routers side by side.
+  - Run A: `nothing_crossed`, then `healthy` with no token crossing, then
+    `stale`.
+  - Run B: `face_closed` at each step, with nothing delivered.
+
+**`just py-freshness`: 21 of 21.** **`just py-hostid`: 34 of 34.**
+
+**What changed in zk2py.**
+- **`zk2py.health`**, new:
+  - the reader's half: levels with unknown kept apart, `judge` (§2.11),
+    `rollup`, `code_class`, `status_agrees` and `clock_ahead` (§5), proto3
+    codecs for the three messages, and `read_near` and `read_across` on a
+    bus;
+  - the owner's half, `HealthOwner`: the status before step 4, checks with
+    §2.2's rule and order, faults of §2.10's form, and `clock_ahead` on
+    the guard's first hold, every 30 s while it holds, and none after.
+- **The owner:**
+  - `initial=` values are put before the tokens;
+  - a templated state member gets its publisher at its first put;
+  - `on_guard` is told of each of the guard's transitions.
+- **`zk2py.freshness`:** `ClockTrust.measured` follows 0.2, and `judge`
+  asks the horizon's steps when there is no observation.
+- **The examples family** walks `spec/profiles/**` against
+  `spec/profiles/.history`, and checks the two roots' shared revisions.
+
+### F-103 · gap (measured) · health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B: a clock ahead a runner cannot make
+
+> scenarios.md §4: "an owner, `lab/ahead` … its clock 2 s ahead of R1 (the
+> reference's `simulate_offset`)". Expected 2: "a `faults` sample with code
+> `clock_ahead` and level `FAILED`, whose stamp is not the owner's (R1
+> re-stamped a future-dated put, core §4.1)".
+
+> v1.md §2.5: "A session with its HLC enabled stamps every put it is not
+> given a stamp for … The fault therefore carries a stamp from the owner's
+> clock, which is ahead."
+
+R1 re-stamps the fault only when the owner's session HLC is itself ahead,
+since the fault is published with no stamp of its own. A runner without
+root cannot set the host's clock, and zenoh-python gives no way to move a
+session's HLC. So zk2py, like any such runner, offsets the clock the owner
+mints and guards with, over its session. Then:
+- the fault, published without a stamp, carries the session HLC's own,
+  which is not future-dated, and R1 keeps it with the owner's zid;
+- given the offset stamp, the owner's own session re-stamps it before it
+  leaves, with the owner's zid. This was measured with zenoh-python 1.10.1
+  in the 0.21 round: an owner 2 s ahead put a state value, and it arrived
+  with the owner's zid and an offset of about 0.
+
+Either way R1 has nothing to re-stamp, and the expectation cannot be
+met. The guard, the fault, its repetition and the stale status are all
+observable. Only the stamp's origin depends on how the clock is made to
+run ahead, and the text names `simulate_offset` without saying what it
+moves. The text does not say whether a runner must put the owner's session
+HLC itself ahead, or how.
+**Resolved:** zk2py checks what holds however the offset is made: the
+fault arrives with a stamp that is not future-dated. Its report names the
+stamp's origin (the owner's session), and cites this entry.
+
+### F-104 · gap · health.v1 0.1 scenarios.md §5 to §7, with freshness.v1 0.2 §2.6: how the tool trusts its clock
+
+> scenarios.md §5: "A tool lists `zk2/p5/*/@zk/**` … then GETs each
+> instance's descriptor, and each listed service's `health.v1/state/**`,
+> and judges." Expected: "judges each **healthy**, `ok`".
+
+> freshness.v1 §2.6: "A GET reader MUST NOT age a reply unless it trusts
+> that its clock and the clock that stamped the reply … agree within the
+> delta", on "the deployment's word" or "a measurement" of live puts
+> "during the reading it judges in".
+
+The conventions give S and G a subscription, from whose deliveries G
+measures its clock. §5's tool, and T in §6 and §7, read by GET alone. A
+GET is no live put, so it measures nothing, and nothing says that the
+deployment gives its word. Read as written, every status in §5 is
+`clock_untrusted`, so unobservable, and §6's step 1 cannot be `unhealthy`.
+A status re-put every 30 s would give a measurement only to a reader that
+subscribes and waits that long.
+**Resolved:** a guess. zk2py's tool subscribes to the statuses before the
+owners start, as S does, and measures its clock from their first puts.
+The deployment's word would also do on one host, and the text does not
+say which of the two the scenarios mean.
