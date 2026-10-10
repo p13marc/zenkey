@@ -6,6 +6,19 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — "lost no delivery" established (#740)
+
+Core 0.25 (spec §2.7) establishes a window's "lost no delivery" from what
+this run can see, rather than assuming it from a run that lost nothing
+itself.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`'s `budget-window` and `rate`: lossless when this run lost nothing | lossless when this run lost nothing **and** the resource is reliable with `block` | A best-effort or `drop` resource's window is never lossless, whatever `--for`: its `budget-window` within the bound, and its `rate` kept, read unobservable, exit 2, the reason naming the QoS ("best-effort: a dropped sample leaves no trace"). More than the bound, or beyond the rate, is still a violation from any window. The run's subscriptions detect no misses, so a resource declaring miss detection is told so |
+| a window's span counted from its subscription | from its subscription plus `--timeout` | A sample put before the owner's router knew of the subscription is never routed to it: `--for 3600` with the default timeout is short of a stream's hour; the reason names the `--for` that is not |
+| the owner present from the window's start to its end | and a lease past it, plus `--timeout`; new `--lease <SECS>`, default 10, zenoh's | A silent link withdraws the owner's token only at its lease, which is the deployment's and not on the bus. The run waits it only where a window could pass (a reliable, `block` resource whose span or period the window covers) |
+| `rate`: kept over a whole period that lost nothing | and the owner present throughout | A rate window over a failed path is no more lossless than a population window |
+
 ## Unreleased (`main`, zk2) — the population budget (#735)
 
 Core 0.24 (spec §2.7) makes the budget core: `cardinality` bounds a

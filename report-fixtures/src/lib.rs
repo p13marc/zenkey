@@ -1132,7 +1132,8 @@ pub fn why_report_silent() -> WhyReport {
 /// `check conform` over one service (#703): every pole on some case — a
 /// pass, a violation, a resource unobservable in its window, an operation
 /// not called, a resource with no horizon not asked, a state over its bound
-/// and a stream's population over a window short of an hour (§2.7, #735)
+/// and a best-effort stream's population, whose window is never lossless
+/// (§2.7, #735; 0.25, #740)
 /// — so a renderer that merged two fails.
 pub fn conform_report() -> ConformReport {
     let fp = format!("sha256:{}", "5d1c0a9b2e3f4a6b".repeat(4));
@@ -1203,9 +1204,9 @@ pub fn conform_report() -> ConformReport {
                 CaseId::BudgetWindow,
                 "stream/bandwidth/{ns}/{iface}",
                 "2 member(s) heard within one hour in the 5.0s window, within its bound of 1024 \
-                 (the contract's): a window shows a population within its bound only after one \
-                 liveness span, so a window of at least 3600 s (`--for 3600`), or --skip \
-                 budget-window (§2.7)",
+                 (the contract's), and the window is not shown to have lost no delivery: \
+                 best-effort: a dropped sample leaves no trace, so no window of it is lossless — \
+                 a member it did not hear may be live (§2.7)",
             ),
         ],
         unobservable: None,

@@ -399,7 +399,8 @@ impl Render for zenkey_fleet::ConformReport {
         }
         // §2.7 (0.24): a window shows a stream's or an event's population
         // within its bound only once it is complete — a whole liveness span,
-        // lossless, the owner present throughout.
+        // lossless, the owner present throughout. Lossless is established
+        // (0.25): a best-effort or `drop` resource's window never is.
         let windowed = self
             .cases
             .iter()
@@ -412,9 +413,10 @@ impl Render for zenkey_fleet::ConformReport {
                 Note::coverage(format!(
                     "{windowed} budget-window case(s) unobservable: a window shows a stream's or \
                      an event's population within its bound only over a whole liveness span (an \
-                     hour, or the retention: --for), nothing lost, the owner present throughout \
-                     — more than the bound would be a violation; --skip budget-window leaves the \
-                     case unasked and the state's budget asked"
+                     hour, or the retention: --for), lost no delivery (the resource reliable \
+                     with block, nothing lost by this run), the owner present throughout — more \
+                     than the bound would be a violation; --skip budget-window leaves the case \
+                     unasked and the state's budget asked"
                 ))
                 .cite("spec §2.7"),
             );

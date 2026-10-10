@@ -3974,9 +3974,10 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// every operation — passes every case asked, exit 0; the operation that
 /// is not idempotent is not called, and a resource with no horizon is not
 /// asked its freshness. Its state's population passes `budget` by the
-/// owner's complete GET, and its stream's `budget-window`, over a window
-/// short of an hour, is unobservable (§2.7, #735): exit 2 until `--skip
-/// budget-window`, which leaves the state's `budget` asked and passing.
+/// owner's complete GET, and its best-effort stream's `budget-window` is
+/// unobservable whatever the window, since no window of it is lossless
+/// (§2.7, #735; 0.25, #740): exit 2 until `--skip budget-window`, which
+/// leaves the state's `budget` asked and passing.
 /// `--junit` writes the suite. The router's admin space is on: the owner's
 /// own stamp passes only against a router this run verified (S1, §4.2,
 /// 0.17).
@@ -4003,9 +4004,9 @@ async fn check_conform_passes_a_conforming_service() {
     wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
     let junit = bus.home.join("conform.xml");
     let junit = junit.to_str().expect("a UTF-8 path").to_owned();
-    // §2.7 (#735): a 2 s window is short of the stream's hour, so its
-    // `budget-window` is the one case left unobservable; the state's
-    // `budget` passes by the owner's GET.
+    // §2.7 (0.25): the stream is best-effort, so its `budget-window` is the
+    // one case left unobservable, and says why; the state's `budget` passes
+    // by the owner's GET.
     let unskipped = [
         "check",
         "conform",
@@ -4039,7 +4040,7 @@ async fn check_conform_passes_a_conforming_service() {
     assert!(
         bw["verdict"]["reason"]
             .to_string()
-            .contains("at least 3600 s (`--for 3600`)"),
+            .contains("best-effort: a dropped sample leaves no trace"),
         "{run}"
     );
     assert!(
@@ -5065,10 +5066,12 @@ fn pulses() -> Contract {
 }
 
 /// Core §2.7 (#735), a window's clean pole: an owner publishing two
-/// sources every 200 ms, within its bound of two, read over a 3 s window —
-/// longer than its 2 s retention, nothing lost, its instance token held
-/// throughout — passes `budget-window`. The same owner closed a second into
-/// the window was not present throughout: unobservable, and said so.
+/// sources every 200 ms, within its bound of two, read over a 4 s window
+/// whose 3 s past the 1 s reply timeout are longer than its 2 s retention
+/// (0.25) — the event reliable with `block` and nothing lost, its instance
+/// token held throughout and watched a lease (`--lease 1`) and the timeout
+/// past it — passes `budget-window`. The same owner closed half a second
+/// into the window was not present throughout: unobservable, and said so.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     let mut bus = Bus::admin(None).await;
@@ -5107,9 +5110,11 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
         "host-a/pulse",
         "pulse.v1",
         "--for",
-        "3",
+        "4",
         "--timeout",
-        "2",
+        "1",
+        "--lease",
+        "1",
         "--format",
         "json",
     ];
@@ -5126,7 +5131,7 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     assert!(
         w["verdict"]["reason"]
             .to_string()
-            .contains("the owner present throughout"),
+            .contains("reliable with block and nothing lost by this run; the owner present throughout and a lease after"),
         "{run}"
     );
     // Half a second into the window, the owner closes: its token goes. The

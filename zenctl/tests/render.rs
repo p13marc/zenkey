@@ -277,7 +277,7 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
 ✗  freshness (freshness.v1)     state/interfaces/{ns}/{iface}                                                        violation — 1 of 2 member(s) stale against its horizon of 60 s: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within its horizon
 —  freshness (freshness.v1)     stream/bandwidth/{ns}/{iface}                                                        not asked — it declares no freshness.ttl_s
 ✗  budget (§2.7)                state/interfaces/{ns}/{iface}                                                        violation — 3 member(s) answered with a value by the owner's GET, above its bound of 2 (its descriptor's; the contract's is 1024): an owner MUST NOT hold more live members than its bound (§2.7)
-?  budget-window (§2.7 window)  stream/bandwidth/{ns}/{iface}                                                        unobservable — 2 member(s) heard within one hour in the 5.0s window, within its bound of 1024 (the contract's): a window shows a population within its bound only after one liveness span, so a window of at least 3600 s (`--for 3600`), or --skip budget-window (§2.7)
+?  budget-window (§2.7 window)  stream/bandwidth/{ns}/{iface}                                                        unobservable — 2 member(s) heard within one hour in the 5.0s window, within its bound of 1024 (the contract's), and the window is not shown to have lost no delivery: best-effort: a dropped sample leaves no trace, so no window of it is lossless — a member it did not hear may be live (§2.7)
 
 "#]]
     );
