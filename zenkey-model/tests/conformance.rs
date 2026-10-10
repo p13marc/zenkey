@@ -818,7 +818,7 @@ fn budget_bounds() {
 #[test]
 fn budget_populations() {
     use zenkey_model::authoring::Kind;
-    use zenkey_model::budget::{Reading, population};
+    use zenkey_model::budget::{Reading, Window, population};
     let doc = read_json(&spec().join("conformance/budget/population.json"));
     for case in doc["cases"].as_array().expect("cases") {
         let kind = match case["kind"].as_str().expect("kind") {
@@ -834,7 +834,12 @@ fn budget_populations() {
                 members: r["members"].as_u64().expect("members"),
                 complete: r["complete"].as_bool().expect("complete"),
             },
-            "window" => Reading::Window(instants(&r["heard"])),
+            "window" => Reading::Window(Window {
+                heard: instants(&r["heard"]),
+                listened: secs(&r["listened_s"]),
+                lossless: r["lossless"].as_bool().expect("lossless"),
+                present: r["present"].as_bool().expect("present"),
+            }),
             other => panic!("via {other:?}"),
         };
         let retention = (!case["retention_s"].is_null()).then(|| secs(&case["retention_s"]));

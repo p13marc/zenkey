@@ -12,9 +12,10 @@
 //! Each judgement answers "does this instance exceed its budget here?", so
 //! its finding is the yes: [`Verdict::Exceeds`]. There is no I/O and no
 //! clock here. A reader counts what it read (the keys an owner's GET
-//! answered with a value, the instants a window heard each member) and
-//! hands it over as values; the fixtures in `spec/conformance/budget/` pin
-//! the rest.
+//! answered with a value and whether it ran to its end; the instants a
+//! window heard each member, how long it listened, whether it lost a
+//! delivery and whether the owner stayed present) and hands it over as
+//! values; the fixtures in `spec/conformance/budget/` pin the rest.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -163,10 +164,29 @@ pub enum Reading {
     /// it answered with a value (a `reply_del` is no member), and whether
     /// it ran to its final reply, with no error reply, a timeout included.
     Get { members: u64, complete: bool },
-    /// A subscription window over a stream or an event: the instants each
-    /// member was heard, on one clock (the reader's receive clock), from
-    /// any origin. An event's member is its key without the ULID chunk.
-    Window(BTreeMap<String, Vec<Duration>>),
+    /// A subscription window over a stream or an event.
+    Window(Window),
+}
+
+/// A subscription window over a stream or an event, as a population
+/// reading (§2.7). It is complete — it heard every member live at its end —
+/// when it lasted at least one liveness span, lost no delivery, and the
+/// owner was present throughout.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Window {
+    /// The instants each member was heard, on one clock (the reader's
+    /// receive clock), from any origin. An event's member is its key
+    /// without the ULID chunk.
+    pub heard: BTreeMap<String, Vec<Duration>>,
+    /// How long the window listened.
+    pub listened: Duration,
+    /// Whether it delivered everything that arrived for it: false when the
+    /// reader fell behind and lost deliveries.
+    pub lossless: bool,
+    /// Whether the owner was present, an instance token of its held, from
+    /// the window's start to its end: false when it joined, left or
+    /// re-minted while the window listened.
+    pub present: bool,
 }
 
 /// The occurrences of an event a window heard, for its `rate` (§2.7).
@@ -224,8 +244,10 @@ pub enum Reason {
     /// Exceeds: `n + 1` occurrences of one member less than the period
     /// apart.
     RateExceeded,
-    /// Within: a complete GET answered at least one member, and no more
-    /// than the bound.
+    /// Within: a complete reading — a GET that ran to its final reply, or a
+    /// window of a whole liveness span, lossless, the owner present
+    /// throughout — counted at least one member, and no more than the
+    /// bound.
     Complete,
     /// Within: a window of at least one period, nothing lost, an
     /// occurrence heard, none beyond the rate.
@@ -235,12 +257,14 @@ pub enum Reason {
     Empty,
     /// Unobservable: the GET ended at its timeout, or with an error reply.
     Incomplete,
-    /// Unobservable: a window, which never shows a member it did not hear.
-    Window,
     /// Unobservable: the window lost deliveries.
     Lossy,
-    /// Unobservable: the window was shorter than the rate's period.
+    /// Unobservable: the window was shorter than the rate's period, or than
+    /// the population's liveness span.
     WindowTooShort,
+    /// Unobservable: the owner was not present throughout the window: it
+    /// joined, left or re-minted while the window listened.
+    OwnerAbsent,
     /// Unobservable: a reading that does not count this kind's members (a
     /// window of a state, a GET of a stream or an event).
     ReadingKind,
@@ -265,9 +289,9 @@ impl Reason {
             Self::RateKept => "rate_kept",
             Self::Empty => "empty",
             Self::Incomplete => "incomplete",
-            Self::Window => "window",
             Self::Lossy => "lossy",
             Self::WindowTooShort => "window_too_short",
+            Self::OwnerAbsent => "owner_absent",
             Self::ReadingKind => "reading_kind",
             Self::NoCeiling => "no_ceiling",
             Self::Untemplated => "untemplated",
@@ -341,8 +365,11 @@ pub fn most_within(heard: &BTreeMap<String, Vec<Duration>>, period: Option<Durat
 ///
 /// The order a reason is chosen in: not asked (an operation; no ceiling;
 /// no parameters); a reading this kind does not count; more members than
-/// the bound, in any reading (a lower bound already exceeds it); no member
-/// at all (O5); an incomplete GET, or a window; else within.
+/// the bound, in any reading (a lower bound already exceeds it); an
+/// incomplete reading — a GET that did not run to its final reply, or a
+/// window that lost a delivery, was shorter than one liveness span, or over
+/// which the owner was not present throughout, in that order; no member at
+/// all (O5); else within.
 #[must_use]
 pub fn population(
     kind: Kind,
@@ -359,24 +386,36 @@ pub fn population(
         Bound::NoCeiling => return Judged::new(NotAsked, Reason::NoCeiling, 0),
         Bound::Of(n) => n,
     };
-    let (counted, complete) = match (kind, reading) {
-        (Kind::State, Reading::Get { members, complete }) => (*members, *complete),
-        (Kind::Stream | Kind::Event, Reading::Window(heard)) => {
-            (most_within(heard, liveness(kind, retention)), false)
+    let span = liveness(kind, retention);
+    let (counted, short_of) = match (kind, reading) {
+        (Kind::State, Reading::Get { members, complete }) => {
+            (*members, (!complete).then_some(Reason::Incomplete))
+        }
+        (Kind::Stream | Kind::Event, Reading::Window(w)) => {
+            let short = span.is_none_or(|span| w.listened < span);
+            let why = if !w.lossless {
+                Some(Reason::Lossy)
+            } else if short {
+                Some(Reason::WindowTooShort)
+            } else if !w.present {
+                Some(Reason::OwnerAbsent)
+            } else {
+                None
+            };
+            (most_within(&w.heard, span), why)
         }
         _ => return Judged::new(Unobservable, Reason::ReadingKind, 0),
     };
     if counted > n {
         return Judged::new(Exceeds, Reason::OverBound, counted);
     }
+    if let Some(why) = short_of {
+        return Judged::new(Unobservable, why, counted);
+    }
     if counted == 0 {
         return Judged::new(Unobservable, Reason::Empty, 0);
     }
-    match reading {
-        Reading::Get { .. } if complete => Judged::new(Within, Reason::Complete, counted),
-        Reading::Get { .. } => Judged::new(Unobservable, Reason::Incomplete, counted),
-        Reading::Window(_) => Judged::new(Unobservable, Reason::Window, counted),
-    }
+    Judged::new(Within, Reason::Complete, counted)
 }
 
 /// "Does an event publish beyond its rate?" (§2.7), per member: at most
@@ -495,25 +534,62 @@ mod tests {
             j(Kind::State, Bound::NoCeiling, &get(9, true)),
             (V::NotAsked, R::NoCeiling)
         );
-        let w = Reading::Window(heard(&[("a", &[0.0]), ("b", &[1.0])]));
         assert_eq!(
-            j(Kind::Stream, Bound::Of(1), &w),
+            j(Kind::State, Bound::Of(2), &get(0, false)),
+            (V::Unobservable, R::Incomplete)
+        );
+        let w = |listened: f64, lossless, present, of: &[(&str, &[f64])]| {
+            Reading::Window(Window {
+                heard: heard(of),
+                listened: s(listened),
+                lossless,
+                present,
+            })
+        };
+        let two: &[(&str, &[f64])] = &[("a", &[0.0]), ("b", &[1.0])];
+        // Above the bound: the finding, from any window.
+        assert_eq!(
+            j(Kind::Stream, Bound::Of(1), &w(5.0, false, false, two)),
             (V::Exceeds, R::OverBound)
         );
+        // Within it: complete only over an hour, lossless, owner present.
         assert_eq!(
-            j(Kind::Stream, Bound::Of(2), &w),
-            (V::Unobservable, R::Window)
+            j(Kind::Stream, Bound::Of(2), &w(3600.0, true, true, two)),
+            (V::Within, R::Complete)
         );
         assert_eq!(
-            j(Kind::State, Bound::Of(2), &w),
+            j(Kind::Stream, Bound::Of(2), &w(3599.0, true, true, two)),
+            (V::Unobservable, R::WindowTooShort)
+        );
+        assert_eq!(
+            j(Kind::Stream, Bound::Of(2), &w(3600.0, false, true, two)),
+            (V::Unobservable, R::Lossy)
+        );
+        assert_eq!(
+            j(Kind::Stream, Bound::Of(2), &w(3600.0, true, false, two)),
+            (V::Unobservable, R::OwnerAbsent)
+        );
+        assert_eq!(
+            j(Kind::Stream, Bound::Of(2), &w(3600.0, true, true, &[])),
+            (V::Unobservable, R::Empty)
+        );
+        assert_eq!(
+            j(Kind::State, Bound::Of(2), &w(3600.0, true, true, two)),
             (V::Unobservable, R::ReadingKind)
         );
-        assert_eq!(j(Kind::Operation, Bound::Of(2), &w), (V::NotAsked, R::Kind));
-        // An event's members are live for its retention (60 s here).
-        let w = Reading::Window(heard(&[("a", &[0.0]), ("b", &[61.0])]));
         assert_eq!(
-            j(Kind::Event, Bound::Of(1), &w),
-            (V::Unobservable, R::Window)
+            j(Kind::Operation, Bound::Of(2), &w(3600.0, true, true, two)),
+            (V::NotAsked, R::Kind)
+        );
+        // An event's members are live for its retention (60 s here).
+        let apart: &[(&str, &[f64])] = &[("a", &[0.0]), ("b", &[61.0])];
+        assert_eq!(
+            j(Kind::Event, Bound::Of(1), &w(120.0, true, true, apart)),
+            (V::Within, R::Complete)
+        );
+        assert_eq!(
+            j(Kind::Event, Bound::Of(1), &w(59.0, true, true, apart)),
+            (V::Unobservable, R::WindowTooShort)
         );
     }
 
