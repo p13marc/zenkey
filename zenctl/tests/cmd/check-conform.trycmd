@@ -36,6 +36,12 @@ on one resource:
                    to the HLC delta (freshness.v1); a resource with no
                    horizon is not asked
   budget           not asked: its profile does not exist yet
+  health           the service, when its descriptor lists health.v1,
+                   is healthy: unhealthy or stale is the finding
+                   (health.v1 §5)
+  health-aggregation  its status agrees with its checks: a check
+                   worse than a fresh status in both readings is the
+                   finding (health.v1 §2.2)
 
 A reply's stamp is aged only against a clock this run measured on a
 live put of the same clock, or on --clocks-synced; otherwise its age

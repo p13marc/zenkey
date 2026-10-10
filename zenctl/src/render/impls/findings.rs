@@ -1,4 +1,5 @@
-//! The family whose rows are *findings*: doctor.
+//! The families whose rows are *findings*: doctor, why, check conform and
+//! health.
 //!
 //! What this seam is for: an empty result means something, and it never
 //! means "nothing is wrong" — `doctor` with no findings has to say what it
@@ -119,6 +120,24 @@ impl Render for DoctorReport {
                 "{n} router(s) answered the admin space, read in no namespace"
             )));
         }
+        if let Some(h) = self.scope.health.as_option() {
+            notes.push(
+                Note::coverage(format!(
+                    "read health.v1 through `{}`, with each presence read: {} service(s) list \
+                     it; {}",
+                    h.selector,
+                    h.services,
+                    if h.clocks_synced {
+                        "a status's age is read against this host's clock, on the deployment's \
+                         word (--clocks-synced)"
+                    } else {
+                        "no clock is trusted, so a status's age is unobservable — pass \
+                         --clocks-synced on the deployment's word"
+                    }
+                ))
+                .cite("freshness.v1 §2.6"),
+            );
+        }
         let not_asked: Vec<String> = self
             .checks
             .iter()
@@ -177,6 +196,9 @@ impl Render for DoctorReport {
         }
         if self.scope.routers.is_asked() {
             asked.push("@/*/router".to_owned());
+        }
+        if let Some(h) = self.scope.health.as_option() {
+            asked.push(h.selector.clone());
         }
         Some(ObservedScope {
             asked,
@@ -400,6 +422,279 @@ impl Render for zenkey_fleet::ConformReport {
             asked: self.asked.clone(),
             window_s: Some(self.window_s),
         })
+    }
+}
+
+/// `health.v1` (#721, PF): one row per service, each verdict its own mark
+/// and word — `✓ healthy`, `✗ unhealthy`, `⚠ stale`, `? unobservable`, `—
+/// not asked` — and its own `verdict` token in a `service` row, so a script
+/// branches on the profile's token and never on the prose. §5's other
+/// answers, the status and checks as read, and an archive's last-known
+/// status ride the detail lines; stale is never drawn as a level, and a
+/// last-known status never as current. The run's judgement leads the
+/// envelope; the finding is the yes of "is a service unhealthy, stale,
+/// breaking §2.2 or running its clock ahead?".
+impl Render for zenkey_fleet::HealthReport {
+    const FAMILY: &'static str = "health";
+
+    fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut e = envelope_without(self, &["services"]);
+        e.insert(
+            "judgement".into(),
+            serde_json::to_value(self.judgement()).expect("a judgement serializes"),
+        );
+        e
+    }
+
+    fn rows(&self, out: &mut dyn FnMut(Row)) {
+        for s in &self.services {
+            out(Row::of("service", s));
+        }
+    }
+
+    fn table(&self, t: &mut Table) {
+        use crate::render::style;
+        use zenkey_fleet::report::{HealthAnswerToken, HealthVerdict, StatusVia};
+        let r = &self.rollup;
+        t.line(format!(
+            "health in {} — worst {}: {} healthy, {} unhealthy, {} stale, {} unobservable, {} \
+             not asked",
+            namespace_words(&self.namespace),
+            r.worst
+                .map_or("none established".to_owned(), |l| level_word(l.as_str())),
+            r.healthy,
+            r.unhealthy,
+            r.stale,
+            r.unobservable,
+            r.not_asked
+        ));
+        let mut grid = Grid::unheaded(3);
+        for s in &self.services {
+            let (mark, st) = match s.verdict {
+                HealthVerdict::Healthy => ("✓", style::PASS),
+                HealthVerdict::Unhealthy => ("✗", style::severity(DoctorSeverity::Error)),
+                HealthVerdict::Stale => ("⚠", style::severity(DoctorSeverity::Warning)),
+                HealthVerdict::Unobservable | HealthVerdict::NotAsked => ("?", style::UNPROVEN),
+            };
+            let mark = if s.verdict == HealthVerdict::NotAsked {
+                "—"
+            } else {
+                mark
+            };
+            let level = s
+                .level
+                .map(|l| format!(", {}", level_word(l.as_str())))
+                .unwrap_or_default();
+            grid.row([
+                Cell::styled(mark, st),
+                Cell::text(&s.address),
+                Cell::text(format!(
+                    "{} ({}{level}) — {}",
+                    s.verdict.as_str().replace('_', " "),
+                    s.reason,
+                    s.says
+                )),
+            ]);
+            let mut detail = Vec::new();
+            if let Some(st) = &s.status {
+                detail.push(format!(
+                    "    status {} {:?} — {}{}",
+                    level_read_word(&st.level),
+                    st.reason,
+                    match st.via {
+                        StatusVia::Get => "its owner's reply",
+                        StatusVia::Subscription => "the last put heard",
+                    },
+                    st.stamp
+                        .as_ref()
+                        .map(|s| format!(", stamped {} by {}", s.time, s.clock))
+                        .unwrap_or_default()
+                ));
+            }
+            if !s.checks.is_empty() {
+                let checks: Vec<String> = s
+                    .checks
+                    .iter()
+                    .map(|c| {
+                        if c.detail.is_empty() {
+                            format!("{} {}", c.check, level_read_word(&c.level))
+                        } else {
+                            format!("{} {} {:?}", c.check, level_read_word(&c.level), c.detail)
+                        }
+                    })
+                    .collect();
+                detail.push(format!("    checks {}", checks.join(", ")));
+            }
+            let answer = |a: &zenkey_fleet::report::HealthAnswer| {
+                let word = match a.answer {
+                    HealthAnswerToken::Yes => "yes",
+                    HealthAnswerToken::No => "no",
+                    HealthAnswerToken::Unobservable => "unobservable",
+                    HealthAnswerToken::NotAsked => "not asked",
+                };
+                format!("{word} — {}", a.says)
+            };
+            detail.push(format!("    agrees with its checks: {}", answer(&s.agrees)));
+            detail.push(format!("    clock ahead: {}", answer(&s.clock_ahead)));
+            if s.faults > 0 {
+                detail.push(format!(
+                    "    {} fault(s) heard{}",
+                    s.faults,
+                    s.last_fault
+                        .as_ref()
+                        .map(|f| format!(
+                            ", the last {} ({}) {}{}",
+                            f.code,
+                            f.class,
+                            level_read_word(&f.level),
+                            if f.detail.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" {:?}", f.detail)
+                            }
+                        ))
+                        .unwrap_or_default()
+                ));
+            }
+            if let Some(lk) = &s.last_known {
+                detail.push(format!(
+                    "    last-known at {} ({}): {} {:?} — last-known, never current",
+                    lk.archive,
+                    if lk.confirmed {
+                        "confirmed by alignment"
+                    } else {
+                        "not confirmed by alignment"
+                    },
+                    level_read_word(&lk.level),
+                    lk.reason
+                ));
+            }
+            grid.detail(detail);
+        }
+        t.grid(grid);
+    }
+
+    fn notes(&self) -> Vec<Note> {
+        use zenkey_fleet::report::ClockGround;
+        let mut notes = Vec::new();
+        let ns = namespace_words(&self.namespace);
+        match (&self.presence, &self.face) {
+            (_, Some(f)) => notes.push(
+                Note::coverage(format!(
+                    "across a constrained face: presence and descriptors do not cross, and the \
+                     deployment's word stands for them — the face {} its status cross",
+                    if f.status_crosses {
+                        "lets"
+                    } else {
+                        "does not let"
+                    }
+                ))
+                .cite("health.v1 §2.8"),
+            ),
+            (Some(p), None) => {
+                notes.push(
+                    Note::coverage(format!(
+                        "read {ns} through `{}`: {} service(s) holding an instance token; a \
+                         service implements health.v1 when its descriptor lists it, never by its \
+                         interface token",
+                        p.selector, p.services
+                    ))
+                    .cite("health.v1 §2.7"),
+                );
+                if !p.complete {
+                    notes.push(
+                        Note::coverage(
+                            "the presence read ran to its timeout, so it is possibly incomplete: \
+                             a service unseen is unobservable, never absent",
+                        )
+                        .cite("spec §8.1"),
+                    );
+                }
+            }
+            (None, None) => {}
+        }
+        notes.push(Note::coverage(format!(
+            "two readings {:.1}s apart, each one GET that answers a status and its checks \
+             together{}",
+            self.apart_s,
+            self.window_s
+                .map(|w| format!(", after a {w:.1}s subscription to every status and the faults"))
+                .unwrap_or_default()
+        )));
+        notes.push(
+            Note::caveat(match self.clock {
+                ClockGround::DeploymentWord => {
+                    "a status reply's stamp is aged against this host's clock, on the \
+                     deployment's word that it and the owners' agree (--clocks-synced)"
+                }
+                ClockGround::Measured => {
+                    "a status reply's stamp is aged only against a clock this reading measured on \
+                     a live put of the same clock"
+                }
+                ClockGround::None => {
+                    "no clock was trusted — no window, no --clocks-synced — so a status reply's \
+                     age is unobservable"
+                }
+            })
+            .cite("freshness.v1 §2.6"),
+        );
+        if self.rollup.stale > 0 {
+            notes.push(
+                Note::caveat(
+                    "stale is its own finding, never a level: never FAILED, never DEGRADED, and \
+                     never the last level as though current — and never down",
+                )
+                .cite("health.v1 §2.4"),
+            );
+        }
+        if let Some(why) = &self.unobservable {
+            notes.push(Note::silence(why.clone()));
+        }
+        let r = &self.rollup;
+        notes.push(Note::summary(format!(
+            "{} service(s): {} healthy, {} unhealthy, {} stale, {} unobservable, {} not asked; \
+             worst established level {}.",
+            self.services.len(),
+            r.healthy,
+            r.unhealthy,
+            r.stale,
+            r.unobservable,
+            r.not_asked,
+            r.worst
+                .map_or("none".to_owned(), |l| level_word(l.as_str()))
+        )));
+        notes
+    }
+
+    /// What the reading put to the bus, over its window.
+    fn scope(&self) -> Option<ObservedScope> {
+        Some(ObservedScope {
+            asked: self.asked.clone(),
+            window_s: self.window_s,
+        })
+    }
+}
+
+fn namespace_words(ns: &str) -> String {
+    if ns.is_empty() {
+        "the bus root".to_owned()
+    } else {
+        format!("namespace {ns:?}")
+    }
+}
+
+/// A level as the profile spells it: `OK`, `DEGRADED`, `FAILED`.
+fn level_word(token: &str) -> String {
+    token.to_ascii_uppercase()
+}
+
+/// A level as a payload carried it: a level, `UNSPECIFIED`, `undecodable`,
+/// or a number the enum does not list.
+fn level_read_word(l: &zenkey_fleet::report::LevelRead) -> String {
+    match l {
+        zenkey_fleet::report::LevelRead::Token("undecodable") => "undecodable".to_owned(),
+        zenkey_fleet::report::LevelRead::Token(t) => level_word(t),
+        zenkey_fleet::report::LevelRead::Unlisted(n) => format!("level {n} (unknown)"),
     }
 }
 

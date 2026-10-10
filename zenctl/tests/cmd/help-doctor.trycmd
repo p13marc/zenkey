@@ -1,6 +1,7 @@
 The doctor: a zk2 deployment judged against the core (#612, FJ6).
 
-Thirteen checks, each a question whose finding is the *yes* (the tooling
+Eighteen checks (five since #721: health.v1's four and hostid.v1's
+hostid-duplicate), each a question whose finding is the *yes* (the tooling
 guide's polarity rule), and each answered in the judgement shape: a finding,
 clean with its evidence, unobservable with its reason, or not asked. The
 deployment is read through a session in its namespace, `--namespace` (alias
@@ -18,7 +19,7 @@ unobservable, an empty scope, or a run that could not start.
 $ zenctl doctor --help
 Judge a zk2 deployment against the core: one verdict per check.
 
-Thirteen checks, each a question whose finding is the yes: split-brain (§6), binding-unsatisfied (§3.2), contract-drift (§9.8), contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4), admin-unreachable and router-version-skew. The deployment is read through a session in its namespace; the routers' admin space and the presence domain through one in no namespace. A check whose input could not be had is unobservable, with the reason — never clean — and so is every check that reads presence when no zk2 token is visible. Exit 0 every check asked is clean, 1 a finding at or above --fail-on (default warning), 2 no verdict: a check left unobservable, an empty scope, or a run that could not start.
+Eighteen checks, each a question whose finding is the yes: split-brain (§6), binding-unsatisfied (§3.2), contract-drift (§9.8), contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4), admin-unreachable, router-version-skew; health.v1's health-failed and health-degraded (a service at that level), health-stale (a status not confirmed within 60 s, never a level) and health-inconsistent (a status better than a check, in both readings), a status's age read only with --clocks-synced; and hostid.v1's hostid-duplicate (two sessions claiming one minted address, the cause undecided). The deployment is read through a session in its namespace; the routers' admin space and the presence domain through one in no namespace. A check whose input could not be had is unobservable, with the reason — never clean — and so is every check that reads presence when no zk2 token is visible. Exit 0 every check asked is clean, 1 a finding at or above --fail-on (default warning), 2 no verdict: a check left unobservable, an empty scope, or a run that could not start.
 
 Usage: zenctl doctor [OPTIONS]
 
@@ -38,6 +39,9 @@ Options:
 
       --trust-admin-space
           Trust every answer from the routers' admin space. Without it, an answer counts only when it is verifiably a router's own, from a router this session is connected to: any session can answer under `@/<zid>/router` (spec §4.2, 0.12). Pass it only when the deployment's grants deny `@/**` queryables to every principal (§11.1)
+
+      --clocks-synced
+          This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a health.v1 status reply's stamp is then aged against this clock (freshness.v1 §2.6). The doctor listens to no status, so without it the health-* checks of every service implementing health.v1 are unobservable
 
       --check <CHECK-ID>
           Ask only this check (repeatable); every other is not asked
@@ -125,7 +129,7 @@ session opens — exit 2, clap's code, because it is your input.
 ```console
 $ zenctl doctor --check split-brian
 ? 2
-error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew
+error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate
 
 For more information, try '--help'.
 

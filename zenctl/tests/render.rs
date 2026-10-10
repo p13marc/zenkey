@@ -87,24 +87,32 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
     assert_data_eq!(
         table(&report),
         str![[r#"
-✗  split-brain (§6)                  finding — 1 subject(s)
+✗  split-brain (§6)                      finding — 1 subject(s)
     ✗ error: host-a/tc tc.netif.v1 — 2 instances hold its interface token in two presence reads 2.0s apart (3fa9c2d41b7e0012, 3fa9c2d41b7e0013), and at least two expose an exclusive resource
-⚠  binding-unsatisfied (§3.2 R5)     finding — 1 subject(s)
+⚠  binding-unsatisfied (§3.2 R5)         finding — 1 subject(s)
     ⚠ warning: ws-01/tcgui-frontend scenario — its bindings (*/tc) select no provider of tc.scenario.v1 visible to this reader
-?  contract-drift (§9.8)             unobservable — 1 subject(s) unjudged
+?  contract-drift (§9.8)                 unobservable — 1 subject(s) unjudged
     ? unjudged tc.netem.v1 eeeeeeeeeeeeeeee 5d1c0a9b2e3f4a6b: not classified: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is unavailable
-✗  contract-unavailable (§8.4)       finding — 1 subject(s)
+✗  contract-unavailable (§8.4)           finding — 1 subject(s)
     ✗ error: tc.netem.v1 sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee — named by host-b/tc@3fa9c2d41b7e0014; no holder served a bundle that verified (no reply)
-✓  descriptor-invalid (§3.3)         clean — 3 descriptor(s) pass the descriptor check against the contracts they name
-✓  token-missing (§8.1)              clean — 3 instance(s): every token agrees with its descriptor
-✓  presence-over-budget (§8.3)       clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
-✓  storage-on-state (§4.2 S4)        clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
-✓  archive-unaligned (§4.4)          clean — no archive.v1 provider visible to this reader: nothing to align
-—  state-stamp-foreign (§4.2 S1–S2)  not asked
-·  shm-memlock-low (§7.4)            finding — 1 subject(s)
+✓  descriptor-invalid (§3.3)             clean — 3 descriptor(s) pass the descriptor check against the contracts they name
+✓  token-missing (§8.1)                  clean — 3 instance(s): every token agrees with its descriptor
+✓  presence-over-budget (§8.3)           clean — 9 token(s) visible to this reader in the presence domain; within the budget 10000
+✓  storage-on-state (§4.2 S4)            clean — 1 storage(s) on 2 router(s), none answering on an owner's state keys
+✓  archive-unaligned (§4.4)              clean — no archive.v1 provider visible to this reader: nothing to align
+—  state-stamp-foreign (§4.2 S1–S2)      not asked
+·  shm-memlock-low (§7.4)                finding — 1 subject(s)
     · info: this host — RLIMIT_MEMLOCK is 64 KiB, below the 8 MiB floor
-✓  admin-unreachable (§4.2)          clean — 2 router(s) answered `@/*/router`
-✓  router-version-skew (App. B)      clean — 2 router(s), all at 1.10.1
+✓  admin-unreachable (§4.2)              clean — 2 router(s) answered `@/*/router`
+✓  router-version-skew (App. B)          clean — 2 router(s), all at 1.10.1
+✗  health-failed (health.v1 §2.1)        finding — 1 subject(s)
+    ✗ error: host-b/tc — its status is FAILED, fresh: present, and unable to do its primary job, as its owner says (health.v1 §2.1) — its reason: "netns gone"
+✓  health-degraded (health.v1 §2.1)      clean — 1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and the checks it vouches for, read better
+?  health-stale (health.v1 §2.4)         unobservable — 1 subject(s) unjudged
+    ? unjudged host-a/tc: its status's freshness could not be read: this reader's clock is not trusted to the HLC delta against the stamping clock (clock_untrusted)
+✓  health-inconsistent (health.v1 §2.2)  clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
+⚠  hostid-duplicate (hostid.v1 §2.12)    finding — 1 subject(s)
+    ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
 
 "#]]
     );
@@ -156,7 +164,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
         "{said}"
     );
     assert!(
-        said.contains("4 finding(s): 2 error(s), 1 warning(s), 1 info"),
+        said.contains("6 finding(s): 3 error(s), 2 warning(s), 1 info"),
         "{said}"
     );
 
@@ -312,6 +320,87 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
     );
 }
 
+/// `zenctl health` (#721, PF): one row per service, every verdict of "is
+/// this service healthy?" spelled apart in every medium — a mark and a word
+/// in the table, the profile's own `verdict` token in a `service` row — with
+/// §5's other answers beside it, stale never drawn as a level, an archive's
+/// status last-known and never current, and the run's judgement leading the
+/// envelope. The fixture has every verdict, every answer and every roll-up
+/// count non-zero (tooling guide §7).
+#[test]
+fn a_health_reading_spells_every_verdict_apart_in_every_medium() {
+    let report = fx::health_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 unobservable, 1 not asked
+✗  lab/liar   unhealthy (inconsistent, FAILED) — a check is worse than its status, which health.v1 §2.2 forbids
+    status OK "serving" — its owner's reply, stamped 2026-10-10T08:00:00.000000000Z by a1
+    checks disk FAILED "full"
+    agrees with its checks: no — a current check is worse than its fresh status in each of 2 readings: its owner breaks health.v1 §2.2
+    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+✓  lab/ok     healthy (ok, OK) — its status is OK and confirmed, and no check is worse
+    status OK "serving" — the last put heard, stamped 2026-10-10T08:00:00.000000000Z by a2
+    agrees with its checks: yes — its status is fresh at a level, and no current check is worse
+    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+⚠  lab/ahead  stale (beyond_horizon) — not confirmed within its horizon
+    agrees with its checks: unobservable — not confirmed within its horizon
+    clock ahead: yes — a clock_ahead fault was heard, and no confirmation of its status since
+    2 fault(s) heard, the last clock_ahead (profile) FAILED "2000 ms ahead"
+?  lab/new    unobservable (unknown_level) — its status's level is unknown
+    status UNSPECIFIED "starting" — its owner's reply, stamped 2026-10-10T08:00:00.000000000Z by a3
+    agrees with its checks: unobservable — its status's level is unknown
+    clock ahead: no — its status was confirmed after its last clock_ahead fault, or with none heard
+—  lab/svc    not asked (absent) — it is absent: presence's word, not a level
+    agrees with its checks: not asked — it is absent: presence's word, not a level
+    clock ahead: not asked — it is absent: presence's word
+    last-known at lab/archive (confirmed by alignment): DEGRADED "upstream lost" — last-known, never current
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let envelope = &lines[0];
+    assert_eq!(envelope["report"], "health");
+    assert_eq!(envelope["judgement"]["answer"], "established");
+    assert_eq!(envelope["rollup"]["worst"], "failed");
+    assert!(envelope.get("services").is_none(), "services are rows");
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.services.len());
+    assert!(rows.iter().all(|r| r["row"] == "service"));
+    let verdicts: std::collections::BTreeSet<&str> = rows
+        .iter()
+        .map(|r| r["verdict"].as_str().expect("a verdict"))
+        .collect();
+    assert_eq!(
+        verdicts,
+        ["healthy", "not_asked", "stale", "unhealthy", "unobservable"].into(),
+        "five verdicts, five spellings"
+    );
+    for r in rows {
+        let established = r["verdict"] == "healthy" || r["verdict"] == "unhealthy";
+        assert_eq!(
+            r.get("level").is_some(),
+            established,
+            "a level rides only an established verdict, never stale: {r}"
+        );
+    }
+    let gone = rows.iter().find(|r| r["verdict"] == "not_asked").unwrap();
+    assert_eq!(gone["last_known"]["archive"], "lab/archive");
+    let said = notes(&report);
+    assert!(said.contains("never by its interface token"), "{said}");
+    assert!(
+        said.contains("stale is its own finding, never a level"),
+        "{said}"
+    );
+    assert!(
+        said.contains("5 service(s): 1 healthy, 1 unhealthy, 1 stale, 1 unobservable, 1 not asked"),
+        "{said}"
+    );
+}
+
 /// Every family renders a table that is byte-stable at a fixed width, with no
 /// trailing whitespace anywhere — the property that makes the snapshots above
 /// reviewable at all.
@@ -335,6 +424,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::why_report_cause()),
         table(&fx::why_report_silent()),
         table(&fx::conform_report()),
+        table(&fx::health_report()),
     ];
     for r in &renderings {
         for line in r.lines() {
@@ -1545,6 +1635,7 @@ fn every_render_impl_is_drawn_somewhere_in_this_file() {
         "gen-plan",
         "get",
         "graph",
+        "health",
         "hostid",
         "iface-list",
         "iface-show",
@@ -1648,10 +1739,18 @@ fn every_observing_family_states_its_scope() {
     assert_eq!(s.window_s, Some(1.25));
 
     // The doctor's scope is what it read: presence in the namespace, the
-    // admin space in none.
+    // admin space in none, and the owners' health.v1 state (#721, PF).
     let s = scoped(&fx::doctor_report());
-    assert_eq!(s.asked, ["zk2/*/*/@zk/**", "@/*/router"]);
+    assert_eq!(
+        s.asked,
+        ["zk2/*/*/@zk/**", "@/*/router", "zk2/*/*/health.v1/state/**"]
+    );
     assert_eq!(s.window_s, None);
+    // `health` (#721, PF): presence, the readings' GET, the window's
+    // subscriptions, over the window.
+    let s = scoped(&fx::health_report());
+    assert_eq!(s.asked.len(), 4);
+    assert_eq!(s.window_s, Some(31.0));
     // `storage gen --check` sweeps the admin space once, no window.
     let s = scoped(&fx::storage_check());
     assert_eq!(s.asked, ["@/*/router/**/storage_manager/storages/**"]);
