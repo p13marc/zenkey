@@ -145,8 +145,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirteen checks,
-  eighteen since PF (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
+  FJ6's `doctor` judges a zk2 deployment against the core: eighteen checks
+  since PF (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
   `Judgement` whose finding is the yes, read through a session in the
   namespace and one in none for the admin space and the presence domain;
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
