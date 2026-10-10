@@ -71,6 +71,7 @@ mod tests {
                 namespace: String::new(),
                 presence: Asked::NotAsked,
                 routers: Asked::NotAsked,
+                health: Asked::NotAsked,
             },
             checks,
             unobservable: None,

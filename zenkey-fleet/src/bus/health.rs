@@ -438,7 +438,11 @@ pub async fn observe(
 /// reply grouped by the owner its key names. A reply on a key that is not a
 /// `health.v1` state key, or on a wildcard key, is not a member and is left
 /// out (R6).
-async fn get(session: &Session, selector: &str, timeout: Duration) -> Result<HealthGet, String> {
+pub async fn get(
+    session: &Session,
+    selector: &str,
+    timeout: Duration,
+) -> Result<HealthGet, String> {
     let replies = session
         .get(selector)
         .target(QueryTarget::All)

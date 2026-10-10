@@ -70,11 +70,26 @@ pub enum CheckId {
     AdminUnreachable,
     /// Routers of the mesh at different zenoh versions (Appendix B).
     RouterVersionSkew,
+    /// A present service at `FAILED`, by its fresh status or a current check
+    /// that status vouches for (`health.v1` §2.1, §2.11; #721).
+    HealthFailed,
+    /// A present service at `DEGRADED`, the same way (`health.v1` §2.1).
+    HealthDegraded,
+    /// A present service whose status was not confirmed within its 60 s
+    /// horizon: stale, never a level (`health.v1` §2.4).
+    HealthStale,
+    /// An owner holding a status better than a current check, in both of
+    /// two readings a grace apart (`health.v1` §2.2).
+    HealthInconsistent,
+    /// Two sessions claiming one address of a minted system, in both of two
+    /// presence reads a grace apart, the cause undecided (`hostid.v1`
+    /// §2.12).
+    HostidDuplicate,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 13] = [
+    pub const ALL: [CheckId; 18] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -88,6 +103,11 @@ impl CheckId {
         CheckId::ShmMemlockLow,
         CheckId::AdminUnreachable,
         CheckId::RouterVersionSkew,
+        CheckId::HealthFailed,
+        CheckId::HealthDegraded,
+        CheckId::HealthStale,
+        CheckId::HealthInconsistent,
+        CheckId::HostidDuplicate,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -106,6 +126,11 @@ impl CheckId {
             CheckId::ShmMemlockLow => "shm-memlock-low",
             CheckId::AdminUnreachable => "admin-unreachable",
             CheckId::RouterVersionSkew => "router-version-skew",
+            CheckId::HealthFailed => "health-failed",
+            CheckId::HealthDegraded => "health-degraded",
+            CheckId::HealthStale => "health-stale",
+            CheckId::HealthInconsistent => "health-inconsistent",
+            CheckId::HostidDuplicate => "hostid-duplicate",
         }
     }
 
@@ -115,7 +140,8 @@ impl CheckId {
         CheckId::ALL.into_iter().find(|c| c.as_str() == token)
     }
 
-    /// The core section the check enforces (`spec/core.md`).
+    /// The core section the check enforces (`spec/core.md`), or the
+    /// profile's (`spec/profiles/`).
     pub fn section(self) -> &'static str {
         match self {
             CheckId::SplitBrain => "§6",
@@ -131,6 +157,10 @@ impl CheckId {
             CheckId::ShmMemlockLow => "§7.4",
             CheckId::AdminUnreachable => "§4.2",
             CheckId::RouterVersionSkew => "App. B",
+            CheckId::HealthFailed | CheckId::HealthDegraded => "health.v1 §2.1",
+            CheckId::HealthStale => "health.v1 §2.4",
+            CheckId::HealthInconsistent => "health.v1 §2.2",
+            CheckId::HostidDuplicate => "hostid.v1 §2.12",
         }
     }
 
@@ -173,6 +203,25 @@ impl CheckId {
             }
             CheckId::AdminUnreachable => "does no router answer the admin space?",
             CheckId::RouterVersionSkew => "do the routers run different zenoh versions?",
+            CheckId::HealthFailed => {
+                "is a present service at FAILED, by its fresh status or a current check that \
+                 status vouches for?"
+            }
+            CheckId::HealthDegraded => {
+                "is a present service at DEGRADED, by its fresh status or a current check that \
+                 status vouches for?"
+            }
+            CheckId::HealthStale => {
+                "is a present service's status stale: not confirmed within its 60 s horizon?"
+            }
+            CheckId::HealthInconsistent => {
+                "does an owner hold a status better than one of its current checks, in both of \
+                 two readings a grace apart?"
+            }
+            CheckId::HostidDuplicate => {
+                "do the counted instances of one address of a minted system state two session \
+                 zids, in both of two presence reads a grace apart?"
+            }
         }
     }
 
@@ -354,6 +403,24 @@ pub struct DoctorScope {
     /// namespace. Absent when no check that reads it was asked.
     #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
     pub routers: Asked<usize>,
+    /// What the `health.v1` checks read (#721, PF). Absent when none was
+    /// asked.
+    #[serde(default, skip_serializing_if = "Asked::is_not_asked")]
+    pub health: Asked<DoctorHealth>,
+}
+
+/// The `health.v1` half of [`DoctorScope`] (#721, PF).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DoctorHealth {
+    /// The selector both readings' GETs went out on, base-relative.
+    pub selector: String,
+    /// Present services whose descriptor lists `health.v1` (§2.7).
+    pub services: usize,
+    /// Whether the run took the deployment's word that this host's clock
+    /// and the owners' agree (`--clocks-synced`, `freshness.v1` §2.6).
+    /// Without it, the doctor measures no clock, and a status reply's age is
+    /// unobservable.
+    pub clocks_synced: bool,
 }
 
 /// The presence half of [`DoctorScope`].
@@ -511,6 +578,11 @@ mod tests {
                 held: 2,
             }),
             routers: Asked::Asked(1),
+            health: Asked::Asked(DoctorHealth {
+                selector: "zk2/*/*/health.v1/state/**".into(),
+                services: 2,
+                clocks_synced: false,
+            }),
         }
     }
 
@@ -570,6 +642,11 @@ mod tests {
                         "held": 2,
                     },
                     "routers": 1,
+                    "health": {
+                        "selector": "zk2/*/*/health.v1/state/**",
+                        "services": 2,
+                        "clocks_synced": false,
+                    },
                 },
                 "checks": [
                     {
@@ -612,6 +689,7 @@ mod tests {
                 namespace: String::new(),
                 presence: Asked::NotAsked,
                 routers: Asked::NotAsked,
+                health: Asked::NotAsked,
             },
             checks: vec![],
             unobservable: Some("no zk2 token visible to this reader".into()),
@@ -732,6 +810,11 @@ mod check_id_tests {
                 "shm-memlock-low",
                 "admin-unreachable",
                 "router-version-skew",
+                "health-failed",
+                "health-degraded",
+                "health-stale",
+                "health-inconsistent",
+                "hostid-duplicate",
             ]
         );
     }

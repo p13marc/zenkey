@@ -53,6 +53,7 @@ pub mod catalog;
 pub mod compat;
 pub mod diff;
 pub mod examples;
+pub mod health;
 pub mod jsonschema;
 pub mod lens;
 pub mod namespace;

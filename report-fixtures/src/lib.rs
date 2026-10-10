@@ -87,6 +87,11 @@ pub fn doctor_report() -> DoctorReport {
                 held: 2,
             }),
             routers: Asked::Asked(2),
+            health: Asked::Asked(DoctorHealth {
+                selector: "zk2/*/*/health.v1/state/**".into(),
+                services: 2,
+                clocks_synced: false,
+            }),
         },
         checks: vec![
             CheckReport::of(
@@ -173,7 +178,238 @@ pub fn doctor_report() -> DoctorReport {
                 "2 router(s) answered `@/*/router`",
             ),
             clean(CheckId::RouterVersionSkew, "2 router(s), all at 1.10.1"),
+            CheckReport::of(
+                CheckId::HealthFailed,
+                vec![finding(
+                    CheckId::HealthFailed,
+                    DoctorSeverity::Error,
+                    "host-b/tc",
+                    "its status is FAILED, fresh: present, and unable to do its primary job, as \
+                     its owner says (health.v1 §2.1) — its reason: \"netns gone\"",
+                )],
+                vec![],
+                "unused",
+            ),
+            clean(
+                CheckId::HealthDegraded,
+                "1 service(s) implementing health.v1, none at DEGRADED: each fresh status, and \
+                 the checks it vouches for, read better",
+            ),
+            CheckReport::of(
+                CheckId::HealthStale,
+                vec![],
+                vec![Unjudged {
+                    subject: "host-a/tc".into(),
+                    reason: "its status's freshness could not be read: this reader's clock is \
+                             not trusted to the HLC delta against the stamping clock \
+                             (clock_untrusted)"
+                        .into(),
+                }],
+                "unused",
+            ),
+            clean(
+                CheckId::HealthInconsistent,
+                "1 service(s) implementing health.v1, each fresh status no better than its \
+                 current checks",
+            ),
+            CheckReport::of(
+                CheckId::HostidDuplicate,
+                vec![finding(
+                    CheckId::HostidDuplicate,
+                    DoctorSeverity::Warning,
+                    "h-bbd1aa1db10b/sysinfo",
+                    "in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a \
+                     system their descriptors declare minted state 2 session zids: the cause is \
+                     undecided",
+                )],
+                vec![],
+                "unused",
+            ),
         ],
+        unobservable: None,
+    }
+}
+
+/// `zenctl health` (#721, PF): every verdict of "is this service healthy?"
+/// and every answer of §5's other questions, over a scope whose counts are
+/// non-zero — an unhealthy service breaking §2.2 in both readings, a
+/// healthy one, a stale one whose clock is ahead, one unobservable, and an
+/// absent one, not asked, with its archive's status last-known.
+pub fn health_report() -> HealthReport {
+    let answer = |answer, reason: &str, says: &str| HealthAnswer {
+        answer,
+        reason: reason.into(),
+        says: says.into(),
+    };
+    let reading = |verdict, reason: &str, level| HealthReadingVerdict {
+        verdict,
+        reason: reason.into(),
+        level,
+    };
+    let stamp = |clock: &str| Stamp {
+        time: "2026-10-10T08:00:00.000000000Z".into(),
+        clock: clock.into(),
+    };
+    let row = |address: &str, verdict, reason: &str, level, says: &str| HealthRow {
+        address: address.into(),
+        verdict,
+        reason: reason.into(),
+        level,
+        says: says.into(),
+        readings: vec![
+            reading(verdict, reason, level),
+            reading(verdict, reason, level),
+        ],
+        agrees: answer(
+            HealthAnswerToken::Yes,
+            "ok",
+            "its status is fresh at a level, and no current check is worse",
+        ),
+        clock_ahead: answer(
+            HealthAnswerToken::No,
+            "confirmed",
+            "its status was confirmed after its last clock_ahead fault, or with none heard",
+        ),
+        status: None,
+        checks: vec![],
+        last_known: None,
+        faults: 0,
+        last_fault: None,
+    };
+    let mut liar = row(
+        "lab/liar",
+        HealthVerdict::Unhealthy,
+        "inconsistent",
+        Some(HealthLevel::Failed),
+        "a check is worse than its status, which health.v1 §2.2 forbids",
+    );
+    liar.agrees = answer(
+        HealthAnswerToken::No,
+        "inconsistent",
+        "a current check is worse than its fresh status in each of 2 readings: its owner \
+         breaks health.v1 §2.2",
+    );
+    liar.status = Some(StatusSeen {
+        level: LevelRead::Token("ok"),
+        reason: "serving".into(),
+        since_ns: 1_791_700_000_000_000_000,
+        stamp: Some(stamp("a1")),
+        via: StatusVia::Get,
+    });
+    liar.checks = vec![CheckSeen {
+        check: "disk".into(),
+        level: LevelRead::Token("failed"),
+        detail: "full".into(),
+    }];
+    let mut ok = row(
+        "lab/ok",
+        HealthVerdict::Healthy,
+        "ok",
+        Some(HealthLevel::Ok),
+        "its status is OK and confirmed, and no check is worse",
+    );
+    ok.status = Some(StatusSeen {
+        level: LevelRead::Token("ok"),
+        reason: "serving".into(),
+        since_ns: 1_791_700_000_000_000_000,
+        stamp: Some(stamp("a2")),
+        via: StatusVia::Subscription,
+    });
+    let mut ahead = row(
+        "lab/ahead",
+        HealthVerdict::Stale,
+        "beyond_horizon",
+        None,
+        "not confirmed within its horizon",
+    );
+    ahead.agrees = answer(
+        HealthAnswerToken::Unobservable,
+        "beyond_horizon",
+        "not confirmed within its horizon",
+    );
+    ahead.clock_ahead = answer(
+        HealthAnswerToken::Yes,
+        "clock_ahead",
+        "a clock_ahead fault was heard, and no confirmation of its status since",
+    );
+    ahead.faults = 2;
+    ahead.last_fault = Some(FaultSeen {
+        code: "clock_ahead".into(),
+        class: "profile",
+        level: LevelRead::Token("failed"),
+        detail: "2000 ms ahead".into(),
+    });
+    let mut unknown = row(
+        "lab/new",
+        HealthVerdict::Unobservable,
+        "unknown_level",
+        None,
+        "its status's level is unknown",
+    );
+    unknown.agrees = answer(
+        HealthAnswerToken::Unobservable,
+        "unknown_level",
+        "its status's level is unknown",
+    );
+    unknown.status = Some(StatusSeen {
+        level: LevelRead::Token("unspecified"),
+        reason: "starting".into(),
+        since_ns: 1_791_700_000_000_000_000,
+        stamp: Some(stamp("a3")),
+        via: StatusVia::Get,
+    });
+    let mut gone = row(
+        "lab/svc",
+        HealthVerdict::NotAsked,
+        "absent",
+        None,
+        "it is absent: presence's word, not a level",
+    );
+    gone.agrees = answer(
+        HealthAnswerToken::NotAsked,
+        "absent",
+        "it is absent: presence's word, not a level",
+    );
+    gone.clock_ahead = answer(
+        HealthAnswerToken::NotAsked,
+        "absent",
+        "it is absent: presence's word",
+    );
+    gone.last_known = Some(LastKnownStatus {
+        archive: "lab/archive".into(),
+        level: LevelRead::Token("degraded"),
+        reason: "upstream lost".into(),
+        since_ns: 1_791_600_000_000_000_000,
+        stamp: Some(stamp("a4")),
+        confirmed: true,
+    });
+    HealthReport {
+        namespace: "acme".into(),
+        service: None,
+        presence: Some(HealthPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            services: 4,
+        }),
+        face: None,
+        window_s: Some(31.0),
+        apart_s: 31.0,
+        clock: ClockGround::Measured,
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/*/*/health.v1/state/**".into(),
+            "zk2/*/*/health.v1/state/status".into(),
+            "zk2/*/*/health.v1/stream/faults".into(),
+        ],
+        services: vec![liar, ok, ahead, unknown, gone],
+        rollup: HealthRollup {
+            worst: Some(HealthLevel::Failed),
+            healthy: 1,
+            unhealthy: 1,
+            stale: 1,
+            unobservable: 1,
+            not_asked: 1,
+        },
         unobservable: None,
     }
 }

@@ -111,7 +111,24 @@ pub async fn read_tokens(session: &Session, scope: &Scope, timeout: Duration) ->
 /// each answer — silence and a failed GET included — in
 /// `observed.descriptors`.
 pub async fn describe(session: &Session, observed: &mut Observed, timeout: Duration) {
-    let mut pending = observed.instances().into_iter();
+    describe_where(session, observed, timeout, |_, _| true).await;
+}
+
+/// [`describe`], for the instances `keep` selects only: the doctor's first
+/// presence read describes the instances `hostid-duplicate` counts (#721,
+/// PF), and no other. The ones left out have no entry.
+pub async fn describe_where(
+    session: &Session,
+    observed: &mut Observed,
+    timeout: Duration,
+    keep: impl Fn(&Addr, &zenkey_model::grammar::InstanceId) -> bool,
+) {
+    let wanted: Vec<_> = observed
+        .instances()
+        .into_iter()
+        .filter(|(a, i)| keep(a, i))
+        .collect();
+    let mut pending = wanted.into_iter();
     let mut tasks = tokio::task::JoinSet::new();
     let mut found = BTreeMap::new();
     loop {
