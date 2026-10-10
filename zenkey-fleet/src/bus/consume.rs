@@ -94,6 +94,16 @@ fn all_bound(r: &Resource, values: &Bindings) -> bool {
 /// target `All`, consolidation `Latest`, through the runtime's consumer.
 /// No reply within the timeout is no rows: silence, never "no value" (S6).
 pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateReport> {
+    get_state_answer(session, read).await.map(|(r, _)| r)
+}
+
+/// [`get_state`], with whether every GET ran to its final reply: the one
+/// complete reading of a state population (§2.7, 0.24; #735). A GET that
+/// ended at its timeout, or with any error reply, may miss a member.
+pub async fn get_state_answer(
+    session: &Session,
+    read: StateRead<'_>,
+) -> Result<(StateReport, bool)> {
     let StateRead {
         revision,
         owner,
@@ -127,35 +137,34 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
             .collect()
     };
     let got = consumer
-        .get(&name, one.then_some(values), timeout)
+        .get_answer(&name, one.then_some(values), timeout)
         .await
         .map_err(|e| runtime("get", &address, e))?;
-    let mut rows: Vec<StateRow> = match got {
-        zenkey::state::StateGet::Silent => Vec::new(),
-        zenkey::state::StateGet::Answered(current) => current
-            .into_iter()
-            .map(|c| match c {
-                zenkey::state::Current::Value { key, sample } => StateRow {
-                    timestamp: sample.timestamp().map(stamp),
-                    value: StateValue::Value {
-                        payload: Box::new(payload(revision, &key, &sample, Member::Type)),
-                    },
-                    key,
-                    confirmed: None,
-                    identity: None,
+    let complete = got.complete;
+    let mut rows: Vec<StateRow> = got
+        .current
+        .into_iter()
+        .map(|c| match c {
+            zenkey::state::Current::Value { key, sample } => StateRow {
+                timestamp: sample.timestamp().map(stamp),
+                value: StateValue::Value {
+                    payload: Box::new(payload(revision, &key, &sample, Member::Type)),
                 },
-                zenkey::state::Current::Deleted { key, timestamp } => StateRow {
-                    key,
-                    value: StateValue::Deleted,
-                    timestamp: timestamp.as_ref().map(stamp),
-                    confirmed: None,
-                    identity: None,
-                },
-            })
-            .collect(),
-    };
+                key,
+                confirmed: None,
+                identity: None,
+            },
+            zenkey::state::Current::Deleted { key, timestamp } => StateRow {
+                key,
+                value: StateValue::Deleted,
+                timestamp: timestamp.as_ref().map(stamp),
+                confirmed: None,
+                identity: None,
+            },
+        })
+        .collect();
     rows.sort_by(|a, b| a.key.cmp(&b.key));
-    Ok(StateReport {
+    let report = StateReport {
         reading: StateReading::Current,
         address,
         iface: revision.iface().to_string(),
@@ -166,7 +175,8 @@ pub async fn get_state(session: &Session, read: StateRead<'_>) -> Result<StateRe
         archive: None,
         timeout_s: timeout.as_secs_f64(),
         rows,
-    })
+    };
+    Ok((report, complete))
 }
 
 /// One member's key, every parameter given: `zk2/<owner>/<iface>/<token>/…`.

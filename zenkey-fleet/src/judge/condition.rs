@@ -1021,7 +1021,7 @@ impl RuleSet {
             })
             .collect();
         let mut spec = crate::judge::doctor::DoctorSpec::new(timeout);
-        spec.deep = checks.contains(&CheckId::StateStampForeign);
+        spec.deep = checks.iter().any(|c| c.reads_data());
         spec.checks = checks;
         spec.clocks_synced = clocks_synced;
         spec
@@ -1826,5 +1826,10 @@ mod tests {
                 .collect()
         );
         assert!(rules.doctor_spec(t, true).clocks_synced);
+        // population-over-bound reads the owners' data plane too (#735).
+        let rules =
+            RuleSet::new(&[Condition::parse("doctor population-over-bound").expect("rule")])
+                .expect("compiles");
+        assert!(rules.doctor_spec(t, false).deep);
     }
 }

@@ -17,11 +17,20 @@
 //! **What a case judged is what arrived.** A subscription keeps at most
 //! [`crate::bus::conform::SAMPLE_CAP`] samples per resource; the evidence
 //! says how many it judged of how many delivered.
+//!
+//! **A population is bounded from below** (core §2.7, 0.24; #735). The
+//! `budget` case counts a templated resource's live members against its
+//! bound in this instance, and the `rate` case an event's occurrences per
+//! member, both through `zenkey_model::budget`. More than the bound, from
+//! any reading, is the finding; within it is clean only after the owner's
+//! complete GET of a state, and a window, which never shows a member it did
+//! not hear, leaves it unobservable.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use zenkey_model::authoring::Kind;
+use zenkey_model::budget::{self, Bound, Occurrences, Reading};
 use zenkey_model::contract::{Body, Fanout, Resource};
 use zenkey_model::freshness::{
     self as fresh, ClockMeasure, ClockTrust, Horizon, Judged, Observation, Reason, Reply, StampAge,
@@ -29,7 +38,7 @@ use zenkey_model::freshness::{
 };
 use zenkey_model::schema::TypeId;
 
-use crate::bus::conform::{ConformObservation, FanoutSeen, Heard, OpObserved};
+use crate::bus::conform::{Arrival, ConformObservation, FanoutSeen, Heard, OpObserved};
 use crate::judge::common::s1_premise;
 use crate::judge::doctor::AdminSpace;
 use crate::model::catalog::{ContractState, Revision, zid_value};
@@ -61,7 +70,6 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             obs.iface.to_string(),
             why.clone(),
         ));
-        report.cases.extend(profile_cases());
         report.cases.extend(health_cases(obs));
         report.unobservable = Some(why);
         report
@@ -119,7 +127,6 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
              to judge the resources against",
             obs.iface
         ));
-        report.cases.extend(profile_cases());
         report.cases.extend(health_cases(obs));
         return report;
     };
@@ -176,6 +183,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
                     }
                 }
             }
+            report.cases.extend(budget_case(obs, r, &name, None, None));
             continue;
         }
         let heard = obs.heard.get(&name);
@@ -200,22 +208,359 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
         report
             .cases
             .push(freshness(obs, r, &name, heard, get, &clocks));
+        report.cases.extend(budget_case(obs, r, &name, heard, get));
+        report.cases.extend(rate_case(r, &name, heard));
     }
-    report.cases.extend(profile_cases());
     report.cases.extend(health_cases(obs));
     let mut seen = BTreeSet::new();
     report.asked.retain(|s| seen.insert(s.clone()));
     report
 }
 
-/// The profile-backed cases still waiting for their profile (#613).
-fn profile_cases() -> [ConformCase; 1] {
-    [ConformCase::not_asked(
-        CaseId::Budget,
-        "service",
-        "judged against a declared rate and population budget, a profile that does not \
-         exist yet (#613): not asked is neither a pass nor a violation",
-    )]
+/// The value each instance exposing `name` states for its bound, or none:
+/// one entry per descriptor that exposes it (§2.7, §3.3).
+fn stated(obs: &ConformObservation, name: &str) -> Vec<Option<u64>> {
+    let (Ok(o), Some(rev)) = (&obs.presence, &obs.revision) else {
+        return Vec::new();
+    };
+    let want = obs.iface.to_string();
+    o.descriptors
+        .iter()
+        .flatten()
+        .filter_map(|(_, read)| read.descriptor())
+        .filter(|d| {
+            d.exposed(rev.contract()).is_some_and(|rs| {
+                rs.iter()
+                    .any(|r| zenkey::implementation::resource_name(r) == name)
+            })
+        })
+        .map(|d| {
+            d.interfaces
+                .iter()
+                .find(|e| e.iface == want)
+                .and_then(|e| e.cardinality.get(name).copied())
+        })
+        .collect()
+}
+
+/// "its bound of 8 (the descriptor's)": the bound, and whose it is.
+fn bound_words(r: &Resource, b: Bound) -> String {
+    match (b, r.cardinality) {
+        (Bound::Of(n), Some(c)) if n < c => {
+            format!("its bound of {n} (its descriptor's; the contract's is {c})")
+        }
+        (Bound::Of(n), _) => format!("its bound of {n} (the contract's)"),
+        (other, _) => format!("its bound, {other}"),
+    }
+}
+
+/// A period as a reader says it.
+fn period_words(d: std::time::Duration) -> String {
+    match d.as_secs() {
+        60 => "a minute".to_owned(),
+        3600 => "an hour".to_owned(),
+        s if s % 86_400 == 0 => format!("{} d", s / 86_400),
+        s if s % 3600 == 0 => format!("{} h", s / 3600),
+        s => format!("{s} s"),
+    }
+}
+
+/// An event's member is its key without the ULID chunk (§2.6, §2.7); any
+/// other key is its own member.
+fn member_of(kind: Kind, key: &str) -> &str {
+    match (kind, key.rsplit_once('/')) {
+        (Kind::Event, Some((member, _ulid))) => member,
+        _ => key,
+    }
+}
+
+/// Each member a window heard, with the instants of its puts on this host's
+/// receive clock, which every member shares (§2.7).
+fn members_heard(kind: Kind, h: &Heard) -> BTreeMap<String, Vec<std::time::Duration>> {
+    let mut out: BTreeMap<String, Vec<std::time::Duration>> = BTreeMap::new();
+    for (key, arrivals) in &h.arrivals {
+        out.entry(member_of(kind, key).to_owned())
+            .or_default()
+            .extend(arrivals.iter().map(|a| a.at));
+    }
+    out
+}
+
+/// One member's occurrences as instants (§2.7, "Spans"): between their
+/// stamps when every one carries a stamp of one clock, else on this host's
+/// receive clock, where transit can shorten a span.
+fn occurrence_instants(arrivals: &[&Arrival]) -> Vec<std::time::Duration> {
+    let stamped: Option<Vec<(String, SystemTime)>> = arrivals
+        .iter()
+        .map(|a| {
+            let s = a.stamp.as_ref()?;
+            Some((zid_value(&s.clock), stamp_time(s)?))
+        })
+        .collect();
+    if let Some(stamped) = stamped
+        && let Some((clock, _)) = stamped.first()
+        && stamped.iter().all(|(c, _)| c == clock)
+        && let Some(origin) = stamped.iter().map(|(_, t)| *t).min()
+    {
+        return stamped
+            .iter()
+            .map(|(_, t)| t.duration_since(origin).unwrap_or_default())
+            .collect();
+    }
+    arrivals.iter().map(|a| a.at).collect()
+}
+
+/// §2.7: a templated resource's live members against its bound in this
+/// instance — the owner's GET for a state, the window for a stream or an
+/// event. `None` for a resource without parameters, which has no bound to
+/// keep.
+fn budget_case(
+    obs: &ConformObservation,
+    r: &Resource,
+    name: &str,
+    heard: Option<&Result<Heard, String>>,
+    get: Option<&Result<StateReport, String>>,
+) -> Option<ConformCase> {
+    const C: CaseId = CaseId::Budget;
+    if !r.template.has_params() {
+        return None;
+    }
+    if r.kind == Kind::Operation {
+        return Some(ConformCase::not_asked(
+            C,
+            name,
+            "an operation's members are the values its callers name, and no reading of the \
+             owner counts them (§2.7)",
+        ));
+    }
+    let b = budget::bound_of(r, stated(obs, name));
+    let of = bound_words(r, b);
+    let w = obs.spec.window.as_secs_f64();
+    let retention = budget::retention_of(r);
+    let live = match budget::liveness(r.kind, retention) {
+        Some(p) if r.kind == Kind::Event => format!(
+            "with an occurrence within its retention of {}",
+            period_words(p)
+        ),
+        _ => "heard within one hour".to_owned(),
+    };
+    let (reading, capped) = match r.kind {
+        Kind::State => match get {
+            Some(Ok(g)) => (
+                Reading::Get {
+                    members: rows(g).count() as u64,
+                    complete: obs.gets_complete.get(name).copied().unwrap_or(false),
+                },
+                String::new(),
+            ),
+            Some(Err(e)) => {
+                return Some(ConformCase::unobservable(
+                    C,
+                    name,
+                    format!("the GET failed: {e}"),
+                ));
+            }
+            None => return Some(ConformCase::unobservable(C, name, "the GET was not made")),
+        },
+        _ => match heard {
+            Some(Ok(h)) => (
+                Reading::Window(members_heard(r.kind, h)),
+                if h.arrivals_capped > 0 {
+                    format!(
+                        " ({} put(s) past the {} this run keeps not counted)",
+                        h.arrivals_capped,
+                        crate::bus::conform::ARRIVAL_CAP
+                    )
+                } else {
+                    String::new()
+                },
+            ),
+            Some(Err(e)) => {
+                return Some(ConformCase::unobservable(
+                    C,
+                    name,
+                    format!("the subscription failed: {e}"),
+                ));
+            }
+            None => return Some(ConformCase::unobservable(C, name, "not subscribed")),
+        },
+    };
+    let j = budget::population(r.kind, b, retention, &reading);
+    let n = j.counted;
+    Some(match (j.verdict, j.reason) {
+        (budget::Verdict::NotAsked, budget::Reason::NoCeiling) => ConformCase::not_asked(
+            C,
+            name,
+            "its bound is the no-ceiling 4294967295: no bound, never a population to budget \
+             with (§2.2)",
+        ),
+        (budget::Verdict::NotAsked, why) => ConformCase::not_asked(C, name, why.as_str()),
+        (budget::Verdict::Exceeds, _) => ConformCase::failed(
+            C,
+            name,
+            match &reading {
+                Reading::Get { complete, .. } => format!(
+                    "{n} member(s) answered with a value by the owner's GET{}, above {of}: an \
+                     owner MUST NOT hold more live members than its bound (§2.7)",
+                    if *complete {
+                        ""
+                    } else {
+                        ", which did not run to its final reply: a lower bound already above it"
+                    }
+                ),
+                Reading::Window(_) => format!(
+                    "{n} member(s) {live} in the {w}s window, above {of}: an owner MUST NOT \
+                     hold more live members than its bound, and a lower bound already exceeds \
+                     it (§2.7){capped}"
+                ),
+            },
+        ),
+        (budget::Verdict::Within, _) => ConformCase::passed(
+            C,
+            name,
+            format!(
+                "{n} member(s) answered with a value by the owner's GET, which ran to its final \
+                 reply: within {of} (§2.7)"
+            ),
+        ),
+        (budget::Verdict::Unobservable, budget::Reason::Empty) => ConformCase::unobservable(
+            C,
+            name,
+            match &reading {
+                Reading::Get { .. } => "the owner's GET answered no member with a value: an \
+                                        empty reply set is never a verdict (O5)"
+                    .to_owned(),
+                Reading::Window(_) => {
+                    format!("no member heard in the {w}s window: nothing to count (O5)")
+                }
+            },
+        ),
+        (budget::Verdict::Unobservable, budget::Reason::Incomplete) => ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "{n} member(s) answered with a value, within {of}, by a GET that did not run to \
+                 its final reply: a member it did not answer may be live (§2.7)"
+            ),
+        ),
+        (budget::Verdict::Unobservable, _) => ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "{n} member(s) {live} in the {w}s window, within {of}: a window never shows a \
+                 member it did not hear, so it bounds the population from below only (§2.7) — \
+                 --skip budget leaves the case unasked{capped}"
+            ),
+        ),
+    })
+}
+
+/// §2.7: an event's occurrences per member, against its declared `rate`.
+/// `None` for a resource that is not an event.
+fn rate_case(
+    r: &Resource,
+    name: &str,
+    heard: Option<&Result<Heard, String>>,
+) -> Option<ConformCase> {
+    const C: CaseId = CaseId::Rate;
+    if r.kind != Kind::Event {
+        return None;
+    }
+    let Some(rate) = budget::rate_of(r) else {
+        return Some(ConformCase::not_asked(
+            C,
+            name,
+            "it declares no rate (§2.6)",
+        ));
+    };
+    let h = match heard {
+        Some(Ok(h)) => h,
+        Some(Err(e)) => {
+            return Some(ConformCase::unobservable(
+                C,
+                name,
+                format!("the subscription failed: {e}"),
+            ));
+        }
+        None => return Some(ConformCase::unobservable(C, name, "not subscribed")),
+    };
+    let mut by_member: BTreeMap<&str, Vec<&Arrival>> = BTreeMap::new();
+    for (key, arrivals) in &h.arrivals {
+        by_member
+            .entry(member_of(Kind::Event, key))
+            .or_default()
+            .extend(arrivals.iter());
+    }
+    let members: BTreeMap<String, Vec<std::time::Duration>> = by_member
+        .iter()
+        .map(|(m, a)| ((*m).to_owned(), occurrence_instants(a)))
+        .collect();
+    let lost = h.lagged + h.arrivals_capped;
+    let o = Occurrences {
+        listened: h.listened,
+        complete: lost == 0,
+        members,
+    };
+    let (n, period) = rate.limit();
+    let period = period_words(period);
+    let w = h.listened.as_secs_f64();
+    let j = budget::rate(Some(rate), &o);
+    Some(match j.reason {
+        budget::Reason::RateExceeded => {
+            let (member, _) = o
+                .members
+                .iter()
+                .find(|(m, ts)| {
+                    let one = Occurrences {
+                        members: BTreeMap::from([((*m).clone(), (*ts).clone())]),
+                        ..o.clone()
+                    };
+                    budget::rate(Some(rate), &one).verdict == budget::Verdict::Exceeds
+                })
+                .expect("an exceeding member");
+            ConformCase::failed(
+                C,
+                name,
+                format!(
+                    "{} occurrences of {member} within {period}, where its rate {rate} allows \
+                     {n}: an owner MUST NOT publish more (§2.7)",
+                    j.counted
+                ),
+            )
+        }
+        budget::Reason::RateKept => ConformCase::passed(
+            C,
+            name,
+            format!(
+                "{} member(s) over a {w:.1}s window, none with more than {n} occurrence(s) within \
+                 {period} ({rate}, §2.7)",
+                o.members.len()
+            ),
+        ),
+        budget::Reason::Lossy => ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "this run lost {lost} delivery(ies) in the window: an occurrence it did not hear \
+                 could exceed {rate}"
+            ),
+        ),
+        budget::Reason::WindowTooShort => ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "the {w:.1}s window is shorter than {period}, {rate}'s period: no excess heard, \
+                 and listening at least that long (--for) is what could show the rate kept \
+                 (§2.7)"
+            ),
+        ),
+        budget::Reason::Empty => ConformCase::unobservable(
+            C,
+            name,
+            format!("no occurrence heard in the {w:.1}s window: nothing to count (O5)"),
+        ),
+        other => ConformCase::unobservable(C, name, other.as_str()),
+    })
 }
 
 /// `health.v1` (#721, PF): §5's "is this service healthy?" (`health`) and
@@ -1384,6 +1729,13 @@ mod tests {
                 )
             })
             .collect();
+        let mut arrivals: BTreeMap<String, Vec<Arrival>> = BTreeMap::new();
+        for s in &samples {
+            arrivals.entry(s.key.clone()).or_default().push(Arrival {
+                at: Duration::from_secs(1),
+                stamp: s.timestamp.clone(),
+            });
+        }
         Ok(Heard {
             received: samples.len() as u64,
             samples,
@@ -1391,6 +1743,7 @@ mod tests {
             members,
             clocks,
             listened: WINDOW,
+            arrivals,
             ..Heard::default()
         })
     }
@@ -1513,6 +1866,7 @@ mod tests {
             revision: Some(rev),
             heard: BTreeMap::new(),
             gets: BTreeMap::new(),
+            gets_complete: BTreeMap::from([("state/status/{dev}".to_owned(), true)]),
             calls: BTreeMap::new(),
             admin: Some(Ok(AdminSpace {
                 routers: vec![crate::report::RouterInfo {
@@ -1576,8 +1930,24 @@ mod tests {
 
     #[test]
     fn a_conforming_service_passes_every_case_asked() {
-        let r = judge(&conforming());
+        let mut r = judge(&conforming());
+        // A window bounds a stream's population from below only (§2.7):
+        // its budget is the one case left unobservable, and skipping it is
+        // what leaves the run clean.
+        let bw = case(&r, CaseId::Budget, "stream/bandwidth/{dev}");
+        assert!(
+            matches!(&bw.verdict, Judgement::Unobservable { reason }
+                if reason.contains("bounds the population from below only")),
+            "{bw:#?}"
+        );
+        assert!(matches!(
+            &r.judgement(),
+            Judgement::Unobservable { reason }
+                if reason.contains("1 case(s)") && reason.contains("budget stream/bandwidth/{dev}")
+        ));
+        r.skip(&[CaseId::Budget]);
         assert_eq!(judgement_exit_code(&r.judgement()), 0, "{r:#?}");
+        let r = judge(&conforming());
         assert_eq!(r.fingerprint, Some(fp().to_string()));
         for (id, subject) in [
             (CaseId::ContractServed, format!("m.v1 {}", fp())),
@@ -1589,6 +1959,7 @@ mod tests {
             (CaseId::Operation, "@op/diag".to_owned()),
             (CaseId::Operation, "@op/list".to_owned()),
             (CaseId::Freshness, "state/status/{dev}".to_owned()),
+            (CaseId::Budget, "state/status/{dev}".to_owned()),
         ] {
             assert!(
                 matches!(
@@ -1601,12 +1972,12 @@ mod tests {
         }
         // Not idempotent, and no --i-know: not asked, with why; so is its
         // fan-out probe; a resource with no horizon is not asked its
-        // freshness; and the budget waits for its profile.
+        // freshness; and an operation's members are its callers' values.
         for (id, subject) in [
             (CaseId::Operation, "@op/set/{dev}"),
             (CaseId::FanoutRefused, "@op/set/{dev}"),
             (CaseId::Freshness, "stream/bandwidth/{dev}"),
-            (CaseId::Budget, "service"),
+            (CaseId::Budget, "@op/set/{dev}"),
         ] {
             let c = case(&r, id, subject);
             assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
@@ -1617,6 +1988,12 @@ mod tests {
             "{:?}",
             r.asked
         );
+        // Untemplated resources have no bound; no event, no rate.
+        assert!(
+            !r.cases.iter().any(|c| c.case == CaseId::Budget
+                && ["@op/diag", "@op/list"].contains(&c.subject.as_str()))
+        );
+        assert!(!r.cases.iter().any(|c| c.case == CaseId::Rate));
         // §4.2 (0.17): without a verified router, the owner's own stamp
         // proves nothing, and the run is no pass.
         let mut o = conforming();
@@ -1749,11 +2126,13 @@ mod tests {
         );
         o.calls
             .insert("@op/list".into(), called(summary_replies(1)));
-        let r = judge(&o);
+        let mut r = judge(&o);
         assert!(matches!(
             case(&r, CaseId::FanoutRefused, "@op/set/{dev}").verdict,
             Judgement::NotEstablished { .. }
         ));
+        // The stream's budget, a window's lower bound, skipped (§2.7).
+        r.skip(&[CaseId::Budget]);
         assert_eq!(judgement_exit_code(&r.judgement()), 0, "{r:#?}");
     }
 
@@ -2019,5 +2398,270 @@ mod tests {
             &case(&r, CaseId::Health, "service").verdict,
             Judgement::Unobservable { reason } if reason.contains("--clocks-synced")
         ));
+    }
+
+    /// `budget` (core §2.7, 0.24; #735) per templated state resource, from
+    /// the owner's GET against the bound its descriptor lowers: more members
+    /// than the bound is the finding, complete or not; within it is clean
+    /// only after a GET that ran to its final reply; an empty answer is
+    /// unobservable (O5). A window over a stream is a lower bound: above
+    /// the bound, the finding; within it, unobservable.
+    #[test]
+    fn the_budget_is_judged_per_templated_resource() {
+        const S: &str = "state/status/{dev}";
+        const BW: &str = "stream/bandwidth/{dev}";
+        let lowered = |n: u64| {
+            let mut p = presence(Some(OWNER));
+            if let Some(d) = p.descriptors.as_mut().and_then(|m| m.values_mut().next()) {
+                let DescriptorRead::Served(d) = d else {
+                    unreachable!()
+                };
+                d.interfaces[0].cardinality.insert(S.to_owned(), n);
+            }
+            p
+        };
+        let two_members = || {
+            let mut g = get(br#"{"up":true}"#, Some("ab12")).unwrap();
+            let mut other = g.rows[0].clone();
+            other.key = "zk2/lab/m/m.v1/state/status/eth1".into();
+            g.rows.push(other);
+            Ok(g)
+        };
+        // Two members against a descriptor's bound of 1: the finding.
+        let mut o = conforming();
+        o.presence = Ok(lowered(1));
+        o.gets.insert(S.into(), two_members());
+        let r = judge(&o);
+        let msg = failed(&r, CaseId::Budget, S);
+        assert!(
+            msg.contains("2 member(s)") && msg.contains("its bound of 1 (its descriptor's"),
+            "{msg}"
+        );
+        assert_eq!(judgement_exit_code(&r.judgement()), 1);
+        // The same from a GET that did not run to its final reply: a lower
+        // bound already above it.
+        o.gets_complete.insert(S.into(), false);
+        assert!(failed(&judge(&o), CaseId::Budget, S).contains("lower bound"));
+        // Within the descriptor's bound of 2, complete: clean.
+        let mut o = conforming();
+        o.presence = Ok(lowered(2));
+        o.gets.insert(S.into(), two_members());
+        assert!(matches!(
+            &case(&judge(&o), CaseId::Budget, S).verdict,
+            Judgement::NotEstablished { reason } if reason.contains("within its bound of 2")
+        ));
+        // Within it, incomplete: unobservable.
+        o.gets_complete.insert(S.into(), false);
+        assert!(matches!(
+            &case(&judge(&o), CaseId::Budget, S).verdict,
+            Judgement::Unobservable { reason } if reason.contains("did not run to its final reply")
+        ));
+        // No member answered: never a verdict (O5).
+        let mut o = conforming();
+        if let Some(Ok(g)) = o.gets.get_mut(S) {
+            g.rows.clear();
+        }
+        assert!(matches!(
+            &case(&judge(&o), CaseId::Budget, S).verdict,
+            Judgement::Unobservable { reason } if reason.contains("O5")
+        ));
+        // A bound above the contract's is D007's: the contract's (8) holds.
+        let mut o = conforming();
+        o.presence = Ok(lowered(64));
+        o.gets.insert(S.into(), two_members());
+        assert!(matches!(
+            &case(&judge(&o), CaseId::Budget, S).verdict,
+            Judgement::NotEstablished { reason } if reason.contains("its bound of 8 (the contract's)")
+        ));
+        // A stream heard with nine members in the window, above its 8.
+        let mut o = conforming();
+        let samples: Vec<WatchSample> = (0..9)
+            .map(|i| {
+                sample(
+                    &format!("zk2/lab/m/m.v1/stream/bandwidth/eth{i}"),
+                    Conformance::Valid,
+                    false,
+                    None,
+                )
+            })
+            .collect();
+        o.heard.insert(BW.into(), heard(samples));
+        let msg = failed(&judge(&o), CaseId::Budget, BW);
+        assert!(
+            msg.contains("9 member(s) heard within one hour") && msg.contains("lower bound"),
+            "{msg}"
+        );
+    }
+
+    /// An event's contract: `budget` and `rate` (core §2.7) over a window.
+    fn alarms() -> Arc<Revision> {
+        let dir = std::env::temp_dir().join(format!("zenkey-fleet-budget-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let l = zenkey_model::contract::load_str(
+            "[interface]\nname = \"al\"\nmajor = 1\n\
+             [resources.\"alarms/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             params = { src = \"string\" }\ncardinality = 2\nrate = \"low\"\nretention = \"1h\"\n\
+             [resources.\"journal/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             params = { src = \"string\" }\ncardinality = 4294967295\nrate = \"burst(10/h)\"\n\
+             retention = \"1d\"\n",
+            &dir,
+            None,
+        );
+        Arc::new(Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::Bus,
+        ))
+    }
+
+    /// One occurrence of `src` arriving at `at` seconds, stamped by
+    /// `clock` at `stamped` seconds past the fixtures' stamp when given.
+    fn occurrence(src: &str, n: usize, at: f64, clock: Option<(&str, f64)>) -> (String, Arrival) {
+        let base = stamp_time(&stamp("x").unwrap()).unwrap();
+        let stamp = clock.map(|(c, stamped)| {
+            let t = base + Duration::from_secs_f64(stamped);
+            let since = t.duration_since(std::time::UNIX_EPOCH).unwrap();
+            Stamp {
+                time: format!("{:#}", zenoh::time::NTP64::from(since)),
+                clock: c.into(),
+            }
+        });
+        (
+            format!("zk2/lab/al/al.v1/events/alarms/{src}/01hzzzzzzzzzzzzzzzzzzzzz{n:02}"),
+            Arrival {
+                at: Duration::from_secs_f64(at),
+                stamp,
+            },
+        )
+    }
+
+    /// `rate` (core §2.7) per member over a window: two occurrences of one
+    /// member less than a minute apart are the finding under `low`, in a
+    /// window of seconds; members once each are no excess, and a window
+    /// shorter than a minute cannot show the rate kept. A stamped span is
+    /// measured between the stamps of one clock, not on arrival. `budget`
+    /// on an event counts members within its retention; the no-ceiling
+    /// cardinality is not asked.
+    #[test]
+    fn an_events_rate_and_population_are_judged_over_the_window() {
+        let rev = alarms();
+        let alarms_r = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "alarms/{src}")
+            .unwrap()
+            .clone();
+        let journal = rev
+            .contract()
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "journal/{src}")
+            .unwrap()
+            .clone();
+        let window = |of: Vec<(String, Arrival)>, listened: f64| -> Result<Heard, String> {
+            let mut h = Heard {
+                listened: Duration::from_secs_f64(listened),
+                ..Heard::default()
+            };
+            for (k, a) in of {
+                h.received += 1;
+                h.arrivals.entry(k).or_default().push(a);
+            }
+            Ok(h)
+        };
+        let rate = |h: &Result<Heard, String>| {
+            rate_case(&alarms_r, "events/alarms/{src}", Some(h)).unwrap()
+        };
+        // Two of `a` 10 s apart, in a 20 s window: beyond `low`.
+        let twice = window(
+            vec![
+                occurrence("a", 1, 1.0, None),
+                occurrence("a", 2, 11.0, None),
+            ],
+            20.0,
+        );
+        let c = rate(&twice);
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        assert!(
+            c.detail
+                .as_deref()
+                .unwrap()
+                .contains("2 occurrences of zk2/lab/al/al.v1/events/alarms/a"),
+            "{c:#?}"
+        );
+        // `a` and `b` once each: no excess, and 20 s is shorter than a minute.
+        let once = window(
+            vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
+            20.0,
+        );
+        assert!(matches!(&rate(&once).verdict,
+            Judgement::Unobservable { reason } if reason.contains("shorter than a minute")));
+        // Over 61 s, nothing lost: kept.
+        let long = window(
+            vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
+            61.0,
+        );
+        assert!(matches!(
+            rate(&long).verdict,
+            Judgement::NotEstablished { .. }
+        ));
+        // Lost deliveries leave it unobservable.
+        let mut lossy = window(vec![occurrence("a", 1, 1.0, None)], 61.0);
+        lossy.as_mut().unwrap().lagged = 3;
+        assert!(matches!(&rate(&lossy).verdict,
+            Judgement::Unobservable { reason } if reason.contains("lost 3")));
+        // Arrivals 1 s apart, stamps of one clock (compared by value) 70 s
+        // apart: the span is the stamps', and keeps `low`.
+        let stamped = window(
+            vec![
+                occurrence("a", 1, 1.0, Some(("ab12", 1.0))),
+                occurrence("a", 2, 2.0, Some(("AB12", 71.0))),
+            ],
+            61.0,
+        );
+        assert!(matches!(
+            rate(&stamped).verdict,
+            Judgement::NotEstablished { .. }
+        ));
+        // Stamps of two clocks: the receive clock's span, 1 s, beyond it.
+        let mixed = window(
+            vec![
+                occurrence("a", 1, 1.0, Some(("ab12", 1.0))),
+                occurrence("a", 2, 2.0, Some(("cd34", 71.0))),
+            ],
+            61.0,
+        );
+        assert_eq!(rate(&mixed).verdict, Judgement::Established);
+        // Budget: three members within an hour's retention, above 2.
+        let three = window(
+            vec![
+                occurrence("a", 1, 1.0, None),
+                occurrence("b", 2, 2.0, None),
+                occurrence("c", 3, 3.0, None),
+            ],
+            20.0,
+        );
+        let mut o = conforming();
+        o.revision = Some(Arc::clone(&rev));
+        o.presence = Ok(Observed::from_keys("zk2/lab/al/@zk/**", &[], true));
+        let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&three), None).unwrap();
+        assert_eq!(b.verdict, Judgement::Established, "{b:#?}");
+        assert!(
+            b.detail
+                .as_deref()
+                .unwrap()
+                .contains("within its retention of an hour"),
+            "{b:#?}"
+        );
+        // Two members: within, from a window: unobservable.
+        let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&once), None).unwrap();
+        assert!(
+            matches!(b.verdict, Judgement::Unobservable { .. }),
+            "{b:#?}"
+        );
+        // The no-ceiling cardinality: not asked.
+        let b = budget_case(&o, &journal, "events/journal/{src}", Some(&three), None).unwrap();
+        assert_eq!(b.verdict, Judgement::NotAsked, "{b:#?}");
+        assert!(b.detail.as_deref().unwrap().contains("no-ceiling"));
     }
 }

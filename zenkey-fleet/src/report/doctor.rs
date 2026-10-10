@@ -85,11 +85,16 @@ pub enum CheckId {
     /// presence reads a grace apart, the cause undecided (`hostid.v1`
     /// §2.12).
     HostidDuplicate,
+    /// An owner holding more live members of a templated state resource
+    /// than its bound, by its own complete GET (core §2.7, 0.24; #735). A
+    /// data-plane read, asked under `deep` only, from the GETs
+    /// `state-stamp-foreign` reads.
+    PopulationOverBound,
 }
 
 impl CheckId {
     /// Every check id, in the order the doctor reports them.
-    pub const ALL: [CheckId; 18] = [
+    pub const ALL: [CheckId; 19] = [
         CheckId::SplitBrain,
         CheckId::BindingUnsatisfied,
         CheckId::ContractDrift,
@@ -108,6 +113,7 @@ impl CheckId {
         CheckId::HealthStale,
         CheckId::HealthInconsistent,
         CheckId::HostidDuplicate,
+        CheckId::PopulationOverBound,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -131,6 +137,7 @@ impl CheckId {
             CheckId::HealthStale => "health-stale",
             CheckId::HealthInconsistent => "health-inconsistent",
             CheckId::HostidDuplicate => "hostid-duplicate",
+            CheckId::PopulationOverBound => "population-over-bound",
         }
     }
 
@@ -161,6 +168,7 @@ impl CheckId {
             CheckId::HealthStale => "health.v1 §2.4",
             CheckId::HealthInconsistent => "health.v1 §2.2",
             CheckId::HostidDuplicate => "hostid.v1 §2.12",
+            CheckId::PopulationOverBound => "§2.7",
         }
     }
 
@@ -222,7 +230,21 @@ impl CheckId {
                 "do the counted instances of one address of a minted system state two session \
                  zids, in both of two presence reads a grace apart?"
             }
+            CheckId::PopulationOverBound => {
+                "does an owner hold more live members of a templated state resource than its \
+                 bound, by its own answer to a GET?"
+            }
         }
+    }
+
+    /// Whether the check reads the owners' data plane, a GET of every
+    /// owner's state, and so is asked under `deep` only: the frugality v1's
+    /// `--deep` checks had.
+    pub fn reads_data(self) -> bool {
+        matches!(
+            self,
+            CheckId::StateStampForeign | CheckId::PopulationOverBound
+        )
     }
 
     /// Whether the check reads the deployment's presence. Over an empty
@@ -815,6 +837,7 @@ mod check_id_tests {
                 "health-stale",
                 "health-inconsistent",
                 "hostid-duplicate",
+                "population-over-bound",
             ]
         );
     }

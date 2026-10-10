@@ -815,6 +815,88 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
     drop(writer);
 }
 
+// ─── population-over-bound: core §2.7 (deep, 0.24, #735) ─────────────────────
+
+/// An owner of `inv.v1` (one templated state, bound 4) at `address`, its
+/// descriptor lowering the bound to `bound`, holding `members` items.
+async fn inventory(
+    session: &zenoh::Session,
+    address: &str,
+    bound: u64,
+    members: usize,
+) -> (Service, Vec<zenkey::state::StateWriter>) {
+    let inv = load(
+        "[interface]\nname = \"inv\"\nmajor = 1\n\
+         [resources.\"items/{item}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+         params = { item = \"string\" }\ncardinality = 4\n",
+    );
+    let id = iface("inv.v1");
+    let mut b = ServiceBuilder::new(session, config(address));
+    b.implement(Implementation::new(inv)).expect("implement");
+    let mut writers = Vec::new();
+    for i in 0..members {
+        let item: Bindings = [("item".to_owned(), vec![format!("i{i}")])].into();
+        let w = b
+            .declare_state_writer(&id, "state/items/{item}", &item)
+            .await
+            .expect("a member");
+        w.put(format!("{i}")).await.expect("a put");
+        writers.push(w);
+    }
+    b.cardinality(&id, "state/items/{item}", bound)
+        .expect("a lowering");
+    (b.start().await.expect("start"), writers)
+}
+
+/// Core §2.7 under `deep`: the doctor counts each owner's templated state
+/// from the GET `state-stamp-foreign` reads. Two members where the
+/// descriptor lowers the bound to one is the finding, an error; two within
+/// a lowered bound of two adds nothing. Without `deep`, not asked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_population_above_its_bound_is_a_finding_under_deep() {
+    let (_r, ep) = router(false).await;
+    let (owners, tool) = (client(&ep).await, client(&ep).await);
+    let (_over, _w1) = inventory(&owners, "host-a/inv", 1, 2).await;
+    let (_within, _w2) = inventory(&owners, "host-b/inv", 2, 2).await;
+    settled(&tool, &["host-a/inv", "host-b/inv"]).await;
+    let mut deep = spec(&[CheckId::PopulationOverBound]);
+    deep.deep = true;
+    let r = doctor(&bus(&tool, &tool, ""), &deep).await;
+    let f = found(
+        &r,
+        CheckId::PopulationOverBound,
+        "host-a/inv inv.v1 state/items/{item}",
+    );
+    assert_eq!(f.severity, DoctorSeverity::Error);
+    assert!(
+        f.evidence.contains("2 member(s)")
+            && f.evidence
+                .contains("its bound of 1 (its descriptor's; the contract's is 4)"),
+        "{f:?}"
+    );
+    let c = verdict(&r, CheckId::PopulationOverBound);
+    assert!(
+        !c.findings
+            .iter()
+            .any(|f| f.subject.starts_with("host-b/inv"))
+            && !c
+                .unjudged
+                .iter()
+                .any(|u| u.subject.starts_with("host-b/inv")),
+        "within its bound: {c:#?}"
+    );
+    let r = doctor(
+        &bus(&tool, &tool, ""),
+        &spec(&[CheckId::PopulationOverBound]),
+    )
+    .await;
+    assert!(
+        verdict(&r, CheckId::PopulationOverBound)
+            .verdict
+            .is_not_asked()
+    );
+}
+
 // ─── the empty scope ────────────────────────────────────────────────────────
 
 /// A doctor pointed at the wrong namespace: no zk2 token visible, so every
