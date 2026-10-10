@@ -496,6 +496,18 @@ def _health_codes(path: Path) -> list[Result]:
             for c in _load_json(path)["cases"]]
 
 
+def _health_clock(path: Path) -> list[Result]:
+    """health.v1 §5 (0.3): what one subscriber heard of one service, in
+    arrival order, and its presence -> "is this service's clock ahead?"."""
+    from . import health
+
+    return [_check(f"clock: {c['heard']} ({c['note']})",
+                   dict(zip(("answer", "reason"),
+                            health.clock_question(c["presence"], c.get("descriptor"), c["heard"]))),
+                   c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
@@ -504,7 +516,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements,
                   "clock-trust.json": _freshness_clock_trust},
     "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
-               "codes.json": _health_codes},
+               "codes.json": _health_codes, "clock.json": _health_clock},
 }
 
 
@@ -527,7 +539,80 @@ def _profile_family(name: str) -> Callable[[Path], list[Result]]:
     return family
 
 
+def _budget_bounds(path: Path) -> list[Result]:
+    """Core §2.7 (0.24): the contract's cardinality and each instance's
+    stated one -> the bound a tool judges against."""
+    from . import budget
+
+    return [_check(f"bounds: {c['note']}", {"bound": budget.bound(c["contract"], c["stated"])}, c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _budget_population(path: Path) -> list[Result]:
+    """Core §2.7 (0.24): a kind, a bound, a retention and one reading -> the
+    population verdict and its reason."""
+    from . import budget
+    from .freshness import seconds_to_ns
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        r = c["reading"]
+        if r["via"] == "get":
+            reading: Any = budget.GetReading(r["members"], r["complete"])
+        else:
+            reading = budget.WindowReading({m: [seconds_to_ns(x) for x in ts] for m, ts in r["heard"].items()},
+                                           seconds_to_ns(r["listened_s"]), r["lossless"], r["present"])
+        ret = None if c.get("retention_s") is None else seconds_to_ns(c["retention_s"])
+        out.append(_check(f"population: {c['note']}", budget.population(c["kind"], c["bound"], ret, reading).pair(),
+                          c["expect"]))
+    return out
+
+
+def _budget_rate(path: Path) -> list[Result]:
+    """Core §2.7 (0.24): an event's rate and a window's occurrences -> the
+    rate verdict and its reason."""
+    from . import budget
+    from .freshness import seconds_to_ns
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        r = c["reading"]
+        members = {m: [seconds_to_ns(x) for x in ts] for m, ts in r["members"].items()}
+        got = budget.rate(c["rate"], members, seconds_to_ns(r["listened_s"]), r["complete"])
+        out.append(_check(f"rate: {c['note']}", got.pair(), c["expect"]))
+    return out
+
+
+BUDGET_FIXTURES = {"bounds.json": _budget_bounds, "population.json": _budget_population, "rate.json": _budget_rate}
+
+
+def family_budget(root: Path) -> list[Result]:
+    """``budget/`` (core §2.7, 0.24): every file, and an unknown one fails."""
+    out: list[Result] = []
+    for path in sorted((root / "budget").iterdir()):
+        run = BUDGET_FIXTURES.get(path.name)
+        if run is None:
+            out.append((f"budget/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(path)
+    return out
+
+
+#: Every entry of spec/conformance/ that a family reads. Appendix E lists
+#: the fixture formats; an entry no family reads fails ``layout``, so a new
+#: family cannot land unrun.
+KNOWN_ENTRIES = {"README.md", "keys.json", "slugs.json", "templates.json", "contracts", "sets", "bundles",
+                 "history", "descriptors", "errors", "compat", "budget"}
+
+
+def family_layout(root: Path) -> list[Result]:
+    return [(f"spec/conformance/{p.name}", p.name in KNOWN_ENTRIES,
+             "" if p.name in KNOWN_ENTRIES else "an entry no family reads")
+            for p in sorted(root.iterdir())]
+
+
 FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
+    "layout": family_layout,
     "keys": family_keys,
     "slugs": family_slugs,
     "templates": family_templates,
@@ -538,6 +623,7 @@ FAMILIES: dict[str, Callable[[Path], list[Result]]] = {
     "descriptors": family_descriptors,
     "errors": family_errors,
     "compat": family_compat,
+    "budget": family_budget,
     "examples": family_examples,
     # The profiles, one family each (profiles/README.md, "How the harnesses
     # take profiles in").

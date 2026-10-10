@@ -58,6 +58,7 @@ case name. It exits with:
 
 | Family | Spec | Module | What is checked |
 |---|---|---|---|
+| layout | App. E | | every entry of `spec/conformance/` is read by a family: a new one fails until it is |
 | keys | §1.1, §1.2 | `keys`, `lexical` | parse every key in `keys.json`, refuse the others, and build each accepted key back to the same string |
 | slugs | §1.4 | `slug` | slug and unslug, round trips, and refusal of non-canonical chunks |
 | templates | §2.2 | `templates` | match, then rank, with unslugged bindings |
@@ -67,15 +68,17 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
+| budget | §2.7 (0.24) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it) and `rate.json` (an event's rate per member). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
-| health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up) and `codes.json` (fault codes). An unknown file there fails. |
+| health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
 | examples | §9.6–§9.8, §10 | | Every `examples/zk2/**/<name>.v<major>.toml`, and every profile's standard contract under `spec/profiles/` (0.23): loads with **no finding at all**, W107 included; its built bundle verifies; it is published in its tree's history root (`examples/zk2/.history` or `spec/profiles/.history`), **byte-identical** to the bundle zk2py builds; it is `compatible` with its history. Both roots pass the §9.7 check, and a revision held in both is one file, byte for byte. |
 
 The result at the time of writing:
 
 ```text
+layout         12 passed     0 failed
 keys           55 passed     0 failed
 slugs          42 passed     0 failed
 templates      11 passed     0 failed
@@ -86,17 +89,19 @@ history        10 passed     0 failed
 descriptors    42 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
+budget         62 passed     0 failed
 examples       99 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
-health         91 passed     0 failed
-total         761 passed     0 failed
+health        112 passed     0 failed
+total         856 passed     0 failed
 ```
 
-The figures are against `core.md` 0.23, `hostid.v1` 0.3, `freshness.v1`
-0.2 and `health.v1` 0.1. 0.22 added `contracts/e002-two-majors`.
-`freshness.v1` 0.2 added `clock-trust.json` and four judgement cases, and
-`health.v1` its three fixture files. Five earlier releases added descriptor
+The figures are against `core.md` 0.24, `hostid.v1` 0.4, `freshness.v1`
+0.2 and `health.v1` 0.3. 0.22 added `contracts/e002-two-majors`, and 0.24
+the `budget/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
+judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
+`clock.json`. Five earlier releases added descriptor
 fixtures:
 - 0.10, `descriptors/ok-optional-role`;
 - 0.11, `ok-optional-unchecked`;
@@ -105,12 +110,13 @@ fixtures:
 - 0.19, `ok-derivation-profile`.
 
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
-  F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, and `freshness.v1`
-  0.2 F-100 to F-102. F-103 and F-104 are open, both against `health.v1`
-  0.1's scenarios.
+  F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
+  F-100 to F-102, and `health.v1` 0.2 F-103 and F-104. F-105 is open,
+  against core 0.24 §2.7.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
-  one (F-98), and `freshness.v1` 0.2 two (F-101, F-102).
+  one (F-98), `freshness.v1` 0.2 two (F-101, F-102), and `health.v1` 0.2 one
+  (F-104).
 - 0.7 adds the nullable reading (C-1) and `$ref`s followed inside
   `oneOf`/`anyOf`/`prefixItems` (X-1) to the classifier.
 - 0.8 makes `["null"]` a null schema too, and compares a recursive `$ref`
@@ -414,7 +420,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 303 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 315 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -550,7 +556,7 @@ it in as described below.
     example reads two different re-put stamps 1.5 s apart, then one once
     the writer closes.
 
-## health.v1 (profile text 0.2, core 0.23)
+## health.v1 (profile text 0.3, core 0.23 and 0.24)
 
 ```bash
 just py-health
@@ -560,8 +566,8 @@ just py-health
 with a standard contract: `health.v1.toml`, moved from the walkthrough
 unchanged and published in `spec/profiles/.history`. zk2py takes it in as
 described below.
-- **The `health` conformance family:** `judgements.json`, `rollups.json`
-  and `codes.json`, 91 of 91. The examples family walks the profiles'
+- **The `health` conformance family:** `judgements.json`, `rollups.json`,
+  `codes.json` and `clock.json` (0.3), 112 of 112. The examples family walks the profiles'
   standard contracts against `spec/profiles/.history` too.
 - **`zk2py.health`, the reader's half:**
   - the levels, unknown kept apart (§2.1, §2.6);
@@ -600,6 +606,30 @@ described below.
   - §4 step 4 runs under `drop_future_timestamp`;
   - the Rust `consume` example reads zk2py's health status, and stops at
     its operation step, since `health.v1` has none.
+
+## The population budget (core §2.7, 0.24)
+
+- **The `budget` conformance family:** `bounds.json`, `population.json` and
+  `rate.json`, 62 of 62.
+- **`zk2py.budget`:** `bound`, `population` and `rate`, as the fixtures read
+  them. `get_population` is a complete S4 GET, and `Window` a window over a
+  stream's or an event's members, with the owner's presence watched
+  throughout.
+- **The owner keeps the rule.** A new live member beyond its bound (a
+  templated state, a stream live for an hour, an event live for its
+  retention), or an occurrence beyond its rate, raises `BudgetExceeded`.
+  `cardinality=` lowers the bound in the descriptor, `budget=False` makes a
+  test owner that breaks the rule, and `occur()` publishes an event.
+- **Across the two implementations** (`just py-live`, `--only budget`, 12
+  checks):
+  - the owner example's `health.v1` checks, a templated state of
+    cardinality 64, are judged from complete S4 GETs: `within` at 10 and at
+    64, a 65th refused by the owner, and a GET that ran to its timeout
+    `incomplete`;
+  - zk2py's owners give a state with its bound lowered, a stream, and an
+    event whose window of one retention, 61 s, is a complete reading. Each
+    is shown both ways: a conforming owner, and a test owner that breaks
+    the rule and is the finding.
 
 ## What it does not cover
 
@@ -696,8 +726,9 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
+    budget.py         §2.7      the population budget: the bound, a population, a rate, readings on a bus
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b; freshness/ holds beacon.v1 and zk2py_fresh.v1;
+                      sysinfo_x, tracker, order, order_b, budget; freshness/ holds beacon.v1 and zk2py_fresh.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

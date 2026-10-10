@@ -1,0 +1,29 @@
+# zk2py's contract for core §2.7, the population budget (0.24): a templated
+# state, a templated event with a rate and a short retention (so that a
+# window of one retention is a complete reading in a minute), and a
+# templated stream. It must load with no finding at all.
+[interface]
+name    = "zk2py_budget"
+major   = 1
+minor   = 0
+summary = "zk2py's contract for the population budget"
+
+[resources."items/{id}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { id = "string" }
+cardinality = 4
+
+[resources."alarms/{id}"]
+kind        = "event"
+type        = { raw = "text/plain" }
+params      = { id = "string" }
+cardinality = 2
+rate        = "low"
+retention   = "60s"
+
+[resources."samples/{id}"]
+kind        = "stream"
+type        = { raw = "text/plain" }
+params      = { id = "string" }
+cardinality = 2

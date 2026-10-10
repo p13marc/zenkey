@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-two rounds.**
+**Twenty-three rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -41,7 +41,10 @@ where that was not enough, or where the spec said two things.
   profile, read cold with core 0.23 and `freshness.v1` 0.2 (see "At 0.23:
   health.v1 0.1"). `health.v1` 0.2 resolved them.
 - Nothing new was found against `health.v1` 0.2, read and run live against
-  the Rust owner example (see "At health.v1 0.2" at the end).
+  the Rust owner example (see "At health.v1 0.2").
+- **F-105 is new**, found against core 0.24's §2.7, the population budget,
+  read cold with `health.v1` 0.3 and `hostid.v1` 0.4 (see "At 0.24: the
+  population budget" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -51,8 +54,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.23, hostid.v1 0.3, freshness.v1 0.2 and health.v1 0.2:**
-104 entries, none open.
+**Counts at core 0.24, hostid.v1 0.4, freshness.v1 0.2 and health.v1 0.3:**
+105 entries, one open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -129,11 +132,12 @@ where that was not enough, or where the spec said two things.
     runs: an owner without an HLC, stamping from its offset clock.
   - F-104 overturned zk2py's guess. The tool takes the deployment's word for
     its clock, where zk2py had subscribed and measured.
+- F-105: **new**, an ambiguity against core 0.24 §2.7.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
 
-| Id | Severity | Status at 0.23 | Location | In one line |
+| Id | Severity | Status at 0.24 | Location | In one line |
 |---|---|---|---|---|
 | F-01 | ambiguity | resolved by 0.5 | §1.2 ULID | No first-character bound. |
 | F-02 | ambiguity | resolved by 0.5 | §1.1 | Is `x-eth0` a valid resource chunk without a contract? |
@@ -239,6 +243,7 @@ by the spec section that now states the rule.
 | F-102 | gap | resolved by freshness 0.2 | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
 | F-103 | gap (measured) | resolved by health 0.2 | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
 | F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
+| F-105 | ambiguity | **new** | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
 
 ---
 
@@ -3367,3 +3372,120 @@ line tables only, since the disk is tight.
 - **The `consume` example prints a protobuf state as its raw bytes,**
   lossily decoded as UTF-8. It is a test harness's printer, not a tool's
   rendering (core §7.2), so zk2py compares the bytes it can.
+
+## At 0.24: the population budget (#609)
+
+Core 0.24 adds §2.7, the population budget, with the fixture family
+`budget/`. `health.v1` 0.3 gives §5's clock question a fixture,
+`clock.json`. `hostid.v1` 0.4 fixes the wording of its scenarios §6. zk2py
+read all three cold, from `spec/` and `examples/zk2/` alone, and drove the
+Rust owner example as a black box.
+
+**`just py-conformance`: 856 of 856.**
+- A new family, `budget`, runs every file under `spec/conformance/budget/`.
+  An unknown file there fails.
+  - `bounds.json`: 15 cases.
+  - `population.json`: 30 cases.
+  - `rate.json`: 17 cases.
+
+  All 62 passed the first time.
+- `health` is 112, with `clock.json`'s 21 cases. All passed the first time,
+  and the runner no longer reports `clock.json` as unknown.
+- A new family, `layout`, checks that a family reads every entry of
+  `spec/conformance/`. A directory added there, as `budget/` was, now fails
+  the run until a family reads it.
+
+**`just py-health`: 29 of 29.** Its §4 and the live run now answer the clock
+question by `clock.json`'s rule, over what the subscriber heard in arrival
+order (`health.clock_from`).
+
+**`just py-hostid`: 34 of 34.** §6 already ran as a tool's scenario, all
+five steps, with zk2py's tool (`live.hostid_collision`). Step 5's contract
+is zk2py's own `zk2py_sysinfo_x.v1`, an id already spelled as 0.4 spells
+it.
+
+**`just py-freshness`: 21 of 21.**
+
+**`just py-live`: 315 passed, 0 failed, 0 known deviations.** The new run `budget` adds 12 checks:
+- **The owner example's `health.v1/state/checks/{check}`,** a templated
+  state of cardinality 64. Its `--health-check` flags and `check` commands
+  give it members, so it is the Rust owner's population zk2py judges.
+  - Its descriptor states no `cardinality`, so the bound is 64.
+  - A complete S4 GET answers 10 members, `within`, `complete`. Driven to 64,
+    exactly the bound, it is still `within`.
+  - It refuses a 65th check: "health.v1 holds at most 64 checks (§2.3)".
+  - A retired check is a `reply_del`, not a member: 63.
+  - Stopped with SIGSTOP, its GET ends at the timeout with an error reply,
+    so it is incomplete: `unobservable`, `incomplete`.
+- **zk2py's owners of `interop/zk2py_budget.v1.toml`:**
+  - its state `items/{id}`: the descriptor lowers 4 to 3, the owner refuses a
+    4th live member, and a complete GET is `within`. Once a member is
+    deleted, a new one is accepted. A test owner that breaks the rule holds
+    5, `exceeds`, `over_bound`;
+  - its stream `samples/{id}`, cardinality 2: the conforming owner refuses
+    a third member. Its window of seconds is `window_too_short`, since a
+    complete one takes an hour. The test owner's three members are the
+    finding in the same window;
+  - its event `alarms/{id}`, cardinality 2, rate `low`, retention 60 s: the
+    conforming owner refuses a second occurrence within a minute and a
+    third member. A window of 61 s, with the owner present throughout, is
+    complete: `within`, and the rate kept. The test owner's a twice and
+    three members are both findings, in a window of a second.
+
+**What changed in zk2py.**
+- **`zk2py.budget`**, new:
+  - `bound`, `population` and `rate`, as the fixtures read them, with
+    integer nanoseconds;
+  - on a bus, `get_population` (a complete S4 GET) and `Window` (a window's
+    members on the receive clock, the owner's presence watched throughout,
+    and a rate's spans on the stamps when they carry one clock id).
+- **The owner keeps §2.7's rule:**
+  - a new live member beyond the bound raises `BudgetExceeded`, for a
+    templated state, a stream (live for an hour) and an event (live for its
+    retention), as does an occurrence beyond its rate;
+  - the descriptor states `cardinality=` lowerings, and `budget=False` is a
+    test owner that breaks the rule;
+  - `occur()` publishes an event occurrence on a fresh ULID.
+- `health.clock_question` and `clock_from` implement clock.json's rule.
+
+**Where zk2py's reading needed a guess.**
+- **A lossless window** (F-105): zk2py reads "lost no delivery" as "knows of
+  no lost delivery".
+- **The owner present throughout:** zk2py declares a liveliness subscriber
+  on the owner's instance token before it lists presence at the window's
+  start. It requires the token at the start, no delete of it while
+  listening, and the token at the end. The text says what to establish,
+  not how; this follows from core §8.1, so it is no finding.
+
+### F-105 · ambiguity · core 0.24 §2.7, "What a tool reads" and its table: a window that "lost no delivery"
+
+> §2.7: "A complete reading of a stream or an event is a subscription
+> window … It is complete when all three hold: … it lost no delivery, as a
+> rate's clean pole requires (below)".
+
+> The table, rate, clean: "a window at least one period long, no delivery
+> lost". population.json: "`lossless`, false when it lost a delivery".
+
+> freshness.v1 §2.5, rule 3: "It knows it lost deliveries (it fell behind
+> and dropped some, for instance)".
+
+A subscriber can know that it lost a delivery. It drops one itself, or
+advanced publication's miss detection (core §2.5, `history`) reports a gap.
+It cannot know that it lost none. A best-effort sample lost in transit,
+or one a `drop` congestion policy discarded, leaves no trace at a plain
+subscription. freshness.v1 states the condition as knowledge. §2.7 states
+it as a fact. The two readings differ:
+- **as a fact,** only a window with miss detection could ever be complete.
+  A stream or event without `history` could never be clean, against 0.24's
+  own reason for complete windows: "A rule that refused every window would
+  leave a stream's population a question no reading could ever answer no
+  to";
+- **as knowledge,** a plain subscription that heard nothing amiss is
+  lossless, even across a face that drops samples. A member whose samples
+  were all dropped then reads as no member, so the window can read clean
+  over a population above the bound.
+
+**Resolved:** a guess. zk2py reads it as knowledge, as freshness.v1 §2.5
+does. Its callback subscriptions drop nothing locally, so its windows are
+lossless unless it knows of a loss. Its live event window ran on loopback,
+with the event's reliable, `block` QoS.
