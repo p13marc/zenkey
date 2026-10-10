@@ -51,6 +51,10 @@ sipper = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The doctor report's JSON Schema (#614, FL3): a notifier that publishes the
+# report as Rust-first state (zenwatch.v1's `doctor`) commits a schema of it,
+# and the schema of a pinned shape is derived beside the shape, here.
+schemars = { workspace = true }
 # A `--zenoh-config` file is read twice: by zenoh, which fills every key the
 # file left out with its default, and raw, to learn which keys the file
 # actually *states* — the explorer's posture (client, multicast off) yields to
