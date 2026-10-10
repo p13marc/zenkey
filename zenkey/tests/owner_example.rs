@@ -505,3 +505,101 @@ async fn the_owner_example_reports_a_clock_ahead() {
     assert_eq!(o.ask("clock-offset 0").await, "clock-offset 0");
     o.stop().await;
 }
+
+/// The knobs that reach each bound (core §2.7, #741; `budget.md` §4–§7):
+/// `--cardinality` lowers a state's bound in the descriptor, and `fill`,
+/// `put` and `delete` drive the runtime's refusals, each answered with the
+/// key written or the refusal naming the bound and whose it is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_reaches_each_bound() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("budget.v1.toml");
+    std::fs::write(
+        &file,
+        "[interface]\nname = \"budget\"\nmajor = 1\n\
+         [resources.\"items/{item}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+         params = { item = \"string\" }\ncardinality = 3\n\
+         [resources.\"load/{cpu}\"]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+         params = { cpu = \"string\" }\ncardinality = 3\nreliability = \"reliable\"\n\
+         congestion = \"block\"\n\
+         [resources.\"alarms/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+         params = { src = \"string\" }\ncardinality = 2\nrate = \"burst(3/h)\"\n\
+         retention = \"2s\"\n",
+    )
+    .unwrap();
+    let file = file.display().to_string();
+    let (_r1, ep) = router(None).await;
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--cardinality",
+        "budget.v1:state/items/{item}=2",
+        "ex/budget",
+        &file,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    assert!(line(&o.lines).await.starts_with("ready "));
+    const KEY: &str = "zk2/ex/budget/budget.v1";
+    // §4, the descriptor's bound of 2.
+    let refused = o.ask("fill budget.v1 state/items/{item} 3").await;
+    assert!(
+        refused.starts_with("refused fill budget.v1 state/items/{item} 3: 2 put, then: ")
+            && refused.contains("at its bound of 2 (the descriptor's)"),
+        "{refused}"
+    );
+    assert_eq!(
+        o.ask("put budget.v1 state/items/{item} m0").await,
+        format!("put {KEY}/state/items/m0"),
+        "a live key adds no member"
+    );
+    assert_eq!(
+        o.ask("delete budget.v1 state/items/{item} m1").await,
+        format!("deleted {KEY}/state/items/m1")
+    );
+    assert_eq!(
+        o.ask("put budget.v1 state/items/{item} m2").await,
+        format!("put {KEY}/state/items/m2"),
+        "a delete frees one"
+    );
+    // §5, the contract's bound of 3.
+    assert_eq!(
+        o.ask("fill budget.v1 stream/load/{cpu} 3").await,
+        "filled 3"
+    );
+    let refused = o.ask("put budget.v1 stream/load/{cpu} c9").await;
+    assert!(
+        refused.contains("at its bound of 3 (the contract's)"),
+        "{refused}"
+    );
+    assert!(
+        o.ask("delete budget.v1 stream/load/{cpu} m0")
+            .await
+            .contains("only a state is deleted")
+    );
+    // §6 and §7: burst(3/h) per source, two sources live at once.
+    for _ in 0..3 {
+        let put = o.ask("put budget.v1 events/alarms/{src} a").await;
+        assert!(
+            put.starts_with(&format!("put {KEY}/events/alarms/a/")),
+            "{put}"
+        );
+    }
+    let refused = o.ask("put budget.v1 events/alarms/{src} a").await;
+    assert!(refused.contains("beyond its rate burst(3/h)"), "{refused}");
+    assert!(
+        o.ask("put budget.v1 events/alarms/{src} b")
+            .await
+            .starts_with("put ")
+    );
+    let refused = o.ask("put budget.v1 events/alarms/{src} c").await;
+    assert!(
+        refused.contains("at its bound of 2 (the contract's)"),
+        "{refused}"
+    );
+    assert!(
+        o.ask("put budget.v1 events/alarms/{src}")
+            .await
+            .contains("takes 1 value(s)")
+    );
+    o.stop().await;
+}

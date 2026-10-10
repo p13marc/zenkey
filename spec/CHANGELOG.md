@@ -3,6 +3,147 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.25 — 2026-10-10: "lost no delivery" established, and the owner keeping its budget (#740, #741)
+
+The spec-only implementation read 0.24 cold (PR #739) and found one
+ambiguity, F-105. §2.7 lets a window be a complete reading of a stream's
+or an event's population, and gives a rate its clean pole, only when the
+window "lost no delivery". A subscriber can know that it lost a delivery,
+never that it lost none: a best-effort or `drop` sample a queue dropped
+leaves no trace. `freshness.v1` §2.5 states the condition as knowledge,
+and §2.7 as fact. Read as a fact, no window is ever complete. Read as
+knowledge, a window over a path that drops silently reads clean over a
+population above its bound, since a member whose samples were all dropped
+reads as no member.
+
+The maintainer decided the resolution: "lost no delivery" is established
+from what the reader can see. Its premises were measured before they were
+written (`scenarios/budget.md` §1–§3, Appendix B), and the measurements
+narrowed it in three places.
+
+**Changed: rules stated (§2.7).**
+- **Lost no delivery, established.** Both must hold:
+  - **the reader lost none:** no overflow or lag in its own queue, and
+    nothing kept out of its count by a cap;
+  - **the path could not drop one silently:** the resource declares
+    `reliable` with congestion `block`.
+
+  Otherwise no window of the resource is lossless, whatever it heard. The
+  reason names the reader's loss, a detected miss, or the QoS.
+  - **Why `reliable` and `block`.** zenoh 1.10.1 counts such a sample
+    non-droppable. A full queue makes its push wait, and one it cannot
+    queue within `wait_before_close` (5 s by default) closes the
+    transport. Measured through two routers in processes of their own: a
+    reader taking 2 ms per 16 KiB sample heard 1,000 of 1,000 in order.
+    The same reader stuck for 7 s lost 691–794, and saw the owner's
+    instance token withdrawn each time. Best effort with `drop` lost
+    695–832, and nothing it received said so.
+  - **Why a failure is seen.** A transport that closes withdraws the
+    tokens learned through it, and the presence premise reads the
+    owner's. Measured: at once when a link closes (0.8–2.0 ms), between
+    routers and on the reader's own link alike.
+- **The owner present until one lease after the window's end (narrowed).**
+  The decided resolution rested on "owner present throughout" catching a
+  failed path. A link that goes silent is seen only when its lease runs
+  out: 986–1,037 ms at a 1 s lease (and 9,961–10,047 ms at the default
+  10 s, spike S10). The samples put meanwhile are lost. A failure in the
+  window's last lease would be seen after the window ended, so the tool
+  watches for a lease more, plus its reply timeout for the withdrawal's
+  transit.
+- **Miss detection is evidence of a loss, never of none (narrowed).** The
+  decided resolution let a subscription that detects misses, and detected
+  none, establish the window. zenoh-ext cannot carry that.
+  - It takes a publisher's first sample heard as its start
+    (`advanced_subscriber.rs`, `handle_sample`). So it reports neither the
+    samples before that one nor a publisher none of whose samples
+    arrived. Measured: five samples never heard, then none reported.
+  - The reference writer gives each member its own publisher, so a member
+    whose every sample was dropped is exactly what it cannot see, and
+    exactly what a population reading must rule out.
+  - Its periodic heartbeat, which would show a trailing loss, is
+    published with `drop`.
+
+  What it can show is kept: a detected miss is a loss. `lossless.json`
+  keeps the inputs (declared, used, misses), so that a later amendment
+  with a measured rule for publisher detection has a format to extend.
+  Events, the only resources with a rate, cannot declare `history` (E019),
+  so the rate never had this branch.
+- **A window counts from its subscription reaching the owner.** 0.24's
+  "a publisher matched late" was named as a cause of incompleteness and
+  ruled out by no premise. A sample put before the owner's router knew of
+  the subscription is never routed to it. No reader can see that moment,
+  so a tool counts the span from its declaration plus its reply timeout:
+  a convention, stated as one.
+- **A rate's clean pole reads the same rule,** the owner's presence
+  included. 0.24 asked a rate window to have lost nothing, and nothing of
+  the owner. Losslessness now rests on presence catching a failed path,
+  and a rate window over a failure is no more lossless than a population
+  window.
+- **`history.miss_detection_ms`** (§2.5) said nothing of what it
+  declares. It declares that the owner numbers its samples and heartbeats
+  every that many milliseconds, which is what the reference writer does.
+- **Keeping the bound** (§2.7). An owner keeps it by refusing the write
+  that would make a new member live while its live members are at the
+  bound: a put of a new state key, a publication on a stream member not
+  live, an occurrence of an event member not live. A put to a live key
+  adds no member, a delete frees one, and a refused write publishes
+  nothing and is never silent. An occurrence beyond the rate is refused
+  the same way. 0.24 left this to runtimes; the spec-only owner refused
+  already, and the reference runtime now does (#741).
+
+**Changed: wording.**
+- **§2.4** says that only a `reliable`, `block` resource has windows a
+  tool can read clean from.
+- **§2.7's table**: clean and unobservable cells name the established
+  rule and the owner's presence for the rate.
+
+**Changed: evidence.**
+- **New `conformance/budget/lossless.json`:** the declared QoS, the
+  reader's loss and miss detection → lossless or not, with a reason in a
+  stated order: `reader_lost`, `misses_detected`, `best_effort`,
+  `congestion_drop`, else `reliable_block`.
+- **`rate.json`:** its reading's `complete` is renamed `lossless`, the
+  same name and meaning as `population.json`'s. Each case gains
+  `present`, and five cases pin `owner_absent`, ordered after
+  `window_too_short` and before `empty`, as `population.json` orders it.
+  No expected value of an existing case changes.
+- **`population.json`:** its description says what `listened_s`,
+  `lossless` and `present` now mean. No case changes.
+- **New `scenarios/budget.md`:** §1–§3 the measurements, §4–§7 an owner
+  keeping its bound and its rate. Appendix B lists the measured facts,
+  and Appendix C and E index the new files.
+
+**Found while writing it.**
+- **A router that shares its process.** The sessions of one process share
+  zenoh's receive threads, two by default. With two routers and a reader
+  whose callback blocks in one process, 3 of 6 runs lost 674–970 of 1,000
+  reliable, `block` samples. The transport closes stalled, and no token
+  was withdrawn while the runs lasted. §2.7 names routers in processes of
+  their own as a premise a deployment provides, and no tool can see it.
+- **A UDP link.** zenoh sends a reliable sample over any link when no
+  reliable link is up, so over a UDP link alone it travels best-effort
+  (source). That is the other premise named.
+- **A rate window across a re-mint** is now unobservable, although a
+  re-mint does not reset a rate (0.24). Kept: the old instance's token
+  goes, and nothing tells a re-mint's make-before-break from a failure
+  that took it.
+
+**Deliberately not changed.**
+- **`freshness.v1` §2.5.** Its rule 3, "it knows it lost deliveries", is
+  the reader's-loss half of §2.7's rule, and it is about another verdict.
+  Fresh rests on a delivery heard, never on none lost. Stale is reported
+  "as this reader observed" (§2.11), and §2.4's half interval absorbs one
+  lost put. No text version moves.
+- **Interceptors.** A router configured to downsample a key drops its
+  samples by design, and like an access-control deny it narrows what any
+  reader there can see (§8.1's narrowing, 0.8).
+- **No lint.** A templated stream declared best-effort is its author's
+  choice; §2.7 says only what a tool can then conclude.
+- **Best effort is not made complete by length.** A longer window of a
+  best-effort stream drops as silently as a short one, so its population
+  and its rate stay unobservable from a window. Its finding, more members
+  than the bound, stays available from any window.
+
 ## 0.24 — 2026-10-10: the population budget (#735)
 
 FJ (#612) left the tools' budget checks dark as profile-backed, beside

@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.24** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.25** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -18,9 +18,10 @@ order of `profiles`, and a derived address, in 0.21 the first
 vocabulary a profile publishes, `freshness.v1`'s, with a re-put, in
 0.22 one major of a profile per contract, in 0.23 what `health.v1`
 needed: a clock ahead reported by a stream, and the first standard
-contract a profile publishes, and in 0.24 the population budget: what a
+contract a profile publishes, in 0.24 the population budget: what a
 member and a live member are, what `rate` bounds, and what a tool
-concludes).
+concludes, and in 0.25 a window's "lost no delivery" established from
+what its reader can see, with the owner keeping its budget).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -345,6 +346,10 @@ with it. The fields map one-to-one onto Zenoh's stable QoS.
   whose state declares a horizon (0.21). An archive (§4.4)
   recording such a state can then miss values between re-puts. Spike S5
   lost 10,917 of 100,000 values put with `drop` on their way to a storage.
+- **What a tool can conclude rests on it** (0.25). Only a resource
+  declared `reliable` with `block` has windows shown to have lost no
+  delivery, so only its population and its rate can read clean from a
+  window (§2.7). Any resource's window can still show a finding.
 - **`express`** is opt-in. A contract's author SHOULD set it only on
   measurement. Spike S9 measured `real_time` + express losing 0.6–4 % of
   samples at 1–5 kHz on loopback, with no latency gain.
@@ -367,6 +372,14 @@ zenoh-ext's advanced publication is behind its `unstable` feature in
 unstable API (§0). An advanced publisher declares its own queryable and
 token under `<key>/@adv/…`, so its grants (§11.1) must include that
 subtree.
+
+**`history.miss_detection_ms`** (0.25) declares miss detection: the
+owner's advanced publisher numbers its samples, and sends a heartbeat
+with the last number every that many milliseconds, so that a subscriber
+can detect a gap (zenoh-ext's sample-miss detection). Without it, an
+advanced publisher's samples carry no number, and a subscriber has
+nothing to detect. What a detected miss shows, and what no detected miss
+does not, is §2.7's.
 
 ### 2.6 Events
 
@@ -426,7 +439,14 @@ presence budget (§8.3) is another. `[F: budget/]`
   - **stream:** for an hour after the owner last published on it;
   - **event:** for the retention after its last occurrence.
 
-  `[F: budget/population.json]`
+  `[F: budget/population.json]` `[Sc: budget.md §4–§6]`
+  - **Keeping it** (0.25). An owner keeps its bound by refusing the write
+    that would make a new member live while its live members are at the
+    bound: a put of a new state key, a publication on a stream member not
+    live, an occurrence of an event member not live. A put to a key that
+    is live adds no member, and a delete frees one. A refused write
+    publishes nothing, and its writer is told: a refusal is never silent.
+    An occurrence beyond the rate is refused the same way.
   - **Why an hour.** A stream has no delete, so when a member stops
     existing is the owner's knowledge and never the reader's. A reader
     that forgets a stream member after an hour of silence holds at most
@@ -443,7 +463,7 @@ presence budget (§8.3) is another. `[F: budget/]`
   within any hour (`rare`), within any minute (`low`), or `<n>` within any
   hour (`burst(<n>/h)`). An owner MUST NOT publish more: `<n>` + 1
   occurrences of one member less than the period apart break it.
-  `[F: budget/rate.json]`
+  `[F: budget/rate.json]` `[Sc: budget.md §7]`
   - **Per member, because** §2.2 already states an event's key population
     as cardinality × rate × retention, which holds only when each member
     has the rate. A rate per template would make it rate × retention.
@@ -462,24 +482,75 @@ presence budget (§8.3) is another. `[F: budget/]`
 - **A complete reading of a stream or an event** is a subscription window
   that hears every member live at its end. It is complete when all three
   hold:
-  - it lasted at least one liveness span: an hour for a stream, the
-    retention for an event;
-  - it lost no delivery, as a rate's clean pole requires (below);
+  - it lasted at least one liveness span, an hour for a stream and the
+    retention for an event, counted from when its subscription reached
+    the owner (0.25, below);
+  - it lost no delivery, as established below (0.25);
   - the owner was present, its instance token held, from the window's
-    start to its end. An owner that joined, left or re-minted while the
-    window listened is a new instance or a gap (§1.5, §8.1), so the window
-    is incomplete.
+    start until one lease after its end (0.25, below). An owner that
+    joined, left or re-minted while the window listened is a new instance
+    or a gap (§1.5, §8.1), so the window is incomplete.
 
   A member is live for one span after its last publication, so such a
   window heard it. For a stream, a window counts the members heard within
   one hour; for an event, the members with occurrences within the
   retention. Two instants exactly one span apart are not within one span.
+- **Lost no delivery is established, never assumed** (0.25). A reader can
+  know that it lost a delivery, and never that it lost none: a sample a
+  queue dropped leaves no trace at a subscriber (Appendix B). A window
+  lost no delivery when both hold:
+  1. **Its reader lost none.** Its own queue neither overflowed nor fell
+     behind, and no delivery was kept out of its count by a cap.
+  2. **The path could not drop one silently.** The resource declares
+     `reliable` with congestion `block` (§2.4). A router's queue never
+     drops such a sample: its push waits for room, and one it cannot queue
+     within the transport's `wait_before_close` (5 s by default) closes
+     the transport (Appendix B). So a reliable path loses a delivery only
+     by failing, and a failed path withdraws the owner's instance token at
+     the reader, which the presence premise reads.
+
+  Otherwise no window of the resource is lossless, whatever it heard, and
+  a reading that needs one is unobservable. The reason names what failed:
+  the reader's own loss, a miss detected, or the QoS. At `best_effort`, a
+  sample dropped anywhere on the path leaves no trace; at `reliable` with
+  `drop`, a full queue drops one and leaves none.
+  `[F: budget/lossless.json]` `[Sc: budget.md §1]`
+  - **Miss detection is evidence of a loss, never of none** (§2.5). A
+    subscription that detects misses and detected one lost a delivery.
+    One that detected none established nothing: zenoh-ext takes a
+    publisher's first sample heard as its start, so it reports neither
+    the samples before that one nor a publisher none of whose samples
+    arrived (Appendix B). A member whose every sample was dropped is the
+    one a population reading must rule out. A subscription detects misses
+    only where the resource declares them (`history.miss_detection_ms`);
+    elsewhere it has nothing to detect. `[Sc: budget.md §3]`
+  - **What a deployment provides**, which no tool can see: links that
+    zenoh counts reliable, since a reliable sample crosses a UDP link
+    best-effort when no reliable link is up; and routers in processes of
+    their own, since a process that runs a router beside a subscriber
+    whose callback blocks shares zenoh's receive threads with it, and has
+    lost deliveries with no transport closed (Appendix B).
+- **The owner present until one lease after the end** (0.25). A link that
+  closes withdraws the owner's instance token at the reader at once. One
+  that goes silent withdraws it only when its lease runs out, and the
+  deliveries put meanwhile are lost (Appendix B). So a failure in the
+  window's last lease is seen after the window ends. A tool watches the
+  owner's instance tokens for one lease after the window's end, zenoh's
+  default being 10 s, and its reply timeout more for the withdrawal's
+  transit. A deployment that sets a longer lease, or a `wait_before_close`
+  longer than its lease, lengthens it. `[Sc: budget.md §2]`
+- **A window counts from its subscription reaching the owner** (0.25). A
+  sample the owner put before its router knew of the subscription was
+  never routed to it, and no reader can see that moment. A tool counts a
+  window's span from its subscription's declaration plus its reply
+  timeout. This is a convention, the time a tool already allows a message
+  to cross the path, and not a bound zenoh gives.
 - **Every other reading is incomplete.** A member it never heard may be
   live: a sample lost, a publisher matched late, and a member quiet while
   it listened look the same as no member.
   - A GET that ended at its timeout, or with an error reply.
-  - A window shorter than one span, one that lost a delivery, or one over
-    which the owner was not present throughout.
+  - A window shorter than one span, one not shown to have lost no
+    delivery, or one over which the owner was not present throughout.
   - An archive's answer, which is last-known (S6).
 - **A window shows no state population,** however long. It hears puts and
   deletes, and a delete it missed would count a member twice.
@@ -500,11 +571,11 @@ period.
 | | Population | Rate (events) |
 |---|---|---|
 | **Finding** | more members than the bound, in any reading | `<n>` + 1 occurrences of one member less than the period apart, in any window |
-| **Clean** | at most the bound, in a complete reading with at least one member: a state's complete GET, or a stream's or event's complete window | a window at least one period long, no delivery lost, an occurrence heard, none beyond the rate |
-| **Unobservable** | at most the bound in an incomplete reading: a GET that did not run to its final reply; a window that lost a delivery, was shorter than one span, or over which the owner was not present throughout; no member at all (O5); a reading that does not count the kind | a window shorter than one period; deliveries lost; no occurrence heard (O5) |
+| **Clean** | at most the bound, in a complete reading with at least one member: a state's complete GET, or a stream's or event's complete window | a window at least one period long that lost no delivery, the owner present throughout (both as above, 0.25), an occurrence heard, none beyond the rate |
+| **Unobservable** | at most the bound in an incomplete reading: a GET that did not run to its final reply; a window not shown to have lost no delivery, shorter than one span, or over which the owner was not present throughout; no member at all (O5); a reading that does not count the kind | a window not shown to have lost no delivery; shorter than one period; the owner not present throughout; no occurrence heard (O5) |
 | **Not asked** | the no-ceiling bound; a template without parameters; an operation | a resource that declares no rate |
 
-`[F: budget/]`
+`[F: budget/]` `[Sc: budget.md]`
 
 ---
 
@@ -2806,6 +2877,42 @@ Appendix B. These are the ones the rules above cite:
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 
+**What a path drops, and what a reader sees** (0.25, §2.7). Measured on
+2026-10-10 by [`scenarios/budget.md`](scenarios/budget.md) §1–§3
+(`zenkey/tests/budget.rs`), with the source each rests on:
+- A sample that is `reliable` with congestion `block` is not droppable. A
+  full queue makes its push wait, and one it cannot queue within
+  `wait_before_close` (5 s by default) closes the transport
+  (`unicast/universal/tx.rs`). A best-effort sample, or one with `drop`,
+  is droppable once `wait_before_drop` (1 ms) passes. Through two routers
+  in processes of their own, to a reader that took 2 ms over each 16 KiB
+  sample:
+  - reliable, `block`: 1,000 of 1,000 arrived in order, and the owner's
+    put waited;
+  - best effort, `drop`: 695–832 of 1,000 were lost, and nothing the
+    reader received said so;
+  - reliable, `block`, the reader stuck for 7 s on one sample: 691–794
+    were lost, and each time the reader saw the owner's instance token
+    withdrawn.
+- A transport that closes withdraws the tokens learned through it, between
+  routers and on a client's own link alike. The withdrawal reaches the
+  reader within 1–2 ms when the link closes, and one lease after a link
+  goes silent: 986–1,037 ms at a 1 s lease, 9,961–10,047 ms at the default
+  10 s (spike S10). The samples put meanwhile are lost.
+- A reliable sample takes any link when no reliable one is up: over a UDP
+  link alone it travels best-effort (link selection in
+  `unicast/universal/tx.rs`).
+- zenoh-ext's sample-miss detection takes a publisher's first sample heard
+  as its start (`advanced_subscriber.rs`, `handle_sample`). A subscriber
+  declared after a publisher's first five samples heard the sixth or the
+  seventh, and reported no miss. A gap after a sample heard was reported.
+  The periodic heartbeat is published with congestion `drop`.
+- The sessions of one process share zenoh's receive threads, two by
+  default (`ZENOH_RUNTIME`). With two routers and a reader whose callback
+  blocks in one process, 3 of 6 runs lost 674–970 of 1,000 reliable,
+  `block` samples. The routers' transport closes stalled, and no token was
+  withdrawn while the runs lasted.
+
 ## Appendix C. Evidence index
 
 | Evidence | Covers |
@@ -2817,7 +2924,7 @@ Appendix B. These are the ones the rules above cite:
 | `conformance/history/` | §9.7 |
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
-| `conformance/budget/` | §2.7 (0.24) |
+| `conformance/budget/` | §2.7 (0.24; `lossless.json` 0.25) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4 |
@@ -2828,6 +2935,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
+| `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7) (0.25); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
@@ -2905,9 +3013,11 @@ brief:
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);
   a rate's from the occurrences a window heard (`rate.json`). A window
-  case gives how long it listened, whether it lost a delivery, and whether
-  the owner was present throughout. Each file's description states the
-  order a reason is chosen in.
+  case gives how long it listened, whether it lost no delivery, and
+  whether the owner was present throughout. Whether a window lost no
+  delivery comes from the resource's declared QoS, the reader's own loss
+  and miss detection (declared, used, misses detected) (`lossless.json`,
+  0.25). Each file's description states the order a reason is chosen in.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

@@ -5,6 +5,7 @@
 //!
 //! ```text
 //! bound(contract, stated…)              ─▶ Untemplated │ NoCeiling │ Of(n)
+//! lossless(delivery)                    ─▶ lossless or not, + reason (0.25)
 //! population(kind, bound, retention, r) ─▶ exceeds │ within │ unobservable │ not_asked, + reason
 //! rate(rate, occurrences)               ─▶ the same four, + reason
 //! ```
@@ -13,15 +14,21 @@
 //! its finding is the yes: [`Verdict::Exceeds`]. There is no I/O and no
 //! clock here. A reader counts what it read (the keys an owner's GET
 //! answered with a value and whether it ran to its end; the instants a
-//! window heard each member, how long it listened, whether it lost a
-//! delivery and whether the owner stayed present) and hands it over as
-//! values; the fixtures in `spec/conformance/budget/` pin the rest.
+//! window heard each member, how long it listened, what it lost and
+//! whether the owner stayed present) and hands it over as values; the
+//! fixtures in `spec/conformance/budget/` pin the rest.
+//!
+//! **"Lost no delivery" is established, never assumed** (0.25, #740): a
+//! reader can know that it lost a delivery, never that it lost none.
+//! [`lossless`] decides it from the resource's declared QoS, the reader's
+//! own loss and miss detection; a window's `lossless` and an occurrence
+//! set's are its answer.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use crate::authoring::Kind;
+use crate::authoring::{Congestion, Kind, Reliability};
 use crate::contract::{Body, Rate, Resource};
 
 /// The no-ceiling cardinality, 2^32−1 (§2.2): no bound, never a population
@@ -31,6 +38,135 @@ pub const NO_CEILING: u64 = 4_294_967_295;
 /// How long a stream member stays live after the owner last published on
 /// it (§2.7): an hour.
 pub const STREAM_LIVENESS: Duration = Duration::from_secs(3600);
+
+/// zenoh's default link lease (`transport/link/tx/lease`, 10 s): a link
+/// gone silent withdraws the owner's token only when it runs out
+/// (Appendix B). A window's owner must stay present for one lease after
+/// the window's end (§2.7, 0.25); a deployment that sets a longer lease, or
+/// a `wait_before_close` longer than its lease, lengthens it.
+pub const DEFAULT_LEASE: Duration = Duration::from_secs(10);
+
+/// What a window's path declares and what its reader saw of it, for "lost
+/// no delivery" (§2.7, 0.25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Delivery {
+    /// The resource's declared reliability (§2.4).
+    pub reliability: Reliability,
+    /// The resource's declared congestion control (§2.4).
+    pub congestion: Congestion,
+    /// Deliveries the window's own reader lost: its queue overflowed or
+    /// fell behind, or a cap kept them out of its count.
+    pub reader_lost: u64,
+    pub miss_detection: MissDetection,
+}
+
+/// Miss detection over a window (§2.5, §2.7): counted only where the
+/// resource declares it and the window's subscription uses it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MissDetection {
+    /// The resource declares `history.miss_detection_ms`: its owner numbers
+    /// its samples.
+    pub declared: bool,
+    /// The window's subscription detects misses.
+    pub used: bool,
+    /// How many misses it detected.
+    pub misses: u64,
+}
+
+/// Why a window is, or is not, shown to have lost no delivery: the
+/// fixture's reason class, in the order [`lossless`] chooses it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LossReason {
+    /// Not lossless: the reader itself lost deliveries.
+    ReaderLost,
+    /// Not lossless: the subscription detected missed samples.
+    MissesDetected,
+    /// Not lossless: best effort, so a sample dropped anywhere on the path
+    /// leaves no trace, whatever the congestion control.
+    BestEffort,
+    /// Not lossless: reliable with `drop`, so a full queue drops a sample
+    /// and leaves no trace.
+    CongestionDrop,
+    /// Lossless: reliable with `block`, which no router queue drops; a
+    /// failed push closes the transport, and the owner's token goes.
+    ReliableBlock,
+}
+
+impl LossReason {
+    /// The fixture's token.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReaderLost => "reader_lost",
+            Self::MissesDetected => "misses_detected",
+            Self::BestEffort => "best_effort",
+            Self::CongestionDrop => "congestion_drop",
+            Self::ReliableBlock => "reliable_block",
+        }
+    }
+
+    /// Whether this reason makes the window lossless.
+    #[must_use]
+    pub fn is_lossless(self) -> bool {
+        self == Self::ReliableBlock
+    }
+}
+
+impl fmt::Display for LossReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// "Did this window lose no delivery?" (§2.7, 0.25), from what its reader
+/// can see. Lossless only when its reader lost none and the path could not
+/// drop one silently: the resource is `reliable` with `block`. A detected
+/// miss is a loss; none detected establishes nothing, since zenoh-ext
+/// takes a publisher's first sample heard as its start (Appendix B), and
+/// counts only where the resource declares miss detection and the
+/// subscription uses it.
+///
+/// The order a reason is chosen in: the reader's own loss; a miss detected;
+/// best effort; reliable with `drop`; else lossless, reliable with `block`.
+#[must_use]
+pub fn lossless(d: &Delivery) -> LossReason {
+    let m = d.miss_detection;
+    if d.reader_lost > 0 {
+        LossReason::ReaderLost
+    } else if m.declared && m.used && m.misses > 0 {
+        LossReason::MissesDetected
+    } else if d.reliability == Reliability::BestEffort {
+        LossReason::BestEffort
+    } else if d.congestion == Congestion::Drop {
+        LossReason::CongestionDrop
+    } else {
+        LossReason::ReliableBlock
+    }
+}
+
+/// The [`Delivery`] of a stream, state or event resource, from its
+/// declared QoS and `history`, with what the reader lost and what its
+/// subscription detected (`misses`: `None` when it does not detect
+/// misses). `None` for an operation.
+#[must_use]
+pub fn delivery_of(r: &Resource, reader_lost: u64, misses: Option<u64>) -> Option<Delivery> {
+    match &r.body {
+        Body::Data(d) => Some(Delivery {
+            reliability: d.reliability,
+            congestion: d.congestion,
+            reader_lost,
+            miss_detection: MissDetection {
+                declared: d
+                    .history
+                    .as_ref()
+                    .is_some_and(|h| h.miss_detection_ms.is_some()),
+                used: misses.is_some(),
+                misses: misses.unwrap_or(0),
+            },
+        }),
+        Body::Operation(_) => None,
+    }
+}
 
 /// A templated resource's bound in an instance (§2.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,25 +314,31 @@ pub struct Window {
     /// receive clock), from any origin. An event's member is its key
     /// without the ULID chunk.
     pub heard: BTreeMap<String, Vec<Duration>>,
-    /// How long the window listened.
+    /// How long the window listened, counted from when its subscription is
+    /// taken to have reached the owner: its declaration plus the reader's
+    /// reply timeout (0.25).
     pub listened: Duration,
-    /// Whether it delivered everything that arrived for it: false when the
-    /// reader fell behind and lost deliveries.
+    /// Whether it is shown to have lost no delivery: [`lossless`]'s answer
+    /// (0.25).
     pub lossless: bool,
     /// Whether the owner was present, an instance token of its held, from
-    /// the window's start to its end: false when it joined, left or
-    /// re-minted while the window listened.
+    /// the window's start until one lease after its end (0.25): false when
+    /// it joined, left or re-minted, or a path to it failed.
     pub present: bool,
 }
 
-/// The occurrences of an event a window heard, for its `rate` (§2.7).
+/// The occurrences of an event a window heard, for its `rate` (§2.7), with
+/// the window's premises as a [`Window`] has them.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Occurrences {
-    /// How long the window listened.
+    /// How long the window listened, counted as [`Window::listened`] is.
     pub listened: Duration,
-    /// Whether the window delivered everything that arrived for it: false
-    /// when the reader fell behind and lost deliveries.
-    pub complete: bool,
+    /// Whether it is shown to have lost no delivery: [`lossless`]'s answer
+    /// (0.25).
+    pub lossless: bool,
+    /// Whether the owner was present from the window's start until one
+    /// lease after its end (0.25).
+    pub present: bool,
     /// Per member, the instants of its occurrences, measured between the
     /// occurrences' stamps of one clock, or on the reader's receive clock.
     pub members: BTreeMap<String, Vec<Duration>>,
@@ -257,13 +399,16 @@ pub enum Reason {
     Empty,
     /// Unobservable: the GET ended at its timeout, or with an error reply.
     Incomplete,
-    /// Unobservable: the window lost deliveries.
+    /// Unobservable: the window is not shown to have lost no delivery
+    /// ([`lossless`]: its reader lost one, a miss was detected, or its QoS
+    /// drops silently).
     Lossy,
     /// Unobservable: the window was shorter than the rate's period, or than
     /// the population's liveness span.
     WindowTooShort,
-    /// Unobservable: the owner was not present throughout the window: it
-    /// joined, left or re-minted while the window listened.
+    /// Unobservable: the owner was not present throughout the window and
+    /// one lease after it: it joined, left or re-minted while the window
+    /// listened, or a path to it failed.
     OwnerAbsent,
     /// Unobservable: a reading that does not count this kind's members (a
     /// window of a state, a GET of a stream or an event).
@@ -423,8 +568,8 @@ pub fn population(
 /// the period apart are the finding, in a window of any length.
 ///
 /// The order a reason is chosen in: not asked (no rate); beyond the rate;
-/// deliveries lost; a window shorter than one period; no occurrence heard
-/// (O5); else kept.
+/// not shown lossless; a window shorter than one period; the owner not
+/// present throughout (0.25); no occurrence heard (O5); else kept.
 #[must_use]
 pub fn rate(rate: Option<Rate>, o: &Occurrences) -> Judged {
     use Verdict::{Exceeds, NotAsked, Unobservable, Within};
@@ -448,11 +593,14 @@ pub fn rate(rate: Option<Rate>, o: &Occurrences) -> Judged {
     if most > n {
         return Judged::new(Exceeds, Reason::RateExceeded, most as u64);
     }
-    if !o.complete {
+    if !o.lossless {
         return Judged::new(Unobservable, Reason::Lossy, most as u64);
     }
     if o.listened < period {
         return Judged::new(Unobservable, Reason::WindowTooShort, most as u64);
+    }
+    if !o.present {
+        return Judged::new(Unobservable, Reason::OwnerAbsent, most as u64);
     }
     if most == 0 {
         return Judged::new(Unobservable, Reason::Empty, 0);
@@ -594,10 +742,56 @@ mod tests {
     }
 
     #[test]
+    fn lossless_rests_on_the_reader_and_the_qos() {
+        use LossReason as L;
+        let d = |reliability, congestion, reader_lost, declared, used, misses| Delivery {
+            reliability,
+            congestion,
+            reader_lost,
+            miss_detection: MissDetection {
+                declared,
+                used,
+                misses,
+            },
+        };
+        let (re, be) = (Reliability::Reliable, Reliability::BestEffort);
+        let (block, drop) = (Congestion::Block, Congestion::Drop);
+        assert_eq!(
+            lossless(&d(re, block, 0, false, false, 0)),
+            L::ReliableBlock
+        );
+        assert!(L::ReliableBlock.is_lossless());
+        assert_eq!(lossless(&d(re, block, 1, false, false, 0)), L::ReaderLost);
+        assert_eq!(lossless(&d(be, drop, 0, false, false, 0)), L::BestEffort);
+        assert_eq!(lossless(&d(be, block, 0, false, false, 0)), L::BestEffort);
+        assert_eq!(
+            lossless(&d(re, drop, 0, false, false, 0)),
+            L::CongestionDrop
+        );
+        // A detected miss is a loss; none detected establishes nothing.
+        assert_eq!(lossless(&d(re, block, 0, true, true, 1)), L::MissesDetected);
+        assert_eq!(lossless(&d(be, drop, 0, true, true, 0)), L::BestEffort);
+        // Counted only where declared and used.
+        assert_eq!(lossless(&d(re, block, 0, false, true, 3)), L::ReliableBlock);
+        assert_eq!(lossless(&d(re, block, 0, true, false, 3)), L::ReliableBlock);
+        // The reader's own loss first.
+        assert_eq!(lossless(&d(re, block, 2, true, true, 5)), L::ReaderLost);
+        for r in [
+            L::ReaderLost,
+            L::MissesDetected,
+            L::BestEffort,
+            L::CongestionDrop,
+        ] {
+            assert!(!r.is_lossless(), "{r}");
+        }
+    }
+
+    #[test]
     fn rate_poles() {
-        let o = |listened, complete, of: &[(&str, &[f64])]| Occurrences {
+        let o = |listened, lossless, of: &[(&str, &[f64])]| Occurrences {
             listened: s(listened),
-            complete,
+            lossless,
+            present: true,
             members: heard(of),
         };
         let j = |r, o: &Occurrences| {
@@ -645,5 +839,27 @@ mod tests {
             (V::Within, R::RateKept)
         );
         assert_eq!(j(None, &o(120.0, true, &[])), (V::NotAsked, R::NoRate));
+        // The owner not present throughout (0.25): after too short, before
+        // empty, and no excess hidden.
+        let absent = |listened, of: &[(&str, &[f64])]| Occurrences {
+            present: false,
+            ..o(listened, true, of)
+        };
+        assert_eq!(
+            j(low, &absent(120.0, &[("a", &[0.0])])),
+            (V::Unobservable, R::OwnerAbsent)
+        );
+        assert_eq!(
+            j(low, &absent(120.0, &[])),
+            (V::Unobservable, R::OwnerAbsent)
+        );
+        assert_eq!(
+            j(low, &absent(30.0, &[("a", &[0.0])])),
+            (V::Unobservable, R::WindowTooShort)
+        );
+        assert_eq!(
+            j(low, &absent(120.0, &[("a", &[0.0, 1.0])])),
+            (V::Exceeds, R::RateExceeded)
+        );
     }
 }

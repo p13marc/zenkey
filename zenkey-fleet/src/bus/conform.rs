@@ -23,11 +23,20 @@
 //!    instant on this host's monotonic clock and its stamp, per key, which
 //!    a stream's and an event's members and an event's rate are counted
 //!    from; whether each state GET ran to its final reply, a complete
-//!    reading of a state population; and, when a templated stream or event
-//!    is exposed, whether the owner held its instance token from before
-//!    the window to its end — a liveliness subscriber on its instance
-//!    tokens, then a read of them, before the window opens — which a window
-//!    needs to be a complete reading of a stream's or an event's.
+//!    reading of a state population; and, when a templated stream or any
+//!    event is exposed, whether the owner held its instance token from
+//!    before the window until a lease after its end — a liveliness
+//!    subscriber on its instance tokens, then a read of them, before the
+//!    window opens, kept for the lease and the reply timeout after it
+//!    (0.25) — which a window needs to be a complete reading of a stream's
+//!    or an event's, and a rate window to be clean.
+//!
+//! **What the subscriptions see of a loss** (0.25, #740). Each one is the
+//! runtime's consumer, a plain zenoh subscriber: it counts what this tool
+//! fell behind on ([`Heard::lagged`]) and what passed the arrival cap, and
+//! it detects no misses ([`Heard::misses_detected`] is `None`), even where
+//! a resource declares miss detection. Whether a window lost no delivery
+//! is the judge's, by `zenkey_model::budget::lossless`.
 //!
 //! Nothing is judged here: [`crate::judge::conform`] decides every case
 //! from the [`ConformObservation`] this returns.
@@ -97,6 +106,28 @@ pub struct ConformSpec {
     /// GET reply's stamp is aged only against a clock this run measured on
     /// a live put of the same clock, and is unobservable otherwise.
     pub clocks_synced: bool,
+    /// The deployment's link lease: a path gone silent withdraws the
+    /// owner's token only when it runs out, so a window's owner is watched
+    /// for it, and `timeout` more, after the window (core §2.7, 0.25).
+    /// zenoh's default, `zenkey_model::budget::DEFAULT_LEASE`, unless the
+    /// deployment lengthens it.
+    pub lease: Duration,
+}
+
+impl ConformSpec {
+    /// How long after a window's end the owner's instance tokens are
+    /// watched: a lease, and the reply timeout for the withdrawal's
+    /// transit (core §2.7, 0.25).
+    pub fn presence_tail(&self) -> Duration {
+        self.lease + self.timeout
+    }
+
+    /// How much of a subscription's listening counts toward a window's
+    /// span: what it listened past its declaration plus the reply timeout,
+    /// when it is taken to have reached the owner (core §2.7, 0.25).
+    pub fn counted(&self, listened: Duration) -> Duration {
+        listened.saturating_sub(self.timeout)
+    }
 }
 
 /// What one resource's subscription heard in the window.
@@ -130,10 +161,15 @@ pub struct Heard {
     pub arrivals: BTreeMap<String, Vec<Arrival>>,
     /// Puts delivered past [`ARRIVAL_CAP`], not kept.
     pub arrivals_capped: u64,
+    /// The misses the subscription detected (core §2.5, §2.7), or `None`
+    /// when it does not detect misses — every subscription this run makes,
+    /// today: the runtime's consumer is a plain zenoh subscriber.
+    pub misses_detected: Option<u64>,
 }
 
-/// Whether the owner held its instance token over the whole window (§2.7):
-/// a window of a stream or an event is a complete reading only then.
+/// Whether the owner held its instance token over the whole window and a
+/// lease after it (§2.7, 0.25): a window of a stream or an event is a
+/// complete reading, and a rate window clean, only then.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WindowPresence {
     /// The instance tokens a read just before the window found.
@@ -141,15 +177,20 @@ pub struct WindowPresence {
     /// Whether that read ran to the routers' final reply (§8.1).
     pub complete: bool,
     /// Those tokens a liveliness subscriber, declared before the read, saw
-    /// deleted by the window's end.
+    /// deleted by the time it was read: the window's end and [`Self::tail`].
     pub gone: BTreeSet<String>,
+    /// How long after the window's end the subscriber was read. The run
+    /// waits [`ConformSpec::presence_tail`] only where a window could read
+    /// clean: a resource `reliable` with `block`, and a window long enough.
+    pub tail: Duration,
 }
 
 impl WindowPresence {
     /// Present throughout: a complete read found a token, and none of the
-    /// tokens it found was deleted before the window ended.
-    pub fn throughout(&self) -> bool {
-        self.complete && !self.held.is_empty() && self.gone.is_empty()
+    /// tokens it found was deleted by the time the subscriber was read,
+    /// at least `tail` after the window's end (0.25).
+    pub fn throughout(&self, tail: Duration) -> bool {
+        self.complete && !self.held.is_empty() && self.gone.is_empty() && self.tail >= tail
     }
 }
 
@@ -421,16 +462,24 @@ async fn suite(
     };
     let exposed: Vec<Resource> = obs.exposed().into_iter().cloned().collect();
 
-    // §2.7: a window of a stream or an event is complete only with the
-    // owner present throughout. The subscriber first, so a token the read
-    // finds and that goes later is seen going.
+    // §2.7: a window of a stream or an event is complete, and a rate window
+    // clean, only with the owner present throughout. The subscriber first,
+    // so a token the read finds and that goes later is seen going.
     let windowed = exposed
         .iter()
-        .any(|r| matches!(r.kind, Kind::Stream | Kind::Event) && r.template.has_params());
+        .any(|r| (r.kind == Kind::Stream && r.template.has_params()) || r.kind == Kind::Event);
     let presence_watch = if windowed {
         Some(watch_instances(session, &obs.address, t).await)
     } else {
         None
+    };
+    // 0.25: the watch outlasts the window by a lease and the reply timeout
+    // where a window could read clean: a resource reliable with `block`
+    // whose span or period the window covers. Elsewhere nothing waits on it.
+    let tail = if windowed && clean_reachable(&exposed, &spec) {
+        spec.presence_tail()
+    } else {
+        Duration::ZERO
     };
 
     // The subscriptions first, so what the GETs and the calls stir up is
@@ -531,14 +580,46 @@ async fn suite(
     obs.gets = gets;
     obs.gets_complete = complete;
     obs.calls = calls;
+    if presence_watch.as_ref().is_some_and(Result::is_ok) && !tail.is_zero() {
+        tokio::time::sleep_until(deadline + tail).await;
+    }
+    let read_at = tokio::time::Instant::now();
     obs.window_presence = presence_watch.map(|w| {
         w.map(|(mut p, gone, _subscriber)| {
             let gone = gone.lock().expect("not poisoned");
             p.gone = p.held.intersection(&gone).cloned().collect();
+            p.tail = read_at.saturating_duration_since(deadline);
             p
         })
     });
     obs
+}
+
+/// Whether a window of this run could read clean (§2.7, 0.25): some
+/// windowed resource is `reliable` with `block`, so its window can be
+/// lossless, and the window counts at least its liveness span (a
+/// templated stream or event) or its rate's period (an event).
+fn clean_reachable(exposed: &[Resource], spec: &ConformSpec) -> bool {
+    use zenkey_model::authoring::{Congestion, Reliability};
+    let counted = spec.counted(spec.window);
+    exposed.iter().any(|r| {
+        let Body::Data(d) = &r.body else {
+            return false;
+        };
+        if d.reliability != Reliability::Reliable || d.congestion != Congestion::Block {
+            return false;
+        }
+        let span = r
+            .template
+            .has_params()
+            .then(|| zenkey_model::budget::liveness(r.kind, d.retention_s.map(Duration::from_secs)))
+            .flatten();
+        let period = d.rate.map(|rate| rate.limit().1);
+        [span, period]
+            .into_iter()
+            .flatten()
+            .any(|need| counted >= need)
+    })
 }
 
 /// What [`watch_instances`] hands back: the read's tokens, the deletes seen
@@ -580,6 +661,7 @@ async fn watch_instances(
             held: read.keys.into_iter().collect(),
             complete: read.complete,
             gone: BTreeSet::new(),
+            tail: Duration::ZERO,
         },
         gone,
         subscriber,

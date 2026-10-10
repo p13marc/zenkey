@@ -358,8 +358,10 @@ silent call to a present service is a violation only with `--calls-granted`,
 the operator's word that no access control refused it, and unobservable
 without; a stream's or an event's population is `budget-window`'s, a pass
 within its bound only over a window of a whole liveness span — an hour, or
-the retention — so `--skip budget-window` where a run cannot listen that
-long, the state's `budget` still asked) · `zenctl why <key|address>` (a key's or a
+the retention — that lost no delivery, which only a resource declared
+reliable with block can show (spec §2.7, 0.25) — so `--skip budget-window`
+where a run cannot listen that long, or the stream is best-effort, the
+state's `budget` still asked) · `zenctl why <key|address>` (a key's or a
 service's silence, rung by rung — namespace, presence, descriptor, contract,
 the owner's answer, an archive's last-known — stopped at the first cause:
 exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·

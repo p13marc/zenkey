@@ -38,12 +38,14 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         trust_admin_space,
         calls_granted,
         clocks_synced,
+        lease,
         skip,
         contracts,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
+    let lease = ASKING.ask(super::positive_secs("--lease", lease));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let spec = ConformSpec {
         timeout: dep.timeout(),
@@ -53,6 +55,10 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         trust_admin: trust_admin_space,
         calls_granted,
         clocks_synced,
+        // §2.7 (0.25): the owner is watched a lease past the window. The
+        // deployment's lease is not on the bus: zenoh's default
+        // (`zenkey_model::budget::DEFAULT_LEASE`) unless `--lease` says.
+        lease,
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).

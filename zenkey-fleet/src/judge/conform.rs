@@ -26,8 +26,19 @@
 //! `zenkey_model::budget`. More than the bound, from any reading, is the
 //! finding. Within it is clean only after a complete reading: a GET that
 //! ran to its final reply, or a window of a whole liveness span that lost
-//! nothing while the owner held its instance token throughout
+//! no delivery while the owner held its instance token throughout
 //! ([`crate::bus::conform::WindowPresence`]); otherwise unobservable.
+//!
+//! **"Lost no delivery" is established, never assumed** (core §2.7, 0.25;
+//! #740): this run's reader lost nothing (no lag, nothing past the arrival
+//! cap), and the resource is `reliable` with `block`, which no router
+//! queue drops — by `zenkey_model::budget::lossless`, from the contract in
+//! hand. A best-effort or `drop` resource's window is never lossless, and
+//! its case says which QoS. The run's subscriptions detect no misses, so
+//! that input is always "not used". The owner must stay present a lease
+//! (and the reply timeout) past the window's end, and a window counts its
+//! span from its declaration plus the reply timeout. The `rate` case's
+//! clean pole reads all three.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
@@ -212,9 +223,7 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             .cases
             .push(freshness(obs, r, &name, heard, get, &clocks));
         report.cases.extend(budget_case(obs, r, &name, heard, get));
-        report
-            .cases
-            .extend(rate_case(Some(rev.contract()), r, &name, heard));
+        report.cases.extend(rate_case(obs, r, &name, heard));
     }
     report.cases.extend(health_cases(obs));
     let mut seen = BTreeSet::new();
@@ -354,11 +363,93 @@ fn occurrence_instants(arrivals: &[&Arrival]) -> Vec<std::time::Duration> {
     arrivals.iter().map(|a| a.at).collect()
 }
 
+/// "Lost no delivery" for a window over `r` (core §2.7, 0.25): what this
+/// run's reader lost, the misses its subscription detected (none: it
+/// detects none), and the resource's declared QoS, by
+/// `zenkey_model::budget::lossless`.
+fn window_loss(r: &Resource, h: &Heard) -> (budget::LossReason, u64) {
+    let lost = h.lagged + h.arrivals_capped;
+    let reason = budget::delivery_of(r, lost, h.misses_detected)
+        .map_or(budget::LossReason::ReaderLost, |d| budget::lossless(&d));
+    (reason, lost)
+}
+
+/// Why a window is not shown lossless, as a reader says it (core §2.7,
+/// 0.25): the reader's own loss, a detected miss, or the QoS named.
+fn loss_words(r: &Resource, reason: budget::LossReason, lost: u64, h: &Heard) -> String {
+    let declared = matches!(&r.body, Body::Data(d)
+        if d.history.as_ref().is_some_and(|x| x.miss_detection_ms.is_some()));
+    let unused = if declared && h.misses_detected.is_none() {
+        "; it declares miss detection, which this run's subscription does not use, and which \
+         could show a loss, never none"
+    } else {
+        ""
+    };
+    match reason {
+        budget::LossReason::ReaderLost => {
+            format!("this run lost {lost} delivery(ies)")
+        }
+        budget::LossReason::MissesDetected => format!(
+            "the subscription detected {} missed sample(s)",
+            h.misses_detected.unwrap_or(0)
+        ),
+        budget::LossReason::BestEffort => format!(
+            "best-effort: a dropped sample leaves no trace, so no window of it is lossless{unused}"
+        ),
+        budget::LossReason::CongestionDrop => format!(
+            "reliable with congestion drop: a full queue drops a sample and leaves no trace, so \
+             no window of it is lossless{unused}"
+        ),
+        budget::LossReason::ReliableBlock => "lossless".to_owned(),
+    }
+}
+
+/// Why the owner was not present throughout a window and the lease after it
+/// (core §2.7, 0.25), as a reader says it.
+fn absence_words(obs: &ConformObservation) -> String {
+    let tail = obs.spec.presence_tail();
+    match &obs.window_presence {
+        Some(Ok(p)) if !p.complete => {
+            "the read of its instance tokens ended at its timeout".to_owned()
+        }
+        Some(Ok(p)) if p.held.is_empty() => {
+            "no instance token of it was visible when the window opened".to_owned()
+        }
+        Some(Ok(p)) if !p.gone.is_empty() => format!(
+            "{} of its instance token(s) went while the window listened or within {:.1}s after",
+            p.gone.len(),
+            p.tail.as_secs_f64()
+        ),
+        Some(Ok(p)) => format!(
+            "its instance tokens were watched {:.1}s past the window's end, short of the lease \
+             and the reply timeout ({:.1}s): a path that failed in the window's last lease would \
+             not have shown yet",
+            p.tail.as_secs_f64(),
+            tail.as_secs_f64()
+        ),
+        Some(Err(e)) => format!("its presence could not be watched: {e}"),
+        None => "its presence was not watched".to_owned(),
+    }
+}
+
+/// Whether the owner was present throughout the window and the lease after
+/// it (core §2.7, 0.25).
+fn present_throughout(obs: &ConformObservation) -> bool {
+    match &obs.window_presence {
+        Some(Ok(p)) => p.throughout(obs.spec.presence_tail()),
+        _ => false,
+    }
+}
+
 /// §2.7: a templated resource's live members against its bound in this
 /// instance — `budget`, from the owner's GET, for a state; `budget-window`,
 /// from the window, for a stream or an event. `None` for a resource
 /// without parameters, which has no bound to keep. An operation's row is a
 /// `budget` not asked.
+///
+/// A window is complete (0.25) when it counted one liveness span past its
+/// declaration and the reply timeout, lost no delivery by
+/// [`window_loss`], and the owner stayed present until a lease after it.
 fn budget_case(
     obs: &ConformObservation,
     r: &Resource,
@@ -393,12 +484,10 @@ fn budget_case(
         ),
         _ => "heard within one hour".to_owned(),
     };
-    let present = match &obs.window_presence {
-        Some(Ok(p)) => p.throughout(),
-        _ => false,
-    };
-    let mut lost = 0u64;
+    let present = present_throughout(obs);
+    let mut lost_words = String::new();
     let mut w = obs.spec.window.as_secs_f64();
+    let mut counted = w;
     let (reading, capped) = match r.kind {
         Kind::State => match get {
             Some(Ok(g)) => (
@@ -419,13 +508,16 @@ fn budget_case(
         },
         _ => match heard {
             Some(Ok(h)) => {
-                lost = h.lagged + h.arrivals_capped;
+                let (loss, lost) = window_loss(r, h);
+                lost_words = loss_words(r, loss, lost, h);
                 w = h.listened.as_secs_f64();
+                let listened = obs.spec.counted(h.listened);
+                counted = listened.as_secs_f64();
                 (
                     Reading::Window(Window {
                         heard: members_heard(contract, r, h),
-                        listened: h.listened,
-                        lossless: lost == 0,
+                        listened,
+                        lossless: loss.is_lossless(),
                         present,
                     }),
                     if h.arrivals_capped > 0 {
@@ -451,7 +543,10 @@ fn budget_case(
     };
     let j = budget::population(r.kind, b, retention, &reading);
     let n = j.counted;
-    let need = span.map_or(u64::MAX, |p| p.as_secs());
+    let timeout = obs.spec.timeout.as_secs_f64();
+    let need = span.map_or(u64::MAX, |p| {
+        (p + obs.spec.timeout).as_secs_f64().ceil() as u64
+    });
     Some(match (j.verdict, j.reason) {
         (budget::Verdict::NotAsked, budget::Reason::NoCeiling) => ConformCase::not_asked(
             c,
@@ -489,8 +584,9 @@ fn budget_case(
                      final reply: within {of} (§2.7)"
                 ),
                 Reading::Window(_) => format!(
-                    "{n} member(s) {live} over a {w:.1}s window of at least one liveness span, \
-                     nothing lost, the owner present throughout: within {of} (§2.7)"
+                    "{n} member(s) {live} over a {w:.1}s window, {counted:.1}s of it counted, \
+                     at least one liveness span; reliable with block and nothing lost by this \
+                     run; the owner present throughout and a lease after: within {of} (§2.7)"
                 ),
             },
         ),
@@ -520,8 +616,9 @@ fn budget_case(
                 name,
                 format!(
                     "{n} member(s) {live} in the {w:.1}s window, within {of}: a window shows a \
-                     population within its bound only after one liveness span, so a window of \
-                     at least {need} s (`--for {need}`), or --skip budget-window (§2.7){capped}"
+                     population within its bound only after one liveness span, counted from its \
+                     declaration plus the {timeout:.1}s reply timeout, so a window of at least \
+                     {need} s (`--for {need}`), or --skip budget-window (§2.7){capped}"
                 ),
             )
         }
@@ -529,8 +626,9 @@ fn budget_case(
             c,
             name,
             format!(
-                "{n} member(s) {live} in the {w:.1}s window, within {of}, and this run lost \
-                 {lost} delivery(ies): a member it did not hear may be live (§2.7){capped}"
+                "{n} member(s) {live} in the {w:.1}s window, within {of}, and the window is not \
+                 shown to have lost no delivery: {lost_words} — a member it did not hear may be \
+                 live (§2.7){capped}"
             ),
         ),
         (budget::Verdict::Unobservable, budget::Reason::OwnerAbsent) => ConformCase::unobservable(
@@ -538,22 +636,9 @@ fn budget_case(
             name,
             format!(
                 "{n} member(s) {live} in the {w:.1}s window, within {of}, and the owner was not \
-                 present throughout: {} — a member published while it was away, or before this \
-                 run was matched, may be live (§2.7)",
-                match &obs.window_presence {
-                    Some(Ok(p)) if !p.complete => {
-                        "the read of its instance tokens ended at its timeout".to_owned()
-                    }
-                    Some(Ok(p)) if p.held.is_empty() => {
-                        "no instance token of it was visible when the window opened".to_owned()
-                    }
-                    Some(Ok(p)) => format!(
-                        "{} of its instance token(s) went while the window listened",
-                        p.gone.len()
-                    ),
-                    Some(Err(e)) => format!("its presence could not be watched: {e}"),
-                    None => "its presence was not watched".to_owned(),
-                }
+                 present throughout and a lease after: {} — a member published while it was \
+                 away, or lost to a path that failed, may be live (§2.7)",
+                absence_words(obs)
             ),
         ),
         (budget::Verdict::Unobservable, why) => ConformCase::unobservable(c, name, why.as_str()),
@@ -561,9 +646,11 @@ fn budget_case(
 }
 
 /// §2.7: an event's occurrences per member, against its declared `rate`.
-/// `None` for a resource that is not an event.
+/// `None` for a resource that is not an event. Kept is clean (0.25) only
+/// over a window that counted a whole period, lost no delivery by
+/// [`window_loss`], with the owner present until a lease after it.
 fn rate_case(
-    contract: Option<&zenkey_model::contract::Contract>,
+    obs: &ConformObservation,
     r: &Resource,
     name: &str,
     heard: Option<&Result<Heard, String>>,
@@ -572,6 +659,7 @@ fn rate_case(
     if r.kind != Kind::Event {
         return None;
     }
+    let contract = obs.revision.as_deref().map(Revision::contract);
     let Some(rate) = budget::rate_of(r) else {
         return Some(ConformCase::not_asked(
             C,
@@ -605,15 +693,19 @@ fn rate_case(
         .iter()
         .map(|(m, a)| ((*m).to_owned(), occurrence_instants(a)))
         .collect();
-    let lost = h.lagged + h.arrivals_capped;
+    let (loss, lost) = window_loss(r, h);
+    let listened = obs.spec.counted(h.listened);
     let o = Occurrences {
-        listened: h.listened,
-        complete: lost == 0,
+        listened,
+        lossless: loss.is_lossless(),
+        present: present_throughout(obs),
         members,
     };
     let (n, period) = rate.limit();
     let period = period_words(period);
     let w = h.listened.as_secs_f64();
+    let counted = listened.as_secs_f64();
+    let timeout = obs.spec.timeout.as_secs_f64();
     let j = budget::rate(Some(rate), &o);
     Some(match j.reason {
         budget::Reason::RateExceeded => {
@@ -642,8 +734,9 @@ fn rate_case(
             C,
             name,
             format!(
-                "{} member(s) over a {w:.1}s window, none with more than {n} occurrence(s) within \
-                 {period} ({rate}, §2.7)",
+                "{} member(s) over a {w:.1}s window, {counted:.1}s of it counted, none with more \
+                 than {n} occurrence(s) within {period}; reliable with block and nothing lost by \
+                 this run; the owner present throughout and a lease after ({rate}, §2.7)",
                 o.members.len()
             ),
         ),
@@ -651,17 +744,28 @@ fn rate_case(
             C,
             name,
             format!(
-                "this run lost {lost} delivery(ies) in the window: an occurrence it did not hear \
-                 could exceed {rate}"
+                "the window is not shown to have lost no delivery: {} — an occurrence it did \
+                 not hear could exceed {rate} (§2.7)",
+                loss_words(r, loss, lost, h)
             ),
         ),
         budget::Reason::WindowTooShort => ConformCase::unobservable(
             C,
             name,
             format!(
-                "the {w:.1}s window is shorter than {period}, {rate}'s period: no excess heard, \
-                 and listening at least that long (--for) is what could show the rate kept \
-                 (§2.7)"
+                "the {w:.1}s window counts {counted:.1}s from its declaration plus the \
+                 {timeout:.1}s reply timeout, short of {period}, {rate}'s period: no excess \
+                 heard, and listening at least that long (--for) is what could show the rate \
+                 kept (§2.7)"
+            ),
+        ),
+        budget::Reason::OwnerAbsent => ConformCase::unobservable(
+            C,
+            name,
+            format!(
+                "the owner was not present throughout the window and a lease after: {} — an \
+                 occurrence lost to a path that failed could exceed {rate} (§2.7)",
+                absence_words(obs)
             ),
         ),
         budget::Reason::Empty => ConformCase::unobservable(
@@ -1969,6 +2073,7 @@ mod tests {
                 trust_admin: false,
                 calls_granted: true,
                 clocks_synced: false,
+                lease: Duration::from_secs(10),
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
@@ -1977,10 +2082,12 @@ mod tests {
             heard: BTreeMap::new(),
             gets: BTreeMap::new(),
             gets_complete: BTreeMap::from([("state/status/{dev}".to_owned(), true)]),
+            // Watched a lease and the reply timeout past the window (0.25).
             window_presence: Some(Ok(WindowPresence {
                 held: [format!("zk2/lab/m/@zk/instance/{INST}")].into(),
                 complete: true,
                 gone: BTreeSet::new(),
+                tail: Duration::from_secs(11),
             })),
             calls: BTreeMap::new(),
             admin: Some(Ok(AdminSpace {
@@ -2046,13 +2153,14 @@ mod tests {
     #[test]
     fn a_conforming_service_passes_every_case_asked() {
         let mut r = judge(&conforming());
-        // A 2 s window is short of a stream's hour (§2.7): its
-        // `budget-window` is the one case left unobservable, and skipping
-        // it is what leaves the run clean, the state's `budget` still asked.
+        // A best-effort stream's window is never lossless (§2.7, 0.25): its
+        // `budget-window` is the one case left unobservable, whatever the
+        // window's length, and skipping it is what leaves the run clean,
+        // the state's `budget` still asked.
         let bw = case(&r, CaseId::BudgetWindow, "stream/bandwidth/{dev}");
         assert!(
             matches!(&bw.verdict, Judgement::Unobservable { reason }
-                if reason.contains("at least 3600 s (`--for 3600`)")),
+                if reason.contains("best-effort: a dropped sample leaves no trace")),
             "{bw:#?}"
         );
         assert!(matches!(
@@ -2622,7 +2730,10 @@ mod tests {
              params = { src = \"string\" }\ncardinality = 2\nrate = \"low\"\nretention = \"1h\"\n\
              [resources.\"journal/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
              params = { src = \"string\" }\ncardinality = 4294967295\nrate = \"burst(10/h)\"\n\
-             retention = \"1d\"\n",
+             retention = \"1d\"\n\
+             [resources.\"logs/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+             params = { src = \"string\" }\ncardinality = 2\nrate = \"low\"\nretention = \"1h\"\n\
+             reliability = \"best_effort\"\n",
             &dir,
             None,
         );
@@ -2659,24 +2770,26 @@ mod tests {
     /// shorter than a minute cannot show the rate kept. A stamped span is
     /// measured between the stamps of one clock, not on arrival. `budget`
     /// on an event counts members within its retention; the no-ceiling
-    /// cardinality is not asked.
+    /// cardinality is not asked. Lossless is established (0.25): a window
+    /// counts from its declaration plus the reply timeout, a best-effort
+    /// event's is never lossless, and the owner must stay present a lease
+    /// past the window, for the rate as for the population.
     #[test]
     fn an_events_rate_and_population_are_judged_over_the_window() {
         let rev = alarms();
-        let alarms_r = rev
-            .contract()
-            .resources
-            .iter()
-            .find(|r| r.template.as_str() == "alarms/{src}")
-            .unwrap()
-            .clone();
-        let journal = rev
-            .contract()
-            .resources
-            .iter()
-            .find(|r| r.template.as_str() == "journal/{src}")
-            .unwrap()
-            .clone();
+        let resource = |t: &str| {
+            rev.contract()
+                .resources
+                .iter()
+                .find(|r| r.template.as_str() == t)
+                .unwrap()
+                .clone()
+        };
+        let (alarms_r, journal, logs) = (
+            resource("alarms/{src}"),
+            resource("journal/{src}"),
+            resource("logs/{src}"),
+        );
         let window = |of: Vec<(String, Arrival)>, listened: f64| -> Result<Heard, String> {
             let mut h = Heard {
                 listened: Duration::from_secs_f64(listened),
@@ -2688,14 +2801,12 @@ mod tests {
             }
             Ok(h)
         };
-        let rate = |h: &Result<Heard, String>| {
-            rate_case(
-                Some(rev.contract()),
-                &alarms_r,
-                "events/alarms/{src}",
-                Some(h),
-            )
-            .unwrap()
+        // A 1 s reply timeout, the owner watched a lease and that past it.
+        let mut o = conforming();
+        o.revision = Some(Arc::clone(&rev));
+        o.presence = Ok(Observed::from_keys("zk2/lab/al/@zk/**", &[], true));
+        let rate = |o: &ConformObservation, h: &Result<Heard, String>| {
+            rate_case(o, &alarms_r, "events/alarms/{src}", Some(h)).unwrap()
         };
         // Two of `a` 10 s apart, in a 20 s window: beyond `low`.
         let twice = window(
@@ -2705,7 +2816,7 @@ mod tests {
             ],
             20.0,
         );
-        let c = rate(&twice);
+        let c = rate(&o, &twice);
         assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
         assert!(
             c.detail
@@ -2719,21 +2830,26 @@ mod tests {
             vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
             20.0,
         );
-        assert!(matches!(&rate(&once).verdict,
-            Judgement::Unobservable { reason } if reason.contains("shorter than a minute")));
-        // Over 61 s, nothing lost: kept.
+        assert!(matches!(&rate(&o, &once).verdict,
+            Judgement::Unobservable { reason } if reason.contains("short of a minute")));
+        // 60.5 s listened is 59.5 s counted, past the 1 s reply timeout:
+        // short of a minute still.
+        let almost = window(vec![occurrence("a", 1, 1.0, None)], 60.5);
+        assert!(matches!(&rate(&o, &almost).verdict,
+            Judgement::Unobservable { reason } if reason.contains("59.5s from its declaration")));
+        // Over 61 s, 60 counted, nothing lost, the owner present: kept.
         let long = window(
             vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
             61.0,
         );
         assert!(matches!(
-            rate(&long).verdict,
-            Judgement::NotEstablished { .. }
+            &rate(&o, &long).verdict,
+            Judgement::NotEstablished { reason } if reason.contains("reliable with block")
         ));
         // Lost deliveries leave it unobservable.
         let mut lossy = window(vec![occurrence("a", 1, 1.0, None)], 61.0);
         lossy.as_mut().unwrap().lagged = 3;
-        assert!(matches!(&rate(&lossy).verdict,
+        assert!(matches!(&rate(&o, &lossy).verdict,
             Judgement::Unobservable { reason } if reason.contains("lost 3")));
         // Arrivals 1 s apart, stamps of one clock (compared by value) 70 s
         // apart: the span is the stamps', and keeps `low`.
@@ -2745,7 +2861,7 @@ mod tests {
             61.0,
         );
         assert!(matches!(
-            rate(&stamped).verdict,
+            rate(&o, &stamped).verdict,
             Judgement::NotEstablished { .. }
         ));
         // Stamps of two clocks: the receive clock's span, 1 s, beyond it.
@@ -2756,7 +2872,31 @@ mod tests {
             ],
             61.0,
         );
-        assert_eq!(rate(&mixed).verdict, Judgement::Established);
+        assert_eq!(rate(&o, &mixed).verdict, Judgement::Established);
+        // A best-effort event: never lossless, named, however long.
+        let logs_once = window(
+            vec![(
+                "zk2/lab/al/al.v1/events/logs/a/01hzzzzzzzzzzzzzzzzzzzzz01".to_owned(),
+                Arrival {
+                    at: Duration::from_secs(1),
+                    stamp: None,
+                },
+            )],
+            7200.0,
+        );
+        let c = rate_case(&o, &logs, "events/logs/{src}", Some(&logs_once)).unwrap();
+        assert!(
+            matches!(&c.verdict, Judgement::Unobservable { reason }
+                if reason.contains("best-effort: a dropped sample leaves no trace")),
+            "{c:#?}"
+        );
+        let b = budget_case(&o, &logs, "events/logs/{src}", Some(&logs_once), None).unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::Unobservable { reason }
+                if reason.contains("not shown to have lost no delivery")
+                    && reason.contains("best-effort")),
+            "{b:#?}"
+        );
         // Budget: three members within an hour's retention, above 2.
         let three = window(
             vec![
@@ -2766,9 +2906,6 @@ mod tests {
             ],
             20.0,
         );
-        let mut o = conforming();
-        o.revision = Some(Arc::clone(&rev));
-        o.presence = Ok(Observed::from_keys("zk2/lab/al/@zk/**", &[], true));
         let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&three), None).unwrap();
         assert_eq!(b.verdict, Judgement::Established, "{b:#?}");
         assert!(
@@ -2779,27 +2916,31 @@ mod tests {
             "{b:#?}"
         );
         assert_eq!(b.case, CaseId::BudgetWindow);
-        // Two members within the bound, over 20 s of an hour's retention.
+        // Two members within the bound, over 20 s of an hour's retention:
+        // a span counts past the reply timeout too.
         let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&once), None).unwrap();
         assert!(
             matches!(&b.verdict, Judgement::Unobservable { reason }
-                if reason.contains("at least 3600 s (`--for 3600`)")),
+                if reason.contains("at least 3601 s (`--for 3601`)")),
             "{b:#?}"
         );
-        // Over the whole hour, nothing lost, the owner present: clean.
+        // A listened hour is short of a counted one.
+        let hour_only = window(vec![occurrence("a", 1, 1.0, None)], 3600.0);
+        let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&hour_only), None).unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::Unobservable { reason }
+                if reason.contains("`--for 3601`")),
+            "{b:#?}"
+        );
+        // Over the whole counted hour, nothing lost, the owner present: clean.
         let hour = window(
             vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
-            3600.0,
+            3601.0,
         );
-        o.window_presence = Some(Ok(WindowPresence {
-            held: ["zk2/lab/al/@zk/instance/3fa9c2d41b7e0012".to_owned()].into(),
-            complete: true,
-            gone: BTreeSet::new(),
-        }));
         let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&hour), None).unwrap();
         assert!(
             matches!(&b.verdict, Judgement::NotEstablished { reason }
-                if reason.contains("the owner present throughout")),
+                if reason.contains("the owner present throughout and a lease after")),
             "{b:#?}"
         );
         // The same hour, a delivery lost: unobservable.
@@ -2817,6 +2958,28 @@ mod tests {
             matches!(&b.verdict, Judgement::Unobservable { reason } if reason.contains("lost 1")),
             "{b:#?}"
         );
+        // The owner's tokens watched only 2 s past the window, short of the
+        // lease and the reply timeout: a failure in the last lease could
+        // still be on its way, for the population and for the rate.
+        let mut short_tail = o.clone();
+        if let Some(Ok(p)) = &mut short_tail.window_presence {
+            p.tail = Duration::from_secs(2);
+        }
+        let b = budget_case(
+            &short_tail,
+            &alarms_r,
+            "events/alarms/{src}",
+            Some(&hour),
+            None,
+        )
+        .unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::Unobservable { reason }
+                if reason.contains("short of the lease and the reply timeout (11.0s)")),
+            "{b:#?}"
+        );
+        assert!(matches!(&rate(&short_tail, &long).verdict,
+            Judgement::Unobservable { reason } if reason.contains("not present throughout")));
         // The owner's token went mid-window: unobservable, and said so.
         if let Some(Ok(p)) = &mut o.window_presence {
             p.gone = p.held.clone();
@@ -2828,6 +2991,8 @@ mod tests {
                     && reason.contains("went while the window listened")),
             "{b:#?}"
         );
+        assert!(matches!(&rate(&o, &long).verdict,
+            Judgement::Unobservable { reason } if reason.contains("went while the window listened")));
         // The no-ceiling cardinality: not asked.
         let b = budget_case(&o, &journal, "events/journal/{src}", Some(&three), None).unwrap();
         assert_eq!(b.verdict, Judgement::NotAsked, "{b:#?}");

@@ -43,6 +43,7 @@ use zenoh::liveliness::LivelinessToken;
 use zenoh::pubsub::Publisher;
 use zenoh::query::{Query, Queryable};
 
+use crate::budget::Budget;
 use crate::config::ServiceConfig;
 use crate::consumer::Consumer;
 use crate::descriptor;
@@ -63,6 +64,16 @@ pub(crate) struct ImplState {
     pub(crate) unavailable: BTreeMap<String, (Cause, Option<String>)>,
     /// Lowered template bounds, keyed `<kind token>/<template>` (§3.3).
     pub(crate) cardinality: BTreeMap<String, u64>,
+    /// Each stream, state and event resource's budget (§2.7, #741), keyed
+    /// as `cardinality`: shared by every writer of the resource.
+    pub(crate) budgets: BTreeMap<String, Arc<Budget>>,
+}
+
+impl ImplState {
+    /// The budget every writer of `r` keeps (§2.7).
+    fn budget(&self, r: &zenkey_model::contract::Resource) -> Option<Arc<Budget>> {
+        self.budgets.get(&resource_name(r)).cloned()
+    }
 }
 
 /// A role through which data reaches this component (§3.1). Its bindings
@@ -246,7 +257,9 @@ impl ServiceBuilder {
         values: &Bindings,
     ) -> Result<StateWriter> {
         let key = self.key(iface, resource, values)?;
-        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?.clone();
+        let budget = s.budget(&r);
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!(
                 "{iface} {resource:?} is not state"
@@ -254,7 +267,9 @@ impl ServiceBuilder {
         }
         self.expose(iface, resource)?;
         self.state_ifaces.insert(iface.clone());
-        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values).await?;
+        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+            .await?
+            .bounded(budget);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -304,11 +319,18 @@ impl ServiceBuilder {
                 optional: req.optional,
             });
         }
+        let budgets = imp
+            .contract()
+            .resources
+            .iter()
+            .filter_map(|r| Some((resource_name(r), Arc::new(Budget::new(imp.iface(), r)?))))
+            .collect();
         self.impls.push(ImplState {
             imp,
             exposed: BTreeSet::new(),
             unavailable: BTreeMap::new(),
             cardinality: BTreeMap::new(),
+            budgets,
         });
         Ok(self)
     }
@@ -365,7 +387,9 @@ impl ServiceBuilder {
     }
 
     /// Lowers a template's bound for this instance (§3.3). It cannot raise
-    /// it (D007).
+    /// it (D007), and it cannot lower it below the members its writers have
+    /// made live already (§2.7, #741): that is [`Error::Budget`], the bound
+    /// unchanged.
     pub fn cardinality(&mut self, iface: &IfaceId, resource: &str, n: u64) -> Result<&mut Self> {
         let s = find_mut(&mut self.impls, iface)?;
         let r = s.imp.resource(resource)?;
@@ -377,6 +401,9 @@ impl ServiceBuilder {
                     r.cardinality
                 )));
             }
+        }
+        if let Some(b) = s.budget(r) {
+            b.lower(n, std::time::Instant::now())?;
         }
         s.cardinality.insert(resource.to_owned(), n);
         if let Some(h) = &self.health
@@ -435,6 +462,11 @@ impl ServiceBuilder {
 
     /// Declares a publisher on a resource member, with the contract's QoS
     /// (§2.4), and exposes the resource. Streams, state and events only.
+    ///
+    /// A raw zenoh publisher: the runtime does not see its puts, so keeping
+    /// the resource's budget (§2.7) with it is the caller's. The writers
+    /// ([`ServiceBuilder::declare_writer`], [`ServiceBuilder::declare_state_writer`],
+    /// [`ServiceBuilder::event_writer`]) keep it.
     pub async fn declare_publisher(
         &mut self,
         iface: &IfaceId,
@@ -501,9 +533,15 @@ impl ServiceBuilder {
         values: &Bindings,
     ) -> Result<Writer> {
         let key = self.key(iface, resource, values)?;
-        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?.clone();
+        let budget = s.budget(&r);
         self.expose(iface, resource)?;
-        Writer::declare(&self.session, key.into_keyexpr(), &r, values).await
+        Ok(
+            Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+                .await?
+                .bounded(budget),
+        )
     }
 
     /// An [`EventWriter`] for an event's member, and exposes the resource.
@@ -514,9 +552,11 @@ impl ServiceBuilder {
         values: &Bindings,
     ) -> Result<EventWriter> {
         let key = self.key(iface, resource, values)?;
-        let r = find(&self.impls, iface)?.imp.resource(resource)?.clone();
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?.clone();
+        let budget = s.budget(&r);
         self.expose(iface, resource)?;
-        EventWriter::new(&self.session, key.to_string(), &r, values)
+        Ok(EventWriter::new(&self.session, key.to_string(), &r, values)?.bounded(budget))
     }
 
     /// Brings the service up in the order of §8.2. On any refusal, nothing
@@ -769,7 +809,12 @@ impl Service {
     ) -> Result<Writer> {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
-        Writer::declare(&self.session, key.into_keyexpr(), &r, values).await
+        let budget = find(&self.impls, iface)?.budget(&r);
+        Ok(
+            Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+                .await?
+                .bounded(budget),
+        )
     }
 
     /// A [`StateWriter`] on a member of an exposed state resource, for
@@ -790,7 +835,10 @@ impl Service {
         }
         self.ensure_state_server(iface).await?;
         let key = self.key(iface, resource, values)?;
-        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values).await?;
+        let budget = find(&self.impls, iface)?.budget(&r);
+        let w = Writer::declare(&self.session, key.into_keyexpr(), &r, values)
+            .await?
+            .bounded(budget);
         Ok(StateWriter::new(
             w,
             Arc::clone(&self.store),
@@ -852,7 +900,24 @@ impl Service {
     ) -> Result<EventWriter> {
         let r = self.exposed(iface, resource)?;
         let key = self.key(iface, resource, values)?;
-        EventWriter::new(&self.session, key.to_string(), &r, values)
+        let budget = find(&self.impls, iface)?.budget(&r);
+        Ok(EventWriter::new(&self.session, key.to_string(), &r, values)?.bounded(budget))
+    }
+
+    /// The members of `resource` its writers hold live now, and its bound
+    /// in force with whose it is (core §2.7, #741); `None` for an
+    /// operation.
+    pub fn budget(
+        &self,
+        iface: &IfaceId,
+        resource: &str,
+    ) -> Result<Option<(u64, zenkey_model::budget::Bound, crate::budget::Source)>> {
+        let s = find(&self.impls, iface)?;
+        let r = s.imp.resource(resource)?;
+        Ok(s.budget(r).map(|b| {
+            let (bound, source) = b.bound();
+            (b.live(std::time::Instant::now()), bound, source)
+        }))
     }
 
     /// The consumer of `role`, compiled against `contract`, the required

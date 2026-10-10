@@ -3742,20 +3742,31 @@ async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
     let events = owner
         .event_writer(&iface("tc.netem.v1"), "events/applied", &Bindings::new())
         .expect("an event writer");
+    // One occurrence only: the event's rate is `low`, which the runtime
+    // keeps (§2.7, #741), so the subscriber is matched first, through a
+    // probe publisher on the event's keys, rather than put until heard.
+    let probe = bus
+        .owners
+        .declare_publisher(
+            "zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/events/applied/01hzzzzzzzzzzzzzzzzzzzzzzz",
+        )
+        .await
+        .expect("a probe publisher");
     let deadline = Instant::now() + SETTLE;
-    let key = loop {
-        let put = events
-            .put(br#"{"ulid":"x"}"#.to_vec())
-            .await
-            .expect("an occurrence");
-        match tokio::time::timeout(Duration::from_millis(200), sub.recv_async()).await {
-            Ok(Ok(sample)) => {
-                assert_eq!(sample.key_expr().as_str(), put);
-                break put;
-            }
-            _ if Instant::now() < deadline => continue,
-            _ => panic!("no occurrence reached {key_expr}"),
+    while !probe.matching_status().await.expect("matching").matching() {
+        assert!(Instant::now() < deadline, "the subscriber never matched");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let put = events
+        .put(br#"{"ulid":"x"}"#.to_vec())
+        .await
+        .expect("an occurrence");
+    let key = match tokio::time::timeout(SETTLE, sub.recv_async()).await {
+        Ok(Ok(sample)) => {
+            assert_eq!(sample.key_expr().as_str(), put);
+            put
         }
+        _ => panic!("no occurrence reached {key_expr}"),
     };
     bus.services.push(owner);
 
@@ -3974,9 +3985,10 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// every operation — passes every case asked, exit 0; the operation that
 /// is not idempotent is not called, and a resource with no horizon is not
 /// asked its freshness. Its state's population passes `budget` by the
-/// owner's complete GET, and its stream's `budget-window`, over a window
-/// short of an hour, is unobservable (§2.7, #735): exit 2 until `--skip
-/// budget-window`, which leaves the state's `budget` asked and passing.
+/// owner's complete GET, and its best-effort stream's `budget-window` is
+/// unobservable whatever the window, since no window of it is lossless
+/// (§2.7, #735; 0.25, #740): exit 2 until `--skip budget-window`, which
+/// leaves the state's `budget` asked and passing.
 /// `--junit` writes the suite. The router's admin space is on: the owner's
 /// own stamp passes only against a router this run verified (S1, §4.2,
 /// 0.17).
@@ -4003,9 +4015,9 @@ async fn check_conform_passes_a_conforming_service() {
     wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
     let junit = bus.home.join("conform.xml");
     let junit = junit.to_str().expect("a UTF-8 path").to_owned();
-    // §2.7 (#735): a 2 s window is short of the stream's hour, so its
-    // `budget-window` is the one case left unobservable; the state's
-    // `budget` passes by the owner's GET.
+    // §2.7 (0.25): the stream is best-effort, so its `budget-window` is the
+    // one case left unobservable, and says why; the state's `budget` passes
+    // by the owner's GET.
     let unskipped = [
         "check",
         "conform",
@@ -4039,7 +4051,7 @@ async fn check_conform_passes_a_conforming_service() {
     assert!(
         bw["verdict"]["reason"]
             .to_string()
-            .contains("at least 3600 s (`--for 3600`)"),
+            .contains("best-effort: a dropped sample leaves no trace"),
         "{run}"
     );
     assert!(
@@ -4147,18 +4159,26 @@ fn inv() -> Contract {
     )
 }
 
-/// An owner of `inv.v1` at `address`, its descriptor lowering the bound to
-/// `bound`, holding `members` items it re-puts every 200 ms.
-async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Service, Task) {
+/// An instance of `inv.v1` at `address` on `session`, its descriptor
+/// lowering the bound to `bound`, holding `items` it re-puts every 200 ms.
+/// The runtime keeps the bound (§2.7, #741): it refuses more items than it.
+async fn inventory(
+    session: &zenoh::Session,
+    address: &str,
+    bound: u64,
+    items: &[&str],
+) -> (Service, Task) {
     let id = iface("inv.v1");
     let mut b = ServiceBuilder::new(
-        &bus.owners,
+        session,
         ServiceConfig::new(address.parse().expect("an address")),
     );
     b.implement(Implementation::new(inv())).expect("implement");
+    b.cardinality(&id, "state/items/{item}", bound)
+        .expect("a lowering");
     let mut writers = Vec::new();
-    for i in 0..members {
-        let item: Bindings = [("item".to_owned(), vec![format!("i{i}")])].into();
+    for (i, item) in items.iter().enumerate() {
+        let item: Bindings = [("item".to_owned(), vec![(*item).to_owned()])].into();
         let w = b
             .declare_state_writer(&id, "state/items/{item}", &item)
             .await
@@ -4166,8 +4186,6 @@ async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Ser
         w.put(format!("{i}")).await.expect("put");
         writers.push(w);
     }
-    b.cardinality(&id, "state/items/{item}", bound)
-        .expect("a lowering");
     let service = b.start().await.expect("start");
     let task = Task(tokio::spawn(async move {
         loop {
@@ -4180,20 +4198,31 @@ async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Ser
     (service, task)
 }
 
-/// Core §2.7 (#735): an owner holding two members where its descriptor
-/// lowers the bound to one breaks the budget, by its own complete GET:
-/// `check conform`'s `budget` case is the violation, exit 1, naming the
-/// descriptor's bound. Beside it, an owner of the same contract holding two
-/// members within its lowered bound of two passes every case asked, exit 0:
-/// a state's population is the one a reading can show within its bound.
+/// Core §2.7 (#735): two instances of one service, each holding one member
+/// within its descriptor's bound of one — the runtime keeps each instance's
+/// (#741) — hold two members of one population, since a key names no
+/// instance: by the owners' complete GET, `check conform`'s `budget` case
+/// is the violation, exit 1, naming the descriptor's bound. Beside it, an
+/// owner of the same contract holding two members within its lowered bound
+/// of two passes every case asked, exit 0: a state's population is the one
+/// a reading can show within its bound.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_judges_a_population_against_its_lowered_bound() {
     let mut bus = Bus::admin(None).await;
-    for (address, bound) in [("host-a/inv", 1), ("host-b/inv", 2)] {
-        let (owner, task) = inventory(&bus, address, bound, 2).await;
+    let other = client(&bus.endpoint, None).await;
+    let mut up = Vec::new();
+    for (session, address, bound, items) in [
+        (&bus.owners, "host-a/inv", 1, &["i0"][..]),
+        (&other, "host-a/inv", 1, &["i1"][..]),
+        (&bus.owners, "host-b/inv", 2, &["i0", "i1"][..]),
+    ] {
+        up.push(inventory(session, address, bound, items).await);
+    }
+    for (owner, task) in up {
         bus.services.push(owner);
         bus.keep(task);
     }
+    bus.keep(other);
     wait_for(&bus, &["host-a/inv", "host-b/inv"]).await;
     let conform = |address: &'static str| {
         [
@@ -4256,7 +4285,9 @@ fn alarms() -> Contract {
 /// the retention, above its two — and a window of two seconds shows both:
 /// `rate` and `budget-window` are violations, exit 1. A window that heard
 /// no excess could only say `low` kept after a whole minute (unit-tested; a
-/// live minute is not spent here).
+/// live minute is not spent here). The reference runtime refuses both
+/// (#741), so the occurrences are the owner's session's own puts, on the
+/// event's keys and QoS: an owner whose runtime does not keep §2.7.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_judges_an_events_rate_and_population() {
     let mut bus = Bus::admin(None).await;
@@ -4267,19 +4298,21 @@ async fn check_conform_judges_an_events_rate_and_population() {
     );
     b.implement(Implementation::new(alarms()))
         .expect("implement");
-    let writers: Vec<_> = ["a", "b", "c"]
-        .into_iter()
-        .map(|src| {
-            let v: Bindings = [("src".to_owned(), vec![src.to_owned()])].into();
-            b.event_writer(&id, "events/alarms/{src}", &v)
-                .expect("an event writer")
-        })
-        .collect();
+    b.expose(&id, "events/alarms/{src}").expect("exposed");
     bus.services.push(b.start().await.expect("start"));
+    let session = bus.owners.clone();
     bus.keep(Task(tokio::spawn(async move {
         loop {
-            for w in &writers {
-                let _ = w.put("alarm").await;
+            for src in ["a", "b", "c"] {
+                let ulid = zenkey::writer::ulid(std::time::SystemTime::now());
+                let _ = session
+                    .put(
+                        format!("zk2/host-a/al/al.v1/events/alarms/{src}/{ulid}"),
+                        "alarm",
+                    )
+                    .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                    .congestion_control(zenoh::qos::CongestionControl::Block)
+                    .await;
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
@@ -5065,10 +5098,12 @@ fn pulses() -> Contract {
 }
 
 /// Core §2.7 (#735), a window's clean pole: an owner publishing two
-/// sources every 200 ms, within its bound of two, read over a 3 s window —
-/// longer than its 2 s retention, nothing lost, its instance token held
-/// throughout — passes `budget-window`. The same owner closed a second into
-/// the window was not present throughout: unobservable, and said so.
+/// sources every 200 ms, within its bound of two, read over a 4 s window
+/// whose 3 s past the 1 s reply timeout are longer than its 2 s retention
+/// (0.25) — the event reliable with `block` and nothing lost, its instance
+/// token held throughout and watched a lease (`--lease 1`) and the timeout
+/// past it — passes `budget-window`. The same owner closed half a second
+/// into the window was not present throughout: unobservable, and said so.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     let mut bus = Bus::admin(None).await;
@@ -5107,9 +5142,11 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
         "host-a/pulse",
         "pulse.v1",
         "--for",
-        "3",
+        "4",
         "--timeout",
-        "2",
+        "1",
+        "--lease",
+        "1",
         "--format",
         "json",
     ];
@@ -5126,7 +5163,7 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     assert!(
         w["verdict"]["reason"]
             .to_string()
-            .contains("the owner present throughout"),
+            .contains("reliable with block and nothing lost by this run; the owner present throughout and a lease after"),
         "{run}"
     );
     // Half a second into the window, the owner closes: its token goes. The

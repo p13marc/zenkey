@@ -44,6 +44,12 @@ pub enum Error {
     /// stops writing state until the drift is gone (spec §4.3, S7).
     #[error("this owner's clock is ahead of its router: state writes stop (spec §4.3)")]
     ClockAhead,
+    /// A write core §2.7 forbids, refused with nothing published: a new
+    /// member while the resource's live members are at its bound, an event
+    /// occurrence beyond its rate, or a lowering below the members already
+    /// live (#741). It names the resource, the bound and whose it is.
+    #[error(transparent)]
+    Budget(Box<crate::budget::Refusal>),
     /// A payload does not encode or decode as its declared type (§7.2): a
     /// value reply or a sample that is not what the contract says, or a
     /// value its codec cannot write.
@@ -67,6 +73,12 @@ pub enum Error {
 impl From<crate::hostid::HostIdError> for Error {
     fn from(e: crate::hostid::HostIdError) -> Self {
         Self::HostId(std::sync::Arc::new(e))
+    }
+}
+
+impl From<crate::budget::Refusal> for Error {
+    fn from(r: crate::budget::Refusal) -> Self {
+        Self::Budget(Box::new(r))
     }
 }
 

@@ -13,6 +13,7 @@
 //! | [`presence`]: reading tokens and descriptors | §8.1 |
 //! | [`retrieval`]: fetching a contract bundle | §8.4 |
 //! | [`writer`]: the contract's QoS and `Encoding` on every sample; events | §2.4–§2.6, §7.2 |
+//! | [`budget`]: a new member refused at the bound, an occurrence beyond the rate (#741) | §2.7 |
 //! | [`qos`]: the contract's QoS as zenoh spells it | §2.4 |
 //! | [`consumer`]: data through a role's bindings | §3.2 R1–R7 |
 //! | [`operation`]: serving calls; [`client`]: calling them, one address or a fleet; [`ownership`]: the split-brain diagnosis | §5.1 O1–O7, §5.2, §6 |
@@ -46,6 +47,7 @@
 
 #[cfg(feature = "zenoh")]
 pub mod archive;
+pub mod budget;
 pub mod call;
 #[cfg(feature = "zenoh")]
 pub mod client;

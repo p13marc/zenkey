@@ -6,6 +6,7 @@
 //! cargo run -p zenkey --example owner -- [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
 //!     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
 //!     [--tokenless <iface>]... [--clock-reference <key>] [--clock-offset-ms <ms>]
+//!     [--cardinality <iface>:<resource>=<n>]...
 //!     <address> <contract.toml>...
 //! ```
 //!
@@ -75,7 +76,26 @@
 //! fault <code> <LEVEL> [<detail>...]     fault: an application's code (§2.10)
 //! confirm on|off                         set_confirming: off lets the status go stale (§2.4)
 //! clock-offset <ms>                      the clock's simulated offset (0: set right)
+//! put <iface> <resource> [<value>...]    one write on a member (core §2.7)
+//! delete <iface> <resource> [<value>...] a state member's delete
+//! fill <iface> <resource> <n>            put members m0 … m<n−1>, one write each
 //! ```
+//!
+//! **The budget** (core §2.7, #741), for a runner to reach each bound:
+//! `put` writes once on the member of a stream, state or event resource
+//! whose template parameters the values bind, in order (a rest parameter
+//! takes its value's `/`-separated chunks): a stamped state put, a stream
+//! sample, or one event occurrence, each of the bytes `ok`, which is a
+//! value only of a raw type. It is answered `put <key>`, an occurrence's
+//! key with its ULID. `delete` deletes a state member, answered `deleted
+//! <key>`. `fill` puts members `m0` to `m<n−1>` (every parameter bound to
+//! `m<i>`), stopping at the first refusal, answered `filled <n>`. A write
+//! the runtime refuses — a new member while the live members are at the
+//! bound, an occurrence beyond the member's rate — is answered `refused
+//! <command>: <why>`, `why` naming the resource, the bound and whose it is
+//! (or the rate), and for `fill` how many it put first. `--cardinality
+//! <iface>:<resource>=<n>` lowers a template's bound in the descriptor
+//! (core §3.3), e.g. `--cardinality budget.v1:state/items/{item}=2`.
 //!
 //! A `health.v1` command is answered `health status=<LEVEL> declared=<LEVEL>
 //! raised_by=<name>` (`UNSPECIFIED` for no level, `-` for none): the status
@@ -97,6 +117,7 @@
 //! `--tokenless <iface>` puts an interface in the deployment's tokenless
 //! set (core §8.1, U22): `health.v1`, for one.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -104,11 +125,13 @@ use std::path::PathBuf;
 use zenkey::health::{self, Effective, Health, Level};
 use zenkey::hostid::{HostIdMinter, HostIdSource};
 use zenkey::model::authoring::Kind;
-use zenkey::model::contract::{Body, load_path};
+use zenkey::model::contract::{Body, Contract, Resource, load_path};
+use zenkey::model::grammar::IfaceId;
 use zenkey::model::schema::TypeId;
-use zenkey::model::template::Bindings;
-use zenkey::state::Minter;
-use zenkey::{Address, Implementation, OpError, ServiceBuilder, ServiceConfig};
+use zenkey::model::template::{Bindings, Segment};
+use zenkey::state::StateWriter;
+use zenkey::writer::{EventWriter, Writer};
+use zenkey::{Address, Implementation, OpError, Service, ServiceBuilder, ServiceConfig};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -135,6 +158,9 @@ pub struct Options {
     pub clock_reference: Option<String>,
     /// `--clock-offset-ms <ms>`: this owner's clock, shifted.
     pub clock_offset_ms: i64,
+    /// `--cardinality <iface>:<resource>=<n>`: a template's bound lowered in
+    /// the descriptor (core §3.3, §2.7).
+    pub cardinality: Vec<(String, String, u64)>,
     pub address: String,
     pub contracts: Vec<PathBuf>,
 }
@@ -163,6 +189,7 @@ impl Options {
              [--health] [--health-status <LEVEL>[:<reason>]] \
              [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... \
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
+             [--cardinality <iface>:<resource>=<n>]... \
              <system>/<service>|@hostid.v1/<service> <contract.toml>..."
                 .to_owned()
         };
@@ -176,6 +203,7 @@ impl Options {
             tokenless: Vec::new(),
             clock_reference: None,
             clock_offset_ms: 0,
+            cardinality: Vec::new(),
             address: String::new(),
             contracts: Vec::new(),
         };
@@ -237,6 +265,20 @@ impl Options {
                     o.clock_offset_ms = value
                         .parse()
                         .map_err(|e| format!("--clock-offset-ms {value:?}: {e}"))?;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--cardinality" => {
+                    let parsed = value.split_once(':').and_then(|(iface, r)| {
+                        let (resource, n) = r.rsplit_once('=')?;
+                        Some((iface.to_owned(), resource.to_owned(), n.parse().ok()?))
+                    });
+                    let Some(c) = parsed else {
+                        return Err(format!(
+                            "--cardinality {value:?}: <iface>:<resource>=<n>, as \
+                             budget.v1:state/items/{{item}}=2"
+                        ));
+                    };
+                    o.cardinality.push(c);
                     rest = tail;
                 }
                 [flag, ..] if flag.starts_with("--") => return Err(usage()),
@@ -352,10 +394,14 @@ pub async fn run_with(
     b.minter().simulate_offset(opts.clock_offset_ms);
     let mut states = Vec::new();
     let mut servers = Vec::new();
+    let mut members = Members::default();
     let none = Bindings::new();
     for imp in imps {
         let iface = imp.iface().clone();
         let resources = imp.contract().resources.clone();
+        members
+            .contracts
+            .insert(iface.clone(), imp.contract().clone());
         b.implement(imp)?;
         for r in resources {
             let name = zenkey::implementation::resource_name(&r);
@@ -397,6 +443,11 @@ pub async fn run_with(
             }
         }
     }
+    // Core §3.3: a template's bound lowered in the descriptor, which the
+    // runtime then keeps (§2.7).
+    for (iface, resource, n) in &opts.cardinality {
+        b.cardinality(&iface.parse()?, resource, *n)?;
+    }
     // health.v1 §2.3: its status and checks before the tokens; the status
     // is UNSPECIFIED, "starting", when none is given.
     let health = if opts.health {
@@ -419,7 +470,7 @@ pub async fn run_with(
     for w in &states {
         w.put("ok").await?;
     }
-    let svc = b.start().await?;
+    let mut svc = b.start().await?;
     say(format!("ready {}", svc.instance_key()?));
 
     let mut until = std::pin::pin!(until);
@@ -428,14 +479,15 @@ pub async fn run_with(
         tokio::select! {
             () = &mut until => break,
             line = commands.recv_async(), if open => match line {
-                Ok(line) => say(command(&line, health.as_ref(), svc.minter()).await),
+                Ok(line) => say(command(&line, health.as_ref(), &mut svc, &mut members).await),
                 Err(_) => open = false,
             },
         }
     }
     while let Ok(line) = commands.try_recv() {
-        say(command(&line, health.as_ref(), svc.minter()).await);
+        say(command(&line, health.as_ref(), &mut svc, &mut members).await);
     }
+    drop(members);
     svc.close().await?;
     drop(servers);
     session.close().await?;
@@ -452,19 +504,187 @@ fn describe(e: &Effective) -> String {
     )
 }
 
+/// A member's writer, kept for its next write.
+enum Held {
+    State(StateWriter),
+    Stream(Box<Writer>),
+    Event(EventWriter),
+}
+
+/// The members `put`, `delete` and `fill` write (core §2.7): each
+/// implemented contract, and a writer per member written.
+#[derive(Default)]
+struct Members {
+    contracts: HashMap<IfaceId, Contract>,
+    writers: HashMap<String, Held>,
+}
+
+/// The template's parameters bound to `values`, in order: a rest parameter
+/// takes its value's `/`-separated chunks.
+fn bind(r: &Resource, values: &[String]) -> Result<Bindings, String> {
+    let params: Vec<(String, bool)> = r
+        .template
+        .segments()
+        .iter()
+        .filter_map(|s| match s {
+            Segment::Param(n) => Some((n.clone(), false)),
+            Segment::Rest(n) => Some((n.clone(), true)),
+            Segment::Literal(_) => None,
+        })
+        .collect();
+    if params.len() != values.len() {
+        return Err(format!(
+            "{} takes {} value(s), one per parameter, and {} were given",
+            r.template,
+            params.len(),
+            values.len()
+        ));
+    }
+    Ok(params
+        .into_iter()
+        .zip(values)
+        .map(|((name, rest), v)| {
+            let chunks = if rest {
+                v.split('/').map(str::to_owned).collect()
+            } else {
+                vec![v.clone()]
+            };
+            (name, chunks)
+        })
+        .collect())
+}
+
+impl Members {
+    /// One write on the member of `resource` the values bind (§2.7), or why
+    /// not; for `delete`, the state member's delete. Answers its key.
+    async fn write(
+        &mut self,
+        svc: &mut Service,
+        iface: &str,
+        resource: &str,
+        values: &[String],
+        delete: bool,
+    ) -> Result<String, String> {
+        let iface: IfaceId = iface.parse().map_err(|e| format!("{e}"))?;
+        let r = self
+            .contracts
+            .get(&iface)
+            .ok_or_else(|| format!("{iface} is not implemented here"))?
+            .resources
+            .iter()
+            .find(|r| zenkey::implementation::resource_name(r) == resource)
+            .ok_or_else(|| format!("{iface} has no resource {resource:?}"))?
+            .clone();
+        let bound = bind(&r, values)?;
+        let key = svc
+            .key(&iface, resource, &bound)
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let err = |e: zenkey::Error| e.to_string();
+        if !self.writers.contains_key(&key) {
+            let held = match r.kind {
+                Kind::State => Held::State(
+                    svc.state_writer(&iface, resource, &bound)
+                        .await
+                        .map_err(err)?,
+                ),
+                Kind::Stream => Held::Stream(Box::new(
+                    svc.writer(&iface, resource, &bound).await.map_err(err)?,
+                )),
+                Kind::Event => {
+                    Held::Event(svc.event_writer(&iface, resource, &bound).map_err(err)?)
+                }
+                Kind::Operation => return Err(format!("{resource:?} is an operation")),
+            };
+            self.writers.insert(key.clone(), held);
+        }
+        match (self.writers.get(&key).expect("held"), delete) {
+            (Held::State(w), false) => w.put("ok").await.map(|_| key).map_err(err),
+            (Held::State(w), true) => w.delete().await.map(|_| key).map_err(err),
+            (Held::Stream(w), false) => w.put("ok").await.map(|()| key).map_err(err),
+            (Held::Event(w), false) => w.put("ok").await.map_err(err),
+            (_, true) => Err(format!(
+                "{resource:?} is not state: only a state is deleted"
+            )),
+        }
+    }
+}
+
 /// Answers one command line (the module doc's).
-async fn command(line: &str, health: Option<&Health>, minter: &Minter) -> String {
+async fn command(
+    line: &str,
+    health: Option<&Health>,
+    svc: &mut Service,
+    members: &mut Members,
+) -> String {
     let words: Vec<&str> = line.split_whitespace().collect();
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
     if let ["clock-offset", ms] = words.as_slice() {
         return match ms.parse::<i64>() {
             Ok(ms) => {
-                minter.simulate_offset(ms);
+                svc.minter().simulate_offset(ms);
                 format!("clock-offset {ms}")
             }
             Err(e) => refuse(&e.to_string()),
         };
+    }
+    // Core §2.7: one write on a member, its delete, or a run of members.
+    let owned = |from: usize| -> Vec<String> {
+        words
+            .get(from..)
+            .unwrap_or_default()
+            .iter()
+            .map(|w| (*w).to_owned())
+            .collect()
+    };
+    match words.as_slice() {
+        ["put", iface, resource, ..] => {
+            return match members.write(svc, iface, resource, &owned(3), false).await {
+                Ok(key) => format!("put {key}"),
+                Err(why) => refuse(&why),
+            };
+        }
+        ["delete", iface, resource, ..] => {
+            return match members.write(svc, iface, resource, &owned(3), true).await {
+                Ok(key) => format!("deleted {key}"),
+                Err(why) => refuse(&why),
+            };
+        }
+        ["fill", iface, resource, n] => {
+            let Ok(n) = n.parse::<u64>() else {
+                return refuse("fill takes a count");
+            };
+            let Ok(id) = iface.parse::<IfaceId>() else {
+                return refuse("not an interface id");
+            };
+            let Some(params) = members
+                .contracts
+                .get(&id)
+                .and_then(|c| {
+                    c.resources
+                        .iter()
+                        .find(|r| zenkey::implementation::resource_name(r) == *resource)
+                })
+                .map(|r| r.template.params().count())
+            else {
+                return refuse(&format!("{id} has no resource {resource:?} here"));
+            };
+            for i in 0..n {
+                let values = vec![format!("m{i}"); params];
+                if let Err(why) = members.write(svc, iface, resource, &values, false).await {
+                    return refuse(&format!("{i} put, then: {why}"));
+                }
+            }
+            return format!("filled {n}");
+        }
+        ["put" | "delete" | "fill", ..] => {
+            return refuse(
+                "usage: put <iface> <resource> [<value>...] | delete <iface> <resource> \
+                 [<value>...] | fill <iface> <resource> <n>",
+            );
+        }
+        _ => {}
     }
     let Some(verb) = words.first() else {
         return refuse("an empty line");

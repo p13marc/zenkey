@@ -51,14 +51,23 @@ on one resource:
                    (§2.7): n + 1 less than the period apart is the
                    finding in any window; kept is a pass only over a
                    window of a whole period (a minute for low, an
-                   hour for rare and burst) that lost nothing
+                   hour for rare and burst) that lost no delivery,
+                   the owner present throughout
   budget-window    each templated stream or event holds no more live
                    members than its bound, over the window (§2.7): a
                    stream's heard within an hour, an event's within
                    its retention; more is the finding in any window,
                    within it a pass only over a window of at least
-                   that span (--for), nothing lost, the owner present
-                   throughout
+                   that span (--for), lost no delivery, the owner
+                   present throughout
+
+"Lost no delivery" is established, never assumed (§2.7, 0.25): this
+run lost nothing, and the resource is reliable with block, which no
+router queue drops. A best-effort or drop resource's window never
+is, whatever its length, and its case names the QoS. A window's span
+counts from its subscription plus --timeout, and the owner is
+watched --lease and --timeout past its end, where a window could
+pass.
 
 A reply's stamp is aged only against a clock this run measured on a
 live put of the same clock, or on --clocks-synced; otherwise its age
@@ -75,8 +84,9 @@ returns empty too (O5).
 Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
 left unobservable, the service not visible, or the run could not
 start. A case this run cannot judge here — budget-window over a
-window shorter than an hour — is --skip'ped rather than left to read
-2: not asked neither passes nor fails. --junit FILE also writes
+window shorter than an hour, or of a best-effort stream — is
+--skip'ped rather than left to read 2: not asked neither passes nor
+fails. --junit FILE also writes
 the suite as JUnit XML: a failure per violation, an error per
 unobservable case, skipped per case not asked.
 
@@ -114,6 +124,11 @@ Options:
 
       --clocks-synced
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a state reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, a stamp is aged only against a clock this run measured on a live put
+
+      --lease <SECS>
+          The deployment's link lease, seconds (zenoh's `transport/link/tx/lease`): a path gone silent withdraws the owner's token only when it runs out, so a window that could pass is followed by this, and --timeout, of watching the owner (spec §2.7, 0.25)
+          
+          [default: 10]
 
       --skip <CASE>
           Do not ask this case (repeatable): every row of it reads `not_asked`, which neither passes nor fails the run
