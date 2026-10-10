@@ -19,7 +19,7 @@ unobservable, an empty scope, or a run that could not start.
 $ zenctl doctor --help
 Judge a zk2 deployment against the core: one verdict per check.
 
-Eighteen checks, each a question whose finding is the yes: split-brain (§6), binding-unsatisfied (§3.2), contract-drift (§9.8), contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4), admin-unreachable, router-version-skew; health.v1's health-failed and health-degraded (a service at that level), health-stale (a status not confirmed within 60 s, never a level) and health-inconsistent (a status better than a check, in both readings), a status's age read only with --clocks-synced; and hostid.v1's hostid-duplicate (two sessions claiming one minted address, the cause undecided). The deployment is read through a session in its namespace; the routers' admin space and the presence domain through one in no namespace. A check whose input could not be had is unobservable, with the reason — never clean — and so is every check that reads presence when no zk2 token is visible. Exit 0 every check asked is clean, 1 a finding at or above --fail-on (default warning), 2 no verdict: a check left unobservable, an empty scope, or a run that could not start.
+Nineteen checks, each a question whose finding is the yes: split-brain (§6), binding-unsatisfied (§3.2), contract-drift (§9.8), contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep), shm-memlock-low (§7.4), admin-unreachable, router-version-skew; health.v1's health-failed and health-degraded (a service at that level), health-stale (a status not confirmed within 60 s, never a level) and health-inconsistent (a status better than a check, in both readings), a status's age read only with --clocks-synced; and hostid.v1's hostid-duplicate (two sessions claiming one minted address, the cause undecided); and population-over-bound (§2.7, with --deep: an owner holding more live members of a templated state than its bound, by its own GET). The deployment is read through a session in its namespace; the routers' admin space and the presence domain through one in no namespace. A check whose input could not be had is unobservable, with the reason — never clean — and so is every check that reads presence when no zk2 token is visible. Exit 0 every check asked is clean, 1 a finding at or above --fail-on (default warning), 2 no verdict: a check left unobservable, an empty scope, or a run that could not start.
 
 Usage: zenctl doctor [OPTIONS]
 
@@ -30,7 +30,7 @@ Options:
           [default: 2]
 
       --deep
-          Also ask state-stamp-foreign: GET every owner's state and check whose clock stamped each reply (spec §4.2 S1–S2). Costs the owners' data plane, so it is asked only here
+          Also ask the checks that GET every owner's state: state-stamp-foreign (whose clock stamped each reply, spec §4.2 S1–S2) and population-over-bound (more live members of a templated state than its bound, §2.7). One GET per owner interface serves both. Costs the owners' data plane, so it is asked only here
 
       --presence-budget <N>
           The token count presence-over-budget judges the presence domain against (spec §8.3: about 10–15k tokens per domain)
@@ -129,7 +129,7 @@ session opens — exit 2, clap's code, because it is your input.
 ```console
 $ zenctl doctor --check split-brian
 ? 2
-error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate
+error: invalid value 'split-brian' for '--check <CHECK-ID>': not a check id; one of: split-brain, binding-unsatisfied, contract-drift, contract-unavailable, descriptor-invalid, token-missing, presence-over-budget, storage-on-state, archive-unaligned, state-stamp-foreign, shm-memlock-low, admin-unreachable, router-version-skew, health-failed, health-degraded, health-stale, health-inconsistent, hostid-duplicate, population-over-bound
 
 For more information, try '--help'.
 

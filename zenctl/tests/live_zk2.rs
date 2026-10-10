@@ -3972,11 +3972,13 @@ fn conform_case<'a>(doc: &'a Value, case: &str, subject: &str) -> &'a Value {
 /// #703: a conforming service — FJ8a's mock owner, `gen`, publishing every
 /// resource of `tc.netif.v1` through the runtime's writers and answering
 /// every operation — passes every case asked, exit 0; the operation that
-/// is not idempotent is not called, a resource with no horizon is not asked
-/// its freshness, and budget is not asked. `--junit` writes the suite. The
-/// router's admin space is on: the
-/// owner's own stamp passes only against a router this run verified (S1,
-/// §4.2, 0.17).
+/// is not idempotent is not called, and a resource with no horizon is not
+/// asked its freshness. Its state's population passes `budget` by the
+/// owner's complete GET, and its stream's, which a window bounds from below
+/// only, is unobservable (§2.7, #735): exit 2 until `--skip budget`.
+/// `--junit` writes the suite. The router's admin space is on: the owner's
+/// own stamp passes only against a router this run verified (S1, §4.2,
+/// 0.17).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_passes_a_conforming_service() {
     let bus = Bus::admin(Some("acme")).await;
@@ -4000,6 +4002,50 @@ async fn check_conform_passes_a_conforming_service() {
     wait_for_ns(&bus, "acme", &["host-a/tc"]).await;
     let junit = bus.home.join("conform.xml");
     let junit = junit.to_str().expect("a UTF-8 path").to_owned();
+    // §2.7 (#735): the stream's budget is the one case a window cannot
+    // pass; the state's passes by the owner's GET.
+    let unskipped = [
+        "check",
+        "conform",
+        "host-a/tc",
+        "tc.netif.v1",
+        "--namespace",
+        "acme",
+        "--for",
+        "2",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&unskipped, |r| {
+            r.code == 2
+                && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                    rows_of(&d, "case").iter().any(|c| {
+                        c["case"] == "budget"
+                            && c["subject"] == "state/interfaces/{ns}/{iface}"
+                            && c["verdict"]["answer"] == "not_established"
+                    })
+                })
+        })
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    let bw = conform_case(&doc, "budget", "stream/bandwidth/{ns}/{iface}");
+    assert_eq!(bw["verdict"]["answer"], "unobservable", "{run}");
+    assert!(
+        bw["verdict"]["reason"]
+            .to_string()
+            .contains("from below only"),
+        "{run}"
+    );
+    assert!(
+        doc["judgement"]["reason"]
+            .to_string()
+            .contains("budget stream/bandwidth/{ns}/{iface}"),
+        "{run}"
+    );
     let args = [
         "check",
         "conform",
@@ -4011,6 +4057,8 @@ async fn check_conform_passes_a_conforming_service() {
         "2",
         "--timeout",
         "2",
+        "--skip",
+        "budget",
         "--junit",
         &junit,
         "--format",
@@ -4060,9 +4108,215 @@ async fn check_conform_passes_a_conforming_service() {
         conform_case(&doc, "freshness", "state/namespaces")["verdict"]["answer"],
         "not_asked"
     );
+    for subject in [
+        "stream/bandwidth/{ns}/{iface}",
+        "state/interfaces/{ns}/{iface}",
+    ] {
+        let b = conform_case(&doc, "budget", subject);
+        assert_eq!(b["verdict"]["answer"], "not_asked", "{run}");
+        assert_eq!(b["detail"], "skipped by the operator", "{run}");
+    }
     let xml = std::fs::read_to_string(&junit).expect("the JUnit file");
     assert!(xml.contains("failures=\"0\" errors=\"0\""), "{xml}");
     assert!(xml.contains("<skipped message=\"not asked:"), "{xml}");
+}
+
+// ── the population budget (core §2.7, 0.24; #735) ─────────────────────────
+
+/// A contract written for a budget test, from its text.
+fn contract_text(name: &str, text: &str) -> Contract {
+    let l = zenkey::model::contract::load_str(text, Path::new(env!("CARGO_MANIFEST_DIR")), None);
+    l.contract
+        .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
+}
+
+/// `inv.v1`: one templated state of bound 4, raw text, no horizon.
+fn inv() -> Contract {
+    contract_text(
+        "inv.v1",
+        "[interface]\nname = \"inv\"\nmajor = 1\n\
+         [resources.\"items/{item}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+         params = { item = \"string\" }\ncardinality = 4\n",
+    )
+}
+
+/// An owner of `inv.v1` at `address`, its descriptor lowering the bound to
+/// `bound`, holding `members` items it re-puts every 200 ms.
+async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Service, Task) {
+    let id = iface("inv.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new(address.parse().expect("an address")),
+    );
+    b.implement(Implementation::new(inv())).expect("implement");
+    let mut writers = Vec::new();
+    for i in 0..members {
+        let item: Bindings = [("item".to_owned(), vec![format!("i{i}")])].into();
+        let w = b
+            .declare_state_writer(&id, "state/items/{item}", &item)
+            .await
+            .expect("a member");
+        w.put(format!("{i}")).await.expect("put");
+        writers.push(w);
+    }
+    b.cardinality(&id, "state/items/{item}", bound)
+        .expect("a lowering");
+    let service = b.start().await.expect("start");
+    let task = Task(tokio::spawn(async move {
+        loop {
+            for w in &writers {
+                let _ = w.put("x").await;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }));
+    (service, task)
+}
+
+/// Core §2.7 (#735): an owner holding two members where its descriptor
+/// lowers the bound to one breaks the budget, by its own complete GET:
+/// `check conform`'s `budget` case is the violation, exit 1, naming the
+/// descriptor's bound. Beside it, an owner of the same contract holding two
+/// members within its lowered bound of two passes every case asked, exit 0:
+/// a state's population is the one a reading can show within its bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_judges_a_population_against_its_lowered_bound() {
+    let mut bus = Bus::admin(None).await;
+    for (address, bound) in [("host-a/inv", 1), ("host-b/inv", 2)] {
+        let (owner, task) = inventory(&bus, address, bound, 2).await;
+        bus.services.push(owner);
+        bus.keep(task);
+    }
+    wait_for(&bus, &["host-a/inv", "host-b/inv"]).await;
+    let conform = |address: &'static str| {
+        [
+            "check",
+            "conform",
+            address,
+            "inv.v1",
+            "--for",
+            "2",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ]
+    };
+    let items = "state/items/{item}";
+    let over = conform("host-a/inv");
+    let run = bus.until(&over, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["judgement"]["answer"], "established", "{run}");
+    let b = conform_case(&doc, "budget", items);
+    assert_eq!(b["verdict"]["answer"], "established", "{run}");
+    let said = b["detail"].to_string();
+    assert!(
+        said.contains("2 member(s) answered with a value")
+            && said.contains("its bound of 1 (its descriptor's; the contract's is 4)"),
+        "{run}"
+    );
+    let within = conform("host-b/inv");
+    let run = bus.until(&within, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["judgement"]["answer"], "not_established", "{run}");
+    let b = conform_case(&doc, "budget", items);
+    assert_eq!(b["verdict"]["answer"], "not_established", "{run}");
+    assert!(
+        b["verdict"]["reason"]
+            .to_string()
+            .contains("within its bound of 2"),
+        "{run}"
+    );
+}
+
+/// `al.v1`: an event, at most once a minute per source (`low`), at most
+/// two sources within its hour's retention.
+fn alarms() -> Contract {
+    contract_text(
+        "al.v1",
+        "[interface]\nname = \"al\"\nmajor = 1\n\
+         [resources.\"alarms/{src}\"]\nkind = \"event\"\ntype = { raw = \"text/plain\" }\n\
+         params = { src = \"string\" }\ncardinality = 2\nrate = \"low\"\n\
+         retention = \"1h\"\n",
+    )
+}
+
+/// Core §2.7 (#735): an owner publishing an occurrence of each of three
+/// sources every 300 ms breaks both of an event's budgets — two occurrences
+/// of one source within a minute, beyond `low`, and three sources within
+/// the retention, above its two — and a window of two seconds shows both:
+/// `rate` and `budget` are violations, exit 1. A window that heard no
+/// excess could only say `low` kept after a whole minute (unit-tested; a
+/// live minute is not spent here).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_judges_an_events_rate_and_population() {
+    let mut bus = Bus::admin(None).await;
+    let id = iface("al.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("host-a/al".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(alarms()))
+        .expect("implement");
+    let writers: Vec<_> = ["a", "b", "c"]
+        .into_iter()
+        .map(|src| {
+            let v: Bindings = [("src".to_owned(), vec![src.to_owned()])].into();
+            b.event_writer(&id, "events/alarms/{src}", &v)
+                .expect("an event writer")
+        })
+        .collect();
+    bus.services.push(b.start().await.expect("start"));
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            for w in &writers {
+                let _ = w.put("alarm").await;
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/al"]).await;
+    let args = [
+        "check",
+        "conform",
+        "host-a/al",
+        "al.v1",
+        "--for",
+        "2",
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let both = |r: &Run| {
+        r.code == 1
+            && serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                ["rate", "budget"].iter().all(|case| {
+                    rows_of(&d, "case")
+                        .iter()
+                        .any(|c| c["case"] == *case && c["verdict"]["answer"] == "established")
+                })
+            })
+    };
+    let run = bus.until(&args, both).await;
+    exits(&run, 1);
+    let doc = run.json();
+    let events = "events/alarms/{src}";
+    let rate = conform_case(&doc, "rate", events);
+    assert!(
+        rate["detail"].to_string().contains("within a minute")
+            && rate["detail"].to_string().contains("its rate low allows 1"),
+        "{run}"
+    );
+    let budget = conform_case(&doc, "budget", events);
+    assert!(
+        budget["detail"]
+            .to_string()
+            .contains("3 member(s) with an occurrence within its retention of an hour"),
+        "{run}"
+    );
 }
 
 /// #703: a service that breaks its contract three ways — a stream value

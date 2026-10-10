@@ -368,9 +368,11 @@ pub(crate) struct DoctorArgs {
     /// one below a second.
     #[arg(long, value_name = "SECS", default_value_t = 2.0)]
     pub(crate) grace: f64,
-    /// Also ask state-stamp-foreign: GET every owner's state and check whose
-    /// clock stamped each reply (spec §4.2 S1–S2). Costs the owners' data
-    /// plane, so it is asked only here.
+    /// Also ask the checks that GET every owner's state: state-stamp-foreign
+    /// (whose clock stamped each reply, spec §4.2 S1–S2) and
+    /// population-over-bound (more live members of a templated state than
+    /// its bound, §2.7). One GET per owner interface serves both. Costs the
+    /// owners' data plane, so it is asked only here.
     #[arg(long)]
     pub(crate) deep: bool,
     /// The token count presence-over-budget judges the presence domain
@@ -459,6 +461,17 @@ fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
         format!(
             "not a check id; one of: {}",
             CheckId::ALL.map(CheckId::as_str).join(", ")
+        )
+    })
+}
+
+/// A `check conform` case id, for `--skip`.
+fn case_id(s: &str) -> Result<zenkey_fleet::report::CaseId, String> {
+    use zenkey_fleet::report::CaseId;
+    CaseId::parse(s).ok_or_else(|| {
+        format!(
+            "not a case id; one of: {}",
+            CaseId::ALL.map(CaseId::as_str).join(", ")
         )
     })
 }
@@ -805,7 +818,7 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Eighteen checks, each a question whose finding is the yes: split-brain
+    /// Nineteen checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
@@ -816,7 +829,9 @@ pub(crate) enum Command {
     /// level) and health-inconsistent (a status better than a check, in both
     /// readings), a status's age read only with --clocks-synced; and
     /// hostid.v1's hostid-duplicate (two sessions claiming one minted
-    /// address, the cause undecided). The deployment is read through a
+    /// address, the cause undecided); and population-over-bound (§2.7, with
+    /// --deep: an owner holding more live members of a templated state than
+    /// its bound, by its own GET). The deployment is read through a
     /// session in its namespace; the routers' admin space and the presence
     /// domain through one in no namespace. A check whose input could not be
     /// had is unobservable, with the reason — never clean — and so is every
@@ -950,13 +965,26 @@ pub(crate) enum CheckCmd {
     ///                    clock, or a reply's stamp against a clock trusted
     ///                    to the HLC delta (freshness.v1); a resource with no
     ///                    horizon is not asked
-    ///   budget           not asked: its profile does not exist yet
+    ///   budget           each templated stream, state or event resource
+    ///                    holds no more live members than its bound, the
+    ///                    descriptor's lowered cardinality else the
+    ///                    contract's (§2.7): more is the finding, from any
+    ///                    reading; within it is a pass only by the owner's
+    ///                    GET of a state that ran to its final reply, and
+    ///                    unobservable from a window, which never shows a
+    ///                    member it did not hear; no ceiling and an
+    ///                    operation are not asked
     ///   health           the service, when its descriptor lists health.v1,
     ///                    is healthy: unhealthy or stale is the finding
     ///                    (health.v1 §5)
     ///   health-aggregation  its status agrees with its checks: a check
     ///                    worse than a fresh status in both readings is the
     ///                    finding (health.v1 §2.2)
+    ///   rate             an event's occurrences per member within its rate
+    ///                    (§2.7): n + 1 less than the period apart is the
+    ///                    finding in any window; kept is a pass only over a
+    ///                    window of a whole period (a minute for low, an
+    ///                    hour for rare and burst) that lost nothing
     ///
     /// A reply's stamp is aged only against a clock this run measured on a
     /// live put of the same clock, or on --clocks-synced; otherwise its age
@@ -972,8 +1000,11 @@ pub(crate) enum CheckCmd {
     ///
     /// Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
     /// left unobservable, the service not visible, or the run could not
-    /// start. --junit FILE also writes the suite as JUnit XML: a failure per
-    /// violation, an error per unobservable case, skipped per case not asked.
+    /// start. A case this run cannot judge here — budget on a stream, which
+    /// a window bounds from below only — is --skip'ped rather than left to
+    /// read 2: not asked neither passes nor fails. --junit FILE also writes
+    /// the suite as JUnit XML: a failure per violation, an error per
+    /// unobservable case, skipped per case not asked.
     #[command(verbatim_doc_comment)]
     Conform(CheckConformArgs),
     /// Check one payload against a type of a zk2 contract, exit-coded for CI.
@@ -2441,6 +2472,11 @@ pub(crate) struct CheckConformArgs {
     /// only against a clock this run measured on a live put.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// Do not ask this case (repeatable): every row of it reads `not_asked`,
+    /// which neither passes nor fails the run.
+    #[arg(long, value_name = "CASE", value_parser = case_id,
+          add = ArgValueCandidates::new(completion::case_ids))]
+    pub(crate) skip: Vec<zenkey_fleet::report::CaseId>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

@@ -35,13 +35,26 @@ on one resource:
                    clock, or a reply's stamp against a clock trusted
                    to the HLC delta (freshness.v1); a resource with no
                    horizon is not asked
-  budget           not asked: its profile does not exist yet
+  budget           each templated stream, state or event resource
+                   holds no more live members than its bound, the
+                   descriptor's lowered cardinality else the
+                   contract's (§2.7): more is the finding, from any
+                   reading; within it is a pass only by the owner's
+                   GET of a state that ran to its final reply, and
+                   unobservable from a window, which never shows a
+                   member it did not hear; no ceiling and an
+                   operation are not asked
   health           the service, when its descriptor lists health.v1,
                    is healthy: unhealthy or stale is the finding
                    (health.v1 §5)
   health-aggregation  its status agrees with its checks: a check
                    worse than a fresh status in both readings is the
                    finding (health.v1 §2.2)
+  rate             an event's occurrences per member within its rate
+                   (§2.7): n + 1 less than the period apart is the
+                   finding in any window; kept is a pass only over a
+                   window of a whole period (a minute for low, an
+                   hour for rare and burst) that lost nothing
 
 A reply's stamp is aged only against a clock this run measured on a
 live put of the same clock, or on --clocks-synced; otherwise its age
@@ -57,8 +70,11 @@ returns empty too (O5).
 
 Exit 0 every case asked passed, 1 a violation, 2 no verdict: a case
 left unobservable, the service not visible, or the run could not
-start. --junit FILE also writes the suite as JUnit XML: a failure per
-violation, an error per unobservable case, skipped per case not asked.
+start. A case this run cannot judge here — budget on a stream, which
+a window bounds from below only — is --skip'ped rather than left to
+read 2: not asked neither passes nor fails. --junit FILE also writes
+the suite as JUnit XML: a failure per violation, an error per
+unobservable case, skipped per case not asked.
 
 Usage: zenctl check conform [OPTIONS] <SYSTEM/SERVICE> <IFACE[@FP]>
 
@@ -94,6 +110,9 @@ Options:
 
       --clocks-synced
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a state reply's stamp is then aged against this clock (freshness.v1 §2.6). Without it, a stamp is aged only against a clock this run measured on a live put
+
+      --skip <CASE>
+          Do not ask this case (repeatable): every row of it reads `not_asked`, which neither passes nor fails the run
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
@@ -172,6 +191,18 @@ For more information, try '--help'.
 $ zenctl check conform host-a/tc tc-netif
 ? 2
 error: invalid value 'tc-netif' for '<IFACE[@FP]>': interface "tc-netif" is not <name>.v<major> with name segments [a-z][a-z0-9_]* (e.g. `tc.netif.v1`)
+
+For more information, try '--help'.
+
+```
+
+`--skip` takes a case of the suite's closed vocabulary (#735); anything else
+is clap's refusal, which lists them.
+
+```console
+$ zenctl check conform host-a/tc tc.netif.v1 --skip budgets
+? 2
+error: invalid value 'budgets' for '--skip <CASE>': not a case id; one of: contract-served, resource-served, payload-type, qos, operation, fanout-refused, state-stamp, state-get, freshness, budget, health, health-aggregation, rate
 
 For more information, try '--help'.
 

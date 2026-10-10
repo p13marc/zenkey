@@ -351,9 +351,13 @@ and silent) · `zenctl check schema <iface> <resource> --from …` (one payload
 against a type of a revision) · `zenctl check conform <address> <iface>` (one
 service against the revision it claims, as a suite: served, typed, on its QoS,
 its operations answering as O1–O7 say, its state stamped by its own session
-and answering a GET — exit 1 on a violation; `--junit` for CI; a silent call
-to a present service is a violation only with `--calls-granted`, the
-operator's word that no access control refused it, and unobservable without) · `zenctl why <key|address>` (a key's or a
+and answering a GET, its populations within their bounds and its events
+within their rates (spec §2.7) — exit 1 on a violation; `--junit` for CI; a
+silent call to a present service is a violation only with `--calls-granted`,
+the operator's word that no access control refused it, and unobservable
+without; a stream's population, which a window bounds from below only, is
+unobservable within its bound, so `--skip budget` where that is all a run
+can say) · `zenctl why <key|address>` (a key's or a
 service's silence, rung by rung — namespace, presence, descriptor, contract,
 the owner's answer, an archive's last-known — stopped at the first cause:
 exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·
@@ -523,7 +527,7 @@ zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is pub
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl admin graph --namespace acme     # …with each zk2 instance on the router that lists its session, or unattached
-zenctl doctor --namespace acme          # eighteen checks; 1 on a finding, 2 if one could not be judged
+zenctl doctor --namespace acme          # nineteen checks; 1 on a finding, 2 if one could not be judged
 zenctl health --namespace acme --clocks-synced   # every service's health.v1, and the worst level among them
 zenctl why acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 --namespace acme  # why silent: the first rung with a cause
 zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
@@ -662,7 +666,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks eighteen questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks nineteen questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -689,6 +693,7 @@ none.
 | `health-stale` | is a present service's status not confirmed within its 60 s horizon? Never a level, never down (warning) | health.v1 §2.4 |
 | `health-inconsistent` | does an owner hold a status better than a current check, in both of two readings? (error) | health.v1 §2.2 |
 | `hostid-duplicate` | do two sessions claim one address of a minted system, in both presence reads? The cause is undecided, and never named (warning) | hostid.v1 §2.12 |
+| `population-over-bound` | does an owner hold more live members of a templated state than its bound — its descriptor's lowered `cardinality`, else the contract's — by its own answer to a GET? (`--deep`; error) | §2.7 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -717,7 +722,18 @@ each presence read. The doctor listens to no status long enough to measure a
 clock, so a status reply's age rests on the deployment's word,
 `--clocks-synced`: without it, every service implementing `health.v1` is
 unjudged, and the reason says so. `zenctl health` measures one over its
-window instead. A `doctor health-*` rule of `watchdog` or `record --on`
+window instead.
+
+`population-over-bound` (#735) counts each owner's templated state from the
+same GETs `state-stamp-foreign` reads, so it too is asked only under
+`--deep`. More members than the bound is the finding whether or not the GET
+ran to its final reply — a lower bound already above it — and within it is
+clean only when it did. A resource the GET answered no member of adds
+nothing (an empty reply set is never a verdict), and the no-ceiling bound
+(4294967295) is not asked. Streams and events are `check conform`'s: the
+doctor listens to no window.
+
+A `doctor health-*` rule of `watchdog` or `record --on`
 runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
 `record --on … --clocks-synced`.
 

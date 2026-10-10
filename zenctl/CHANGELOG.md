@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the population budget (#735)
+
+Core 0.24 (spec §2.7) makes the budget core: `cardinality` bounds a
+template's live members in one instance, and an event's `rate` bounds each
+member. The tools judge both; nothing waits for #613 any more.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`: one `budget` row, subject `service`, not asked (#613) | one `budget` row per templated stream, state and event resource, and per templated operation (not asked) | The bound is the descriptor's lowered `cardinality`, else the contract's. More live members than the bound is a violation from any reading. Within it passes only by the owner's GET of a state that ran to its final reply; from a window (a stream's members heard within an hour, an event's within its retention) it is unobservable, exit 2. An empty GET is unobservable (O5); the no-ceiling bound is not asked. Scripts that keyed on `subject == "service"` key on the resource |
+| — | `check conform`: a `rate` row per event resource | Per member: n + 1 occurrences less than the period apart (a minute for `low`, an hour for `rare` and `burst(n/h)`) is a violation in any window. Kept passes only over a window of a whole period that lost nothing; shorter, unobservable. Spans are measured between stamps of one clock where the occurrences carry them |
+| — | `check conform --skip <CASE>` | Repeatable: every row of the case reads `not_asked` ("skipped by the operator"), which neither passes nor fails the run, as the doctor's `--skip`. A run over a service with a templated stream reads 2 on its budget until `--skip budget` |
+| `doctor`: eighteen checks | nineteen: `population-over-bound` (error, `--deep`) | Each owner's templated state counted from the GETs `state-stamp-foreign` reads, against its bound; within it from a GET that ended at its timeout is unjudged. Appended to the check-id vocabulary; a watchdog's `doctor population-over-bound` rule turns `deep` on, as `state-stamp-foreign` does |
+| `doctor --deep`: asks `state-stamp-foreign` | asks it and `population-over-bound`, from one GET per owner interface | |
+
 ## Unreleased (`main`, zk2) — the doctor rules' clocks (#735, a PF follow-up)
 
 | Before | Now | Notes |
@@ -37,7 +51,7 @@ resource declares (`spec/profiles/freshness/v1.md`).
 |---|---|---|
 | `check conform`: one `freshness` row, subject `service`, not asked | one `freshness` row per exposed stream, state and event resource | A resource that declares `freshness.ttl_s` is judged at the end of the `--for` window, each member by this run's receive clock and the GET reply's stamp: stale is a violation (exit 1), and a reply's age is unobservable unless the clock is trusted to the HLC delta. One with no horizon, and an event, is not asked. Scripts that keyed on `subject == "service"` key on the resource |
 | — | `check conform --clocks-synced` | The operator's word that this host's clock and the owners' agree within the HLC delta (500 ms): a state reply's stamp is then aged against it. Without it, a stamp is aged only against a clock this run measured on a live put of the same clock (freshness.v1 §2.6) |
-| `check conform`'s note: freshness and budget not asked | budget alone not asked | Its profile does not exist yet (#613) |
+| `check conform`'s note: freshness and budget not asked | budget alone not asked | Its profile does not exist yet (#613); asked since #735, core 0.24 |
 
 ## Unreleased (`main`, zk2) — `hostid.v1` (#719, PB)
 

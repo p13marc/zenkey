@@ -113,6 +113,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ✓  health-inconsistent (health.v1 §2.2)  clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
 ⚠  hostid-duplicate (hostid.v1 §2.12)    finding — 1 subject(s)
     ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
+—  population-over-bound (§2.7)          not asked
 
 "#]]
     );
@@ -275,6 +276,8 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
 —  operation (§5.1)          @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
 ✗  freshness (freshness.v1)  state/interfaces/{ns}/{iface}                                                        violation — 1 of 2 member(s) stale against its horizon of 60 s: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within its horizon
 —  freshness (freshness.v1)  stream/bandwidth/{ns}/{iface}                                                        not asked — it declares no freshness.ttl_s
+✗  budget (§2.7)             state/interfaces/{ns}/{iface}                                                        violation — 3 member(s) answered with a value by the owner's GET, above its bound of 2 (its descriptor's; the contract's is 1024): an owner MUST NOT hold more live members than its bound (§2.7)
+?  budget (§2.7)             stream/bandwidth/{ns}/{iface}                                                        unobservable — 2 member(s) heard within one hour in the 5s window, within its bound of 1024 (the contract's): a window never shows a member it did not hear, so it bounds the population from below only (§2.7) — --skip budget leaves the case unasked
 
 "#]]
     );
@@ -313,9 +316,14 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
     }
     let said = notes(&report);
     assert!(said.contains("pass --i-know"), "{said}");
-    assert!(said.contains("its profile does not exist yet"), "{said}");
     assert!(
-        said.contains("8 case(s): 3 violation(s), 2 passed, 1 unobservable, 2 not asked."),
+        said.contains("1 budget case(s) unobservable")
+            && said.contains("from below only")
+            && said.contains("--skip budget"),
+        "{said}"
+    );
+    assert!(
+        said.contains("10 case(s): 4 violation(s), 2 passed, 2 unobservable, 2 not asked."),
         "{said}"
     );
 }
