@@ -27,14 +27,14 @@ message Check {
   Level level = 1;
   // What the check found, for a person. Free text.
   string detail = 2;
-  // When the check last ran: nanoseconds since the Unix epoch, on the
-  // owner's clock.
+  // When the check found the value put: nanoseconds since the Unix epoch,
+  // on the owner's clock. Informative: a check is not aged by it (§2.3).
   uint64 checked_at_ns = 3;
 }
 
-// stream faults (§2.5).
+// stream faults (§2.3, §2.5).
 message Fault {
-  // A fault code (§2.8): [a-z][a-z0-9_]*, from the profile's table or
+  // A fault code (§2.10): [a-z][a-z0-9_]*, from the profile's table or
   // an application's own.
   string code = 1;
   Level level = 2;
