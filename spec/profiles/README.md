@@ -11,13 +11,14 @@ and `examples/zk2/`.
 |---|---|---|---|---|---|
 | [`hostid.v1`](hostid/v1.md) | 0.3 | draft | 0.22 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
 | [`freshness.v1`](freshness/v1.md) | 0.1 | draft | 0.21 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
+| [`health.v1`](health/v1.md) | 0.1 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 
 ## Layout
 
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (none yet)
+  .history/               published revisions of the profiles' standard contracts (health.v1)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text
@@ -79,14 +80,24 @@ thing in the same place.
   its fixture or scenario, in the same change.
 - **A standard contract** goes in the profile's directory, and is
   published in `spec/profiles/.history/` (core §9.7), append-only, like
-  `examples/zk2/.history`.
+  `examples/zk2/.history`. After an intended change, publish the new
+  revision:
+
+  ```bash
+  cargo run -p zenkey-model --bin zk2 -- contract bundle spec/profiles/<name>/<name>.v<major>.toml --history spec/profiles/.history
+  ```
+
+  A contract that moves here from elsewhere keeps its published revisions
+  where they were, and is copied here byte for byte (core §9.7, 0.23), as
+  `health.v1` was from `examples/zk2/.history`.
 - **A profile that needs the core to change** says so, and the core
   changes first, through [`../CHANGELOG.md`](../CHANGELOG.md).
   `hostid.v1` needed 0.19, so that an instance can declare a profile no
   contract uses, and its runtime 0.20, so that a binding can name a
   provider on the service's own, minted, system. `freshness.v1` needed
   0.21, so that W105 reads its published vocabulary and a re-put is a
-  mutation.
+  mutation. `health.v1` needed 0.23, so that a clock ahead is reported by
+  a stream, which the guard does not hold, rather than by its status.
 - **Lessons go to guides, not MUSTs,** as in the core.
 
 ## How the harnesses take profiles in
@@ -101,8 +112,12 @@ thing in the same place.
     ```bash
     ZK2_BLESS=1 cargo test -p zenkey-model --test profiles
     ```
+  - The same test walks every standard contract,
+    `spec/profiles/<name>/<name>.v<major>.toml`: it loads with no finding,
+    is named by its interface id, and is published in
+    `spec/profiles/.history`, compatible with every earlier revision there.
   - A profile's session-free code lives in `zenkey-model` (`hostid`,
-    `freshness`), and its runtime in `zenkey`. Its scenarios run as tests
+    `freshness`, `health`), and its runtime in `zenkey`. Its scenarios run as tests
     of the runtime, one test per section, named after it, as the core's
     do. A scenario that is a tool's runs as a test of that tool.
 - **Other implementations** run the same files. Each fixture states its
