@@ -32,8 +32,9 @@ operations.md §1 (target and consolidation shown by behaviour),
 operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
 access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
 generated grants), ``hostid.v1`` with core R1's ``self.system``
-providers (0.20), and ``freshness.v1``'s re-puts and judgements (0.21),
-across both implementations. ``--only`` picks some of them.
+providers (0.20), ``freshness.v1``'s re-puts and judgements (0.21), and
+``health.v1`` (text 0.2), across both implementations. ``--only`` picks
+some of them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -115,20 +116,23 @@ class Owner:
     """The owner example as a child process, read line by line."""
 
     def __init__(self, exe: Path, service: str, contracts: list[Path], connect: str | None = None,
-                 hostid_root: str | None = None, hostid_ephemeral: bool = False):
+                 hostid_root: str | None = None, hostid_ephemeral: bool = False, flags: list[str] | None = None):
         """``connect``: run it as a client of that router (its documented
         ``--connect <endpoint>``; it then prints ``connected …`` rather than
         ``listening …``). ``service`` may be ``@hostid.v1/<service>``, a
         minted system (hostid.v1 §2.3), with ``hostid_root`` its
         ``--hostid-root <dir>`` and ``hostid_ephemeral`` its
-        ``--hostid-ephemeral`` (its usage, read by running it)."""
+        ``--hostid-ephemeral`` (its usage, read by running it). ``flags``
+        are passed before the address: its health.v1 options (``--health``,
+        ``--health-status``, ``--health-check``, ``--tokenless``,
+        ``--clock-reference``, ``--clock-offset-ms``)."""
         if not exe.is_file():
             raise CannotRun(f"{exe} not found: build it with "
                             "`cargo build -q -p zenkey --example owner`")
         self.proc = subprocess.Popen([str(exe), *(["--connect", connect] if connect else []),
                                       *(["--hostid-root", hostid_root] if hostid_root else []),
                                       *(["--hostid-ephemeral"] if hostid_ephemeral else []),
-                                      service, *map(str, contracts)],
+                                      *(flags or []), service, *map(str, contracts)],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True)
         self.lines: queue.Queue[str] = queue.Queue()
@@ -160,6 +164,19 @@ class Owner:
             if line.startswith(prefix):
                 return line[len(prefix):]
         return None
+
+    def command(self, line: str, timeout: float = 10.0) -> str | None:
+        """One command on its stdin, and the one stdout line that answers it
+        (its health.v1 commands: ``status``, ``check``, ``retire``,
+        ``fault``, ``confirm``, ``clock-offset``)."""
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+        try:
+            got = self.lines.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        self.seen.append(got)
+        return got
 
     def close(self, timeout: float = 15.0) -> int | None:
         """Close stdin and wait. None when the owner had to be killed."""
@@ -861,11 +878,12 @@ def run_python_refusal(report: Report) -> None:
         r1.close()
 
 
-def _r1(timestamping: bool = True, adminspace: bool = False):
+def _r1(timestamping: bool = True, adminspace: bool = False, drop_future: bool = False):
     """A router of the runner's own, which outlives every owner it serves
     (presence.md §2, state.md §1): (session, endpoint, zid). ``adminspace``
     enables its admin space, read-only, as §4.2 (0.10) asks of a deployment
-    that wants S4 checked."""
+    that wants S4 checked. ``drop_future`` sets
+    ``timestamping.drop_future_timestamp`` (health.v1 scenarios §4 step 4)."""
     import zenoh
 
     from .owner import free_loopback_port
@@ -876,6 +894,8 @@ def _r1(timestamping: bool = True, adminspace: bool = False):
     conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}"]))
     conf.insert_json5("scouting/multicast/enabled", "false")
     conf.insert_json5("timestamping/enabled", "true" if timestamping else "false")
+    if drop_future:
+        conf.insert_json5("timestamping/drop_future_timestamp", "true")
     if adminspace:
         conf.insert_json5("adminspace", json.dumps({"enabled": True,
                                                     "permissions": {"read": True, "write": False}}))
@@ -2428,6 +2448,364 @@ def _sleep_until(mono_ns: int) -> None:
         time.sleep(d)
 
 
+HEALTH_TOML = "spec/profiles/health/health.v1.toml"
+
+
+def run_python_health(report: Report, exe: Path, consume: Path) -> None:
+    """health.v1 (text 0.2) across the two implementations, through a router
+    R1 of the runner's, the owner example a black box driven by its flags
+    and its stdin commands:
+    - ``lab/svc`` (``--health``): zk2py's tool T reads it through §2.11, its
+      clock on the deployment's word (freshness.v1 §2.6, ground 1), after
+      each command; zk2py's subscriber S, declared before it starts, sees
+      the order of its puts (§2.2), its faults, and its re-puts. A
+      malformed fault code is refused;
+    - ``lab/ahead`` (``--clock-reference``, ``--clock-offset-ms 2000``): its
+      session has no HLC, so its puts reach R1 dated ahead, scenarios §4's
+      [moved clock] tier. ``clock_ahead`` at once and again within 31 s, no
+      status put while it holds, the status stale at 65 s, and after
+      ``clock-offset 0`` a re-put and no fault. Meanwhile ``lab/svc`` stops
+      confirming (``confirm off``) and goes stale too;
+    - §4 step 4 under ``drop_future_timestamp``;
+    - the reverse: zk2py's health owner read by the Rust ``consume``
+      example, as far as it reads."""
+    import zenoh
+
+    from . import freshness as fr
+    from . import health as h
+    from . import live
+    from .contract import load_contract
+    from .descriptor import check_descriptor
+
+    contract = load_contract(REPO / HEALTH_TOML)
+    word = fr.ClockTrust(word=True)
+    beat = "zk2py/health/heartbeat"
+    r1, ep, r1_zid = _r1()
+    t_sess, s_sess, g_sess = live.open_client(ep), live.open_client(ep), live.open_client(ep)
+    rusts: list[Owner] = []
+    stop = threading.Event()
+    subs: list[Any] = []
+    try:
+        # -- lab/svc: bring-up, read by T -----------------------------------
+        run = "health.v1 0.2: the owner example's health (lab/svc), read by zk2py"
+        s = fr.Subscriber(s_sess, "zk2/lab/svc/health.v1/**")
+        subs.append(s)
+        at_token: list[Any] = []
+        appeared: queue.Queue = queue.Queue()
+
+        def get_at_token() -> None:
+            # The GET runs off zenoh's callback thread, the moment the token
+            # is seen.
+            if appeared.get() is not None:
+                at_token.append(live.get_state(t_sess, "zk2/lab/svc/health.v1/state/status"))
+
+        threading.Thread(target=get_at_token, daemon=True).start()
+        lv = t_sess.liveliness().declare_subscriber("zk2/lab/svc/@zk/instance/*", zenoh.handlers.Callback(
+            lambda smp: appeared.put(str(smp.key_expr)) if smp.kind == zenoh.SampleKind.PUT else None),
+            history=True)
+        subs.append(lv)
+        time.sleep(0.3)
+        rust = Owner(exe, "lab/svc", [], connect=ep, flags=["--health", "--health-status", "OK:serving",
+                                                           "--health-check", "disk=OK"])
+        rusts.append(rust)
+        ready = rust.wait_for("ready ", 120)
+        if not report.check(run, "it starts behind R1 with --health", ready is not None,
+                            f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
+            return
+        time.sleep(1.0)
+        first = [h.decode_status(x.payload) for x in (at_token[0].replies if at_token else [])]
+        report.check(run, "a GET made the moment its instance token appeared answers its status, OK \"serving\": "
+                          "put before the tokens (§2.3)",
+                     len(first) == 1 and first[0] is not None and first[0]["level"] == h.OK
+                     and first[0]["reason"] == "serving", str(first))
+        doc, raw = _doc(t_sess, ready)
+        entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "health.v1"), {})
+        report.check(run, "its descriptor lists health.v1 in interfaces, its profiles list freshness.v1 and not "
+                          "health.v1 (core §3.3, §10, 0.23), and it has no D code against the standard contract",
+                     entry.get("token") is True and doc.get("profiles") == ["freshness.v1"]
+                     and check_descriptor(raw, [contract]) == [],
+                     f"entry {entry}, profiles {doc.get('profiles')}")
+        fp = live.fingerprint_of(doc, "health.v1")
+        r = live.retrieve_bundle(t_sess, "health.v1", fp) if fp else None
+        report.check(run, "its bundle, retrieved by the descriptor's fingerprint, is revision 1.0 as zk2py builds "
+                          "it from spec/profiles/health/health.v1.toml (§3)",
+                     fp == contract.fingerprint and r is not None and r.verified is not None
+                     and r.verified.contract == contract.canonical, f"fingerprint {fp}")
+
+        def t_judge() -> tuple[h.Answer, h.Reading, dict]:
+            rd, info = h.read_near(t_sess, "lab/svc", trust=word)
+            return h.judge(rd), rd, info
+
+        a, rd, _ = t_judge()
+        report.check(run, "T, on the deployment's word, judges it healthy, ok, with its check disk OK read",
+                     a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"}
+                     and rd.checks == [("disk", "ok")], f"{a.expect()}, checks {rd.checks}")
+
+        # -- the order of the puts (§2.2), driven over stdin -----------------
+        run = "health.v1 0.2: the owner example's puts, driven over its stdin (lab/svc)"
+        sk = "zk2/lab/svc/health.v1/state/status"
+
+        def merged(t0: int) -> list[tuple[str, Any]]:
+            recs = [(k.rsplit("/", 1)[1], x) for k in list(s.deliveries) if "/state/" in k for x in s.of(k)
+                    if x.arrival_ns >= t0]
+            return sorted(recs, key=lambda kr: kr[1].arrival_ns)
+
+        def shown(recs) -> list[tuple[str, Any]]:
+            return [(k, "delete" if x.kind == "delete" else
+                     h.status_level(x.payload) if k == "status" else h.check_level(x.payload)) for k, x in recs]
+
+        def safe(recs) -> bool:
+            status, checks = None, {}
+            for k, x in recs:
+                if k == "status" and x.kind == "put":
+                    status = h.status_level(x.payload)
+                elif k != "status":
+                    checks[k] = None if x.kind == "delete" else h.check_level(x.payload)
+                worst = [lv for lv in checks.values() if isinstance(lv, str)]
+                if isinstance(status, str) and worst and any(h.worse(lv, status) for lv in worst):
+                    return False
+            return True
+
+        steps = [
+            ("check disk FAILED the disk is full", "health status=FAILED declared=OK raised_by=disk",
+             [("status", "failed"), ("disk", "failed")], ("unhealthy", "failed", "failed")),
+            ("check disk OK", "health status=OK declared=OK raised_by=-",
+             [("disk", "ok"), ("status", "ok")], ("healthy", "ok", "ok")),
+            ("check net DEGRADED slow", "health status=DEGRADED declared=OK raised_by=net",
+             [("status", "degraded"), ("net", "degraded")], ("unhealthy", "degraded", "degraded")),
+            ("retire net", "health status=OK declared=OK raised_by=-",
+             [("net", "delete"), ("status", "ok")], ("healthy", "ok", "ok")),
+            ("status DEGRADED upstream lost", "health status=DEGRADED declared=DEGRADED raised_by=-",
+             [("status", "degraded")], ("unhealthy", "degraded", "degraded")),
+            ("status OK serving", "health status=OK declared=OK raised_by=-",
+             [("status", "ok")], ("healthy", "ok", "ok")),
+        ]
+        t_all = time.monotonic_ns()
+        for cmd, want_line, want_order, want in steps:
+            t0 = time.monotonic_ns()
+            line = rust.command(cmd)
+            time.sleep(0.5)
+            order = shown(merged(t0))
+            a, rd, info = t_judge()
+            report.check(run, f"`{cmd}`: answered `{want_line}`; S receives {want_order} in that order; T judges "
+                              f"{want[0]}, {want[1]}",
+                         line == want_line and order == want_order
+                         and a.expect() == {"verdict": want[0], "reason": want[1], "level": want[2]},
+                         f"line {line!r}; order {order}; {a.expect()}; checks {rd.checks}")
+        report.check(run, "at no delivery is S's latest status better than a current check (§2.2); the retired "
+                          "check is a reply_del to T's GET (core S2, S3)",
+                     safe(merged(t_all)) and any(x.key.endswith("/checks/net") and x.deleted
+                                                 for x in t_judge()[2].get("replies", [])),
+                     str(shown(merged(t_all))))
+        # Faults (§2.3, §2.10).
+        fk = "zk2/lab/svc/health.v1/stream/faults"
+        t0 = time.monotonic_ns()
+        line = rust.command("fault tc_netns_gone DEGRADED the namespace is gone")
+        time.sleep(0.5)
+        got = [h.decode_fault(x.payload) for x in s.of(fk) if x.arrival_ns >= t0]
+        report.check(run, "`fault tc_netns_gone DEGRADED …`: S receives the fault, an application's code (§2.10), "
+                          "and no status put",
+                     len(got) == 1 and got[0]["code"] == "tc_netns_gone" and got[0]["level"] == h.DEGRADED
+                     and h.code_class(got[0]["code"]) == "application"
+                     and not [x for x in s.of(sk) if x.arrival_ns >= t0],
+                     f"line {line!r}; faults {got}")
+        t0 = time.monotonic_ns()
+        line = rust.command("fault Bad-Code FAILED x")
+        time.sleep(0.5)
+        got = [h.decode_fault(x.payload) for x in s.of(fk) if x.arrival_ns >= t0]
+        report.check(run, "`fault Bad-Code FAILED x`: refused, a code not of §2.10's form, and nothing published",
+                     line is not None and line.startswith("refused fault Bad-Code") and "§2.10" in line and not got
+                     and h.code_class("Bad-Code") == "malformed", f"line {line!r}; faults {got}")
+        line = rust.command("status BOGUS")
+        report.check(run, "`status BOGUS`: refused, not a level (§2.1)",
+                     line is not None and line.startswith("refused status BOGUS"), repr(line))
+
+        # -- lab/ahead: clock ahead, the [moved clock] tier -------------------
+        run = "health.v1 0.2: the owner example 2 s ahead (lab/ahead), [moved clock]"
+        sa = fr.Subscriber(s_sess, "zk2/lab/ahead/health.v1/**")
+        subs.append(sa)
+        time.sleep(0.3)
+        ahead = Owner(exe, "lab/ahead", [], connect=ep,
+                      flags=["--health", "--health-status", "OK:serving", "--clock-reference", beat,
+                             "--clock-offset-ms", "2000"])
+        rusts.append(ahead)
+        ready_a = ahead.wait_for("ready ", 120)
+        if not report.check(run, "it starts behind R1 with --clock-offset-ms 2000 and --clock-reference",
+                            ready_a is not None, f"ready {ready_a!r}; stderr {ahead.stderr[-2:]}"):
+            return
+        time.sleep(0.5)
+        ask, afk = "zk2/lab/ahead/health.v1/state/status", "zk2/lab/ahead/health.v1/stream/faults"
+        before = [x for x in sa.of(ask) if x.kind == "put"]
+        doc_a, _ = _doc(t_sess, ready_a)
+        owner_a = live._zid_value((doc_a.get("meta") or {}).get("zid"))
+
+        def beats() -> None:
+            while not stop.wait(0.3):
+                g_sess.put(beat, b"beat")  # no stamp of its own: R1 stamps it
+
+        t_beat = time.monotonic_ns()
+        threading.Thread(target=beats, daemon=True).start()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not sa.of(afk):
+            time.sleep(0.05)
+        faults = [(x, h.decode_fault(x.payload)) for x in sa.of(afk)]
+        t_fault = faults[0][0].arrival_ns if faults else time.monotonic_ns()
+        report.check(run, "step 1: S receives its status before any heartbeat (R1 re-stamped it, dated ahead)",
+                     len(before) >= 1 and live._zid_value(before[0].stamp_id) == live._zid_value(r1_zid),
+                     f"{len(before)} status puts, stamp id {before[0].stamp_id if before else None}")
+        report.check(run, "step 2: on the heartbeat, S receives clock_ahead at FAILED, its detail naming the offset, "
+                          "within 2 s of the first heartbeat; [moved clock]: its stamp is R1's, not the owner's "
+                          "(R1 re-stamped a future-dated put, core §4.1)",
+                     bool(faults) and faults[0][1]["code"] == "clock_ahead" and faults[0][1]["level"] == h.FAILED
+                     and (t_fault - t_beat) <= 2 * fr.NS
+                     and live._zid_value(faults[0][0].stamp_id) == live._zid_value(r1_zid) != owner_a,
+                     f"{faults[0][1] if faults else None}; stamp id {faults[0][0].stamp_id if faults else None}, "
+                     f"R1 {r1_zid}, after {(t_fault - t_beat) / 1e9:.2f} s")
+        # lab/svc goes on confirming for 35 s, then stops.
+        _sleep_until(t_fault + 35 * fr.NS)
+        reputs = [x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_all]
+        gaps = [(b.arrival_ns - a_.arrival_ns) / 1e9 for a_, b in zip(reputs, reputs[1:])]
+        same = len({x.payload for x in reputs[-2:]}) == 1 if len(reputs) >= 2 else False
+        report.check(health_svc := "health.v1 0.2: the owner example's re-puts (lab/svc)",
+                     "its status is re-put unchanged, since_ns included, no two puts more than 30 s apart "
+                     "(§2.3, freshness.v1 §2.4)",
+                     len(reputs) >= 2 and max(gaps) <= 30.2 and same,
+                     f"{len(reputs)} puts since the drive, gaps {[round(g, 2) for g in gaps]} s")
+        line = rust.command("confirm off")
+        t_off = time.monotonic_ns()
+        report.check(health_svc, "`confirm off` is answered with its status line", line is not None
+                     and line.startswith("health status=OK"), repr(line))
+        _sleep_until(t_fault + 65 * fr.NS)
+        puts_after = [x for x in sa.of(ask) if x.kind == "put" and x.arrival_ns > t_fault]
+        afaults = [x for x in sa.of(afk) if (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
+        gap = (afaults[1].arrival_ns - afaults[0].arrival_ns) / 1e9 if len(afaults) > 1 else None
+        pres = live.list_presence(t_sess, "zk2/lab/ahead/@zk/**")
+        rd, _ = h.read_near(t_sess, "lab/ahead", subscriber=sa, trust=word, get=False)
+        a = h.judge(rd)
+        conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
+        q = h.clock_ahead(afaults[-1].arrival_ns if afaults else None, conf[-1] if conf else None)
+        report.check(run, "step 2: no status put after the fault; the fault again within 31 s; its tokens present; "
+                          "at 65 s S judges the status stale, never FAILED, and the clock question answers yes",
+                     not puts_after and gap is not None and gap <= 31 and len(pres.instances) == 1
+                     and a.verdict == "stale" and a.level is None and q == "yes",
+                     f"{len(puts_after)} puts after, fault gap {gap}, tokens {len(pres.instances)}, {a.expect()}, "
+                     f"clock ahead {q}")
+        line = ahead.command("clock-offset 0")
+        t_fix = time.monotonic_ns()
+        _sleep_until(t_fix + 35 * fr.NS)
+        reput = [x for x in sa.of(ask) if x.kind == "put" and x.arrival_ns > t_fix]
+        after = [x for x in sa.of(afk) if x.arrival_ns > t_fix + fr.NS
+                 and (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
+        rd, _ = h.read_near(t_sess, "lab/ahead", subscriber=sa, trust=word, get=False)
+        a = h.judge(rd)
+        conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
+        allf = [x.arrival_ns for x in sa.of(afk) if (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
+        q = h.clock_ahead(allf[-1] if allf else None, conf[-1] if conf else None)
+        report.check(run, "step 3: `clock-offset 0`: the status re-put within a few seconds, no clock_ahead after, "
+                          "S judges healthy, ok, and the clock question answers no",
+                     line == "clock-offset 0" and bool(reput) and (reput[0].arrival_ns - t_fix) <= 5 * fr.NS
+                     and not after and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "no",
+                     f"line {line!r}; re-put after "
+                     f"{(reput[0].arrival_ns - t_fix) / 1e9 if reput else None} s; {len(after)} faults after; "
+                     f"{a.expect()}; clock ahead {q}")
+        # lab/svc, 65 s after `confirm off`.
+        _sleep_until(t_off + 65 * fr.NS)
+        rd, _ = h.read_near(t_sess, "lab/svc", subscriber=s, trust=word, get=False)
+        a = h.judge(rd)
+        pres = live.list_presence(t_sess, "zk2/lab/svc/@zk/**")
+        report.check(health_svc, "65 s after `confirm off`, S judges its status stale, never FAILED, with its tokens "
+                                 "present (§2.4, freshness.v1 §2.11)",
+                     a.verdict == "stale" and a.level is None and len(pres.instances) == 1,
+                     f"{a.expect()}, tokens {len(pres.instances)}")
+        stop.set()
+        for o in list(rusts):
+            o.close()
+            rusts.remove(o)
+
+        # -- §4 step 4 under drop_future_timestamp ---------------------------
+        run = "health.v1 0.2: the owner example 2 s ahead under drop_future_timestamp, [moved clock]"
+        r2, ep2, _ = _r1(drop_future=True)
+        s2_sess, g2_sess = live.open_client(ep2), live.open_client(ep2)
+        try:
+            s2 = fr.Subscriber(s2_sess, "zk2/lab/ahead/health.v1/**")
+            time.sleep(0.3)
+            dropped = Owner(exe, "lab/ahead", [], connect=ep2,
+                            flags=["--health", "--health-status", "OK:serving", "--clock-reference", beat,
+                                   "--clock-offset-ms", "2000"])
+            rusts.append(dropped)
+            ready_d = dropped.wait_for("ready ", 120)
+            stop2 = threading.Event()
+
+            def beats2() -> None:
+                while not stop2.wait(0.3):
+                    g2_sess.put(beat, b"beat")
+
+            threading.Thread(target=beats2, daemon=True).start()
+            time.sleep(4.0)
+            stop2.set()
+            doc_d, _ = _doc(g2_sess, ready_d) if ready_d else ({}, b"")
+            st = live.get_state(g2_sess, "zk2/lab/ahead/health.v1/state/status")
+            gets = [(x.stamp_id, h.decode_status(x.payload)) for x in st.replies]
+            owner_d = live._zid_value((doc_d.get("meta") or {}).get("zid"))
+            report.check(run, "step 4: S receives neither the fault nor any status put; G's reply holds the status "
+                              "under the owner's stamp (a router never drops or re-stamps a reply, core §4.1)",
+                         ready_d is not None and not s2.of("zk2/lab/ahead/health.v1/stream/faults")
+                         and not s2.of("zk2/lab/ahead/health.v1/state/status") and len(gets) == 1
+                         and live._zid_value(gets[0][0]) == owner_d and gets[0][1]["level"] == h.OK,
+                         f"faults {len(s2.of('zk2/lab/ahead/health.v1/stream/faults'))}, status puts "
+                         f"{len(s2.of('zk2/lab/ahead/health.v1/state/status'))}; GET {gets}, owner {owner_d}")
+            s2.close()
+            dropped.close()
+            rusts.remove(dropped)
+        finally:
+            s2_sess.close()
+            g2_sess.close()
+            r2.close()
+
+        # -- the reverse: zk2py's health owner, read by the Rust consumer ------
+        run = "health.v1 0.2: zk2py's health owner (lab/py), read by the Rust consume example"
+        if consume.is_file():
+            py = h.HealthOwner("lab", "py", connect=ep, level=h.DEGRADED, reason="upstream lost")
+            py.start()
+            try:
+                py.set_check("disk", h.FAILED, "full")
+                time.sleep(0.5)
+                held = py.owner._held[py.status_key]
+                p = subprocess.run([str(consume), ep, "lab/py", str(REPO / HEALTH_TOML), "state/status", "@op/none"],
+                                   capture_output=True, text=True, timeout=60)
+                lines = p.stdout.splitlines()
+                prefix = held.payload[:4 + held.payload[3]].decode("utf-8")
+                ok = (len(lines) >= 2 and lines[0] == "present lab/py"
+                      and lines[1].startswith(f"state {py.status_key} {held.stamp} " + prefix))
+                report.check(run, "it finds zk2py's owner present and reads its status, the protobuf bytes of "
+                                  "FAILED \"check disk: full\" (raised by the check, §2.2) under zk2py's stamp; it "
+                                  "then stops, as health.v1 has no operation for it to call",
+                             ok and p.returncode != 0 and "NoResource" in p.stderr,
+                             f"exit {p.returncode}; {lines[:2]}; stderr {p.stderr.strip()[-120:]!r}")
+                p2 = subprocess.run([str(consume), ep, "lab/py", str(REPO / HEALTH_TOML), "state/checks/disk",
+                                     "@op/none"], capture_output=True, text=True, timeout=60)
+                report.info(run, "it cannot name a member of checks/{check} (exit "
+                                 f"{p2.returncode}: {p2.stderr.strip()[-90:]!r}), and nothing on the Rust side "
+                                 "judges health before zenctl health (chunk PF)")
+            finally:
+                py.close()
+    finally:
+        stop.set()
+        for o in rusts:
+            o.close()
+        for x in subs:
+            try:
+                x.close() if hasattr(x, "close") else x.undeclare()
+            except Exception:  # noqa: BLE001 - closing anyway
+                try:
+                    x.undeclare()
+                except Exception:  # noqa: BLE001
+                    pass
+        for x in (t_sess, s_sess, g_sess):
+            x.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -2446,6 +2824,7 @@ def main(argv: list[str] | None = None) -> int:
         "o1": run_python_o1, "fanout": run_python_fanout, "tool-rules": run_python_tool_rules,
         "0.16": run_python_016, "hostid": lambda r: run_python_hostid(r, args.owner),
         "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
+        "health": lambda r: run_python_health(r, args.owner, args.consume),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),
