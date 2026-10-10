@@ -374,8 +374,12 @@ impl LivelinessRules {
                 }
                 if held.contains(key) {
                     out.push(r.notice(key, CondState::Ok, None, false, None, at));
-                } else if basis == TokenBasis::Complete {
-                    r.known.insert(key.to_string(), false);
+                    continue;
+                }
+                // Remembered gone either way, so that its return is the
+                // resolve it owes; assumed gone when a complete read says so.
+                r.known.insert(key.to_string(), false);
+                if basis == TokenBasis::Complete {
                     out.push(r.notice(key, CondState::Firing, None, true, None, at));
                 }
             }
@@ -403,6 +407,11 @@ impl LivelinessRules {
                     continue;
                 }
                 r.known.insert(m.key.clone(), m.held);
+                // A token first seen held is not news: remembered, so that
+                // its going can say it went.
+                if prior.is_none() && m.held {
+                    continue;
+                }
                 let state = if m.held {
                     CondState::Ok
                 } else {

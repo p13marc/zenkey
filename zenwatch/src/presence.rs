@@ -191,6 +191,16 @@ impl PresenceRules {
         for r in &mut self.rules {
             let observer = observer_state(presence.basis());
             let held = r.holdings(presence, &namespace);
+            let id = rule_ids.get(&r.name).cloned().unwrap_or_default();
+            // What the ledger remembers announced under the rule, by
+            // identity (the observer apart).
+            let remembered: BTreeSet<&str> = announced
+                .get(&r.name)
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m.strip_prefix(&id).and_then(|s| s.strip_prefix(':')))
+                .filter(|identity| *identity != OBSERVER)
+                .collect();
             let mut up = Vec::new();
             let mut down = Vec::new();
             for (identity, holds) in &held {
@@ -198,28 +208,28 @@ impl PresenceRules {
                 let (address, _) = split_identity(identity);
                 if *holds {
                     up.push(identity.clone());
-                    out.push(r.notice(identity, CondState::Ok, None, false, at, None, address));
+                    // Held at the first look is not news — unless the ledger
+                    // remembers it gone, when it is the resolve. Nothing else
+                    // enters the ledger: an `ok` there would only crowd out
+                    // what it must remember.
+                    if remembered.contains(identity.as_str()) {
+                        out.push(r.notice(identity, CondState::Ok, None, false, at, None, address));
+                    }
                 } else {
                     down.push(identity.clone());
                     out.push(r.notice(identity, CondState::Firing, None, true, at, None, address));
                 }
             }
-            // The ledger's memory, against what the projection shows now.
-            let id = rule_ids.get(&r.name).cloned().unwrap_or_default();
-            for remembered in announced.get(&r.name).into_iter().flatten() {
-                let Some(identity) = remembered
-                    .strip_prefix(&id)
-                    .and_then(|s| s.strip_prefix(':'))
-                else {
-                    continue;
-                };
-                if identity == OBSERVER || held.contains_key(identity) {
+            // The rest of the ledger's memory, against what the projection
+            // shows now: nothing of it held and no record — gone if a
+            // complete read stands behind it, and remembered gone either
+            // way, so that its return is the resolve it owes.
+            for identity in remembered {
+                if held.contains_key(identity) {
                     continue;
                 }
-                // Nothing of it held, and no record: gone if a complete read
-                // stands behind it, unknowable otherwise.
+                r.known.insert(identity.to_string(), false);
                 if presence.basis() == PresenceBasis::Complete {
-                    r.known.insert(identity.to_string(), false);
                     down.push(identity.to_string());
                     let (address, _) = split_identity(identity);
                     out.push(r.notice(identity, CondState::Firing, None, true, at, None, address));
@@ -257,11 +267,15 @@ impl PresenceRules {
                     if prior == Some(holds) {
                         continue;
                     }
-                    // Nothing can be gone that was never seen held — but an
-                    // address the operator named exactly is watched from the
-                    // start.
+                    // First sight: held is not news, only remembered, so its
+                    // going can say it went. Nothing can be gone that was
+                    // never seen held — but an address the operator named
+                    // exactly is watched from the start.
                     let named = r.form == Form::Address && r.target.concrete.is_some();
-                    if prior.is_none() && !holds && !named {
+                    if prior.is_none() && (holds || !named) {
+                        if holds {
+                            r.known.insert(identity, true);
+                        }
                         continue;
                     }
                     r.known.insert(identity.clone(), holds);
@@ -734,8 +748,10 @@ mod tests {
 
     /// The baseline (#614, FL2): an exact address absent from a complete
     /// seed is down — assumed, not paged — and said in one baseline
-    /// notification at the rule's severity; an address up is a quiet `ok`;
-    /// a pattern that matches nothing yet says so in an `info` baseline.
+    /// notification at the rule's severity; an address up is not news, and
+    /// no notice at all (nothing to crowd the ledger with); a wildcard does
+    /// not claim an address another rule tracks; a pattern that matches
+    /// nothing yet says so in an `info` baseline.
     #[test]
     fn the_first_look_assumes_what_is_down_and_says_it_once() {
         let rules = vec![
@@ -751,7 +767,6 @@ mod tests {
         assert_eq!(
             summary(&out),
             [
-                ("tc-gone".into(), "h1/tc".into(), CondState::Ok, false),
                 ("h9-gone".into(), "h9/tc".into(), CondState::Firing, true),
                 (
                     "h9-gone".into(),
@@ -762,7 +777,14 @@ mod tests {
                 ("gui-gone".into(), "baseline".into(), CondState::Ok, false),
             ]
         );
-        let h9 = &out[2];
+        // h1/tc is remembered held: its going is news.
+        let t = p.token(&instance("h1/tc", 1), false, at(2));
+        let gone = watch.fold(&t, &p, "t");
+        assert_eq!(
+            summary(&gone),
+            [("tc-gone".into(), "h1/tc".into(), CondState::Firing, false)]
+        );
+        let h9 = &out[1];
         assert!(
             h9.passthrough && h9.severity.is_none(),
             "the rule's own severity"
@@ -772,7 +794,7 @@ mod tests {
             "{:?}",
             h9.lines
         );
-        let gui = &out[3];
+        let gui = &out[2];
         assert_eq!(gui.severity.as_deref(), Some("info"));
         assert!(
             gui.evidence.contains("no address matches */gui yet"),
@@ -781,12 +803,12 @@ mod tests {
         );
     }
 
-    /// The live poles: an address going is firing with its prior and the
-    /// move that decided it; coming back is ok; a second address appearing
-    /// under a pattern is an identity of its own; a `Dropped(n)` is the
-    /// observer going unobservable — never an `ok` — with no per-address
-    /// notice, and the complete re-read restores it and finds what the loss
-    /// hid.
+    /// The live poles: a second address appearing under a pattern is an
+    /// identity of its own — not news, remembered — so its going is firing,
+    /// with its prior and the move that decided it; coming back is ok; a
+    /// `Dropped(n)` is the observer going unobservable — never an `ok` —
+    /// with no per-address notice, and the complete re-read restores it and
+    /// finds what the loss hid.
     #[test]
     fn instance_gone_fires_resolves_and_goes_unobservable_on_a_loss() {
         let rules = vec![rule("tc-gone", "instance-gone */tc")];
@@ -797,18 +819,13 @@ mod tests {
         assert!(
             watch
                 .baseline(&p, &BTreeMap::new(), &ids(&rules), "t")
-                .len()
-                == 1
+                .is_empty(),
+            "all up: nothing to say"
         );
 
-        // A second address appears under the pattern.
+        // A second address appears under the pattern: first sight.
         let t = p.token(&instance("h2/tc", 2), true, at(2));
-        let out = watch.fold(&t, &p, "t");
-        assert_eq!(
-            summary(&out),
-            [("tc-gone".into(), "h2/tc".into(), CondState::Ok, false)]
-        );
-        assert_eq!(out[0].prior, None, "first sight");
+        assert!(watch.fold(&t, &p, "t").is_empty(), "held is not news");
 
         // It goes: firing, from ok, with the status move attached.
         let t = p.token(&instance("h2/tc", 2), false, at(3));
@@ -929,6 +946,18 @@ mod tests {
             ],
             "possibly incomplete: nothing remembered is decided"
         );
+        // …and remembered gone all the same: the complete read that shows
+        // h1/tc up is its resolve, and the observer's.
+        let t = p.seed(&seed(&[instance("h1/tc", 1)], true), at(2));
+        let out = watch.fold(&t, &p, "t");
+        assert_eq!(
+            summary(&out),
+            [
+                ("tc-gone".into(), "h1/tc".into(), CondState::Ok, false),
+                ("tc-gone".into(), "observer".into(), CondState::Ok, false),
+            ]
+        );
+        assert_eq!(out[0].prior, Some(CondState::Firing));
     }
 
     /// `liveliness-gone` on interface and member tokens: an interface is
@@ -977,23 +1006,7 @@ mod tests {
             at(1),
         );
         let out = watch.baseline(&p, &BTreeMap::new(), &ids(&rules), "t");
-        assert_eq!(
-            summary(&out),
-            [
-                (
-                    "netif".into(),
-                    "h1/tc/tc.netif.v1".into(),
-                    CondState::Ok,
-                    false
-                ),
-                (
-                    "members".into(),
-                    "h1/nav/nav.v2/a".into(),
-                    CondState::Ok,
-                    false
-                ),
-            ]
-        );
+        assert!(out.is_empty(), "held at the first look: {out:?}");
         // One of two holders goes: still held. The other: gone.
         let t = p.token(&alive("h1/tc", &iface, 1), false, at(2));
         assert!(watch.fold(&t, &p, "t").is_empty());
