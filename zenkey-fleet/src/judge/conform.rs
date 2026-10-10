@@ -209,7 +209,9 @@ pub fn judge(obs: &ConformObservation) -> ConformReport {
             .cases
             .push(freshness(obs, r, &name, heard, get, &clocks));
         report.cases.extend(budget_case(obs, r, &name, heard, get));
-        report.cases.extend(rate_case(r, &name, heard));
+        report
+            .cases
+            .extend(rate_case(Some(rev.contract()), r, &name, heard));
     }
     report.cases.extend(health_cases(obs));
     let mut seen = BTreeSet::new();
@@ -274,12 +276,51 @@ fn member_of(kind: Kind, key: &str) -> &str {
     }
 }
 
-/// Each member a window heard, with the instants of its puts on this host's
-/// receive clock, which every member shares (§2.7).
-fn members_heard(kind: Kind, h: &Heard) -> BTreeMap<String, Vec<std::time::Duration>> {
+/// Whether `key` is a member of `r` (§2.2: match, then rank): a key a more
+/// specific template of the same kind token wins is that template's, never
+/// `r`'s, though `r`'s selector reaches it. Without a contract, every key
+/// is taken as `r`'s.
+fn resolves_to(
+    contract: Option<&zenkey_model::contract::Contract>,
+    r: &Resource,
+    key: &str,
+) -> bool {
+    let Some(contract) = contract else {
+        return true;
+    };
+    let Ok(zenkey_model::grammar::ZkKey::Data { kind, resource, .. }) =
+        zenkey_model::grammar::parse(key)
+    else {
+        return false;
+    };
+    let candidates: Vec<&Resource> = contract
+        .resources
+        .iter()
+        .filter(|x| x.token == kind)
+        .collect();
+    let refs: Vec<&str> = crate::model::lens::template_chunks(kind, &resource)
+        .iter()
+        .map(String::as_str)
+        .collect();
+    zenkey_model::template::resolve(candidates.iter().map(|x| &x.template), &refs).is_some_and(
+        |(i, _)| candidates[i].token == r.token && candidates[i].template == r.template,
+    )
+}
+
+/// Each member of `r` a window heard, with the instants of its puts on this
+/// host's receive clock, which every member shares (§2.7).
+fn members_heard(
+    contract: Option<&zenkey_model::contract::Contract>,
+    r: &Resource,
+    h: &Heard,
+) -> BTreeMap<String, Vec<std::time::Duration>> {
     let mut out: BTreeMap<String, Vec<std::time::Duration>> = BTreeMap::new();
-    for (key, arrivals) in &h.arrivals {
-        out.entry(member_of(kind, key).to_owned())
+    for (key, arrivals) in h
+        .arrivals
+        .iter()
+        .filter(|(k, _)| resolves_to(contract, r, k))
+    {
+        out.entry(member_of(r.kind, key).to_owned())
             .or_default()
             .extend(arrivals.iter().map(|a| a.at));
     }
@@ -333,6 +374,7 @@ fn budget_case(
              owner counts them (§2.7)",
         ));
     }
+    let contract = obs.revision.as_deref().map(Revision::contract);
     let b = budget::bound_of(r, stated(obs, name));
     let of = bound_words(r, b);
     let w = obs.spec.window.as_secs_f64();
@@ -348,7 +390,7 @@ fn budget_case(
         Kind::State => match get {
             Some(Ok(g)) => (
                 Reading::Get {
-                    members: rows(g).count() as u64,
+                    members: rows(g).filter(|(k, _)| resolves_to(contract, r, k)).count() as u64,
                     complete: obs.gets_complete.get(name).copied().unwrap_or(false),
                 },
                 String::new(),
@@ -364,7 +406,7 @@ fn budget_case(
         },
         _ => match heard {
             Some(Ok(h)) => (
-                Reading::Window(members_heard(r.kind, h)),
+                Reading::Window(members_heard(contract, r, h)),
                 if h.arrivals_capped > 0 {
                     format!(
                         " ({} put(s) past the {} this run keeps not counted)",
@@ -458,6 +500,7 @@ fn budget_case(
 /// §2.7: an event's occurrences per member, against its declared `rate`.
 /// `None` for a resource that is not an event.
 fn rate_case(
+    contract: Option<&zenkey_model::contract::Contract>,
     r: &Resource,
     name: &str,
     heard: Option<&Result<Heard, String>>,
@@ -485,7 +528,11 @@ fn rate_case(
         None => return Some(ConformCase::unobservable(C, name, "not subscribed")),
     };
     let mut by_member: BTreeMap<&str, Vec<&Arrival>> = BTreeMap::new();
-    for (key, arrivals) in &h.arrivals {
+    for (key, arrivals) in h
+        .arrivals
+        .iter()
+        .filter(|(k, _)| resolves_to(contract, r, k))
+    {
         by_member
             .entry(member_of(Kind::Event, key))
             .or_default()
@@ -2570,7 +2617,13 @@ mod tests {
             Ok(h)
         };
         let rate = |h: &Result<Heard, String>| {
-            rate_case(&alarms_r, "events/alarms/{src}", Some(h)).unwrap()
+            rate_case(
+                Some(rev.contract()),
+                &alarms_r,
+                "events/alarms/{src}",
+                Some(h),
+            )
+            .unwrap()
         };
         // Two of `a` 10 s apart, in a 20 s window: beyond `low`.
         let twice = window(
@@ -2663,5 +2716,61 @@ mod tests {
         let b = budget_case(&o, &journal, "events/journal/{src}", Some(&three), None).unwrap();
         assert_eq!(b.verdict, Judgement::NotAsked, "{b:#?}");
         assert!(b.detail.as_deref().unwrap().contains("no-ceiling"));
+    }
+
+    /// A key a more specific template wins is that template's member, never
+    /// the wider one's, though its selector reaches it (§2.2): `items/total`
+    /// is the literal resource's, so `items/{item}` counts one member, not
+    /// two, against its bound of 1.
+    #[test]
+    fn a_member_is_counted_for_the_template_it_resolves_to() {
+        let dir = std::env::temp_dir().join(format!("zenkey-fleet-resolve-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let l = zenkey_model::contract::load_str(
+            "[interface]\nname = \"inv\"\nmajor = 1\n\
+             [resources.\"items/{item}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             params = { item = \"string\" }\ncardinality = 1\n\
+             [resources.\"items/total\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n",
+            &dir,
+            None,
+        );
+        let c = l.contract.unwrap_or_else(|| panic!("{}", l.report));
+        let items = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "items/{item}")
+            .unwrap();
+        let total = c
+            .resources
+            .iter()
+            .find(|r| r.template.as_str() == "items/total")
+            .unwrap();
+        let a = "zk2/lab/inv/inv.v1/state/items/a";
+        let t = "zk2/lab/inv/inv.v1/state/items/total";
+        assert!(resolves_to(Some(&c), items, a));
+        assert!(!resolves_to(Some(&c), items, t), "the literal wins");
+        assert!(resolves_to(Some(&c), total, t));
+        assert!(!resolves_to(
+            Some(&c),
+            items,
+            "zk2/lab/inv/inv.v1/stream/items/a"
+        ));
+        assert!(resolves_to(None, items, t), "no contract, no filter");
+        let h = Heard {
+            arrivals: [a, t]
+                .into_iter()
+                .map(|k| {
+                    (
+                        k.to_owned(),
+                        vec![Arrival {
+                            at: Duration::from_secs(1),
+                            stamp: None,
+                        }],
+                    )
+                })
+                .collect(),
+            ..Heard::default()
+        };
+        assert_eq!(members_heard(Some(&c), items, &h).len(), 1);
     }
 }
