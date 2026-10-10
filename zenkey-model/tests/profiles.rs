@@ -32,6 +32,7 @@ const KNOWN: &[(&str, &str)] = &[
     ("health", "rollups.json"),
     ("health", "codes.json"),
     ("freshness", "clock-trust.json"),
+    ("health", "clock.json"),
 ];
 
 fn profiles() -> PathBuf {
@@ -394,6 +395,62 @@ fn level_token(l: Option<Level>) -> Value {
     l.map_or(Value::Null, |l| json!(l.as_str()))
 }
 
+/// A case's presence, descriptor and face, as `health/conformance/` writes
+/// them.
+fn health_presence(case: &Value) -> Presence {
+    match case["presence"].as_str().expect("presence") {
+        "present" => Presence::Present(match &case["descriptor"] {
+            Value::Null => Listing::Unread,
+            d if d["lists"] == json!(false) => Listing::NotListed,
+            d => Listing::Listed {
+                token: d["token"].as_bool().expect("descriptor.token"),
+            },
+        }),
+        "absent" => Presence::Absent,
+        "incomplete" => Presence::Incomplete,
+        "across_face" => Presence::AcrossFace {
+            status_crosses: case["face"]["status_crosses"]
+                .as_bool()
+                .expect("face.status_crosses"),
+        },
+        other => panic!("presence {other:?}"),
+    }
+}
+
+/// `health/conformance/clock.json`: what one subscriber heard of one service
+/// in its window → the answer to "is this service's clock ahead?"
+/// (health.v1 §5, §2.5).
+#[test]
+fn health_clock() {
+    let path = profiles().join("health/conformance/clock.json");
+    let mut doc = read_json(&path);
+    for case in doc["cases"].as_array_mut().expect("cases") {
+        let presence = health_presence(case);
+        let heard: Vec<health::Heard> = case["heard"]
+            .as_array()
+            .expect("heard")
+            .iter()
+            .map(|h| match h.as_str().expect("a delivery") {
+                "status" => health::Heard::Status,
+                "status_deleted" => health::Heard::StatusDeleted,
+                "clock_ahead" => health::Heard::ClockAhead,
+                "fault" => health::Heard::Fault,
+                other => panic!("heard {other:?}"),
+            })
+            .collect();
+        let c = health::clock_ahead(presence, &heard);
+        let what = format!("{}", case["note"]);
+        expect(
+            case,
+            json!({"answer": c.answer.as_str(), "reason": c.reason.as_str()}),
+            &what,
+        );
+    }
+    if bless() {
+        write_json(&path, &doc);
+    }
+}
+
 /// `health/conformance/judgements.json`: one reading of one service → the
 /// answer to "is this service healthy?" (health.v1 §2.11).
 #[test]
@@ -401,23 +458,7 @@ fn health_judgements() {
     let path = profiles().join("health/conformance/judgements.json");
     let mut doc = read_json(&path);
     for case in doc["cases"].as_array_mut().expect("cases") {
-        let presence = match case["presence"].as_str().expect("presence") {
-            "present" => Presence::Present(match &case["descriptor"] {
-                Value::Null => Listing::Unread,
-                d if d["lists"] == json!(false) => Listing::NotListed,
-                d => Listing::Listed {
-                    token: d["token"].as_bool().expect("descriptor.token"),
-                },
-            }),
-            "absent" => Presence::Absent,
-            "incomplete" => Presence::Incomplete,
-            "across_face" => Presence::AcrossFace {
-                status_crosses: case["face"]["status_crosses"]
-                    .as_bool()
-                    .expect("face.status_crosses"),
-            },
-            other => panic!("presence {other:?}"),
-        };
+        let presence = health_presence(case);
         let observations: Vec<Observation> = case["status"]["observations"]
             .as_array()
             .expect("status.observations")

@@ -1,0 +1,326 @@
+{
+  "cases": [
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [],
+      "note": "nothing heard: the faults' silence is their normal state, and no confirmation was heard (§5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": null,
+      "heard": [
+        "status"
+      ],
+      "note": "a confirmation, and no fault heard: its guard did not hold that write",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead"
+      ],
+      "note": "a clock_ahead fault, and no confirmation heard (§2.5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "status",
+        "clock_ahead"
+      ],
+      "note": "a confirmation, then a clock_ahead fault: none since",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "status"
+      ],
+      "note": "a clock_ahead fault, then a confirmation: the drift ended, the status re-put (§2.5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "status",
+        "clock_ahead"
+      ],
+      "note": "a fault, a confirmation, a fault again: the last fault has no confirmation after it",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "status",
+        "clock_ahead",
+        "clock_ahead"
+      ],
+      "note": "a fault published again every status interval while the guard holds (§2.5)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "status_deleted"
+      ],
+      "note": "a delete of the status after the fault is no confirmation (§2.3)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [
+        "status_deleted"
+      ],
+      "note": "a delete of the status alone confirms nothing",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [
+        "fault"
+      ],
+      "note": "another code says nothing of the clock (§2.10)",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": null,
+      "heard": [
+        "fault",
+        "status"
+      ],
+      "note": "another code, then a confirmation",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": true
+      },
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": null,
+      "heard": [
+        "status",
+        "fault"
+      ],
+      "note": "a confirmation, then another code",
+      "presence": "present"
+    },
+    {
+      "descriptor": {
+        "lists": true,
+        "token": false
+      },
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead"
+      ],
+      "note": "health.v1 in the tokenless set: the token plays no part (§2.7)",
+      "presence": "present"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "not_asked",
+        "reason": "absent"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead"
+      ],
+      "note": "absent: not asked, as the first question's, whatever was heard before (§2.1)",
+      "presence": "absent"
+    },
+    {
+      "descriptor": {
+        "lists": false
+      },
+      "expect": {
+        "answer": "not_asked",
+        "reason": "not_listed"
+      },
+      "face": null,
+      "heard": [
+        "status"
+      ],
+      "note": "the descriptor does not list health.v1: not asked (§2.7)",
+      "presence": "present"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead"
+      ],
+      "note": "the descriptor not read: a fault heard on its key is still its own word",
+      "presence": "present"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [],
+      "note": "the descriptor not read, and nothing heard",
+      "presence": "present"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": null,
+      "heard": [],
+      "note": "its token not seen in a read possibly incomplete, and nothing heard",
+      "presence": "incomplete"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "no",
+        "reason": "confirmed"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "heard": [
+        "status"
+      ],
+      "note": "across a face that lets the status cross: a confirmation crossed (§2.8)",
+      "presence": "across_face"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "yes",
+        "reason": "clock_ahead"
+      },
+      "face": {
+        "status_crosses": false
+      },
+      "heard": [
+        "clock_ahead"
+      ],
+      "note": "across a face closed to the status, its faults crossing: the occurrences cross (§2.8)",
+      "presence": "across_face"
+    },
+    {
+      "descriptor": null,
+      "expect": {
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      },
+      "face": {
+        "status_crosses": false
+      },
+      "heard": [],
+      "note": "across a face closed to the status, nothing heard: no heartbeat (§2.8)",
+      "presence": "across_face"
+    }
+  ],
+  "description": "health.v1 §5, \"is this service's clock ahead?\" (§2.5): what one subscriber heard of one service during its reading, in arrival order -> the answer. A case gives presence, descriptor and face as judgements.json writes them. heard: the deliveries, each \"status\" (a put of state/status, a change or a re-put: a confirmation), \"status_deleted\" (a delete of state/status, which is no confirmation), \"clock_ahead\" (a stream/faults sample whose code is clock_ahead, whatever its level and its stamp) or \"fault\" (a stream/faults sample with any other code). expect.answer is yes, no, unobservable or not_asked: yes on a clock_ahead fault with no confirmation heard after it; no when a confirmation was heard after the last clock_ahead fault, or with none heard; unobservable when neither was heard, since the faults' silence is their normal state; not_asked when the service is absent or its descriptor does not list health.v1, as the first question's. A fault heard answers whatever else presence says. expect.reason: clock_ahead, confirmed, nothing_heard, absent or not_listed."
+}
