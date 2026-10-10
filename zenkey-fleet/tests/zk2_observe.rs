@@ -665,6 +665,7 @@ async fn invalid_payload_and_qos_mismatch_fire_and_clear() {
         tick: Duration::from_millis(400),
         ticks: Some(12),
         timeout: T,
+        clocks_synced: false,
     };
     let contracts = ContractSet::new();
     let store = bed.store.clone();

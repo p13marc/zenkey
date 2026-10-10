@@ -1985,6 +1985,11 @@ pub(crate) struct RecordArgs {
         requires = "on"
     )]
     pub(crate) preamble: PreambleMode,
+    /// With --on: this host's clock and the owners' agree within the HLC
+    /// delta (500 ms), for a `doctor health-*` rule, as `watchdog
+    /// --clocks-synced`. Without it, those rules read unobservable.
+    #[arg(long, requires = "on")]
+    pub(crate) clocks_synced: bool,
     /// With --on: revisions known offline, for the rules that judge a
     /// payload or a QoS against its contract.
     #[command(flatten)]
@@ -2288,6 +2293,13 @@ pub(crate) struct WatchdogArgs {
     /// is unobservable, else 0.
     #[arg(long, value_name = "N")]
     pub(crate) count: Option<u64>,
+    /// This host's clock and the owners' agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a `doctor health-*` rule's doctor
+    /// then ages a health.v1 status reply's stamp against this clock
+    /// (freshness.v1 §2.6), as `doctor --clocks-synced` does. The doctor
+    /// listens to no status, so without it those rules read unobservable.
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]

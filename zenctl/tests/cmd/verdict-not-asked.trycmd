@@ -114,3 +114,28 @@ Caused by:
     Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
 
 ```
+
+`--clocks-synced` is the operator's word for a `doctor health-*` rule's
+doctor, which listens to no status (#735). It is the watchdog's, and a
+trigger capture's under `--on`: a plain `record` has no rule to hand it to,
+and clap refuses it before anything else.
+
+```console
+$ zenctl watchdog --rule 'doctor health-stale' --clocks-synced --count 1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+
+$ zenctl record 'zk2/**' -o /dev/null --clocks-synced
+? 2
+error: the following required arguments were not provided:
+  --pre <SECS>
+  --on <RULE>
+
+Usage: zenctl record --out <FILE> --pre <SECS> --on <RULE> --clocks-synced --namespace <NS> <SELECTOR>...
+
+For more information, try '--help'.
+
+```

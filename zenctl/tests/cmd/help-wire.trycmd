@@ -771,6 +771,9 @@ Options:
           
           [default: absent-from-window]
 
+      --clocks-synced
+          With --on: this host's clock and the owners' agree within the HLC delta (500 ms), for a `doctor health-*` rule, as `watchdog --clocks-synced`. Without it, those rules read unobservable
+
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
@@ -1436,6 +1439,9 @@ Options:
 
       --count <N>
           Stop after N evaluations (default: run until interrupted). A bounded run exits on how its rules ended: 1 if any is firing, else 2 if any is unobservable, else 0
+
+      --clocks-synced
+          This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a `doctor health-*` rule's doctor then ages a health.v1 status reply's stamp against this clock (freshness.v1 §2.6), as `doctor --clocks-synced` does. The doctor listens to no status, so without it those rules read unobservable
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

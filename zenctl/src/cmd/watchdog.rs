@@ -50,6 +50,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         rules,
         every,
         count,
+        clocks_synced,
         contracts: _,
         ns: _,
     } = cli;
@@ -77,6 +78,7 @@ pub async fn run(cli: crate::cli::WatchdogArgs) -> Result<()> {
         tick,
         ticks: count,
         timeout: dep.timeout(),
+        clocks_synced,
     };
 
     eprintln!(

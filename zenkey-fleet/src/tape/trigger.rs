@@ -84,6 +84,11 @@ pub struct TriggerSpec {
     /// Per-ask timeout: the presence, contract and doctor sweeps, and the
     /// preamble GET.
     pub timeout: Duration,
+    /// The operator's word that this host's clock and the owners' agree
+    /// within the HLC delta, for a `doctor health-*` rule's doctor, as the
+    /// watchdog's [`crate::judge::condition::WatchdogSpec::clocks_synced`]
+    /// (#735).
+    pub clocks_synced: bool,
     /// The deployment's sessions (#612, FJ6, FJ8b): where a `doctor` rule's
     /// doctor reads, an `instance-gone` rule's presence, and the lens
     /// `invalid-payload` and `qos-mismatch` judge through. `None` makes
@@ -302,7 +307,7 @@ where
     let addresses = rules.instance_addresses();
     // The doctor rules' doctor (#612, FJ6): only the checks they name, one
     // contract store for the capture, seeded with what `--contracts` holds.
-    let doctor_spec = rules.doctor_spec(spec.timeout);
+    let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
     let bundles = crate::bus::contracts::BundleStore::new(spec.timeout);
     bundles.seed(&spec.contracts);
     let deployment = spec.deployment.as_ref();

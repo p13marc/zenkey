@@ -717,7 +717,9 @@ each presence read. The doctor listens to no status long enough to measure a
 clock, so a status reply's age rests on the deployment's word,
 `--clocks-synced`: without it, every service implementing `health.v1` is
 unjudged, and the reason says so. `zenctl health` measures one over its
-window instead.
+window instead. A `doctor health-*` rule of `watchdog` or `record --on`
+runs the same doctor, so it takes the same word: `watchdog --clocks-synced`,
+`record --on … --clocks-synced`.
 
 The v1 doctor — `introspect` fanned across the fleet and diffed against the
 `--registry` TOMLs (RFC 08 §6) — left `main` with `check conform` at FJ9; the
