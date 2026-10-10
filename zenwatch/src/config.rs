@@ -14,6 +14,14 @@
 //! be *able* to carry a credential by accident. [`Secret::resolve`] reads the
 //! value; [`check`] proves it readable before anything runs.
 //!
+//! **What zk2 took away is refused by name, never ignored** (#614, FL2):
+//! `bus.registry` (v1's registry slices; zk2 reads `contracts`),
+//! `discipline.inhibit` with inhibition on (removed: it read v1's catalog),
+//! `group_by: ["origin"]` (v1's origin chunk; zk2 groups by `system` or
+//! `address`) and the doctor block's `sample` each parse, so that [`check`]
+//! can say where the question went instead of an unknown-field error that
+//! says nothing.
+//!
 //! [`load`] parses; [`check`] refuses. Both are pure over their inputs, so
 //! `check-config` and `run` cannot disagree about what a bad config is.
 
@@ -33,6 +41,21 @@ use crate::rules::{RuleKind, parse_rule};
 pub struct Config {
     #[serde(default)]
     pub bus: BusConfig,
+    /// Contracts known offline (spec §8.5): authoring files, directories of
+    /// them, or `.history` roots, as `zenctl --contracts` reads them. A
+    /// revision held here is never retrieved; every other one a descriptor
+    /// names is retrieved from its holders (§8.4). `--contracts` adds to
+    /// these. Relative paths are the working directory's.
+    #[serde(default)]
+    pub contracts: Vec<PathBuf>,
+    /// The operator's word that this host's clock and the owners' agree
+    /// within the HLC delta (500 ms), as the deployment keeps them
+    /// (`freshness.v1` §2.6): the doctor — scheduled, or a `doctor` rule's —
+    /// then ages a `health.v1` status reply's stamp against this clock.
+    /// It listens to no status, so without it the `health-*` checks of
+    /// every service implementing `health.v1` are unobservable. Default off.
+    #[serde(default)]
+    pub clocks_synced: bool,
     /// The watchdog's evaluation cadence for the engine rules, seconds.
     #[serde(default = "default_tick")]
     pub tick_s: f64,
@@ -41,20 +64,21 @@ pub struct Config {
     #[serde(default)]
     pub render: RenderConfig,
     /// The notification discipline (#389): `for`, dedup, grouping, repeat,
-    /// inhibition, resolved notices.
+    /// resolved notices.
     #[serde(default)]
     pub discipline: DisciplineConfig,
-    /// Where the discipline's ledger survives a restart (JSON). Unset: the
-    /// ledger is in memory only, and a restart re-announces the world.
+    /// Where the discipline's ledger survives a restart (JSON, version 2).
+    /// Unset: the ledger is in memory only, and a restart re-announces the
+    /// world.
     pub state_file: Option<PathBuf>,
     /// How many notice entries the ledger keeps; the least recently changed
     /// are evicted past it, counted and reported (RFC 13 §3 O6).
     #[serde(default = "default_state_max_entries")]
     pub state_max_entries: usize,
-    /// The scheduled doctor (#390): `run_doctor` over the whole deployment
-    /// every few **hours**, run-over-run deltas to the named sinks, the
-    /// last report published. Absent: not scheduled — nothing runs, nothing
-    /// is published, and the health document says so.
+    /// The scheduled doctor (#390): zk2's `run_doctor` over the whole
+    /// deployment every few **hours**, run-over-run deltas to the named
+    /// sinks, the last report published. Absent: not scheduled — nothing
+    /// runs, nothing is published, and the health document says so.
     pub doctor: Option<DoctorConfig>,
 }
 
@@ -67,15 +91,17 @@ fn default_state_max_entries() -> usize {
 }
 
 /// The `doctor` section (#390): the deployment's conformance checks
-/// (`zenctl doctor`'s stable check ids) asked on a schedule, so that a
-/// fleet which drifts three weeks after deployment — a sensor upgraded on
-/// four hosts and not the fifth, a producer that stopped answering
-/// `introspect` — is noticed without anyone running the doctor by hand.
+/// (`zenctl doctor`'s stable check ids, zk2's since FL2) asked on a
+/// schedule, so that a fleet which drifts three weeks after deployment — a
+/// provider upgraded on four hosts and not the fifth, a role whose
+/// provider went away — is noticed without anyone running the doctor by
+/// hand.
 ///
-/// **Hours, not seconds.** A doctor run is a fan-in sweep — a roster ask,
-/// an introspect per producer, a describe per producer, admin — not a
-/// tick. `every_s` exists for tests and demos, where an interval of hours
-/// is an interval nobody sees, and is documented as exactly that.
+/// **Hours, not seconds.** A doctor run is a fan-in sweep — two presence
+/// reads a grace apart, a descriptor per instance, the bundles they name,
+/// the admin space — not a tick. `every_s` exists for tests and demos,
+/// where an interval of hours is an interval nobody sees, and is
+/// documented as exactly that.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DoctorConfig {
@@ -84,13 +110,15 @@ pub struct DoctorConfig {
     /// The interval, in seconds — **for tests and demos only**: a sweep
     /// every few seconds is load on the fleet, not observation of it.
     pub every_s: Option<f64>,
-    /// The deep checks too (per-family state snapshots for freshness,
-    /// storage coverage, budgets) — real query load, opt-in.
+    /// The checks that read the owners' data plane too —
+    /// `state-stamp-foreign` and `population-over-bound`, a GET of every
+    /// owner's state — real query load, opt-in (`zenctl doctor --deep`).
     #[serde(default)]
     pub deep: bool,
-    /// At most this many state samples per family in the deep checks.
+    /// v1's per-family sample bound. zk2's deep checks read every owner's
+    /// state once and take no sample: refused by [`check`] with that said.
     pub sample: Option<usize>,
-    /// Per-query timeout for the sweep; the bus timeout when unsaid.
+    /// Per-read timeout for the sweep; the bus timeout when unsaid.
     pub timeout_s: Option<f64>,
     /// Names into `sinks`; at least one. Every doctor notification — the
     /// baseline, each new finding, each fixed one, a run that could not
@@ -147,16 +175,21 @@ pub struct DisciplineConfig {
     /// notification is sent for all of them. At most 60.
     #[serde(default = "default_group_window")]
     pub group_window_s: f64,
-    /// The label set a group key is built from; `origin` is the origin
-    /// chunk of the key the notice came from. Default: by origin.
+    /// The label set a group key is built from. Two are the notice's own
+    /// when it is about an address: `system` (the `<system>` of
+    /// `<system>/<service>`, a host under `hostid.v1`) and `address`; any
+    /// other is a label a rule carries. Default: by system.
     #[serde(default = "default_group_by")]
     pub group_by: Vec<String>,
     /// Re-send a notice still firing after this many seconds, once per
     /// interval. `0`: never.
     #[serde(default)]
     pub repeat_s: f64,
-    #[serde(default)]
-    pub inhibit: InhibitConfig,
+    /// Inhibition **was removed** (#614, FL2): it read v1's catalog
+    /// (`edge/*`, `entity/*`, `alias/*`), and no zk2 profile brings it
+    /// back. The block still parses so that `enabled: false` (or no block)
+    /// runs, and [`check`] refuses inhibition switched on, saying why.
+    pub inhibit: Option<InhibitConfig>,
     /// Send the resolved family (`resolved`, `observable_again`) at all.
     #[serde(default = "default_true")]
     pub resolved_notice: bool,
@@ -166,11 +199,16 @@ fn default_group_window() -> f64 {
     2.0
 }
 fn default_group_by() -> Vec<String> {
-    vec!["origin".into()]
+    vec![GROUP_SYSTEM.into()]
 }
 fn default_true() -> bool {
     true
 }
+
+/// The group label that is a notice's `<system>` (#614, FL2).
+pub const GROUP_SYSTEM: &str = "system";
+/// The group label that is a notice's `<system>/<service>`.
+pub const GROUP_ADDRESS: &str = "address";
 
 impl Default for DisciplineConfig {
     fn default() -> Self {
@@ -179,38 +217,29 @@ impl Default for DisciplineConfig {
             group_window_s: default_group_window(),
             group_by: default_group_by(),
             repeat_s: 0.0,
-            inhibit: InhibitConfig::default(),
+            inhibit: None,
             resolved_notice: true,
         }
     }
 }
 
-/// Inhibition (#389, RFC 06 §5.6): do not page for a service on a host
-/// that is itself down. Reads the catalog's edges, entities and aliases;
-/// needs no application knowledge.
+/// v1's inhibition block, kept only to be refused when switched on (#614,
+/// FL2). In v1 a block without `enabled` was on, so only `enabled: false`
+/// is accepted.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct InhibitConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// How many containment edges the walk follows from a down entity; at
-    /// most [`zenkey_fleet::MAX_DEPTH_CAP`].
-    #[serde(default = "default_inhibit_depth")]
-    pub depth: usize,
+    pub enabled: Option<bool>,
+    /// The walk bound v1 took; meaningless with inhibition off, and parsed
+    /// so an `enabled: false` block that still carries it runs.
+    pub depth: Option<usize>,
 }
 
-fn default_inhibit_depth() -> usize {
-    zenkey_fleet::MAX_DEPTH_CAP
-}
-
-impl Default for InhibitConfig {
-    fn default() -> Self {
-        InhibitConfig {
-            enabled: true,
-            depth: default_inhibit_depth(),
-        }
-    }
-}
+/// Why inhibition is refused: named once, for [`check`] and the docs.
+pub const INHIBIT_REMOVED: &str = "inhibition was removed in the zk2 port \
+     (#614): it read v1's catalog (edge/*, entity/*, alias/*) to attribute a \
+     symptom to a down host, and no zk2 profile carries those documents. \
+     Delete the block, or set `enabled: false`";
 
 /// The `bus` section — the same knobs as a zenctl context, and resolved
 /// against one ([`crate::bus`]).
@@ -219,7 +248,11 @@ impl Default for InhibitConfig {
 pub struct BusConfig {
     /// A named explorer context to start from; `--context` overrides it.
     pub context: Option<String>,
-    pub base: Option<String>,
+    /// The deployment namespace: the resolved reads' session is opened in
+    /// it (decided 2026-10-08). `base` is the same field, as `--base` is
+    /// zenctl's `--namespace`; `--namespace` overrides it.
+    #[serde(alias = "base")]
+    pub namespace: Option<String>,
     #[serde(default)]
     pub connect: Vec<String>,
     #[serde(default)]
@@ -227,8 +260,9 @@ pub struct BusConfig {
     pub scouting: Option<bool>,
     pub timeout_s: Option<u64>,
     pub zenoh_config: Option<PathBuf>,
-    #[serde(default)]
-    pub registry: Vec<PathBuf>,
+    /// v1's registry directories. zk2 reads contracts: refused by [`check`]
+    /// with the field that replaced it named.
+    pub registry: Option<Vec<PathBuf>>,
 }
 
 /// One rule, as written.
@@ -238,9 +272,7 @@ pub struct RuleConfig {
     pub name: String,
     /// One spelling of the closed vocabulary ([`crate::rules::VOCABULARY`]).
     pub rule: String,
-    /// `info` | `warning` | `error` | `critical`; `warning` when unsaid. An
-    /// `alerts` rule uses the producer's own severity when the document
-    /// carries one, this otherwise.
+    /// `info` | `warning` | `error` | `critical`; `warning` when unsaid.
     pub severity: Option<String>,
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
@@ -499,7 +531,8 @@ pub fn parse(text: &str) -> Result<Config, json5::Error> {
 ///
 /// Secrets are **resolved here** (and their values discarded): an unset env
 /// var or an unreadable file is a config problem at check time, not a
-/// delivery failure at 3am.
+/// delivery failure at 3am. The contracts and the state file are read by
+/// [`crate::load_checked`], which knows the flags.
 pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     let mut out = Vec::new();
     let mut problem = |path: String, message: String| out.push(ConfigProblem { path, message });
@@ -518,6 +551,21 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     }
     if cfg.sinks.is_empty() {
         problem("sinks".into(), "no sinks — nowhere to notify".into());
+    }
+    if cfg.bus.registry.is_some() {
+        problem(
+            "bus.registry".into(),
+            "v1's registry slices are gone: zk2 reads contracts — `contracts: [<PATH>]` \
+             (an authoring file, a directory of them, or a .history root) or `--contracts`; \
+             a revision held offline is never retrieved, every other one comes from the bus \
+             (spec §8.4)"
+                .into(),
+        );
+    }
+    if let Some(ns) = &cfg.bus.namespace
+        && let Err(e) = check_namespace(ns)
+    {
+        problem("bus.namespace".into(), e);
     }
     check_discipline(&mut problem, cfg);
     check_doctor(&mut problem, cfg);
@@ -727,6 +775,16 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     out
 }
 
+/// A deployment namespace, refused the way the session would refuse it: a
+/// concrete key-expression prefix, no wildcard, no empty chunk. Empty is the
+/// bus-root deployment.
+pub fn check_namespace(ns: &str) -> Result<(), String> {
+    if ns.is_empty() {
+        return Ok(());
+    }
+    zenkey_fleet::check_namespace(ns).map_err(|e| e.to_string())
+}
+
 /// The `discipline` bounds, and the state file's directory writable now
 /// rather than at the first persist (#389).
 fn check_discipline(problem: &mut impl FnMut(String, String), cfg: &Config) {
@@ -768,18 +826,25 @@ fn check_discipline(problem: &mut impl FnMut(String, String), cfg: &Config) {
     if d.group_by.is_empty() {
         problem(
             "discipline.group_by".into(),
-            "at least one label to group by (`origin` is the default)".into(),
+            format!("at least one label to group by (`{GROUP_SYSTEM}` is the default)"),
         );
     }
-    if d.inhibit.depth == 0 || d.inhibit.depth > zenkey_fleet::MAX_DEPTH_CAP {
-        problem(
-            "discipline.inhibit.depth".into(),
-            format!(
-                "must be 1–{} containment edges, got {} (RFC 06 §5.6: the walk is bounded)",
-                zenkey_fleet::MAX_DEPTH_CAP,
-                d.inhibit.depth
-            ),
-        );
+    for (i, label) in d.group_by.iter().enumerate() {
+        if label == "origin" {
+            problem(
+                format!("discipline.group_by[{i}]"),
+                format!(
+                    "\"origin\" was v1's origin chunk, which zk2 keys do not carry: group by \
+                     `{GROUP_SYSTEM}` (the <system> of <system>/<service>, a host under \
+                     hostid.v1) or `{GROUP_ADDRESS}` (<system>/<service>)"
+                ),
+            );
+        }
+    }
+    if let Some(inhibit) = &d.inhibit
+        && inhibit.enabled != Some(false)
+    {
+        problem("discipline.inhibit".into(), INHIBIT_REMOVED.into());
     }
     if cfg.state_max_entries == 0 {
         problem(
@@ -796,7 +861,7 @@ fn check_discipline(problem: &mut impl FnMut(String, String), cfg: &Config) {
 
 /// The `doctor` block (#390): exactly one interval spelling, positive;
 /// every sink named exists; the floor is one of the three; the bounds are
-/// numbers.
+/// numbers; v1's `sample` named for what it was.
 fn check_doctor(problem: &mut impl FnMut(String, String), cfg: &Config) {
     let Some(d) = &cfg.doctor else {
         return;
@@ -828,10 +893,12 @@ fn check_doctor(problem: &mut impl FnMut(String, String), cfg: &Config) {
             "must be a positive number of seconds".into(),
         );
     }
-    if d.sample == Some(0) {
+    if d.sample.is_some() {
         problem(
             "doctor.sample".into(),
-            "must be positive — a sample of zero asks nothing (leave it unset for unbounded)"
+            "v1's per-family state sample: zk2's deep checks (`state-stamp-foreign`, \
+             `population-over-bound`) read every owner's state once and take no sample — \
+             remove it"
                 .into(),
         );
     }
@@ -924,6 +991,7 @@ mod tests {
         let cfg = parse(MINIMAL).unwrap();
         assert_eq!(cfg.tick_s, 5.0);
         assert_eq!(cfg.bus, BusConfig::default());
+        assert!(cfg.contracts.is_empty() && !cfg.clocks_synced);
         assert_eq!(cfg.render.max_message_bytes, 2048);
         assert!(check(&cfg).is_empty(), "{:?}", check(&cfg));
     }
@@ -961,8 +1029,8 @@ mod tests {
             r#"{
               tick_s: 0,
               rules: [
-                { name: "a", rule: "silent-for v1/** 30", sinks: ["nope"] },
-                { name: "b", rule: "silent-for v1/** 30", sinks: ["hook"] },
+                { name: "a", rule: "silent-for prod/zk2/** 30", sinks: ["nope"] },
+                { name: "b", rule: "silent-for prod/zk2/** 30", sinks: ["hook"] },
                 { name: "c", rule: "if x then y", severity: "loud", sinks: [] },
               ],
               sinks: {
@@ -990,7 +1058,8 @@ mod tests {
         }
         let vocabulary = problems.iter().find(|p| p.path == "rules[2].rule").unwrap();
         assert!(
-            vocabulary.message.contains("liveliness-gone"),
+            vocabulary.message.contains("liveliness-gone")
+                && vocabulary.message.contains("instance-gone"),
             "{vocabulary}"
         );
         let dup = problems.iter().find(|p| p.path == "rules[1].rule").unwrap();
@@ -1002,16 +1071,112 @@ mod tests {
         assert!(unset.message.contains("not set"), "{unset}");
     }
 
+    /// What the zk2 port took away is refused by name (#614, FL2), each by
+    /// its path and with where its question went: v1's `origin-down` (no
+    /// silent alias), the dark `alerts`, inhibition switched on (a block
+    /// without `enabled` was on in v1), grouping by v1's origin, v1's
+    /// registry dirs and the doctor's sample. Inhibition off, or no block,
+    /// still runs.
+    #[test]
+    fn what_zk2_took_away_is_refused_by_name() {
+        let cfg = parse(
+            r#"{
+              bus: { registry: ["/etc/zenwatch/registry"] },
+              rules: [
+                { name: "hosts", rule: "origin-down h-aaaaaaaaaaaa", sinks: ["hook"] },
+                { name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["hook"] },
+              ],
+              sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
+              discipline: { inhibit: { depth: 4 }, group_by: ["origin", "team"] },
+              doctor: { every_h: 6, sample: 200, sinks: ["hook"] },
+            }"#,
+        )
+        .unwrap();
+        let problems = check(&cfg);
+        let message = |path: &str| {
+            problems
+                .iter()
+                .find(|p| p.path == path)
+                .unwrap_or_else(|| panic!("no problem at {path}: {problems:?}"))
+                .message
+                .clone()
+        };
+        assert!(message("rules[0].rule").contains("instance-gone"));
+        assert!(message("rules[1].rule").contains("#613"));
+        let inhibit = message("discipline.inhibit");
+        assert!(
+            inhibit.contains("removed") && inhibit.contains("catalog"),
+            "{inhibit}"
+        );
+        assert!(message("discipline.group_by[0]").contains("system"));
+        assert!(
+            !problems.iter().any(|p| p.path == "discipline.group_by[1]"),
+            "a rule's own label groups as before"
+        );
+        assert!(message("bus.registry").contains("contracts"));
+        assert!(message("doctor.sample").contains("remove it"));
+
+        for off in [
+            "discipline: { inhibit: { enabled: false } }",
+            "discipline: { inhibit: { enabled: false, depth: 4 } }",
+            "discipline: {}",
+        ] {
+            let cfg = parse(&format!(
+                r#"{{ {off}, rules: [{{ name: "d", rule: "dropped", sinks: ["hook"] }}],
+                   sinks: {{ hook: {{ kind: "webhook", url: "https://example.org/h" }} }} }}"#
+            ))
+            .unwrap();
+            assert!(check(&cfg).is_empty(), "{off}: {:?}", check(&cfg));
+        }
+        let on = parse(
+            r#"{ discipline: { inhibit: { enabled: true } },
+                 rules: [{ name: "d", rule: "dropped", sinks: ["hook"] }],
+                 sinks: { hook: { kind: "webhook", url: "https://example.org/h" } } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            check(&on).into_iter().map(|p| p.path).collect::<Vec<_>>(),
+            ["discipline.inhibit"]
+        );
+    }
+
+    /// The bus section's zk2 field: `namespace`, which `base` spells too
+    /// (as zenctl's `--base` is its `--namespace`), refused when it is not a
+    /// concrete prefix.
+    #[test]
+    fn the_namespace_is_spelled_two_ways_and_must_be_concrete() {
+        let with = |field: &str, ns: &str| {
+            parse(&format!(
+                r#"{{ bus: {{ {field}: "{ns}" }}, rules: [{{ name: "d", rule: "dropped", sinks: ["h"] }}],
+                   sinks: {{ h: {{ kind: "webhook", url: "https://example.org/h" }} }} }}"#
+            ))
+            .unwrap()
+        };
+        assert_eq!(
+            with("namespace", "site/prod").bus.namespace.as_deref(),
+            Some("site/prod")
+        );
+        assert_eq!(with("base", "prod").bus.namespace.as_deref(), Some("prod"));
+        assert!(check(&with("namespace", "site/prod")).is_empty());
+        for bad in ["prod/*", "a//b"] {
+            let problems = check(&with("namespace", bad));
+            assert!(
+                problems.iter().any(|p| p.path == "bus.namespace"),
+                "{bad}: {problems:?}"
+            );
+        }
+    }
+
     /// The discipline's own refusals (#389), each by path: a `for` at or
-    /// past the repeat, a walk deeper than the RFC allows, a group window
-    /// past a minute, a state file whose directory does not exist.
+    /// past the repeat, a group window past a minute, a state file whose
+    /// directory does not exist.
     #[test]
     fn the_discipline_bounds_are_refused_by_path() {
         let cfg = parse(
             r#"{
               rules: [{ name: "drops", rule: "dropped", sinks: ["hook"], for_s: 30 }],
               sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
-              discipline: { for_s: 60, repeat_s: 30, group_window_s: 61, inhibit: { depth: 5 } },
+              discipline: { for_s: 60, repeat_s: 30, group_window_s: 61 },
               state_file: "/nonexistent-zenwatch-dir/state.json",
               state_max_entries: 0,
             }"#,
@@ -1023,7 +1188,6 @@ mod tests {
             "rules[0].for_s",
             "discipline.for_s",
             "discipline.group_window_s",
-            "discipline.inhibit.depth",
             "state_file",
             "state_max_entries",
         ] {
@@ -1036,8 +1200,8 @@ mod tests {
         );
         // The defaults check clean and are what the README says.
         let d = DisciplineConfig::default();
-        assert_eq!(d.group_by, vec!["origin".to_string()]);
-        assert!(d.inhibit.enabled && d.inhibit.depth == 4);
+        assert_eq!(d.group_by, vec!["system".to_string()]);
+        assert_eq!(d.inhibit, None);
         assert!(d.resolved_notice && d.repeat_s == 0.0 && d.for_s.is_none());
     }
 
@@ -1049,9 +1213,9 @@ mod tests {
     fn the_doctor_block_is_refused_by_path() {
         let cfg = parse(
             r#"{
-              rules: [{ name: "doctor", rule: "doctor slice-sync", sinks: ["hook"] }],
+              rules: [{ name: "doctor", rule: "doctor split-brain", sinks: ["hook"] }],
               sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
-              doctor: { sinks: ["pager"], severity_floor: "critical", timeout_s: 0, sample: 0 },
+              doctor: { sinks: ["pager"], severity_floor: "critical", timeout_s: 0 },
             }"#,
         )
         .unwrap();
@@ -1062,7 +1226,6 @@ mod tests {
             "doctor.sinks[0]",
             "doctor.severity_floor",
             "doctor.timeout_s",
-            "doctor.sample",
             "rules[0].name",
         ] {
             assert!(paths.contains(&expected), "missing {expected} in {paths:?}");
@@ -1089,6 +1252,7 @@ mod tests {
 
         let hours = parse(
             r#"{
+              clocks_synced: true,
               rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
               sinks: { hook: { kind: "webhook", url: "https://example.org/h" } },
               doctor: { every_h: 6, deep: true, sinks: ["hook"], severity_floor: "warning" },
@@ -1096,7 +1260,9 @@ mod tests {
         )
         .unwrap();
         assert!(check(&hours).is_empty(), "{:?}", check(&hours));
+        assert!(hours.clocks_synced);
         let d = hours.doctor.as_ref().unwrap();
+        assert!(d.deep);
         assert_eq!(d.every(), Some(std::time::Duration::from_secs(6 * 3600)));
         assert_eq!(d.every_spelled(), "6h");
         assert_eq!(d.floor_rank(), severity_rank_of("warning"));

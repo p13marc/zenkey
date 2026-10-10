@@ -1,37 +1,55 @@
-//! The rule vocabulary: the engine's closed nine, plus the two this daemon
+//! The rule vocabulary: the engine's closed seven, plus the two this daemon
 //! owns.
 //!
-//! `alerts <SEL>` and `liveliness-gone <SEL>` are **not** new
-//! [`Condition`] variants, and the reason is structural: a `Condition` is
-//! one state per rule (a `RuleState`), while these are one state per
-//! *key* — one alert document, one alive token — under a selector. The
-//! engine keeps its vocabulary; the daemon composes the engine's watchdog for
-//! the eight with its own monitor for the two. [`parse_rule`] is the one
-//! parser over the union, and its error spells the whole vocabulary, because
-//! closed means closed: no expressions, no templating.
+//! `instance-gone <SYSTEM/SERVICE>` and `liveliness-gone <SEL>` are **not**
+//! judged by the engine's watchdog, and the reason is structural: a
+//! [`Condition`] is one state per rule (a `RuleState`), while these are one
+//! state per *address* or per *token* — `*/tc` is every `tc` there is, each
+//! one up or gone on its own (#614, FL2). The engine judges its seven every
+//! tick; the daemon reads the other two from the fleet's live presence
+//! projection ([`crate::presence`]) or its own token ledger
+//! ([`crate::liveliness`]). [`parse_rule`] is the one parser over the
+//! union, and its error spells the whole vocabulary, because closed means
+//! closed: no expressions, no templating.
+//!
+//! **Refused, never ignored.** `alerts <SEL>` read v1's alert plane and is
+//! dark until zk2's alarm profile exists (#613); `origin-down` and
+//! `alert-firing` are v1 spellings. Each is refused with where its question
+//! went, never parsed into a rule that would silently never fire.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use zenkey_fleet::Condition;
+use zenkey_fleet::{Condition, ResolvedTarget as Target};
 
 /// The whole grammar, for the parse error and the docs.
 pub const VOCABULARY: &str = "rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | \
      silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | \
-     doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | \
-     alert-firing <SEL> [<MIN-SEVERITY>] | \
-     alerts <SEL> | liveliness-gone <SEL>";
+     doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | \
+     liveliness-gone <SEL>";
+
+/// Why `alerts` is refused (#613): named once, for the parser and the docs.
+pub const ALERTS_DARK: &str = "alerts read v1's alert plane, and zk2's alarm \
+     profile (alarms.v1) does not exist yet: the rule is dark until it does \
+     (#613). Refused rather than ignored — a rule that can never fire is a \
+     rule that pages nobody";
 
 /// What one rule watches.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleKind {
-    /// One of the engine's nine, judged by the watchdog every tick.
+    /// One of the engine's seven, judged by the watchdog every tick. Never
+    /// [`Condition::InstanceGone`]: [`parse_rule`] reads that spelling as
+    /// [`RuleKind::InstanceGone`].
     Engine(Condition),
-    /// The producers' own alert documents under `selector` (RFC 04 §1.2):
-    /// a `put` is firing, a `delete` is resolved, one state per key.
-    Alerts { selector: String },
-    /// Alive tokens under `selector` (RFC 04 §5): a token that disappears is
-    /// firing, one that comes back is ok — the dead-man's switch.
+    /// The addresses `target` names (spec §8.1): one state per address, up
+    /// while an instance token is held, gone when none is and a complete
+    /// read says so, unobservable otherwise — read from the fleet's live
+    /// presence projection (#614).
+    InstanceGone { target: Target },
+    /// Liveliness tokens under `selector` (a wire selector): a token that
+    /// disappears is firing, one that comes back is ok — the dead-man's
+    /// switch. On the deployment's own zk2 presence tokens it rides the
+    /// projection; on anything else, the daemon's own token ledger.
     LivelinessGone { selector: String },
     /// The scheduled doctor (#390): not a spelling of the vocabulary at all
     /// — [`parse_rule`] never produces it — but the `doctor` block as the
@@ -41,7 +59,7 @@ pub enum RuleKind {
 }
 
 impl RuleKind {
-    /// The head word — what `kind` says on a notification.
+    /// The head word — what `rule_kind` says on a notification.
     pub fn head(&self) -> &'static str {
         match self {
             RuleKind::Engine(c) => match c {
@@ -51,21 +69,20 @@ impl RuleKind {
                 Condition::InvalidPayload { .. } => "invalid-payload",
                 Condition::QosMismatch { .. } => "qos-mismatch",
                 Condition::DoctorCheck { .. } => "doctor",
-                Condition::OriginDown { .. } => "origin-down",
+                Condition::InstanceGone { .. } => "instance-gone",
                 Condition::Dropped => "dropped",
-                Condition::AlertFiring { .. } => "alert-firing",
             },
-            RuleKind::Alerts { .. } => "alerts",
+            RuleKind::InstanceGone { .. } => "instance-gone",
             RuleKind::LivelinessGone { .. } => "liveliness-gone",
             RuleKind::ScheduledDoctor => "doctor",
         }
     }
 
-    /// The selector of the two daemon-owned kinds.
+    /// The wire selector of a `liveliness-gone` rule.
     pub fn watched_selector(&self) -> Option<&str> {
         match self {
-            RuleKind::Alerts { selector } | RuleKind::LivelinessGone { selector } => Some(selector),
-            RuleKind::Engine(_) | RuleKind::ScheduledDoctor => None,
+            RuleKind::LivelinessGone { selector } => Some(selector),
+            _ => None,
         }
     }
 }
@@ -75,7 +92,7 @@ impl fmt::Display for RuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RuleKind::Engine(c) => write!(f, "{c}"),
-            RuleKind::Alerts { selector } => write!(f, "alerts {selector}"),
+            RuleKind::InstanceGone { target } => write!(f, "instance-gone {}", target.address),
             RuleKind::LivelinessGone { selector } => write!(f, "liveliness-gone {selector}"),
             RuleKind::ScheduledDoctor => f.write_str("doctor (scheduled)"),
         }
@@ -87,59 +104,72 @@ impl fmt::Display for RuleKind {
 #[error("{0}")]
 pub struct RuleError(String);
 
-/// Parse one rule: whitespace-separated, kind first. The two daemon kinds
-/// are tried first; anything else goes to [`Condition::parse`], whose error
-/// is re-spelled with the *full* vocabulary so the user never sees eight
-/// where there are ten.
+/// Parse one rule: whitespace-separated, kind first. The daemon's kinds and
+/// the refused spellings are tried first; anything else goes to
+/// [`Condition::parse`], whose error is re-spelled with the *full*
+/// vocabulary so the user never sees seven where there are nine.
 pub fn parse_rule(text: &str) -> Result<RuleKind, RuleError> {
     let tokens: Vec<&str> = text.split_whitespace().collect();
-    let selector = |sel: &str, head: &str| -> Result<String, RuleError> {
-        if sel.contains("$*") {
-            // zenoh accepts it; the convention does not (RFC 03 §2), and
-            // zenctl refuses it at the same seam.
-            return Err(RuleError(format!(
-                "{head} {sel:?}: `$*` is not in the convention's selector grammar (RFC 03 §2)"
-            )));
-        }
-        zenoh::key_expr::KeyExpr::try_from(sel.to_string())
-            .map(|_| sel.to_string())
-            .map_err(|e| {
-                // zenoh's message ends in the build machine's source path
-                // (`… at /home/…/borrowed.rs:777.`, #240).
-                let reason = crate::exit::without_source_locations(&e.to_string());
-                RuleError(format!("{head} {sel:?}: not a key expression: {reason}"))
-            })
+    let closed = |head: String| {
+        RuleError(format!(
+            "{head} — the vocabulary is closed (no expressions, no templating): {VOCABULARY}"
+        ))
     };
     match tokens.as_slice() {
-        ["alerts", sel] => Ok(RuleKind::Alerts {
-            selector: selector(sel, "alerts")?,
-        }),
+        ["alerts", ..] => Err(RuleError(format!("{text:?}: {ALERTS_DARK}"))),
         ["liveliness-gone", sel] => Ok(RuleKind::LivelinessGone {
             selector: selector(sel, "liveliness-gone")?,
         }),
-        ["alerts" | "liveliness-gone", ..] => Err(RuleError(format!(
-            "{:?} takes exactly one selector — the vocabulary is closed: {VOCABULARY}",
-            text
-        ))),
+        ["instance-gone", address] => Target::parse(address)
+            .map(|target| RuleKind::InstanceGone { target })
+            .map_err(|e| {
+                closed(format!(
+                    "instance-gone {address:?}: {}",
+                    zenkey_fleet::one_line(&e)
+                ))
+            }),
+        ["liveliness-gone" | "instance-gone", ..] => {
+            Err(closed(format!("{text:?} takes exactly one argument")))
+        }
         _ => Condition::parse(text).map(RuleKind::Engine).map_err(|e| {
-            // The engine's own message, then the union it does not know.
+            // The engine's own message, then the union it does not know. Its
+            // refusals of v1's spellings (`origin-down`, `alert-firing`)
+            // already say where the question went, and pass through whole.
             let engine = e.to_string();
             let head = engine
                 .split(" — the vocabulary is closed")
                 .next()
                 .unwrap_or(&engine)
                 .to_string();
-            RuleError(format!(
-                "{head} — the vocabulary is closed (no expressions, no templating): {VOCABULARY}"
-            ))
+            closed(head)
         }),
     }
 }
 
-/// The chunk a rule's name slugs to — its `firing/{rule_id}` key and its
-/// notification ids (RFC 03 §2's slug, lossless).
+/// A wire selector, refused the way zenctl refuses one at the same seam.
+fn selector(sel: &str, head: &str) -> Result<String, RuleError> {
+    if sel.contains("$*") {
+        // zenoh accepts it; the convention does not (RFC 03 §2, carried
+        // into zk2's grammar, spec §1.3).
+        return Err(RuleError(format!(
+            "{head} {sel:?}: `$*` is not in the convention's selector grammar (RFC 03 §2)"
+        )));
+    }
+    zenoh::key_expr::KeyExpr::try_from(sel.to_string())
+        .map(|_| sel.to_string())
+        .map_err(|e| {
+            // zenoh's message ends in the build machine's source path
+            // (`… at /home/…/borrowed.rs:777.`, #240).
+            let reason = crate::exit::without_source_locations(&e.to_string());
+            RuleError(format!("{head} {sel:?}: not a key expression: {reason}"))
+        })
+}
+
+/// The chunk a rule's name slugs to — its `firing/{rule_id}` key and the
+/// head of its notification ids (RFC 03 §2's slug, lossless; zk2 slugs
+/// with the same rules, `zenkey_model::slug`).
 pub fn rule_id(name: &str) -> String {
-    zenkey::slug::chunk_slug(name)
+    zenkey_model::slug::chunk_slug(name)
 }
 
 /// One configured rule, parsed.
@@ -149,8 +179,8 @@ pub struct Rule {
     /// [`rule_id`] of the name.
     pub id: String,
     pub kind: RuleKind,
-    /// The selector of an `alerts`/`liveliness-gone` rule, compiled once for
-    /// key attribution.
+    /// The selector of a `liveliness-gone` rule, compiled once for key
+    /// attribution.
     pub keyexpr: Option<zenoh::key_expr::KeyExpr<'static>>,
     pub severity: String,
     pub labels: BTreeMap<String, String>,
@@ -214,8 +244,7 @@ impl Rule {
         }
     }
 
-    /// Whether a wire key falls under this rule's selector (the two
-    /// daemon kinds only).
+    /// Whether a wire key falls under a `liveliness-gone` rule's selector.
     pub fn covers(&self, key: &zenoh::key_expr::KeyExpr<'_>) -> bool {
         self.keyexpr.as_ref().is_some_and(|k| k.intersects(key))
     }
@@ -225,24 +254,30 @@ impl Rule {
 mod tests {
     use super::*;
 
-    /// All ten spellings parse and round-trip; the two daemon kinds are the
-    /// daemon's, the eight are the engine's.
+    /// All nine spellings parse and round-trip; the two daemon kinds are the
+    /// daemon's, the seven are the engine's, and `instance-gone` is never
+    /// the engine's condition.
     #[test]
-    fn the_ten_kinds_parse_and_round_trip() {
+    fn the_nine_kinds_parse_and_round_trip() {
         let rules = [
-            ("rate-above v1/*/telemetry/** 5", "rate-above"),
+            ("rate-above prod/zk2/*/*/*/stream/** 5", "rate-above"),
             (
-                "rate-below v1/h-aaaaaaaaaaaa/state/p/health 0.5",
+                "rate-below prod/zk2/host-a/tc/tc.netif.v1/state/namespaces 0.5",
                 "rate-below",
             ),
-            ("silent-for v1/*/events/** 30", "silent-for"),
-            ("invalid-payload v1/*/state/**", "invalid-payload"),
-            ("qos-mismatch v1/*/telemetry/**", "qos-mismatch"),
-            ("doctor slice-sync", "doctor"),
-            ("origin-down h-aaaaaaaaaaaa", "origin-down"),
+            ("silent-for prod/zk2/** 30", "silent-for"),
+            ("invalid-payload prod/zk2/**", "invalid-payload"),
+            ("qos-mismatch prod/zk2/*/tc/**", "qos-mismatch"),
+            ("doctor split-brain", "doctor"),
+            ("instance-gone host-a/tc", "instance-gone"),
+            ("instance-gone */tc", "instance-gone"),
+            ("instance-gone host-a/*", "instance-gone"),
             ("dropped", "dropped"),
-            ("alerts v1/*/state/*/alert/*", "alerts"),
-            ("liveliness-gone v1/*/state/*/alive", "liveliness-gone"),
+            ("liveliness-gone demo/held/*/alive", "liveliness-gone"),
+            (
+                "liveliness-gone prod/zk2/*/tc/@zk/instance/*",
+                "liveliness-gone",
+            ),
         ];
         for (text, head) in rules {
             let kind = parse_rule(text).expect(text);
@@ -250,11 +285,16 @@ mod tests {
             assert_eq!(kind.head(), head);
             assert_eq!(
                 matches!(kind, RuleKind::Engine(_)),
-                !matches!(head, "alerts" | "liveliness-gone")
+                !matches!(head, "instance-gone" | "liveliness-gone"),
+                "{text}"
             );
         }
-        // The scheduled doctor is not a spelling: it is the `doctor` block
-        // as a rule, and it slugs to the id the config check reserves.
+        let RuleKind::InstanceGone { target } = parse_rule("instance-gone */tc").unwrap() else {
+            panic!("instance-gone is the daemon's");
+        };
+        assert!(target.concrete.is_none(), "a pattern");
+        // The scheduled doctor is not a spelling: it is the `doctor` block as
+        // a rule, and it slugs to the id the config check reserves.
         let scheduled = RuleKind::ScheduledDoctor;
         assert_eq!(scheduled.head(), "doctor");
         assert_eq!(scheduled.watched_selector(), None);
@@ -262,20 +302,45 @@ mod tests {
         assert_eq!(rule_id(DOCTOR_RULE), "doctor");
     }
 
-    /// Outside the vocabulary — an expression, a daemon kind with the wrong
-    /// arity, a selector that is not a key expression — the error names all
-    /// ten kinds.
+    /// Refused, never ignored: `alerts` is dark and names #613; v1's
+    /// `origin-down` names `instance-gone`, with no silent alias; v1's
+    /// `alert-firing` names #613 too.
     #[test]
-    fn a_rule_outside_the_vocabulary_names_all_ten() {
+    fn the_dark_and_v1_spellings_are_refused_with_where_they_went() {
+        let e = parse_rule("alerts v1/*/state/*/alert/*")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("#613") && e.contains("alarms.v1"), "{e}");
+        let e = parse_rule("alerts").unwrap_err().to_string();
+        assert!(e.contains("#613"), "every arity: {e}");
+        let e = parse_rule("origin-down h-aaaaaaaaaaaa")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("instance-gone"), "{e}");
+        let e = parse_rule("alert-firing v1/*/state/*/alert/* warning")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("#613"), "{e}");
+    }
+
+    /// Outside the vocabulary — an expression, a daemon kind with the wrong
+    /// arity, an address that is not one, a selector that is not a key
+    /// expression — the error names all nine kinds.
+    #[test]
+    fn a_rule_outside_the_vocabulary_names_all_nine() {
         for bad in [
             "if rate > 5 then page",
-            "alerts",
-            "alerts a b",
+            "liveliness-gone",
+            "liveliness-gone a b",
+            "instance-gone host-a",
+            "instance-gone Host A",
             "dropped now",
         ] {
             let e = parse_rule(bad).unwrap_err().to_string();
             assert!(
-                e.contains("liveliness-gone <SEL>") && e.contains("rate-above <SEL>"),
+                e.contains("liveliness-gone <SEL>")
+                    && e.contains("instance-gone <SYSTEM/SERVICE>")
+                    && e.contains("rate-above <SEL>"),
                 "{bad}: {e}"
             );
         }
@@ -285,7 +350,9 @@ mod tests {
         let e = parse_rule("liveliness-gone v1//x").unwrap_err().to_string();
         assert!(e.contains("not a key expression"), "{e}");
         assert!(!e.contains(" at /"), "no source locations: {e}");
-        let e = parse_rule("alerts v1/$*/x").unwrap_err().to_string();
+        let e = parse_rule("liveliness-gone v1/$*/x")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("RFC 03 §2"), "{e}");
     }
 
@@ -295,7 +362,7 @@ mod tests {
     fn a_rule_id_is_a_legal_chunk() {
         for name in ["sysinfo-quiet", "Fleet Alerts", "_x", "hosts gone!"] {
             let id = rule_id(name);
-            assert!(zenkey::grammar::is_valid_plain_chunk(&id), "{name} → {id}");
+            assert!(zenkey_model::chunk::is_plain_chunk(&id), "{name} → {id}");
         }
         assert_eq!(rule_id("sysinfo-quiet"), "sysinfo-quiet");
     }

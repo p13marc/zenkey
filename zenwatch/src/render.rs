@@ -1,23 +1,43 @@
 //! Rendering: one notification's title and message, **bounded**.
 //!
-//! A 4 KB alert document must not become a 4 KB push, so every rendering
-//! is cut at [`RenderConfig::max_message_bytes`] and says so — `truncated`
-//! rides the wire shape, never a silent ellipsis. The payload goes in last,
-//! after the facts that fit in a glance (state, evidence, labels, key,
+//! A 4 KB document must not become a 4 KB push, so every rendering is cut
+//! at [`RenderConfig::max_message_bytes`] and says so — `truncated` rides
+//! the wire shape, never a silent ellipsis. The payload goes in last, after
+//! the facts that fit in a glance (state, evidence, labels, key,
 //! timestamp), so the cut lands on the part a reader can fetch from the bus
 //! anyway.
 //!
 //! Three sources, said out loud (RFC 13 §3 O4): typed fields through the
-//! producer's served schema (RFC 08 §7); a structural reading when no
-//! schema is served, prefixed with why and bounded separately at
-//! [`RenderConfig::max_structural_bytes`]; and key-plus-timestamp when
-//! nothing was decoded, with the reason. A producer with no schema still
-//! yields a usable notification.
+//! contract that declares the payload (spec §7.2); a structural reading
+//! when no contract resolves one, prefixed with why and bounded separately
+//! at [`RenderConfig::max_structural_bytes`]; and key-plus-timestamp when
+//! nothing was decoded, with the reason. Every rule zk2's port keeps is
+//! judged over a window or a token, so today every notification is
+//! key-only; the payload path stays for the alerts that zk2's alarm
+//! profile brings back (#613).
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
-use zenkey_fleet::{CondState, RenderSource};
+use serde::{Deserialize, Serialize};
+use zenkey_fleet::CondState;
+
+/// Where the fields a notification renders came from — said out loud,
+/// because "no severity" reads differently under each (RFC 13 §3 O4). The
+/// wire words are v1's (`schema` | `structural` | `key_only`), kept so a
+/// sink consumer's switch survives the port (#614, FL2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderSource {
+    /// Decoded through the contract that declares the payload.
+    Schema,
+    /// No contract resolved it: a structural reading of the bytes (JSON if
+    /// they parse, CBOR diagnostic otherwise), which may still carry the
+    /// fields.
+    Structural,
+    /// Nothing was decoded — a judgement over a window, a token, a
+    /// tombstone — and the key is what there is.
+    KeyOnly,
+}
 
 /// The two byte bounds.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -50,10 +70,10 @@ impl Default for RenderConfig {
 /// What the payload rendered to, if anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Payload {
-    /// Named fields through the served schema.
+    /// Named fields through the contract.
     Typed(serde_json::Value),
-    /// No served schema: the structural reading, and what was asked for
-    /// (the registered type name, or the key when nothing refined).
+    /// No contract resolved it: the structural reading, and what was asked for
+    /// (the declared type name, or the key when nothing refined).
     Structural { text: String, what: String },
     /// Nothing decoded, and why.
     None { reason: String },
@@ -77,6 +97,8 @@ pub struct Draft<'a> {
     pub prior: Option<CondState>,
     pub severity: &'a str,
     pub evidence: &'a str,
+    /// Lines after the evidence: an address, a baseline's list.
+    pub extra: &'a [String],
     pub labels: &'a BTreeMap<String, String>,
     pub key: Option<&'a str>,
     /// The producer's (HLC) timestamp, when the sample carried one.
@@ -132,6 +154,7 @@ pub fn render(d: &Draft<'_>, cfg: &RenderConfig) -> Rendered {
     if !d.evidence.is_empty() {
         lines.push(d.evidence.to_string());
     }
+    lines.extend(d.extra.iter().cloned());
     if !d.labels.is_empty() {
         let kv: Vec<String> = d.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
         lines.push(format!("labels: {}", kv.join(" ")));
@@ -153,7 +176,7 @@ pub fn render(d: &Draft<'_>, cfg: &RenderConfig) -> Rendered {
         Payload::Structural { text, what } => {
             let (cut, was_cut) = truncate_bytes(text, cfg.max_structural_bytes);
             truncated |= was_cut;
-            lines.push(format!("no served schema for {what}: structural rendering"));
+            lines.push(format!("no contract resolved {what}: structural rendering"));
             lines.push(cut);
         }
         Payload::None { reason } => lines.push(format!("payload not rendered: {reason}")),
@@ -180,13 +203,14 @@ mod tests {
 
     fn draft<'a>(payload: &'a Payload, labels: &'a BTreeMap<String, String>) -> Draft<'a> {
         Draft {
-            rule: "fleet-alerts",
+            rule: "tc-state",
             state: CondState::Firing,
             prior: Some(CondState::Ok),
             severity: "warning",
-            evidence: "alert h-3fa9c2d41b7e.netlink.a659f813308ad1da firing",
+            evidence: "tc.netif.v1 namespaces on host-a/tc firing",
+            extra: &[],
             labels,
-            key: Some("v1/h-3fa9c2d41b7e/state/netlink/alert/a659f813308ad1da"),
+            key: Some("zk2/host-a/tc/tc.netif.v1/state/namespaces"),
             timestamp: Some("7/1"),
             payload,
         }
@@ -199,7 +223,7 @@ mod tests {
         let cfg = RenderConfig::default();
         let typed = Payload::Typed(serde_json::json!({"severity": "warning"}));
         let r = render(&draft(&typed, &l), &cfg);
-        assert_eq!(r.title, "warning fleet-alerts firing");
+        assert_eq!(r.title, "warning tc-state firing");
         assert_eq!(r.source, RenderSource::Schema);
         assert!(
             r.message.starts_with("state: firing (was: ok)\n"),
@@ -212,7 +236,7 @@ mod tests {
         );
         assert!(
             r.message
-                .contains("key: v1/h-3fa9c2d41b7e/state/netlink/alert/a659f813308ad1da")
+                .contains("key: zk2/host-a/tc/tc.netif.v1/state/namespaces")
         );
         assert!(r.message.contains("timestamp: 7/1"));
         assert!(
@@ -224,13 +248,13 @@ mod tests {
 
         let structural = Payload::Structural {
             text: "{\"a\":1}".into(),
-            what: "Alert".into(),
+            what: "Namespaces".into(),
         };
         let r = render(&draft(&structural, &l), &cfg);
         assert_eq!(r.source, RenderSource::Structural);
         assert!(
             r.message
-                .contains("no served schema for Alert: structural rendering\n{\"a\":1}"),
+                .contains("no contract resolved Namespaces: structural rendering\n{\"a\":1}"),
             "{}",
             r.message
         );

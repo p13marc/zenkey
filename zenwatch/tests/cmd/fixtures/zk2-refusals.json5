@@ -1,0 +1,12 @@
+// What the zk2 port took away, each spelled as v1 zenwatch accepted it:
+// refused by name, with where its question went — never ignored.
+{
+  bus: { registry: ["/etc/zenwatch/registry"] },
+  rules: [
+    { name: "hosts-gone", rule: "origin-down h-3fa9c2d41b7e", sinks: ["hook"] },
+    { name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["hook"] },
+  ],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+  discipline: { inhibit: { enabled: true, depth: 4 }, group_by: ["origin"] },
+  doctor: { every_h: 6, sample: 200, sinks: ["hook"] },
+}

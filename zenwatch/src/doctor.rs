@@ -1,15 +1,16 @@
 //! The scheduled doctor (#390): the deployment's conformance checks asked
 //! every few hours, and only what *changed* told to anyone.
 //!
-//! `run_doctor`'s stable check ids are properties of a deployment, and
-//! until now they were asked in exactly one place — CI, against a fleet
-//! stood up ten seconds earlier. The failures that matter are on the fleet
-//! that has run for three weeks: a sensor upgraded on four hosts and not
-//! the fifth (`slice-sync`, `schema-drift`), a producer that stopped
-//! answering `introspect` (`introspect-coverage`), traffic on keys nothing
-//! registered. This module runs the same doctor on an interval and turns
-//! each run into notices for the engine's one `Notice` stream — the same
-//! [`route`], discipline and sinks as everything else.
+//! `run_doctor`'s stable check ids — zk2's since the port (#614, FL2):
+//! `split-brain`, `binding-unsatisfied`, `contract-drift`, `token-missing`,
+//! the `health-*` four and the rest of [`CheckId::ALL`] — are properties of
+//! a deployment, and the failures that matter are on the fleet that has run
+//! for three weeks: a provider upgraded on four hosts and not the fifth
+//! (`contract-drift`), a role whose last provider went away
+//! (`binding-unsatisfied`), an instance whose tokens disagree with its
+//! descriptor (`token-missing`). This module runs the same doctor on an
+//! interval and turns each run into notices for the engine's one `Notice`
+//! stream — the same [`route`], discipline and sinks as everything else.
 //!
 //! [`route`]: crate::engine::route
 //!
@@ -18,22 +19,28 @@
 //! finding entered into the discipline's ledger *assumed* — announced
 //! without a delivery ([`crate::discipline::NoticeMeta::assume`]) — so that
 //! the run which fixes one can say `resolved`. Every later run is judged
-//! against the previous one by the engine's [`doctor_delta`]: one
-//! notification per **new** finding, one `resolved` per **fixed** one, and
-//! nothing at all when the two sets are empty. Findings are identified by
-//! `(check, subject)`, which is the notice identity — evidence drift is
-//! the same finding.
+//! against the findings standing from the runs before it: one notification
+//! per **new** finding, one `resolved` per **fixed** one, and nothing at
+//! all when the two sets are empty. Findings are identified by `(check,
+//! subject)`, which is the notice identity — evidence drift is the same
+//! finding.
 //!
-//! **The four poles ride through** (RFC 13 §1). A run that could not
-//! happen — the transport, the timeout — or that judged nothing because
-//! nothing was in scope (#510) is an `unobservable` notification naming
-//! why, and the previous report is **retained**, never
-//! replaced with nothing; the run after it is `observable_again`. Inside a
-//! report, what was *not asked* is stated, never read as clean: the
-//! registry diff that never ran because no registry was loaded (`synced:
-//! not asked`), the deep checks that were not requested, the listen phase
-//! that did not run — each is a line in every notification and rides the
-//! published report exactly as `zenctl doctor --format json` prints it.
+//! **A fix is a fix only where the check was established.** A finding
+//! absent from a run whose check could not be established — unobservable,
+//! or not asked — has not been fixed: nobody saw it go. It stays standing,
+//! carried to the next run's comparison, and is never announced
+//! `resolved` (the reading `zenkey_fleet::doctor_delta`'s doc asks of a
+//! notifier).
+//!
+//! **The four poles ride through** (RFC 13 §1). A run that judged nothing
+//! because nothing was in scope (#510, the report's `unobservable`) is an
+//! `unobservable` notification naming why, and the previous report is
+//! **retained**, never replaced with nothing; the run after it is
+//! `observable_again`. Inside a report, what was *not asked* is stated,
+//! never read as clean: the coverage line every notification ends with
+//! names the scope the run read and how many checks were established,
+//! unobservable or not asked, and the published report carries each
+//! check's verdict exactly as `zenctl doctor --format json` prints it.
 //!
 //! **Published.** After every run, [`ZenwatchDoctor`] goes out on
 //! `state/zenwatch/doctor` (registry `ttl_s = 0`: retained, last writer
@@ -41,16 +48,16 @@
 //! the past is a schedule that lapsed. **Hours, not seconds**: a run is a
 //! fan-in sweep, and it runs beside the drain, never on it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use zenkey_fleet::report::{Asked, CheckId, DoctorFinding, DoctorReport, DoctorSeverity};
-use zenkey_fleet::{CondState, DoctorSpec, RenderSource, doctor_delta};
+use zenkey_fleet::report::{CheckId, DoctorFinding, DoctorReport, DoctorSeverity, Judgement};
+use zenkey_fleet::{CondState, DoctorDelta, DoctorSpec};
 
 use crate::config::DoctorConfig;
 use crate::discipline::severity_rank;
 use crate::publish::{DoctorOutcome, DoctorStatus, ZenwatchDoctor};
-use crate::render::{RenderConfig, state_word, truncate_bytes};
+use crate::render::{RenderConfig, RenderSource, state_word, truncate_bytes};
 use crate::rules::{DOCTOR_RULE, Rule};
 use crate::sinks::{NoticeKind, Notification, Outgoing};
 
@@ -108,15 +115,11 @@ impl DoctorNotice {
 
 /// The wire word for a finding's severity — the config's vocabulary.
 pub fn severity_word(s: DoctorSeverity) -> &'static str {
-    match s {
-        DoctorSeverity::Error => "error",
-        DoctorSeverity::Warning => "warning",
-        DoctorSeverity::Info => "info",
-    }
+    s.as_str()
 }
 
 /// The notice identity of a finding: `doctor:<check>:<subject>` — the
-/// `(check, subject)` key [`doctor_delta`] uses, under the rule's id.
+/// `(check, subject)` key the delta uses, under the rule's id.
 pub fn finding_id(check: CheckId, subject: &str) -> String {
     format!("{DOCTOR_RULE}:{check}:{subject}")
 }
@@ -129,40 +132,78 @@ pub fn id_parts(id: &str) -> Option<(CheckId, &str)> {
     Some((CheckId::parse(check)?, subject))
 }
 
+/// Whether a run established `check` — a finding, or a clean answer — so
+/// that a finding of it absent from the run is fixed, not merely unseen.
+pub fn established(report: &DoctorReport, check: CheckId) -> bool {
+    report.check(check).is_some_and(|c| {
+        matches!(
+            c.verdict,
+            Judgement::Established | Judgement::NotEstablished { .. }
+        )
+    })
+}
+
 /// What the run covered, with every not-asked pole said out loud (RFC 13
-/// §1, §3 O4): the registry diff that never ran is "not asked", never
-/// "0 in sync"; the deep checks and the listen phase likewise; a listen
-/// window with drops is unobservable in that span (O6).
+/// §1, §3 O4): the presence read and whether it completed, the routers'
+/// admin space, the `health.v1` reading and its clock, and how many checks
+/// were established, unobservable or not asked — never a silent zero.
 pub fn coverage(r: &DoctorReport) -> String {
-    let synced = match &r.synced {
-        Asked::NotAsked => "not asked (no registry loaded)".to_string(),
-        Asked::Asked(v) => format!("asked, {} producer(s) in sync", v.len()),
-    };
-    let listen = match &r.observation {
+    let presence = match r.scope.presence.as_option() {
         None => "not asked".to_string(),
-        Some(o) => format!(
-            "{}s, {} sample(s) on {} key(s), {} dropped{}",
-            o.window_s,
-            o.samples,
-            o.keys_seen,
-            o.dropped,
-            if o.dropped > 0 {
-                " — unobservable in that span (O6)"
+        Some(p) => format!(
+            "{} ({}), {} service(s), {} instance(s), {} token(s), {} undescribed, \
+             {} revision(s) ({} held)",
+            p.selector,
+            if p.complete {
+                "complete"
             } else {
-                ""
+                "possibly incomplete"
+            },
+            p.services,
+            p.instances,
+            p.tokens,
+            p.undescribed,
+            p.revisions,
+            p.held
+        ),
+    };
+    let routers = match r.scope.routers.as_option() {
+        None => "not asked".to_string(),
+        Some(n) => format!("{n} answered"),
+    };
+    let health = match r.scope.health.as_option() {
+        None => "not asked".to_string(),
+        Some(h) => format!(
+            "{} service(s), clocks {}",
+            h.services,
+            if h.clocks_synced {
+                "synced (the operator's word)"
+            } else {
+                "not vouched for"
             }
         ),
     };
+    let (mut est, mut unobs, mut not_asked) = (0, Vec::new(), 0);
+    for c in &r.checks {
+        match &c.verdict {
+            Judgement::Established | Judgement::NotEstablished { .. } => est += 1,
+            Judgement::Unobservable { .. } => unobs.push(c.check.as_str()),
+            Judgement::NotAsked => not_asked += 1,
+        }
+    }
+    let unobservable = if unobs.is_empty() {
+        "0 unobservable".to_string()
+    } else {
+        format!("{} unobservable ({})", unobs.len(), unobs.join(", "))
+    };
+    let namespace = if r.scope.namespace.is_empty() {
+        "the bus root".to_string()
+    } else {
+        format!("namespace {:?}", r.scope.namespace)
+    };
     format!(
-        "coverage: {} live producer(s), {} introspect answered, describe served {} / \
-         missing {}, {} router(s); registry diff: {synced}; deep checks: {}; listen phase: \
-         {listen}",
-        r.live_producers,
-        r.introspect_answered,
-        r.describe_served,
-        r.describe_missing,
-        r.routers,
-        if r.deep { "ran" } else { "not asked" },
+        "coverage: {namespace}; presence: {presence}; routers: {routers}; health: {health}; \
+         checks: {est} established, {unobservable}, {not_asked} not asked"
     )
 }
 
@@ -170,11 +211,13 @@ fn rfc3339(now: f64) -> String {
     zenkey_fleet::rfc3339_from_unix(now.max(0.0) as u64)
 }
 
-/// The last successful run, kept whole: what the next one is judged
-/// against, and what a failed one retains.
+/// The last successful run, kept whole: what a failed one retains, and the
+/// findings standing after it — its own, plus those of checks it could not
+/// establish, carried from the runs before.
 #[derive(Debug, Clone)]
 struct Previous {
     report: DoctorReport,
+    standing: Vec<DoctorFinding>,
     at: String,
 }
 
@@ -185,6 +228,7 @@ pub struct Schedule {
     cfg: DoctorConfig,
     every: Duration,
     timeout: Duration,
+    clocks_synced: bool,
     prev: Option<Previous>,
     /// The error of the last run, while it stands.
     failed: Option<String>,
@@ -194,14 +238,16 @@ pub struct Schedule {
 
 impl Schedule {
     /// From a checked config: `every()` is `Some` because [`crate::config::check`]
-    /// refused anything else. `timeout` is the bus's, unless the block says.
-    pub fn new(cfg: &DoctorConfig, bus_timeout: Duration) -> Schedule {
+    /// refused anything else. `timeout` is the bus's, unless the block says;
+    /// `clocks_synced` is the config's top-level word (`freshness.v1` §2.6).
+    pub fn new(cfg: &DoctorConfig, bus_timeout: Duration, clocks_synced: bool) -> Schedule {
         Schedule {
             every: cfg.every().unwrap_or(Duration::from_secs(3600)),
             timeout: cfg
                 .timeout_s
                 .map(Duration::from_secs_f64)
                 .unwrap_or(bus_timeout),
+            clocks_synced,
             cfg: cfg.clone(),
             prev: None,
             failed: None,
@@ -214,16 +260,15 @@ impl Schedule {
         self.every
     }
 
-    /// What one run should cost — the block's `deep`, `sample`, timeout;
-    /// no listen phase (a passive window on a scheduled sweep is a watchdog
-    /// rule's job, and the `--for` checks are theirs).
+    /// What one run should ask: every check, `deep` as the block says
+    /// (the data-plane checks, `state-stamp-foreign` and
+    /// `population-over-bound`), `clocks_synced` as the config says, and
+    /// the timeout; every other setting the doctor's default.
     pub fn spec(&self) -> DoctorSpec {
-        DoctorSpec {
-            deep: self.cfg.deep,
-            sample: self.cfg.sample,
-            timeout: self.timeout,
-            listen: None,
-        }
+        let mut spec = DoctorSpec::new(self.timeout);
+        spec.deep = self.cfg.deep;
+        spec.clocks_synced = self.clocks_synced;
+        spec
     }
 
     pub fn runs(&self) -> u64 {
@@ -253,7 +298,7 @@ impl Schedule {
     ///
     /// `announced` is what the discipline currently has announced under the
     /// doctor rule — after a restart, the state file's memory — so that an
-    /// entry remembered firing which this run does not find is resolved
+    /// entry remembered firing which this run establishes gone is resolved
     /// rather than left announced forever, and a remembered failed run is
     /// `observable_again` on the first success.
     pub fn observe(
@@ -266,7 +311,7 @@ impl Schedule {
         // A run that judged nothing (#510) is one that could not see: the
         // same `unobservable` notice as a failed one, the previous report
         // retained — never an empty baseline every finding is fixed against.
-        let outcome = outcome.and_then(|r| match r.unobservable {
+        let outcome = outcome.and_then(|r| match r.unobservable.clone() {
             Some(why) => Err(why),
             None => Ok(r),
         });
@@ -287,7 +332,10 @@ impl Schedule {
                     every_s,
                     outcome: DoctorOutcome::Failed,
                     error: Some(error),
-                    findings: self.prev.as_ref().map_or(0, |p| p.report.findings.len()),
+                    findings: self
+                        .prev
+                        .as_ref()
+                        .map_or(0, |p| p.report.findings().count()),
                     new: 0,
                     fixed: 0,
                     report: self
@@ -309,20 +357,16 @@ impl Schedule {
             });
         }
         let cov = coverage(&report);
-        let (new, fixed, delta) = match &self.prev {
+        let found: Vec<DoctorFinding> = report.findings().cloned().collect();
+        let key = |f: &DoctorFinding| (f.check, f.subject.clone());
+        let (new, fixed, delta, standing) = match &self.prev {
             None => {
-                let checks = report
-                    .findings
-                    .iter()
-                    .map(|f| f.check)
-                    .collect::<std::collections::BTreeSet<_>>()
-                    .len();
+                let checks = found.iter().map(|f| f.check).collect::<BTreeSet<_>>().len();
                 out.push(DoctorNotice::Baseline {
                     at: ran_at.clone(),
-                    findings: report.findings.len(),
+                    findings: found.len(),
                     checks,
-                    lines: report
-                        .findings
+                    lines: found
                         .iter()
                         .map(|f| {
                             format!(
@@ -336,7 +380,7 @@ impl Schedule {
                         .collect(),
                     coverage: cov.clone(),
                 });
-                for f in report.findings.iter().filter(|f| self.eligible(f)) {
+                for f in found.iter().filter(|f| self.eligible(f)) {
                     out.push(DoctorNotice::Finding {
                         finding: f.clone(),
                         state: CondState::Firing,
@@ -347,28 +391,33 @@ impl Schedule {
                     });
                 }
                 // Remembered firing before a restart, absent now: fixed
-                // while nobody watched — resolved, not announced forever.
+                // while nobody watched — resolved, not announced forever —
+                // when this run established its check; carried otherwise.
+                let mut carried = Vec::new();
                 for id in announced {
                     let Some((check, subject)) = id_parts(id) else {
                         continue;
                     };
-                    if report
-                        .findings
+                    if found
                         .iter()
                         .any(|f| f.check == check && f.subject == subject)
                     {
                         continue;
                     }
+                    let remembered = DoctorFinding {
+                        severity: DoctorSeverity::Info,
+                        check,
+                        subject: subject.to_string(),
+                        evidence: "remembered firing by the state file; absent from the \
+                                   first run after the restart"
+                            .into(),
+                    };
+                    if !established(&report, check) {
+                        carried.push(remembered);
+                        continue;
+                    }
                     out.push(DoctorNotice::Finding {
-                        finding: DoctorFinding {
-                            severity: DoctorSeverity::Info,
-                            check,
-                            subject: subject.to_string(),
-                            evidence: "remembered firing by the state file; absent from the \
-                                       first run after the restart"
-                                .into(),
-                            citation: None,
-                        },
+                        finding: remembered,
                         state: CondState::Ok,
                         prior: Some(CondState::Firing),
                         assume: false,
@@ -376,11 +425,25 @@ impl Schedule {
                         coverage: cov.clone(),
                     });
                 }
-                (0, 0, None)
+                let mut standing = found.clone();
+                standing.extend(carried);
+                (0, 0, None, standing)
             }
             Some(prev) => {
-                let d = doctor_delta(&prev.report, &report);
-                for f in d.new.iter().filter(|f| self.eligible(f)) {
+                let before: BTreeSet<(CheckId, String)> = prev.standing.iter().map(key).collect();
+                let now_found: BTreeSet<(CheckId, String)> = found.iter().map(key).collect();
+                let new: Vec<DoctorFinding> = found
+                    .iter()
+                    .filter(|f| !before.contains(&key(f)))
+                    .cloned()
+                    .collect();
+                let (fixed, carried): (Vec<DoctorFinding>, Vec<DoctorFinding>) = prev
+                    .standing
+                    .iter()
+                    .filter(|f| !now_found.contains(&key(f)))
+                    .cloned()
+                    .partition(|f| established(&report, f.check));
+                for f in new.iter().filter(|f| self.eligible(f)) {
                     out.push(DoctorNotice::Finding {
                         finding: f.clone(),
                         state: CondState::Firing,
@@ -390,7 +453,7 @@ impl Schedule {
                         coverage: cov.clone(),
                     });
                 }
-                for f in d.fixed.iter().filter(|f| self.eligible(f)) {
+                for f in fixed.iter().filter(|f| self.eligible(f)) {
                     out.push(DoctorNotice::Finding {
                         finding: f.clone(),
                         state: CondState::Ok,
@@ -400,11 +463,19 @@ impl Schedule {
                         coverage: cov.clone(),
                     });
                 }
-                let (n, x) = (d.new.len(), d.fixed.len());
+                let unchanged = now_found.intersection(&before).count();
+                let delta = DoctorDelta {
+                    new: new.clone(),
+                    fixed: fixed.clone(),
+                    unchanged,
+                };
+                let mut standing = found.clone();
+                standing.extend(carried);
                 (
-                    n,
-                    x,
-                    Some(serde_json::to_value(&d).expect("a delta serializes")),
+                    new.len(),
+                    fixed.len(),
+                    Some(serde_json::to_value(&delta).expect("a delta serializes")),
+                    standing,
                 )
             }
         };
@@ -414,14 +485,18 @@ impl Schedule {
             every_s,
             outcome: DoctorOutcome::Ok,
             error: None,
-            findings: report.findings.len(),
+            findings: found.len(),
             new,
             fixed,
             report: serde_json::to_value(&report).expect("a report serializes"),
             report_at: Some(ran_at.clone()),
             delta,
         });
-        self.prev = Some(Previous { report, at: ran_at });
+        self.prev = Some(Previous {
+            report,
+            standing,
+            at: ran_at,
+        });
         out
     }
 }
@@ -429,8 +504,8 @@ impl Schedule {
 /// One doctor notice as the [`Outgoing`] the scheduled rule routes —
 /// rendered here rather than in [`crate::render`] because a doctor finding
 /// is a judgement over a sweep, not a payload on a key: the message is the
-/// check, the subject, the evidence, the citation and the coverage line,
-/// bounded by the same byte limit.
+/// check and the section it enforces, the subject, the evidence and the
+/// coverage, bounded by the same byte limit.
 pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Outgoing {
     let at = zenkey_fleet::rfc3339_now();
     let (id, kind, state, prior, severity, title, lines, labels, evidence) = match notice {
@@ -492,10 +567,6 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                 ),
                 None => format!("state: {} ({since})", state_word(*state)),
             };
-            let check_line = match &finding.citation {
-                Some(c) => format!("check: {} ({c})", finding.check),
-                None => format!("check: {}", finding.check),
-            };
             let severity = severity_word(finding.severity).to_string();
             (
                 finding_id(finding.check, &finding.subject),
@@ -506,7 +577,8 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                 format!("{} {}", finding.check, finding.subject),
                 vec![
                     head,
-                    check_line,
+                    format!("check: {} ({})", finding.check, finding.check.section()),
+                    format!("question: {}", finding.check.question()),
                     format!("subject: {}", finding.subject),
                     format!("evidence: {}", finding.evidence),
                     coverage.clone(),
@@ -578,7 +650,7 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
             truncated,
             repeat: 0,
             group: None,
-            inhibited_by: None,
+            presence: None,
         },
         sinks: rule.sinks.clone(),
     }
@@ -589,7 +661,9 @@ mod tests {
     use super::*;
     use crate::config::DisciplineConfig;
     use crate::discipline::{Discipline, NoticeMeta};
-    use std::collections::BTreeSet;
+    use zenkey_fleet::report::{
+        Asked, CheckReport, DoctorHealth, DoctorPresence, DoctorScope, Unjudged,
+    };
 
     fn finding(check: CheckId, subject: &str, severity: DoctorSeverity) -> DoctorFinding {
         DoctorFinding {
@@ -597,24 +671,61 @@ mod tests {
             check,
             subject: subject.into(),
             evidence: format!("evidence for {subject}"),
-            citation: Some("RFC 08 §6".into()),
         }
     }
 
-    fn report(findings: Vec<DoctorFinding>, synced: Asked<Vec<String>>) -> DoctorReport {
+    fn scope(presence: bool) -> DoctorScope {
+        DoctorScope {
+            namespace: "prod".into(),
+            presence: if presence {
+                Asked::Asked(DoctorPresence {
+                    selector: "zk2/*/*/@zk/**".into(),
+                    complete: true,
+                    grace_s: 2.0,
+                    services: 3,
+                    instances: 3,
+                    tokens: 7,
+                    undescribed: 0,
+                    revisions: 2,
+                    held: 2,
+                })
+            } else {
+                Asked::NotAsked
+            },
+            routers: Asked::NotAsked,
+            health: Asked::NotAsked,
+        }
+    }
+
+    /// A zk2 report: every check asked and clean but for `findings`, each
+    /// under its own check, and `unseen` unobservable.
+    fn report_with(findings: Vec<DoctorFinding>, unseen: &[CheckId]) -> DoctorReport {
         DoctorReport {
-            findings,
-            synced,
-            introspect_answered: 3,
-            live_producers: 3,
-            describe_served: 2,
-            describe_missing: 1,
-            routers: 0,
-            router_version: None,
-            deep: false,
-            observation: None,
+            scope: scope(true),
+            checks: CheckId::ALL
+                .into_iter()
+                .map(|id| {
+                    if unseen.contains(&id) {
+                        return CheckReport::of(
+                            id,
+                            vec![],
+                            vec![Unjudged {
+                                subject: "fleet".into(),
+                                reason: "a read ended at its timeout".into(),
+                            }],
+                            "unused",
+                        );
+                    }
+                    let mine = findings.iter().filter(|f| f.check == id).cloned().collect();
+                    CheckReport::of(id, mine, vec![], "clean")
+                })
+                .collect(),
             unobservable: None,
         }
+    }
+
+    fn report(findings: Vec<DoctorFinding>) -> DoctorReport {
+        report_with(findings, &[])
     }
 
     fn cfg(floor: Option<&str>) -> DoctorConfig {
@@ -652,7 +763,7 @@ mod tests {
                 100,
             );
             Harness {
-                schedule: Schedule::new(&cfg, Duration::from_secs(2)),
+                schedule: Schedule::new(&cfg, Duration::from_secs(2), false),
                 rule,
                 discipline,
                 render: RenderConfig::default(),
@@ -663,16 +774,14 @@ mod tests {
             let announced = self.discipline.announced_under(DOCTOR_RULE);
             for n in self.schedule.observe(outcome, now, &announced) {
                 let meta = NoticeMeta {
-                    origin: None,
+                    address: None,
                     passthrough: n.is_passthrough(),
                     assume: n.is_assumed(),
                 };
                 let o = outgoing(&n, &self.rule, &self.render);
                 self.discipline.observe(o, &meta, now);
             }
-            self.discipline
-                .tick(now, None, &BTreeSet::new(), false)
-                .outgoing
+            self.discipline.tick(now, false).outgoing
         }
     }
 
@@ -688,6 +797,22 @@ mod tests {
             .collect()
     }
 
+    /// The spec a run asks: every check, `deep` and `clocks_synced` as the
+    /// config says (#614, FL2).
+    #[test]
+    fn the_spec_asks_every_check_with_the_config_s_deep_and_clock() {
+        let mut c = cfg(None);
+        let s = Schedule::new(&c, Duration::from_secs(2), false).spec();
+        assert!(!s.deep && !s.clocks_synced);
+        assert_eq!(s.checks.len(), CheckId::ALL.len());
+        assert!(!s.asks(CheckId::StateStampForeign), "not deep");
+        c.deep = true;
+        let s = Schedule::new(&c, Duration::from_secs(2), true).spec();
+        assert!(s.deep && s.clocks_synced);
+        assert!(s.asks(CheckId::StateStampForeign) && s.asks(CheckId::PopulationOverBound));
+        assert_eq!(s.timeout, Duration::from_secs(2));
+    }
+
     /// Baseline, then deltas: the first run is one `info` notification
     /// counting the findings and naming them, not one per finding; an
     /// identical second run is nothing; a third with one new and one fixed
@@ -696,12 +821,17 @@ mod tests {
     #[test]
     fn a_baseline_then_only_deltas() {
         let mut h = Harness::new(None);
-        let a = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
-        let b = finding(CheckId::DescribeMissing, "fleet", DoctorSeverity::Info);
-        let out = h.run(
-            Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))),
-            0.0,
+        let a = finding(
+            CheckId::BindingUnsatisfied,
+            "ws-01/gui scenario",
+            DoctorSeverity::Error,
         );
+        let b = finding(
+            CheckId::ContractUnavailable,
+            "tc.v1 sha256:00",
+            DoctorSeverity::Info,
+        );
+        let out = h.run(Ok(report(vec![a.clone(), b.clone()])), 0.0);
         assert_eq!(out.len(), 1, "one baseline, not one per finding: {out:?}");
         let n = &out[0].notification;
         assert_eq!(n.id, BASELINE_ID);
@@ -713,22 +843,25 @@ mod tests {
         assert_eq!(n.rule_kind, "doctor");
         assert_eq!(n.title, "doctor baseline: 2 finding(s) across 2 check(s)");
         assert!(
-            n.message
-                .contains("- error slice-sync h-1/sysinfo: evidence for h-1/sysinfo"),
+            n.message.contains(
+                "- error binding-unsatisfied ws-01/gui scenario: evidence for ws-01/gui scenario"
+            ),
             "{}",
             n.message
         );
         assert!(
             n.message
-                .contains("registry diff: asked, 0 producer(s) in sync")
+                .contains("checks: 19 established, 0 unobservable, 0 not asked"),
+            "{}",
+            n.message
         );
         assert_eq!(out[0].sinks, vec!["ops".to_string()]);
         // Both findings are remembered firing under the rule, delivered to nobody.
         assert_eq!(
             h.discipline.announced_under(DOCTOR_RULE),
             vec![
-                "doctor:describe-missing:fleet".to_string(),
-                "doctor:slice-sync:h-1/sysinfo".to_string()
+                "doctor:binding-unsatisfied:ws-01/gui scenario".to_string(),
+                "doctor:contract-unavailable:tc.v1 sha256:00".to_string(),
             ]
         );
         let doc = h.schedule.document().unwrap().clone();
@@ -736,15 +869,13 @@ mod tests {
         assert_eq!((doc.findings, doc.new, doc.fixed), (2, 0, 0));
         assert_eq!(doc.delta, None);
         assert_eq!(doc.every_s, 6.0 * 3600.0);
-        assert_eq!(doc.report["synced"], serde_json::json!([]));
-        assert_eq!(doc.report["findings"][0]["check"], "slice-sync");
+        assert_eq!(doc.report["scope"]["namespace"], "prod");
+        assert_eq!(doc.report["checks"][1]["check"], "binding-unsatisfied");
+        assert_eq!(doc.report["checks"][1]["verdict"]["answer"], "established");
         assert_eq!(doc.report_at.as_deref(), Some(doc.ran_at.as_str()));
 
         // The same again: nothing.
-        let out = h.run(
-            Ok(report(vec![a.clone(), b.clone()], Asked::Asked(vec![]))),
-            100.0,
-        );
+        let out = h.run(Ok(report(vec![a.clone(), b.clone()])), 100.0);
         assert!(out.is_empty(), "{out:?}");
         let doc = h.schedule.document().unwrap();
         assert_eq!((doc.findings, doc.new, doc.fixed), (2, 0, 0));
@@ -754,36 +885,39 @@ mod tests {
         let mut a2 = a.clone();
         a2.evidence = "different wording".into();
         let c = finding(
-            CheckId::SchemaDrift,
-            "TelemetryPoint",
+            CheckId::TokenMissing,
+            "host-a/tc@0000000000000001 tc.netif.v1",
             DoctorSeverity::Error,
         );
-        let out = h.run(Ok(report(vec![a2, c], Asked::Asked(vec![]))), 200.0);
+        let out = h.run(Ok(report(vec![a2, c])), 200.0);
         assert_eq!(
             ids(&out),
             vec![
                 (
-                    "doctor:describe-missing:fleet".to_string(),
+                    "doctor:contract-unavailable:tc.v1 sha256:00".to_string(),
                     NoticeKind::Resolved,
                     CondState::Ok
                 ),
                 (
-                    "doctor:schema-drift:TelemetryPoint".to_string(),
+                    "doctor:token-missing:host-a/tc@0000000000000001 tc.netif.v1".to_string(),
                     NoticeKind::Doctor,
                     CondState::Firing
                 ),
             ]
         );
         let new = &out[1].notification;
-        assert_eq!(new.title, "schema-drift TelemetryPoint");
+        assert_eq!(
+            new.title,
+            "token-missing host-a/tc@0000000000000001 tc.netif.v1"
+        );
         assert_eq!(new.severity, "error");
         assert_eq!(new.prior, Some(CondState::Ok));
         assert_eq!(
             new.labels.get("check").map(String::as_str),
-            Some("schema-drift")
+            Some("token-missing")
         );
         assert!(
-            new.message.contains("check: schema-drift (RFC 08 §6)"),
+            new.message.contains("check: token-missing (§8.1)"),
             "{}",
             new.message
         );
@@ -794,22 +928,68 @@ mod tests {
         );
         assert!(
             new.message
-                .contains("evidence: evidence for TelemetryPoint")
+                .contains("evidence: evidence for host-a/tc@0000000000000001 tc.netif.v1")
         );
         let fixed = &out[0].notification;
-        assert_eq!(fixed.title, "describe-missing fleet");
+        assert_eq!(fixed.title, "contract-unavailable tc.v1 sha256:00");
         assert_eq!(fixed.prior, Some(CondState::Firing));
         let doc = h.schedule.document().unwrap();
         assert_eq!((doc.findings, doc.new, doc.fixed), (2, 1, 1));
         assert_eq!(
             doc.delta.as_ref().unwrap()["new"][0]["check"],
-            "schema-drift"
+            "token-missing"
         );
         assert_eq!(
             doc.delta.as_ref().unwrap()["fixed"][0]["check"],
-            "describe-missing"
+            "contract-unavailable"
         );
         assert_eq!(h.schedule.runs(), 3);
+    }
+
+    /// A fix is a fix only where the check was established: a finding
+    /// absent from a run whose check was unobservable is not `resolved` —
+    /// nobody saw it go — and stays standing, so it is neither new when it
+    /// shows again nor lost when the check is established clean, which is
+    /// the run that resolves it.
+    #[test]
+    fn an_unobservable_check_is_never_a_fix() {
+        let mut h = Harness::new(None);
+        let a = finding(CheckId::SplitBrain, "h1/tc tc.v1", DoctorSeverity::Error);
+        h.run(Ok(report(vec![a.clone()])), 0.0);
+        let out = h.run(Ok(report_with(vec![], &[CheckId::SplitBrain])), 100.0);
+        assert!(out.is_empty(), "unseen, not fixed: {out:?}");
+        let doc = h.schedule.document().unwrap();
+        assert_eq!((doc.new, doc.fixed), (0, 0));
+        assert!(
+            h.discipline
+                .announced_under(DOCTOR_RULE)
+                .contains(&"doctor:split-brain:h1/tc tc.v1".to_string()),
+            "still remembered firing"
+        );
+        // Seen again: not new.
+        assert!(h.run(Ok(report(vec![a.clone()])), 200.0).is_empty());
+        // Unseen again, then established clean: the clean run resolves it.
+        assert!(
+            h.run(Ok(report_with(vec![], &[CheckId::SplitBrain])), 300.0)
+                .is_empty()
+        );
+        let out = h.run(Ok(report(vec![])), 400.0);
+        assert_eq!(
+            ids(&out),
+            vec![(
+                "doctor:split-brain:h1/tc tc.v1".to_string(),
+                NoticeKind::Resolved,
+                CondState::Ok
+            )]
+        );
+        assert!(
+            out[0]
+                .notification
+                .message
+                .contains("checks: 19 established"),
+            "{}",
+            out[0].notification.message
+        );
     }
 
     /// A run that fails is `unobservable`, naming the error, with the
@@ -820,11 +1000,11 @@ mod tests {
     #[test]
     fn a_failed_run_is_unobservable_and_keeps_the_baseline() {
         let mut h = Harness::new(None);
-        let a = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
-        h.run(Ok(report(vec![a.clone()], Asked::NotAsked)), 0.0);
+        let a = finding(CheckId::SplitBrain, "h1/tc tc.v1", DoctorSeverity::Error);
+        h.run(Ok(report(vec![a.clone()])), 0.0);
         assert_eq!(h.schedule.status(), DoctorStatus::Ok);
 
-        let out = h.run(Err("timed out asking the roster".into()), 100.0);
+        let out = h.run(Err("no session in the namespace".into()), 100.0);
         assert_eq!(
             ids(&out),
             vec![(
@@ -836,7 +1016,7 @@ mod tests {
         let n = &out[0].notification;
         assert_eq!(n.title, "the doctor could not run");
         assert!(
-            n.message.contains("timed out asking the roster"),
+            n.message.contains("no session in the namespace"),
             "{}",
             n.message
         );
@@ -844,9 +1024,12 @@ mod tests {
         assert_eq!(h.schedule.status(), DoctorStatus::Failed);
         let doc = h.schedule.document().unwrap().clone();
         assert_eq!(doc.outcome, DoctorOutcome::Failed);
-        assert_eq!(doc.error.as_deref(), Some("timed out asking the roster"));
+        assert_eq!(doc.error.as_deref(), Some("no session in the namespace"));
         assert_eq!(doc.findings, 1, "the baseline's findings, retained");
-        assert_eq!(doc.report["findings"][0]["subject"], "h-1/sysinfo");
+        assert_eq!(
+            doc.report["checks"][0]["findings"][0]["subject"],
+            "h1/tc tc.v1"
+        );
         assert_ne!(doc.report_at, Some(doc.ran_at.clone()), "an older report");
         assert_eq!(doc.delta, None);
         // Still remembered firing.
@@ -857,7 +1040,7 @@ mod tests {
 
         // Recovery: observable again, and the baseline finding is now
         // fixed — judged against the run at 0, not against nothing.
-        let out = h.run(Ok(report(vec![], Asked::NotAsked)), 200.0);
+        let out = h.run(Ok(report(vec![])), 200.0);
         assert_eq!(
             ids(&out),
             vec![
@@ -867,7 +1050,7 @@ mod tests {
                     CondState::Ok
                 ),
                 (
-                    "doctor:slice-sync:h-1/sysinfo".to_string(),
+                    "doctor:split-brain:h1/tc tc.v1".to_string(),
                     NoticeKind::Resolved,
                     CondState::Ok
                 ),
@@ -886,7 +1069,7 @@ mod tests {
         let doc = h.schedule.document().unwrap().clone();
         assert_eq!(doc.report, serde_json::Value::Null);
         assert_eq!(doc.report_at, None);
-        let out = h.run(Ok(report(vec![], Asked::NotAsked)), 100.0);
+        let out = h.run(Ok(report(vec![])), 100.0);
         assert_eq!(
             ids(&out).iter().map(|(_, k, _)| *k).collect::<Vec<_>>(),
             vec![NoticeKind::Doctor, NoticeKind::ObservableAgain],
@@ -901,11 +1084,11 @@ mod tests {
     #[test]
     fn an_empty_scope_is_unobservable_never_a_fix() {
         let mut h = Harness::new(None);
-        let a = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
-        h.run(Ok(report(vec![a], Asked::NotAsked)), 0.0);
+        let a = finding(CheckId::SplitBrain, "h1/tc tc.v1", DoctorSeverity::Error);
+        h.run(Ok(report(vec![a])), 0.0);
         let empty = DoctorReport {
-            unobservable: Some("nothing in scope".into()),
-            ..report(vec![], Asked::NotAsked)
+            unobservable: Some("no zk2 token visible to this reader".into()),
+            ..report(vec![])
         };
         let out = h.run(Ok(empty), 100.0);
         assert_eq!(
@@ -917,7 +1100,10 @@ mod tests {
             )]
         );
         assert!(
-            out[0].notification.message.contains("nothing in scope"),
+            out[0]
+                .notification
+                .message
+                .contains("no zk2 token visible to this reader"),
             "{}",
             out[0].notification.message
         );
@@ -926,61 +1112,67 @@ mod tests {
         assert_eq!(doc.findings, 1, "the baseline's findings, retained");
     }
 
-    /// `synced: not asked` (no registry) is carried as-is — absent from the
-    /// published report, exactly as `zenctl doctor --format json` prints
-    /// it, and stated as "not asked" in every message — never as clean;
-    /// the deep checks and the listen phase likewise.
+    /// What was not asked is stated, never read as clean: the coverage line
+    /// says "not asked" for every scope half the run did not read and
+    /// counts the checks it did not ask; the published report keeps the
+    /// absences as the report contract pins them.
     #[test]
     fn not_asked_rides_through_never_as_clean() {
-        let mut h = Harness::new(None);
-        let out = h.run(Ok(report(vec![], Asked::NotAsked)), 0.0);
-        let n = &out[0].notification;
-        assert_eq!(n.state, CondState::Ok);
+        let bare = DoctorReport {
+            scope: scope(false),
+            checks: CheckId::ALL
+                .into_iter()
+                .map(|id| {
+                    if id == CheckId::SplitBrain {
+                        CheckReport::of(id, vec![], vec![], "clean")
+                    } else {
+                        CheckReport::not_asked(id)
+                    }
+                })
+                .collect(),
+            unobservable: None,
+        };
+        let line = coverage(&bare);
+        assert!(line.contains("presence: not asked"), "{line}");
+        assert!(line.contains("routers: not asked"), "{line}");
+        assert!(line.contains("health: not asked"), "{line}");
         assert!(
-            n.message
-                .contains("registry diff: not asked (no registry loaded)"),
-            "{}",
-            n.message
+            line.contains("checks: 1 established, 0 unobservable, 18 not asked"),
+            "{line}"
         );
-        assert!(n.message.contains("deep checks: not asked"));
-        assert!(n.message.contains("listen phase: not asked"));
+        assert!(line.contains("namespace \"prod\""), "{line}");
+        let mut h = Harness::new(None);
+        let out = h.run(Ok(bare), 0.0);
+        assert!(
+            out[0].notification.message.contains("presence: not asked"),
+            "{}",
+            out[0].notification.message
+        );
         let doc = h.schedule.document().unwrap();
         assert!(
-            !doc.report.as_object().unwrap().contains_key("synced"),
-            "not asked is absence on the wire, as the report contract pins: {}",
+            doc.report["scope"].get("presence").is_none(),
+            "not asked is absence on the wire: {}",
             doc.report
         );
-        let asked = report(
-            vec![],
-            Asked::Asked(vec!["h-1/sysinfo (registry 1.0)".into()]),
-        );
-        let deep = DoctorReport {
-            deep: true,
-            ..asked
+        let read = DoctorReport {
+            scope: DoctorScope {
+                routers: Asked::Asked(2),
+                health: Asked::Asked(DoctorHealth {
+                    selector: "zk2/*/*/health.v1/state/**".into(),
+                    services: 1,
+                    clocks_synced: true,
+                }),
+                namespace: String::new(),
+                ..scope(true)
+            },
+            ..report_with(vec![], &[CheckId::HealthStale])
         };
-        assert!(coverage(&deep).contains("asked, 1 producer(s) in sync"));
-        assert!(coverage(&deep).contains("deep checks: ran"));
-        // A finding's message carries the same line.
-        let mut h = Harness::new(None);
-        h.run(Ok(report(vec![], Asked::NotAsked)), 0.0);
-        let out = h.run(
-            Ok(report(
-                vec![finding(
-                    CheckId::StaleState,
-                    "v1/h-1/state/p/health",
-                    DoctorSeverity::Warning,
-                )],
-                Asked::NotAsked,
-            )),
-            100.0,
-        );
-        assert_eq!(out.len(), 1);
-        assert!(
-            out[0]
-                .notification
-                .message
-                .contains("registry diff: not asked")
-        );
+        let line = coverage(&read);
+        assert!(line.contains("the bus root"), "{line}");
+        assert!(line.contains("(complete)"), "{line}");
+        assert!(line.contains("routers: 2 answered"), "{line}");
+        assert!(line.contains("clocks synced"), "{line}");
+        assert!(line.contains("1 unobservable (health-stale)"), "{line}");
     }
 
     /// The severity floor: an `info` finding below a `warning` floor is in
@@ -989,8 +1181,12 @@ mod tests {
     #[test]
     fn the_severity_floor_keeps_low_findings_in_the_report_only() {
         let mut h = Harness::new(Some("warning"));
-        let info = finding(CheckId::DescribeMissing, "fleet", DoctorSeverity::Info);
-        let out = h.run(Ok(report(vec![info.clone()], Asked::NotAsked)), 0.0);
+        let info = finding(
+            CheckId::BindingUnsatisfied,
+            "ws-01/gui scenario",
+            DoctorSeverity::Info,
+        );
+        let out = h.run(Ok(report(vec![info.clone()])), 0.0);
         assert!(
             out[0]
                 .notification
@@ -1002,16 +1198,13 @@ mod tests {
             "not remembered"
         );
         let warn = finding(
-            CheckId::UnregisteredTraffic,
-            "v1/h-1/x",
+            CheckId::HealthDegraded,
+            "host-a/tc",
             DoctorSeverity::Warning,
         );
-        let out = h.run(Ok(report(vec![warn.clone()], Asked::NotAsked)), 100.0);
+        let out = h.run(Ok(report(vec![warn.clone()])), 100.0);
         assert_eq!(out.len(), 1, "the warning, not the fixed info: {out:?}");
-        assert_eq!(
-            out[0].notification.id,
-            "doctor:unregistered-traffic:v1/h-1/x"
-        );
+        assert_eq!(out[0].notification.id, "doctor:health-degraded:host-a/tc");
         let doc = h.schedule.document().unwrap();
         assert_eq!(
             (doc.findings, doc.new, doc.fixed),
@@ -1021,20 +1214,19 @@ mod tests {
     }
 
     /// After a restart the state file remembers what was announced: a
-    /// finding still present is assumed silently, one gone is resolved,
-    /// and a remembered failed run is observable again.
+    /// finding still present is assumed silently, one gone (its check
+    /// established) is resolved, one whose check this run could not
+    /// establish stays remembered, and a remembered failed run is
+    /// observable again.
     #[test]
     fn a_restart_reconciles_the_baseline_against_the_ledger() {
         let mut h = Harness::new(None);
-        // Stand in for the restored ledger: two findings announced, and
+        // Stand in for the restored ledger: three findings announced, and
         // the run itself unobservable.
-        let present = finding(CheckId::SliceSync, "h-1/sysinfo", DoctorSeverity::Error);
-        let gone = finding(
-            CheckId::SchemaDrift,
-            "TelemetryPoint",
-            DoctorSeverity::Error,
-        );
-        for f in [&present, &gone] {
+        let present = finding(CheckId::SplitBrain, "h1/tc tc.v1", DoctorSeverity::Error);
+        let gone = finding(CheckId::ContractDrift, "tc.netif.v1", DoctorSeverity::Error);
+        let unseen = finding(CheckId::HealthStale, "host-b/tc", DoctorSeverity::Warning);
+        for f in [&present, &gone, &unseen] {
             let o = outgoing(
                 &DoctorNotice::Finding {
                     finding: f.clone(),
@@ -1058,10 +1250,10 @@ mod tests {
             &h.render,
         );
         h.discipline.observe(o, &NoticeMeta::default(), -100.0);
-        h.discipline.tick(-100.0, None, &BTreeSet::new(), false);
-        assert_eq!(h.discipline.announced_under(DOCTOR_RULE).len(), 3);
+        h.discipline.tick(-100.0, false);
+        assert_eq!(h.discipline.announced_under(DOCTOR_RULE).len(), 4);
 
-        let out = h.run(Ok(report(vec![present], Asked::NotAsked)), 0.0);
+        let out = h.run(Ok(report_with(vec![present], &[CheckId::HealthStale])), 0.0);
         assert_eq!(
             ids(&out),
             vec![
@@ -1071,27 +1263,32 @@ mod tests {
                     CondState::Firing
                 ),
                 (
-                    RUN_ID.to_string(),
-                    NoticeKind::ObservableAgain,
+                    "doctor:contract-drift:tc.netif.v1".to_string(),
+                    NoticeKind::Resolved,
                     CondState::Ok
                 ),
                 (
-                    "doctor:schema-drift:TelemetryPoint".to_string(),
-                    NoticeKind::Resolved,
+                    RUN_ID.to_string(),
+                    NoticeKind::ObservableAgain,
                     CondState::Ok
                 ),
             ]
         );
         assert_eq!(
             h.discipline.announced_under(DOCTOR_RULE),
-            vec!["doctor:slice-sync:h-1/sysinfo".to_string()]
+            vec![
+                "doctor:health-stale:host-b/tc".to_string(),
+                "doctor:split-brain:h1/tc tc.v1".to_string(),
+            ],
+            "the unseen one stays remembered"
         );
         assert_eq!(
-            id_parts("doctor:slice-sync:h-1/sysinfo:with:colons"),
-            Some((CheckId::SliceSync, "h-1/sysinfo:with:colons"))
+            id_parts("doctor:split-brain:h1/tc tc.v1:with:colons"),
+            Some((CheckId::SplitBrain, "h1/tc tc.v1:with:colons"))
         );
         assert_eq!(id_parts("doctor:run"), None);
-        assert_eq!(id_parts("fleet-alerts:x"), None);
+        assert_eq!(id_parts("doctor:slice-sync:h-1/sysinfo"), None, "v1's ids");
+        assert_eq!(id_parts("tc-gone:host-a/tc"), None);
     }
 
     /// The message is bounded like every rendering: a baseline with many
@@ -1101,7 +1298,7 @@ mod tests {
         let cfg = cfg(None);
         let rule = Rule::scheduled_doctor(&cfg);
         let lines: Vec<String> = (0..500)
-            .map(|i| format!("- error slice-sync h-{i}/sysinfo: drift"))
+            .map(|i| format!("- error token-missing h-{i}/tc@0000000000000001: drift"))
             .collect();
         let o = outgoing(
             &DoctorNotice::Baseline {

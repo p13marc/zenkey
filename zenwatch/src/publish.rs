@@ -2,6 +2,14 @@
 //! `zenctl` see the notifier without SSH and something else can watch the
 //! watcher.
 //!
+//! **v1's write side, until FL3** (#614). The read side moved to zk2 in
+//! FL2; this module still brings the daemon up as a v1 producer, through
+//! the v1 libraries under renamed dependencies (`zenkey_v1`,
+//! `zenkey_fleet_v1`) and the build script's v1 registry, on the session in
+//! no namespace with the deployment's namespace as its base — the keys v1
+//! zenwatch published. FL3 replaces it with a `zenwatch.v1` contract served
+//! through zk2's `ServiceBuilder`.
+//!
 //! The same bring-up every producer does (RFC 04 §5, through the engine's
 //! [`BringUp`]): the two `@rpc` queryables first — `introspect` answers
 //! the generated registry slice verbatim, `describe` the served
@@ -33,10 +41,10 @@ use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use zenkey::qos::QosProfile;
-use zenkey::schema::SchemaSet;
-use zenkey::{AppName, AppProfile, OriginSalt, V1Context};
-use zenkey_fleet::{BringUp, Fleet, Publication, declare_publication};
+use zenkey_fleet_v1::{BringUp, Fleet, Publication, declare_publication};
+use zenkey_v1::qos::QosProfile;
+use zenkey_v1::schema::SchemaSet;
+use zenkey_v1::{AppName, AppProfile, OriginSalt, V1Context};
 
 use crate::discipline::{Discipline, severity_rank};
 use crate::render::state_word;
@@ -203,19 +211,19 @@ pub fn firing_docs(discipline: &Discipline) -> BTreeMap<String, FiringRule> {
             id: e.id.clone(),
             state: state_word(e.state).into(),
             severity: e.severity.clone(),
-            since: zenkey_fleet::rfc3339_from_unix(e.since.max(0.0) as u64),
+            since: zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64),
             labels: e.labels.clone(),
             count: 0,
         });
         doc.count += 1;
         let more_severe = severity_rank(&e.severity) > severity_rank(&doc.severity);
         let older_at_same = severity_rank(&e.severity) == severity_rank(&doc.severity)
-            && zenkey_fleet::rfc3339_from_unix(e.since.max(0.0) as u64) < doc.since;
+            && zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64) < doc.since;
         if more_severe || older_at_same {
             doc.id = e.id.clone();
             doc.state = state_word(e.state).into();
             doc.severity = e.severity.clone();
-            doc.since = zenkey_fleet::rfc3339_from_unix(e.since.max(0.0) as u64);
+            doc.since = zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64);
             doc.labels = e.labels.clone();
         }
     }
@@ -234,13 +242,13 @@ pub struct SelfProducer {
     published: BTreeMap<String, FiringRule>,
     refused: u64,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
-    task: tokio::task::JoinHandle<zenkey_fleet::Result<()>>,
+    task: tokio::task::JoinHandle<zenkey_fleet_v1::Result<()>>,
 }
 
 impl SelfProducer {
     /// Bring the producer up in RFC 04 §5 order: `introspect` and
     /// `describe` declared and served, then the token.
-    pub async fn bring_up(fleet: &Fleet<'_>) -> zenkey_fleet::Result<SelfProducer> {
+    pub async fn bring_up(fleet: &Fleet<'_>) -> zenkey_fleet_v1::Result<SelfProducer> {
         let ctx = context();
         let session = fleet.session().clone();
         let base = fleet.base().to_string();
@@ -328,7 +336,7 @@ impl SelfProducer {
         self.refused
     }
 
-    pub async fn publish_health(&self, health: &ZenwatchHealth) -> zenkey_fleet::Result<()> {
+    pub async fn publish_health(&self, health: &ZenwatchHealth) -> zenkey_fleet_v1::Result<()> {
         let body = serde_json::to_vec(health).expect("a health document serializes");
         self.health.send(body, None).await
     }
@@ -336,7 +344,7 @@ impl SelfProducer {
     /// The scheduled doctor's last run (#390) — after every run, whatever
     /// its outcome. Never tombstoned: the registry's `ttl_s = 0` is a
     /// retained document, and the last report stays the last report.
-    pub async fn publish_doctor(&self, doc: &ZenwatchDoctor) -> zenkey_fleet::Result<()> {
+    pub async fn publish_doctor(&self, doc: &ZenwatchDoctor) -> zenkey_fleet_v1::Result<()> {
         let body = serde_json::to_vec(doc).expect("a doctor document serializes");
         self.doctor.send(body, None).await
     }
@@ -347,7 +355,7 @@ impl SelfProducer {
     pub async fn publish_firing(
         &mut self,
         docs: &BTreeMap<String, FiringRule>,
-    ) -> zenkey_fleet::Result<()> {
+    ) -> zenkey_fleet_v1::Result<()> {
         let gone: Vec<String> = self
             .published
             .keys()
@@ -373,7 +381,7 @@ impl SelfProducer {
                     );
                     continue;
                 }
-                let key = zenkey::grammar::with_base(
+                let key = zenkey_v1::grammar::with_base(
                     &self.base,
                     self.ctx.state_key(&["firing", rule_id])?.as_str(),
                 );
@@ -397,8 +405,8 @@ impl SelfProducer {
     /// tombstoned (the doctor report deliberately not — it is retained
     /// state, not a fact about a live process), then the token retracted
     /// and the queryables undeclared (the engine's
-    /// [`LiveProducer::retire`](zenkey_fleet::bus::producer::LiveProducer::retire) order).
-    pub async fn shutdown(mut self) -> zenkey_fleet::Result<()> {
+    /// [`LiveProducer::retire`](zenkey_fleet_v1::bus::producer::LiveProducer::retire) order).
+    pub async fn shutdown(mut self) -> zenkey_fleet_v1::Result<()> {
         for id in self.published.keys() {
             if let Some(p) = self.firing.get(id) {
                 p.retire().await?;
@@ -411,7 +419,7 @@ impl SelfProducer {
         }
         match self.task.await {
             Ok(r) => r,
-            Err(e) => Err(zenkey_fleet::Error::bus(
+            Err(e) => Err(zenkey_fleet_v1::Error::bus(
                 "retire self producer",
                 "",
                 std::io::Error::other(e.to_string()),
@@ -478,10 +486,10 @@ mod tests {
     fn introspect_serves_the_kdl_file_and_declares_it() {
         use crate::registry::zenwatch::{REGISTRY_ENCODING, REGISTRY_SOURCE};
         assert_eq!(REGISTRY_ENCODING, "application/kdl");
-        let format = zenkey::registry_doc::negotiate(Some(REGISTRY_ENCODING), REGISTRY_SOURCE)
+        let format = zenkey_v1::registry_doc::negotiate(Some(REGISTRY_ENCODING), REGISTRY_SOURCE)
             .expect("a declared spelling");
-        assert_eq!(format, zenkey::SliceFormat::Kdl);
-        let slice = zenkey::parse_slice_as(REGISTRY_SOURCE, format).expect("the served slice");
+        assert_eq!(format, zenkey_v1::SliceFormat::Kdl);
+        let slice = zenkey_v1::parse_slice_as(REGISTRY_SOURCE, format).expect("the served slice");
         assert_eq!(slice.name, "zenwatch");
         assert_eq!(slice.subjects.len(), 3);
     }
@@ -551,7 +559,10 @@ mod tests {
     fn the_context_spells_the_registered_keys() {
         let ctx = context();
         let origin = ctx.origin().chunk().to_string();
-        assert!(zenkey::grammar::is_valid_host_origin(&origin), "{origin}");
+        assert!(
+            zenkey_v1::grammar::is_valid_host_origin(&origin),
+            "{origin}"
+        );
         assert_eq!(
             ctx.health_key().as_str(),
             format!("v1/{origin}/state/zenwatch/health")

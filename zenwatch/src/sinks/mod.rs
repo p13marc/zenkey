@@ -11,7 +11,9 @@
 //! [`Notification`] and [`Outgoing`] are **this daemon's wire**: the JSON a
 //! webhook receives and an `exec` program reads on stdin. They are pinned
 //! here, beside the sinks that emit them, and not in the engine — the engine
-//! never sees them.
+//! never sees them. What they carry of the engine's is the engine's own
+//! pinned shape: a presence notification's [`PresenceTransition`]
+//! (`zenkey_fleet::report`, #614 FL2).
 
 pub mod dry_run;
 pub mod exec;
@@ -24,29 +26,38 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use zenkey_fleet::{CondState, RenderSource};
+use zenkey_fleet::{CondState, PresenceTransition};
 
 use crate::config::{Config, SinkConfig};
+use crate::render::RenderSource;
 
 /// What a notification *is* (#389) — the discipline's verdict on a
 /// notice, and the first thing a sink consumer switches on.
 ///
-/// The three base kinds are what a rule saw; the rest are what the
-/// discipline made of it. A resolve is one of three, kept apart because a
-/// phone must be able to tell "it is fixed" from "I can see it again":
-/// `firing → ok` is [`Resolved`](NoticeKind::Resolved), `unobservable →
-/// ok` is [`ObservableAgain`](NoticeKind::ObservableAgain), `firing →
+/// The base kinds are what a rule saw; the rest are what the discipline
+/// made of it. A resolve is one of three, kept apart because a phone must
+/// be able to tell "it is fixed" from "I can see it again": `firing → ok`
+/// is [`Resolved`](NoticeKind::Resolved), `unobservable → ok` is
+/// [`ObservableAgain`](NoticeKind::ObservableAgain), `firing →
 /// unobservable` is [`LostSight`](NoticeKind::LostSight) and `ok →
 /// unobservable` is [`Unobservable`](NoticeKind::Unobservable).
+///
+/// `alert` left with the dark `alerts` rule (#613); it returns with
+/// zk2's alarm profile, deliberately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeKind {
     /// An engine condition changed state.
     Transition,
-    /// A producer's alert document fired.
-    Alert,
-    /// An alive token went.
+    /// An address went down (`instance-gone`, #614): no instance token
+    /// visible to this reader, a complete read behind the claim.
+    Presence,
+    /// A liveliness token went (`liveliness-gone`).
     Liveliness,
+    /// A presence rule's first look (#614, FL2): what is down at start,
+    /// what could not be seen — said once, the addresses down remembered
+    /// rather than paged one by one, as the doctor's baseline is.
+    Baseline,
     /// Several notices in one window from one group key, folded into one.
     Group,
     /// `firing → ok`.
@@ -70,8 +81,9 @@ impl NoticeKind {
     pub fn as_str(self) -> &'static str {
         match self {
             NoticeKind::Transition => "transition",
-            NoticeKind::Alert => "alert",
+            NoticeKind::Presence => "presence",
             NoticeKind::Liveliness => "liveliness",
+            NoticeKind::Baseline => "baseline",
             NoticeKind::Group => "group",
             NoticeKind::Resolved => "resolved",
             NoticeKind::ObservableAgain => "observable_again",
@@ -90,13 +102,17 @@ impl NoticeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Notification {
     /// The notice's **identity** (#389), stable across runs and restarts:
-    /// `<rule_id>:<what>` — the RFC 11 §3.2 `alert_ref` for an `alerts`
-    /// rule, `origin/producer` for `liveliness-gone`, the sorted labels for
-    /// an engine condition. Dedup, repeat and the state file key on it.
+    /// `<rule_id>:<what>` — the address for `instance-gone`, the token's
+    /// wire key (or, on zk2 presence tokens, the address and what the
+    /// token names) for `liveliness-gone`, `observer` for a presence rule's
+    /// own sight, the sorted labels for an engine condition,
+    /// `<check>:<subject>` under `doctor`. Dedup, repeat and the state file
+    /// key on it.
     pub id: String,
     /// The rule's name, as configured.
     pub rule: String,
-    /// The rule's head word (`silent-for`, `alerts`, `liveliness-gone`, …).
+    /// The rule's head word (`silent-for`, `instance-gone`,
+    /// `liveliness-gone`, …).
     pub rule_kind: String,
     /// What this notification is (#389).
     pub kind: NoticeKind,
@@ -106,7 +122,7 @@ pub struct Notification {
     pub severity: String,
     pub title: String,
     pub message: String,
-    /// The rule's labels, with an alert document's own on top.
+    /// The rule's labels.
     pub labels: BTreeMap<String, String>,
     /// RFC 3339 wall clock.
     pub at: String,
@@ -119,10 +135,12 @@ pub struct Notification {
     pub repeat: u32,
     /// For a [`NoticeKind::Group`]: the member notice ids, in order.
     pub group: Option<Vec<String>>,
-    /// Set when impact attribution (RFC 06 §5.6) judged this a **symptom**
-    /// of a down entity: the root's entity id. Carried, never dropped
-    /// silently.
-    pub inhibited_by: Option<String>,
+    /// The presence move that decided a notice read from the live
+    /// projection (#614, FL2) — an address's status, an interface or member
+    /// token — as the engine pins it (`zenkey_fleet::report`): `at`,
+    /// `source` (`event` | `seed` | `dropped`), `address`, and `change`
+    /// tagged by `kind`. `null` for everything else.
+    pub presence: Option<PresenceTransition>,
 }
 
 /// A notification and the sinks it is routed to. Every named sink gets the
@@ -314,7 +332,7 @@ pub fn test_outgoing(sink: &str) -> Outgoing {
             truncated: false,
             repeat: 0,
             group: None,
-            inhibited_by: None,
+            presence: None,
         },
         sinks: vec![sink.to_string()],
     }
@@ -323,30 +341,32 @@ pub fn test_outgoing(sink: &str) -> Outgoing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
 
     /// The webhook/exec wire shape: field names, snake_case states, `null`
-    /// prior on a baseline, `unobservable` distinguishable from `ok`.
+    /// prior on a baseline, `unobservable` distinguishable from `ok`, and a
+    /// presence notification's transition in the engine's pinned shape.
     #[test]
     fn outgoing_json_shape_is_pinned() {
         let o = Outgoing {
             notification: Notification {
-                id: "hosts-gone:h-3fa9c2d41b7e/netlink".into(),
-                rule: "hosts-gone".into(),
-                rule_kind: "liveliness-gone".into(),
+                id: "tc-gone:observer".into(),
+                rule: "tc-gone".into(),
+                rule_kind: "instance-gone".into(),
                 kind: NoticeKind::Unobservable,
                 state: CondState::Unobservable,
                 prior: None,
                 severity: "error".into(),
-                title: "error hosts-gone unobservable".into(),
-                message: "state: unobservable (first observation)\nthe observer dropped 3".into(),
+                title: "error tc-gone unobservable".into(),
+                message: "state: unobservable (first observation)\nthe projection lost 3".into(),
                 labels: BTreeMap::from([("team".to_string(), "infra".to_string())]),
                 at: "2026-09-06T00:00:00Z".into(),
-                evidence: "the observer dropped 3".into(),
+                evidence: "the projection lost 3".into(),
                 rendering: RenderSource::KeyOnly,
                 truncated: false,
                 repeat: 0,
                 group: None,
-                inhibited_by: None,
+                presence: None,
             },
             sinks: vec!["ops".into(), "mail".into()],
         };
@@ -354,46 +374,72 @@ mod tests {
             serde_json::to_value(&o).unwrap(),
             serde_json::json!({
                 "notification": {
-                    "id": "hosts-gone:h-3fa9c2d41b7e/netlink",
-                    "rule": "hosts-gone",
-                    "rule_kind": "liveliness-gone",
+                    "id": "tc-gone:observer",
+                    "rule": "tc-gone",
+                    "rule_kind": "instance-gone",
                     "kind": "unobservable",
                     "state": "unobservable",
                     "prior": null,
                     "severity": "error",
-                    "title": "error hosts-gone unobservable",
-                    "message": "state: unobservable (first observation)\nthe observer dropped 3",
+                    "title": "error tc-gone unobservable",
+                    "message": "state: unobservable (first observation)\nthe projection lost 3",
                     "labels": {"team": "infra"},
                     "at": "2026-09-06T00:00:00Z",
-                    "evidence": "the observer dropped 3",
+                    "evidence": "the projection lost 3",
                     "rendering": "key_only",
                     "truncated": false,
                     "repeat": 0,
                     "group": null,
-                    "inhibited_by": null,
+                    "presence": null,
                 },
                 "sinks": ["ops", "mail"],
             })
         );
         let mut firing = o.clone();
+        firing.notification.id = "tc-gone:host-a/tc".into();
         firing.notification.state = CondState::Firing;
         firing.notification.prior = Some(CondState::Ok);
-        firing.notification.kind = NoticeKind::Liveliness;
+        firing.notification.kind = NoticeKind::Presence;
         firing.notification.repeat = 2;
-        firing.notification.inhibited_by = Some("ent-pve".into());
+        firing.notification.presence = Some(PresenceTransition {
+            at: std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_331_200),
+            source: PresenceSource::Event,
+            address: "host-a/tc".parse().unwrap(),
+            change: PresenceChange::Status {
+                from: AddressStatus::Up,
+                to: AddressStatus::Down,
+            },
+        });
         let j = serde_json::to_value(&firing).unwrap();
         assert_eq!(j["notification"]["state"], "firing");
         assert_eq!(j["notification"]["prior"], "ok");
-        assert_eq!(j["notification"]["kind"], "liveliness");
+        assert_eq!(j["notification"]["kind"], "presence");
         assert_eq!(j["notification"]["repeat"], 2);
-        assert_eq!(j["notification"]["inhibited_by"], "ent-pve");
+        assert_eq!(
+            j["notification"]["presence"],
+            serde_json::json!({
+                "at": "2026-10-07T00:00:00Z",
+                "source": "event",
+                "address": "host-a/tc",
+                "change": {"kind": "status", "from": "up", "to": "down"},
+            })
+        );
+        assert!(
+            j["notification"].get("inhibited_by").is_none(),
+            "inhibition was removed (#614, FL2)"
+        );
         // Every kind spells itself in snake_case, the way a consumer
         // switches on it.
         for k in [
+            NoticeKind::Transition,
+            NoticeKind::Presence,
+            NoticeKind::Liveliness,
+            NoticeKind::Baseline,
             NoticeKind::Group,
             NoticeKind::Resolved,
             NoticeKind::ObservableAgain,
             NoticeKind::LostSight,
+            NoticeKind::Unobservable,
             NoticeKind::Doctor,
         ] {
             assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());

@@ -1,0 +1,6 @@
+// A state file v1 zenwatch wrote: refused, never migrated.
+{
+  rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+  state_file: "tests/cmd/fixtures/state-v1.json",
+}
