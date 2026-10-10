@@ -31,8 +31,9 @@ health`; #721, PF).
   (`freshness.v1` §2.6, ground 2). "Judges" applies v1.md §2.11 to the
   reading at that instant, the descriptor read as core §3.3 says.
 - **The horizon** is the contract's, 60 s, so the owner confirms its status
-  at least every 30 s. §2, §4 and §8 wait it out: each takes about 70 s,
-  and a runner MAY keep them in a slow tier.
+  at least every 30 s. §2, §4 and §8 wait it out, §2 and §4 for about
+  70 s each and §8 for about 200 s, and a runner MAY keep them in a slow
+  tier.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent. The reference allows 200 ms on
   loopback.
@@ -195,13 +196,20 @@ from its configuration that `vehicle-01/nav` implements `health.v1`.
 - **Run B:** the face denies `zk2/vehicle-01/*/*/state/**`, as
   zenoh-modem's `face-deny-device-state` does.
 
-**Steps.** G subscribes to the owner's status statically, without
-presence, and listens 65 s, then judges. In run A, the owner then closes
-its writer for the status, and G listens 65 s more and judges.
+**Steps.**
+1. G subscribes to the owner's status statically, without presence, before
+   the owner starts, and listens 65 s, then judges.
+2. The owner starts. G listens 65 s, then judges.
+3. In run A, the owner closes its writer for the status. G listens 65 s
+   more, and judges.
 
 **Expected.**
-- **Run A:** G receives the status and its re-puts, and judges
-  **healthy**, `ok`. After the close, G judges **stale**: never down,
-  never `FAILED`, and never absent, since presence does not cross.
-- **Run B:** nothing of the status crosses. G judges **unobservable**,
-  `face_closed`, and never reports the service unhealthy, failed or down.
+- **Run A:**
+  1. G receives nothing, and judges **unobservable**, `nothing_crossed`:
+     it knows of no status yet, and does not call one stale (§2.8).
+  2. G receives the status and its re-puts, and judges **healthy**, `ok`.
+  3. G judges **stale**: never down, never `FAILED`, and never absent,
+     since presence does not cross.
+- **Run B:** nothing of the status crosses at any step. G judges
+  **unobservable**, `face_closed`, each time, and never reports the service
+  unhealthy, failed or down.

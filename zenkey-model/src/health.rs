@@ -271,6 +271,10 @@ pub enum Reason {
     /// Unobservable: across a face that does not let the status cross
     /// (§2.8).
     FaceClosed,
+    /// Unobservable: across a face that lets the status cross, nothing of
+    /// it arrived, so no status is known to exist (§2.8, `freshness.v1`
+    /// §2.5).
+    NothingCrossed,
     /// Not asked: absent, presence's word (§2.1).
     Absent,
     /// Not asked: the descriptor does not list `health.v1` (§2.7).
@@ -298,6 +302,7 @@ impl Reason {
             Self::PresenceIncomplete => "presence_incomplete",
             Self::NoDescriptor => "no_descriptor",
             Self::FaceClosed => "face_closed",
+            Self::NothingCrossed => "nothing_crossed",
             Self::Absent => "absent",
             Self::NotListed => "not_listed",
             Self::LastKnown => "last_known",
@@ -322,6 +327,9 @@ impl Reason {
             }
             Self::NoDescriptor => "its descriptor could not be read",
             Self::FaceClosed => "the constrained face does not let its status cross",
+            Self::NothingCrossed => {
+                "nothing of its status has crossed the constrained face, so none is known to exist"
+            }
             Self::Absent => "it is absent: presence's word, not a level",
             Self::NotListed => "its descriptor does not list health.v1",
             Self::LastKnown => "only an archive's last-known status was read, never current",
@@ -391,6 +399,15 @@ pub fn judge(r: &Reading<'_>) -> Judged {
     let f = freshness::judge_all(&status_horizon(), r.status);
     match f.verdict {
         freshness::Verdict::Fresh => {}
+        // A present, listed owner holds a status (§2.3), so silence ages
+        // it. Across a face nothing says one exists until something
+        // crosses (`freshness.v1` §2.5, "a member it knows").
+        freshness::Verdict::Stale
+            if f.reason == freshness::Reason::NoDelivery
+                && matches!(r.presence, Presence::AcrossFace { .. }) =>
+        {
+            return Judged::unobservable(R::NothingCrossed);
+        }
         freshness::Verdict::Stale => {
             return Judged::new(Verdict::Stale, R::Freshness(f.reason), None);
         }

@@ -42,7 +42,7 @@ clock ahead through `health.v1`.
   unobservable, not asked; the status against its checks; a roll-up; a
   clock ahead. The changes against v1's health document (Appendix A), and
   the adopters' mappings (Appendix B).
-- **Evidence:** `conformance/judgements.json` (60 cases),
+- **Evidence:** `conformance/judgements.json` (61 cases),
   `conformance/rollups.json` (8), `conformance/codes.json` (22), and eight
   scenario sections, five the runtime's and three a tool's.
 
@@ -70,6 +70,12 @@ clock ahead through `health.v1`.
   recommendation.
 - **A deleted status reads unobservable,** reason `deleted`: the owner
   broke §2.3, and nothing answers whether it is healthy.
+- **Silence ages a status only when one is known to exist.** A present,
+  listed owner holds one (§2.3), so a subscriber's silence makes it stale.
+  Across a constrained face nothing says so until a delivery crosses
+  (`freshness.v1` §2.5, "a member it knows"), so a status of which nothing
+  has crossed is unobservable, `nothing_crossed`, which is what core R7
+  says of a face where nothing crosses.
 - **zenoh-modem's RF face lets nothing of `health.v1` cross**: its
   `link.md` denies the device's state and `health.v1`'s streams. The text
   records it as a gap of that mapping (Appendix B) and leaves `link.md` as

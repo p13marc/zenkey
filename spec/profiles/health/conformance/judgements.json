@@ -1664,13 +1664,13 @@
       "descriptor": null,
       "expect": {
         "level": null,
-        "reason": "no_delivery",
-        "verdict": "stale"
+        "reason": "nothing_crossed",
+        "verdict": "unobservable"
       },
       "face": {
         "status_crosses": true
       },
-      "note": "across a face, nothing delivered in 300 s of a status that crosses: stale, never down",
+      "note": "across a face, nothing delivered in 300 s: no status known to exist, so unobservable, never stale or down (§2.8, freshness.v1 §2.5)",
       "presence": "across_face",
       "status": {
         "level": null,
@@ -1680,6 +1680,33 @@
             "last": null,
             "listened_s": 300,
             "via": "subscription"
+          }
+        ]
+      }
+    },
+    {
+      "checks": null,
+      "descriptor": null,
+      "expect": {
+        "level": null,
+        "reason": "silent",
+        "verdict": "unobservable"
+      },
+      "face": {
+        "status_crosses": true
+      },
+      "note": "across a face, a GET silent too: nothing crossed",
+      "presence": "across_face",
+      "status": {
+        "level": null,
+        "observations": [
+          {
+            "clock": {
+              "delta_s": 0.5,
+              "trusted": true
+            },
+            "reply": null,
+            "via": "get"
           }
         ]
       }
@@ -1762,5 +1789,5 @@
       }
     }
   ],
-  "description": "health.v1 §2.11: one reading of one service -> the answer to \"is this service healthy?\". A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, {\"lists\": false}, or {\"lists\": true, \"token\": true | false}, false being health.v1 in the tokenless set; the interface token plays no part. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: {\"observations\": the observations of state/status, as freshness.v1's judgements.json writes them, judged at the standard contract's horizon, freshness.ttl_s = 60; \"level\": the level of the latest value read, \"ok\" | \"degraded\" | \"failed\" | \"unspecified\" | an integer the enum does not list | \"undecodable\" (a payload that does not decode as health.v1.Status) | null (no value read)}. checks: null when not read, or the checks the owner answered, [{\"check\": its name, \"level\": as status.level, never null}]. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, absent, not_listed, last_known, or freshness.v1's own reason for a stale or unobservable status (beyond_horizon, no_delivery, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation); expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise. Seconds are compared exactly, to the nanosecond."
+  "description": "health.v1 §2.11: one reading of one service -> the answer to \"is this service healthy?\". A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, {\"lists\": false}, or {\"lists\": true, \"token\": true | false}, false being health.v1 in the tokenless set; the interface token plays no part. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: {\"observations\": the observations of state/status, as freshness.v1's judgements.json writes them, judged at the standard contract's horizon, freshness.ttl_s = 60; \"level\": the level of the latest value read, \"ok\" | \"degraded\" | \"failed\" | \"unspecified\" | an integer the enum does not list | \"undecodable\" (a payload that does not decode as health.v1.Status) | null (no value read)}. checks: null when not read, or the checks the owner answered, [{\"check\": its name, \"level\": as status.level, never null}]. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, nothing_crossed, absent, not_listed, last_known, or freshness.v1's own reason for a stale or unobservable status (beyond_horizon, no_delivery, listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon, no_observation); expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise. Seconds are compared exactly, to the nanosecond."
 }
