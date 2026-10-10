@@ -3742,20 +3742,31 @@ async fn storage_gen_derives_a_union_storage_that_takes_an_owners_events() {
     let events = owner
         .event_writer(&iface("tc.netem.v1"), "events/applied", &Bindings::new())
         .expect("an event writer");
+    // One occurrence only: the event's rate is `low`, which the runtime
+    // keeps (§2.7, #741), so the subscriber is matched first, through a
+    // probe publisher on the event's keys, rather than put until heard.
+    let probe = bus
+        .owners
+        .declare_publisher(
+            "zk2/h-3fa9c2d41b7e/tc/tc.netem.v1/events/applied/01hzzzzzzzzzzzzzzzzzzzzzzz",
+        )
+        .await
+        .expect("a probe publisher");
     let deadline = Instant::now() + SETTLE;
-    let key = loop {
-        let put = events
-            .put(br#"{"ulid":"x"}"#.to_vec())
-            .await
-            .expect("an occurrence");
-        match tokio::time::timeout(Duration::from_millis(200), sub.recv_async()).await {
-            Ok(Ok(sample)) => {
-                assert_eq!(sample.key_expr().as_str(), put);
-                break put;
-            }
-            _ if Instant::now() < deadline => continue,
-            _ => panic!("no occurrence reached {key_expr}"),
+    while !probe.matching_status().await.expect("matching").matching() {
+        assert!(Instant::now() < deadline, "the subscriber never matched");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let put = events
+        .put(br#"{"ulid":"x"}"#.to_vec())
+        .await
+        .expect("an occurrence");
+    let key = match tokio::time::timeout(SETTLE, sub.recv_async()).await {
+        Ok(Ok(sample)) => {
+            assert_eq!(sample.key_expr().as_str(), put);
+            put
         }
+        _ => panic!("no occurrence reached {key_expr}"),
     };
     bus.services.push(owner);
 
