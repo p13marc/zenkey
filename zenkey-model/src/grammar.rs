@@ -253,6 +253,80 @@ impl fmt::Display for KindToken {
     }
 }
 
+// ─── kind selectors (§1.3) ──────────────────────────────────────────────────
+
+/// The ambient selector (§1.3): every plain-kind data key of every service
+/// — `stream`, `state` and `events` — and nothing verbatim. Zenoh's `**`
+/// never matches a verbatim chunk, so it never delivers an `@stream` or
+/// `@state` sample and a GET on it never reaches an `@op` queryable or a
+/// control key: that is the guard, and [`blind_spots`] names what it
+/// leaves out.
+pub const AMBIENT: &str = "zk2/**";
+
+/// The grammar's verbatim chunks (§1.2): the three verbatim kind tokens,
+/// then the control token. What [`blind_spots`] answers in.
+pub const VERBATIM: [&str; 4] = ["@stream", "@state", "@op", CONTROL];
+
+/// An exact kind selector (§1.3): `zk2/<system>/<service>/<iface>/<kind>/**`,
+/// `*` at each of the first three positions left `None`. Positions 1–5 have
+/// fixed arity, so it selects the resources of `kind` and no other: the
+/// token can never be read at position 6, and a verbatim token is named
+/// here, which is the only way to reach it. Base-relative, like every key
+/// of this module; a session's namespace adds the prefix.
+#[must_use]
+pub fn kind_selector(
+    system: Option<&Name>,
+    service: Option<&Name>,
+    iface: Option<&IfaceId>,
+    kind: KindToken,
+) -> String {
+    let iface = iface.map(ToString::to_string);
+    [
+        GRAMMAR,
+        system.map_or("*", Name::as_str),
+        service.map_or("*", Name::as_str),
+        iface.as_deref().unwrap_or("*"),
+        kind.as_str(),
+        "**",
+    ]
+    .join("/")
+}
+
+/// The verbatim chunks of [`VERBATIM`] that `selector` can never reach, in
+/// that order (§1.3's guard): a frontend's line saying what a watch does
+/// not show, rather than letting its silence read as nothing there.
+///
+/// `@stream`, `@state` and `@op` are the data keys of that kind token under
+/// any service; `@zk` is every control key, a service's tokens and
+/// descriptors and the contract bundles alike. A selector may carry a
+/// namespace before `zk2` or none: the answer is the same, since `**`
+/// crosses no verbatim chunk wherever it stands. A non-canonical selector
+/// is canonized first (`zk2/**/**` is `zk2/**`); one that is not a key
+/// expression at all is refused.
+pub fn blind_spots(selector: &str) -> Result<Vec<&'static str>, KeyError> {
+    let selector = OwnedKeyExpr::autocanonize(selector.to_owned())
+        .map_err(|e| KeyError::KeyExpr(selector.to_owned(), e.to_string()))?;
+    let probes = |chunk: &str| -> Vec<String> {
+        if chunk == CONTROL {
+            vec![
+                format!("**/{GRAMMAR}/*/*/{CONTROL}/**"),
+                format!("**/{GRAMMAR}/{CONTROL}/**"),
+            ]
+        } else {
+            vec![format!("**/{GRAMMAR}/*/*/*/{chunk}/**")]
+        }
+    };
+    Ok(VERBATIM
+        .into_iter()
+        .filter(|chunk| {
+            !probes(chunk).iter().any(|p| {
+                zenoh_keyexpr::keyexpr::new(p.as_str())
+                    .is_ok_and(|probe| selector.intersects(probe))
+            })
+        })
+        .collect())
+}
+
 macro_rules! hex_id {
     ($(#[$m:meta])* $t:ident, $what:literal, $len:literal) => {
         $(#[$m])*
@@ -693,5 +767,132 @@ mod tests {
         assert!(KindToken::Op.is_verbatim());
         assert!(!KindToken::Events.is_verbatim());
         assert!(!KindToken::Stream.is_verbatim());
+        let verbatim: Vec<&str> = KindToken::ALL
+            .into_iter()
+            .filter(|k| k.is_verbatim())
+            .map(KindToken::as_str)
+            .collect();
+        assert_eq!(
+            verbatim,
+            VERBATIM[..3],
+            "VERBATIM lists the verbatim kinds, then @zk"
+        );
+    }
+
+    /// One data key of each kind token, and one key of each control form.
+    fn one_of_each() -> (Vec<(KindToken, Key)>, Vec<Key>) {
+        let nav: IfaceId = "nav.v2".parse().unwrap();
+        let data = KindToken::ALL
+            .into_iter()
+            .map(|k| {
+                let resource: &[&str] = if k == KindToken::Events {
+                    &["applied", "01hzy3d1s5k8b2c4e6g8j0m2p4"]
+                } else {
+                    &["position"]
+                };
+                (k, data_key(&addr(), &nav, k, resource).unwrap())
+            })
+            .collect();
+        let i = InstanceId::from_u64(1);
+        let sha = Sha256Hex::new(&"3fa9c2d41b7e9a01".repeat(4)).unwrap();
+        let control = vec![
+            instance_key(&addr(), &i).unwrap(),
+            alive_key(&addr(), &nav, &i, &sha.fp16()).unwrap(),
+            member_key(&addr(), &nav, "rf0", &i).unwrap(),
+            contract_key(&nav, &sha).unwrap(),
+        ];
+        (data, control)
+    }
+
+    fn reaches(selector: &str, key: &Key) -> bool {
+        zenoh_keyexpr::keyexpr::new(selector)
+            .unwrap()
+            .intersects(&key.clone().into_keyexpr())
+    }
+
+    /// §1.3's guard: the ambient selector reaches every plain-kind data key
+    /// and no verbatim chunk — no `@stream`, `@state` or `@op` key, and no
+    /// control key, a service's or a contract's.
+    #[test]
+    fn ambient_never_reaches_a_verbatim_chunk() {
+        let (data, control) = one_of_each();
+        for (kind, key) in &data {
+            assert_eq!(
+                reaches(AMBIENT, key),
+                !kind.is_verbatim(),
+                "{AMBIENT} and {key}"
+            );
+        }
+        for key in &control {
+            assert!(!reaches(AMBIENT, key), "{AMBIENT} reached {key}");
+        }
+        assert_eq!(blind_spots(AMBIENT).unwrap(), VERBATIM);
+    }
+
+    /// §1.3's exact kind selectors: positions 1–5 have fixed arity, so a
+    /// kind selector reaches its own kind's keys and no other kind's, the
+    /// token never being read further down the key; and a verbatim one is
+    /// not blind to its own token.
+    #[test]
+    fn kind_selectors_have_fixed_arity() {
+        let (data, control) = one_of_each();
+        for kind in KindToken::ALL {
+            let selector = kind_selector(None, None, None, kind);
+            assert_eq!(selector, format!("zk2/*/*/*/{kind}/**"));
+            for (other, key) in &data {
+                assert_eq!(reaches(&selector, key), *other == kind, "{selector}, {key}");
+            }
+            for key in &control {
+                assert!(!reaches(&selector, key), "{selector} reached {key}");
+            }
+            let blind = blind_spots(&selector).unwrap();
+            assert!(!blind.contains(&kind.as_str()), "{selector} sees {kind}");
+            assert!(blind.contains(&CONTROL));
+        }
+        // The token at position 6 is a resource chunk, never a kind.
+        let deeper = "zk2/vehicle-01/navigation/nav.v2/stream/state/x";
+        let deeper = Key(OwnedKeyExpr::try_from(deeper.to_owned()).unwrap());
+        assert!(!reaches(
+            &kind_selector(None, None, None, KindToken::State),
+            &deeper
+        ));
+        let a = addr();
+        let nav: IfaceId = "nav.v2".parse().unwrap();
+        assert_eq!(
+            kind_selector(
+                Some(&a.system),
+                Some(&a.service),
+                Some(&nav),
+                KindToken::ExplicitState
+            ),
+            "zk2/vehicle-01/navigation/nav.v2/@state/**"
+        );
+        assert_eq!(
+            kind_selector(Some(&a.system), None, None, KindToken::Op),
+            "zk2/vehicle-01/*/*/@op/**"
+        );
+    }
+
+    /// What a selector cannot see, named: the whole bus root sees no
+    /// verbatim chunk, a namespace changes nothing, a control selector sees
+    /// `@zk` alone, and what is not a key expression is refused.
+    #[test]
+    fn blind_spots_name_what_a_selector_cannot_see() {
+        assert_eq!(blind_spots("**").unwrap(), VERBATIM);
+        assert_eq!(blind_spots("prod/site/zk2/**").unwrap(), VERBATIM);
+        assert_eq!(blind_spots("zk2/**/**").unwrap(), VERBATIM, "canonized");
+        assert_eq!(
+            blind_spots("zk2/*/*/@zk/**").unwrap(),
+            ["@stream", "@state", "@op"]
+        );
+        assert_eq!(
+            blind_spots("zk2/@zk/contract/**").unwrap(),
+            ["@stream", "@state", "@op"]
+        );
+        assert_eq!(
+            blind_spots("prod/zk2/robot1/*/nav.v2/@stream/**").unwrap(),
+            ["@state", "@op", "@zk"]
+        );
+        assert!(blind_spots("a//b").is_err());
     }
 }
