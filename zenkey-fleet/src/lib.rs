@@ -44,7 +44,9 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
-//!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens`, `why`
+//!   zk2's `presence` (its `PresenceFeed` keeps `model::presence_live`
+//!   current from a monitor, #614), `contracts`, `operation`, `consume`,
+//!   `lens`, `why`
 //!   (the reads a silence is explained from, #702), `conform` (a
 //!   service's suite, #703) and `health` (a `health.v1` reading, #721). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
@@ -74,7 +76,9 @@
 //! * **[`model`]** — everything that can do its job from values already in
 //!   hand. zk2's `catalog`, `render`, `target`, `compat`, `namespace` and
 //!   `lens` (a raw observer's key resolved rung by rung, its payload
-//!   checked, its stamp attributed), `timeline`, `snapshot` and
+//!   checked, its stamp attributed), `presence_live` (each address up, down
+//!   or unobservable, from a seed and the liveliness events after it, with
+//!   every move a value, #614), `timeline`, `snapshot` and
 //!   `snapshot_diff` over it, `acl` and `storage` (a router's config from
 //!   an enrollment or a deployment file), the `structural` ladder bytes no
 //!   schema reaches fall to, `stats`, `tree` and `diff`, plus the two
@@ -239,11 +243,20 @@ pub use bus::presence::{
     describe as describe_instances, liveliness_read, namespace_listing,
     observe as observe_presence, read_tokens, service_listing,
 };
+// Live presence, per address (#614, FL1): the session-free projection, and
+// the feed that seeds it and keeps it current from a monitor.
+pub use bus::presence::{
+    PresenceFeed, RESEED_BACKOFF, RESEED_BACKOFF_MAX, SeedOutcome, presence_selectors,
+};
 pub use model::catalog::{
     Catalog, ContractSet, ContractState, Contracts, DescriptorRead, LoadProblem,
     Observed as ObservedPresence, Revision, namespaces, type_view,
 };
 pub use model::compat::compat;
+pub use model::presence_live::{
+    AddressStatus, DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, MemberId,
+    PresenceBasis, PresenceChange, PresenceIgnored, PresenceSource, PresenceTransition,
+};
 pub use model::render::{
     Member, render as render_payload, render_detail, render_resource,
     render_with as render_payload_with, resolved_revision,
@@ -357,6 +370,28 @@ const _: () = {
         assert_send::<crate::BundleStore>();
         assert_send::<crate::Catalog>();
         assert_send::<crate::LensFeed>();
+        // A feed holds an event stream and a session across its seeds
+        // (#614, FL1).
+        assert_send::<crate::PresenceFeed>();
+        assert_send::<crate::LivePresence>();
+    }
+
+    /// The live presence feed's futures (#614, FL1): a seed holds the
+    /// session's read and the event stream across awaits.
+    #[allow(dead_code)]
+    fn presence_feed_futures_are_send(
+        session: &zenoh::Session,
+        events: crate::EventStream,
+        feed: &mut crate::PresenceFeed,
+    ) {
+        fn is_send<T: Send>(_: &T) {}
+        is_send(&crate::PresenceFeed::open(
+            session,
+            events,
+            crate::LivePresence::new(crate::PresenceScope::all()),
+            std::time::Duration::ZERO,
+        ));
+        is_send(&feed.next());
     }
 
     /// The zk2 futures (#612, FJ3): a presence read holds a session and a

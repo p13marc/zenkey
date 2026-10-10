@@ -15,7 +15,10 @@
 //! read and the contracts in hand ([`lens`]): its address and resource, its
 //! payload checked against the declared type, its stamp attributed to its
 //! owner. Bytes no schema reaches fall to the structural ladder
-//! ([`structural`]).
+//! ([`structural`]). One read of presence and the liveliness events after
+//! it become each address's live presence — up, down or unobservable, and
+//! every instance, interface and member move as a value
+//! ([`presence_live`], #614).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -57,6 +60,7 @@ pub mod health;
 pub mod jsonschema;
 pub mod lens;
 pub mod namespace;
+pub mod presence_live;
 pub mod render;
 pub mod retain;
 pub mod snapshot;
