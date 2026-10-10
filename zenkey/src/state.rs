@@ -70,6 +70,10 @@ pub struct Minter {
     last: Mutex<Option<Timestamp>>,
     offset_ms: AtomicI64,
     ahead: AtomicBool,
+    /// The guard's hold, for what reports it (`health.v1` §2.5): the offset
+    /// last measured while it holds, `None` while it does not. Receivers
+    /// are woken on a change of hold only; the offset is kept current.
+    held: tokio::sync::watch::Sender<Option<Duration>>,
 }
 
 impl Minter {
@@ -79,6 +83,7 @@ impl Minter {
             last: Mutex::new(None),
             offset_ms: AtomicI64::new(0),
             ahead: AtomicBool::new(false),
+            held: tokio::sync::watch::Sender::new(None),
         }
     }
 
@@ -137,6 +142,33 @@ impl Minter {
         self.ahead.load(Ordering::Relaxed)
     }
 
+    /// The guard's hold as a watch: `Some(offset)` while it holds this
+    /// owner's state writes, with the offset it last measured, `None` while
+    /// it does not. It wakes on a change of hold only (`health.v1` §2.5).
+    pub(crate) fn held(&self) -> tokio::sync::watch::Receiver<Option<Duration>> {
+        self.held.subscribe()
+    }
+
+    /// The guard measured this owner `offset` ahead of its router: beyond
+    /// [`HLC_DELTA`] its state writes stop (§4.3). Returns whether this
+    /// detection is the first of a hold.
+    fn measure(&self, offset: Duration) -> bool {
+        let ahead = offset > HLC_DELTA;
+        let first = if ahead {
+            !self.ahead.swap(true, Ordering::Relaxed)
+        } else {
+            self.ahead.store(false, Ordering::Relaxed);
+            false
+        };
+        let now = ahead.then_some(offset);
+        self.held.send_if_modified(|h| {
+            let changed = h.is_some() != now.is_some();
+            *h = now;
+            changed
+        });
+        first
+    }
+
     /// Shifts this owner's clock by `ms` (negative: behind). For tests and
     /// simulation of the clock rules (spec scenarios state.md §7); a
     /// deployment never sets it.
@@ -168,15 +200,20 @@ impl ClockGuard {
                 }
                 let mine = minter.now().get_time().to_duration();
                 let theirs = router.get_time().to_duration();
-                let ahead = mine.saturating_sub(theirs) > HLC_DELTA;
-                if ahead && !minter.ahead.swap(true, Ordering::Relaxed) {
+                let offset = mine.saturating_sub(theirs);
+                let was = minter.is_ahead();
+                if minter.measure(offset) {
                     tracing::warn!(
-                        ahead_ms = mine.saturating_sub(theirs).as_millis() as u64,
+                        ahead_ms = offset.as_millis() as u64,
                         "this owner's clock is ahead of its router beyond the HLC delta: \
                          state writes stop (spec §4.3)"
                     );
-                } else if !ahead {
-                    minter.ahead.store(false, Ordering::Relaxed);
+                } else if was && !minter.is_ahead() {
+                    tracing::info!(
+                        ahead_ms = offset.as_millis() as u64,
+                        "this owner's clock is back within the HLC delta of its router: \
+                         state writes resume (spec §4.3)"
+                    );
                 }
             })
             .await

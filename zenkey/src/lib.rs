@@ -19,6 +19,7 @@
 //! | [`call`]: what a handler receives and a caller gets back, without a session | §5.1 O3, O5–O7, §5.2 |
 //! | [`shm`]: the memlock limit SHM falls back under | §7.4 |
 //! | [`state`]: stamped mutations, tombstones, clocks, the owner-only GET | §4.1–§4.3, S1–S4, S6–S7 |
+//! | [`health`]: `health.v1`'s owner, its standard contract embedded: the status, checks and faults; `clock_ahead` | `health.v1` §2.2–§2.6, §2.10; §4.3, §8.2 |
 //! | [`archive`]: last-known state, recorded and aligned; the explicit read | §4.4, S5–S6 |
 //! | [`codec`]: a Rust type and how it is carried; [`typed`]: the handles generated code is written against (#611) | §7.2 |
 //!
@@ -48,6 +49,8 @@ pub mod consumer;
 #[cfg(feature = "zenoh")]
 mod descriptor;
 pub mod error;
+#[cfg(feature = "zenoh")]
+pub mod health;
 #[cfg(feature = "hostid")]
 pub mod hostid;
 pub mod implementation;
