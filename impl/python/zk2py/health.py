@@ -11,7 +11,8 @@ The session-free half, the reader's:
   ``conformance/judgements.json`` writes it, the status's freshness judged
   by :mod:`zk2py.freshness` at the contract's horizon;
 - :func:`rollup` (§2.2, §5) and :func:`code_class` (§2.10);
-- :func:`clock_ahead` (§5's fourth question);
+- :func:`clock_question` (§5's fourth question, `conformance/clock.json`, 0.3), and
+  :func:`clock_from` over what a subscriber heard;
 - the payloads, ``health.v1.Status``, ``Check`` and ``Fault``, encoded and
   decoded as proto3 (``proto/health/v1/health.proto``).
 
@@ -191,16 +192,50 @@ def code_class(code: str) -> str:
     return "application" if CODE_FORM.fullmatch(code) and code.isascii() else "malformed"
 
 
-def clock_ahead(last_fault_ns: int | None, last_confirmation_ns: int | None) -> str:
-    """§5, "Is this service's clock ahead?", on one subscriber's monotonic
-    clock: yes, a ``clock_ahead`` fault with no confirmation of the status
-    heard since; no, a confirmation after the last fault, or with none
-    heard; unobservable, neither heard."""
-    if last_fault_ns is not None and (last_confirmation_ns is None or last_confirmation_ns < last_fault_ns):
-        return "yes"
-    if last_confirmation_ns is not None:
-        return "no"
-    return UNOBSERVABLE
+def clock_question(presence: str, descriptor: dict[str, Any] | None, heard: list[str]) -> tuple[str, str]:
+    """§5, "Is this service's clock ahead?" (0.3, ``conformance/clock.json``),
+    over what one subscriber heard of one service in arrival order:
+    ``status`` (a confirmation), ``status_deleted`` (no confirmation, §2.3),
+    ``clock_ahead`` (a fault of that code, whatever its level and stamp) and
+    ``fault`` (another code). Not asked as the first question's for an
+    absent service or one whose descriptor does not list health.v1; else
+    yes on a clock_ahead fault with no confirmation after it, no on a
+    confirmation after the last one (or with none heard), and unobservable
+    when neither was heard. A fault heard is the service's own word,
+    whatever else presence says."""
+    if presence == "absent":
+        return NOT_ASKED, "absent"
+    if presence == "present" and descriptor is not None and not descriptor.get("lists"):
+        return NOT_ASKED, "not_listed"
+    last_fault = max((i for i, x in enumerate(heard) if x == "clock_ahead"), default=None)
+    confirmations = [i for i, x in enumerate(heard) if x == "status"]
+    if last_fault is not None and not any(i > last_fault for i in confirmations):
+        return "yes", "clock_ahead"
+    if confirmations:
+        return "no", "confirmed"
+    return UNOBSERVABLE, "nothing_heard"
+
+
+def heard_from(subscriber: Any, address: str) -> list[str]:
+    """What one subscriber heard of ``address``'s health, in arrival order,
+    as clock.json writes it: ``status``, ``status_deleted``, ``clock_ahead``
+    or ``fault``."""
+    status_key = f"zk2/{address}/{IFACE}/state/status"
+    faults_key = f"zk2/{address}/{IFACE}/stream/faults"
+    out: list[tuple[int, str]] = []
+    for x in subscriber.of(status_key):
+        out.append((x.arrival_ns, "status" if x.kind == "put" else "status_deleted"))
+    for x in subscriber.of(faults_key):
+        f = decode_fault(x.payload)
+        out.append((x.arrival_ns, "clock_ahead" if f is not None and f["code"] == "clock_ahead" else "fault"))
+    return [k for _, k in sorted(out)]
+
+
+def clock_from(subscriber: Any, address: str, presence: str = "present",
+               descriptor: dict[str, Any] | None = None) -> str:
+    """§5's clock question over what ``subscriber`` heard (clock.json)."""
+    return clock_question(presence, descriptor if descriptor is not None else {"lists": True},
+                          heard_from(subscriber, address))[0]
 
 
 # -- the payloads (§3, proto3) --------------------------------------------------------

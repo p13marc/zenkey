@@ -33,8 +33,8 @@ operations.md §2 (fan-out over templates), the tool rules of 0.10 to 0.13,
 access control from §11 (``zk2py.acl_interop``: security.md §1–§3 on
 generated grants), ``hostid.v1`` with core R1's ``self.system``
 providers (0.20), ``freshness.v1``'s re-puts and judgements (0.21), and
-``health.v1`` (text 0.2), across both implementations. ``--only`` picks
-some of them.
+``health.v1`` (text 0.2), and the population budget (core §2.7, 0.24),
+across both implementations. ``--only`` picks some of them.
 
 Exit 0 when every check passes, 1 when any fails, 2 when it could not run.
 A rule the owner example is known not to meet is reported XFAIL (or XPASS),
@@ -2683,7 +2683,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         rd, _ = h.read_near(t_sess, "lab/ahead", subscriber=sa, trust=word, get=False)
         a = h.judge(rd)
         conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
-        q = h.clock_ahead(afaults[-1].arrival_ns if afaults else None, conf[-1] if conf else None)
+        q = h.clock_from(sa, "lab/ahead")
         report.check(run, "step 2: no status put after the fault; the fault again within 31 s; its tokens present; "
                           "at 65 s S judges the status stale, never FAILED, and the clock question answers yes",
                      not puts_after and gap is not None and gap <= 31 and len(pres.instances) == 1
@@ -2700,7 +2700,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         a = h.judge(rd)
         conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
         allf = [x.arrival_ns for x in sa.of(afk) if (h.decode_fault(x.payload) or {}).get("code") == "clock_ahead"]
-        q = h.clock_ahead(allf[-1] if allf else None, conf[-1] if conf else None)
+        q = h.clock_from(sa, "lab/ahead")
         report.check(run, "step 3: `clock-offset 0`: the status re-put within a few seconds, no clock_ahead after, "
                           "S judges healthy, ok, and the clock question answers no",
                      line == "clock-offset 0" and bool(reput) and (reput[0].arrival_ns - t_fix) <= 5 * fr.NS
@@ -2806,6 +2806,212 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         r1.close()
 
 
+BUDGET_TOML = "impl/python/interop/zk2py_budget.v1.toml"
+
+
+def run_python_budget(report: Report, exe: Path) -> None:
+    """Core §2.7, the population budget (0.24), across the two
+    implementations, through a router R1 of the runner's:
+    - the owner example's ``health.v1/state/checks/{check}``, a templated
+      state of cardinality 64, which it holds as many members of as its
+      ``--health-check`` flags and ``check`` commands give it: zk2py judges
+      its population from complete S4 GETs, at the bound and past it, and a
+      GET that ran to its timeout (the owner stopped) is incomplete;
+    - zk2py's owners of ``zk2py_budget.v1``: a state whose bound the
+      descriptor lowers, an event with a rate and a 60 s retention, so that
+      a window of one retention is a complete reading, and a stream, whose
+      complete window would take an hour. A conforming owner refuses what
+      §2.7's rule forbids; a test owner that breaks it is the finding."""
+    import signal
+
+    from . import budget as bg
+    from . import live
+    from .contract import load_contract
+    from .owner import BudgetExceeded
+    from .owner import Owner as PyOwner
+
+    contract = load_contract(REPO / BUDGET_TOML)
+    r1, ep, _ = _r1()
+    tool = live.open_client(ep)
+    rusts: list[Owner] = []
+    pys: list[Any] = []
+    windows: list[Any] = []
+    try:
+        # -- the owner example's checks ---------------------------------------
+        run = "core 0.24 §2.7: the owner example's health checks, a templated state of cardinality 64"
+        flags = ["--health", "--health-status", "OK:serving"]
+        for i in range(10):
+            flags += ["--health-check", f"c{i}=OK"]
+        rust = Owner(exe, "lab/svc", [], connect=ep, flags=flags)
+        rusts.append(rust)
+        ready = rust.wait_for("ready ", 120)
+        if not report.check(run, "it starts with 10 checks", ready is not None,
+                            f"ready {ready!r}; stderr {rust.stderr[-2:]}"):
+            return
+        doc, _ = _doc(tool, ready)
+        entry = next((e for e in doc.get("interfaces") or [] if e.get("iface") == "health.v1"), {})
+        stated = (entry.get("cardinality") or {}).get("state/checks/{check}")
+        b = bg.bound(64, [stated])
+        sel = "zk2/lab/svc/health.v1/state/checks/*"
+        reading, members = bg.get_population(tool, sel)
+        v = bg.population("state", b, None, reading)
+        report.check(run, "the bound is the contract's, 64, its descriptor stating none; a complete S4 GET answers "
+                          "10 members: within, complete",
+                     b == 64 and reading == bg.GetReading(10, True) and v.pair() == {"verdict": "within",
+                                                                                     "reason": "complete"},
+                     f"stated {stated}, bound {b}; {reading}; {v.pair()}")
+        answers = [rust.command(f"check c{i} OK") for i in range(10, 64)]
+        reading, _ = bg.get_population(tool, sel)
+        v = bg.population("state", b, None, reading)
+        report.check(run, "driven to 64 checks: the complete GET answers 64, exactly the bound: within, complete",
+                     all(a and a.startswith("health ") for a in answers) and reading == bg.GetReading(64, True)
+                     and v.pair() == {"verdict": "within", "reason": "complete"},
+                     f"{reading}; {v.pair()}; last answer {answers[-1]!r}")
+        over = rust.command("check c64 OK")
+        reading, _ = bg.get_population(tool, sel)
+        v = bg.population("state", b, None, reading)
+        report.check(run, "a 65th check: the owner refuses it (§2.7's rule, health.v1 §2.3), and the complete GET "
+                          "still answers 64: within",
+                     over is not None and over.startswith("refused") and reading.members == 64
+                     and v.verdict == "within", f"answer {over!r}; {reading}; {v.pair()}")
+        rust.command("retire c0")
+        time.sleep(0.3)
+        st = live.get_state(tool, sel)
+        reading, members = bg.get_population(tool, sel)
+        report.check(run, "a retired check is a reply_del, not a member: 63",
+                     reading == bg.GetReading(63, True) and any(r.deleted for r in st.replies),
+                     f"{reading}, {sum(1 for r in st.replies if r.deleted)} reply_del")
+        rust.proc.send_signal(signal.SIGSTOP)
+        try:
+            reading, _ = bg.get_population(tool, sel, timeout=1.0)
+        finally:
+            rust.proc.send_signal(signal.SIGCONT)
+        v = bg.population("state", b, None, reading)
+        report.check(run, "the owner stopped (SIGSTOP): the GET ends at its timeout with an error reply, so it is "
+                          "incomplete, and the verdict unobservable, incomplete, never within",
+                     not reading.complete and v.pair() == {"verdict": "unobservable", "reason": "incomplete"},
+                     f"{reading}; {v.pair()}")
+
+        # -- zk2py's state, its bound lowered by its descriptor -----------------
+        run = "core 0.24 §2.7: zk2py's owner of zk2py_budget.v1, a state whose descriptor lowers 4 to 3"
+        good = PyOwner("lab", "budget", [contract], connect=ep,
+                       cardinality={"zk2py_budget.v1": {"state/items/{id}": 3}})
+        good.start()
+        pys.append(good)
+        # The event window opens now, the owner present: it must last one
+        # retention, 60 s.
+        ev_sel = "zk2/lab/budget/zk2py_budget.v1/events/alarms/*/*"
+        w_ev = bg.Window(tool, ev_sel, "lab/budget", event=True)
+        windows.append(w_ev)
+        base = good.prefix(contract)
+        for i in "abc":
+            good.set_state(f"{base}/state/items/{i}", b"x")
+        try:
+            good.set_state(f"{base}/state/items/d", b"x")
+            refused = None
+        except BudgetExceeded as e:
+            refused = str(e)
+        doc_g, _ = _doc(tool, good.instance_key)
+        e_g = next(e for e in doc_g.get("interfaces") or [] if e.get("iface") == "zk2py_budget.v1")
+        b_items = bg.bound(4, [(e_g.get("cardinality") or {}).get("state/items/{id}")])
+        sel_items = f"{base}/state/items/*"
+        reading, _ = bg.get_population(tool, sel_items)
+        v = bg.population("state", b_items, None, reading)
+        report.check(run, "its descriptor states 3; the owner refuses a 4th live member; a complete GET answers 3: "
+                          "within, complete",
+                     b_items == 3 and refused is not None and reading == bg.GetReading(3, True)
+                     and v.pair() == {"verdict": "within", "reason": "complete"},
+                     f"bound {b_items}; refused {refused!r}; {reading}; {v.pair()}")
+        good.delete_state(f"{base}/state/items/c")
+        good.set_state(f"{base}/state/items/d", b"x")
+        reading, _ = bg.get_population(tool, sel_items)
+        report.check(run, "a deleted member is not live: after deleting c, d is accepted, and the GET answers 3, "
+                          "c's reply_del no member", reading == bg.GetReading(3, True), str(reading))
+        over = PyOwner("lab", "over", [contract], connect=ep, budget=False)
+        over.start()
+        pys.append(over)
+        obase = over.prefix(contract)
+        for i in "abcde":
+            over.set_state(f"{obase}/state/items/{i}", b"x")
+        reading, _ = bg.get_population(tool, f"{obase}/state/items/*")
+        v = bg.population("state", bg.bound(4, [None]), None, reading)
+        report.check(run, "a test owner that breaks the rule holds 5 items against 4: the finding, over_bound",
+                     v.pair() == {"verdict": "exceeds", "reason": "over_bound"}, f"{reading}; {v.pair()}")
+
+        # -- a stream: a window short of an hour --------------------------------
+        run = "core 0.24 §2.7: a templated stream of cardinality 2, read by a window"
+        w_good = bg.Window(tool, f"{base}/stream/samples/*", "lab/budget")
+        w_over = bg.Window(tool, f"{obase}/stream/samples/*", "lab/over")
+        windows += [w_good, w_over]
+        time.sleep(0.3)
+        good.publish(f"{base}/stream/samples/a", b"1")
+        good.publish(f"{base}/stream/samples/b", b"1")
+        try:
+            good.publish(f"{base}/stream/samples/c", b"1")
+            refused = None
+        except BudgetExceeded as e:
+            refused = str(e)
+        for i in "abc":
+            over.publish(f"{obase}/stream/samples/{i}", b"1")
+        time.sleep(1.0)
+        vg = bg.population("stream", 2, None, w_good.reading())
+        vo = bg.population("stream", 2, None, w_over.reading())
+        report.check(run, "the conforming owner refuses a third live member; its 2 in a window of seconds are "
+                          "unobservable, window_too_short (a complete window lasts an hour); the test owner's 3 are "
+                          "the finding in the same short window",
+                     refused is not None and vg.pair() == {"verdict": "unobservable", "reason": "window_too_short"}
+                     and vo.pair() == {"verdict": "exceeds", "reason": "over_bound"},
+                     f"refused {refused!r}; good {vg.pair()}, over {vo.pair()}")
+
+        # -- an event: a window of one retention ---------------------------------
+        run = "core 0.24 §2.7: a templated event, cardinality 2, rate low, retention 60 s, read by a window"
+        w_ov_ev = bg.Window(tool, f"{obase}/events/alarms/*/*", "lab/over", event=True)
+        windows.append(w_ov_ev)
+        time.sleep(0.3)
+        good.occur(f"{base}/events/alarms/a", b"!")
+        good.occur(f"{base}/events/alarms/b", b"!")
+        refusals = []
+        for member in ("a", "c"):
+            try:
+                good.occur(f"{base}/events/alarms/{member}", b"!")
+                refusals.append(None)
+            except BudgetExceeded as e:
+                refusals.append(str(e))
+        for member in ("a", "a", "b", "c"):
+            over.occur(f"{obase}/events/alarms/{member}", b"!")
+        time.sleep(1.0)
+        r_ov = w_ov_ev.reading()
+        vp = bg.population("event", 2, 60 * bg.NS, r_ov)
+        vr = bg.rate("low", w_ov_ev.rate_members(), r_ov.listened_ns, r_ov.lossless)
+        report.check(run, "the conforming owner refuses a second occurrence of a within a minute (the rate) and a "
+                          "third member (the bound); the test owner's a twice and three members are both findings, "
+                          "in a window of a second",
+                     all(x is not None for x in refusals)
+                     and vp.pair() == {"verdict": "exceeds", "reason": "over_bound"}
+                     and vr.pair() == {"verdict": "exceeds", "reason": "rate_exceeded"},
+                     f"refusals {refusals}; population {vp.pair()}, rate {vr.pair()}")
+        _sleep_until(w_ev.start_ns + 61 * bg.NS)
+        r_ev = w_ev.reading()
+        vp = bg.population("event", 2, 60 * bg.NS, r_ev)
+        vr = bg.rate("low", w_ev.rate_members(), r_ev.listened_ns, r_ev.lossless)
+        report.check(run, "a window of one retention (61 s), the owner present throughout, no delivery lost: two "
+                          "members, within, complete, and the rate kept",
+                     r_ev.present and r_ev.listened_ns >= 60 * bg.NS
+                     and vp.pair() == {"verdict": "within", "reason": "complete"}
+                     and vr.pair() == {"verdict": "within", "reason": "rate_kept"},
+                     f"heard {sorted(r_ev.heard)}, listened {r_ev.listened_ns / 1e9:.1f} s, present {r_ev.present}; "
+                     f"population {vp.pair()}, rate {vr.pair()}")
+    finally:
+        for w in windows:
+            w.close()
+        for o in pys:
+            o.close()
+        for o in rusts:
+            o.close()
+        tool.close()
+        r1.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.live_interop", description=__doc__.split("\n")[0])
     ap.add_argument("--owner", type=Path, default=Path(os.environ.get("ZK2PY_OWNER", DEFAULT_OWNER)),
@@ -2825,6 +3031,7 @@ def main(argv: list[str] | None = None) -> int:
         "0.16": run_python_016, "hostid": lambda r: run_python_hostid(r, args.owner),
         "freshness": lambda r: run_python_freshness(r, args.owner, args.consume),
         "health": lambda r: run_python_health(r, args.owner, args.consume),
+        "budget": lambda r: run_python_budget(r, args.owner),
         "acl": lambda r: __import__("zk2py.acl_interop", fromlist=["run_python_acl"]).run_python_acl(r, REPO),
     }
     ap.add_argument("--only", action="append", choices=sorted(python_runs),

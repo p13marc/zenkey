@@ -112,6 +112,12 @@ class OwnerRefused(RuntimeError):
     """The owner must not start (§3.2, §8.2 step 2)."""
 
 
+class BudgetExceeded(RuntimeError):
+    """Core §2.7 (0.24): "An owner MUST NOT hold more live members of a
+    templated stream, state or event than its bound", and MUST NOT publish
+    an event's member beyond its rate."""
+
+
 class ClockAhead(RuntimeError):
     """Core §4.3 "Ahead": a detection shows the owner's clock beyond its
     router's delta, so it "MUST stop writing state, re-puts included"."""
@@ -266,7 +272,8 @@ class Owner:
                  router_connect: str | None = None, hostid: Any = None,
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
-                 initial: dict[str, bytes] | None = None, hlc: bool = True):
+                 initial: dict[str, bytes] | None = None, hlc: bool = True,
+                 cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -308,6 +315,12 @@ class Owner:
           raises :class:`ClockAhead`, and no re-put is made
           (freshness.v1 §2.10).
 
+        - ``cardinality``: per interface, ``<kind token>/<template>`` -> the
+          bound this instance states in its descriptor (§3.3), lowering the
+          contract's (§2.7).
+        - ``budget``: False lets a test owner break §2.7's rule on purpose:
+          by default a put of a new live member beyond the bound, or an
+          event occurrence beyond its rate, raises :class:`BudgetExceeded`.
         - ``hlc``: False runs a client's session without its HLC, a test
           rig only: core §4.3 asks every serving session for one. Its puts
           then leave with the stamps the owner gives them, so an offset
@@ -381,6 +394,16 @@ class Owner:
         self._refresher: threading.Thread | None = None
         self.initial = dict(initial or {})
         self.hlc = hlc
+        self.cardinality = {k: dict(v) for k, v in (cardinality or {}).items()}
+        self.budget = budget
+        #: §2.7: a templated member's resource, by key
+        self._member_of: dict[str, tuple[Any, dict[str, Any]]] = {}
+        #: a templated stream member's last publication (monotonic s)
+        self._stream_last: dict[str, float] = {}
+        #: an event member's occurrences (monotonic s)
+        self._occurrences: dict[str, list[float]] = {}
+        #: every occurrence put, (key, payload)
+        self.events_put: list[tuple[str, bytes]] = []
         #: called with (held, offset in ns) on each of the guard's transitions
         self.on_guard: Any = None
 
@@ -595,7 +618,7 @@ class Owner:
                 "unavailable": [{"resource": f"{r['token']}/{r['template']}",
                                  "cause": self.unavailable[f"{r['token']}/{r['template']}"]}
                                 for r, status in plan[c.interface] if status == "listed"],
-                "cardinality": {},
+                "cardinality": dict(self.cardinality.get(c.interface, {})),
             } for c in self.contracts],
             "capabilities": sorted(self.capabilities),
             # 0.10: `optional` is true for a role the instance works without,
@@ -627,6 +650,12 @@ class Owner:
             if self.ahead:
                 raise ClockAhead(f"{key}: the clock guard holds state writes (core §4.3)")
             self._member_publisher(key)
+            held = self._held.get(key)
+            if key in self._member_of and (held is None or held.payload is None):
+                # §2.7: a new live member. A key with a value is live.
+                live = [k for k, h in self._held.items() if h.payload is not None
+                        and self._member_of.get(k, (None, None))[1] is self._member_of[key][1]]
+                self._check_budget(key, len(live))
             stamp = self.mint()
             enc = self._encodings[key]
             self._publishers[key].put(payload, encoding=enc, timestamp=stamp)
@@ -658,10 +687,11 @@ class Owner:
             raise ValueError(f"{key}: a member key is concrete (R6)")
         for c in self.contracts:
             for r in c.canonical["resources"]:
-                if r["kind"] != "state" or not r["params"]:
+                if r["kind"] not in ("state", "stream") or not r["params"]:
                     continue
                 pattern = zenoh.KeyExpr(f"{self.prefix(c)}/{r['token']}/{_template_key(r['template'])}")
                 if pattern.intersects(zenoh.KeyExpr(key)):
+                    self._member_of[key] = (c, r)
                     enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else (
                         "application/json" if r.get("encoding") != "cbor" else "application/cbor") \
                         if r["type"]["kind"] == "jsonschema" else "application/protobuf"
@@ -673,6 +703,69 @@ class Owner:
                     self._publishers[key], self._encodings[key] = pub, enc
                     return
         raise KeyError(f"{key}: no state resource of this owner holds it")
+
+    # -- core §2.7, the population budget -----------------------------------
+
+    def bound_of(self, c: Any, r: dict[str, Any]) -> int | None:
+        """§2.7 "The bound": the cardinality this instance states, when from
+        1 to the contract's, else the contract's; None for no ceiling."""
+        contract = r["cardinality"]
+        stated = self.cardinality.get(c.interface, {}).get(f"{r['token']}/{r['template']}")
+        b = stated if stated is not None and 1 <= stated <= contract else contract
+        return None if b == 4294967295 else b
+
+    def _check_budget(self, key: str, live_others: int) -> None:
+        c, r = self._member_of[key]
+        b = self.bound_of(c, r)
+        if self.budget and b is not None and live_others >= b:
+            raise BudgetExceeded(f"{key}: {live_others} live members of {r['token']}/{r['template']} already, "
+                                 f"the bound {b} (core §2.7)")
+
+    def occur(self, member: str, payload: bytes) -> str:
+        """An event occurrence (§2.6): one put on ``<member>/<ulid>``, the
+        ULID minted here. By default the owner keeps §2.7: no new member
+        while ``bound`` members have an occurrence within the retention, and
+        no more than ``rate`` occurrences of a member within its period."""
+        from . import budget as bg
+        from .live import new_ulid
+
+        assert self.session is not None
+        found = None
+        for c in self.contracts:
+            for r in c.canonical["resources"]:
+                pattern = zenoh.KeyExpr(f"{self.prefix(c)}/{r['token']}/{_template_key(r['template'])}")
+                if r["kind"] == "event" and pattern.intersects(zenoh.KeyExpr(member)):
+                    found = (c, r)
+        if found is None:
+            raise KeyError(f"{member}: no event resource of this owner holds it")
+        c, r = found
+        now = time.monotonic()
+        with self._writes:
+            if self.budget:
+                n, period = bg.parse_rate(r["rate"])
+                recent = [x for x in self._occurrences.get(member, []) if now - x < period / 1e9]
+                if len(recent) >= n:
+                    raise BudgetExceeded(f"{member}: {len(recent)} occurrence(s) within the period of "
+                                         f"{r['rate']} already (core §2.7)")
+                if r["params"] and member not in self._occurrences_live(c, r, now):
+                    b = self.bound_of(c, r)
+                    live = self._occurrences_live(c, r, now)
+                    if b is not None and len(live) >= b:
+                        raise BudgetExceeded(f"{member}: {len(live)} live members of {r['template']}, the bound "
+                                             f"{b} (core §2.7)")
+            key = f"{member}/{new_ulid(int(time.time() * 1000))}"
+            enc = r["type"]["media_type"] if r["type"]["kind"] == "raw" else "application/protobuf"
+            self.session.put(key, payload, encoding=enc)
+            self._occurrences.setdefault(member, []).append(now)
+            self.events_put.append((key, payload))
+            return key
+
+    def _occurrences_live(self, c: Any, r: dict[str, Any], now: float) -> set[str]:
+        """§2.7: an event member is live "for the retention after its last
+        occurrence"."""
+        pattern = zenoh.KeyExpr(f"{self.prefix(c)}/{r['token']}/{_template_key(r['template'])}")
+        return {m for m, ts in self._occurrences.items()
+                if ts and now - ts[-1] < r["retention_s"] and pattern.intersects(zenoh.KeyExpr(m))}
 
     def close_writer(self, key: str) -> None:
         """freshness.v1 §2.4: "The re-puts stop … when its writer for that
@@ -739,6 +832,18 @@ class Owner:
         """Put a stream sample on its declared publisher, with the
         resource's Encoding (§7.2), stamped ``timestamp`` when given (else
         by the session, core §4.1)."""
+        if key not in self._publishers:
+            self._member_publisher(key)
+        if key in self._member_of:
+            # §2.7: a stream member is live "for an hour after the owner last
+            # published on it".
+            now = time.monotonic()
+            c, r = self._member_of[key]
+            live = [k for k, last in self._stream_last.items() if k != key and now - last < 3600
+                    and self._member_of.get(k, (None, None))[1] is self._member_of[key][1]]
+            if key not in self._stream_last or now - self._stream_last[key] >= 3600:
+                self._check_budget(key, len(live))
+            self._stream_last[key] = now
         if timestamp is None:
             self._publishers[key].put(payload, encoding=self._encodings[key])
         else:

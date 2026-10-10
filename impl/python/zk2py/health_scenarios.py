@@ -458,7 +458,7 @@ def section4(report: Report) -> None:
         a = h.judge(r)
         last_fault = ahead_faults[-1].arrival_ns if ahead_faults else None
         confirmations = [x.arrival_ns for x in s.of(sk) if x.kind == "put"]
-        q = h.clock_ahead(last_fault, confirmations[-1] if confirmations else None)
+        q = h.clock_from(s, "lab/ahead")
         report.check(sec, "step 2: no status put from the detection on; the fault again within 31 s; the tokens "
                           "stay present; at 65 s S judges the status stale, never FAILED, and the clock question "
                           "answers yes",
@@ -482,7 +482,7 @@ def section4(report: Report) -> None:
         confirmations = [x.arrival_ns for x in s.of(sk) if x.kind == "put"]
         all_faults = [x.arrival_ns for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
                       if f and f["code"] == "clock_ahead"]
-        q = h.clock_ahead(all_faults[-1] if all_faults else None, confirmations[-1] if confirmations else None)
+        q = h.clock_from(s, "lab/ahead")
         first_reput = (reput[0].arrival_ns - t_rel) / fr.NS if reput else None
         report.check(sec, "step 3: the clock set right, the guard releases; S receives the status re-put within a "
                           "few seconds, and no clock_ahead fault after; S judges healthy, ok, and the clock "
