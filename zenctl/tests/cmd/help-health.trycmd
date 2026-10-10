@@ -1,0 +1,119 @@
+`health` (#721, PF) reads `health.v1` as the profile's reader does: every
+service in the namespace, or one, judged healthy, unhealthy, stale,
+unobservable or not asked, with §5's other answers and the roll-up. A
+judgement verb: exit 1 on a finding (unhealthy, stale, a break of §2.2 seen in
+both readings, a clock ahead), 0 when every service asked is healthy, 2 when
+one is unobservable, none was asked, or the run could not start.
+
+```console
+$ zenctl health --help
+Read every service's health.v1, or one's: healthy, unhealthy, stale.
+
+health.v1's reader (spec/profiles/health/v1.md §2.11), through a session in the deployment's namespace: presence and each descriptor — a service implements health.v1 when its descriptor lists it, token or not (§2.7) — then two readings, each one GET of the owners' health.v1/state/** that answers a status and its checks together (§2.4), after a window's subscription to every status and to the faults. Per service, §5's questions: is it healthy (healthy; unhealthy at its level, by its status or a current check worse than it; stale, which is never FAILED and never down); does its status agree with its checks (a break seen in both readings is the finding); is its clock ahead (a clock_ahead fault no confirmation followed); and the roll-up, the worst established level with every verdict counted apart. An absent service is not asked — presence's word, not a level — and an archive's status for it is shown last-known, never current. A status reply's age needs a trusted clock: the window measures one on the owners' live puts, or --clocks-synced takes the deployment's word. Exit 0 every service asked is healthy, 1 a finding (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service unobservable, none asked, or a run that could not start.
+
+Usage: zenctl health [OPTIONS] [SYSTEM/SERVICE]
+
+Arguments:
+  [SYSTEM/SERVICE]
+          One service, `<system>/<service>`; omitted, every service presence shows in the namespace
+
+Options:
+      --clocks-synced
+          This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a status reply's stamp is then aged against this clock (freshness.v1 §2.6), and no window is needed
+
+      --for <SECS>
+          The reading's window, seconds: a subscription to every status and to the faults, which measures this host's clock on the owners' live puts, confirms each status, and answers "is its clock ahead?". Default 31, just over the 30 s an owner re-puts its status within; with --clocks-synced, no window unless given
+
+      --grace <SECS>
+          Seconds between the two readings when no window separates them: a status better than a check is reported from two readings a grace apart (health.v1 §2.2)
+          
+          [default: 2]
+
+      --across-face <STATUS>
+          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements health.v1 (R7). `crosses` when the face lets its state/status cross, `denied` when it does not — health is then unobservable, never unhealthy or down (health.v1 §2.8)
+
+          Possible values:
+          - crosses: The face lets `state/status` cross: its puts are the service's liveness and its health
+          - denied:  The face does not: health is unobservable across it
+
+      --namespace <NS>
+          The deployment namespace: the session is opened in it.
+          
+          zk2 keys are base-relative (`zk2/<system>/<service>/…`), and a deployment's services run in a zenoh session namespace that prefixes them on the wire. A resolved verb opens its session in the same one, so it reads what a consumer of the deployment reads. `--base` is the same flag, and so is the active context's `base`. Resolution: flag > env > active context > empty — the bus-root deployment, no namespace. `zenctl namespace list` finds the namespaces in use.
+          
+          [env: ZENCTL_BASE=]
+          [alias: --base]
+
+      --context <NAME>
+          Use a named context from the config file for this invocation (default: the file's `current` pointer; env `ZENCTL_CONTEXT`)
+
+  -c, --connect <CONNECT>
+          Endpoint to connect to, repeatable (e.g. `tcp/127.0.0.1:7447`).
+          
+          The session is a zenoh client of these endpoints: no listener of its own, no gossip, nothing the mesh can route through. An endpoint nothing answers fails the command (exit 2) rather than reading as an empty bus, and one that does not parse is refused by name (exit 2).
+
+  -l, --listen <LISTEN>
+          Endpoint to listen on, repeatable — which makes the session a peer
+
+      --scouting
+          Enable multicast scouting (off by default, and think first)
+
+      --timeout <SECS>
+          Seconds to wait for replies (default 5; a context may override the default). Bounds the presence read, each descriptor GET and each contract retrieval, a state GET, and a call — which, given none, waits what its operation recommends (`timeout_ms`)
+
+      --zenoh-config <FILE>
+          Zenoh JSON5 config file: the passthrough that reaches a secured bus.
+          
+          Loaded as the base layer; --connect/--listen/--scouting apply on top when given. A file that sets a session namespace is refused: the namespace is `--namespace`'s to set.
+          
+          [env: ZENCTL_ZENOH_CONFIG=]
+
+      --format <FORMAT>
+          Output format: table for humans, json (one document) or ndjson (one object per row) for scripts; auto = table on a tty, ndjson piped
+          
+          [env: ZENCTL_FORMAT=]
+          [default: auto]
+          [possible values: auto, table, json, ndjson]
+
+      --color <COLOR>
+          Colour: auto (a terminal gets it, a pipe does not), always, never.
+          
+          Colour only ever re-encodes a distinction the plain text already makes, so stripping every escape leaves the same information. `NO_COLOR` and `CLICOLOR_FORCE` are honoured under `auto`, and `--format json|ndjson` never carries an escape whatever this says.
+
+          Possible values:
+          - auto:   A terminal gets colour; a pipe does not. Honours `NO_COLOR` and `CLICOLOR_FORCE`
+          - always
+          - never
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+```
+
+Across a constrained face the deployment's word stands for presence, so it
+names one service: without one, clap refuses it, exit 2.
+
+```console
+$ zenctl health --across-face crosses
+? 2
+error: the following required arguments were not provided:
+  <SYSTEM/SERVICE>
+
+Usage: zenctl health --across-face <STATUS> --namespace <NS> <SYSTEM/SERVICE>
+
+For more information, try '--help'.
+
+```
+
+A window of zero would hear nothing and measure no clock: refused before any
+session opens, exit 2, the reserved non-verdict.
+
+```console
+$ zenctl health --for 0 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: --for must be a positive number of seconds, got 0
+health: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```

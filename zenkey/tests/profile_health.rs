@@ -311,19 +311,33 @@ fn is_health_token(k: &ZkKey) -> bool {
 }
 
 /// v1.md §5's last question, "is this service's clock ahead?", from S's
-/// log: yes on a `clock_ahead` fault with no confirmation of the status
-/// heard since; no when the status was confirmed after the last one, or
-/// with none heard.
+/// log, by `zenkey_model::health::clock_ahead` (text 0.3, its fixture
+/// `clock.json`): yes on a `clock_ahead` fault with no confirmation of the
+/// status heard since; no when the status was confirmed after the last one,
+/// or with none heard.
 fn clock_ahead(log: &[Rec]) -> bool {
-    let last_fault = log
+    let heard: Vec<hm::Heard> = log
         .iter()
-        .rposition(|r| r.is_fault() && r.fault().code == health::CLOCK_AHEAD);
-    let last_status = log.iter().rposition(|r| r.is_status() && !r.delete);
-    match (last_fault, last_status) {
-        (Some(f), Some(s)) => f > s,
-        (Some(_), None) => true,
-        (None, _) => false,
-    }
+        .filter_map(|r| {
+            if r.is_status() {
+                Some(if r.delete {
+                    hm::Heard::StatusDeleted
+                } else {
+                    hm::Heard::Status
+                })
+            } else if r.is_fault() {
+                Some(if r.fault().code == health::CLOCK_AHEAD {
+                    hm::Heard::ClockAhead
+                } else {
+                    hm::Heard::Fault
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    let present = Presence::Present(Listing::Listed { token: true });
+    hm::clock_ahead(present, &heard).answer == hm::Answer::Yes
 }
 
 /// §1: the status answers a GET made at the instance token and at the

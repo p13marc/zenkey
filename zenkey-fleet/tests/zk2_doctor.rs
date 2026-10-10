@@ -982,3 +982,151 @@ async fn a_far_router_is_verified_through_the_router_that_lists_it() {
     );
     drop((r1, r2));
 }
+
+// ── hostid.v1 §2.12 (#721, PF) ─────────────────────────────────────────────
+
+/// `spec/profiles/hostid/scenarios.md`'s machine ids (each a case of its
+/// `conformance/vectors.json`).
+const M1: &str = "b642b4217b34b1e8d3bd915fc65c4452";
+const M2: &str = "0123456789abcdef0123456789abcdef";
+
+/// A root standing in for `/`, its `etc/machine-id` holding `id` and a
+/// newline, and `var/lib` in it (the scenarios' conventions).
+fn root(id: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NTH: AtomicU64 = AtomicU64::new(0);
+    let r = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "hostid-s6-{}-{}",
+        std::process::id(),
+        NTH.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&r);
+    std::fs::create_dir_all(r.join("etc")).expect("etc");
+    std::fs::create_dir_all(r.join("var/lib")).expect("var/lib");
+    std::fs::write(r.join("etc/machine-id"), format!("{id}\n")).expect("machine-id");
+    r
+}
+
+/// `@hostid.v1/sysinfo` on `root`, in a session of its own: a pure
+/// consumer, its `meta.host` `host`, its `meta.zid` its session's unless
+/// `zid` is false; implementing `also` in its tokenless set when given.
+async fn sysinfo(
+    ep: &str,
+    root: &std::path::Path,
+    host: &str,
+    zid: bool,
+    also: Option<&Contract>,
+) -> (zenoh::Session, Service) {
+    let s = client(ep).await;
+    let name = zenkey::model::grammar::Name::new("service", "sysinfo").expect("a name");
+    let mut cfg = zenkey::ServiceConfig::minted(name);
+    cfg.meta.insert("host".into(), json!(host));
+    if !zid {
+        // What the deployment states in `meta` wins: a null zid is no zid
+        // stated.
+        cfg.meta.insert("zid".into(), Value::Null);
+    }
+    if let Some(c) = also {
+        cfg = cfg.tokenless(c.iface.clone());
+    }
+    let minter = zenkey::hostid::HostIdMinter::new(zenkey::hostid::HostIdSource::at(root));
+    let mut b = ServiceBuilder::with_hostid(&s, cfg, &minter);
+    if let Some(c) = also {
+        b.implement(Implementation::new(c.clone()))
+            .expect("implement");
+        let _ = b.expose(&c.iface, "stream/cpu");
+    }
+    let svc = b.start().await.expect("it starts");
+    (s, svc)
+}
+
+/// `spec/profiles/hostid/scenarios.md` §6 (#721, PF): what a tool — the
+/// doctor's `hostid-duplicate` — concludes. Two roots holding one machine
+/// id, as two hosts booted from one image, each running `sysinfo` in a
+/// session of its own: two instances of one minted address with different
+/// `meta.zid` in both reads, the finding, its cause undecided and never
+/// named. The control (B holding M2) is two systems and no finding; B
+/// stating no `meta.zid` leaves the address undecided; a literal system in
+/// the minted shape is not minted, and not this profile's; and, owners of
+/// an interface whose contract lists `hostid.v1` in `uses`, neither
+/// instance is counted, so the address is undecided too. The scenario's
+/// `sysinfo-x.v1` is spelled `sysinfo_x.v1`: an interface name's segments
+/// are `[a-z][a-z0-9_]*` (E001).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hostid_s6_what_a_tool_concludes() {
+    const S1: &str = "h-bbd1aa1db10b/sysinfo";
+    let only = spec(&[CheckId::HostidDuplicate]);
+    let (a_root, b_root) = (root(M1), root(M1));
+
+    // Step 1: one machine id, two hosts.
+    let (_r1, ep) = router(false).await;
+    let tool = client(&ep).await;
+    let a = sysinfo(&ep, &a_root, "host-a", true, None).await;
+    let b = sysinfo(&ep, &b_root, "host-b", true, None).await;
+    assert_eq!(a.1.address().to_string(), S1);
+    assert_eq!(b.1.address().to_string(), S1);
+    tokens(&tool, "zk2/h-bbd1aa1db10b/sysinfo/@zk/**", 2).await;
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    let f = found(&r, CheckId::HostidDuplicate, S1);
+    assert_eq!(f.severity, DoctorSeverity::Warning);
+    assert!(f.evidence.contains("cause is undecided"), "{f:?}");
+    assert!(
+        f.evidence.contains(&a.1.instance().to_string())
+            && f.evidence.contains(&b.1.instance().to_string()),
+        "{f:?}"
+    );
+    assert!(
+        f.evidence.contains("\"host-a\"") && f.evidence.contains("\"host-b\""),
+        "meta.host shown as evidence: {f:?}"
+    );
+    drop((a, b));
+
+    // Step 2, the control, and step 4: B holds M2, and a third service has
+    // the literal address h-504c6767c349/logger.
+    let (_r2, ep) = router(false).await;
+    let tool = client(&ep).await;
+    let a = sysinfo(&ep, &a_root, "host-a", true, None).await;
+    let b = sysinfo(&ep, &root(M2), "host-b", true, None).await;
+    assert_eq!(b.1.address().to_string(), "h-3f6d94515669/sysinfo");
+    let logger_s = client(&ep).await;
+    let logger = bring_up(&logger_s, config("h-504c6767c349/logger"), &[]).await;
+    tokens(&tool, "zk2/*/*/@zk/**", 3).await;
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    let why = clean(&r, CheckId::HostidDuplicate);
+    assert!(why.starts_with("2 address(es) on minted systems"), "{why}");
+    assert!(
+        why.contains("not this profile's"),
+        "the literal logger: {why}"
+    );
+    drop((a, b, logger, logger_s));
+
+    // Step 3: B states no meta.zid.
+    let (_r3, ep) = router(false).await;
+    let tool = client(&ep).await;
+    let a = sysinfo(&ep, &a_root, "host-a", true, None).await;
+    let b = sysinfo(&ep, &b_root, "host-b", false, None).await;
+    tokens(&tool, "zk2/h-bbd1aa1db10b/sysinfo/@zk/**", 2).await;
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    let why = unseen(&r, CheckId::HostidDuplicate);
+    assert!(why.contains("states no meta.zid"), "{why}");
+    drop((a, b));
+
+    // Step 5: each also owns an interface whose contract lists hostid.v1 in
+    // `uses`, in its tokenless set.
+    let x = load(
+        "[interface]\nname = \"sysinfo_x\"\nmajor = 1\nminor = 0\nuses = [\"hostid.v1\"]\n\
+         [resources.cpu]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n",
+    );
+    let (_r5, ep) = router(false).await;
+    let tool = client(&ep).await;
+    let a = sysinfo(&ep, &a_root, "host-a", true, Some(&x)).await;
+    let b = sysinfo(&ep, &b_root, "host-b", true, Some(&x)).await;
+    tokens(&tool, "zk2/h-bbd1aa1db10b/sysinfo/@zk/**", 2).await;
+    let r = doctor(&bus(&tool, &tool, ""), &only).await;
+    let why = unseen(&r, CheckId::HostidDuplicate);
+    assert!(why.contains("lists hostid.v1 in uses"), "{why}");
+    drop((a, b));
+    for r in [a_root, b_root] {
+        let _ = std::fs::remove_dir_all(r);
+    }
+}

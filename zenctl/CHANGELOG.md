@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `health.v1` and `hostid.v1`'s cloned ids (#721, PF)
+
+A judgement verb over `health.v1` (`spec/profiles/health/v1.md`, text
+0.3), and the doctor and `check conform` asking it; the doctor also judges
+two sessions claiming one minted address (`spec/profiles/hostid/v1.md`
+§2.12).
+
+| Before | Now | Notes |
+|---|---|---|
+| — | `health [SYSTEM/SERVICE] [--clocks-synced] [--for SECS] [--grace SECS] [--across-face crosses\|denied] [--namespace NS]` | §2.11's reader: presence and descriptors (a service implements `health.v1` when its descriptor lists it, token or not), two readings — each one GET of `health.v1/state/**` answering a status and its checks together — after a window's subscription to every status and to the faults. Per service, `verdict` is `healthy`, `unhealthy` (at its `level`), `stale` (never a level), `unobservable` or `not_asked`, with `readings`, `agrees` (a break of §2.2 is `no` only in both readings), `clock_ahead`, the status and checks as read, and an archive's `last_known` for an absent owner, never current; a `rollup`. Rows tagged `service`; the envelope carries `judgement`. Exit 1 on unhealthy, stale, a break or a clock ahead; 0 every service asked healthy; 2 a service unobservable, none asked, or a run that could not start. `--for` defaults to 31 s, or none with `--clocks-synced` |
+| `doctor`: thirteen checks | eighteen: `health-failed` (error), `health-degraded` (warning), `health-stale` (warning), `health-inconsistent` (error), `hostid-duplicate` (warning) | Appended to the check-id vocabulary; `--check`/`--skip`/`--transitions` and a watchdog's `doctor <CHECK-ID>` take them. `hostid-duplicate` names no cause: a collision, a cloned machine id and a second process look alike. A deployment with no `health.v1` service reads the health checks clean ("asked of none"); a scope with no minted address, `hostid-duplicate` clean |
+| — | `doctor --clocks-synced` | The doctor listens to no status, so a `health.v1` status reply's age needs the operator's word that the clocks agree within the HLC delta. Without it, the `health-*` checks of every service implementing `health.v1` are unobservable (exit 2), each reason naming the flag. A watchdog's `doctor health-*` rule runs without it |
+| `doctor`'s scope: presence and routers | and `health` (the GET selector, the services listing `health.v1`, whether `--clocks-synced` was given) | Absent when no `health-*` check was asked |
+| `check conform`: ten cases | twelve: `health` and `health-aggregation`, subject `service` | Asked of a service whose descriptor lists `health.v1`, over the `--for` window: unhealthy or stale, and a break seen in both readings, are violations. Not asked otherwise |
+
 ## Unreleased (`main`, zk2) — `freshness.v1` (#720, PC)
 
 `check conform`'s `freshness` case is asked, against the horizon a

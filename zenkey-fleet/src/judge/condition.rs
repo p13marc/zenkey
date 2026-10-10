@@ -1419,6 +1419,7 @@ mod tests {
                 namespace: String::new(),
                 presence: crate::report::Asked::NotAsked,
                 routers: crate::report::Asked::NotAsked,
+                health: crate::report::Asked::NotAsked,
             },
             checks: CheckId::ALL
                 .into_iter()

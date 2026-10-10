@@ -154,6 +154,7 @@ or `-c tls/other:7447` overrides it for one invocation.
 ```bash
 zenctl service list                                # which zk2 services are up, and what they serve
 zenctl doctor                                      # does the deployment keep the core's rules?
+zenctl health --clocks-synced                      # how well does each service say it serves?
 zenctl echo                                        # every zk2 sample, decoded as its declared type
 ```
 
@@ -192,7 +193,7 @@ One contract for the whole tool, written once in
 | **1** | asked, and the answer is a **finding** | an assertion did not hold; a reply was an error envelope; `--fail-on` tripped; an act (`pub`, `replay`, `gen`) failed |
 | **2** | **no verdict**: the question could not be asked or proven | a usage error; input zenctl refuses (a bad expression, an unknown `--context`, an existing `-o` file); a session that never opened; silence under a fan-out; an observation too impaired (drops) to carry the claim |
 
-Verdict verbs (`check *`, `compat`, `doctor`, `watchdog`) land **any** failure
+Verdict verbs (`check *`, `compat`, `doctor`, `health`, `watchdog`) land **any** failure
 before the question was put on 2, so a dead bus never reads as a pass or as a
 finding.
 
@@ -216,6 +217,11 @@ esac
 # The deployment against the core: exit 1 on an error-severity finding.
 zenctl doctor --namespace prod --fail-on error
 zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state; no admin space here
+zenctl doctor --namespace prod --clocks-synced         # + health.v1's checks, on the word that the clocks agree
+
+# Every service's health.v1: exit 1 on unhealthy, stale, a status better than its checks.
+zenctl health --namespace prod --clocks-synced
+zenctl health host-a/tc --namespace prod               # one service, its clock measured over a 31 s window
 
 # One expectation over a zk2 resource, for CI or a cron job.
 zenctl check expect '*/tc' tc.netif.v1 'bandwidth/{ns}/{iface}' --namespace prod --for 60 --at-least 1
@@ -352,6 +358,10 @@ service's silence, rung by rung — namespace, presence, descriptor, contract,
 the owner's answer, an archive's last-known — stopped at the first cause:
 exit 1 on a cause, 0 when it answers, 2 when a rung cannot be observed) ·
 `zenctl doctor` (a zk2 deployment against the core, one verdict per check) ·
+`zenctl health [SYSTEM/SERVICE]` (each service's `health.v1`: healthy,
+unhealthy at its level, stale — never a level, never down — unobservable or
+not asked, with whether its status agrees with its checks, whether its clock
+is ahead, and the roll-up; exit 1 on a finding, 2 when one cannot be read) ·
 `zenctl watchdog --rule …` (conditions, as transitions).
 
 **Router configuration — generated, then checked.**
@@ -513,7 +523,8 @@ zenctl replay bus.zrec --dry-run        # ALWAYS preview first — replay is pub
 zenctl get '@/**' --zenoh-config tls.json5       # your JSON5 as the base layer — TLS/QUIC/usrpwd reachable
 zenctl admin graph --dot | dot -Tsvg > mesh.svg  # the mesh, labeled: heard-of nodes dashed, you bold
 zenctl admin graph --namespace acme     # …with each zk2 instance on the router that lists its session, or unattached
-zenctl doctor --namespace acme          # thirteen checks; 1 on a finding, 2 if one could not be judged
+zenctl doctor --namespace acme          # eighteen checks; 1 on a finding, 2 if one could not be judged
+zenctl health --namespace acme --clocks-synced   # every service's health.v1, and the worst level among them
 zenctl why acme/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0 --namespace acme  # why silent: the first rung with a cause
 zenctl doctor --check split-brain --grace 3   # one question, presence read twice 3 s apart
 zenctl context create lab --base acme -c tcp/…   # named contexts; completions <shell>
@@ -651,7 +662,7 @@ origin) is gone with the registry it read.
 
 ## `doctor` — a deployment against the core
 
-zk2's doctor (#612, FJ6) asks thirteen questions of a deployment, each worded
+zk2's doctor (#612, FJ6) asks eighteen questions of a deployment, each worded
 so that its finding is the *yes*, and answers each in the judgement shape: a
 finding, clean with the evidence that makes it clean, unobservable with what
 stood in the way, or not asked. The deployment is read through a session in
@@ -673,6 +684,11 @@ none.
 | `shm-memlock-low` | is this host's `RLIMIT_MEMLOCK` below what a shared-memory pool needs? | §7.4 |
 | `admin-unreachable` | does no router answer the admin space? | §4.2 |
 | `router-version-skew` | do the routers run different zenoh versions? | App. B |
+| `health-failed` | is a present service at FAILED, by its fresh status or a current check that status vouches for? (error) | health.v1 §2.1 |
+| `health-degraded` | is a present service at DEGRADED, the same way? (warning) | health.v1 §2.1 |
+| `health-stale` | is a present service's status not confirmed within its 60 s horizon? Never a level, never down (warning) | health.v1 §2.4 |
+| `health-inconsistent` | does an owner hold a status better than a current check, in both of two readings? (error) | health.v1 §2.2 |
+| `hostid-duplicate` | do two sessions claim one address of a minted system, in both presence reads? The cause is undecided, and never named (warning) | hostid.v1 §2.12 |
 
 ```
 $ zenctl doctor --namespace acme -c tcp/127.0.0.1:7447
@@ -696,9 +712,60 @@ green), or a run that could not start. A check you cannot judge here —
 left to read 2: not asked neither passes nor fails. `--check` asks one alone,
 and `--transitions` re-runs and prints only what changed.
 
+The `health-*` checks (#721) read every owner's `health.v1/state/**` with
+each presence read. The doctor listens to no status long enough to measure a
+clock, so a status reply's age rests on the deployment's word,
+`--clocks-synced`: without it, every service implementing `health.v1` is
+unjudged, and the reason says so. `zenctl health` measures one over its
+window instead.
+
 The v1 doctor — `introspect` fanned across the fleet and diffed against the
 `--registry` TOMLs (RFC 08 §6) — left `main` with `check conform` at FJ9; the
 `v1` branch keeps both.
+
+## `health` — how well each service says it serves
+
+`health` (#721) reads `health.v1` (`spec/profiles/health/v1.md`) as its
+§2.11 reader does: every service presence shows in the namespace, or one. A
+service implements `health.v1` when its descriptor lists it, token or not —
+never by its interface token. Two readings, each one GET of the owners'
+`health.v1/state/**` that answers a status and its checks together, after a
+window's subscription to every status and to the faults. Per service, §5's
+questions:
+
+| question | the finding | unestablished |
+|---|---|---|
+| is it healthy? | `unhealthy` at its level (its status, or a current check worse than it), and `stale` — its own verdict, never FAILED, never down | `unobservable` (a reply's age with no trusted clock, a silent GET, an unknown level); `not_asked` (absent: presence's word, not a level; not listing `health.v1`) |
+| does its status agree with its checks? | a check worse than a fresh status in **both** readings: the owner breaks §2.2 | one reading's break; a status not fresh |
+| is its clock ahead? | a `clock_ahead` fault no confirmation followed | nothing heard in the window |
+| how healthy are they? | the roll-up: the worst established level, every verdict counted apart | no established verdict, no worst level |
+
+A reply's stamp is aged only against a trusted clock: the window (`--for`,
+31 s by default, just over the 30 s an owner re-puts its status within)
+measures this host's clock on the owners' live puts, or `--clocks-synced`
+takes the deployment's word and needs no window. An absent service's status,
+from an archive presence shows, is printed as **last-known, never current**.
+Across a constrained face, `--across-face crosses|denied` is the deployment's
+word for what presence cannot say: whether the face lets the status cross. A
+face closed to it reads unobservable, never unhealthy or down.
+
+```
+$ zenctl health --namespace acme --clocks-synced -c tcp/127.0.0.1:7447
+health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 0 stale, 0 unobservable, 0 not asked
+✗  lab/liar  unhealthy (inconsistent, FAILED) — a check is worse than its status, which health.v1 §2.2 forbids
+    status OK "serving" — its owner's reply, stamped … by 1c9e…
+    checks disk FAILED
+    agrees with its checks: no — a current check is worse than its fresh status in each of 2 readings: its owner breaks health.v1 §2.2
+✓  lab/ok    healthy (ok, OK) — its status is OK and confirmed, and no check is worse
+…
+```
+
+Exit 0 when every service asked is healthy; 1 on a finding (unhealthy,
+stale, a break of §2.2 in both readings, a clock ahead); 2 is no verdict — a
+service unobservable, none asked (an absent service is not asked), or a run
+that could not start. `check conform` asks the first two questions of a
+service implementing `health.v1` as its `health` and `health-aggregation`
+cases.
 
 ## `acl gen` — access control from the contracts
 

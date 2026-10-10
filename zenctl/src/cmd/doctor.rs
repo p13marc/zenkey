@@ -44,6 +44,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         deep,
         presence_budget,
         trust_admin_space,
+        clocks_synced,
         checks,
         skip,
         fail_on,
@@ -66,6 +67,7 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         deep,
         checks: asked.into_iter().filter(|c| !skip.contains(c)).collect(),
         trust_admin: trust_admin_space,
+        clocks_synced,
     };
     if deep_without_its_check(&spec) {
         eprintln!(

@@ -384,6 +384,13 @@ pub(crate) struct DoctorArgs {
     /// grants deny `@/**` queryables to every principal (§11.1).
     #[arg(long)]
     pub(crate) trust_admin_space: bool,
+    /// This host's clock and the owners' agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a health.v1 status reply's stamp
+    /// is then aged against this clock (freshness.v1 §2.6). The doctor
+    /// listens to no status, so without it the health-* checks of every
+    /// service implementing health.v1 are unobservable.
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
     /// Ask only this check (repeatable); every other is not asked.
     #[arg(long = "check", value_name = "CHECK-ID", value_parser = check_id,
           conflicts_with = "skip", add = ArgValueCandidates::new(completion::check_ids))]
@@ -798,20 +805,48 @@ pub(crate) enum Command {
     Why(WhyArgs),
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
-    /// Thirteen checks, each a question whose finding is the yes: split-brain
+    /// Eighteen checks, each a question whose finding is the yes: split-brain
     /// (§6), binding-unsatisfied (§3.2), contract-drift (§9.8),
     /// contract-unavailable (§8.4), descriptor-invalid (§3.3), token-missing
     /// (§8.1), presence-over-budget (§8.3), storage-on-state (§4.2 S4),
     /// archive-unaligned (§4.4), state-stamp-foreign (S1–S2, with --deep),
-    /// shm-memlock-low (§7.4), admin-unreachable and router-version-skew. The
-    /// deployment is read through a session in its namespace; the routers'
-    /// admin space and the presence domain through one in no namespace. A
-    /// check whose input could not be had is unobservable, with the reason —
-    /// never clean — and so is every check that reads presence when no zk2
-    /// token is visible. Exit 0 every check asked is clean, 1 a finding at or
-    /// above --fail-on (default warning), 2 no verdict: a check left
-    /// unobservable, an empty scope, or a run that could not start.
+    /// shm-memlock-low (§7.4), admin-unreachable, router-version-skew;
+    /// health.v1's health-failed and health-degraded (a service at that
+    /// level), health-stale (a status not confirmed within 60 s, never a
+    /// level) and health-inconsistent (a status better than a check, in both
+    /// readings), a status's age read only with --clocks-synced; and
+    /// hostid.v1's hostid-duplicate (two sessions claiming one minted
+    /// address, the cause undecided). The deployment is read through a
+    /// session in its namespace; the routers' admin space and the presence
+    /// domain through one in no namespace. A check whose input could not be
+    /// had is unobservable, with the reason — never clean — and so is every
+    /// check that reads presence when no zk2 token is visible. Exit 0 every
+    /// check asked is clean, 1 a finding at or above --fail-on (default
+    /// warning), 2 no verdict: a check left unobservable, an empty scope, or
+    /// a run that could not start.
     Doctor(DoctorArgs),
+    /// Read every service's health.v1, or one's: healthy, unhealthy, stale.
+    ///
+    /// health.v1's reader (spec/profiles/health/v1.md §2.11), through a
+    /// session in the deployment's namespace: presence and each descriptor —
+    /// a service implements health.v1 when its descriptor lists it, token or
+    /// not (§2.7) — then two readings, each one GET of the owners'
+    /// health.v1/state/** that answers a status and its checks together
+    /// (§2.4), after a window's subscription to every status and to the
+    /// faults. Per service, §5's questions: is it healthy (healthy;
+    /// unhealthy at its level, by its status or a current check worse than
+    /// it; stale, which is never FAILED and never down); does its status
+    /// agree with its checks (a break seen in both readings is the finding);
+    /// is its clock ahead (a clock_ahead fault no confirmation followed);
+    /// and the roll-up, the worst established level with every verdict
+    /// counted apart. An absent service is not asked — presence's word, not
+    /// a level — and an archive's status for it is shown last-known, never
+    /// current. A status reply's age needs a trusted clock: the window
+    /// measures one on the owners' live puts, or --clocks-synced takes the
+    /// deployment's word. Exit 0 every service asked is healthy, 1 a finding
+    /// (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service
+    /// unobservable, none asked, or a run that could not start.
+    Health(HealthArgs),
     /// Watch conditions on the bus and print each state change as ndjson.
     ///
     /// Emits TRANSITIONS (#227). A foreground observer — explicitly launched, one process per
@@ -916,6 +951,12 @@ pub(crate) enum CheckCmd {
     ///                    to the HLC delta (freshness.v1); a resource with no
     ///                    horizon is not asked
     ///   budget           not asked: its profile does not exist yet
+    ///   health           the service, when its descriptor lists health.v1,
+    ///                    is healthy: unhealthy or stale is the finding
+    ///                    (health.v1 §5)
+    ///   health-aggregation  its status agrees with its checks: a check
+    ///                    worse than a fresh status in both readings is the
+    ///                    finding (health.v1 §2.2)
     ///
     /// A reply's stamp is aged only against a clock this run measured on a
     /// live put of the same clock, or on --clocks-synced; otherwise its age
@@ -2392,6 +2433,53 @@ pub(crate) struct CheckConformArgs {
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
+}
+
+/// `zenctl health`'s flags (#721, PF) — one struct the dispatcher hands over
+/// whole, destructured in the verb rather than in `run()` (#354).
+#[derive(clap::Args)]
+pub(crate) struct HealthArgs {
+    /// One service, `<system>/<service>`; omitted, every service presence
+    /// shows in the namespace.
+    #[arg(value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          add = ArgValueCandidates::new(completion::services))]
+    pub(crate) address: Option<zenkey_model::grammar::Addr>,
+    /// This host's clock and the owners' agree within the HLC delta (500
+    /// ms), as the deployment keeps them: a status reply's stamp is then aged
+    /// against this clock (freshness.v1 §2.6), and no window is needed.
+    #[arg(long)]
+    pub(crate) clocks_synced: bool,
+    /// The reading's window, seconds: a subscription to every status and to
+    /// the faults, which measures this host's clock on the owners' live puts,
+    /// confirms each status, and answers "is its clock ahead?". Default 31,
+    /// just over the 30 s an owner re-puts its status within; with
+    /// --clocks-synced, no window unless given.
+    #[arg(long = "for", value_name = "SECS")]
+    pub(crate) for_secs: Option<f64>,
+    /// Seconds between the two readings when no window separates them: a
+    /// status better than a check is reported from two readings a grace
+    /// apart (health.v1 §2.2).
+    #[arg(long, value_name = "SECS", default_value_t = 2.0)]
+    pub(crate) grace: f64,
+    /// The service sits across a constrained face (spec §8.5), where
+    /// presence and descriptors do not cross: the deployment's word that it
+    /// implements health.v1 (R7). `crosses` when the face lets its
+    /// state/status cross, `denied` when it does not — health is then
+    /// unobservable, never unhealthy or down (health.v1 §2.8).
+    #[arg(long, value_enum, value_name = "STATUS", requires = "address")]
+    pub(crate) across_face: Option<FaceStatus>,
+    #[command(flatten)]
+    pub(crate) ns: NamespaceArgs,
+}
+
+/// `health --across-face`: whether the face lets a status cross.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum FaceStatus {
+    /// The face lets `state/status` cross: its puts are the service's
+    /// liveness and its health.
+    Crosses,
+    /// The face does not: health is unobservable across it.
+    Denied,
 }
 
 /// The `check schema` verb's flags (zk2's since #612, FJ8b) — one struct the

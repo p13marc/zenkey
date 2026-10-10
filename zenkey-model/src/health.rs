@@ -4,12 +4,14 @@
 //! The profile's session-free half: the levels and their order (§2.1,
 //! §2.6), the fault codes (§2.10), and the pure judgement of one reading of
 //! one service (§2.11), built on [`freshness::judge_all`] for the status,
-//! with a tool's roll-up of many (§2.2).
+//! with a tool's roll-up of many (§2.2) and §5's other two questions.
 //!
 //! ```text
 //! Read::from_wire(n)  ─▶ Level(OK < DEGRADED < FAILED) │ Unspecified │ Unlisted(n) │ Undecodable
 //! judge(reading)      ─▶ healthy │ unhealthy │ stale │ unobservable │ not_asked, + reason, + level
 //! rollup(judged…)     ─▶ the worst established level, every verdict counted
+//! agrees(judged, read)─▶ §5 "does its status agree with its checks?": yes │ no │ unestablished
+//! clock_ahead(p, heard)─▶ §5 "is its clock ahead?": yes │ no │ unestablished
 //! code(s)             ─▶ profile │ application │ malformed
 //! ```
 //!
@@ -281,6 +283,9 @@ pub enum Reason {
     NotListed,
     /// Not asked: only an archive's status was read, last-known (core S6).
     LastKnown,
+    /// Unobservable, for §5's second question only ([`agrees`]): the checks
+    /// were not read, so whether one is worse than the status is not known.
+    ChecksUnread,
     /// Stale or unobservable: the status's freshness, `freshness.v1`'s
     /// reason.
     Freshness(freshness::Reason),
@@ -306,6 +311,7 @@ impl Reason {
             Self::Absent => "absent",
             Self::NotListed => "not_listed",
             Self::LastKnown => "last_known",
+            Self::ChecksUnread => "checks_unread",
             Self::Freshness(r) => r.as_str(),
         }
     }
@@ -333,6 +339,7 @@ impl Reason {
             Self::Absent => "it is absent: presence's word, not a level",
             Self::NotListed => "its descriptor does not list health.v1",
             Self::LastKnown => "only an archive's last-known status was read, never current",
+            Self::ChecksUnread => "its checks were not read",
             Self::Freshness(r) => r.says(),
         }
     }
@@ -479,6 +486,184 @@ pub fn rollup(judged: impl IntoIterator<Item = Judged>) -> Rollup {
     r
 }
 
+/// A yes-or-no question of §5, answered in the three states: a pole of each
+/// Established kind, and the two Unestablished kinds apart (core O5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Answer {
+    Yes,
+    No,
+    /// The question was put, and the reading could not answer it.
+    Unobservable,
+    /// Nobody put the question, or its premise does not hold.
+    NotAsked,
+}
+
+impl Answer {
+    /// The fixture's token.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Yes => "yes",
+            Self::No => "no",
+            Self::Unobservable => "unobservable",
+            Self::NotAsked => "not_asked",
+        }
+    }
+}
+
+impl fmt::Display for Answer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// §5's second question, "does its status agree with its checks?" (§2.2),
+/// for one reading, and its reason in [`Reason`]'s vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Agreement {
+    pub answer: Answer,
+    pub reason: Reason,
+}
+
+/// §5's second question over one reading, from what [`judge`] concluded of
+/// it and whether its checks were read: *yes* for a fresh status at a level
+/// with no current check worse; *no* for a current check worse than that
+/// status ([`Reason::Inconsistent`], the finding about the owner, which a
+/// tool reports only from two readings a grace apart, §2.2); not asked as
+/// the first question's not asked; unobservable when the status is not
+/// fresh, its level is unknown, or the checks were not read.
+#[must_use]
+pub fn agrees(judged: Judged, checks_read: bool) -> Agreement {
+    let a = |answer, reason| Agreement { answer, reason };
+    match (judged.verdict, judged.reason) {
+        (Verdict::NotAsked, r) => a(Answer::NotAsked, r),
+        (_, Reason::Inconsistent) => a(Answer::No, Reason::Inconsistent),
+        (
+            Verdict::Healthy | Verdict::Unhealthy,
+            r @ (Reason::Ok | Reason::Degraded | Reason::Failed),
+        ) => {
+            if checks_read {
+                a(Answer::Yes, r)
+            } else {
+                a(Answer::Unobservable, Reason::ChecksUnread)
+            }
+        }
+        // A status at an unknown level bounds nothing (§2.6), so whether a
+        // check is worse than it has no answer.
+        (Verdict::Unhealthy, Reason::Check) => a(Answer::Unobservable, Reason::UnknownLevel),
+        (_, r) => a(Answer::Unobservable, r),
+    }
+}
+
+/// One delivery a subscriber heard of one service during its reading, as
+/// §5's last question reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Heard {
+    /// A put of `state/status`, a change or a re-put: a confirmation.
+    Status,
+    /// A delete of `state/status`, which §2.3 forbids: no confirmation.
+    StatusDeleted,
+    /// A `faults` sample whose code is `clock_ahead` (§2.5, §2.10).
+    ClockAhead,
+    /// A `faults` sample with any other code, which says nothing of the
+    /// clock.
+    Fault,
+}
+
+/// Why §5's last question has its answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClockReason {
+    /// Yes: a `clock_ahead` fault, and no confirmation of the status heard
+    /// since.
+    ClockAhead,
+    /// No: the status confirmed after the last `clock_ahead` fault, or with
+    /// none heard. Its guard did not hold that write.
+    Confirmed,
+    /// Unobservable: no `clock_ahead` fault heard, and the status not
+    /// confirmed within the reader's window. Never "no" from the faults'
+    /// silence.
+    NothingHeard,
+    /// Not asked: absent, presence's word (§2.1).
+    Absent,
+    /// Not asked: the descriptor does not list `health.v1` (§2.7).
+    NotListed,
+}
+
+impl ClockReason {
+    /// The fixture's token.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClockAhead => "clock_ahead",
+            Self::Confirmed => "confirmed",
+            Self::NothingHeard => "nothing_heard",
+            Self::Absent => "absent",
+            Self::NotListed => "not_listed",
+        }
+    }
+
+    /// The reason in words, for a tool's message.
+    #[must_use]
+    pub fn says(self) -> &'static str {
+        match self {
+            Self::ClockAhead => {
+                "a clock_ahead fault was heard, and no confirmation of its status since"
+            }
+            Self::Confirmed => {
+                "its status was confirmed after its last clock_ahead fault, or with none heard"
+            }
+            Self::NothingHeard => {
+                "no clock_ahead fault was heard, and its status was not confirmed in the window"
+            }
+            Self::Absent => "it is absent: presence's word",
+            Self::NotListed => "its descriptor does not list health.v1",
+        }
+    }
+}
+
+impl fmt::Display for ClockReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// §5's last question, "is this service's clock ahead?" (§2.5), and why.
+/// Yes is the finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Clock {
+    pub answer: Answer,
+    pub reason: ClockReason,
+}
+
+/// §5's last question from what one subscriber heard of one service in its
+/// window, in arrival order: *yes* on a `clock_ahead` fault with no
+/// confirmation of the status heard since; *no* when the status was
+/// confirmed after the last one, or with none heard; unobservable when
+/// neither was heard, since the faults' silence is their normal state (core
+/// O5). Not asked as the first question's: absent, or not listing
+/// `health.v1`. Whatever else presence says, a fault heard is the service's
+/// own word, and answers. Nothing rests on a fault's stamp, nor its level
+/// (§2.5).
+#[must_use]
+pub fn clock_ahead(presence: Presence, heard: &[Heard]) -> Clock {
+    let c = |answer, reason| Clock { answer, reason };
+    match presence {
+        Presence::Absent => return c(Answer::NotAsked, ClockReason::Absent),
+        Presence::Present(Listing::NotListed) => {
+            return c(Answer::NotAsked, ClockReason::NotListed);
+        }
+        _ => {}
+    }
+    let fault = heard.iter().rposition(|h| *h == Heard::ClockAhead);
+    let status = heard.iter().rposition(|h| *h == Heard::Status);
+    match (fault, status) {
+        (Some(f), Some(s)) if f > s => c(Answer::Yes, ClockReason::ClockAhead),
+        (Some(_), None) => c(Answer::Yes, ClockReason::ClockAhead),
+        (_, Some(_)) => c(Answer::No, ClockReason::Confirmed),
+        (None, None) => c(Answer::Unobservable, ClockReason::NothingHeard),
+    }
+}
+
 /// A fault's code, read by §2.10.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Code<'a> {
@@ -597,6 +782,52 @@ mod tests {
         assert_eq!(r.worst, Some(Level::Ok));
         assert_eq!((r.healthy, r.stale), (1, 1));
         assert_eq!(rollup([stale]).worst, None);
+    }
+
+    #[test]
+    fn the_status_agrees_with_its_checks_only_when_fresh_at_a_level_and_read() {
+        let j = |verdict, reason, level| Judged::new(verdict, reason, level);
+        let ok = j(Verdict::Healthy, Reason::Ok, Some(Level::Ok));
+        assert_eq!(agrees(ok, true).answer, Answer::Yes);
+        assert_eq!(
+            agrees(ok, false),
+            Agreement {
+                answer: Answer::Unobservable,
+                reason: Reason::ChecksUnread
+            }
+        );
+        let liar = Judged::unhealthy(Reason::Inconsistent, Level::Failed);
+        assert_eq!(agrees(liar, true).answer, Answer::No);
+        let frank = Judged::unhealthy(Reason::Failed, Level::Failed);
+        assert_eq!(agrees(frank, true).answer, Answer::Yes, "worse is allowed");
+        let unknown = Judged::unhealthy(Reason::Check, Level::Failed);
+        assert_eq!(agrees(unknown, true).reason, Reason::UnknownLevel);
+        let stale = j(
+            Verdict::Stale,
+            Reason::Freshness(freshness::Reason::BeyondHorizon),
+            None,
+        );
+        assert_eq!(agrees(stale, true).answer, Answer::Unobservable);
+        let absent = Judged::not_asked(Reason::Absent);
+        assert_eq!(agrees(absent, true).answer, Answer::NotAsked);
+    }
+
+    #[test]
+    fn the_clock_is_ahead_on_a_fault_no_confirmation_followed() {
+        use Heard::{ClockAhead, Fault, Status, StatusDeleted};
+        let p = present();
+        let a = |heard: &[Heard]| clock_ahead(p, heard).answer;
+        assert_eq!(a(&[ClockAhead]), Answer::Yes);
+        assert_eq!(a(&[Status, ClockAhead]), Answer::Yes);
+        assert_eq!(a(&[ClockAhead, Status]), Answer::No);
+        assert_eq!(a(&[ClockAhead, StatusDeleted]), Answer::Yes);
+        assert_eq!(a(&[Status]), Answer::No);
+        assert_eq!(a(&[Fault]), Answer::Unobservable, "never from silence");
+        assert_eq!(a(&[]), Answer::Unobservable);
+        assert_eq!(
+            clock_ahead(Presence::Absent, &[ClockAhead]).answer,
+            Answer::NotAsked
+        );
     }
 
     #[test]

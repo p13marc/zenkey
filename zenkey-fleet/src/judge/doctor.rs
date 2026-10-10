@@ -56,15 +56,20 @@ use crate::bus::admin::{
     AdminEntry, ROUTERS, RouterVerification, STORAGES, admin_read, merge_storage_rows,
     router_from_admin_entry, storage_from_admin_entry,
 };
+use zenkey_model::health::{Level, Listing, Presence as HealthPresence, Reason, Verdict};
+
 use crate::bus::contracts::BundleStore;
+use crate::bus::health::{HealthGet, HealthTarget};
 use crate::bus::presence::Scope;
 use crate::judge::common::{FINDING_CAP, s1_premise};
 use crate::model::catalog::zid_value;
 use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Revision};
 use crate::model::examples::Examples;
+use crate::model::health::{Got, Trust, agreement_over, listing, reading};
 use crate::report::{
-    Asked, CheckId, CheckReport, DoctorFinding, DoctorPresence, DoctorReport, DoctorScope,
-    DoctorSeverity, RouterInfo, StorageInfo, Unjudged,
+    Asked, CheckId, CheckReport, DoctorFinding, DoctorHealth, DoctorPresence, DoctorReport,
+    DoctorScope, DoctorSeverity, HealthAnswer, HealthAnswerToken, RouterInfo, StorageInfo,
+    Unjudged,
 };
 
 /// How far apart the two presence reads are, by default. Above the one
@@ -86,6 +91,14 @@ pub const DOMAIN_SELECTORS: [&str; 2] = ["**", "**/zk2/*/*/@zk/**"];
 /// `archive.v1`'s interface id: its providers are the archives.
 const ARCHIVE: &str = "archive.v1";
 
+/// The checks that read `health.v1` (#721, PF).
+const HEALTH_CHECKS: [CheckId; 4] = [
+    CheckId::HealthFailed,
+    CheckId::HealthDegraded,
+    CheckId::HealthStale,
+    CheckId::HealthInconsistent,
+];
+
 /// What a doctor run asks.
 #[derive(Debug, Clone)]
 pub struct DoctorSpec {
@@ -106,6 +119,12 @@ pub struct DoctorSpec {
     /// (§4.2, §11.1, 0.12), which no tool can observe. Off by default:
     /// an answer is then trusted only when it is verifiably a router's.
     pub trust_admin: bool,
+    /// The operator's word that this host's clock and the owners' agree
+    /// within the HLC delta (`freshness.v1` §2.6, ground 1; #721, PF). The
+    /// doctor listens to no status long enough to measure a clock, so
+    /// without it a status reply's age is unobservable, and so are the
+    /// `health-*` checks of every service implementing `health.v1`.
+    pub clocks_synced: bool,
 }
 
 impl DoctorSpec {
@@ -118,7 +137,14 @@ impl DoctorSpec {
             deep: false,
             checks: CheckId::ALL.into_iter().collect(),
             trust_admin: false,
+            clocks_synced: false,
         }
+    }
+
+    /// Whether the run asks a `health.v1` check, which reads every owner's
+    /// `health.v1/state/**` (#721, PF).
+    fn asks_health(&self) -> bool {
+        HEALTH_CHECKS.into_iter().any(|c| self.asks(c))
     }
 
     /// Whether the run asks `check`.
@@ -170,7 +196,9 @@ pub struct DoctorObservation {
     pub namespace: String,
     /// How far apart `before` and `after` were taken.
     pub grace: Duration,
-    /// The first presence read, tokens only.
+    /// The first presence read: its tokens, and, when `hostid-duplicate` is
+    /// asked, the descriptors of its instances on systems in the minted
+    /// shape (#721, PF), read during the grace.
     pub before: Option<Result<Observed, String>>,
     /// The second, with every instance's descriptor.
     pub after: Option<Result<Observed, String>>,
@@ -186,6 +214,11 @@ pub struct DoctorObservation {
     pub stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
     /// This process's `RLIMIT_MEMLOCK`.
     pub memlock: Option<Memlock>,
+    /// `health.v1`'s readings (#721, PF), the first first: one GET of every
+    /// owner's `health.v1/state/**` with the second presence read, and one
+    /// with the first when `health-inconsistent` is asked. Empty when no
+    /// `health-*` check was asked.
+    pub health: Vec<Result<HealthGet, String>>,
 }
 
 /// The routers' admin space, as two reads found it.
@@ -313,6 +346,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
                 zenkey::shm::Memlock::Unlimited => Memlock::Unlimited,
                 zenkey::shm::Memlock::Unknown => Memlock::Unknown,
             }),
+        health: p.health,
     }
 }
 
@@ -324,16 +358,48 @@ struct PresencePhase {
     contracts: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
     archives: BTreeMap<Addr, Result<ArchiveKeys, String>>,
     stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
+    health: Vec<Result<HealthGet, String>>,
 }
 
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
     let (s, t) = (&bus.session, spec.timeout);
     let scope = Scope::all();
-    let before = if spec.asks(CheckId::SplitBrain) || spec.asks(CheckId::TokenMissing) {
+    let health = HealthTarget::All.state_selector();
+    let mut readings = Vec::new();
+    let before = if [
+        CheckId::SplitBrain,
+        CheckId::TokenMissing,
+        CheckId::HostidDuplicate,
+        CheckId::HealthInconsistent,
+    ]
+    .into_iter()
+    .any(|c| spec.asks(c))
+    {
         let read = crate::bus::presence::read_tokens(s, &scope, t)
             .await
             .map_err(|e| crate::one_line(&e));
-        tokio::time::sleep(spec.grace).await;
+        // During the grace: the first health reading, and the descriptors
+        // hostid-duplicate counts (hostid.v1 §2.12): every instance on a
+        // system in the minted shape, the only systems a minting can name.
+        let first = async {
+            if spec.asks(CheckId::HealthInconsistent) {
+                Some(crate::bus::health::get(s, &health, t).await)
+            } else {
+                None
+            }
+        };
+        let described = async {
+            let mut read = read;
+            if let (true, Ok(o)) = (spec.asks(CheckId::HostidDuplicate), &mut read) {
+                crate::bus::presence::describe_where(s, o, t, |a, _| {
+                    zenkey_model::hostid::is_minted_shape(a.system.as_str())
+                })
+                .await;
+            }
+            read
+        };
+        let (_, first, read) = tokio::join!(tokio::time::sleep(spec.grace), first, described);
+        readings.extend(first);
         Some(read)
     } else {
         None
@@ -348,7 +414,17 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             ..Default::default()
         };
     };
-    let wanted = Catalog::new(observed).wanted();
+    let mut wanted = Catalog::new(observed).wanted();
+    if let Some(Ok(b)) = &before {
+        // The revisions the first read's descriptors name: an instance gone
+        // by the second read is still counted by what it implements.
+        let more = Catalog::new(b).wanted();
+        wanted.extend(
+            more.into_iter()
+                .filter(|w| !wanted.contains(w))
+                .collect::<Vec<_>>(),
+        );
+    }
     store.forget_absences();
     let contracts = async {
         let answers = store.fetch_all(s, &wanted).await;
@@ -384,13 +460,22 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         }
         out
     };
-    let (contracts, archives, stamps) = tokio::join!(contracts, archives, stamps);
+    let second = async {
+        if spec.asks_health() {
+            Some(crate::bus::health::get(s, &health, t).await)
+        } else {
+            None
+        }
+    };
+    let (contracts, archives, stamps, second) = tokio::join!(contracts, archives, stamps, second);
+    readings.extend(second);
     PresencePhase {
         before,
         after: Some(after),
         contracts,
         archives,
         stamps,
+        health: readings,
     }
 }
 
@@ -650,6 +735,11 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::TokenMissing => token_missing(p),
                 CheckId::ArchiveUnaligned => archive_unaligned(p),
                 CheckId::StateStampForeign => state_stamp_foreign(p),
+                CheckId::HealthFailed => health_level(p, spec, Level::Failed),
+                CheckId::HealthDegraded => health_level(p, spec, Level::Degraded),
+                CheckId::HealthStale => health_stale(p, spec),
+                CheckId::HealthInconsistent => health_inconsistent(p, spec),
+                CheckId::HostidDuplicate => hostid_duplicate(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -659,7 +749,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
         _ => None,
     };
     DoctorReport {
-        scope: scope_of(obs),
+        scope: scope_of(obs, spec),
         checks,
         unobservable,
     }
@@ -685,7 +775,7 @@ fn empty_scope(namespace: &str, after: &Observed) -> String {
     )
 }
 
-fn scope_of(obs: &DoctorObservation) -> DoctorScope {
+fn scope_of(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorScope {
     let presence = match &obs.after {
         Some(Ok(after)) => {
             let catalog = Catalog::new(after);
@@ -719,6 +809,21 @@ fn scope_of(obs: &DoctorObservation) -> DoctorScope {
         presence,
         routers: match &obs.admin {
             Some(Ok(a)) => Asked::Asked(a.routers.len()),
+            _ => Asked::NotAsked,
+        },
+        health: match (&obs.after, obs.health.is_empty()) {
+            (Some(Ok(after)), false) => {
+                let catalog = Catalog::new(after);
+                Asked::Asked(DoctorHealth {
+                    selector: HealthTarget::All.state_selector(),
+                    services: catalog
+                        .addresses()
+                        .filter(|a| catalog.has_instance(a))
+                        .filter(|a| matches!(listing(after, a), Listing::Listed { .. }))
+                        .count(),
+                    clocks_synced: spec.clocks_synced,
+                })
+            }
             _ => Asked::NotAsked,
         },
     }
@@ -1772,6 +1877,583 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
                  its owner's own session"
             )
         },
+    )
+}
+
+// ─── health.v1 (#721, PF) ───────────────────────────────────────────────────
+
+/// One service the `health-*` checks judge: present in the second read, its
+/// descriptor listing `health.v1` (§2.7).
+struct HealthSubject {
+    addr: Addr,
+    /// "Is this service healthy?", by the second reading (§2.11).
+    last: zenkey_model::health::Judged,
+    /// "Does its status agree with its checks?", over both readings (§2.2).
+    agreement: HealthAnswer,
+    /// The reason its owner gave with the status, as read.
+    said: Option<String>,
+}
+
+/// What the `health-*` checks read: the subjects, the services they could
+/// not decide, and how many present services do not list `health.v1`.
+struct HealthRead {
+    subjects: Vec<HealthSubject>,
+    undecided: Vec<Unjudged>,
+    unlisted: usize,
+}
+
+/// Every present service's `health.v1` readings, as `zenctl health` builds
+/// them ([`crate::model::health::reading`]): presence from the instance
+/// token and the descriptor's listing, never the interface token (§2.7);
+/// the status's freshness from the GET's reply alone, aged on the
+/// deployment's word ([`DoctorSpec::clocks_synced`]) or not at all, since
+/// the doctor listens to no status; the checks of the same answer (§2.4).
+/// The first reading counts for a service whose instance token the first
+/// presence read held.
+fn health_read(p: &Presence<'_>, spec: &DoctorSpec) -> HealthRead {
+    let trust = if spec.clocks_synced {
+        Trust::Word
+    } else {
+        Trust::None
+    };
+    let (first, second) = match p.obs.health.as_slice() {
+        [first, second] => (Some(first), second),
+        [second] => (None, second),
+        _ => {
+            return HealthRead {
+                subjects: Vec::new(),
+                undecided: vec![unjudged(
+                    "health.v1",
+                    "no reading of the owners' health.v1/state/** was taken",
+                )],
+                unlisted: 0,
+            };
+        }
+    };
+    let catalog = Catalog::new(p.after);
+    let before = p.before.as_ref().ok().map(|b| Catalog::new(b));
+    let mut out = HealthRead {
+        subjects: Vec::new(),
+        undecided: Vec::new(),
+        unlisted: 0,
+    };
+    for addr in catalog.addresses().filter(|a| catalog.has_instance(a)) {
+        let listed = listing(p.after, addr);
+        match listed {
+            Listing::NotListed => {
+                out.unlisted += 1;
+                continue;
+            }
+            Listing::Unread => {
+                out.undecided.push(unjudged(
+                    addr.to_string(),
+                    "no descriptor of it read: whether it implements health.v1 cannot be told, \
+                     and its interface token says nothing (health.v1 §2.7)",
+                ));
+                continue;
+            }
+            Listing::Listed { .. } => {}
+        }
+        let second = match second {
+            Ok(g) => g,
+            Err(e) => {
+                out.undecided.push(unjudged(
+                    addr.to_string(),
+                    format!("the reading's GET could not be made: {e}"),
+                ));
+                continue;
+            }
+        };
+        let presence = HealthPresence::Present(listed);
+        let last = reading(presence, Got::of(Some(second), addr), None, &trust, false);
+        let mut agreements = Vec::new();
+        if let (Some(first), Some(before)) = (first, &before)
+            && before.has_instance(addr)
+        {
+            let got = Got::of(first.as_ref().ok(), addr);
+            agreements.push(reading(presence, got, None, &trust, false).agreement());
+        }
+        agreements.push(last.agreement());
+        out.subjects.push(HealthSubject {
+            addr: addr.clone(),
+            last: last.judged(),
+            agreement: agreement_over(&agreements),
+            said: second
+                .services
+                .get(addr)
+                .and_then(|g| g.status.as_ref())
+                .and_then(|r| r.value.as_ref())
+                .map(|v| v.reason.clone()),
+        });
+    }
+    if !p.complete {
+        out.undecided
+            .push(incomplete("a service unseen may implement health.v1"));
+    }
+    out
+}
+
+/// Why a subject's verdict is not this check's to decide, with the cure
+/// for an untrusted clock.
+fn health_unjudged(s: &HealthSubject, what: &str) -> Unjudged {
+    let hint =
+        if s.last.reason == Reason::Freshness(zenkey_model::freshness::Reason::ClockUntrusted) {
+            " — the doctor measures no clock: pass --clocks-synced on the deployment's word that \
+         this host's clock and the owners' agree (freshness.v1 §2.6)"
+        } else {
+            ""
+        };
+    unjudged(
+        s.addr.to_string(),
+        format!(
+            "{}: {} ({}){hint}",
+            what,
+            s.last.reason.says(),
+            s.last.reason.as_str()
+        ),
+    )
+}
+
+/// The clean reason's tail: the services not asked.
+fn unlisted_note(n: usize) -> String {
+    if n == 0 {
+        String::new()
+    } else {
+        format!("; {n} present service(s) do not list health.v1, and are not asked")
+    }
+}
+
+/// `health-failed` and `health-degraded` (§2.1, §2.11): a present service
+/// read unhealthy at `level` — by its fresh status, by a current check worse
+/// than that status (the effective level, §2.2), or by a check under a
+/// status at an unknown level. FAILED is an error: the owner says it cannot
+/// do its primary job. DEGRADED is a warning: it serves with reduced
+/// function, which a person should look at. A stale status is never a
+/// level (§2.4): its current level is unknown, so it is not decided here.
+fn health_level(p: &Presence<'_>, spec: &DoctorSpec, level: Level) -> CheckReport {
+    let (check, severity) = match level {
+        Level::Failed => (CheckId::HealthFailed, DoctorSeverity::Error),
+        Level::Degraded => (CheckId::HealthDegraded, DoctorSeverity::Warning),
+        Level::Ok => unreachable!("OK is no finding"),
+    };
+    let h = health_read(p, spec);
+    let mut findings = Vec::new();
+    let mut undecided = h.undecided;
+    let mut fresh = 0usize;
+    for s in &h.subjects {
+        match (s.last.verdict, s.last.level) {
+            (Verdict::Unhealthy, Some(l)) if l == level => {
+                let why = match s.last.reason {
+                    Reason::Inconsistent => format!(
+                        "a current check is {level} and its fresh status is better: read at the \
+                         effective level, {level} (health.v1 §2.2, §2.11)"
+                    ),
+                    Reason::Check => format!(
+                        "its status's level is unknown and a current check is {level}: a no can \
+                         rest on a check (health.v1 §2.11)"
+                    ),
+                    _ => format!(
+                        "its status is {level}, fresh: {}",
+                        if level == Level::Failed {
+                            "present, and unable to do its primary job, as its owner says \
+                             (health.v1 §2.1)"
+                        } else {
+                            "it serves with reduced function, as its owner says (health.v1 §2.1)"
+                        }
+                    ),
+                };
+                let said = s
+                    .said
+                    .as_deref()
+                    .filter(|r| !r.is_empty())
+                    .map(|r| format!(" — its reason: {r:?}"))
+                    .unwrap_or_default();
+                findings.push(finding(
+                    check,
+                    severity,
+                    s.addr.to_string(),
+                    format!("{why}{said}"),
+                ));
+            }
+            (Verdict::Healthy | Verdict::Unhealthy, _) => fresh += 1,
+            (Verdict::Stale, _) => undecided.push(health_unjudged(
+                s,
+                "its status is stale, never a level, so its current level is unknown",
+            )),
+            (Verdict::Unobservable, _) => {
+                undecided.push(health_unjudged(s, "its health could not be read"))
+            }
+            (Verdict::NotAsked, _) => {}
+        }
+    }
+    let clean = if h.subjects.is_empty() && undecided.is_empty() {
+        format!(
+            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
+             §2.7){}",
+            unlisted_note(h.unlisted)
+        )
+    } else {
+        format!(
+            "{fresh} service(s) implementing health.v1, none at {level}: each fresh status, and \
+             the checks it vouches for, read better{}",
+            unlisted_note(h.unlisted)
+        )
+    };
+    CheckReport::of(check, findings, undecided, clean)
+}
+
+/// `health-stale` (§2.4): a present, listed service whose status was not
+/// confirmed within its 60 s horizon, by `freshness.v1`. A warning: the
+/// owner has not confirmed its level, and why — stopped, its writer
+/// closed, its clock ahead, the link — is unobservable from the status
+/// alone (§5). Stale is never FAILED, and never down.
+fn health_stale(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::HealthStale;
+    let h = health_read(p, spec);
+    let mut findings = Vec::new();
+    let mut undecided = h.undecided;
+    let mut fresh = 0usize;
+    for s in &h.subjects {
+        match s.last.verdict {
+            Verdict::Stale => findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                s.addr.to_string(),
+                format!(
+                    "its instance token is held, and its status is stale: {} ({}) — not \
+                     confirmed within its 60 s horizon, which is never FAILED and never down; the \
+                     cause (its owner stopped, its writer closed, its clock ahead) is \
+                     unobservable from the status alone (health.v1 §2.4, §5)",
+                    s.last.reason.says(),
+                    s.last.reason.as_str()
+                ),
+            )),
+            Verdict::Healthy | Verdict::Unhealthy => fresh += 1,
+            Verdict::Unobservable => undecided.push(health_unjudged(
+                s,
+                "its status's freshness could not be read",
+            )),
+            Verdict::NotAsked => {}
+        }
+    }
+    let clean = if h.subjects.is_empty() && undecided.is_empty() {
+        format!(
+            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
+             §2.7){}",
+            unlisted_note(h.unlisted)
+        )
+    } else {
+        format!(
+            "{fresh} service(s) implementing health.v1, each status confirmed within its 60 s \
+             horizon{}",
+            unlisted_note(h.unlisted)
+        )
+    };
+    CheckReport::of(C, findings, undecided, clean)
+}
+
+/// `health-inconsistent` (§2.2): an owner holding a status better than a
+/// current check, in both of two readings a grace apart, each one GET that
+/// answers the status and its checks together. An error: an owner MUST NOT
+/// hold it. One reading's is unobservable, never clean and never the
+/// finding.
+fn health_inconsistent(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
+    const C: CheckId = CheckId::HealthInconsistent;
+    let h = health_read(p, spec);
+    let mut findings = Vec::new();
+    let mut undecided = h.undecided;
+    let mut agree = 0usize;
+    for s in &h.subjects {
+        match s.agreement.answer {
+            HealthAnswerToken::No => findings.push(finding(
+                C,
+                DoctorSeverity::Error,
+                s.addr.to_string(),
+                format!(
+                    "{}, {:.1}s apart: an owner MUST NOT hold a status better than its worst \
+                     current check; a reader reads it at the check's level (health.v1 §2.2)",
+                    s.agreement.says,
+                    p.grace_s()
+                ),
+            )),
+            HealthAnswerToken::Yes => agree += 1,
+            HealthAnswerToken::Unobservable => {
+                let hint = if s.agreement.reason == "clock_untrusted" {
+                    " — the doctor measures no clock: pass --clocks-synced on the deployment's \
+                     word (freshness.v1 §2.6)"
+                } else {
+                    ""
+                };
+                undecided.push(unjudged(
+                    s.addr.to_string(),
+                    format!(
+                        "whether its status agrees with its checks cannot be told: {} ({}){hint}",
+                        s.agreement.says, s.agreement.reason
+                    ),
+                ));
+            }
+            HealthAnswerToken::NotAsked => {}
+        }
+    }
+    let clean = if h.subjects.is_empty() && undecided.is_empty() {
+        format!(
+            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
+             §2.7){}",
+            unlisted_note(h.unlisted)
+        )
+    } else {
+        format!(
+            "{agree} service(s) implementing health.v1, each fresh status no better than its \
+             current checks{}",
+            unlisted_note(h.unlisted)
+        )
+    };
+    CheckReport::of(C, findings, undecided, clean)
+}
+
+/// §5's first question of `hostid.v1`, for one instance: is its system
+/// minted?
+enum Minted {
+    /// Its descriptor lists `hostid.v1`, and no contract it implements
+    /// lists it in `uses` (§2.8).
+    Yes,
+    /// Its descriptor does not list it.
+    No,
+    /// It lists it, and whether that is a minting cannot be told.
+    Unobservable(String),
+}
+
+fn minted(p: &Presence<'_>, d: &Descriptor) -> Minted {
+    if !d
+        .profiles
+        .iter()
+        .any(|x| x == zenkey_model::hostid::PROFILE)
+    {
+        return Minted::No;
+    }
+    for e in &d.interfaces {
+        match p.entry_revision(e) {
+            Ok(rev) => {
+                if rev
+                    .contract()
+                    .uses
+                    .iter()
+                    .any(|u| u.to_string() == zenkey_model::hostid::PROFILE)
+                {
+                    return Minted::Unobservable(format!(
+                        "{} lists hostid.v1 in uses, so its listing is the contract's and \
+                         minting cannot be read from it (hostid.v1 §2.8, §5)",
+                        e.iface
+                    ));
+                }
+            }
+            Err(why) => {
+                return Minted::Unobservable(format!(
+                    "a contract it implements could not be read: {why}"
+                ));
+            }
+        }
+    }
+    Minted::Yes
+}
+
+/// What one presence read shows of one address, for `hostid-duplicate`.
+#[derive(Default)]
+struct ZidRead {
+    /// The session zids the counted instances state, by value, with each
+    /// instance and its `meta.host`.
+    zids: BTreeMap<String, Vec<(String, Option<String>)>>,
+    /// What keeps the read from settling a *no*: a descriptor not read, an
+    /// instance stating no `meta.zid`, one listing `hostid.v1` whose minting
+    /// is unobservable.
+    impediments: Vec<String>,
+}
+
+/// `hostid-duplicate` (`hostid.v1` §2.12, §5): an address whose instances
+/// on a minted system state at least two session zids in both presence
+/// reads, not necessarily the same instances. Only instances whose system
+/// is known to be minted are counted (§5's first question). The finding's
+/// cause is undecided — a collision, a cloned machine id and a second
+/// process look alike on the bus, and a standby shows the same way — so
+/// the evidence names none of them as the cause, and shows each instance's
+/// `meta.host`. A warning: the deployment may expect it (a standby), and a
+/// person decides. *No* is a read that ended at the routers' final reply,
+/// every descriptor in it read, showing at most one zid. An address with
+/// no instance listing `hostid.v1` is not this profile's; one on a system
+/// in the minted shape with a descriptor unread may be, since only a minted
+/// system has the shape (§2.1). A zid is constant for an instance, so an
+/// instance's descriptor from either read stands for both.
+fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::HostidDuplicate;
+    let before = match &p.before {
+        Ok(b) => *b,
+        Err(why) => return CheckReport::unobservable(C, why.clone()),
+    };
+    let descriptor = |key: &(Addr, InstanceId)| -> Option<&DescriptorRead> {
+        fn served<'o>(i: &Inst<'o>) -> Option<&'o DescriptorRead> {
+            i.descriptor.filter(|r| r.descriptor().is_some())
+        }
+        p.now
+            .get(key)
+            .and_then(served)
+            .or_else(|| p.then.get(key).and_then(served))
+            .or_else(|| p.now.get(key).and_then(|i| i.descriptor))
+            .or_else(|| p.then.get(key).and_then(|i| i.descriptor))
+    };
+    let addrs: BTreeSet<&Addr> = p
+        .now
+        .iter()
+        .chain(p.then.iter())
+        .filter(|(_, i)| i.instance_token)
+        .map(|((a, _), _)| a)
+        .collect();
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut counted, mut literal) = (0usize, 0usize);
+    for addr in addrs {
+        let shaped = zenkey_model::hostid::is_minted_shape(addr.system.as_str());
+        let mut lists = false;
+        let mut unread = false;
+        let read_of = |index: &BTreeMap<(Addr, InstanceId), Inst<'_>>| -> ZidRead {
+            let mut r = ZidRead::default();
+            for (key, _) in index
+                .iter()
+                .filter(|((a, _), i)| a == addr && i.instance_token)
+            {
+                let at = format!("{}@{}", key.0, key.1);
+                let d = match descriptor(key) {
+                    Some(DescriptorRead::Served(d)) => d,
+                    Some(other) => {
+                        r.impediments.push(format!(
+                            "the descriptor of {at} did not read ({})",
+                            undescribed_why(other)
+                        ));
+                        continue;
+                    }
+                    None => {
+                        r.impediments
+                            .push(format!("the descriptor of {at} was not read"));
+                        continue;
+                    }
+                };
+                match minted(p, d) {
+                    Minted::No => {}
+                    Minted::Unobservable(why) => r.impediments.push(format!(
+                        "{at} lists hostid.v1 and whether its system is minted is unobservable: \
+                         {why}"
+                    )),
+                    Minted::Yes => match d.meta.get("zid").and_then(|z| z.as_str()) {
+                        Some(z) => r.zids.entry(zid_value(z)).or_default().push((
+                            at,
+                            d.meta
+                                .get("host")
+                                .and_then(|h| h.as_str())
+                                .map(str::to_owned),
+                        )),
+                        None => r.impediments.push(format!("{at} states no meta.zid")),
+                    },
+                }
+            }
+            r
+        };
+        for key in p.now.keys().chain(p.then.keys()).filter(|(a, _)| a == addr) {
+            match descriptor(key) {
+                Some(DescriptorRead::Served(d)) => {
+                    lists |= d
+                        .profiles
+                        .iter()
+                        .any(|x| x == zenkey_model::hostid::PROFILE);
+                }
+                _ => unread = true,
+            }
+        }
+        if !lists && !(shaped && unread) {
+            if shaped {
+                literal += 1;
+            }
+            continue;
+        }
+        let (then, now) = (read_of(&p.then), read_of(&p.now));
+        let established = |r: &ZidRead| r.zids.len() >= 2;
+        let settles_no =
+            |r: &ZidRead, complete: bool| complete && r.impediments.is_empty() && r.zids.len() <= 1;
+        if established(&then) && established(&now) {
+            let shown: Vec<String> = now
+                .zids
+                .iter()
+                .flat_map(|(z, insts)| {
+                    insts.iter().map(move |(at, host)| {
+                        format!(
+                            "{at} (zid {z}{})",
+                            host.as_deref()
+                                .map(|h| format!(", meta.host {h:?}"))
+                                .unwrap_or_default()
+                        )
+                    })
+                })
+                .collect();
+            findings.push(finding(
+                C,
+                DoctorSeverity::Warning,
+                addr.to_string(),
+                format!(
+                    "in both presence reads {:.1}s apart, instances of {addr} on a system their \
+                     descriptors declare minted state {} session zids, {} then and {} now: {} — \
+                     two sessions claim one address, and the cause is undecided: a collision, a \
+                     cloned machine id and a second process started as the same service look \
+                     alike on the bus, and a standby shows the same way (hostid.v1 §2.12)",
+                    p.grace_s(),
+                    now.zids.len().max(then.zids.len()),
+                    then.zids.len(),
+                    now.zids.len(),
+                    shown.join(", ")
+                ),
+            ));
+        } else if settles_no(&then, before.complete) || settles_no(&now, p.after.complete) {
+            counted += 1;
+        } else {
+            let mut why: Vec<String> = Vec::new();
+            for (name, r, complete) in [
+                ("the first", &then, before.complete),
+                ("the second", &now, p.after.complete),
+            ] {
+                if established(r) {
+                    why.push(format!("{name} read shows {} session zids", r.zids.len()));
+                } else if !complete {
+                    why.push(format!(
+                        "{name} read ended at its timeout and shows at most one zid, which may \
+                         have missed one"
+                    ));
+                }
+                why.extend(r.impediments.iter().map(|i| format!("in {name} read, {i}")));
+            }
+            let mut seen = BTreeSet::new();
+            why.retain(|w| seen.insert(w.clone()));
+            undecided.push(unjudged(
+                addr.to_string(),
+                format!(
+                    "the counted instances do not settle it: {} (hostid.v1 §2.12)",
+                    why.join("; ")
+                ),
+            ));
+        }
+    }
+    CheckReport::of(
+        C,
+        findings,
+        undecided,
+        format!(
+            "{counted} address(es) on minted systems, each with its counted instances stating one \
+             session zid in a complete read with every descriptor read{}",
+            if literal > 0 {
+                format!(
+                    "; {literal} on systems in the minted shape whose descriptors do not list \
+                     hostid.v1, which is not this profile's"
+                )
+            } else {
+                String::new()
+            }
+        ),
     )
 }
 
@@ -2895,5 +3577,410 @@ mod tests {
         clean(&at(Memlock::Unlimited));
         // An unreadable limit is not an unlimited one (#677).
         assert!(unseen(&at(Memlock::Unknown)).contains("could not be read"));
+    }
+
+    // ── health.v1 (#721, PF) ────────────────────────────────────────────
+
+    use crate::bus::health::{CheckValue, Replied, ServiceGot, Stamped, StatusValue};
+    use zenkey_model::health::Read;
+
+    const C: &str = "000000000000000c";
+    const D: &str = "000000000000000d";
+
+    fn now() -> std::time::SystemTime {
+        std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+    }
+
+    /// A descriptor of `service@instance` listing `health.v1`, its token as
+    /// `token` says.
+    fn health_descriptor(service: &str, instance: &str, token: bool) -> DescriptorRead {
+        descriptor(
+            service,
+            instance,
+            &[json!({"iface": "health.v1",
+                     "contract": format!("sha256:{}", zenkey::health::FINGERPRINT),
+                     "minor": 0, "token": token})],
+            &[],
+        )
+    }
+
+    /// An owner's answer: its status at `level`, `age_s` old, and its checks.
+    fn answered(level: Level, age_s: u64, checks: &[(&str, Level)]) -> ServiceGot {
+        ServiceGot {
+            status: Some(Replied {
+                value: Some(StatusValue {
+                    level: Read::Level(level),
+                    reason: "netns gone".into(),
+                    since_ns: 1,
+                }),
+                stamp: Some(Stamped {
+                    time: now() - Duration::from_secs(age_s),
+                    clock: "ab12".into(),
+                }),
+            }),
+            checks: checks
+                .iter()
+                .map(|(n, l)| {
+                    (
+                        (*n).to_owned(),
+                        Replied {
+                            value: Some(CheckValue {
+                                level: Read::Level(*l),
+                                detail: String::new(),
+                            }),
+                            stamp: None,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn reading_of(services: Vec<(&str, ServiceGot)>) -> HealthGet {
+        HealthGet {
+            selector: "zk2/*/*/health.v1/state/**".into(),
+            read_at: now(),
+            complete: true,
+            services: services
+                .into_iter()
+                .map(|(a, g)| (a.parse().unwrap(), g))
+                .collect(),
+        }
+    }
+
+    /// Four owners implementing `health.v1` (one in its tokenless set) and
+    /// one that does not, each reading as `first` and `second` say.
+    fn health_obs(
+        first: Vec<(&str, ServiceGot)>,
+        second: Vec<(&str, ServiceGot)>,
+    ) -> DoctorObservation {
+        let keys = [
+            inst("lab/f", A),
+            inst("lab/d", B),
+            inst("lab/s", C),
+            inst("lab/l", D),
+            inst("lab/n", "000000000000000e"),
+        ];
+        let o = observed(
+            &keys,
+            vec![
+                (("lab/f", A), health_descriptor("lab/f", A, true)),
+                (("lab/d", B), health_descriptor("lab/d", B, false)),
+                (("lab/s", C), health_descriptor("lab/s", C, true)),
+                (("lab/l", D), health_descriptor("lab/l", D, true)),
+                (
+                    ("lab/n", "000000000000000e"),
+                    descriptor("lab/n", "000000000000000e", &[], &[]),
+                ),
+            ],
+        );
+        let mut o = obs(o, &[], &[]);
+        o.health = vec![Ok(reading_of(first)), Ok(reading_of(second))];
+        o
+    }
+
+    fn synced() -> DoctorSpec {
+        DoctorSpec {
+            clocks_synced: true,
+            ..spec()
+        }
+    }
+
+    fn health_check(o: &DoctorObservation, s: &DoctorSpec, id: CheckId) -> CheckReport {
+        judge(o, s).check(id).expect("every check").clone()
+    }
+
+    fn deployment() -> Vec<(&'static str, ServiceGot)> {
+        vec![
+            ("lab/f", answered(Level::Failed, 5, &[])),
+            ("lab/d", answered(Level::Degraded, 5, &[])),
+            ("lab/s", answered(Level::Ok, 70, &[])),
+            ("lab/l", answered(Level::Ok, 5, &[("disk", Level::Failed)])),
+        ]
+    }
+
+    #[test]
+    fn health_checks_find_each_level_and_never_a_stale_status_at_one() {
+        let o = health_obs(deployment(), deployment());
+        let s = synced();
+        // FAILED: by its status, and by a check worse than an OK status.
+        let r = health_check(&o, &s, CheckId::HealthFailed);
+        assert_eq!(r.verdict, Judgement::Established, "{r:#?}");
+        let subjects: Vec<&str> = r.findings.iter().map(|f| f.subject.as_str()).collect();
+        assert_eq!(subjects, ["lab/f", "lab/l"]);
+        assert!(
+            r.findings
+                .iter()
+                .all(|f| f.severity == DoctorSeverity::Error)
+        );
+        assert!(r.findings[0].evidence.contains("netns gone"), "{r:#?}");
+        assert!(r.findings[1].evidence.contains("effective level"), "{r:#?}");
+        // The stale one is undecided here, never FAILED.
+        assert!(
+            r.unjudged
+                .iter()
+                .any(|u| u.subject == "lab/s" && u.reason.contains("never a level"))
+        );
+        // DEGRADED, a warning; the tokenless owner found by its descriptor.
+        let r = health_check(&o, &s, CheckId::HealthDegraded);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/d", DoctorSeverity::Warning)
+        );
+        // Stale: a finding of its own, a warning, never FAILED nor down.
+        let r = health_check(&o, &s, CheckId::HealthStale);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/s", DoctorSeverity::Warning)
+        );
+        assert!(f.evidence.contains("never FAILED and never down"), "{f:?}");
+        // The break of §2.2, in both readings: an error about the owner.
+        let r = health_check(&o, &s, CheckId::HealthInconsistent);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            ("lab/l", DoctorSeverity::Error)
+        );
+        assert!(f.evidence.contains("MUST NOT"), "{f:?}");
+    }
+
+    #[test]
+    fn health_checks_are_clean_unobservable_and_not_asked_apart() {
+        let healthy = || {
+            vec![
+                ("lab/f", answered(Level::Ok, 5, &[])),
+                ("lab/d", answered(Level::Ok, 5, &[("disk", Level::Ok)])),
+                ("lab/s", answered(Level::Ok, 5, &[])),
+                ("lab/l", answered(Level::Failed, 5, &[("disk", Level::Ok)])),
+            ]
+        };
+        let o = health_obs(healthy(), healthy());
+        let s = synced();
+        for id in [
+            CheckId::HealthDegraded,
+            CheckId::HealthStale,
+            CheckId::HealthInconsistent,
+        ] {
+            let why = clean(&health_check(&o, &s, id));
+            assert!(why.contains("4 service(s)"), "{id}: {why}");
+            assert!(
+                why.contains("1 present service(s) do not list"),
+                "{id}: {why}"
+            );
+        }
+        // A status worse than its checks is allowed (§2.2).
+        assert_eq!(
+            found(&health_check(&o, &s, CheckId::HealthFailed)).subject,
+            "lab/l"
+        );
+
+        // No word for the clock: every reply's age is unobservable, and the
+        // reason names the cure.
+        let r = health_check(&o, &spec(), CheckId::HealthStale);
+        assert!(unseen(&r).contains("4 subjects"), "{r:#?}");
+        assert!(r.unjudged[0].reason.contains("--clocks-synced"), "{r:#?}");
+
+        // A break in the last reading only: unobservable, never the finding.
+        let o = health_obs(healthy(), deployment());
+        let r = health_check(&o, &s, CheckId::HealthInconsistent);
+        assert!(r.findings.is_empty());
+        assert!(
+            r.unjudged
+                .iter()
+                .any(|u| u.subject == "lab/l" && u.reason.contains("one_reading")),
+            "{r:#?}"
+        );
+
+        // A GET that answered nothing for an owner: silent, undecided.
+        let o = health_obs(vec![], vec![]);
+        assert!(unseen(&health_check(&o, &s, CheckId::HealthFailed)).contains("silent"));
+
+        // Nobody implements it: clean, health asked of none.
+        let mut o = obs(
+            observed(
+                &[inst("lab/n", A)],
+                vec![(("lab/n", A), descriptor("lab/n", A, &[], &[]))],
+            ),
+            &[],
+            &[],
+        );
+        o.health = vec![Ok(reading_of(vec![])), Ok(reading_of(vec![]))];
+        assert!(clean(&health_check(&o, &s, CheckId::HealthFailed)).contains("asked of none"));
+        // A descriptor that did not read: whether it implements it is unknown.
+        let mut o = obs(
+            observed(
+                &[inst("lab/n", A)],
+                vec![(("lab/n", A), DescriptorRead::Silent)],
+            ),
+            &[],
+            &[],
+        );
+        o.health = vec![Ok(reading_of(vec![]))];
+        assert!(unseen(&health_check(&o, &s, CheckId::HealthStale)).contains("interface token"));
+        // Not asked by the run: not read.
+        let mut not = s.clone();
+        not.checks.remove(&CheckId::HealthFailed);
+        assert_eq!(
+            health_check(&o, &not, CheckId::HealthFailed).verdict,
+            Judgement::NotAsked
+        );
+    }
+
+    // ── hostid-duplicate (hostid.v1 §2.12) ──────────────────────────────
+
+    const SYSINFO: &str = "h-bbd1aa1db10b/sysinfo";
+
+    /// A descriptor of `sysinfo@instance` on a minted system: `profiles`
+    /// lists `hostid.v1`, `meta` states `zid` (unless `None`) and a host.
+    fn minted_descriptor(
+        instance: &str,
+        zid: Option<&str>,
+        entries: &[serde_json::Value],
+    ) -> DescriptorRead {
+        let mut meta = serde_json::Map::new();
+        if let Some(z) = zid {
+            meta.insert("zid".into(), json!(z));
+        }
+        meta.insert("host".into(), json!(format!("host-{instance}")));
+        let d: Descriptor = serde_json::from_value(json!({
+            "format": "zk2-descriptor/0.1",
+            "service": SYSINFO,
+            "instance": instance,
+            "interfaces": entries,
+            "profiles": ["hostid.v1"],
+            "meta": meta,
+        }))
+        .expect("a descriptor");
+        DescriptorRead::Served(Box::new(d))
+    }
+
+    fn two_sysinfos(a: DescriptorRead, b: DescriptorRead) -> Observed {
+        observed(
+            &[inst(SYSINFO, A), inst(SYSINFO, B)],
+            vec![((SYSINFO, A), a), ((SYSINFO, B), b)],
+        )
+    }
+
+    #[test]
+    fn two_sessions_claiming_a_minted_address_are_a_finding_whose_cause_is_undecided() {
+        // §6 step 1: two zids in both reads.
+        let o = obs(
+            two_sysinfos(
+                minted_descriptor(A, Some("aa01"), &[]),
+                minted_descriptor(B, Some("bb02"), &[]),
+            ),
+            &[],
+            &[],
+        );
+        let r = check(&o, CheckId::HostidDuplicate);
+        let f = found(&r);
+        assert_eq!(
+            (f.subject.as_str(), f.severity),
+            (SYSINFO, DoctorSeverity::Warning)
+        );
+        assert!(f.evidence.contains("cause is undecided"), "{f:?}");
+        assert!(f.evidence.contains("meta.host \"host-"), "{f:?}");
+        // One zid, stated twice: one session, the re-mint rules' (§2.12).
+        let o = obs(
+            two_sysinfos(
+                minted_descriptor(A, Some("aa01"), &[]),
+                minted_descriptor(B, Some("00AA01"), &[]),
+            ),
+            &[],
+            &[],
+        );
+        clean(&check(&o, CheckId::HostidDuplicate));
+        // §6 step 3: one states no zid — undecided, never clean.
+        let o = obs(
+            two_sysinfos(
+                minted_descriptor(A, Some("aa01"), &[]),
+                minted_descriptor(B, None, &[]),
+            ),
+            &[],
+            &[],
+        );
+        assert!(unseen(&check(&o, CheckId::HostidDuplicate)).contains("states no meta.zid"));
+        // A re-mint: the second instance in one read only.
+        let mut o = obs(
+            observed(
+                &[inst(SYSINFO, B)],
+                vec![((SYSINFO, B), minted_descriptor(B, Some("bb02"), &[]))],
+            ),
+            &[],
+            &[],
+        );
+        o.before = Some(Ok(two_sysinfos(
+            minted_descriptor(A, Some("aa01"), &[]),
+            minted_descriptor(B, Some("bb02"), &[]),
+        )));
+        clean(&check(&o, CheckId::HostidDuplicate));
+        // A read that ended at its timeout shows one zid it may have missed.
+        let mut o = obs(
+            observed(
+                &[inst(SYSINFO, A)],
+                vec![((SYSINFO, A), minted_descriptor(A, Some("aa01"), &[]))],
+            ),
+            &[],
+            &[],
+        );
+        after_mut(&mut o).complete = false;
+        if let Some(Ok(b)) = &mut o.before {
+            b.complete = false;
+        }
+        assert!(unseen(&check(&o, CheckId::HostidDuplicate)).contains("timeout"));
+    }
+
+    #[test]
+    fn a_minting_a_contract_lists_in_uses_is_unobservable_and_not_counted() {
+        // §6 step 5: both list hostid.v1, but a contract each implements
+        // does too, so neither is counted.
+        let x = load(
+            "[interface]\nname = \"sysinfo_x\"\nmajor = 1\nminor = 0\nuses = [\"hostid.v1\"]\n\
+             [resources.cpu]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n",
+        );
+        let mut e = entry(&x);
+        e["token"] = json!(false);
+        let o = obs(
+            two_sysinfos(
+                minted_descriptor(A, Some("aa01"), std::slice::from_ref(&e)),
+                minted_descriptor(B, Some("bb02"), &[e]),
+            ),
+            &[&x],
+            &[],
+        );
+        let why = unseen(&check(&o, CheckId::HostidDuplicate));
+        assert!(why.contains("lists hostid.v1 in uses"), "{why}");
+        // §6 step 4: a literal system in the minted shape is not minted, and
+        // not this profile's.
+        let literal = descriptor("h-504c6767c349/logger", A, &[], &[]);
+        let o = obs(
+            observed(
+                &[inst("h-504c6767c349/logger", A)],
+                vec![(("h-504c6767c349/logger", A), literal)],
+            ),
+            &[],
+            &[],
+        );
+        assert!(clean(&check(&o, CheckId::HostidDuplicate)).contains("not this profile's"));
+        // §6 step 2: two systems, one instance each.
+        let other = "h-3f6d94515669/sysinfo";
+        let mut b = minted_descriptor(B, Some("bb02"), &[]);
+        if let DescriptorRead::Served(d) = &mut b {
+            d.service = other.into();
+        }
+        let o = obs(
+            observed(
+                &[inst(SYSINFO, A), inst(other, B)],
+                vec![
+                    ((SYSINFO, A), minted_descriptor(A, Some("aa01"), &[])),
+                    ((other, B), b),
+                ],
+            ),
+            &[],
+            &[],
+        );
+        assert!(clean(&check(&o, CheckId::HostidDuplicate)).starts_with("2 address(es)"));
     }
 }

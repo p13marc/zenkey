@@ -4,6 +4,35 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.3 — 2026-10-10: §5's clock question has its fixture (#721, PF)
+
+The reference tool (`zenctl health`, #721's PF) answers §5's last
+question, "is this service's clock ahead?", and found it pinned by the
+text and checked by no fixture: the runtime's §4 test computed it by hand.
+
+**Changed.**
+- **`conformance/clock.json`** (21 cases), cited from §5's row: what one
+  subscriber heard of one service in its window, in arrival order (the
+  status's puts and deletes, `clock_ahead` faults, other faults), and its
+  presence as `judgements.json` writes it → yes, no, unobservable or not
+  asked, with a reason. `zenkey_model::health::clock_ahead` runs it.
+
+**Deliberately not changed.**
+- **The rule.** Every case is §5's row as 0.2 states it. Where the row is
+  silent the fixture reads it so, and says so in its notes:
+  - a status delete is no confirmation (§2.3), so it neither answers no nor
+    clears a fault;
+  - a fault's level and stamp play no part, only its code (§2.5: nothing a
+    reader concludes rests on the stamp);
+  - "not asked, as the first row's" is absent and not listed. A service
+    whose descriptor was not read, or whose token a read possibly
+    incomplete missed, is still answered by a fault heard on its key: the
+    fault is its own word.
+- **§5's second question** ("does its status agree with its checks?")
+  stays without a fixture of its own: its answer is the first question's
+  reason for one reading (`inconsistent` is the no), and `judgements.json`
+  pins that reason.
+
 ## 0.2 — 2026-10-10: a clock ahead without root, and the tool's clock (#721, PE)
 
 Two findings of the Python implementation's cold read of 0.1 (#609),

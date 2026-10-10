@@ -45,8 +45,8 @@
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed`, and
 //!   zk2's `presence`, `contracts`, `operation`, `consume`, `lens`, `why`
-//!   (the reads a silence is explained from, #702) and `conform` (a
-//!   service's suite, #703). The
+//!   (the reads a silence is explained from, #702), `conform` (a
+//!   service's suite, #703) and `health` (a `health.v1` reading, #721). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through
@@ -85,8 +85,9 @@
 //!
 //! * **[`judge`]** — everything that takes a position. `doctor` and its
 //!   `doctor_delta`, `expect`, `probe`, `condition`, `field`, `why` (a
-//!   silence explained rung by rung, #702) and `conform` (a service against
-//!   the revision it claims, #703), and
+//!   silence explained rung by rung, #702), `conform` (a service against
+//!   the revision it claims, #703) and `health` (`health.v1`'s verdicts,
+//!   #721), and
 //!   [`judge::common`] for the vocabulary they share. The honesty rules (the
 //!   tooling guide, which carries RFC 13 over to zk2) bite hardest here, so
 //!   the layer states them once.
@@ -216,6 +217,13 @@ pub use bus::conform::{
     SAMPLE_CAP as CONFORM_SAMPLE_CAP, observe as observe_conform, run_conform,
 };
 pub use judge::conform::judge as judge_conform;
+// `health.v1` (#721, PF): every service's health, or one's, read as the
+// profile's reader reads it — the reads, the session-free judge, and the
+// two in a row.
+pub use bus::health::{
+    AcrossFace, HealthObservation, HealthSpec, HealthTarget, observe as observe_health, run_health,
+};
+pub use judge::health::judge as judge_health;
 // Types reachable *through* root-exported ones (#350).
 pub use model::bounded::DEFAULT_MAX_KEYS;
 pub use model::tree::{TreeNode, TreeRow, TreeRows};
@@ -296,11 +304,11 @@ pub use model::timeline::{
 pub use model::tree::KeyTreeSnapshot;
 pub use report::{
     BenchReport, ConformReport, DeclaredEntities, DeclaredEntity, DoctorDelta, DoctorReport,
-    EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HelloView, Judgement,
-    LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport, RouterInfo, SampleRow,
-    SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff, SnapshotReport, SnapshotRow,
-    StorageInfo, TimelineReport, TopologyEdge, TopologyNode, TopologyReport, WhyReport, ZrecHeader,
-    ZsnapHeader, judgement_exit_code,
+    EntityKind, ExpectReport, FieldReport, GenPlan, GenPlanEntry, GenReport, HealthReport,
+    HelloView, Judgement, LatencyReport, LatencySummary, MeshLink, RecordReport, ReplayReport,
+    RouterInfo, SampleRow, SeedCoverage, ServeSummary, ServedCall, Snapshot, SnapshotDiff,
+    SnapshotReport, SnapshotRow, StorageInfo, TimelineReport, TopologyEdge, TopologyNode,
+    TopologyReport, WhyReport, ZrecHeader, ZsnapHeader, judgement_exit_code,
 };
 /// The documents the verbs above **return**, at the root beside the verbs
 /// themselves — a caller that can spell `run_doctor` can spell what it hands
@@ -373,6 +381,20 @@ const _: () = {
             session,
             "k",
             &crate::GetOpts::new(std::time::Duration::ZERO),
+        ));
+        // A health reading holds its window's subscriptions across awaits
+        // (#721, PF).
+        is_send(&crate::run_health(
+            session,
+            "",
+            crate::HealthTarget::All,
+            crate::HealthSpec {
+                timeout: std::time::Duration::ZERO,
+                window: None,
+                grace: std::time::Duration::ZERO,
+                clocks_synced: false,
+                face: None,
+            },
         ));
     }
 };

@@ -9,7 +9,7 @@ get verbs under them; FJ4 (#612) replaced v1's `topic`, `node`, `base`,
 `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`, `compat`,
 `serve`, `gen`, `scout` — are acts and observations on live traffic, and hang
 off the root, because an act is not a property of a noun. **Judgement** —
-`check`, `doctor`, `watchdog` — is exit-coded, under the one contract in
+`check`, `doctor`, `health`, `watchdog` — is exit-coded, under the one contract in
 `zenctl/src/exit.rs`. Then `context`, `cache` and `completions`, which are
 about the tool. FJ9 removed what was left of v1: `config`, `blob`, `export`
 and `why` (#612); the `v1` branch keeps them.
@@ -57,6 +57,7 @@ Commands:
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
+  health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion
@@ -124,6 +125,7 @@ Commands:
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
+  health       Read every service's health.v1, or one's: healthy, unhealthy, stale
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
   cache        Inspect, refresh or clear the name cache that feeds shell completion

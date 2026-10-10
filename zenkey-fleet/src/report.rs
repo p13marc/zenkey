@@ -60,7 +60,9 @@
 //! in place of v1's `generate`, and re-cut `bench` over zk2 calls. FJ8b gave
 //! the raw observers theirs (`observe`: a wire key's identity as far as the
 //! O2 ladder got, a payload's conformance to its declared type, a sample's
-//! QoS against the contract's, and what the observer resolved with).
+//! QoS against the contract's, and what the observer resolved with). PF
+//! gave `health.v1` its domain (`health`: each service's verdict, §5's other
+//! questions and the roll-up, in the profile's own tokens, #721).
 
 mod acl;
 mod admin;
@@ -74,6 +76,7 @@ mod doctor;
 mod expect;
 mod field;
 mod graph;
+mod health;
 mod iface;
 mod judgement;
 mod mock;
@@ -104,6 +107,7 @@ pub use doctor::*;
 pub use expect::*;
 pub use field::*;
 pub use graph::*;
+pub use health::*;
 pub use iface::*;
 pub use judgement::*;
 pub use mock::*;

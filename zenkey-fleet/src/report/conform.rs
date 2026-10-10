@@ -12,7 +12,12 @@
 //! resource that declares no `freshness.ttl_s`, a profile-backed case whose
 //! profile does not exist yet (#613). The `freshness` case is the "no" of
 //! `freshness.v1`'s "is this value fresh?" turned into the suite's
-//! polarity: a stale member is the finding (#720).
+//! polarity: a stale member is the finding (#720). The `health` and
+//! `health-aggregation` cases do the same for `health.v1`'s "is this
+//! service healthy?" and "does its status agree with its checks?" (#721):
+//! unhealthy or stale, and a break of §2.2 seen in both readings, are the
+//! findings; a service whose descriptor does not list `health.v1` is not
+//! asked.
 
 use std::fmt;
 
@@ -60,11 +65,19 @@ pub enum CaseId {
     /// Rates and populations within a declared budget: a profile's, which
     /// waits for it (#613). Never asked here.
     Budget,
+    /// The service, implementing `health.v1`, is healthy (`health.v1` §5,
+    /// §2.11; #721): unhealthy or stale is the finding. Not asked of a
+    /// service whose descriptor does not list `health.v1`.
+    Health,
+    /// Its status agrees with its checks: no current check worse than a
+    /// fresh status, in either of two readings (`health.v1` §2.2, §5). The
+    /// break, seen in both, is the finding.
+    HealthAggregation,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 10] = [
+    pub const ALL: [CaseId; 12] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -75,6 +88,8 @@ impl CaseId {
         CaseId::StateGet,
         CaseId::Freshness,
         CaseId::Budget,
+        CaseId::Health,
+        CaseId::HealthAggregation,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -90,6 +105,8 @@ impl CaseId {
             CaseId::StateGet => "state-get",
             CaseId::Freshness => "freshness",
             CaseId::Budget => "budget",
+            CaseId::Health => "health",
+            CaseId::HealthAggregation => "health-aggregation",
         }
     }
 
@@ -106,6 +123,8 @@ impl CaseId {
             CaseId::StateGet => "§4.2 S2",
             CaseId::Freshness => "freshness.v1",
             CaseId::Budget => "#613",
+            CaseId::Health => "health.v1 §5",
+            CaseId::HealthAggregation => "health.v1 §2.2",
         }
     }
 }
@@ -282,7 +301,9 @@ mod tests {
                 "state-stamp",
                 "state-get",
                 "freshness",
-                "budget"
+                "budget",
+                "health",
+                "health-aggregation",
             ]
         );
         for c in CaseId::ALL {
@@ -322,6 +343,12 @@ mod tests {
                 "1 of 1 member(s) stale",
             ),
             ConformCase::not_asked(CaseId::Freshness, "state/namespaces", "no freshness.ttl_s"),
+            ConformCase::failed(CaseId::Health, "service", "unhealthy (failed, at failed)"),
+            ConformCase::not_asked(
+                CaseId::HealthAggregation,
+                "service",
+                "its descriptor does not list health.v1",
+            ),
         ]);
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
@@ -344,6 +371,12 @@ mod tests {
                      "detail": "1 of 1 member(s) stale"},
                     {"case": "freshness", "subject": "state/namespaces", "section": "freshness.v1",
                      "verdict": {"answer": "not_asked"}, "detail": "no freshness.ttl_s"},
+                    {"case": "health", "subject": "service", "section": "health.v1 §5",
+                     "verdict": {"answer": "established"},
+                     "detail": "unhealthy (failed, at failed)"},
+                    {"case": "health-aggregation", "subject": "service",
+                     "section": "health.v1 §2.2", "verdict": {"answer": "not_asked"},
+                     "detail": "its descriptor does not list health.v1"},
                 ],
             })
         );
