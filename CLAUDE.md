@@ -33,7 +33,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   observer resolves keys through (`model::lens`), contract-resolved
   rendering (`model::render`, structural when no contract is in hand),
   `Monitor` with bounded broadcast + `Dropped(n)` honesty and ArcSwap
-  key-tree snapshots. It depends on the zk2 runtime as plain `zenkey` (by
+  key-tree snapshots, and live per-address presence (`model::presence_live`:
+  up, down or unobservable, every token move a value; kept current from a
+  `Monitor` by `bus::presence::PresenceFeed`, re-seeded after `Dropped(n)`,
+  #614 FL1). It depends on the zk2 runtime as plain `zenkey` (by
   path) and has no feature axes: v1's registry slice sets, introspection,
   roster, schema-decode seam and codec features, v1 judges and the
   profile-backed features left at FJ9 (#612). **Five layers**, and `lib.rs`'s doc-map is the normative statement of
