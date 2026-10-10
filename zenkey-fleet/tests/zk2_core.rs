@@ -74,7 +74,7 @@ async fn deployment(owners: &zenoh::Session) -> Deployment {
         bring_up(
             owners,
             config("vehicle-01/cam-front").tokenless(iface("health.v1")),
-            &["walkthrough/camera.v1", "walkthrough/health.v1"],
+            &["walkthrough/camera.v1", "profiles/health/health.v1"],
         )
         .await,
     );

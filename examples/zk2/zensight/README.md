@@ -49,7 +49,7 @@ The v1 surface, re-counted from
 | host services | v1's producer names: `sysinfo`, `netlink`, `netring`, `systemd`, `logs`, `hostspec`, `parallax`, `probe`, `pve`, `historian`, plus the process identities `correlator`, `policy-compiler`, `exporter-prometheus`, `exporter-otel`. A second instance is just another service (`netring-2`) implementing the same interface. |
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
 | fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
-| framework set | interfaces every service implements: `health.v1` ([`../walkthrough/health.v1.toml`](../walkthrough/health.v1.toml)), `alarms.v1`, `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
+| framework set | interfaces every service implements: `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)), `alarms.v1`, `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
 | schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is `schemas/telemetry.v1.json`. |
 
 Example keys, for host `h-3fa9c2d41b7e`:
@@ -109,7 +109,7 @@ description as `doc`, `when` mapped to `optional` + `gate`, and v1's
 
 | v1 family | Registries | zk2 |
 |---|---|---|
-| state `health` | 20 | `health.v1` (`status`, `checks/{check}`, `faults`). ZenSight's HealthSnapshot fields (devices_total/responding, self_stats) need checks or a profile extension. |
+| state `health` | 20 | `health.v1` (`status`, `checks/{check}`, `faults`). ZenSight's HealthSnapshot fields (devices_total/responding, self_stats) stay in ZenSight's own interfaces, or become checks: `Status` carries no application field ([`health.v1`](../../../spec/profiles/health/v1.md) Appendix A). |
 | state `errors` (ZenSight's profile token) | 20 | `zs.errors.v1` state `errors`: the rolling error window (not written; one resource) |
 | state `sensor` (registration document) | 20 | **deleted**: the instance descriptor (host, build, capabilities, profiles, r3.2 §3.10) |
 | state `evidence/self` | 20 | `zs.evidence.v1` `self` |

@@ -74,8 +74,9 @@ fn every_profile_fixture_is_known() {
     let mut seen = Vec::new();
     for dir in sorted_entries(&profiles()) {
         let profile = dir.file_name().unwrap().to_string_lossy().into_owned();
-        // `README.md` is the index; `.history/` holds published contracts
-        // (core §9.7), checked like `examples/zk2/.history` once one exists.
+        // `README.md` is the index; `.history/` holds the published standard
+        // contracts (core §9.7), checked by
+        // `every_standard_contract_is_published_and_compatible`.
         if !dir.is_dir() || profile == ".history" {
             continue;
         }
@@ -103,6 +104,87 @@ fn every_profile_fixture_is_known() {
         assert!(
             seen.iter().any(|(p, n)| p == profile && n == name),
             "{profile}/conformance/{name} is listed in KNOWN but missing"
+        );
+    }
+}
+
+/// Every profile's standard contract, `spec/profiles/<name>/<name>.v<N>.toml`
+/// (`spec/profiles/README.md`), with its file named by its interface id.
+fn standard_contracts() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for dir in sorted_entries(&profiles()) {
+        let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        if !dir.is_dir() || name.starts_with('.') {
+            continue;
+        }
+        for file in sorted_entries(&dir) {
+            let f = file.file_name().unwrap().to_string_lossy().into_owned();
+            if file.is_file() && f.starts_with(&format!("{name}.v")) && f.ends_with(".toml") {
+                out.push(file);
+            }
+        }
+    }
+    out
+}
+
+/// Every standard contract loads with no finding at all, fingerprints and
+/// bundles, is named by its interface id, and is published in
+/// `spec/profiles/.history` (core §9.7), compatible with every earlier
+/// revision of its interface there, as `tests/examples.rs` requires of
+/// `examples/zk2/`. Every interface published there has its contract in the
+/// tree. After an intended change, publish the new revision with
+/// `zk2 contract bundle <file> --history spec/profiles/.history`.
+#[test]
+fn every_standard_contract_is_published_and_compatible() {
+    use zenkey_model::bundle::Bundle;
+    use zenkey_model::canonical::Fingerprint;
+    use zenkey_model::compat::{Class, Revision, check_history, same_revision};
+    use zenkey_model::contract::load_path;
+
+    let root = profiles().join(".history");
+    let problems = zenkey_model::history::check_tagged(&root);
+    assert!(problems.is_empty(), "{problems:#?}");
+    let files = standard_contracts();
+    assert!(
+        files.iter().any(|p| p.ends_with("health/health.v1.toml")),
+        "health.v1's standard contract: {files:?}"
+    );
+    let mut ifaces = Vec::new();
+    for p in &files {
+        let rel = p.strip_prefix(profiles()).unwrap().display().to_string();
+        let l = load_path(p);
+        assert!(l.report.0.is_empty(), "{rel}:\n{}", l.report);
+        let c = l.contract.expect("no finding, so a contract");
+        assert_eq!(
+            p.file_stem().unwrap().to_string_lossy(),
+            c.iface.to_string(),
+            "{rel}: a standard contract's file is named by its interface id"
+        );
+        let b = Bundle::build(&c);
+        let v = Bundle::verify_expecting(&b.to_bytes(), &Fingerprint::of(&c));
+        assert!(v.is_ok(), "{rel}: {:?}", v.err());
+        let dir = root.join(c.iface.to_string());
+        let mut revs = Vec::new();
+        for e in std::fs::read_dir(&dir)
+            .unwrap_or_else(|_| panic!("{rel}: no history at {}", dir.display()))
+        {
+            let bytes = std::fs::read(e.unwrap().path()).unwrap();
+            revs.push(Revision::of_bundle(&Bundle::verify(&bytes).unwrap()));
+        }
+        let new = Revision::of(&c);
+        assert!(
+            revs.iter().any(|r| same_revision(r, &new)),
+            "{rel}: the current revision is not published; run zk2 contract bundle spec/profiles/{rel} --history spec/profiles/.history"
+        );
+        let v = check_history(&revs, &new);
+        assert_eq!(v.class(), Class::Compatible, "{rel}: {:#?}", v.findings);
+        ifaces.push(c.iface.to_string());
+    }
+    for dir in sorted_entries(&root) {
+        let iface = dir.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            ifaces.contains(&iface),
+            "spec/profiles/.history/{iface} has no standard contract in the tree"
         );
     }
 }

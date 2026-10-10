@@ -20,14 +20,19 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// An example directory's contracts, with the profiles' standard contracts
+/// an example deployment implements beside its own: `health.v1` (#721).
 fn contracts(dir: &str) -> ContractSet {
-    let (set, problems) = ContractSet::load_path(&root().join("examples/zk2").join(dir));
+    let (mut set, problems) = ContractSet::load_path(&root().join("examples/zk2").join(dir));
     // A directory of contracts may hold a deployment file beside them (the
     // tcgui frontend's bindings), reported and skipped.
     for p in &problems {
         assert!(p.at.ends_with(".bindings.toml"), "{p:?}");
     }
     assert!(!set.is_empty());
+    let (standard, problems) = ContractSet::load_path(&root().join("spec/profiles/health"));
+    assert!(problems.is_empty(), "{problems:?}");
+    set.extend(standard);
     set
 }
 

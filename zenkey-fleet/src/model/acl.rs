@@ -2690,12 +2690,17 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
     }
 
+    /// The example directories' contracts, with the profiles' standard
+    /// contracts an example deployment implements beside its own:
+    /// `health.v1` (`spec/profiles/health/`, #721).
     fn contracts(dirs: &[&str]) -> ContractSet {
         let mut set = ContractSet::new();
         for d in dirs {
             let (s, _) = ContractSet::load_path(&examples().join(d));
             set.extend(s);
         }
+        let standard = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles/health");
+        set.extend(ContractSet::load_path(&standard).0);
         set
     }
 

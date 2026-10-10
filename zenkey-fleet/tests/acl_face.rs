@@ -82,7 +82,9 @@ fn face_plan(attach: FaceAttach) -> AclPlan {
         &std::fs::read_to_string(examples.join("acl/walkthrough.enrollment.toml")).unwrap(),
     )
     .unwrap();
-    let (contracts, _) = ContractSet::load_path(&examples.join("walkthrough"));
+    let (mut contracts, _) = ContractSet::load_path(&examples.join("walkthrough"));
+    // navigation implements `health.v1`, its profile's standard contract (#721).
+    contracts.extend(ContractSet::load_path(&util::zk2::profiles().join("health")).0);
     let plan = plan_acl(
         &enrollment,
         &contracts,

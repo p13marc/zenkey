@@ -1,6 +1,7 @@
 //! Every example contract under `examples/zk2/` validates with no finding at
 //! all, fingerprints and bundles (#608), and the set's cross-contract checks
-//! pass.
+//! pass, with the profiles' standard contracts in the set (`health.v1`,
+//! #721), which `tests/profiles.rs` checks on their own.
 
 use std::path::{Path, PathBuf};
 
@@ -32,6 +33,35 @@ fn contract_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// The profiles' standard contracts, `spec/profiles/<name>/<name>.v<N>.toml`
+/// (`spec/profiles/README.md`): an example deployment implements them beside
+/// its own contracts (tcgui and ZenSight implement `health.v1`).
+fn profile_contracts() -> Vec<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(&root).unwrap().flatten() {
+        let dir = e.path();
+        let Some(name) = dir.file_name().and_then(|n| n.to_str()).map(str::to_owned) else {
+            continue;
+        };
+        if !dir.is_dir() || name.starts_with('.') {
+            continue;
+        }
+        for f in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = f.path();
+            if p.is_file()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&format!("{name}.v")) && n.ends_with(".toml"))
+            {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 #[test]
 fn every_example_contract_validates_fingerprints_and_bundles() {
     let mut failures = Vec::new();
@@ -57,14 +87,22 @@ fn every_example_contract_validates_fingerprints_and_bundles() {
         failures.is_empty(),
         "example contracts with findings: {failures:?}"
     );
-    let refs: Vec<&Contract> = contracts.iter().collect();
-    let set = check_set(&refs);
-    assert!(!set.has_errors(), "{set}");
+    // 23 since `health.v1` moved under `spec/profiles/` (#721).
     assert!(
-        contracts.len() >= 24,
+        contracts.len() >= 23,
         "only {} contracts found",
         contracts.len()
     );
+    // The set check sees the profiles' standard contracts too, so no example
+    // declares one of their interfaces again (E036).
+    let standard: Vec<Contract> = profile_contracts()
+        .iter()
+        .map(|p| load_path(p).contract.expect("tests/profiles.rs: it loads"))
+        .collect();
+    assert!(!standard.is_empty(), "health.v1's standard contract");
+    let refs: Vec<&Contract> = contracts.iter().chain(&standard).collect();
+    let set = check_set(&refs);
+    assert!(!set.has_errors(), "{set}");
 }
 
 /// `examples/zk2/.history` (#618): every bundle verifies, every example's

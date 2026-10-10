@@ -24,7 +24,7 @@ cargo run -p zenkey-model --bin zk2 -- contract bundle <file> --history examples
 
 | Directory | What it is | Issue |
 |---|---|---|
-| [`walkthrough/`](walkthrough/) | The r3 walkthrough interfaces: `nav.v2`, `health.v1`, `twist_cmd.v1`, `thruster.v1`, `camera.v1`, `detections.v1`, `mission_plan.v1`, `geo.v1` | #608 |
+| [`walkthrough/`](walkthrough/) | The r3 walkthrough interfaces: `nav.v2`, `twist_cmd.v1`, `thruster.v1`, `camera.v1`, `detections.v1`, `mission_plan.v1`, `geo.v1`. `health.v1`, written here first, is a profile's standard contract since #721: [`spec/profiles/health/health.v1.toml`](../../spec/profiles/health/health.v1.toml), published in `spec/profiles/.history/` (its revision 1.0 stays in this tree's `.history/`, which is append-only) | #608 |
 | [`tcgui/`](tcgui/) | The pilot: tcgui's v1 `tc.toml`, mapped | #589 |
 | [`zenoh-modem/`](zenoh-modem/) | zenoh-modem's management contract, mapped | #623 |
 | [`zensight/`](zensight/) | ZenSight's 22 registries, mapped, with a representative cut | #622 |

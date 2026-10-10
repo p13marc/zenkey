@@ -11,7 +11,7 @@ blob tier), mapped here onto zk2.
 |---|---|
 | `system` | the backend host's id, `h-<12hex>`, minted by [`hostid.v1`](../../../spec/profiles/hostid/v1.md): v1's construction with zk2's one salt (D26), so the value is not v1's origin. Its Appendix B maps tcgui's v1 origins. |
 | `service` | `tc`, one per host |
-| interfaces | `tc.netif.v1`, `tc.netem.v1`, `tc.scenario.v1`, `health.v1` (from [`../walkthrough/`](../walkthrough/health.v1.toml)) |
+| interfaces | `tc.netif.v1`, `tc.netem.v1`, `tc.scenario.v1`, `health.v1` (the profile's standard contract, [`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml); [`health.v1`](../../../spec/profiles/health/v1.md)) |
 | the frontend | a pure consumer on the operator's workstation: an instance token, no interface token. It binds each interface as a role to `*/tc`, every system's tc service, so the wildcard sits at the system position ([`frontend.bindings.toml`](frontend.bindings.toml)) |
 | ownership | every resource `exclusive`, every write `fanout = "forbidden"` except `diagnostics`. The backend mutates kernel state, so it also keeps an out-of-bus lock (r3 §3.8). |
 | schema kind | **jsonschema**, deliberately. tcgui's types are serde structs, which makes this the pilot of the Rust-first path: at port time schemars generates `schemas/tc.json` and the generated file is committed (#614). The walkthrough contracts exercise protobuf. |

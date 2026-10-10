@@ -63,9 +63,20 @@ pub fn examples() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2")
 }
 
-/// A contract from `examples/zk2/`, by its path without `.toml`.
+/// The repository's `spec/profiles/` directory, which holds the profiles'
+/// standard contracts as `<name>/<name>.v<major>.toml` (`health.v1`, #721).
+pub fn profiles() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles")
+}
+
+/// A contract from `examples/zk2/`, by its path without `.toml`, or a
+/// profile's standard contract from `spec/profiles/` when the path starts
+/// with `profiles/` (`profiles/health/health.v1`).
 pub fn example(path: &str) -> Contract {
-    let full = examples().join(format!("{path}.toml"));
+    let full = match path.strip_prefix("profiles/") {
+        Some(p) => profiles().join(format!("{p}.toml")),
+        None => examples().join(format!("{path}.toml")),
+    };
     let l = load_path(&full);
     l.contract
         .unwrap_or_else(|| panic!("{path} does not load:\n{}", l.report))
