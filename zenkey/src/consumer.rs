@@ -34,7 +34,7 @@ use zenoh::pubsub::Subscriber;
 use zenoh::sample::Sample;
 
 use crate::error::{Error, Result, zenoh};
-use crate::state::{Current, StateGet};
+use crate::state::{Current, StateAnswer, StateGet};
 
 /// One bound provider address: a position is `None` for `*`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +466,21 @@ impl Consumer {
         values: Option<&Bindings>,
         timeout: Duration,
     ) -> Result<StateGet> {
+        self.get_answer(resource, values, timeout)
+            .await
+            .map(StateGet::from)
+    }
+
+    /// [`Consumer::get`], with whether every GET ran to its final reply
+    /// ([`StateAnswer::complete`]): a reader that counts members needs to
+    /// know (§2.7, 0.24). An error reply, the timeout's included, is kept
+    /// out of the answer and makes it incomplete.
+    pub async fn get_answer(
+        &self,
+        resource: &str,
+        values: Option<&Bindings>,
+        timeout: Duration,
+    ) -> Result<StateAnswer> {
         let r = self.resource(resource)?.clone();
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!("{resource:?} is not state")));
@@ -499,6 +514,7 @@ impl Consumer {
             }
         };
         let mut out = Vec::new();
+        let mut complete = true;
         for ke in selectors {
             let rx = self
                 .session
@@ -511,6 +527,7 @@ impl Consumer {
                 .map_err(zenoh)?;
             while let Ok(reply) = rx.recv_async().await {
                 let Ok(sample) = reply.into_result() else {
+                    complete = false;
                     continue;
                 };
                 let key = sample.key_expr().as_str().to_owned();
@@ -529,10 +546,9 @@ impl Consumer {
                 });
             }
         }
-        Ok(if out.is_empty() {
-            StateGet::Silent
-        } else {
-            StateGet::Answered(out)
+        Ok(StateAnswer {
+            current: out,
+            complete,
         })
     }
 
