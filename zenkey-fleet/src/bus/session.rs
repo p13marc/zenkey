@@ -190,8 +190,9 @@ pub async fn open_in_namespace(
 
 /// A namespace is a concrete key-expression prefix: no wildcard, no `$*`,
 /// no empty chunk (zenoh 1.10 sets it as the prefix of every key a session
-/// spells).
-fn check_namespace(namespace: &str) -> Result<()> {
+/// spells). Public so a frontend refuses one where it reads it — a config
+/// file's check (zenwatch's `check-config`, #614 FL2) — as the open would.
+pub fn check_namespace(namespace: &str) -> Result<()> {
     let refuse = |detail: String| Error::unaskable(format!("namespace {namespace:?}"), detail);
     let ke = zenoh::key_expr::KeyExpr::try_from(namespace).map_err(|e| refuse(e.to_string()))?;
     if ke.as_str() != namespace {
