@@ -167,3 +167,43 @@ older value.
 
 *Spike S5: the storage manager 1.10.1 accepted the older put and resurrected
 the key, which is why it cannot be an archive's store as released.*
+
+## §10 A late joiner's seed (§4.2, 0.26)
+
+**Setup.** As above. The owner holds `plans/a` (v1, stamp T1), and deleted
+`plans/b` at T2, within W. A tool, the late joiner, wants the plans and
+every change after them. The test holds the owner's answer to a GET until
+it releases it, so that it can place the owner's puts between the late
+joiner's steps: the reference plays the owner from a session of its own,
+whose puts, replies and `reply_del` carry the stamps it mints (§4.3).
+
+**Steps.**
+1. The late joiner subscribes to `plans/*`, then GETs `plans/*` with `All`
+   + `Latest`.
+2. The owner takes the GET and holds it. It puts `plans/d` (v1, T3).
+3. The owner makes its answer: `plans/a` (v1, T1), a `reply_del` for
+   `plans/b` (T2), and `plans/d` (v1, T3).
+4. Before it sends the answer, the owner puts `plans/a` (v2, T4), then
+   `plans/c` (v1, T5).
+5. The owner sends its answer and ends the GET.
+6. **The control:** the other order. The late joiner GETs first; the owner
+   holds the GET, makes its answer (`plans/a` and the `reply_del` for
+   `plans/b`), puts `plans/c` (v1, T5), and answers; the late joiner
+   subscribes once the answer has arrived.
+
+**Expected.** When the GET has ended, the late joiner holds:
+1. `plans/a` as v2 with T4. The reply (T1) is older than the live put,
+   and is dropped by the merge, never shown after v2.
+2. `plans/c` as v1 with T5: the put the GET's answer does not hold arrived
+   through the subscription.
+3. `plans/b` as a deletion with T2: the `reply_del` reached the merge as a
+   deletion, never as an absence.
+4. `plans/d` as v1 with T3, once: the live put and the reply carry one
+   stamp, and are one mutation.
+5. Its seed ran to its final reply, with no error reply: complete.
+6. In the control, `plans/c` is missing: it was put after the answer was
+   made and before the subscription existed.
+
+*The reference (`zenkey-fleet/tests/seeding.rs`) runs it through the
+fleet's seeded subscription, the one zengui's tree seeds through, and the
+control on the bare session.*

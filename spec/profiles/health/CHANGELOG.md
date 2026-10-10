@@ -4,6 +4,24 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-10: zenwatch's row cites its v1 source and its zk2 home (#614)
+
+#614's FL3 made zenwatch a zk2 service: `zenwatch/src/publish.rs` on
+`main` is now its zk2 self-publication, implementing this profile beside
+an interface of its own. Appendix B's zenwatch row cited "its
+`publish.rs`" for the v1 health document it maps.
+
+**Changed: wording, in v1.md.**
+- **Appendix B's zenwatch row** cites its v1 `zenwatch/src/publish.rs` on
+  the repository's `v1` branch, and names the interface of its own the
+  row foresaw: `zenwatch.v1` (`zenwatch/contracts/zenwatch.v1.toml`).
+
+**Deliberately not changed.**
+- **No rule.** The mapping is the one 0.1 wrote: the status, beside an
+  interface of its own for its rules' state.
+- **Written against core 0.23**, still: a citation reads nothing new
+  from the core.
+
 ## 0.3 — 2026-10-10: §5's clock question has its fixture (#721, PF)
 
 The reference tool (`zenctl health`, #721's PF) answers §5's last

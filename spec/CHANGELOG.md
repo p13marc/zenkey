@@ -3,6 +3,110 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.26 — 2026-10-10: a late joiner's seed (#614)
+
+zengui's tree seeds a watched subtree with what is already there, then
+follows it (#614, FL4). Its seed was v1's (RFC 04 §3.2): subscribe, then a
+GET answered by router storages, merged by stamp. zk2 forbids half of
+that: S4 addresses a state GET to the owner with `All` + `Latest`, and
+forbids a storage on an owner's state. §4.2 stated S4, and nothing about a
+reader that wants state and then its changes: the order of the
+subscription and the GET, how the two merge, and what a seed cannot know.
+The maintainer decided the rule (decision 7 of the plan for #614's GUI
+half), and this amendment writes it.
+
+**Changed: a rule stated (§4.2, "A late joiner's seed").**
+- **The order.** A late joiner MUST subscribe first, then make S4's GET.
+  In the other order, a mutation the owner makes after it answers and
+  before the subscription reaches it is lost, and a lost delete leaves a
+  deleted key standing. v1 wrote the same order (RFC 04 §3.2); zk2 had
+  not.
+- **The merge.** Per key, by the owner's stamp, whichever path brought
+  each one: a newer live put or delete replaces a reply, and a newer reply
+  replaces a live sample. A `reply_del` is a deletion with its stamp. Two
+  samples with equal stamps are one mutation, kept once. Stamps compare as
+  `Latest` compares replies (§4.1), so within one timestamp id by time
+  (§4.3).
+- **A selector over several owners.** One GET on a watched selector is
+  addressed to the owner's keys when each key it matches has one owner
+  (P3): `Latest` then consolidates each key over that owner's answers.
+  Foreign keys are outside S4, and a storage may answer them.
+  - Rejected: one GET per owner's resolved state key. It reads S4 more
+    literally, but it needs the contracts before the first GET, and it
+    cannot seed a foreign key.
+- **What a seed cannot know.** A GET that ran to its timeout seeds
+  possibly incompletely: §8.1's reading of a liveliness GET, applied to a
+  state GET. An owner absent at the GET seeds nothing, which is O5's
+  silence, never "no state". A seed is current state, and last-known state
+  is still an archive's.
+
+**Changed: evidence.**
+- **New `scenarios/state.md` §10.** A late joiner subscribes, then GETs.
+  The owner holds the GET: it puts a key its answer will hold, makes its
+  answer, puts a newer value of a key the answer holds and a key the answer
+  lacks, then answers. Expected: the stale reply loses to the newer put, the put the
+  answer lacks is kept, the `reply_del` reaches the merge as a deletion, a
+  put both paths carry is kept once, and the seed is complete. A control
+  in the other order loses the put. The reference runs it in
+  `zenkey-fleet/tests/seeding.rs` (`s10_a_late_joiners_seed`), through the
+  seeded subscription zengui's tree uses.
+- **No fixture.** No pure function decides the merge apart from Zenoh's
+  own timestamp order, which a fixture would only restate. The scenario is
+  the evidence, as it is for S1–S4.
+- **Appendix C**'s `scenarios/state.md` row names §10.
+
+**Changed: citations (editorial).** #614's FL3 made zenwatch a zk2
+service, and `zenwatch/src/publish.rs` on `main` is now its zk2
+self-publication. Three texts cited the v1 file by path and line. Each now
+names the `v1` branch, and the zk2 home where the sentence is about one:
+- `hostid.v1` Appendix B, zenwatch's v1 salt (text 0.5);
+- `health.v1` Appendix B, zenwatch's health document, and `zenwatch.v1`
+  (`zenwatch/contracts/zenwatch.v1.toml`) as the interface of its own the
+  row foresaw (text 0.4);
+- `examples/zk2/zensight/README.md`'s consumer table, whose other zenwatch
+  citations (`rules.rs`, `engine.rs`, `discipline/inhibit.rs`), rewritten
+  or removed by FL2, now name the `v1` branch too.
+
+Each profile's `CHANGELOG.md` has its entry.
+
+**Found while writing it.**
+- **Two ids within one seed.** §4.3 orders an owner's values by time
+  within one timestamp id, and has a consumer accept the first value under
+  a new id. A seed that sees two ids for one key, an owner re-minting
+  inside the seed's window, cannot tell from the stamps which is newer.
+  Comparing as `Latest` does is what Zenoh's consolidation does at the GET
+  anyway. It is named as §4.3's residual risk, and not resolved.
+- **`Latest` delivers at completion** (§4.1): the replies of S4's GET
+  arrive together when the GET ends. The live samples of the window are
+  merged first nearly always, and a reply loses to every newer one: the
+  case the merge exists for.
+- **R6 and a tool's seed.** R6 has a consumer discard a reply on a key
+  that is not concrete. A tool's seeded view of the raw bus shows what
+  arrived, as its live subscription does, and the reference does not
+  discard there. The rule binds a consumer; whether a tool counts such a
+  reply apart is the tool's.
+
+**Deliberately not changed.**
+- **S4, S5, S6.** S4's GET is the seed's GET, and a storage on an owner's
+  state is still forbidden. Last-known state is still read from an
+  archive, explicitly, and never presented as current: a seed never turns
+  to an archive.
+- **The archive's role (§4.4).** An archive aligns from the owner's
+  collection to record and serve last-known state. That is not a late
+  joiner's seed, and its rules are unchanged.
+- **§2.5's history.** A history query reaches the caches of the advanced
+  publishers present, streams included. It is not S4's GET, and this
+  amendment does not make it one. The reference tool keeps it beside the
+  state GET, for resources that declare `history`, merged the same way.
+- **Events.** An occurrence is replayed from union storages, bounded by
+  its retention (§2.6). A seed of state does not reach it.
+- **`freshness.v1`'s "zk2 has no seed: a late joiner GETs the owner (core
+  S4)"** (its appendix, on seeding by re-publishing). That is this
+  amendment's GET, and v1's seed attribute is still not ported. No text
+  version moves.
+- **S1–S7 keep their numbers.** The rule is a paragraph beside S4–S6, as
+  0.21's re-put is.
+
 ## 0.25 — 2026-10-10: "lost no delivery" established, and the owner keeping its budget (#740, #741)
 
 The spec-only implementation read 0.24 cold (PR #739) and found one

@@ -4,6 +4,23 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.5 — 2026-10-10: a v1 source cited where it still is (#614)
+
+#614's FL3 rewrote zenwatch as a zk2 service, and `zenwatch/src/publish.rs`
+on `main` is now its zk2 self-publication. Appendix B's mapping table
+cited line 48 of that file for zenwatch's v1 salt, which `main` no longer
+holds there.
+
+**Changed: wording, in v1.md.**
+- **Appendix B's zenwatch row** cites `zenwatch/src/publish.rs:48` on the
+  repository's `v1` branch, where the salt `zenwatch-host-id-v1` still is.
+
+**Deliberately not changed.**
+- **No rule and no value.** The salt, the v1 origin and the zk2 system in
+  the row, and every case of `conformance/vectors.json`, are as before.
+- **Written against core 0.22**, still: a citation reads nothing new
+  from the core.
+
 ## 0.4 — 2026-10-10: §6's scenario, asked by a tool (#735)
 
 Chunk PF (#721) gave the reference doctor `hostid-duplicate`, which runs
