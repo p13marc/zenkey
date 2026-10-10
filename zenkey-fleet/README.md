@@ -24,8 +24,9 @@ payload rendered through the contract that declares it. **`main` is the zk2
 line**: v1's engine — the registry slice sets, RFC 08 §6 introspection, the
 v1 roster, the schema-aware decode seam and its codec features, the v1 judges
 and the profile-backed features — left at FJ9 (#612) and lives on the `v1`
-branch, released as `zenkey-fleet` 0.18.x, which zengui and zenwatch build
-against until #614 ports them.
+branch, released as `zenkey-fleet` 0.18.x, which zengui builds against
+until #614 ports it (and zenwatch's write side, until FL3; its read side
+runs on this crate since FL2).
 
 ## `bus/` — everything holding a session
 

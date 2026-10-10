@@ -1,172 +1,197 @@
-//! `liveliness-gone <SEL>` against a real bus (#388): a producer's alive
-//! token retired on peer A is one firing notification on peer B naming
-//! the origin and producer; the token coming back is one `ok`. The token
-//! already up when the observer joins is the baseline, never "came back".
+//! The presence rules against live services (#614, FL2): an in-process
+//! router, owners brought up and stopped with the runtime's own
+//! `ServiceBuilder` in a deployment namespace, and the daemon on its two
+//! sessions — one in the namespace, one in none.
+//!
+//! An owner stops: `instance-gone */tc` fires for its address, carrying the
+//! projection's status move, and `liveliness-gone` on its interface token
+//! (a zk2 presence selector, riding the same projection) fires beside it.
+//! The owner restarts — a new instance, the same address — and both
+//! resolve. Beside them, `liveliness-gone` on a foreign token (another
+//! application's, on the shared bus) keeps the daemon's own ledger: gone is
+//! one firing, back is one resolve. Everything up when the daemon joins is
+//! the baseline, never news.
 
 mod util;
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use zenkey_fleet::{BringUp, CondState, Fleet};
-use zenwatch::config::DisciplineConfig;
-use zenwatch::engine::{Engine, run_on};
-use zenwatch::render::RenderConfig;
-use zenwatch::rules::Rule;
-use zenwatch::sinks::{NoticeKind, Outgoing, Sink};
+use util::engine::{self, Capture, Options};
+use util::zk2;
+use zenkey_fleet::{AddressStatus, CondState, PresenceChange, PresenceSource};
+use zenwatch::sinks::{NoticeKind, Notification, Outgoing};
 
-const ALIVE: &str = "v1/h-3fa9c2d41b7e/state/netlink/alive";
+const NS: &str = "site";
+const FOREIGN: &str = "demo/held/p1/alive";
 
-async fn settled(capture: &Arc<Mutex<Vec<Outgoing>>>, n: usize) -> Vec<Outgoing> {
-    let deadline = tokio::time::Instant::now() + util::SETTLE;
-    loop {
-        let snapshot = capture.lock().unwrap().clone();
-        if snapshot.len() >= n {
-            return snapshot;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "waited {:?} for {n} deliveries; have {}",
-            util::SETTLE,
-            snapshot.len()
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+fn find<'o>(got: &'o [Outgoing], id: &str, kind: NoticeKind) -> Option<&'o Notification> {
+    got.iter()
+        .map(|o| &o.notification)
+        .find(|n| n.id == id && n.kind == kind)
 }
 
-/// Until peer B can see the token on the roster — proof it was routed.
-async fn token_visible(session: &zenoh::Session, expect: bool) {
-    let deadline = tokio::time::Instant::now() + util::SETTLE;
-    loop {
-        let replies = session
-            .liveliness()
-            .get("v1/**")
-            .timeout(Duration::from_millis(500))
-            .await
-            .unwrap();
-        let mut seen = false;
-        while let Ok(r) = replies.recv_async().await {
-            if r.result().is_ok_and(|s| s.key_expr().as_str() == ALIVE) {
-                seen = true;
-            }
-        }
-        if seen == expect {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "token visibility never became {expect}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+async fn seen(ops: &Capture, id: &str, kind: NoticeKind) -> Notification {
+    let got = engine::until(ops, &format!("{kind:?} {id}"), |s| {
+        find(s, id, kind).is_some()
+    })
+    .await;
+    find(&got, id, kind).expect("seen").clone()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_retired_alive_token_is_one_firing_and_its_return_is_one_ok() {
-    let (a, b) = util::peer_pair().await;
-    // The token is up before the observer joins: the roster replay on join
-    // (history) is the baseline.
-    let producer = BringUp::new(&a).alive(ALIVE).await.unwrap();
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_that_stops_fires_instance_gone_and_its_restart_resolves_it() {
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let other_app = zk2::client(&ep).await;
+    let ping = zk2::scenario("ping.v1");
 
-    let ops = Arc::new(Mutex::new(Vec::new()));
-    let sinks = Arc::new(vec![Sink::capturing("ops", Arc::clone(&ops))]);
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-    let observer = b.clone();
-    let engine = tokio::spawn(async move {
-        let rules = vec![
-            Rule::from_config(&zenwatch::config::RuleConfig {
-                name: "hosts-gone".into(),
-                rule: "liveliness-gone v1/*/state/*/alive".into(),
-                severity: Some("error".into()),
-                labels: Default::default(),
-                sinks: vec!["ops".into()],
-                for_s: None,
-            })
-            .unwrap(),
-        ];
-        let render = RenderConfig::default();
-        // No group window, no self-publication: this test is about the
-        // rule, and every notification should leave on the next tick.
-        let discipline = DisciplineConfig {
-            group_window_s: 0.0,
-            ..DisciplineConfig::default()
-        };
-        run_on(
-            Engine {
-                fleet: Fleet::new(&observer, ""),
-                slices: None,
-                timeout: Duration::from_secs(2),
-                tick: Duration::from_secs(1),
-                rules: &rules,
-                sinks,
-                render: &render,
-                once: false,
-                ready: Some(ready_tx),
-                discipline: &discipline,
-                state_file: None,
-                state_max_entries: 4096,
-                publish: false,
-                doctor: None,
-            },
-            async move {
-                let _ = stop_rx.await;
-            },
-        )
+    // Up before the daemon joins: an owner, and a foreign token.
+    let svc = zk2::bring_up(&owners, zk2::config("h1/tc"), std::slice::from_ref(&ping)).await;
+    let token = other_app
+        .liveliness()
+        .declare_token(FOREIGN)
         .await
-    });
-    tokio::time::timeout(util::SETTLE, ready_rx)
-        .await
-        .expect("the engine came up")
-        .expect("ready");
-    token_visible(&b, true).await;
-    // The history replay lands on the engine's broadcast a moment after the
-    // subscriber is declared; give the baseline time to be recorded.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+        .expect("a foreign token");
+    zk2::tokens(&tool, "zk2/h1/tc/@zk/instance/*", 1).await;
+    zk2::tokens(&other_app, FOREIGN, 1).await;
+
+    let ops = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![
+            engine::rule("tc-gone", "instance-gone */tc", "error"),
+            engine::rule(
+                "ping-gone",
+                &format!("liveliness-gone {NS}/zk2/*/tc/@zk/alive/ping.v1/**"),
+                "warning",
+            ),
+            engine::rule("held-gone", "liveliness-gone demo/held/*/alive", "warning"),
+        ],
+        ops.clone(),
+        Options::default(),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(800)).await;
     assert!(
         ops.lock().unwrap().is_empty(),
-        "a token already up is the baseline, not a return"
+        "everything up at the first look is the baseline: {:?}",
+        ops.lock().unwrap()
     );
 
-    // Gone.
-    producer.retire().await.unwrap();
-    token_visible(&b, false).await;
-    let got = settled(&ops, 1).await;
-    let n = &got[0].notification;
+    // 1. The owner stops: its address is gone, and so is its interface.
+    svc.close().await.expect("close");
+    let n = seen(&ops, "tc-gone:h1/tc", NoticeKind::Presence).await;
     assert_eq!(n.state, CondState::Firing);
     assert_eq!(n.prior, Some(CondState::Ok), "the baseline was recorded");
-    assert_eq!(n.kind, NoticeKind::Liveliness);
-    assert_eq!(n.rule_kind, "liveliness-gone");
-    assert_eq!(n.id, "hosts-gone:h-3fa9c2d41b7e/netlink");
+    assert_eq!(n.rule_kind, "instance-gone");
     assert_eq!(n.severity, "error");
+    assert_eq!(n.title, "error tc-gone firing");
+    assert!(n.message.contains("address: h1/tc"), "{}", n.message);
     assert!(
-        n.evidence.contains("h-3fa9c2d41b7e/netlink"),
+        n.evidence.contains("no instance token of h1/tc"),
         "{}",
         n.evidence
     );
-    assert!(n.evidence.contains("is gone"), "{}", n.evidence);
-    assert_eq!(n.title, "error hosts-gone firing");
+    let moved = n.presence.as_ref().expect("the deciding move");
+    assert_eq!(moved.address.to_string(), "h1/tc");
+    assert_eq!(moved.source, PresenceSource::Event);
+    assert_eq!(
+        moved.change,
+        PresenceChange::Status {
+            from: AddressStatus::Up,
+            to: AddressStatus::Down
+        }
+    );
+    let wire = serde_json::to_value(&n).expect("serializes");
+    assert_eq!(wire["presence"]["change"]["kind"], "status");
+    assert_eq!(wire["presence"]["change"]["to"], "down");
+    let n = seen(&ops, "ping-gone:h1/tc/ping.v1", NoticeKind::Liveliness).await;
+    assert_eq!(n.state, CondState::Firing);
+    assert_eq!(n.rule_kind, "liveliness-gone");
     assert!(
-        n.message
-            .contains("key: v1/h-3fa9c2d41b7e/state/netlink/alive")
+        matches!(
+            n.presence.as_ref().map(|t| &t.change),
+            Some(PresenceChange::InterfaceGone { .. })
+        ),
+        "{:?}",
+        n.presence
     );
 
-    // Back.
-    let producer = BringUp::new(&a).alive(ALIVE).await.unwrap();
-    let got = settled(&ops, 2).await;
-    let n = &got[1].notification;
+    // 2. It restarts — a new instance at the same address: both resolve.
+    let svc = zk2::bring_up(&owners, zk2::config("h1/tc"), std::slice::from_ref(&ping)).await;
+    let n = seen(&ops, "tc-gone:h1/tc", NoticeKind::Resolved).await;
     assert_eq!(n.state, CondState::Ok);
     assert_eq!(n.prior, Some(CondState::Firing));
-    assert_eq!(n.kind, NoticeKind::Resolved);
-    assert!(n.evidence.contains("is back"), "{}", n.evidence);
+    seen(&ops, "ping-gone:h1/tc/ping.v1", NoticeKind::Resolved).await;
 
-    let _ = stop_tx.send(());
-    let summary = tokio::time::timeout(util::SETTLE, engine)
+    // 3. The foreign token goes, and comes back.
+    token.undeclare().await.expect("undeclare");
+    let id = format!("held-gone:{FOREIGN}");
+    let n = seen(&ops, &id, NoticeKind::Liveliness).await;
+    assert_eq!(n.state, CondState::Firing);
+    assert_eq!(n.prior, Some(CondState::Ok));
+    assert!(
+        n.message.contains(&format!("key: {FOREIGN}")),
+        "{}",
+        n.message
+    );
+    assert!(n.presence.is_none(), "not the projection's");
+    let token = other_app
+        .liveliness()
+        .declare_token(FOREIGN)
         .await
-        .expect("the engine stopped")
-        .expect("no panic")
-        .expect("a clean run");
-    assert_eq!(summary.notices, 2);
-    assert_eq!(summary.delivered, 2);
-    producer.retire().await.unwrap();
+        .expect("a foreign token");
+    let n = seen(&ops, &id, NoticeKind::Resolved).await;
+    assert_eq!(n.prior, Some(CondState::Firing));
+
+    let summary = running.stop().await;
+    assert_eq!(summary.outgoing, 6, "{:?}", ops.lock().unwrap());
+    assert_eq!(summary.delivered, 6);
+    assert_eq!(summary.dropped, 0);
+    assert!(
+        !ops.lock()
+            .unwrap()
+            .iter()
+            .any(|o| o.notification.state == CondState::Unobservable),
+        "nothing was lost, so nothing was unobservable"
+    );
+    svc.close().await.expect("close");
+    token.undeclare().await.expect("undeclare");
+}
+
+/// An exact address absent at the first look, under a complete read, is
+/// down: remembered rather than paged one by one, and said once in a
+/// `baseline` notification at the rule's severity. Its first appearance is
+/// then a `resolved`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_address_down_at_start_is_one_baseline_and_its_arrival_resolves_it() {
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let ops = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![engine::rule("h9-gone", "instance-gone h9/tc", "error")],
+        ops.clone(),
+        Options::default(),
+    )
+    .await;
+    let n = seen(&ops, "h9-gone:baseline", NoticeKind::Baseline).await;
+    assert_eq!(n.state, CondState::Firing);
+    assert_eq!(n.severity, "error");
+    assert!(n.message.contains("- gone: h9/tc"), "{}", n.message);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        ops.lock().unwrap().len(),
+        1,
+        "the address itself is remembered, not paged: {:?}",
+        ops.lock().unwrap()
+    );
+
+    let svc = zk2::bring_up(&owners, zk2::config("h9/tc"), &[zk2::scenario("ping.v1")]).await;
+    let n = seen(&ops, "h9-gone:h9/tc", NoticeKind::Resolved).await;
+    assert_eq!(n.prior, Some(CondState::Firing));
+    let summary = running.stop().await;
+    assert_eq!(summary.discipline.baseline, 1, "the assumed address");
+    svc.close().await.expect("close");
 }

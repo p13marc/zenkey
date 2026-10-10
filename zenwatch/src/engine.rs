@@ -1,65 +1,68 @@
-//! The run loop: two observers, one router, N sinks.
+//! The run loop: three observers, one router, N sinks — on two sessions
+//! (#614, FL2).
 //!
-//! The engine's `watchdog` Straw judges the eight closed conditions every
-//! tick and yields a [`Transition`] per genuine change; this daemon's own
-//! [`Monitor`] watches the alert plane and the liveliness roster for the two
-//! kinds the daemon owns. Both feed one [`Notice`] stream, [`route`] turns a
-//! notice into one [`Outgoing`] per matching rule, and every named sink gets
-//! it concurrently — a slow sink widens nothing, a failed sink is counted and
-//! logged, never fatal.
+//! The fleet's zk2 `watchdog` Straw judges the seven engine conditions
+//! every tick — its wire selectors on the session in no namespace, its
+//! contracts, presence and doctor through the one in the namespace — and
+//! yields a [`Transition`] per genuine change. The fleet's live presence
+//! projection ([`zenkey_fleet::PresenceFeed`], its own monitor on the
+//! namespaced session) carries `instance-gone` and `liveliness-gone` on the
+//! deployment's zk2 tokens ([`crate::presence`]); the daemon's own token
+//! ledger ([`crate::liveliness`], its own monitor on the raw session)
+//! carries `liveliness-gone` on anything else. A monitor each, because a
+//! `Dropped(n)` is one receiver's lag: a flood on one plane must not make
+//! another's tokens unobservable. All three feed one [`Notice`] stream,
+//! [`route`] turns a notice into one [`Outgoing`] per matching rule, and
+//! every named sink gets it concurrently — a slow sink widens nothing, a
+//! failed sink is counted and logged, never fatal.
 //!
 //! **Three states, preserved.** `ok` / `firing` / `unobservable` ride from
-//! the engine's `CondState` into the sink payload unchanged, and this loop
-//! adds its own honesty rule on top: a [`StreamItem::Dropped`] from the
-//! monitor is an `unobservable` notification on every `alerts` and
-//! `liveliness-gone` rule, because a dropped event may have been the
-//! resolve — and the alternative is a phone that stays quiet about an alert
-//! that is still firing (RFC 13 §3 O6).
+//! the engine's `CondState` into the sink payload unchanged. A presence or
+//! token rule whose observer lost events, or whose read ran to its timeout,
+//! says `unobservable` once, on its `observer` identity — never `ok`
+//! (RFC 13 §3 O6).
 //!
-//! **Transitions, not states.** An alert re-put with the same state and
-//! severity is not a notification; a token that was already down going
-//! down is not one either. Per-key state lives in a bounded [`Ledger`], and
-//! what the bound cost rides the summary.
+//! **Transitions, not states.** A token re-declared is not a notification;
+//! an address that was already down going down is not one either. What
+//! each rule last said lives with it, and what the discipline announced
+//! lives in its bounded ledger.
 //!
 //! **Between [`route`] and delivery sits the [`Discipline`]** (#389): every
 //! routed [`Outgoing`] is observed, and only what the tick flushes — after
-//! `for`, dedup, grouping, repeat and inhibition — is dispatched. The tick
-//! also persists the ledger and refreshes what this daemon publishes about
-//! itself ([`crate::publish`]): a real daemon, explicitly launched, is a
-//! producer like any other.
+//! `for`, dedup, grouping and repeat — is dispatched. The tick also
+//! persists the ledger and refreshes what this daemon publishes about
+//! itself ([`crate::publish`], v1's write side until FL3).
 //!
 //! **The scheduled doctor runs beside the drain** (#390, [`crate::doctor`]):
-//! an interval of hours starts `run_doctor` as a future the loop selects
-//! on, the way the schema sweep already does, so a sweep that takes seconds
-//! never stops sampling. Its outcome becomes [`Notice::Doctor`]s on the same
-//! stream — routed under the `doctor` block's own rule
-//! ([`RuleKind::ScheduledDoctor`]), disciplined like every notice, and
-//! published on `state/zenwatch/doctor` after every run.
+//! an interval of hours starts zk2's `run_doctor` as a future the loop
+//! selects on, so a sweep that takes seconds never stops sampling. Its
+//! outcome becomes [`Notice::Doctor`]s on the same stream — routed under
+//! the `doctor` block's own rule ([`RuleKind::ScheduledDoctor`]),
+//! disciplined like every notice, and published after every run.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use zenkey_fleet::{
-    AlertState, AlertTransition, CondState, DoctorReport, Fleet, FleetEvent, Monitor, MonitorSpec,
-    RenderSource, SchemaStore, SeedPolicy, Sipper as _, SliceSet, StreamItem, Transition,
+    BundleStore, CondState, ContractSet, DoctorBus, DoctorReport, LivePresence, Monitor,
+    MonitorSpec, PresenceFeed, PresenceScope, PresenceTransition, Sipper as _, Transition,
     WatchdogSpec, WatchdogSummary,
 };
-use zenoh::key_expr::KeyExpr;
-use zenoh::sample::SampleKind;
 
-use crate::config::{Config, DisciplineConfig, DoctorConfig};
-use crate::discipline::inhibit::{self, Catalog};
+use crate::config::{DisciplineConfig, DoctorConfig};
 use crate::discipline::{Counters as DisciplineCounters, Discipline, NoticeMeta, state as ledger};
 use crate::doctor::{self, DoctorNotice};
 use crate::exit::unaskable;
+use crate::liveliness::{LivelinessRules, TokenFeed};
+use crate::presence::PresenceRules;
 use crate::publish::{self, DoctorStatus, FiringRule, HealthStatus, SelfProducer, ZenwatchHealth};
-use crate::render::{Draft, Payload, RenderConfig};
+use crate::render::{Draft, Payload, RenderConfig, RenderSource};
 use crate::rules::{DOCTOR_RULE, Rule, RuleKind};
 use crate::sinks::{NoticeKind, Notification, Outgoing, Sink};
 
@@ -68,123 +71,66 @@ use crate::sinks::{NoticeKind, Notification, Outgoing, Sink};
 pub enum Notice {
     /// The engine judged a condition into a different state.
     Engine(Transition),
-    /// An alert key moved (RFC 04 §1.2), with the document's rendering.
-    Alert {
-        key: String,
-        /// Boxed: the transition carries the document's labels and summary,
-        /// and an engine transition is a fraction of that.
-        transition: Box<AlertTransition>,
-        /// What this daemon last saw the key as — `None` on first sight.
-        prior: Option<CondState>,
-        payload: Payload,
-    },
-    /// An alive token went (`up: false`) or came back (RFC 04 §5).
-    Liveliness {
-        key: String,
-        origin: String,
-        producer: String,
-        up: bool,
-        prior: Option<CondState>,
-        at: String,
-    },
-    /// The monitor's broadcast overflowed: `n` events this daemon never saw.
-    Dropped { n: u64, at: String },
+    /// A presence or token rule said something about one identity, its
+    /// observer, or its first look (#614, FL2). Already the rule's: the
+    /// projection and the ledger fold per rule. Boxed: it carries the
+    /// presence move that decided it.
+    Rule(Box<RuleNotice>),
     /// One thing a scheduled doctor run said (#390): the baseline, a
     /// finding new or fixed since the last run, or the run itself failing
-    /// or recovering. Boxed: a finding carries the engine's whole
-    /// `DoctorFinding` and the coverage line.
+    /// or recovering.
     Doctor(Box<DoctorNotice>),
 }
 
-/// A bounded per-key memory: the last thing seen on each key, oldest
-/// evicted past `cap`, with the cost counted (RFC 13 §3 O6).
-#[derive(Debug)]
-pub struct Ledger<V> {
-    map: HashMap<String, (V, u64)>,
-    cap: usize,
-    seq: u64,
-    evicted: u64,
-}
-
-impl<V> Ledger<V> {
-    pub fn new(cap: usize) -> Ledger<V> {
-        Ledger {
-            map: HashMap::new(),
-            cap: cap.max(1),
-            seq: 0,
-            evicted: 0,
-        }
-    }
-
-    pub fn get(&self, key: &str) -> Option<&V> {
-        self.map.get(key).map(|(v, _)| v)
-    }
-
-    pub fn set(&mut self, key: String, v: V) {
-        self.seq += 1;
-        if !self.map.contains_key(&key) && self.map.len() >= self.cap {
-            // Evict the least recently *set* key: O(n) on overflow only,
-            // which at the bound is once per new key past it.
-            if let Some(oldest) = self
-                .map
-                .iter()
-                .min_by_key(|(_, (_, s))| *s)
-                .map(|(k, _)| k.clone())
-            {
-                self.map.remove(&oldest);
-                self.evicted += 1;
-            }
-        }
-        self.map.insert(key, (v, self.seq));
-    }
-
-    pub fn evicted(&self) -> u64 {
-        self.evicted
-    }
-
-    /// Every remembered key and its value, in no particular order.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
-        self.map.iter().map(|(k, (v, _))| (k.as_str(), v))
-    }
-}
-
-/// How many alert keys and alive tokens the ledgers remember.
-pub const LEDGER_CAP: usize = 4096;
-
-/// The `CondState` an alert state projects to: firing is firing, resolved
-/// is the established-clean pole.
-pub fn cond_of(a: AlertState) -> CondState {
-    match a {
-        AlertState::Firing => CondState::Firing,
-        AlertState::Resolved => CondState::Ok,
-    }
+/// One presence or token rule's notice: the identity, its state, and the
+/// facts its rendering and the discipline need.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuleNotice {
+    /// The rule's name.
+    pub rule: String,
+    /// The identity under the rule: an address, an address and what a
+    /// token names, a token's wire key, `observer`, `baseline`.
+    pub what: String,
+    /// The notice's own kind: what a passthrough carries as is; a
+    /// remembered identity's is the discipline's verdict.
+    pub kind: NoticeKind,
+    pub state: CondState,
+    /// What the rule last said of the identity; `None` on first sight.
+    pub prior: Option<CondState>,
+    /// The severity, when it is not the rule's (an `info` baseline).
+    pub severity: Option<String>,
+    pub evidence: String,
+    /// Lines the message carries after the evidence (a baseline's list).
+    pub lines: Vec<String>,
+    /// The token's wire key, for a token rule.
+    pub key: Option<String>,
+    /// The address the notice is about, when it is about one.
+    pub address: Option<String>,
+    /// RFC 3339 wall clock.
+    pub at: String,
+    /// The presence move that decided it, as the engine pins it.
+    pub presence: Option<PresenceTransition>,
+    /// A fact that predates the watch: remembered, delivered to nobody.
+    pub assume: bool,
+    /// No identity to remember: delivered every time.
+    pub passthrough: bool,
+    /// Why no payload is rendered.
+    pub reason: &'static str,
 }
 
 /// What the discipline needs to know about a notice that its rendering
-/// does not carry: the origin its key named, and whether it has an
-/// identity at all.
+/// does not carry: the address it is about, whether it has an identity,
+/// and whether it is a fact to remember rather than tell.
 pub fn meta_of(notice: &Notice) -> NoticeMeta {
     match notice {
-        Notice::Alert { transition, .. } => NoticeMeta {
-            origin: Some(transition.origin.clone()),
-            passthrough: false,
-            assume: false,
-        },
-        Notice::Liveliness { origin, .. } => NoticeMeta {
-            origin: Some(origin.clone()),
-            passthrough: false,
-            assume: false,
-        },
         Notice::Engine(_) => NoticeMeta::default(),
-        Notice::Dropped { .. } => NoticeMeta {
-            origin: None,
-            passthrough: true,
-            assume: false,
+        Notice::Rule(n) => NoticeMeta {
+            address: n.address.clone(),
+            passthrough: n.passthrough,
+            assume: n.assume,
         },
-        // No origin: a doctor finding has no entity, so inhibition never
-        // holds it (RFC 06 §5.6 is about hosts, not judgements).
         Notice::Doctor(d) => NoticeMeta {
-            origin: None,
+            address: None,
             passthrough: d.is_passthrough(),
             assume: d.is_assumed(),
         },
@@ -195,194 +141,137 @@ pub fn meta_of(notice: &Notice) -> NoticeMeta {
 /// holds no state.
 ///
 /// The notification's `id` is the notice **identity** (#389): the rule's id
-/// and what the notice is about — the RFC 11 §3.2 `alert_ref`, the token's
-/// `origin/producer`, an engine condition's sorted labels — stable across
-/// ticks, runs and restarts, which is what dedup and the state file key on.
+/// and what the notice is about — an address, a token's key, `observer`, an
+/// engine condition's sorted labels, a doctor finding's check and subject —
+/// stable across ticks, runs and restarts, which is what dedup and the
+/// state file key on.
 pub fn route(notice: &Notice, rules: &[Rule], render: &RenderConfig) -> Vec<Outgoing> {
-    let keyexpr = match notice {
-        Notice::Alert { key, .. } | Notice::Liveliness { key, .. } => {
-            KeyExpr::try_from(key.as_str()).ok()
-        }
-        _ => None,
-    };
     let mut out = Vec::new();
     for r in rules {
-        // The scheduled doctor renders its own notices (#390): a finding is
-        // a judgement over a sweep, not a payload on a key.
-        if let (Notice::Doctor(d), RuleKind::ScheduledDoctor) = (notice, &r.kind) {
-            out.push(doctor::outgoing(d, r, render));
-            continue;
-        }
-        let no_payload = |reason: &str| Payload::None {
-            reason: reason.to_string(),
-        };
-        let covers = keyexpr.as_ref().is_some_and(|k| r.covers(k));
-        let (
-            state,
-            prior,
-            severity,
-            evidence,
-            labels,
-            key,
-            timestamp,
-            payload,
-            at,
-            rendering,
-            what,
-            kind,
-        ) = match (notice, &r.kind) {
-            (Notice::Engine(t), RuleKind::Engine(c)) if c.to_string() == t.rule => (
-                t.to,
-                t.from,
-                r.severity.clone(),
-                t.evidence.clone(),
-                r.labels.clone(),
-                c.selector().map(str::to_string),
-                None,
-                no_payload("an engine condition is judged over a window, not a payload"),
-                t.at.clone(),
-                RenderSource::KeyOnly,
-                r.labels
+        match (notice, &r.kind) {
+            // The scheduled doctor renders its own notices (#390): a finding
+            // is a judgement over a sweep, not a payload on a key.
+            (Notice::Doctor(d), RuleKind::ScheduledDoctor) => {
+                out.push(doctor::outgoing(d, r, render));
+            }
+            (Notice::Engine(t), RuleKind::Engine(c)) if c.to_string() == t.rule => {
+                let what = r
+                    .labels
                     .iter()
                     .map(|(k, v)| format!("{k}={v}"))
                     .collect::<Vec<_>>()
-                    .join(","),
-                NoticeKind::Transition,
-            ),
-            (
-                Notice::Alert {
-                    key,
-                    transition: a,
-                    prior,
-                    payload,
-                },
-                RuleKind::Alerts { .. },
-            ) if covers => {
-                let mut labels = r.labels.clone();
-                labels.extend(a.labels.iter().map(|(k, v)| (k.clone(), v.clone())));
-                let mut evidence = format!(
-                    "alert {} {}",
-                    a.alert_ref,
-                    match a.state {
-                        AlertState::Firing => "firing",
-                        AlertState::Resolved => "resolved (tombstone)",
-                    }
+                    .join(",");
+                let payload = Payload::None {
+                    reason: "an engine condition is judged over a window, not a payload".into(),
+                };
+                let rendered = crate::render::render(
+                    &Draft {
+                        rule: &r.name,
+                        state: t.to,
+                        prior: t.from,
+                        severity: &r.severity,
+                        evidence: &t.evidence,
+                        extra: &[],
+                        labels: &r.labels,
+                        key: c.selector(),
+                        timestamp: None,
+                        payload: &payload,
+                    },
+                    render,
                 );
-                if let Some(rule) = &a.rule {
-                    evidence.push_str(&format!(" rule={rule}"));
-                }
-                if let Some(s) = &a.summary {
-                    evidence.push_str(&format!(" — {s}"));
-                }
-                (
-                    cond_of(a.state),
-                    *prior,
-                    a.severity.clone().unwrap_or_else(|| r.severity.clone()),
-                    evidence,
-                    labels,
-                    Some(key.clone()),
-                    a.timestamp.clone(),
-                    payload.clone(),
-                    a.at.clone(),
-                    a.rendering,
-                    a.alert_ref.clone(),
-                    NoticeKind::Alert,
-                )
+                out.push(outgoing(
+                    r,
+                    format!("{}:{what}", r.id),
+                    NoticeKind::Transition,
+                    t.to,
+                    t.from,
+                    r.severity.clone(),
+                    rendered,
+                    t.at.clone(),
+                    t.evidence.clone(),
+                    None,
+                ));
             }
-            (
-                Notice::Liveliness {
-                    key,
-                    origin,
-                    producer,
-                    up,
-                    prior,
-                    at,
-                },
-                RuleKind::LivelinessGone { .. },
-            ) if covers => (
-                if *up {
-                    CondState::Ok
-                } else {
-                    CondState::Firing
-                },
-                *prior,
-                r.severity.clone(),
-                format!(
-                    "alive token for {origin}/{producer} {} (RFC 04 §5)",
-                    if *up { "is back" } else { "is gone" }
-                ),
-                r.labels.clone(),
-                Some(key.clone()),
-                None,
-                no_payload("a liveliness token carries no payload"),
-                at.clone(),
-                RenderSource::KeyOnly,
-                format!("{origin}/{producer}"),
-                NoticeKind::Liveliness,
-            ),
-            (
-                Notice::Dropped { n, at },
-                RuleKind::Alerts { .. } | RuleKind::LivelinessGone { .. },
-            ) => (
-                CondState::Unobservable,
-                None,
-                r.severity.clone(),
-                format!(
-                    "the observer dropped {n} event(s): a firing or a resolve inside that \
-                     span was not seen — unobservable, not ok (RFC 13 §3 O6)"
-                ),
-                r.labels.clone(),
-                None,
-                None,
-                no_payload("nothing was observed"),
-                at.clone(),
-                RenderSource::KeyOnly,
-                "dropped".to_string(),
-                NoticeKind::Unobservable,
-            ),
-            _ => continue,
-        };
-        let rendered = crate::render::render(
-            &Draft {
-                rule: &r.name,
-                state,
-                prior,
-                severity: &severity,
-                evidence: &evidence,
-                labels: &labels,
-                key: key.as_deref(),
-                timestamp: timestamp.as_deref(),
-                payload: &payload,
-            },
-            render,
-        );
-        out.push(Outgoing {
-            notification: Notification {
-                id: format!("{}:{what}", r.id),
-                rule: r.name.clone(),
-                rule_kind: r.kind.head().to_string(),
-                kind,
-                state,
-                prior,
-                severity,
-                title: rendered.title,
-                message: rendered.message,
-                labels,
-                at,
-                evidence,
-                rendering: match payload {
-                    Payload::None { .. } => rendering,
-                    _ => rendered.source,
-                },
-                truncated: rendered.truncated,
-                repeat: 0,
-                group: None,
-                inhibited_by: None,
-            },
-            sinks: r.sinks.clone(),
-        });
+            (Notice::Rule(n), _) if n.rule == r.name => {
+                let severity = n.severity.clone().unwrap_or_else(|| r.severity.clone());
+                let mut extra = Vec::new();
+                if let Some(a) = &n.address {
+                    extra.push(format!("address: {a}"));
+                }
+                extra.extend(n.lines.iter().cloned());
+                let payload = Payload::None {
+                    reason: n.reason.into(),
+                };
+                let rendered = crate::render::render(
+                    &Draft {
+                        rule: &r.name,
+                        state: n.state,
+                        prior: n.prior,
+                        severity: &severity,
+                        evidence: &n.evidence,
+                        extra: &extra,
+                        labels: &r.labels,
+                        key: n.key.as_deref(),
+                        timestamp: None,
+                        payload: &payload,
+                    },
+                    render,
+                );
+                out.push(outgoing(
+                    r,
+                    format!("{}:{}", r.id, n.what),
+                    n.kind,
+                    n.state,
+                    n.prior,
+                    severity,
+                    rendered,
+                    n.at.clone(),
+                    n.evidence.clone(),
+                    n.presence.clone(),
+                ));
+            }
+            _ => {}
+        }
     }
     out
+}
+
+/// A rendered notice as the [`Outgoing`] its rule's sinks get.
+#[allow(clippy::too_many_arguments)]
+fn outgoing(
+    r: &Rule,
+    id: String,
+    kind: NoticeKind,
+    state: CondState,
+    prior: Option<CondState>,
+    severity: String,
+    rendered: crate::render::Rendered,
+    at: String,
+    evidence: String,
+    presence: Option<PresenceTransition>,
+) -> Outgoing {
+    Outgoing {
+        notification: Notification {
+            id,
+            rule: r.name.clone(),
+            rule_kind: r.kind.head().to_string(),
+            kind,
+            state,
+            prior,
+            severity,
+            title: rendered.title,
+            message: rendered.message,
+            labels: r.labels.clone(),
+            at,
+            evidence,
+            rendering: RenderSource::KeyOnly,
+            truncated: rendered.truncated,
+            repeat: 0,
+            group: None,
+            presence,
+        },
+        sinks: r.sinks.clone(),
+    }
 }
 
 /// What one run watched and did.
@@ -392,9 +281,10 @@ pub struct RunSummary {
     pub outgoing: u64,
     pub delivered: u64,
     pub failed: u64,
-    /// Events the monitor's broadcast dropped on this consumer.
+    /// Liveliness events the presence and token monitors dropped on this
+    /// consumer (each one an observer gone unobservable until a re-read).
     pub dropped: u64,
-    /// Keys the two ledgers retired at their bound.
+    /// Address records the presence projection forgot at its bound.
     pub evicted: u64,
     pub watchdog: Option<WatchdogSummary>,
     /// What the discipline did (#389).
@@ -405,11 +295,16 @@ pub struct RunSummary {
     pub doctor_runs: u64,
 }
 
-/// Everything a run needs, with the session already open — the shape the
+/// Everything a run needs, with the sessions already open — the shape the
 /// bus tests drive directly.
 pub struct Engine<'a> {
-    pub fleet: Fleet<'a>,
-    pub slices: Option<&'a SliceSet>,
+    /// The two sessions: in the deployment's namespace, and in none.
+    pub bus: &'a DoctorBus,
+    /// The contract store, seeded with `contracts`: a revision held
+    /// offline is never retrieved (spec §8.5).
+    pub store: &'a BundleStore,
+    /// The contracts known offline (`contracts`, `--contracts`).
+    pub contracts: &'a ContractSet,
     pub timeout: Duration,
     pub tick: Duration,
     pub rules: &'a [Rule],
@@ -417,9 +312,10 @@ pub struct Engine<'a> {
     pub render: &'a RenderConfig,
     /// One tick, then stop.
     pub once: bool,
-    /// Fired once the monitor is subscribed — the test seam that lets a
-    /// bus test publish *after* the observer is watching (O4: a sample the
-    /// observer was not yet declared for is not a sample it missed).
+    /// Fired once every observer is watching and seeded — the test seam
+    /// that lets a bus test act *after* the observer is watching (O4: a
+    /// sample the observer was not yet declared for is not a sample it
+    /// missed).
     pub ready: Option<tokio::sync::oneshot::Sender<()>>,
     /// The notification discipline (#389).
     pub discipline: &'a DisciplineConfig,
@@ -432,6 +328,9 @@ pub struct Engine<'a> {
     /// The scheduled doctor (#390); `None` is not scheduled — nothing runs,
     /// nothing is published, and the health document says so.
     pub doctor: Option<&'a DoctorConfig>,
+    /// The operator's word on the clocks (`freshness.v1` §2.6), for the
+    /// doctor's `health-*` checks, scheduled or a rule's.
+    pub clocks_synced: bool,
 }
 
 /// Delivery counters shared with the spawned deliveries.
@@ -478,82 +377,31 @@ fn dispatch(
     }
 }
 
-/// One liveliness event against the token ledger: a token first seen up is
-/// the baseline (the monitor replays the roster on join — that is not
-/// "everyone came back"); up→down and down→up are the transitions.
-fn liveliness(
-    tokens: &mut Ledger<bool>,
-    base: &str,
-    key: String,
-    up: bool,
-    rules: &[Rule],
-) -> Option<Notice> {
-    let Ok(keyexpr) = KeyExpr::try_from(key.as_str()) else {
-        return None;
-    };
-    // The ledger records every token it is shown — inhibition's downness
-    // decision reads it — whether or not a rule covers the key.
-    let (origin, producer) = zenkey_fleet::token_identity(base, &key)?;
-    let prior = tokens.get(&key).copied();
-    tokens.set(key.clone(), up);
-    if !rules
-        .iter()
-        .any(|r| matches!(r.kind, RuleKind::LivelinessGone { .. }) && r.covers(&keyexpr))
-    {
-        return None;
-    }
-    match (prior, up) {
-        // Baseline, or no change: not a transition.
-        (None, true) | (Some(true), true) | (Some(false), false) => None,
-        _ => Some(Notice::Liveliness {
-            key,
-            origin,
-            producer,
-            up,
-            prior: prior.map(|was_up| {
-                if was_up {
-                    CondState::Ok
-                } else {
-                    CondState::Firing
-                }
-            }),
-            at: zenkey_fleet::rfc3339_now(),
-        }),
-    }
-}
-
 /// Unix seconds now, as the discipline's clock.
 fn now_s() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0)
 }
 
-/// Origins every one of whose known alive tokens is down — inhibition's
-/// downness input, read off the token ledger.
-fn gone_origins(tokens: &Ledger<bool>, base: &str) -> BTreeSet<String> {
-    let mut by_origin: HashMap<String, bool> = HashMap::new();
-    for (key, up) in tokens.iter() {
-        let Some((origin, _)) = zenkey_fleet::token_identity(base, key) else {
-            continue;
-        };
-        let all_down = by_origin.entry(origin).or_insert(true);
-        *all_down = *all_down && !*up;
+/// A liveliness monitor's spec: no data plane, no tree ticks (the feeds
+/// read tokens only, and a tick on the broadcast is a slot a token needs).
+fn liveliness_spec(liveliness: Vec<String>) -> MonitorSpec {
+    MonitorSpec {
+        liveliness,
+        stats_tick: Duration::from_secs(3600),
+        ..MonitorSpec::default()
     }
-    by_origin
-        .into_iter()
-        .filter_map(|(o, all_down)| all_down.then_some(o))
-        .collect()
 }
 
 /// Run until `stop` resolves (or, with `once`, until one tick has been
 /// evaluated). Returns the summary; delivery failures are in it, never an
 /// `Err`.
 pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<RunSummary> {
-    let (session, base) = (e.fleet.session(), e.fleet.base());
     let mut summary = RunSummary::default();
     let started_at = zenkey_fleet::rfc3339_now();
+    let namespace = e.bus.namespace.as_str();
 
     // The rules the router and the discipline see: the configured ones,
     // plus the `doctor` block as a rule of its own (#390), so a doctor
@@ -565,13 +413,17 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         .cloned()
         .chain(e.doctor.map(Rule::scheduled_doctor))
         .collect();
+    let rule_ids: BTreeMap<String, String> = rules_all
+        .iter()
+        .map(|r| (r.name.clone(), r.id.clone()))
+        .collect();
 
-    // The ledger first: a state file this process cannot read is a
-    // refusal before anything opens (silently starting fresh is how a
-    // resolved alert re-pages).
+    // The ledger first: a state file this process cannot read — malformed,
+    // version 1, another namespace's — is a refusal before anything opens
+    // (silently starting fresh is how a resolved notice re-pages).
     let mut discipline = Discipline::new(e.discipline, &rules_all, e.render, e.state_max_entries);
     if let Some(path) = &e.state_file {
-        match ledger::load(path) {
+        match ledger::load(path, namespace) {
             Ok(Some(saved)) => {
                 let evicted = saved.evicted_total;
                 let n = discipline.restore(saved);
@@ -583,6 +435,17 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         }
     }
 
+    // One notice into the discipline: routed under every rule it matches.
+    let observe = |discipline: &mut Discipline, summary: &mut RunSummary, n: Notice| {
+        summary.notices += 1;
+        let meta = meta_of(&n);
+        let now = now_s();
+        for o in route(&n, &rules_all, e.render) {
+            discipline.observe(o, &meta, now);
+        }
+    };
+
+    // The engine's seven, on the fleet's zk2 watchdog.
     let engine_rules: Vec<_> = e
         .rules
         .iter()
@@ -591,143 +454,79 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             _ => None,
         })
         .collect();
-    let mut alert_selectors: Vec<String> = Vec::new();
-    let mut liveliness_selectors: Vec<String> = Vec::new();
-    for r in e.rules {
-        let (list, sel) = match &r.kind {
-            RuleKind::Alerts { selector } => (&mut alert_selectors, selector),
-            RuleKind::LivelinessGone { selector } => (&mut liveliness_selectors, selector),
-            RuleKind::Engine(_) | RuleKind::ScheduledDoctor => continue,
-        };
-        if !list.contains(sel) {
-            list.push(sel.clone());
-        }
-    }
-    // Inhibition needs the roster whether or not a rule watches it: "down"
-    // is every member origin's token gone, and that is read off the ledger.
-    let inhibiting = e.discipline.inhibit.enabled;
-    if inhibiting {
-        let fleet_alive = e.fleet.wire("v1/*/state/*/alive");
-        if !liveliness_selectors.contains(&fleet_alive) {
-            liveliness_selectors.push(fleet_alive);
-        }
-    }
-
-    // The schema store is warmed before anything is watched and sealed for
-    // the run (#337): a decode on the drain loop must never become a GET.
-    // The per-tick sweep below re-warms beside the drain.
-    let store = SchemaStore::new(base, e.timeout);
-    if e.slices.is_some() {
-        zenkey_fleet::prewarm(&e.fleet, &store, e.slices).await;
-    }
-    let _sealed = store.seal();
-
     let spec = WatchdogSpec {
         rules: engine_rules.clone(),
         tick: e.tick,
         ticks: e.once.then_some(1),
         timeout: e.timeout,
+        clocks_synced: e.clocks_synced,
     };
     let mut watchdog = (!engine_rules.is_empty())
-        .then(|| zenkey_fleet::watchdog(&e.fleet, e.slices, &store, &spec).pin());
+        .then(|| zenkey_fleet::watchdog(e.bus, e.store, e.contracts, &spec).pin());
     let mut watchdog_done = watchdog.is_none();
 
-    let monitor = Monitor::start(
-        session,
-        MonitorSpec {
-            liveliness: liveliness_selectors,
-            ..Default::default()
-        },
-    )
-    .await?;
-    let mut events = monitor.events();
+    // Presence, live (#614): one projection of the whole deployment, its
+    // own monitor on the namespaced session, seeded before `ready`.
+    let mut presence_rules = PresenceRules::new(e.rules, namespace);
+    let mut presence_monitor: Option<Monitor> = None;
+    let mut presence_feed: Option<PresenceFeed> = None;
+    if !presence_rules.is_empty() {
+        let scope = PresenceScope::all();
+        let monitor = Monitor::start(
+            &e.bus.session,
+            liveliness_spec(Vec::new()).with_presence("", &scope),
+        )
+        .await?;
+        let mut live = LivePresence::new(scope);
+        presence_rules.track(&mut live, SystemTime::now());
+        let (feed, _seeded) =
+            PresenceFeed::open(&e.bus.session, monitor.events(), live, e.timeout).await;
+        tracing::info!(seed = ?feed.last_seed(), basis = ?feed.presence().basis(),
+            "presence: the first look");
+        let announced: BTreeMap<String, Vec<String>> = presence_rules
+            .names()
+            .map(|n| (n.to_string(), discipline.announced_under(n)))
+            .collect();
+        let at = zenkey_fleet::rfc3339_now();
+        for n in presence_rules.baseline(feed.presence(), &announced, &rule_ids, &at) {
+            observe(&mut discipline, &mut summary, Notice::Rule(Box::new(n)));
+        }
+        presence_feed = Some(feed);
+        presence_monitor = Some(monitor);
+    }
 
-    // The `alerts` selectors are SEEDED watches (#464), like the catalog feed
-    // below and every other consumer of the alert plane. A plain subscriber
-    // sees only what is published after it; a sensor republishes a firing
-    // alert only on a content change (RFC 04 §1.2's refresh is the
-    // document's, not a heartbeat) — so a notifier started at hour three of
-    // an outage would never learn of it, and would drop the resolve too,
-    // for an alert it never saw. The seed replays the documents up now as
-    // ordinary samples through the same transition path: a restart
-    // mid-incident re-fires, with the baseline stated (`prior: None`).
-    let seed_policy = SeedPolicy {
-        timeout: e.timeout,
-        ..SeedPolicy::default()
+    // Foreign tokens: the daemon's own ledger, its own monitor on the raw
+    // session, seeded before `ready`.
+    let mut token_rules = LivelinessRules::new(e.rules, namespace);
+    let mut token_monitor: Option<Monitor> = None;
+    let mut token_feed: Option<TokenFeed> = None;
+    if !token_rules.is_empty() {
+        let selectors = token_rules.selectors();
+        let monitor = Monitor::start(&e.bus.raw, liveliness_spec(selectors.clone())).await?;
+        let feed = TokenFeed::open(&e.bus.raw, monitor.events(), selectors, e.timeout).await;
+        let announced: BTreeMap<String, Vec<String>> = e
+            .rules
+            .iter()
+            .map(|r| (r.name.clone(), discipline.announced_under(&r.name)))
+            .collect();
+        let at = zenkey_fleet::rfc3339_now();
+        for n in token_rules.baseline(feed.held(), feed.basis(), &announced, &rule_ids, &at) {
+            observe(&mut discipline, &mut summary, Notice::Rule(Box::new(n)));
+        }
+        token_feed = Some(feed);
+        token_monitor = Some(monitor);
+    }
+    let dropped_now = |p: &Option<Monitor>, t: &Option<Monitor>| {
+        p.as_ref().map_or(0, |m| m.core().dropped()) + t.as_ref().map_or(0, |m| m.core().dropped())
     };
-    for selector in &alert_selectors {
-        if let Err(err) = monitor.watch_seeded(selector, seed_policy).await {
-            // Announced, and degraded to the live subscription: a seed that
-            // will not come up is not a reason for a notifier not to run.
-            tracing::warn!(selector, "alert seed failed ({err}); watching live only");
-            monitor.watch(selector).await?;
-        }
-    }
 
-    // The catalog feed (RFC 06 §5.1, §5.6): three seeded watches, each
-    // GET-seeded on its own selector (storage-shaped: one reply per
-    // document). A feed that will not come up degrades inhibition to
-    // nothing, announced — it is not a reason for a notifier not to run.
-    let mut catalog: Option<Catalog> = None;
-    if inhibiting {
-        let mut watched = true;
-        for (selector, _) in inhibit::SELECTORS {
-            if let Err(err) = monitor
-                .watch_seeded(&e.fleet.wire(selector), seed_policy)
-                .await
-            {
-                tracing::warn!(selector, "catalog watch failed ({err}); inhibition is off");
-                watched = false;
-                break;
-            }
-        }
-        if watched {
-            catalog = Some(Catalog::default());
-        }
-    }
-
-    let mut alerts: Ledger<(AlertState, Option<String>)> = Ledger::new(LEDGER_CAP);
-    let mut tokens: Ledger<bool> = Ledger::new(LEDGER_CAP);
-    // The roster baseline, by an explicit ask (RFC 05 §4: the seed is the
-    // state itself). The monitor's history replay also delivers every token
-    // already up — but it can land on the broadcast before this receiver
-    // subscribed and be lost, and a token whose baseline was lost would
-    // report its retirement with no prior. A token the ask and the replay
-    // both name is set to the same value twice; a token neither names is
-    // the baseline the first time it is seen. If the ask fails, that is
-    // logged, not a verdict: nothing here says the roster is empty.
-    for selector in &monitor
-        .watched()
-        .await
-        .into_iter()
-        .map(|(_, s)| s)
-        .filter(|s| s.ends_with("/alive"))
-        .chain(e.rules.iter().filter_map(|r| match &r.kind {
-            RuleKind::LivelinessGone { selector } => Some(selector.clone()),
-            _ => None,
-        }))
-        .collect::<BTreeSet<_>>()
-    {
-        match session.liveliness().get(selector).timeout(e.timeout).await {
-            Ok(replies) => {
-                while let Ok(reply) = replies.recv_async().await {
-                    if let Ok(sample) = reply.result() {
-                        tokens.set(sample.key_expr().as_str().to_string(), true);
-                    }
-                }
-            }
-            Err(err) => tracing::warn!(
-                selector,
-                "roster ask failed ({err}); tokens seen later are the baseline"
-            ),
-        }
-    }
-
-    // The daemon as a producer (RFC 04 §5 order inside `bring_up`): after
-    // the watches, before `ready`, so a test that sees the token can
-    // already call the queryables.
+    // The daemon as a producer — v1's write side until FL3 (#614): its v1
+    // keys under the deployment's base, on the raw session, as v1 zenwatch
+    // published them. After the watches, before `ready`, so a test that
+    // sees the token can already call the queryables.
     let mut publisher: Option<SelfProducer> = if e.publish {
-        let p = SelfProducer::bring_up(&e.fleet).await?;
+        let fleet = zenkey_fleet_v1::Fleet::new(&e.bus.raw, namespace);
+        let p = SelfProducer::bring_up(&fleet).await?;
         summary.self_origin = Some(p.origin());
         Some(p)
     } else {
@@ -737,17 +536,14 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         let _ = ready.send(());
     }
 
-    let mut sweep = tokio::time::interval(e.tick);
-    sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    sweep.tick().await; // the first tick is immediate, and the prewarm was
-    let mut sweeping: Option<Pin<Box<dyn Future<Output = usize> + Send + '_>>> = None;
-
     // The scheduled doctor (#390): the first run one interval after start
     // — the fleet just stood up is the fleet CI already checked — or at
     // once under `--once`, which is a smoke run. A run in flight is a
     // future the loop selects on beside the drain; a tick that lands while
     // one runs waits for it (`Delay`), never stacks a second sweep.
-    let mut doctor_schedule = e.doctor.map(|cfg| doctor::Schedule::new(cfg, e.timeout));
+    let mut doctor_schedule = e
+        .doctor
+        .map(|cfg| doctor::Schedule::new(cfg, e.timeout, e.clocks_synced));
     let mut doctor_tick = doctor_schedule.as_ref().map(|s| {
         let start = if e.once {
             tokio::time::Instant::now()
@@ -788,19 +584,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     macro_rules! discipline_tick {
         ($force:expr) => {{
             let now = now_s();
-            let gone = gone_origins(&tokens, base);
-            let flush = discipline.tick(now, catalog.as_ref(), &gone, $force);
-            if let Some(impact) = &flush.impact
-                && (!impact.roots.is_empty() || impact.walks_capped > 0 || impact.cycles_seen > 0)
-            {
-                tracing::info!(
-                    roots = impact.roots.len(),
-                    symptoms = impact.symptoms.len(),
-                    walks_capped = impact.walks_capped,
-                    cycles_seen = impact.cycles_seen,
-                    "impact attribution (RFC 06 §5.6)"
-                );
-            }
+            let flush = discipline.tick(now, $force);
             for o in flush.outgoing {
                 summary.outgoing += 1;
                 dispatch(&mut tasks, &e.sinks, &counters, o);
@@ -808,7 +592,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             if let Some(path) = &e.state_file
                 && discipline.dirty()
             {
-                let snapshot = discipline.snapshot(now);
+                let snapshot = discipline.snapshot(now, namespace);
                 match ledger::save(path, &snapshot) {
                     Ok(()) => pulse.last_persist_error = None,
                     Err(err) => {
@@ -817,9 +601,9 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                     }
                 }
             }
+            summary.dropped = dropped_now(&presence_monitor, &token_monitor);
             if let Some(p) = publisher.as_mut() {
-                let docs: std::collections::BTreeMap<String, FiringRule> =
-                    publish::firing_docs(&discipline);
+                let docs: BTreeMap<String, FiringRule> = publish::firing_docs(&discipline);
                 if let Err(err) = p.publish_firing(&docs).await {
                     tracing::warn!("firing/* publish failed: {err}");
                 }
@@ -851,7 +635,9 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                             .count(),
                         notifications_sent: c.sent,
                         deliveries_failed: failed,
-                        inhibited: c.inhibited,
+                        // Inhibition was removed (#614, FL2); the field is
+                        // v1's served shape until FL3 redraws it.
+                        inhibited: 0,
                         dropped_total: summary.dropped,
                         state_entries: discipline.len(),
                         state_evicted: c.evicted,
@@ -879,21 +665,8 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         }};
     }
 
-    // One notice into the discipline: routed under every rule it matches.
-    macro_rules! observe_notice {
-        ($n:expr) => {{
-            let n: Notice = $n;
-            summary.notices += 1;
-            let meta = meta_of(&n);
-            let now = now_s();
-            for o in route(&n, &rules_all, e.render) {
-                discipline.observe(o, &meta, now);
-            }
-        }};
-    }
-
     loop {
-        let notice: Option<Notice> = tokio::select! {
+        let notices: Vec<Notice> = tokio::select! {
             biased;
             () = &mut stop => break,
             // Under `--once` a doctor run in flight is the run this smoke
@@ -901,11 +674,11 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             () = &mut once_deadline, if e.once && doctoring.is_none() => break,
             t = async { watchdog.as_mut().expect("guarded").sip().await }, if !watchdog_done => {
                 match t {
-                    Some(t) => Some(Notice::Engine(t)),
+                    Some(t) => vec![Notice::Engine(t)],
                     None => {
                         watchdog_done = true;
                         if e.once && doctoring.is_none() { break }
-                        None
+                        Vec::new()
                     }
                 }
             }
@@ -915,105 +688,84 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
                 let spec = doctor_schedule.as_ref().expect("guarded").spec();
                 tracing::info!(deep = spec.deep, "doctor: scheduled run starting (#390)");
                 doctoring = Some(Box::pin(async move {
-                    zenkey_fleet::run_doctor(&e.fleet, e.slices, &spec)
-                        .await
-                        .map_err(|err| zenkey_fleet::one_line(&err))
+                    Ok(zenkey_fleet::run_doctor(e.bus, e.store, &spec).await)
                 }));
-                None
+                Vec::new()
             }
             outcome = async { doctoring.as_mut().expect("guarded").await }, if doctoring.is_some() => {
                 doctoring = None;
                 summary.doctor_runs += 1;
                 let schedule = doctor_schedule.as_mut().expect("guarded");
                 match &outcome {
-                    Ok(r) => tracing::info!(findings = r.findings.len(), "doctor: run complete"),
+                    Ok(r) => tracing::info!(findings = r.findings().count(),
+                        unobservable = r.unobservable.is_some(), "doctor: run complete"),
                     Err(err) => tracing::warn!("doctor: the run could not happen — unobservable, not clean: {err}"),
                 }
                 let announced = discipline.announced_under(DOCTOR_RULE);
-                for n in schedule.observe(outcome, now_s(), &announced) {
-                    observe_notice!(Notice::Doctor(Box::new(n)));
-                }
+                let notices: Vec<Notice> = schedule
+                    .observe(outcome, now_s(), &announced)
+                    .into_iter()
+                    .map(|n| Notice::Doctor(Box::new(n)))
+                    .collect();
                 if let (Some(p), Some(doc)) = (publisher.as_ref(), schedule.document())
                     && let Err(err) = p.publish_doctor(doc).await
                 {
                     tracing::warn!("doctor publish failed: {err}");
                 }
+                for n in notices {
+                    observe(&mut discipline, &mut summary, n);
+                }
                 if e.once && watchdog_done { break }
-                None
+                Vec::new()
             }
             _ = disc_tick.tick() => {
                 discipline_tick!(false);
-                None
+                Vec::new()
             }
-            _ = sweep.tick(), if sweeping.is_none() && e.slices.is_some() => {
-                sweeping = Some(Box::pin(zenkey_fleet::prewarm(&e.fleet, &store, e.slices)));
-                None
-            }
-            _ = async { sweeping.as_mut().expect("guarded").await }, if sweeping.is_some() => {
-                sweeping = None;
-                None
-            }
-            Some(_) = tasks.join_next(), if !tasks.is_empty() => None,
-            item = events.recv() => match item {
-                None => break,
-                Some(StreamItem::Dropped(n)) => {
-                    summary.dropped += n;
-                    tracing::warn!(dropped = n, "the monitor's broadcast overflowed — unobservable, not ok");
-                    Some(Notice::Dropped { n, at: zenkey_fleet::rfc3339_now() })
+            moved = async { presence_feed.as_mut().expect("guarded").next().await },
+                if presence_feed.is_some() =>
+            {
+                match moved {
+                    Some(moved) => {
+                        let at = zenkey_fleet::rfc3339_now();
+                        let presence = presence_feed.as_ref().expect("guarded").presence();
+                        presence_rules
+                            .fold(&moved, presence, &at)
+                            .into_iter()
+                            .map(|n| Notice::Rule(Box::new(n)))
+                            .collect()
+                    }
+                    None => {
+                        tracing::warn!("the presence monitor stopped: presence rules see nothing more");
+                        presence_feed = None;
+                        Vec::new()
+                    }
                 }
-                Some(StreamItem::Event(FleetEvent::Sample(s))) => {
-                    if let Some(cat) = catalog.as_mut()
-                        && let Some(family) = inhibit::classify(base, &s.key)
-                    {
-                        let bytes = s.payload.to_bytes();
-                        cat.apply(family, &s.key, s.kind, &bytes);
-                        continue;
+            }
+            moved = async { token_feed.as_mut().expect("guarded").next().await },
+                if token_feed.is_some() =>
+            {
+                match moved {
+                    Some(moved) => {
+                        let at = zenkey_fleet::rfc3339_now();
+                        let basis = token_feed.as_ref().expect("guarded").basis();
+                        token_rules
+                            .fold(&moved, basis, &at)
+                            .into_iter()
+                            .map(|n| Notice::Rule(Box::new(n)))
+                            .collect()
                     }
-                    let Ok(key) = KeyExpr::try_from(s.key.as_str()) else { continue };
-                    if !e.rules.iter().any(|r| matches!(r.kind, RuleKind::Alerts { .. }) && r.covers(&key)) {
-                        continue;
+                    None => {
+                        tracing::warn!("the token monitor stopped: liveliness rules see nothing more");
+                        token_feed = None;
+                        Vec::new()
                     }
-                    let at = zenkey_fleet::rfc3339_now();
-                    let stamped = s.timestamp.map(|t| t.to_string());
-                    let (decoded, payload) = match s.kind {
-                        SampleKind::Delete => (None, Payload::None { reason: "a tombstone carries no payload".into() }),
-                        SampleKind::Put => {
-                            let bytes = s.payload.to_bytes();
-                            let d = zenkey_fleet::decode_sample(&e.fleet, &store, e.slices, &s.key, Some(&s.encoding), &bytes).await;
-                            match d.rendering {
-                                zenkey_fleet::Rendering::Typed(p) => (Some((RenderSource::Schema, p.value.clone())), Payload::Typed(p.value)),
-                                zenkey_fleet::Rendering::Structural(text) => {
-                                    // `structural` emits JSON text when the bytes
-                                    // parsed as JSON or CBOR; that reading still
-                                    // carries the document's fields.
-                                    let value = serde_json::from_str::<serde_json::Value>(&text).ok();
-                                    let what = d.type_name.clone().unwrap_or_else(|| s.key.clone());
-                                    (value.map(|v| (RenderSource::Structural, v)), Payload::Structural { text, what })
-                                }
-                            }
-                        }
-                    };
-                    let Some(t) = zenkey_fleet::alert_transition(
-                        base, &s.key, s.kind, decoded.as_ref().map(|(src, v)| (*src, v)), stamped.as_deref(), &at,
-                    ) else { continue };
-                    let now = (t.state, t.severity.clone());
-                    let prior = alerts.get(&s.key).cloned();
-                    if prior.as_ref() == Some(&now) {
-                        // Transitions, not states: a re-put of the same
-                        // alert at the same severity is the refresh RFC 04
-                        // §1.2 asks publishers for, not a new firing.
-                        continue;
-                    }
-                    alerts.set(s.key.clone(), now);
-                    Some(Notice::Alert { key: s.key.clone(), transition: Box::new(t), prior: prior.map(|(a, _)| cond_of(a)), payload })
                 }
-                Some(StreamItem::Event(FleetEvent::NodeUp(key))) => liveliness(&mut tokens, base, key, true, e.rules),
-                Some(StreamItem::Event(FleetEvent::NodeDown(key))) => liveliness(&mut tokens, base, key, false, e.rules),
-                Some(StreamItem::Event(_)) => None,
-            },
+            }
+            Some(_) = tasks.join_next(), if !tasks.is_empty() => Vec::new(),
         };
-        if let Some(n) = notice {
-            observe_notice!(n);
+        for n in notices {
+            observe(&mut discipline, &mut summary, n);
         }
     }
 
@@ -1031,7 +783,15 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     if let Some(p) = publisher.take() {
         p.shutdown().await?;
     }
-    monitor.shutdown().await?;
+    summary.dropped = dropped_now(&presence_monitor, &token_monitor);
+    summary.evicted = presence_feed
+        .as_ref()
+        .map_or(0, |f| f.presence().forgotten());
+    drop(presence_feed);
+    drop(token_feed);
+    for monitor in [presence_monitor, token_monitor].into_iter().flatten() {
+        monitor.shutdown().await?;
+    }
     // In-flight deliveries get one sink-timeout's grace, then are abandoned
     // — a stop is a stop.
     let grace = e
@@ -1044,7 +804,6 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     tasks.abort_all();
     summary.delivered = counters.delivered.load(Ordering::Relaxed);
     summary.failed = counters.failed.load(Ordering::Relaxed);
-    summary.evicted = alerts.evicted() + tokens.evicted();
     summary.discipline = discipline.counters();
     Ok(summary)
 }
@@ -1071,10 +830,12 @@ async fn stop_signal() {
     }
 }
 
-/// `zenwatch run`: load and refuse, build the sinks (secrets resolved now),
-/// resolve the bus, open the session, and run until a signal.
+/// `zenwatch run`: load and refuse (the file, the deployment flags, the
+/// contracts, the state file), build the sinks (secrets resolved now), open
+/// the two sessions, and run until a signal.
 pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
-    let cfg: Config = crate::load_checked(&args.config.config)?;
+    let loaded = crate::load_checked(&args.config.config, &args.deployment)?;
+    let cfg = &loaded.cfg;
     let rules = cfg
         .rules
         .iter()
@@ -1082,17 +843,26 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| unaskable!("{e}"))?;
     let sinks =
-        Arc::new(crate::sinks::build_all(&cfg, args.dry_run).map_err(|e| unaskable!("{e}"))?);
-    let bus = crate::bus::resolve(&cfg.bus, args.context.as_deref())?;
-    let session = bus.session().await?;
-    let slices = bus.slices(&session).await?;
+        Arc::new(crate::sinks::build_all(cfg, args.dry_run).map_err(|e| unaskable!("{e}"))?);
+    let bus = loaded.bus.sessions().await?;
+    let store = BundleStore::new(loaded.bus.timeout);
+    store.seed(&loaded.contracts);
     let tick = Duration::from_secs_f64(cfg.tick_s);
     eprintln!(
-        "zenwatch: {} rule(s), {} sink(s), tick {}s{}{}{}{} — three states, ok/firing/unobservable, \
-         one notification per sink per genuine change (RFC 13 §3)",
+        "zenwatch: {} rule(s), {} sink(s), tick {}s, {}{}{}{}{} — three states, \
+         ok/firing/unobservable, one notification per sink per genuine change (RFC 13 §3)",
         rules.len(),
         sinks.len(),
         cfg.tick_s,
+        if bus.namespace.is_empty() {
+            "the bus-root deployment".to_string()
+        } else {
+            format!("namespace {:?}", bus.namespace)
+        },
+        match loaded.contracts.len() {
+            0 => "; contracts: from the bus only".to_string(),
+            n => format!("; {n} contract revision(s) held offline"),
+        },
         match &cfg.doctor {
             Some(d) => format!(
                 "; doctor every {} → {}",
@@ -1110,18 +880,13 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
         } else {
             ""
         },
-        if slices.is_none() {
-            "; no registry: payloads render structurally"
-        } else {
-            ""
-        },
     );
-    let fleet = Fleet::new(&session, &bus.base);
     let summary = run_on(
         Engine {
-            fleet,
-            slices: slices.as_ref(),
-            timeout: bus.timeout,
+            bus: &bus,
+            store: &store,
+            contracts: &loaded.contracts,
+            timeout: loaded.bus.timeout,
             tick,
             rules: &rules,
             sinks,
@@ -1133,6 +898,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             state_max_entries: cfg.state_max_entries,
             publish: true,
             doctor: cfg.doctor.as_ref(),
+            clocks_synced: cfg.clocks_synced,
         },
         stop_signal(),
     )
@@ -1145,14 +911,17 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
         summary.failed,
         if summary.dropped > 0 {
             format!(
-                ", {} event(s) dropped by the observer (O6)",
+                ", {} liveliness event(s) dropped by the observers (O6)",
                 summary.dropped
             )
         } else {
             String::new()
         },
         if summary.evicted > 0 {
-            format!(", {} key(s) retired at the ledger bound", summary.evicted)
+            format!(
+                ", {} address record(s) forgotten at the bound",
+                summary.evicted
+            )
         } else {
             String::new()
         },
@@ -1165,15 +934,149 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     let d = summary.discipline;
     eprintln!(
         "zenwatch: discipline — {} deduplicated, {} grouped, {} repeat(s), {} cancelled in \
-         `for`, {} baseline, {} inhibited, {} entr{} evicted",
+         `for`, {} baseline, {} entr{} evicted",
         d.deduped,
         d.grouped,
         d.repeats,
         d.cancelled,
         d.baseline,
-        d.inhibited,
         d.evicted,
         if d.evicted == 1 { "y" } else { "ies" },
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RuleConfig;
+    use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
+
+    fn rule(name: &str, text: &str, labels: &[(&str, &str)]) -> Rule {
+        Rule::from_config(&RuleConfig {
+            name: name.into(),
+            rule: text.into(),
+            severity: Some("error".into()),
+            labels: labels
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            sinks: vec!["ops".into()],
+            for_s: None,
+        })
+        .unwrap()
+    }
+
+    /// An engine transition routes to the rule spelling its condition, its
+    /// three states whole — `unobservable` stays `unobservable` — under the
+    /// identity of the rule's sorted labels; no other rule takes it.
+    #[test]
+    fn an_engine_transition_routes_to_its_condition_three_states_whole() {
+        let rules = vec![
+            rule(
+                "quiet",
+                "silent-for site/zk2/** 30",
+                &[("team", "infra"), ("env", "prod")],
+            ),
+            rule("tc-gone", "instance-gone */tc", &[]),
+        ];
+        let t = Transition {
+            rule: "silent-for site/zk2/** 30".into(),
+            from: Some(CondState::Ok),
+            to: CondState::Unobservable,
+            at: "2026-10-10T00:00:00Z".into(),
+            evidence: "no sample seen, but the observer dropped".into(),
+        };
+        let out = route(&Notice::Engine(t), &rules, &RenderConfig::default());
+        assert_eq!(out.len(), 1);
+        let n = &out[0].notification;
+        assert_eq!(n.id, "quiet:env=prod,team=infra");
+        assert_eq!(n.rule_kind, "silent-for");
+        assert_eq!(n.kind, NoticeKind::Transition);
+        assert_eq!(
+            (n.state, n.prior),
+            (CondState::Unobservable, Some(CondState::Ok))
+        );
+        assert_eq!(n.title, "error quiet unobservable");
+        assert!(n.message.contains("key: site/zk2/**"), "{}", n.message);
+        assert_eq!(n.rendering, RenderSource::KeyOnly);
+        assert!(n.presence.is_none());
+        assert_eq!(
+            meta_of(&Notice::Engine(Transition {
+                rule: String::new(),
+                from: None,
+                to: CondState::Ok,
+                at: String::new(),
+                evidence: String::new(),
+            }))
+            .address,
+            None
+        );
+    }
+
+    /// A presence rule's notice routes to its rule alone, under
+    /// `<rule_id>:<identity>`, carrying the move that decided it, its
+    /// address as a line and as the discipline's grouping fact; a baseline's
+    /// own severity wins over the rule's.
+    #[test]
+    fn a_rule_notice_routes_to_its_rule_with_its_move() {
+        let rules = vec![
+            rule("tc-gone", "instance-gone */tc", &[]),
+            rule("other", "instance-gone */gui", &[]),
+        ];
+        let moved = PresenceTransition {
+            at: SystemTime::UNIX_EPOCH,
+            source: PresenceSource::Seed,
+            address: "host-a/tc".parse().unwrap(),
+            change: PresenceChange::Status {
+                from: AddressStatus::Unobservable,
+                to: AddressStatus::Down,
+            },
+        };
+        let n = RuleNotice {
+            rule: "tc-gone".into(),
+            what: "host-a/tc".into(),
+            kind: NoticeKind::Presence,
+            state: CondState::Firing,
+            prior: Some(CondState::Ok),
+            severity: None,
+            evidence: "no instance token of host-a/tc".into(),
+            lines: vec![],
+            key: None,
+            address: Some("host-a/tc".into()),
+            at: "t".into(),
+            presence: Some(moved.clone()),
+            assume: false,
+            passthrough: false,
+            reason: "a presence token carries no payload",
+        };
+        let notice = Notice::Rule(Box::new(n.clone()));
+        let out = route(&notice, &rules, &RenderConfig::default());
+        assert_eq!(out.len(), 1, "its rule alone");
+        let o = &out[0].notification;
+        assert_eq!(o.id, "tc-gone:host-a/tc");
+        assert_eq!(o.rule_kind, "instance-gone");
+        assert_eq!(o.presence.as_ref(), Some(&moved));
+        assert!(o.message.contains("address: host-a/tc"), "{}", o.message);
+        let meta = meta_of(&notice);
+        assert_eq!(meta.address.as_deref(), Some("host-a/tc"));
+        assert!(!meta.assume && !meta.passthrough);
+
+        let baseline = RuleNotice {
+            what: "baseline".into(),
+            kind: NoticeKind::Baseline,
+            severity: Some("info".into()),
+            passthrough: true,
+            presence: None,
+            ..n
+        };
+        let out = route(
+            &Notice::Rule(Box::new(baseline)),
+            &rules,
+            &RenderConfig::default(),
+        );
+        assert_eq!(out[0].notification.severity, "info");
+        assert_eq!(out[0].notification.kind, NoticeKind::Baseline);
+        assert_eq!(out[0].notification.id, "tc-gone:baseline");
+    }
 }

@@ -19,19 +19,18 @@
 //! - **repeat** — still firing `repeat_s` after the last delivery is sent
 //!   again, once per interval, with `repeat` counting up.
 //! - **grouping** — notices sharing a group key (a configured label set;
-//!   by origin unless said otherwise) within one window are one
-//!   [`NoticeKind::Group`]; a group of one goes plain.
+//!   by system unless said otherwise — the `<system>` of the address a
+//!   notice is about) within one window are one [`NoticeKind::Group`]; a
+//!   group of one goes plain.
 //! - **the resolved family** — `firing → ok` is `resolved`, `unobservable
 //!   → ok` is `observable_again`, `firing → unobservable` is `lost_sight`,
 //!   `ok → unobservable` is `unobservable`; each is one notification, and
 //!   `resolved_notice: false` drops the first two.
-//! - **inhibition** — on the tick, the engine's impact attribution (RFC 06
-//!   §5.6) runs over the catalog's edges, the entities of everything
-//!   firing, and the entities this daemon judged down. A notice whose
-//!   entity is a *symptom* carries `inhibited_by: <root>`; it is delivered
-//!   inside the root's own group or when its severity is `error` or
-//!   worse, and otherwise held — counted and logged, never dropped
-//!   silently.
+//!
+//! **Inhibition was removed** in the zk2 port (#614, FL2): it attributed a
+//! symptom to a down host through v1's catalog (`edge/*`, `entity/*`,
+//! `alias/*`), and no zk2 profile carries those documents. A config that
+//! switches it on is refused ([`crate::config::INHIBIT_REMOVED`]).
 //!
 //! **Time is an argument.** Every entry point takes `now` as Unix seconds,
 //! so the whole table above is pinned by unit tests with an injected clock
@@ -51,33 +50,40 @@
 //! queued and nothing to repeat (`last_sent` stays empty), and is counted
 //! as a baseline.
 
-pub mod inhibit;
 pub mod state;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zenkey_fleet::{CondState, ImpactInputs, ImpactReport, RenderSource, attribute};
+use zenkey_fleet::CondState;
 
-use crate::config::DisciplineConfig;
-use crate::render::{RenderConfig, state_word, truncate_bytes};
+use crate::config::{DisciplineConfig, GROUP_ADDRESS, GROUP_SYSTEM};
+use crate::render::{RenderConfig, RenderSource, state_word, truncate_bytes};
 use crate::rules::Rule;
 use crate::sinks::{NoticeKind, Notification, Outgoing};
 
-use self::inhibit::Catalog;
 use self::state::{PersistedEntry, PersistedState};
 
 /// What the engine knows about a notice beyond its rendering.
 #[derive(Debug, Clone, Default)]
 pub struct NoticeMeta {
-    /// The origin chunk of the key the notice came from, if it had one.
-    pub origin: Option<String>,
-    /// An event with no identity to remember — the observer's own
-    /// `Dropped(n)` — delivered every time, never deduplicated.
+    /// The address (`<system>/<service>`) the notice is about, when it is
+    /// about one — what the `system` and `address` group labels read.
+    pub address: Option<String>,
+    /// A notice with no identity to remember — a presence rule's baseline,
+    /// the doctor's — delivered every time, never deduplicated.
     pub passthrough: bool,
     /// A fact that predates this daemon's watch (a doctor baseline finding,
-    /// #390): remembered as announced, delivered to nobody, so that its end
-    /// is a `resolved` and its presence rides `firing/*`.
+    /// #390; an address already down at a presence rule's first look):
+    /// remembered as announced, delivered to nobody, so that its end is a
+    /// `resolved` and its presence rides `firing/*`.
     pub assume: bool,
+}
+
+/// The `<system>` of an address: what the `system` group label is.
+fn system_of(address: &str) -> &str {
+    address
+        .split_once('/')
+        .map_or(address, |(system, _)| system)
 }
 
 /// A firing notice waiting out its `for` window.
@@ -104,15 +110,11 @@ pub struct Entry {
     pub last_sent: Option<f64>,
     pub repeat: u32,
     pub labels: BTreeMap<String, String>,
-    pub origin: Option<String>,
-    /// Something was announced (or held as a symptom) for the current
-    /// condition — the flag a resolve needs.
+    /// The address the notice is about, when it is about one.
+    pub address: Option<String>,
+    /// Something was announced (or assumed) for the current condition —
+    /// the flag a resolve needs.
     pub announced: bool,
-    /// The root that explains this notice, when attribution said so.
-    pub inhibited_by: Option<String>,
-    /// The announcement was held as a low-severity symptom: nothing went
-    /// out, so its resolve stays in too.
-    held: bool,
     pending: Option<Pending>,
     /// The last rendering, to send at the flush or on a repeat.
     latest: Option<Box<Outgoing>>,
@@ -125,7 +127,7 @@ pub struct Entry {
 struct Queued {
     id: String,
     outgoing: Outgoing,
-    origin: Option<String>,
+    address: Option<String>,
     queued_at: f64,
     passthrough: bool,
 }
@@ -145,8 +147,6 @@ pub struct Counters {
     /// Notices folded into a group (members, not groups).
     pub grouped: u64,
     pub repeats: u64,
-    /// Symptoms held back, plus their resolves.
-    pub inhibited: u64,
     /// Identities evicted at the bound, over the ledger's life.
     pub evicted: u64,
 }
@@ -155,8 +155,6 @@ pub struct Counters {
 #[derive(Debug, Default)]
 pub struct Flush {
     pub outgoing: Vec<Outgoing>,
-    /// The attribution that ran, when inhibition had a graph to run on.
-    pub impact: Option<ImpactReport>,
 }
 
 /// Per-rule facts the discipline needs that a notification does not carry.
@@ -280,12 +278,14 @@ impl Discipline {
     }
 
     /// The ledger as the state file stores it — announced, non-`ok`
-    /// entries only — and clears the dirty flag.
-    pub fn snapshot(&mut self, now: f64) -> PersistedState {
+    /// entries only, under the namespace they were judged in — and clears
+    /// the dirty flag.
+    pub fn snapshot(&mut self, now: f64, namespace: &str) -> PersistedState {
         self.dirty = false;
         PersistedState {
             version: state::STATE_VERSION,
             saved_at: rfc3339(now),
+            namespace: namespace.to_string(),
             entries: self
                 .announced()
                 .map(|e| PersistedEntry {
@@ -298,17 +298,16 @@ impl Discipline {
                     last_sent: e.last_sent,
                     repeat: e.repeat,
                     labels: e.labels.clone(),
-                    origin: e.origin.clone(),
-                    inhibited_by: e.inhibited_by.clone(),
+                    address: e.address.clone(),
                 })
                 .collect(),
             evicted_total: self.counters.evicted,
         }
     }
 
-    /// Load a saved ledger: every entry comes back announced, so a re-put
-    /// of an alert already announced before the restart is a duplicate,
-    /// not news. Entries for rules no longer configured are dropped.
+    /// Load a saved ledger: every entry comes back announced, so the same
+    /// firing seen again after the restart is a duplicate, not news.
+    /// Entries for rules no longer configured are dropped.
     pub fn restore(&mut self, saved: PersistedState) -> usize {
         self.counters.evicted = saved.evicted_total;
         let mut restored = 0;
@@ -321,7 +320,6 @@ impl Discipline {
             } else {
                 p.rule_id
             };
-            let held = p.inhibited_by.is_some();
             self.entries.insert(
                 p.id.clone(),
                 Entry {
@@ -334,10 +332,8 @@ impl Discipline {
                     last_sent: p.last_sent,
                     repeat: p.repeat,
                     labels: p.labels,
-                    origin: p.origin,
+                    address: p.address,
                     announced: true,
-                    inhibited_by: p.inhibited_by,
-                    held,
                     pending: None,
                     latest: None,
                     changed: p.since,
@@ -355,7 +351,7 @@ impl Discipline {
             self.queue.push(Queued {
                 id: o.notification.id.clone(),
                 outgoing: o,
-                origin: meta.origin.clone(),
+                address: meta.address.clone(),
                 queued_at: now,
                 passthrough: true,
             });
@@ -377,16 +373,14 @@ impl Discipline {
             last_sent: None,
             repeat: 0,
             labels: n.labels.clone(),
-            origin: meta.origin.clone(),
+            address: meta.address.clone(),
             announced: false,
-            inhibited_by: None,
-            held: false,
             pending: None,
             latest: None,
             changed: now,
         });
         e.labels = n.labels.clone();
-        e.origin = meta.origin.clone();
+        e.address = meta.address.clone();
         e.latest = Some(Box::new(o.clone()));
         e.changed = now;
         self.dirty = true;
@@ -453,11 +447,6 @@ impl Discipline {
                         CondState::Ok => None,
                     };
                     match kind {
-                        Some(_) if e.held => {
-                            self.counters.inhibited += 1;
-                            tracing::info!(id = %e.id, root = ?e.inhibited_by,
-                                "resolve held with its symptom");
-                        }
                         Some(k) if self.cfg.resolved_notice => {
                             queue = Some((k, CondState::Ok));
                         }
@@ -467,8 +456,6 @@ impl Discipline {
                     e.announced = false;
                     e.state = CondState::Ok;
                     e.repeat = 0;
-                    e.inhibited_by = None;
-                    e.held = false;
                     e.last_sent = None;
                 } else {
                     self.counters.baseline += 1;
@@ -530,7 +517,7 @@ impl Discipline {
         self.queue.push(Queued {
             id: id.to_string(),
             outgoing: o,
-            origin: e.origin.clone(),
+            address: e.address.clone(),
             queued_at: now,
             passthrough: false,
         });
@@ -564,7 +551,7 @@ impl Discipline {
                 truncated: false,
                 repeat: 0,
                 group: None,
-                inhibited_by: None,
+                presence: None,
             },
             sinks: facts.map(|f| f.sinks.clone()).unwrap_or_default(),
         });
@@ -582,16 +569,9 @@ impl Discipline {
         o
     }
 
-    /// The tick: advance the `for` timers, issue repeats, flush the groups
-    /// that are due (all of them with `force`, at shutdown), and run
-    /// inhibition over what is about to go out.
-    pub fn tick(
-        &mut self,
-        now: f64,
-        catalog: Option<&Catalog>,
-        gone_origins: &BTreeSet<String>,
-        force: bool,
-    ) -> Flush {
+    /// The tick: advance the `for` timers, issue repeats, and flush the
+    /// groups that are due (all of them with `force`, at shutdown).
+    pub fn tick(&mut self, now: f64, force: bool) -> Flush {
         // 1. Timers.
         let due_timers: Vec<(String, NoticeKind, CondState)> = self
             .entries
@@ -628,7 +608,6 @@ impl Discipline {
                 .filter(|e| {
                     e.announced
                         && e.state == CondState::Firing
-                        && !e.held
                         && e.last_sent
                             .is_some_and(|sent| now >= sent + self.cfg.repeat_s)
                 })
@@ -641,13 +620,13 @@ impl Discipline {
                     e.changed = now;
                     e.clone()
                 };
-                let (o, origin) = (self.repeat_of(&snapshot, now), snapshot.origin.clone());
+                let (o, address) = (self.repeat_of(&snapshot, now), snapshot.address.clone());
                 self.counters.repeats += 1;
                 self.dirty = true;
                 self.queue.push(Queued {
                     id,
                     outgoing: o,
-                    origin,
+                    address,
                     queued_at: now,
                     passthrough: false,
                 });
@@ -681,29 +660,14 @@ impl Discipline {
             }
         }
 
-        // 4. Inhibition over what is due.
+        // 4. Emit.
         let mut flush = Flush::default();
-        if let Some(cat) = catalog
-            && self.cfg.inhibit.enabled
-            && !cat.is_empty()
-        {
-            self.inhibit(cat, gone_origins, &mut due, &mut flush);
-        }
-
-        // 5. Emit.
         for (key, (labels, mut members)) in due {
-            // The root of a folded group first, then by arrival, then id.
+            // By arrival, then id.
             members.sort_by(|a, b| {
-                a.outgoing
-                    .notification
-                    .inhibited_by
-                    .is_some()
-                    .cmp(&b.outgoing.notification.inhibited_by.is_some())
-                    .then_with(|| {
-                        a.queued_at
-                            .partial_cmp(&b.queued_at)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
+                a.queued_at
+                    .partial_cmp(&b.queued_at)
+                    .unwrap_or(std::cmp::Ordering::Equal)
                     .then_with(|| a.id.cmp(&b.id))
             });
             let ids: Vec<String> = members.iter().map(|q| q.id.clone()).collect();
@@ -727,111 +691,17 @@ impl Discipline {
         flush
     }
 
-    /// Attribute, then decide per due firing notice: fold into the root's
-    /// group, deliver alone as `error`+, or hold (counted).
-    fn inhibit(
-        &mut self,
-        cat: &Catalog,
-        gone_origins: &BTreeSet<String>,
-        due: &mut BTreeMap<String, (BTreeMap<String, String>, Vec<Queued>)>,
-        flush: &mut Flush,
-    ) {
-        let entity_of = |origin: Option<&str>| origin.and_then(|o| cat.entity_of(o));
-        let mut firing: BTreeSet<String> = self
-            .entries
-            .values()
-            .filter(|e| {
-                (e.announced && e.state == CondState::Firing)
-                    || e.pending.is_some_and(|p| p.state == CondState::Firing)
-            })
-            .filter_map(|e| entity_of(e.origin.as_deref()))
-            .collect();
-        for (_, members) in due.values() {
-            for q in members {
-                if q.outgoing.notification.state == CondState::Firing
-                    && let Some(ent) = entity_of(q.origin.as_deref())
-                {
-                    firing.insert(ent);
-                }
-            }
-        }
-        let down = cat.down_entities(gone_origins);
-        let edges = cat.edges();
-        let report = attribute(
-            &ImpactInputs {
-                edges: &edges,
-                firing: &firing,
-                down: &down,
-            },
-            self.cfg.inhibit.depth,
-        );
-        let symptoms: BTreeMap<&str, &str> = report
-            .symptoms
-            .iter()
-            .map(|s| (s.entity.as_str(), s.explained_by.as_str()))
-            .collect();
-        if !symptoms.is_empty() {
-            // Which roots have a notice in this flush, and under which key.
-            let mut root_keys: BTreeMap<String, String> = BTreeMap::new();
-            for (key, (_, members)) in due.iter() {
-                for q in members {
-                    if let Some(ent) = entity_of(q.origin.as_deref())
-                        && report.roots.iter().any(|r| r.entity == ent)
-                    {
-                        root_keys.entry(ent).or_insert_with(|| key.clone());
-                    }
-                }
-            }
-            let mut moved: Vec<(String, Queued)> = Vec::new();
-            for (_, members) in due.values_mut() {
-                let mut keep = Vec::new();
-                for mut q in members.drain(..) {
-                    let is_firing = q.outgoing.notification.state == CondState::Firing;
-                    let symptom = entity_of(q.origin.as_deref())
-                        .and_then(|ent| symptoms.get(ent.as_str()).map(|r| (*r).to_string()));
-                    let (Some(root), true) = (symptom, is_firing) else {
-                        keep.push(q);
-                        continue;
-                    };
-                    q.outgoing.notification.inhibited_by = Some(root.clone());
-                    if let Some(e) = self.entries.get_mut(&q.id) {
-                        e.inhibited_by = Some(root.clone());
-                    }
-                    if let Some(root_key) = root_keys.get(&root) {
-                        moved.push((root_key.clone(), q));
-                    } else if severity_rank(&q.outgoing.notification.severity)
-                        >= severity_rank("error")
-                    {
-                        keep.push(q);
-                    } else {
-                        self.counters.inhibited += 1;
-                        if let Some(e) = self.entries.get_mut(&q.id) {
-                            e.held = true;
-                        }
-                        tracing::info!(id = %q.id, root = %root,
-                            "held: a symptom of a down entity (RFC 06 §5.6)");
-                    }
-                }
-                *members = keep;
-            }
-            for (root_key, q) in moved {
-                if let Some((_, members)) = due.get_mut(&root_key) {
-                    members.push(q);
-                }
-            }
-            due.retain(|_, (_, m)| !m.is_empty());
-        }
-        flush.impact = Some(report);
-    }
-
+    /// The group key of a queued notice: the configured labels it has —
+    /// `system` and `address` from the address it is about, any other from
+    /// the rule's labels — or its own id when it has none of them.
     fn group_key(&self, q: &Queued) -> (String, BTreeMap<String, String>) {
         let n = &q.outgoing.notification;
         let mut labels = BTreeMap::new();
         for l in &self.cfg.group_by {
-            let v = if l == "origin" {
-                q.origin.clone()
-            } else {
-                n.labels.get(l).cloned()
+            let v = match l.as_str() {
+                GROUP_SYSTEM => q.address.as_deref().map(|a| system_of(a).to_string()),
+                GROUP_ADDRESS => q.address.clone(),
+                _ => n.labels.get(l).cloned(),
             };
             if let Some(v) = v {
                 labels.insert(l.clone(), v);
@@ -876,13 +746,7 @@ impl Discipline {
                 }
             }
         }
-        let mut lines: Vec<String> = ns
-            .iter()
-            .map(|n| match &n.inhibited_by {
-                Some(root) => format!("- {} (symptom of {root})", n.title),
-                None => format!("- {}", n.title),
-            })
-            .collect();
+        let mut lines: Vec<String> = ns.iter().map(|n| format!("- {}", n.title)).collect();
         lines.insert(0, format!("{} notices sharing {key}:", ns.len()));
         let (message, truncated) = truncate_bytes(&lines.join("\n"), self.max_message_bytes);
         Outgoing {
@@ -907,7 +771,7 @@ impl Discipline {
                 truncated,
                 repeat: 0,
                 group: Some(ns.iter().map(|n| n.id.clone()).collect()),
-                inhibited_by: None,
+                presence: None,
             },
             sinks,
         }
@@ -942,7 +806,7 @@ impl Discipline {
 /// The kind a rule's own firing notice carries.
 pub fn base_kind(head: &str) -> NoticeKind {
     match head {
-        "alerts" => NoticeKind::Alert,
+        "instance-gone" => NoticeKind::Presence,
         "liveliness-gone" => NoticeKind::Liveliness,
         _ => NoticeKind::Transition,
     }
@@ -951,8 +815,7 @@ pub fn base_kind(head: &str) -> NoticeKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InhibitConfig, RuleConfig};
-    use zenoh::sample::SampleKind;
+    use crate::config::RuleConfig;
 
     fn rule(name: &str, rule: &str, for_s: Option<f64>) -> Rule {
         Rule::from_config(&RuleConfig {
@@ -968,9 +831,9 @@ mod tests {
 
     fn rules() -> Vec<Rule> {
         vec![
-            rule("fleet-alerts", "alerts v1/*/state/*/alert/*", None),
-            rule("hosts-gone", "liveliness-gone v1/*/state/*/alive", None),
-            rule("slow", "silent-for v1/** 30", Some(10.0)),
+            rule("tc-gone", "instance-gone */tc", None),
+            rule("hosts-gone", "liveliness-gone demo/held/*/alive", None),
+            rule("slow", "silent-for prod/zk2/** 30", Some(10.0)),
         ]
     }
 
@@ -978,10 +841,6 @@ mod tests {
         DisciplineConfig {
             group_window_s: window,
             repeat_s: repeat,
-            inhibit: InhibitConfig {
-                enabled: true,
-                depth: 4,
-            },
             ..DisciplineConfig::default()
         }
     }
@@ -992,7 +851,7 @@ mod tests {
                 id: id.into(),
                 rule: rule.into(),
                 rule_kind: "x".into(),
-                kind: NoticeKind::Alert,
+                kind: NoticeKind::Presence,
                 state,
                 prior: None,
                 severity: severity.into(),
@@ -1005,22 +864,22 @@ mod tests {
                 truncated: false,
                 repeat: 0,
                 group: None,
-                inhibited_by: None,
+                presence: None,
             },
             sinks: vec!["ops".into()],
         }
     }
 
-    fn meta(origin: &str) -> NoticeMeta {
+    fn meta(address: &str) -> NoticeMeta {
         NoticeMeta {
-            origin: Some(origin.into()),
+            address: Some(address.into()),
             passthrough: false,
             assume: false,
         }
     }
 
     fn flush(d: &mut Discipline, now: f64) -> Vec<Outgoing> {
-        d.tick(now, None, &BTreeSet::new(), false).outgoing
+        d.tick(now, false).outgoing
     }
 
     fn kinds(out: &[Outgoing]) -> Vec<NoticeKind> {
@@ -1036,7 +895,7 @@ mod tests {
         let fire = |d: &mut Discipline, t: f64| {
             d.observe(
                 outgoing("slow", "slow:a", CondState::Firing, "warning"),
-                &meta("h-a"),
+                &meta("h-a/tc"),
                 t,
             )
         };
@@ -1056,7 +915,7 @@ mod tests {
         fire(&mut d, 0.0);
         d.observe(
             outgoing("slow", "slow:a", CondState::Ok, "warning"),
-            &meta("h-a"),
+            &meta("h-a/tc"),
             4.0,
         );
         assert!(flush(&mut d, 20.0).is_empty());
@@ -1068,7 +927,7 @@ mod tests {
         fire(&mut d, 0.0);
         d.observe(
             outgoing("slow", "slow:a", CondState::Unobservable, "warning"),
-            &meta("h-a"),
+            &meta("h-a/tc"),
             5.0,
         );
         fire(&mut d, 7.0);
@@ -1080,7 +939,7 @@ mod tests {
         fire(&mut d, 0.0);
         d.observe(
             outgoing("slow", "slow:a", CondState::Unobservable, "warning"),
-            &meta("h-a"),
+            &meta("h-a/tc"),
             5.0,
         );
         assert!(flush(&mut d, 14.9).is_empty());
@@ -1098,13 +957,13 @@ mod tests {
         let mut d = Discipline::new(&cfg(0.0, 100.0), &r, &RenderConfig::default(), 100);
         let fire = |d: &mut Discipline, t: f64, sev: &str| {
             d.observe(
-                outgoing("fleet-alerts", "fleet-alerts:x", CondState::Firing, sev),
-                &meta("h-a"),
+                outgoing("tc-gone", "tc-gone:h-a/tc", CondState::Firing, sev),
+                &meta("h-a/tc"),
                 t,
             )
         };
         fire(&mut d, 0.0, "warning");
-        assert_eq!(kinds(&flush(&mut d, 0.0)), vec![NoticeKind::Alert]);
+        assert_eq!(kinds(&flush(&mut d, 0.0)), vec![NoticeKind::Presence]);
         fire(&mut d, 10.0, "warning");
         assert!(flush(&mut d, 10.0).is_empty());
         assert_eq!(d.counters().deduped, 1);
@@ -1126,29 +985,33 @@ mod tests {
         assert!(flush(&mut d, 1e6).is_empty(), "repeat_s 0 never repeats");
     }
 
-    /// Grouping: three notices from one origin within the window are one
-    /// group carrying their ids; one from another origin goes plain; the
-    /// window opens with the first member and flushes on the tick after
-    /// it closes.
+    /// Grouping, by system (the default): three notices about services of
+    /// one system within the window are one group carrying their ids; one
+    /// from another system goes plain; the window opens with the first
+    /// member and flushes on the tick after it closes. By address, the
+    /// three are three.
     #[test]
     fn notices_sharing_a_group_key_within_the_window_are_one_group() {
         let r = rules();
         let mut d = Discipline::new(&cfg(5.0, 0.0), &r, &RenderConfig::default(), 100);
-        for (i, t) in [0.0, 1.0, 2.0].into_iter().enumerate() {
+        for (i, (t, addr)) in [(0.0, "h-a/tc"), (1.0, "h-a/gui"), (2.0, "h-a/nav")]
+            .into_iter()
+            .enumerate()
+        {
             d.observe(
                 outgoing(
-                    "fleet-alerts",
-                    &format!("fleet-alerts:a{i}"),
+                    "tc-gone",
+                    &format!("tc-gone:a{i}"),
                     CondState::Firing,
                     "warning",
                 ),
-                &meta("h-a"),
+                &meta(addr),
                 t,
             );
         }
         d.observe(
-            outgoing("hosts-gone", "hosts-gone:h-b/p", CondState::Firing, "error"),
-            &meta("h-b"),
+            outgoing("hosts-gone", "hosts-gone:h-b", CondState::Firing, "error"),
+            &meta("h-b/tc"),
             0.0,
         );
         assert!(flush(&mut d, 4.9).is_empty(), "the window is still open");
@@ -1161,18 +1024,42 @@ mod tests {
         let g = &out[0].notification;
         assert_eq!(
             g.group.as_deref(),
-            Some(&["fleet-alerts:a0", "fleet-alerts:a1", "fleet-alerts:a2"].map(String::from)[..])
+            Some(&["tc-gone:a0", "tc-gone:a1", "tc-gone:a2"].map(String::from)[..])
         );
         assert_eq!(g.state, CondState::Firing);
-        assert_eq!(g.title, "warning 3 notices from origin=h-a");
-        assert_eq!(g.labels.get("origin").map(String::as_str), Some("h-a"));
+        assert_eq!(g.title, "warning 3 notices from system=h-a");
+        assert_eq!(g.labels.get("system").map(String::as_str), Some("h-a"));
         assert!(
-            g.message.contains("- warning fleet-alerts firing"),
+            g.message.contains("- warning tc-gone firing"),
             "{}",
             g.message
         );
         assert_eq!(d.counters().grouped, 3);
         assert_eq!(d.counters().sent, 2);
+
+        let by_address = DisciplineConfig {
+            group_by: vec!["address".into()],
+            ..cfg(5.0, 0.0)
+        };
+        let mut d = Discipline::new(&by_address, &r, &RenderConfig::default(), 100);
+        for (i, addr) in ["h-a/tc", "h-a/gui", "h-a/tc"].into_iter().enumerate() {
+            d.observe(
+                outgoing(
+                    "tc-gone",
+                    &format!("tc-gone:a{i}"),
+                    CondState::Firing,
+                    "warning",
+                ),
+                &meta(addr),
+                0.0,
+            );
+        }
+        let out = flush(&mut d, 5.0);
+        assert_eq!(kinds(&out), vec![NoticeKind::Presence, NoticeKind::Group]);
+        assert_eq!(
+            out[1].notification.title,
+            "warning 2 notices from address=h-a/tc"
+        );
     }
 
     /// The resolved family, one notification each — and none of the two
@@ -1182,7 +1069,7 @@ mod tests {
         let r = rules();
         let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
         let see = |d: &mut Discipline, id: &str, s: CondState, t: f64| {
-            d.observe(outgoing("fleet-alerts", id, s, "warning"), &meta("h-a"), t);
+            d.observe(outgoing("tc-gone", id, s, "warning"), &meta("h-a/tc"), t);
             flush(d, t)
         };
         // firing → ok
@@ -1214,208 +1101,72 @@ mod tests {
         quiet.resolved_notice = false;
         let mut d = Discipline::new(&quiet, &r, &RenderConfig::default(), 100);
         d.observe(
-            outgoing("fleet-alerts", "a", CondState::Firing, "warning"),
-            &meta("h-a"),
+            outgoing("tc-gone", "a", CondState::Firing, "warning"),
+            &meta("h-a/tc"),
             0.0,
         );
         flush(&mut d, 0.0);
         d.observe(
-            outgoing("fleet-alerts", "a", CondState::Ok, "warning"),
-            &meta("h-a"),
+            outgoing("tc-gone", "a", CondState::Ok, "warning"),
+            &meta("h-a/tc"),
             1.0,
         );
         assert!(flush(&mut d, 1.0).is_empty());
     }
 
-    fn catalog() -> Catalog {
-        let mut c = Catalog::default();
-        c.apply(
-            inhibit::Family::Entity,
-            "v1/@catalog/state/entity/ent-a",
-            SampleKind::Put,
-            br#"{"entity_id":"ent-a","origins":["h-a"]}"#,
-        );
-        c.apply(
-            inhibit::Family::Entity,
-            "v1/@catalog/state/entity/ent-b",
-            SampleKind::Put,
-            br#"{"entity_id":"ent-b","origins":["h-b"]}"#,
-        );
-        c.apply(
-            inhibit::Family::Edge,
-            "v1/@catalog/state/edge/e-1",
-            SampleKind::Put,
-            br#"{"edge_id":"e-1","kind":"hosts","from":{"entity":{"entity_id":"ent-a"}},"to":{"entity":{"entity_id":"ent-b"}}}"#,
-        );
-        c
-    }
-
-    /// Inhibition: the root's liveliness and the symptom's alert in one
-    /// flush fold into the root's group; a symptom alone is delivered with
-    /// `inhibited_by` at `error`, held (counted) below it; its resolve is
-    /// held too; and an `l2_adjacent` edge inhibits nothing.
-    #[test]
-    fn a_symptom_rides_with_its_root_or_is_held_and_counted() {
-        let r = rules();
-        let cat = catalog();
-        let gone: BTreeSet<String> = ["h-a".to_string()].into();
-        let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
-        d.observe(
-            outgoing("hosts-gone", "hosts-gone:h-a/p", CondState::Firing, "error"),
-            &meta("h-a"),
-            0.0,
-        );
-        d.observe(
-            outgoing(
-                "fleet-alerts",
-                "fleet-alerts:b",
-                CondState::Firing,
-                "warning",
-            ),
-            &meta("h-b"),
-            0.0,
-        );
-        let f = d.tick(0.0, Some(&cat), &gone, false);
-        assert_eq!(kinds(&f.outgoing), vec![NoticeKind::Group]);
-        let g = &f.outgoing[0].notification;
-        assert_eq!(
-            g.group.as_deref(),
-            Some(&["hosts-gone:h-a/p", "fleet-alerts:b"].map(String::from)[..])
-        );
-        assert!(g.message.contains("(symptom of ent-a)"), "{}", g.message);
-        let impact = f.impact.unwrap();
-        assert_eq!(impact.roots[0].entity, "ent-a");
-        assert_eq!(impact.symptoms[0].explained_by, "ent-a");
-
-        // Alone, below error: held and counted; its resolve is held too.
-        let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
-        d.observe(
-            outgoing(
-                "fleet-alerts",
-                "fleet-alerts:b",
-                CondState::Firing,
-                "warning",
-            ),
-            &meta("h-b"),
-            0.0,
-        );
-        assert!(d.tick(0.0, Some(&cat), &gone, false).outgoing.is_empty());
-        assert_eq!(d.counters().inhibited, 1);
-        assert!(
-            d.announced()
-                .any(|e| e.inhibited_by.as_deref() == Some("ent-a"))
-        );
-        d.observe(
-            outgoing("fleet-alerts", "fleet-alerts:b", CondState::Ok, "warning"),
-            &meta("h-b"),
-            1.0,
-        );
-        assert!(d.tick(1.0, Some(&cat), &gone, false).outgoing.is_empty());
-        assert_eq!(d.counters().inhibited, 2);
-
-        // Alone, at error: delivered, saying what explains it.
-        let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
-        d.observe(
-            outgoing("fleet-alerts", "fleet-alerts:b", CondState::Firing, "error"),
-            &meta("h-b"),
-            0.0,
-        );
-        let f = d.tick(0.0, Some(&cat), &gone, false);
-        assert_eq!(f.outgoing.len(), 1);
-        assert_eq!(
-            f.outgoing[0].notification.inhibited_by.as_deref(),
-            Some("ent-a")
-        );
-
-        // A symmetric kind is inert.
-        let mut l2 = Catalog::default();
-        for (k, doc) in [
-            (
-                "v1/@catalog/state/entity/ent-a",
-                r#"{"entity_id":"ent-a","origins":["h-a"]}"#,
-            ),
-            (
-                "v1/@catalog/state/entity/ent-b",
-                r#"{"entity_id":"ent-b","origins":["h-b"]}"#,
-            ),
-        ] {
-            l2.apply(inhibit::Family::Entity, k, SampleKind::Put, doc.as_bytes());
-        }
-        l2.apply(
-            inhibit::Family::Edge,
-            "v1/@catalog/state/edge/e-2",
-            SampleKind::Put,
-            br#"{"edge_id":"e-2","kind":"l2_adjacent","from":{"entity":{"entity_id":"ent-a"}},"to":{"entity":{"entity_id":"ent-b"}}}"#,
-        );
-        let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
-        d.observe(
-            outgoing(
-                "fleet-alerts",
-                "fleet-alerts:b",
-                CondState::Firing,
-                "warning",
-            ),
-            &meta("h-b"),
-            0.0,
-        );
-        let f = d.tick(0.0, Some(&l2), &gone, false);
-        assert_eq!(f.outgoing.len(), 1);
-        assert_eq!(f.outgoing[0].notification.inhibited_by, None);
-        assert_eq!(d.counters().inhibited, 0);
-    }
-
-    /// Assumed (#390): a baseline fact enters the ledger announced with
-    /// nothing delivered, never repeats, is listed under its rule, and its
-    /// `ok` is a `resolved` — while the same fact observed rather than
-    /// assumed is announced.
+    /// Assumed (#390; a presence rule's baseline since FL2): a fact that
+    /// predates the watch enters the ledger announced with nothing
+    /// delivered, never repeats, is listed under its rule, and its `ok` is
+    /// a `resolved` — while the same fact observed rather than assumed is
+    /// announced.
     #[test]
     fn an_assumed_notice_is_remembered_not_told() {
         let r = rules();
         let mut d = Discipline::new(&cfg(0.0, 10.0), &r, &RenderConfig::default(), 100);
         let assumed = NoticeMeta {
-            origin: Some("h-a".into()),
+            address: Some("h-a/tc".into()),
             passthrough: false,
             assume: true,
         };
         d.observe(
-            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Firing, "error"),
+            outgoing("tc-gone", "tc-gone:h-a/tc", CondState::Firing, "error"),
             &assumed,
             0.0,
         );
         assert!(flush(&mut d, 0.0).is_empty(), "nothing delivered");
         assert_eq!(d.counters().baseline, 1);
-        assert_eq!(d.announced_under("fleet-alerts"), vec!["fleet-alerts:a"]);
+        assert_eq!(d.announced_under("tc-gone"), vec!["tc-gone:h-a/tc"]);
         assert!(
             flush(&mut d, 100.0).is_empty(),
             "never sent, so never repeated"
         );
         d.observe(
-            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Firing, "error"),
+            outgoing("tc-gone", "tc-gone:h-a/tc", CondState::Firing, "error"),
             &assumed,
             101.0,
         );
         assert_eq!(d.counters().baseline, 2, "assumed again: still a baseline");
         d.observe(
-            outgoing("fleet-alerts", "fleet-alerts:a", CondState::Ok, "error"),
-            &meta("h-a"),
+            outgoing("tc-gone", "tc-gone:h-a/tc", CondState::Ok, "error"),
+            &meta("h-a/tc"),
             200.0,
         );
         assert_eq!(kinds(&flush(&mut d, 200.0)), vec![NoticeKind::Resolved]);
-        assert!(d.announced_under("fleet-alerts").is_empty());
+        assert!(d.announced_under("tc-gone").is_empty());
     }
 
     /// The state file: a snapshot restores as announced, so the same firing
     /// again is a duplicate; the bound evicts least-recently-changed and
-    /// counts it across the round trip; a dropped notice passes through
-    /// every time.
+    /// counts it across the round trip; the snapshot carries the namespace
+    /// and each entry's address; a passthrough notice goes out every time.
     #[test]
     fn a_restored_ledger_deduplicates_and_the_bound_is_counted() {
         let r = rules();
         let mut d = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 2);
         for (i, id) in ["a", "b", "c"].iter().enumerate() {
             d.observe(
-                outgoing("fleet-alerts", id, CondState::Firing, "warning"),
-                &meta("h-a"),
+                outgoing("tc-gone", id, CondState::Firing, "warning"),
+                &meta("h-a/tc"),
                 i as f64,
             );
             flush(&mut d, i as f64);
@@ -1427,18 +1178,21 @@ mod tests {
             "a, the least recently changed, went"
         );
         assert!(d.dirty());
-        let saved = d.snapshot(3.0);
+        let saved = d.snapshot(3.0, "prod");
         assert!(!d.dirty());
+        assert_eq!(saved.version, state::STATE_VERSION);
+        assert_eq!(saved.namespace, "prod");
         assert_eq!(saved.entries.len(), 2);
         assert_eq!(saved.evicted_total, 1);
         assert_eq!(saved.entries[0].state, CondState::Firing);
+        assert_eq!(saved.entries[0].address.as_deref(), Some("h-a/tc"));
 
         let mut fresh = Discipline::new(&cfg(0.0, 0.0), &r, &RenderConfig::default(), 100);
         assert_eq!(fresh.restore(saved), 2);
         assert_eq!(fresh.counters().evicted, 1, "the cost survives the restart");
         fresh.observe(
-            outgoing("fleet-alerts", "b", CondState::Firing, "warning"),
-            &meta("h-a"),
+            outgoing("tc-gone", "b", CondState::Firing, "warning"),
+            &meta("h-a/tc"),
             10.0,
         );
         assert!(
@@ -1447,26 +1201,21 @@ mod tests {
         );
         assert_eq!(fresh.counters().deduped, 1);
         fresh.observe(
-            outgoing("fleet-alerts", "b", CondState::Ok, "warning"),
-            &meta("h-a"),
+            outgoing("tc-gone", "b", CondState::Ok, "warning"),
+            &meta("h-a/tc"),
             11.0,
         );
         assert_eq!(kinds(&flush(&mut fresh, 11.0)), vec![NoticeKind::Resolved]);
 
-        let dropped = NoticeMeta {
-            origin: None,
+        let passthrough = NoticeMeta {
+            address: None,
             passthrough: true,
             assume: false,
         };
-        let mut o = outgoing(
-            "fleet-alerts",
-            "fleet-alerts:dropped",
-            CondState::Unobservable,
-            "info",
-        );
-        o.notification.kind = NoticeKind::Unobservable;
-        fresh.observe(o.clone(), &dropped, 12.0);
-        fresh.observe(o, &dropped, 12.0);
+        let mut o = outgoing("tc-gone", "tc-gone:baseline", CondState::Firing, "info");
+        o.notification.kind = NoticeKind::Baseline;
+        fresh.observe(o.clone(), &passthrough, 12.0);
+        fresh.observe(o, &passthrough, 12.0);
         assert_eq!(flush(&mut fresh, 12.0).len(), 2, "no identity, no dedup");
     }
 }

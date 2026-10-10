@@ -1,12 +1,22 @@
 //! The bus ladders — zenctl's (`zenctl/src/resolve.rs`), with the config
-//! file where zenctl has flags.
+//! file where zenctl has flags — and the **two sessions** a zk2 tool runs
+//! on (decided 2026-10-08; #614, FL2).
 //!
-//! Every knob resolves **config-file `bus.*` > env > active context >
-//! default**, as pure functions over scalars and a
-//! [`StoredContext`], so no test has to touch `~/.config`. [`resolve`] is the
-//! one impure edge: it reads the explorer config once, and a `--context`
-//! (or `bus.context`) that names nothing is refused there, before anything
-//! is opened (#209's lesson, kept).
+//! Every knob resolves **flag > config-file `bus.*` > env > active
+//! context > default**, as pure functions over scalars and a
+//! [`StoredContext`], so no test has to touch `~/.config`. [`resolve`] is
+//! the one impure edge: it
+//! reads the explorer config once, and a `--context` (or `bus.context`)
+//! that names nothing is refused there, before anything is opened (#209's
+//! lesson, kept).
+//!
+//! **Two sessions.** [`BusSettings::sessions`] opens one **in** the
+//! deployment's namespace, for what reads the deployment as its own
+//! consumers do — presence, descriptors, contracts, the doctor, state — and
+//! one in **no** namespace, for the raw rules over wire selectors and for
+//! the routers' admin space, as zenctl's raw observers keep them. The
+//! namespace climbs the base's ladder, because it is the same fact: the
+//! deployment base *is* the session namespace its services run in.
 //!
 //! What zenwatch does **not** have: an `OutputArgs`. It renders nothing to a
 //! terminal that a format flag would apply to — its output is the sinks.
@@ -16,6 +26,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use zenkey_explorer_config::StoredContext;
+use zenkey_fleet::DoctorBus;
 
 use crate::config::BusConfig;
 use crate::exit::unaskable;
@@ -35,20 +46,26 @@ pub struct Transport {
 /// Everything the engine needs from the bus section, resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BusSettings {
-    /// The deployment base — empty is the bus-root deployment (RFC v1.6).
-    pub base: String,
+    /// The deployment namespace — empty is the bus-root deployment, and
+    /// sets none.
+    pub namespace: String,
     pub transport: Transport,
     pub timeout: Duration,
-    /// Registry directories (offline slices), if any.
-    pub registry: Vec<PathBuf>,
 }
 
-/// The deployment base: config > `ZENWATCH_BASE` > context > empty.
+/// The deployment namespace: `--namespace` > config > `ZENWATCH_BASE` >
+/// the context's `base` > empty.
 ///
-/// An explicitly empty base is a deployment — the bus root — and must not
-/// fall through to the context.
-pub fn base(cfg: Option<&str>, env: Option<&str>, stored: Option<&StoredContext>) -> String {
-    cfg.or(env)
+/// An explicitly empty namespace is a deployment — the bus root — and must
+/// not fall through to the context.
+pub fn namespace(
+    flag: Option<&str>,
+    cfg: Option<&str>,
+    env: Option<&str>,
+    stored: Option<&StoredContext>,
+) -> String {
+    flag.or(cfg)
+        .or(env)
         .map(str::to_string)
         .unwrap_or_else(|| stored.and_then(|c| c.base.clone()).unwrap_or_default())
 }
@@ -79,15 +96,6 @@ pub fn timeout(cfg: Option<u64>, stored: Option<&StoredContext>) -> Duration {
     )
 }
 
-/// Registry directories: config replaces context, on the endpoints rule.
-pub fn registry_dirs(cfg: &[PathBuf], stored: Option<&StoredContext>) -> Vec<PathBuf> {
-    if cfg.is_empty() {
-        stored.map(|c| c.registry.clone()).unwrap_or_default()
-    } else {
-        cfg.to_vec()
-    }
-}
-
 /// The zenoh JSON5 config file: config > `ZENWATCH_ZENOH_CONFIG` > context.
 pub fn zenoh_config(
     cfg: Option<&Path>,
@@ -99,109 +107,102 @@ pub fn zenoh_config(
         .or_else(|| stored.and_then(|c| c.zenoh_config.clone()))
 }
 
-/// The pure half: every ladder over the config section and a
-/// caller-supplied context. `env_base`/`env_zenoh_config` are passed in so
-/// the environment is an argument, not a hidden rung.
+/// The environment rungs, passed in so the environment is an argument, not
+/// a hidden rung.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Env<'e> {
+    pub base: Option<&'e str>,
+    pub zenoh_config: Option<&'e Path>,
+}
+
+/// The pure half: every ladder over the flag, the config section and a
+/// caller-supplied context. A context's `registry` is not read: zk2 reads
+/// contracts (`contracts`, `--contracts`), as zenctl does.
 pub fn resolve_with(
     cfg: &BusConfig,
-    env_base: Option<&str>,
-    env_zenoh_config: Option<&Path>,
+    namespace_flag: Option<&str>,
+    env: Env<'_>,
     stored: Option<&StoredContext>,
 ) -> BusSettings {
     BusSettings {
-        base: base(cfg.base.as_deref(), env_base, stored),
+        namespace: namespace(namespace_flag, cfg.namespace.as_deref(), env.base, stored),
         transport: Transport {
-            file: zenoh_config(cfg.zenoh_config.as_deref(), env_zenoh_config, stored),
+            file: zenoh_config(cfg.zenoh_config.as_deref(), env.zenoh_config, stored),
             connect: endpoints(&cfg.connect, stored.map(|c| c.connect.as_slice())),
             listen: endpoints(&cfg.listen, stored.map(|c| c.listen.as_slice())),
             scouting: scouting(cfg.scouting, stored),
         },
         timeout: timeout(cfg.timeout_s, stored),
-        registry: registry_dirs(&cfg.registry, stored),
     }
 }
 
 /// The impure edge: read the explorer config once, resolve the context —
 /// `--context` flag > `bus.context` > `ZENKEY_EXPLORER_CONTEXT` > the
 /// file's `current` — and climb every ladder. A named context that does not
-/// exist is refused (exit 2) here, before anything opens.
-pub fn resolve(cfg: &BusConfig, context_flag: Option<&str>) -> Result<BusSettings> {
+/// exist is refused (exit 2) here, before anything opens, and so is a
+/// namespace the session would refuse.
+pub fn resolve(
+    cfg: &BusConfig,
+    context_flag: Option<&str>,
+    namespace_flag: Option<&str>,
+) -> Result<BusSettings> {
     let name = context_flag.or(cfg.context.as_deref());
     let stored = zenkey_explorer_config::active(name).map_err(|e| unaskable!("{e}"))?;
     let env_base = std::env::var("ZENWATCH_BASE").ok();
     let env_zc = std::env::var_os("ZENWATCH_ZENOH_CONFIG").map(PathBuf::from);
-    Ok(resolve_with(
+    let settings = resolve_with(
         cfg,
-        env_base.as_deref(),
-        env_zc.as_deref(),
+        namespace_flag,
+        Env {
+            base: env_base.as_deref(),
+            zenoh_config: env_zc.as_deref(),
+        },
         stored.as_ref(),
-    ))
+    );
+    crate::config::check_namespace(&settings.namespace).map_err(|e| unaskable!("{e}"))?;
+    Ok(settings)
 }
 
 impl BusSettings {
-    /// Open the session, saying which half failed: a config file the user
-    /// named is theirs to fix (a refusal, 2); a transport that would not
-    /// come up is the world being unavailable (1). The fork is
-    /// `zenkey_fleet::OpenFailure`'s (#196); this is where it is spent.
-    pub async fn session(&self) -> Result<zenoh::Session> {
+    /// Open the two sessions, saying which half failed: a config file the
+    /// user named is theirs to fix (a refusal, 2); a transport that would
+    /// not come up is the world being unavailable (1). The fork is
+    /// `zenkey_fleet::OpenFailure`'s (#196); this is where it is spent. The
+    /// raw session opens first, so a dead transport is said once.
+    pub async fn sessions(&self) -> Result<DoctorBus> {
         let t = &self.transport;
-        match zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
-            .await
-        {
-            Ok(s) => Ok(s),
-            Err(zenkey_fleet::OpenFailure::Config(e)) => {
-                Err(unaskable!("{}", zenkey_fleet::one_line(&e)))
-            }
-            Err(other) => Err(other.into_error().into()),
-        }
+        let raw = spend(
+            zenkey_fleet::open_reporting(t.file.as_deref(), &t.connect, &t.listen, t.scouting)
+                .await,
+        )?;
+        let session = spend(
+            zenkey_fleet::open_in_namespace(
+                &self.namespace,
+                t.file.as_deref(),
+                &t.connect,
+                &t.listen,
+                t.scouting,
+            )
+            .await,
+        )?;
+        Ok(DoctorBus {
+            session,
+            raw,
+            namespace: self.namespace.clone(),
+        })
     }
+}
 
-    /// Registry slices when they are available, `None` when they are not —
-    /// zenctl's `slices_optional` (#210), for a tool slices only *enrich*:
-    /// with none, an alert document still renders structurally and
-    /// `qos-mismatch`/`invalid-payload` say what they could not judge.
-    ///
-    /// Two failure sources, kept apart: a directory the config **named**
-    /// that does not read is a refusal (never degraded past — a typo must not
-    /// become a silent structural rendering); a fleet that did not answer is
-    /// a degradation, announced once.
-    pub async fn slices(&self, session: &zenoh::Session) -> Result<Option<zenkey_fleet::SliceSet>> {
-        let fleet = zenkey_fleet::Fleet::new(session, &self.base);
-        if self.registry.is_empty() {
-            return match zenkey_fleet::SliceSet::from_bus(&fleet, self.timeout).await {
-                Ok(set) => {
-                    if set.slices().is_empty() {
-                        tracing::warn!(
-                            base = %self.base,
-                            "no introspect slices — an empty set is not a verdict (RFC 05 §3.1); \
-                             payloads render structurally"
-                        );
-                    }
-                    Ok(Some(set))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "registry sweep failed ({}); payloads render structurally",
-                        zenkey_fleet::one_line(&e)
-                    );
-                    Ok(None)
-                }
-            };
+/// An open's outcome, with the half that failed turned into an exit code.
+fn spend(
+    opened: std::result::Result<zenoh::Session, zenkey_fleet::OpenFailure>,
+) -> Result<zenoh::Session> {
+    match opened {
+        Ok(s) => Ok(s),
+        Err(zenkey_fleet::OpenFailure::Config(e)) => {
+            Err(unaskable!("{}", zenkey_fleet::one_line(&e)))
         }
-        // Named dirs union with the bus, served winning per producer (RFC 08
-        // §6.1); a dir that will not read is the user's error.
-        let out = zenkey_fleet::SliceSet::from_union(&fleet, &self.registry, self.timeout)
-            .await
-            .map_err(|e| unaskable!("{}", zenkey_fleet::one_line(&e)))?;
-        for d in &out.disagreements {
-            tracing::warn!(
-                producer = %d.producer,
-                "registry disagreement: bus serves v{}, dirs carry v{} (served wins)",
-                d.bus_version,
-                d.dirs_version
-            );
-        }
-        Ok(Some(out.set))
+        Err(other) => Err(other.into_error().into()),
     }
 }
 
@@ -221,15 +222,19 @@ mod tests {
         }
     }
 
-    /// The four scalar ladders, each rung reachable: config > env > context
-    /// > default, with an empty base staying empty.
+    /// The scalar ladders, each rung reachable: flag > config > env >
+    /// context > default, with an empty namespace staying empty.
     #[test]
-    fn the_ladders_climb_config_env_context_default() {
+    fn the_ladders_climb_flag_config_env_context_default() {
         let c = ctx();
-        assert_eq!(base(Some(""), Some("env"), Some(&c)), "");
-        assert_eq!(base(None, Some("env"), Some(&c)), "env");
-        assert_eq!(base(None, None, Some(&c)), "prod");
-        assert_eq!(base(None, None, None), "");
+        assert_eq!(
+            namespace(Some("flag"), Some("cfg"), Some("env"), Some(&c)),
+            "flag"
+        );
+        assert_eq!(namespace(None, Some(""), Some("env"), Some(&c)), "");
+        assert_eq!(namespace(None, None, Some("env"), Some(&c)), "env");
+        assert_eq!(namespace(None, None, None, Some(&c)), "prod");
+        assert_eq!(namespace(None, None, None, None), "");
         assert_eq!(
             endpoints(&["tcp/localhost:7447".to_string()], Some(&c.connect)),
             vec!["tcp/localhost:7447".to_string()],
@@ -242,21 +247,20 @@ mod tests {
         assert_eq!(timeout(Some(1), Some(&c)), Duration::from_secs(1));
         assert_eq!(timeout(None, Some(&c)), Duration::from_secs(30));
         assert_eq!(timeout(None, None), Duration::from_secs(DEFAULT_TIMEOUT_S));
-        assert_eq!(registry_dirs(&[], Some(&c)), c.registry);
         assert_eq!(
             zenoh_config(None, Some(Path::new("/env.json5")), Some(&c)),
             Some(PathBuf::from("/env.json5"))
         );
     }
 
-    /// The whole climb, with nothing given: the base-less bus root, five
-    /// seconds, no dirs — a configuration, not a failure.
+    /// The whole climb, with nothing given: the bus-root deployment, five
+    /// seconds — a configuration, not a failure. A context's `registry` is
+    /// not read.
     #[test]
     fn nothing_given_falls_to_the_defaults() {
-        let s = resolve_with(&BusConfig::default(), None, None, None);
-        assert_eq!(s.base, "");
+        let s = resolve_with(&BusConfig::default(), None, Env::default(), None);
+        assert_eq!(s.namespace, "");
         assert_eq!(s.timeout, Duration::from_secs(5));
-        assert!(s.registry.is_empty());
         assert_eq!(
             s.transport,
             Transport {
@@ -266,5 +270,7 @@ mod tests {
                 scouting: None
             }
         );
+        let from_ctx = resolve_with(&BusConfig::default(), None, Env::default(), Some(&ctx()));
+        assert_eq!(from_ctx.namespace, "prod", "the context's base");
     }
 }

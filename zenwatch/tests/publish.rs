@@ -1,28 +1,30 @@
 //! Self-publication against a real bus (#389): the daemon comes up as a
-//! producer on peer B, and peer A — any explorer — sees it without SSH:
-//! `introspect` answers the registry slice naming the three subjects,
-//! `describe` a schema set covering their three types, the roster lists
-//! `zenwatch`, the health document arrives on its cadence, a firing rule is
-//! one `firing/{rule_id}` document and its resolve the tombstone — and
-//! after shutdown the token is gone. Ports are ephemeral (`util::peer_pair`).
+//! producer, and any explorer sees it without SSH: `introspect` answers
+//! the registry slice naming the three subjects, `describe` a schema set
+//! covering their three types, the roster lists `zenwatch`, the health
+//! document arrives on its cadence, a firing rule is one `firing/{rule_id}`
+//! document and its resolve the tombstone — and after shutdown the token
+//! is gone.
+//!
+//! **v1's write side, until FL3** (#614): the daemon reads the deployment
+//! through zk2 since FL2 and still publishes itself as a v1 producer, so
+//! this suite reads it with v1's explorer calls (`zenkey_fleet_v1`), and a
+//! foreign `liveliness-gone` rule is what fires. One router, the daemon's
+//! two sessions and the explorer as its clients; ports are ephemeral.
 
 mod util;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use zenkey::qos::QosProfile;
-use zenkey::schema::SchemaSet;
-use zenkey_fleet::bus::query::{Answer, GetOpts};
-use zenkey_fleet::{Fleet, declare_publication, fleet_get, roster};
+use util::engine::{self, Capture, Options};
+use util::zk2;
+use zenkey_fleet_v1::bus::query::{Answer, GetOpts};
+use zenkey_fleet_v1::{Fleet, fleet_get, roster};
+use zenkey_v1::schema::SchemaSet;
 use zenoh::sample::SampleKind;
-use zenwatch::config::DisciplineConfig;
-use zenwatch::engine::{Engine, run_on};
-use zenwatch::render::RenderConfig;
-use zenwatch::rules::Rule;
-use zenwatch::sinks::Sink;
 
-const ALERT: &str = "v1/h-3fa9c2d41b7e/state/netlink/alert/a659f813308ad1da";
+const TOKEN: &str = "demo/held/p1/alive";
 
 /// What the explorer's subscriber saw: key, kind, body.
 type Seen = Arc<Mutex<Vec<(String, SampleKind, Vec<u8>)>>>;
@@ -77,9 +79,10 @@ async fn until(seen: &Seen, what: &str, pred: impl Fn(&[(String, SampleKind, Vec
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_daemon_is_a_producer_an_explorer_can_see() {
-    let (a, b) = util::peer_pair().await;
+    let (_router, ep) = zk2::router().await;
+    let a = zk2::client(&ep).await;
 
     // The explorer's side watches everything zenwatch publishes, before
     // the daemon exists (O4).
@@ -97,56 +100,26 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
             .await
             .unwrap()
     };
+    // A foreign token, held before the daemon joins: its going is what
+    // fires.
+    let token = a.liveliness().declare_token(TOKEN).await.unwrap();
+    zk2::tokens(&a, TOKEN, 1).await;
 
-    let ops = Arc::new(Mutex::new(Vec::new()));
-    let sinks = Arc::new(vec![Sink::capturing("ops", Arc::clone(&ops))]);
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-    let observer = b.clone();
-    let engine = tokio::spawn(async move {
-        let rules = vec![
-            Rule::from_config(&zenwatch::config::RuleConfig {
-                name: "fleet-alerts".into(),
-                rule: "alerts v1/*/state/*/alert/*".into(),
-                severity: None,
-                labels: Default::default(),
-                sinks: vec!["ops".into()],
-                for_s: None,
-            })
-            .unwrap(),
-        ];
-        let render = RenderConfig::default();
-        let discipline = DisciplineConfig {
-            group_window_s: 0.0,
-            ..DisciplineConfig::default()
-        };
-        run_on(
-            Engine {
-                fleet: Fleet::new(&observer, ""),
-                slices: None,
-                timeout: Duration::from_secs(2),
-                tick: Duration::from_millis(500),
-                rules: &rules,
-                sinks,
-                render: &render,
-                once: false,
-                ready: Some(ready_tx),
-                discipline: &discipline,
-                state_file: None,
-                state_max_entries: 4096,
-                publish: true,
-                doctor: None,
-            },
-            async move {
-                let _ = stop_rx.await;
-            },
-        )
-        .await
-    });
-    tokio::time::timeout(util::SETTLE, ready_rx)
-        .await
-        .expect("the engine came up")
-        .expect("ready");
+    let ops = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, "").await,
+        vec![engine::rule(
+            "held-gone",
+            "liveliness-gone demo/held/*/alive",
+            "error",
+        )],
+        ops.clone(),
+        Options {
+            publish: true,
+            ..Options::default()
+        },
+    )
+    .await;
 
     let fleet = Fleet::new(&a, "");
 
@@ -166,7 +139,10 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    assert!(zenkey::grammar::is_valid_host_origin(&origin), "{origin}");
+    assert!(
+        zenkey_v1::grammar::is_valid_host_origin(&origin),
+        "{origin}"
+    );
 
     // introspect: the registry slice, verbatim, naming the three subjects —
     // the KDL file (RFC 08 §5.1, #374), declared as such (§6), and read in
@@ -175,9 +151,9 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
     assert_eq!(slices.len(), 1, "one producer, one slice");
     let (body, encoding) = &slices[0];
     assert_eq!(encoding.as_deref(), Some("application/kdl"));
-    let format = zenkey::registry_doc::negotiate(encoding.as_deref(), body).unwrap();
-    assert_eq!(format, zenkey::SliceFormat::Kdl);
-    let slice = zenkey::parse_slice_as(body, format).unwrap();
+    let format = zenkey_v1::registry_doc::negotiate(encoding.as_deref(), body).unwrap();
+    assert_eq!(format, zenkey_v1::SliceFormat::Kdl);
+    let slice = zenkey_v1::parse_slice_as(body, format).unwrap();
     assert_eq!(slice.name, "zenwatch");
     let paths: Vec<&str> = slice.subjects.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(paths, vec!["health", "firing/{rule_id}", "doctor"]);
@@ -219,30 +195,13 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
     assert_eq!(health["firing"], 0);
     assert_eq!(health["state_entries"], 0);
 
-    // A firing alert is one firing/{rule_id} document — the rule's id is
-    // its name slugged (`zenwatch::rules::rule_id`) — and its resolve is
-    // the tombstone.
-    let publication = declare_publication(&a, ALERT, QosProfile::Alert, Some("application/json"))
-        .await
-        .unwrap();
-    let deadline = tokio::time::Instant::now() + util::SETTLE;
-    while !publication.matching_status().await.unwrap() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the observer never matched"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    publication
-        .send(
-            br#"{"severity":"error","rule":"link_down","message":"eth0 is down"}"#.to_vec(),
-            None,
-        )
-        .await
-        .unwrap();
+    // A token gone is one firing/{rule_id} document — the rule's id is its
+    // name slugged (`zenwatch::rules::rule_id`) — and its return the
+    // tombstone.
+    token.undeclare().await.unwrap();
     let firing_key = format!(
         "v1/{origin}/state/zenwatch/firing/{}",
-        zenwatch::rules::rule_id("fleet-alerts")
+        zenwatch::rules::rule_id("held-gone")
     );
     until(&seen, "the firing document", |s| {
         s.iter()
@@ -254,11 +213,8 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
         let (_, _, body) = s.iter().find(|(k, _, _)| k == &firing_key).unwrap();
         serde_json::from_slice(body).unwrap()
     };
-    assert_eq!(doc["rule"], "fleet-alerts");
-    assert_eq!(
-        doc["id"],
-        "fleet-alerts:h-3fa9c2d41b7e.netlink.a659f813308ad1da"
-    );
+    assert_eq!(doc["rule"], "held-gone");
+    assert_eq!(doc["id"], format!("held-gone:{TOKEN}"));
     assert_eq!(doc["state"], "firing");
     assert_eq!(doc["severity"], "error");
     assert_eq!(doc["count"], 1);
@@ -268,7 +224,7 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
         "and the sink got its notification"
     );
 
-    publication.retire().await.unwrap();
+    let token = a.liveliness().declare_token(TOKEN).await.unwrap();
     until(&seen, "the firing tombstone", |s| {
         s.iter()
             .any(|(k, kind, _)| k == &firing_key && *kind == SampleKind::Delete)
@@ -276,12 +232,7 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
     .await;
 
     // Shutdown: the token goes, the health is tombstoned.
-    let _ = stop_tx.send(());
-    let summary = tokio::time::timeout(util::SETTLE, engine)
-        .await
-        .expect("the engine stopped")
-        .expect("no panic")
-        .expect("a clean run");
+    let summary = running.stop().await;
     assert_eq!(summary.self_origin.as_deref(), Some(origin.as_str()));
     let deadline = tokio::time::Instant::now() + util::SETTLE;
     loop {
@@ -300,4 +251,5 @@ async fn the_daemon_is_a_producer_an_explorer_can_see() {
             .any(|(k, kind, _)| k == &health_key && *kind == SampleKind::Delete)
     })
     .await;
+    token.undeclare().await.unwrap();
 }

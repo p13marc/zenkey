@@ -25,8 +25,9 @@
 //! judges (`why`, `cutover`, `retired`, `conform` and its registry checks)
 //! and the profile-backed features (configuration, blobs, the exporter,
 //! alerts, kinds and budgets) live on the `v1` branch, which releases
-//! 0.14.x. zengui and zenwatch build against that engine from crates.io
-//! (`zenkey-fleet =0.18.0`) until #614 re-targets them.
+//! 0.14.x. zengui builds against that engine from crates.io
+//! (`zenkey-fleet =0.18.0`) until #614 re-targets it, and zenwatch's write
+//! side does until FL3; zenwatch's read side runs on this crate since FL2.
 //!
 //! # The map
 //!
@@ -191,8 +192,8 @@ pub use bus::scout::{ScoutStream, scout};
 pub use bus::seed::{SeedItem, SeedPolicy, SeededSubscriber, seed_subscribe};
 pub use bus::serve::{MockResponder, ServedQuery, declare_responder};
 pub use bus::session::{
-    OPEN_TIMEOUT, OpenFailure, open, open_in_namespace, open_reporting, open_reporting_within,
-    open_with_config,
+    OPEN_TIMEOUT, OpenFailure, check_namespace, open, open_in_namespace, open_reporting,
+    open_reporting_within, open_with_config,
 };
 pub use bus::write::{
     MatchingEvents, Publication, WireQos, WriteAct, check_concrete, check_retire,
@@ -254,13 +255,16 @@ pub use model::catalog::{
 };
 pub use model::compat::compat;
 pub use model::presence_live::{
-    AddressStatus, DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, MemberId,
-    PresenceBasis, PresenceChange, PresenceIgnored, PresenceSource, PresenceTransition,
+    DEFAULT_MAX_GONE, LiveAddress, LiveInstance, LivePresence, PresenceBasis, PresenceIgnored,
 };
+// Its moves are wire shapes since zenwatch's notifications carry them (#614,
+// FL2): computed by `model::presence_live`, pinned in `report`, spelled here
+// as before.
 pub use model::render::{
     Member, render as render_payload, render_detail, render_resource,
     render_with as render_payload_with, resolved_revision,
 };
+pub use report::{AddressStatus, MemberId, PresenceChange, PresenceSource, PresenceTransition};
 // A deployment namespace on the wire (#612, FJ9): the two spellings a raw
 // observer moves between.
 pub use model::namespace::{join as with_namespace, strip as strip_namespace};

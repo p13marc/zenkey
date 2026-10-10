@@ -1,11 +1,11 @@
 // A config that checks clean: every secret by env, the corpus supplies them.
 {
-  bus: { connect: ["tcp/127.0.0.1:7447"] },
+  bus: { connect: ["tcp/127.0.0.1:7447"], namespace: "site" },
   tick_s: 5,
   rules: [
-    { name: "sysinfo-quiet", rule: "silent-for v1/*/telemetry/sysinfo/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
-    { name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["ops", "mail"] },
-    { name: "hosts-gone", rule: "liveliness-gone v1/*/state/*/alive", severity: "error", sinks: ["ops", "page"] },
+    { name: "streams-quiet", rule: "silent-for site/zk2/*/*/*/stream/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
+    { name: "tc-gone", rule: "instance-gone */tc", severity: "error", sinks: ["ops", "mail"] },
+    { name: "held-gone", rule: "liveliness-gone demo/held/*/alive", severity: "error", sinks: ["ops", "page"] },
     { name: "observer-drops", rule: "dropped", severity: "info", sinks: ["hook"] },
   ],
   sinks: {

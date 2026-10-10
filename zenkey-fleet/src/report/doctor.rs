@@ -782,6 +782,38 @@ mod tests {
         assert_eq!(exit(&r, DoctorSeverity::Warning), 2, "nothing asked");
     }
 
+    /// The run-over-run delta a notifier publishes beside its report
+    /// (zenwatch's `state/zenwatch/doctor`, #390; zk2's since #614 FL2):
+    /// the new and the fixed findings whole, and the count unchanged.
+    #[test]
+    fn doctor_delta_json_shape_is_pinned() {
+        let d = DoctorDelta {
+            new: vec![finding(CheckId::TokenMissing, DoctorSeverity::Error)],
+            fixed: vec![finding(CheckId::SplitBrain, DoctorSeverity::Warning)],
+            unchanged: 2,
+        };
+        assert_eq!(
+            serde_json::to_value(&d).unwrap(),
+            serde_json::json!({
+                "new": [{
+                    "severity": "error",
+                    "check": "token-missing",
+                    "subject": "host-a/tc@3fa9c2d41b7e0012",
+                    "evidence": "e",
+                }],
+                "fixed": [{
+                    "severity": "warning",
+                    "check": "split-brain",
+                    "subject": "host-a/tc@3fa9c2d41b7e0012",
+                    "evidence": "e",
+                }],
+                "unchanged": 2,
+            })
+        );
+        assert!(d.is_new(&finding(CheckId::TokenMissing, DoctorSeverity::Info)));
+        assert!(!d.is_new(&finding(CheckId::SplitBrain, DoctorSeverity::Warning)));
+    }
+
     /// The verdict a check's lists support: findings win, then the
     /// undecided, then the clean reason.
     #[test]

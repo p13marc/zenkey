@@ -60,54 +60,38 @@
 //! changes no answer [`LivePresence::status`] gives: a record with nothing
 //! held reads exactly as an address never heard of does.
 //!
-//! **Not serialized.** Nothing here derives `Serialize`: no wire shape reads
-//! a transition yet. When zenwatch's notices or a `.zrec` carry one (FL2),
-//! the shape moves to `report/` with its pinned test, by the placement rule.
+//! **Patterns** (#614, FL2). A consumer watching `*/tc` or `host-a/*` —
+//! zenwatch's `instance-gone */tc` — tracks the pattern
+//! ([`LivePresence::track_pattern`]): every address it matches keeps its
+//! record whatever it holds, and [`LivePresence::matching`] lists them, so a
+//! second address appearing under the pattern is one more record with its
+//! own moves. An address the pattern matches that no token ever named has
+//! no record: nothing can say it is gone, since nothing said it was there.
+//!
+//! **Serialized where it is read** (FL2). [`AddressStatus`] and
+//! [`PresenceTransition`], with what a transition carries, are wire shapes
+//! since zenwatch's notifications carry them, so they live in
+//! [`crate::report`] with their pinned test, by the placement rule; this
+//! module computes them. [`PresenceBasis`] and the records stay here: no
+//! wire reads them.
 //!
 //! Session-free: [`crate::bus::presence::PresenceFeed`] seeds it from a
 //! liveliness read and feeds it from a [`crate::Monitor`], and a replay can
 //! feed it the same values from a file.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
 use std::time::SystemTime;
 
 use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId, ZkKey};
 
 use crate::bus::presence::Scope;
 use crate::model::catalog::Observed;
+use crate::model::target::Target;
+use crate::report::{AddressStatus, MemberId, PresenceChange, PresenceSource, PresenceTransition};
 
 /// How many records with nothing held a [`LivePresence`] remembers before it
 /// forgets the oldest (tracked addresses are never forgotten).
 pub const DEFAULT_MAX_GONE: usize = 4_096;
-
-/// An address's presence, in the three states (spec §8.1, O5, R7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum AddressStatus {
-    /// At least one instance token held, heard since the last loss.
-    Up,
-    /// No instance token held, with a complete seed behind the claim.
-    Down,
-    /// Neither established: see the module doc.
-    Unobservable,
-}
-
-impl AddressStatus {
-    /// The status as a person reads it: `up`, `down`, `unobservable`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AddressStatus::Up => "up",
-            AddressStatus::Down => "down",
-            AddressStatus::Unobservable => "unobservable",
-        }
-    }
-}
-
-impl fmt::Display for AddressStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 /// What the projection's answers stand on: the reason an address with
 /// nothing held is down, or only unobservable.
@@ -151,17 +135,6 @@ impl PresenceIgnored {
     pub fn total(&self) -> u64 {
         self.outside_namespace + self.not_zk2 + self.not_presence + self.out_of_scope
     }
-}
-
-/// One member of an interface's `epoch` template (§8.1): the interface and
-/// the member's chunk. Its epoch is not part of its identity: a new epoch
-/// is the same member, its continuity broken.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MemberId {
-    pub iface: IfaceId,
-    /// The slugged value of the template's `epoch` parameter, as the key
-    /// carries it.
-    pub member: String,
 }
 
 /// One instance of an address, as its tokens show it.
@@ -236,67 +209,6 @@ impl LiveAddress {
     }
 }
 
-/// How a transition was learned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresenceSource {
-    /// Heard on the subscription, as it happened.
-    Event,
-    /// Found by a seed, against what was held before it: it happened at or
-    /// before the time the transition carries.
-    Seed,
-    /// The basis was lost to a `Dropped(n)`: what follows is unobservable.
-    Dropped,
-}
-
-/// One move of one address's presence.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PresenceChange {
-    /// The address's status moved, in the three states. `to: Down` is
-    /// presence's word, never a verdict about health.
-    Status {
-        from: AddressStatus,
-        to: AddressStatus,
-    },
-    /// An instance token appeared (§8.1).
-    InstanceAppeared { instance: InstanceId },
-    /// An instance token went.
-    InstanceGone { instance: InstanceId },
-    /// An interface token appeared.
-    InterfaceAppeared {
-        instance: InstanceId,
-        iface: IfaceId,
-        fp: Fp16,
-    },
-    /// An interface token went.
-    InterfaceGone {
-        instance: InstanceId,
-        iface: IfaceId,
-        fp: Fp16,
-    },
-    /// A member's first token appeared: the member exists from here (§8.1).
-    MemberAppeared { member: MemberId, epoch: InstanceId },
-    /// A member's current epoch moved while it held a token throughout:
-    /// make-before-break, never a gap (§8.1).
-    MemberHandover {
-        member: MemberId,
-        from: InstanceId,
-        to: InstanceId,
-    },
-    /// A member's last token went.
-    MemberGone { member: MemberId, epoch: InstanceId },
-}
-
-/// One transition: what moved, where, when it was folded and how it was
-/// learned.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PresenceTransition {
-    /// The time the caller folded it with.
-    pub at: SystemTime,
-    pub source: PresenceSource,
-    pub address: Addr,
-    pub change: PresenceChange,
-}
-
 /// A presence token, its address taken off.
 #[derive(Debug, Clone)]
 enum Token {
@@ -312,6 +224,9 @@ pub struct LivePresence {
     namespace: String,
     basis: PresenceBasis,
     addresses: BTreeMap<Addr, LiveAddress>,
+    /// Patterns a consumer tracks ([`LivePresence::track_pattern`]): the
+    /// records of every address they match are never forgotten.
+    patterns: Vec<Target>,
     ignored: PresenceIgnored,
     max_gone: usize,
     forgotten: u64,
@@ -327,6 +242,7 @@ impl LivePresence {
             namespace: String::new(),
             basis: PresenceBasis::Unseeded,
             addresses: BTreeMap::new(),
+            patterns: Vec::new(),
             ignored: PresenceIgnored::default(),
             max_gone: DEFAULT_MAX_GONE,
             forgotten: 0,
@@ -402,12 +318,60 @@ impl LivePresence {
     }
 
     /// Stop tracking `address`; its record is then kept or forgotten like
-    /// any other.
+    /// any other (unless a tracked pattern matches it).
     pub fn untrack(&mut self, address: &Addr) {
         if let Some(a) = self.addresses.get_mut(address) {
             a.tracked = false;
         }
         self.bound();
+    }
+
+    /// Track a pattern — `<system>/<service>`, either position `*`: the
+    /// records of every address it matches are kept whatever they hold, so
+    /// each one's moves stay reportable and [`LivePresence::matching`] lists
+    /// them. A pattern with no `*` is one address, and is
+    /// [tracked](LivePresence::track) as such: it gets a record now, which a
+    /// complete seed can call down. A wildcard pattern names no address
+    /// until a token does, and records nothing until then. Tracking moves
+    /// nothing, so it returns no transition.
+    pub fn track_pattern(&mut self, pattern: &Target, at: SystemTime) {
+        if let Some(address) = &pattern.concrete {
+            self.track(address, at);
+            return;
+        }
+        if !self.patterns.iter().any(|p| p.address == pattern.address) {
+            self.patterns.push(pattern.clone());
+        }
+    }
+
+    /// Stop tracking a pattern; the records it kept are then kept or
+    /// forgotten like any other.
+    pub fn untrack_pattern(&mut self, pattern: &Target) {
+        if let Some(address) = &pattern.concrete {
+            self.untrack(address);
+            return;
+        }
+        self.patterns.retain(|p| p.address != pattern.address);
+        self.bound();
+    }
+
+    /// Whether `address`'s record is kept whatever it holds: tracked
+    /// itself, or matched by a tracked pattern.
+    pub fn tracks(&self, address: &Addr) -> bool {
+        self.addresses.get(address).is_some_and(|a| a.tracked)
+            || self.patterns.iter().any(|p| p.matches(address))
+    }
+
+    /// Every address `pattern` matches that the projection holds a record
+    /// of, in order: those whose tokens it has seen, and a tracked exact
+    /// address whatever it holds.
+    pub fn matching<'p>(
+        &'p self,
+        pattern: &'p Target,
+    ) -> impl Iterator<Item = (&'p Addr, &'p LiveAddress)> + 'p {
+        self.addresses
+            .iter()
+            .filter(move |(addr, _)| pattern.matches(addr))
     }
 
     /// Fold a seed: one liveliness read of the scope (base-relative keys).
@@ -630,10 +594,13 @@ impl LivePresence {
         if self.addresses.len() <= self.max_gone {
             return;
         }
+        let patterns = &self.patterns;
         let mut gone: Vec<(SystemTime, Addr)> = self
             .addresses
             .iter()
-            .filter(|(_, a)| !a.tracked && !a.holds_any())
+            .filter(|(addr, a)| {
+                !a.tracked && !a.holds_any() && !patterns.iter().any(|p| p.matches(addr))
+            })
             .map(|(addr, a)| (a.since, addr.clone()))
             .collect();
         if gone.len() <= self.max_gone {
@@ -1317,5 +1284,67 @@ mod tests {
         assert!(p.address(&addr("h1/tc")).is_none(), "the oldest: forgotten");
         assert_eq!(p.status(&addr("h1/tc")), Down, "and still down");
         assert!(p.address(&addr("h39/tc")).is_some(), "the newest: kept");
+    }
+
+    /// A tracked pattern (#614, FL2) keeps every address it matches — a
+    /// second address appearing under it is a record of its own, with its
+    /// own moves — and lists them; an address outside it is forgotten under
+    /// the bound as before; an exact pattern is a tracked address.
+    #[test]
+    fn a_tracked_pattern_keeps_and_lists_every_address_it_matches() {
+        let tc = Target::parse("*/tc").expect("a pattern");
+        let names = |p: &LivePresence, t: &Target| -> Vec<String> {
+            p.matching(t).map(|(a, _)| a.to_string()).collect()
+        };
+        let mut p = LivePresence::new(Scope::all()).max_gone(16);
+        p.track_pattern(&tc, at(0));
+        assert!(
+            names(&p, &tc).is_empty(),
+            "a wildcard names no address until a token does"
+        );
+        p.seed(&seed(&[instance("h1/tc", 1)], true), at(1));
+        assert_eq!(names(&p, &tc), ["h1/tc"]);
+
+        // A second address appears under the pattern: up from down (the
+        // complete seed covered it), a record of its own.
+        let t = p.token(&instance("h2/tc", 2), true, at(2));
+        assert_eq!(statuses(&t), [("h2/tc".into(), Down, Up)]);
+        assert_eq!(names(&p, &tc), ["h1/tc", "h2/tc"]);
+        // It goes: its record moves to down, and stays.
+        let t = p.token(&instance("h2/tc", 2), false, at(3));
+        assert_eq!(statuses(&t), [("h2/tc".into(), Up, Down)]);
+
+        // Forty other addresses come and go: the pattern's records are
+        // kept, the others forgotten under the bound.
+        for i in 0..40u64 {
+            let a = format!("g{i}/gui");
+            p.token(&instance(&a, 100 + i), true, at(10 + i));
+            p.token(&instance(&a, 100 + i), false, at(10 + i));
+        }
+        assert!(p.forgotten() > 0);
+        assert!(p.tracks(&addr("h2/tc")) && p.tracks(&addr("h7/tc")));
+        assert!(!p.tracks(&addr("g0/gui")));
+        let kept = p.address(&addr("h2/tc")).expect("kept by the pattern");
+        assert_eq!(kept.status, Down);
+        assert!(!kept.tracked, "kept by the pattern, not tracked itself");
+        assert!(
+            p.address(&addr("g0/gui")).is_none(),
+            "outside it: forgotten"
+        );
+        assert_eq!(names(&p, &tc), ["h1/tc", "h2/tc"]);
+
+        // Untracked, the pattern keeps nothing any more.
+        p.untrack_pattern(&tc);
+        assert!(!p.tracks(&addr("h2/tc")));
+
+        // An exact pattern is a tracked address: a record now, down under
+        // the complete seed, and matched.
+        let one = Target::parse("h9/tc").expect("an address");
+        p.track_pattern(&one, at(60));
+        assert!(p.address(&addr("h9/tc")).is_some_and(|a| a.tracked));
+        assert_eq!(p.status(&addr("h9/tc")), Down);
+        assert_eq!(names(&p, &one), ["h9/tc"]);
+        p.untrack_pattern(&one);
+        assert!(!p.tracks(&addr("h9/tc")));
     }
 }

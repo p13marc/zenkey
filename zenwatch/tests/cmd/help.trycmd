@@ -6,7 +6,7 @@ question could not be asked (`zenwatch/src/exit.rs`).
 $ zenwatch --help
 Watch N rules and route every genuine state change to M sinks.
 
-Rules are the closed `zenctl watchdog` vocabulary — rate-above, rate-below, silent-for, invalid-payload, qos-mismatch, doctor, origin-down, dropped, alert-firing — plus `alerts <SEL>` (the producers' own alert documents: a put is firing, a delete is resolved) and `liveliness-gone <SEL>` (the dead-man's switch on alive tokens). Three states ride every notification, never two: ok / firing / unobservable, and a drop in the observer is unobservable, never ok (RFC 13 §3 O6).
+Rules are zenctl watchdog's closed zk2 vocabulary — rate-above, rate-below, silent-for, invalid-payload, qos-mismatch, doctor, dropped — plus `instance-gone <SYSTEM/SERVICE>` (each address up while an instance token is held, read from the live presence projection; `*` in either position) and `liveliness-gone <SEL>` (the dead-man's switch on liveliness tokens). `alerts` is dark until zk2's alarm profile exists (#613). Three states ride every notification, never two: ok / firing / unobservable, and a drop in the observer is unobservable, never ok (RFC 13 §3 O6).
 
 Exit codes: 0 clean, 1 the act failed, 2 refused input (`zenwatch/src/exit.rs`).
 
@@ -34,11 +34,13 @@ Run the notifier: one process, one config, N rules, M sinks — until SIGINT/SIG
 Usage: zenwatch run [OPTIONS] --config <FILE>
 
 Options:
-      --config <FILE>   The JSON5 config file [env: ZENWATCH_CONFIG=]
-      --dry-run         Print every notification that would be sent, as one ndjson line per sink, and send nothing
-      --context <NAME>  The named connection context to run against (overrides the config's `bus.context`)
-      --once            Evaluate one tick and exit — a smoke run, not a daemon
-  -h, --help            Print help
+      --config <FILE>     The JSON5 config file [env: ZENWATCH_CONFIG=]
+      --context <NAME>    The named connection context to run against (overrides the config's `bus.context`)
+      --namespace <NS>    The deployment namespace the resolved reads open their session in (overrides the config's `bus.namespace`) [alias: --base]
+      --contracts <PATH>  Contracts known offline, repeatable: an authoring file, a directory of them, or a `.history` root (added to the config's `contracts`)
+      --dry-run           Print every notification that would be sent, as one ndjson line per sink, and send nothing
+      --once              Evaluate one tick and exit — a smoke run, not a daemon
+  -h, --help              Print help
 
 ```
 
@@ -46,11 +48,14 @@ Options:
 $ zenwatch check-config --help
 Parse and validate a config, refusing exactly what `run` would refuse — exit 0 or 2
 
-Usage: zenwatch check-config --config <FILE>
+Usage: zenwatch check-config [OPTIONS] --config <FILE>
 
 Options:
-      --config <FILE>  The JSON5 config file [env: ZENWATCH_CONFIG=]
-  -h, --help           Print help
+      --config <FILE>     The JSON5 config file [env: ZENWATCH_CONFIG=]
+      --context <NAME>    The named connection context to run against (overrides the config's `bus.context`)
+      --namespace <NS>    The deployment namespace the resolved reads open their session in (overrides the config's `bus.namespace`) [alias: --base]
+      --contracts <PATH>  Contracts known offline, repeatable: an authoring file, a directory of them, or a `.history` root (added to the config's `contracts`)
+  -h, --help              Print help
 
 ```
 
@@ -72,7 +77,7 @@ Options:
 ```console
 $ zenwatch
 ? 2
-Notify when something is wrong on a keyspace-v2 Zenoh bus (#388)
+Notify when something is wrong on a zk2 Zenoh deployment (#388)
 
 Usage: zenwatch <COMMAND>
 

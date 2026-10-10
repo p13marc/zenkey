@@ -1,0 +1,5 @@
+// `alerts` alone: dark until zk2's alarm profile exists (#613).
+{
+  rules: [{ name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+}

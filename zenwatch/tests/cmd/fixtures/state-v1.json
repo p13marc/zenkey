@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "saved_at": "2026-09-06T00:00:00Z",
+  "entries": [
+    {
+      "id": "fleet-alerts:h-3fa9c2d41b7e.netlink.a659f813308ad1da",
+      "rule": "fleet-alerts",
+      "rule_id": "fleet-alerts",
+      "state": "firing",
+      "severity": "warning",
+      "since": 1700000000.0,
+      "last_sent": 1700000001.0,
+      "repeat": 0,
+      "labels": {},
+      "origin": "h-3fa9c2d41b7e",
+      "inhibited_by": null
+    }
+  ],
+  "evicted_total": 0
+}

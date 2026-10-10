@@ -42,12 +42,12 @@ Error: tests/cmd/fixtures/missing-sink.json5: 1 problem(s) — nothing was run
 ```
 
 The vocabulary is closed — no expressions, no templating — and the refusal
-spells all ten kinds:
+spells all nine kinds:
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/bad-rule.json5
 ? 2
-  rules[0].rule: "if rate(v1/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | origin-down <ORIGIN> | dropped | alert-firing <SEL> [<MIN-SEVERITY>] | alerts <SEL> | liveliness-gone <SEL>
+  rules[0].rule: "if rate(zk2/**) > 5 then page": is not a rule — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | liveliness-gone <SEL>
 Error: tests/cmd/fixtures/bad-rule.json5: 1 problem(s) — nothing was run
 
 ```
@@ -58,7 +58,7 @@ Two rules on one engine condition could not be told apart by the transition's
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/duplicate-condition.json5
 ? 2
-  rules[1].rule: duplicates rules[0]'s condition "silent-for v1/*/telemetry/** 30" — the engine reports one transition per condition; give the second rule a different condition or merge the sinks
+  rules[1].rule: duplicates rules[0]'s condition "silent-for site/zk2/*/*/*/stream/** 30" — the engine reports one transition per condition; give the second rule a different condition or merge the sinks
 Error: tests/cmd/fixtures/duplicate-condition.json5: 1 problem(s) — nothing was run
 
 ```
@@ -88,5 +88,74 @@ A file that is not there:
 $ zenwatch check-config --config tests/cmd/fixtures/nope.json5
 ? 2
 Error: cannot read tests/cmd/fixtures/nope.json5: No such file or directory (os error 2)
+
+```
+
+## What the zk2 port took away (#614, FL2)
+
+Each refused by name, with where its question went — never an unknown-field
+error that says nothing, and never parsed into a rule that silently never
+fires: v1's `origin-down` (now `instance-gone`, no alias), the dark `alerts`
+(#613), inhibition switched on (removed: it read v1's catalog), grouping by
+v1's origin chunk, v1's registry dirs, and the doctor's v1 sample:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/zk2-refusals.json5
+? 2
+  bus.registry: v1's registry slices are gone: zk2 reads contracts — `contracts: [<PATH>]` (an authoring file, a directory of them, or a .history root) or `--contracts`; a revision held offline is never retrieved, every other one comes from the bus (spec §8.4)
+  discipline.group_by[0]: "origin" was v1's origin chunk, which zk2 keys do not carry: group by `system` (the <system> of <system>/<service>, a host under hostid.v1) or `address` (<system>/<service>)
+  discipline.inhibit: inhibition was removed in the zk2 port (#614): it read v1's catalog (edge/*, entity/*, alias/*) to attribute a symptom to a down host, and no zk2 profile carries those documents. Delete the block, or set `enabled: false`
+  doctor.sample: v1's per-family state sample: zk2's deep checks (`state-stamp-foreign`, `population-over-bound`) read every owner's state once and take no sample — remove it
+  rules[0].rule: "origin-down h-3fa9c2d41b7e": v1's origin-down read v1's liveliness roster; in zk2 it is instance-gone <SYSTEM/SERVICE>: an address with no instance token visible to this reader (spec §8.1) — the vocabulary is closed (no expressions, no templating): rate-above <SEL> <HZ> | rate-below <SEL> <HZ> | silent-for <SEL> <SECS> | invalid-payload <SEL> | qos-mismatch <SEL> | doctor <CHECK-ID> | instance-gone <SYSTEM/SERVICE> | dropped | liveliness-gone <SEL>
+  rules[1].rule: "alerts v1/*/state/*/alert/*": alerts read v1's alert plane, and zk2's alarm profile (alarms.v1) does not exist yet: the rule is dark until it does (#613). Refused rather than ignored — a rule that can never fire is a rule that pages nobody
+Error: tests/cmd/fixtures/zk2-refusals.json5: 6 problem(s) — nothing was run
+
+```
+
+`run` refuses the same, before any session opens — `check-config` and `run`
+pass one gate:
+
+```console
+$ zenwatch run --config tests/cmd/fixtures/alerts.json5 --once --dry-run
+? 2
+  rules[0].rule: "alerts v1/*/state/*/alert/*": alerts read v1's alert plane, and zk2's alarm profile (alarms.v1) does not exist yet: the rule is dark until it does (#613). Refused rather than ignored — a rule that can never fire is a rule that pages nobody
+Error: tests/cmd/fixtures/alerts.json5: 1 problem(s) — nothing was run
+
+```
+
+A state file v1 zenwatch wrote is refused, never migrated: its identities
+name v1 origins and producers no zk2 rule produces. Moving it aside is the
+fix, and what it costs — one re-announcement of what is still firing — is
+then the operator's choice:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/state-v1.json5
+? 2
+  state_file: state file tests/cmd/fixtures/state-v1.json is version 1, written by zenwatch before the zk2 port: its identities name v1 origins, producers and alert refs, which no zk2 rule produces, so it is not migrated. Move it aside (or delete it) to start a fresh ledger — the first run then announces once what is still firing
+Error: tests/cmd/fixtures/state-v1.json5: 1 problem(s) — nothing was run
+
+```
+
+The deployment flags decide refusals too, so `check-config` takes them: a
+namespace that is not a concrete prefix, contracts that are not there —
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/valid.json5 --namespace prod/*
+? 2
+  --namespace: namespace "prod/*": a namespace is a concrete prefix and cannot hold a wildcard
+Error: tests/cmd/fixtures/valid.json5: 1 problem(s) — nothing was run
+
+$ zenwatch check-config --config tests/cmd/fixtures/valid.json5 --contracts tests/cmd/fixtures/nope
+? 2
+  --contracts tests/cmd/fixtures/nope: tests/cmd/fixtures/nope: no such file or directory
+Error: tests/cmd/fixtures/valid.json5: 1 problem(s) — nothing was run
+
+```
+
+— and contracts that do load are counted:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/valid.json5 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --contracts ../examples/zk2/tcgui/tc.netem.v1.toml
+tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), 2 contract revision(s), doctor every 6h — ok
 
 ```

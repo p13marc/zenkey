@@ -8,7 +8,7 @@ edition.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Notifier for a keyspace-v2 Zenoh bus — the closed watchdog vocabulary plus the producers' own alerts and the liveliness dead-man's switch, routed to ntfy, SMTP, a webhook or a command (#388)"
+description = "Notifier for a zk2 Zenoh deployment — zenctl watchdog's closed vocabulary plus instance-gone on the live presence projection and the liveliness dead-man's switch, routed to ntfy, SMTP, a webhook or a command (#388)"
 readme = "README.md"
 license = "Apache-2.0"
 
@@ -17,13 +17,18 @@ name = "zenwatch"
 path = "src/main.rs"
 
 [dependencies]
-# `schemars`: the served `describe` derives the three registered types'
-# schemas from the structs that publish them (RFC 08 §7).
-zenkey = { workspace = true, features = ["schemars"] }
-# The same codec matrix the explorers turn on (#97/#98): an alert document a
-# producer serves as protobuf or CDR still has to render into a
-# notification. Not `blob`: a notifier fetches no bulk content.
-zenkey-fleet = { workspace = true, features = ["decode-protobuf", "decode-cdr", "validate-json"] }
+# The read side, on zk2 (#614, FL2): the in-tree engine (rules, the live
+# presence projection, contracts, the doctor) and the session-free model
+# (the key grammar, the slug a rule's id is spelled with).
+zenkey-fleet = { path = "../zenkey-fleet" }
+zenkey-model = { path = "../zenkey-model" }
+# The write side, still v1's until FL3 (#614): `publish.rs` brings the
+# daemon up as a v1 producer (`schemars`: its served `describe` derives the
+# three registered types' schemas from the structs that publish them, RFC 08
+# §7). Renamed so no read-side line can reach them; FL3 deletes both, and
+# the build dependency below.
+zenkey-v1 = { package = "zenkey", version = "=0.11.1", features = ["schemars"] }
+zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }
 zenkey-explorer-config = { workspace = true }
 zenoh = { workspace = true }
 tokio = { workspace = true }
@@ -42,14 +47,15 @@ rustls = { workspace = true }
 lettre = { workspace = true }
 
 [build-dependencies]
-# The daemon's own registry (RFC 08 §5): `health`, `firing/{rule_id}`,
-# `doctor` and the two procedures every producer serves. Declared now so the
-# lock does not move when the self-publication chunk lands.
-zenkey-build = { workspace = true }
+# The daemon's own v1 registry (RFC 08 §5): `health`, `firing/{rule_id}`,
+# `doctor` and the two procedures every producer serves — v1's write side,
+# until FL3 replaces it with a zk2 contract (#614).
+zenkey-build-v1 = { package = "zenkey-build", version = "=0.11.1" }
 
 [dev-dependencies]
-# The seeding test (#464) publishes through an advanced publisher's cache.
-zenoh-ext = { workspace = true }
+# The zk2 runtime: the live tests' owners are real services, brought up and
+# stopped with its own `ServiceBuilder` (#614, FL2).
+zenkey = { path = "../zenkey" }
 trycmd = { workspace = true }
 snapbox = { workspace = true }
 tempfile = { workspace = true }
