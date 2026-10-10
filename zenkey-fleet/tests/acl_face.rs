@@ -83,8 +83,12 @@ fn face_plan(attach: FaceAttach) -> AclPlan {
     )
     .unwrap();
     let (mut contracts, _) = ContractSet::load_path(&examples.join("walkthrough"));
-    // navigation implements `health.v1`, its profile's standard contract (#721).
+    // navigation implements `health.v1`, its profile's standard contract (#721),
+    // and the vehicle's notifier zenwatch's own (#614, FL3).
     contracts.extend(ContractSet::load_path(&util::zk2::profiles().join("health")).0);
+    let zenwatch = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenwatch/contracts/zenwatch.v1.toml");
+    contracts.extend(ContractSet::load_path(&zenwatch).0);
     let plan = plan_acl(
         &enrollment,
         &contracts,

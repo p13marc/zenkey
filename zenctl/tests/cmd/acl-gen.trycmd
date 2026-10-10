@@ -486,7 +486,7 @@ A constrained face (§8.5): the far principal's policy carries the `@zk` and
 vehicle router, its ground segment the far side:
 
 ```console
-$ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --contracts ../examples/zk2/.history --format table --face constrained --attach south-region --far ground --region ground --explain ground 'zk2/vehicle-01/navigation/@zk/instance/0123456789abcdef' liveliness_query
+$ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --contracts ../examples/zk2/.history --contracts ../zenwatch/contracts/zenwatch.v1.toml --format table --face constrained --attach south-region --far ground --region ground --explain ground 'zk2/vehicle-01/navigation/@zk/instance/0123456789abcdef' liveliness_query
 ground  liveliness_query  zk2/vehicle-01/navigation/@zk/instance/0123456789abcdef
   ingress  DENIED  face-presence:ground denies liveliness_query on ingress; deny wins
       ✗ face-presence:ground  deny  zk2/**/@zk/**  (face_presence)
@@ -499,7 +499,7 @@ Router to router is refused, and says why: a deny on that link hides the
 declarations from the far side, but their key strings still cross.
 
 ```console
-$ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --contracts ../examples/zk2/.history --face constrained --attach router --far ground
+$ zenctl acl gen --enrollment ../examples/zk2/acl/walkthrough.enrollment.toml --contracts ../examples/zk2/.history --contracts ../zenwatch/contracts/zenwatch.v1.toml --face constrained --attach router --far ground
 ? 2
 Error: acl gen --face: a router-to-router face is refused: a deny there hides the far side's view of the denied declarations, but their key strings still cross the link, so access control is not a confidentiality boundary there (§8.5, §11.3: on a router-to-router link, a deny hides a denied declaration from the far side, but its key string still crosses (spike S3: 11,330 B and 201 denied keys, against 506 B and none in a south region)). Attach the far router in a south region (--attach south-region --region <NAME>), or the far session as a client (--attach client)
 
