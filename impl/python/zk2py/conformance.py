@@ -364,11 +364,59 @@ def _hostid_shapes(path: Path) -> list[Result]:
             for c in _load_json(path)["cases"]]
 
 
+def _freshness_horizons(path: Path) -> list[Result]:
+    """freshness.v1 §2.1–§2.3: "a resolved resource's authoring kind … and
+    its merged annotations -> its horizon"."""
+    from . import freshness
+
+    return [_check(f"horizons: {c['kind']} {json.dumps(c['annotations'])} ({c['note']})",
+                   freshness.horizon(c["kind"], c["annotations"]).expect(), c["expect"])
+            for c in _load_json(path)["cases"]]
+
+
+def _freshness_observation(o: dict[str, Any]):
+    """judgements.json's observation objects, read into zk2py's, with every
+    number of seconds read exactly to the nanosecond."""
+    from . import freshness as f
+
+    if o["via"] == "archive":
+        return f.Archive()
+    if o["via"] == "subscription":
+        last = o.get("last")
+        return f.Subscription(f.seconds_to_ns(o["listened_s"]), bool(o.get("complete", True)),
+                              None if last is None else f.Delivery(last["kind"], f.seconds_to_ns(last["age_s"])))
+    if o["via"] == "get":
+        reply, clock = o.get("reply"), o.get("clock") or {"trusted": False}
+        delta = f.seconds_to_ns(clock["delta_s"]) if clock.get("trusted") else f.DEFAULT_DELTA_NS
+        if reply is None:
+            r = None
+        elif reply["kind"] == "delete":
+            r = f.Reply("delete")
+        else:
+            age = reply.get("stamp_age_s")
+            r = f.Reply("put", None if age is None else f.seconds_to_ns(age))
+        return f.Get(r, bool(clock.get("trusted")), delta)
+    raise ValueError(f"an unknown observation {o!r}")
+
+
+def _freshness_judgements(path: Path) -> list[Result]:
+    """freshness.v1 §2.3, §2.5–§2.8: a resource's kind, its annotations and
+    the observations of one member -> the combined verdict and its reason."""
+    from . import freshness
+
+    out: list[Result] = []
+    for c in _load_json(path)["cases"]:
+        got = freshness.judge(c["kind"], c["annotations"], [_freshness_observation(o) for o in c["observations"]])
+        out.append(_check(f"judgements: {c['note']}", got.pair(), c["expect"]))
+    return out
+
+
 #: Each profile's fixtures, by file name. profiles/README.md: "An unknown
 #: file fails the test, so a fixture cannot land unrun. A README.md there
 #: is prose."
 PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "hostid": {"vectors.json": _hostid_vectors, "shapes.json": _hostid_shapes},
+    "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements},
 }
 
 

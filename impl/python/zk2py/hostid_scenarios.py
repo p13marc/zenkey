@@ -448,7 +448,19 @@ def section4(report: Report, base: str) -> None:
             roots.append(r)
             return r
 
-        # Step 1: two runs.
+        # Step 1: two runs. hostid.v1 0.3: the log goes "wherever the
+        # process's operational logs go, at its warning level", and "a
+        # scenario reads it there, through a log capture in process".
+        import logging
+
+        captured: list[logging.LogRecord] = []
+
+        class Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                captured.append(record)
+
+        handler = Capture(level=logging.DEBUG)
+        logging.getLogger("zk2py.hostid").addHandler(handler)
         r = root_of_3_1()
         before = tree(r)
         runs = []
@@ -462,14 +474,17 @@ def section4(report: Report, base: str) -> None:
                 runs.append((o.system, "hostid.v1" in (doc.get("profiles") or []), rt.logs))
             finally:
                 o.close()
+        logging.getLogger("zk2py.hostid").removeHandler(handler)
         logs_ok = all(len(logs) == 1 and "ephemeral" in logs[0] and all(p in logs[0] for p in
                       ("/etc/machine-id", "/var/lib/dbus/machine-id", "/var/lib/zk2/hostid")) for _, _, logs in runs)
+        warned = [rec.getMessage() for rec in captured if rec.levelno == logging.WARNING]
+        logs_ok = logs_ok and warned == [logs[0] for _, _, logs in runs]
         report.check(sec, "step 1: both runs start, each system in the minted shape, the two differ, each lists "
-                          "hostid.v1, each start logs the ephemeral system with the three paths, and nothing is "
-                          "written under the root",
+                          "hostid.v1, each start logs the ephemeral system with the three paths, at WARNING through "
+                          "the process's logging (0.3), and nothing is written under the root",
                      all(hostid.is_minted_shape(s) and listed for s, listed, _ in runs) and runs[0][0] != runs[1][0]
                      and logs_ok and tree(r) == before,
-                     f"systems {[s for s, _, _ in runs]}; log {runs[0][2][:1]}")
+                     f"systems {[s for s, _, _ in runs]}; log {runs[0][2][:1]}; {len(warned)} WARNING records")
         # Step 2: one process, two ephemeral services.
         rt = hostid.Runtime(root_of_3_1())
         a = rt.configure({"address": "@hostid.v1/a", "hostid": {"ephemeral": True}})

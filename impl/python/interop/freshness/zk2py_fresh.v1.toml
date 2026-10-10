@@ -1,0 +1,21 @@
+# zk2py's freshness.v1 interop contract: a state with a horizon, which its
+# owner re-puts at least every ttl/2 (freshness.v1 §2.4), and a raw
+# operation, since the Rust `consume` example reads one state and calls one
+# operation. zk2py's owner serves it and the Rust consumer reads its
+# re-puts. It must load with no finding at all.
+[interface]
+name    = "zk2py_fresh"
+major   = 1
+minor   = 0
+summary = "zk2py's freshness.v1 interop interface"
+uses    = ["freshness.v1"]
+
+[resources.status]                         # re-put at least every 1 s
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
+
+[resources.echo]
+kind     = "operation"
+request  = { raw = "application/octet-stream" }
+response = { raw = "application/octet-stream" }

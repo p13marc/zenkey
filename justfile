@@ -247,3 +247,11 @@ py-hostid:
     set -euo pipefail
     python3 impl/python/bootstrap.py target/py-venv > /dev/null
     PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.hostid_scenarios
+
+# The Python implementation's freshness.v1 scenarios (spec/profiles/freshness/
+# scenarios.md §1–§6), on an in-process zenoh-python router: no Rust build.
+py-freshness:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    python3 impl/python/bootstrap.py target/py-venv > /dev/null
+    PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.freshness_scenarios
