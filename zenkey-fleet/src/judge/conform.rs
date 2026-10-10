@@ -18,19 +18,22 @@
 //! [`crate::bus::conform::SAMPLE_CAP`] samples per resource; the evidence
 //! says how many it judged of how many delivered.
 //!
-//! **A population is bounded from below** (core §2.7, 0.24; #735). The
-//! `budget` case counts a templated resource's live members against its
-//! bound in this instance, and the `rate` case an event's occurrences per
-//! member, both through `zenkey_model::budget`. More than the bound, from
-//! any reading, is the finding; within it is clean only after the owner's
-//! complete GET of a state, and a window, which never shows a member it did
-//! not hear, leaves it unobservable.
+//! **A population is bounded from below until a reading is complete**
+//! (core §2.7, 0.24; #735). The `budget` case counts a templated state's
+//! live members against its bound in this instance, from the owner's GET;
+//! `budget-window` a templated stream's or event's, over the window; and
+//! `rate` an event's occurrences per member — all through
+//! `zenkey_model::budget`. More than the bound, from any reading, is the
+//! finding. Within it is clean only after a complete reading: a GET that
+//! ran to its final reply, or a window of a whole liveness span that lost
+//! nothing while the owner held its instance token throughout
+//! ([`crate::bus::conform::WindowPresence`]); otherwise unobservable.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::SystemTime;
 
 use zenkey_model::authoring::Kind;
-use zenkey_model::budget::{self, Bound, Occurrences, Reading};
+use zenkey_model::budget::{self, Bound, Occurrences, Reading, Window};
 use zenkey_model::contract::{Body, Fanout, Resource};
 use zenkey_model::freshness::{
     self as fresh, ClockMeasure, ClockTrust, Horizon, Judged, Observation, Reason, Reply, StampAge,
@@ -352,9 +355,10 @@ fn occurrence_instants(arrivals: &[&Arrival]) -> Vec<std::time::Duration> {
 }
 
 /// §2.7: a templated resource's live members against its bound in this
-/// instance — the owner's GET for a state, the window for a stream or an
-/// event. `None` for a resource without parameters, which has no bound to
-/// keep.
+/// instance — `budget`, from the owner's GET, for a state; `budget-window`,
+/// from the window, for a stream or an event. `None` for a resource
+/// without parameters, which has no bound to keep. An operation's row is a
+/// `budget` not asked.
 fn budget_case(
     obs: &ConformObservation,
     r: &Resource,
@@ -362,13 +366,16 @@ fn budget_case(
     heard: Option<&Result<Heard, String>>,
     get: Option<&Result<StateReport, String>>,
 ) -> Option<ConformCase> {
-    const C: CaseId = CaseId::Budget;
     if !r.template.has_params() {
         return None;
     }
+    let c = match r.kind {
+        Kind::Stream | Kind::Event => CaseId::BudgetWindow,
+        Kind::State | Kind::Operation => CaseId::Budget,
+    };
     if r.kind == Kind::Operation {
         return Some(ConformCase::not_asked(
-            C,
+            c,
             name,
             "an operation's members are the values its callers name, and no reading of the \
              owner counts them (§2.7)",
@@ -377,15 +384,21 @@ fn budget_case(
     let contract = obs.revision.as_deref().map(Revision::contract);
     let b = budget::bound_of(r, stated(obs, name));
     let of = bound_words(r, b);
-    let w = obs.spec.window.as_secs_f64();
     let retention = budget::retention_of(r);
-    let live = match budget::liveness(r.kind, retention) {
+    let span = budget::liveness(r.kind, retention);
+    let live = match span {
         Some(p) if r.kind == Kind::Event => format!(
             "with an occurrence within its retention of {}",
             period_words(p)
         ),
         _ => "heard within one hour".to_owned(),
     };
+    let present = match &obs.window_presence {
+        Some(Ok(p)) => p.throughout(),
+        _ => false,
+    };
+    let mut lost = 0u64;
+    let mut w = obs.spec.window.as_secs_f64();
     let (reading, capped) = match r.kind {
         Kind::State => match get {
             Some(Ok(g)) => (
@@ -397,48 +410,58 @@ fn budget_case(
             ),
             Some(Err(e)) => {
                 return Some(ConformCase::unobservable(
-                    C,
+                    c,
                     name,
                     format!("the GET failed: {e}"),
                 ));
             }
-            None => return Some(ConformCase::unobservable(C, name, "the GET was not made")),
+            None => return Some(ConformCase::unobservable(c, name, "the GET was not made")),
         },
         _ => match heard {
-            Some(Ok(h)) => (
-                Reading::Window(members_heard(contract, r, h)),
-                if h.arrivals_capped > 0 {
-                    format!(
-                        " ({} put(s) past the {} this run keeps not counted)",
-                        h.arrivals_capped,
-                        crate::bus::conform::ARRIVAL_CAP
-                    )
-                } else {
-                    String::new()
-                },
-            ),
+            Some(Ok(h)) => {
+                lost = h.lagged + h.arrivals_capped;
+                w = h.listened.as_secs_f64();
+                (
+                    Reading::Window(Window {
+                        heard: members_heard(contract, r, h),
+                        listened: h.listened,
+                        lossless: lost == 0,
+                        present,
+                    }),
+                    if h.arrivals_capped > 0 {
+                        format!(
+                            " ({} put(s) past the {} this run keeps not counted)",
+                            h.arrivals_capped,
+                            crate::bus::conform::ARRIVAL_CAP
+                        )
+                    } else {
+                        String::new()
+                    },
+                )
+            }
             Some(Err(e)) => {
                 return Some(ConformCase::unobservable(
-                    C,
+                    c,
                     name,
                     format!("the subscription failed: {e}"),
                 ));
             }
-            None => return Some(ConformCase::unobservable(C, name, "not subscribed")),
+            None => return Some(ConformCase::unobservable(c, name, "not subscribed")),
         },
     };
     let j = budget::population(r.kind, b, retention, &reading);
     let n = j.counted;
+    let need = span.map_or(u64::MAX, |p| p.as_secs());
     Some(match (j.verdict, j.reason) {
         (budget::Verdict::NotAsked, budget::Reason::NoCeiling) => ConformCase::not_asked(
-            C,
+            c,
             name,
             "its bound is the no-ceiling 4294967295: no bound, never a population to budget \
              with (§2.2)",
         ),
-        (budget::Verdict::NotAsked, why) => ConformCase::not_asked(C, name, why.as_str()),
+        (budget::Verdict::NotAsked, why) => ConformCase::not_asked(c, name, why.as_str()),
         (budget::Verdict::Exceeds, _) => ConformCase::failed(
-            C,
+            c,
             name,
             match &reading {
                 Reading::Get { complete, .. } => format!(
@@ -451,49 +474,89 @@ fn budget_case(
                     }
                 ),
                 Reading::Window(_) => format!(
-                    "{n} member(s) {live} in the {w}s window, above {of}: an owner MUST NOT \
+                    "{n} member(s) {live} in the {w:.1}s window, above {of}: an owner MUST NOT \
                      hold more live members than its bound, and a lower bound already exceeds \
                      it (§2.7){capped}"
                 ),
             },
         ),
         (budget::Verdict::Within, _) => ConformCase::passed(
-            C,
+            c,
             name,
-            format!(
-                "{n} member(s) answered with a value by the owner's GET, which ran to its final \
-                 reply: within {of} (§2.7)"
-            ),
+            match &reading {
+                Reading::Get { .. } => format!(
+                    "{n} member(s) answered with a value by the owner's GET, which ran to its \
+                     final reply: within {of} (§2.7)"
+                ),
+                Reading::Window(_) => format!(
+                    "{n} member(s) {live} over a {w:.1}s window of at least one liveness span, \
+                     nothing lost, the owner present throughout: within {of} (§2.7)"
+                ),
+            },
         ),
         (budget::Verdict::Unobservable, budget::Reason::Empty) => ConformCase::unobservable(
-            C,
+            c,
             name,
             match &reading {
                 Reading::Get { .. } => "the owner's GET answered no member with a value: an \
                                         empty reply set is never a verdict (O5)"
                     .to_owned(),
                 Reading::Window(_) => {
-                    format!("no member heard in the {w}s window: nothing to count (O5)")
+                    format!("no member heard in the {w:.1}s window: nothing to count (O5)")
                 }
             },
         ),
         (budget::Verdict::Unobservable, budget::Reason::Incomplete) => ConformCase::unobservable(
-            C,
+            c,
             name,
             format!(
                 "{n} member(s) answered with a value, within {of}, by a GET that did not run to \
                  its final reply: a member it did not answer may be live (§2.7)"
             ),
         ),
-        (budget::Verdict::Unobservable, _) => ConformCase::unobservable(
-            C,
+        (budget::Verdict::Unobservable, budget::Reason::WindowTooShort) => {
+            ConformCase::unobservable(
+                c,
+                name,
+                format!(
+                    "{n} member(s) {live} in the {w:.1}s window, within {of}: a window shows a \
+                     population within its bound only after one liveness span, so a window of \
+                     at least {need} s (`--for {need}`), or --skip budget-window (§2.7){capped}"
+                ),
+            )
+        }
+        (budget::Verdict::Unobservable, budget::Reason::Lossy) => ConformCase::unobservable(
+            c,
             name,
             format!(
-                "{n} member(s) {live} in the {w}s window, within {of}: a window never shows a \
-                 member it did not hear, so it bounds the population from below only (§2.7) — \
-                 --skip budget leaves the case unasked{capped}"
+                "{n} member(s) {live} in the {w:.1}s window, within {of}, and this run lost \
+                 {lost} delivery(ies): a member it did not hear may be live (§2.7){capped}"
             ),
         ),
+        (budget::Verdict::Unobservable, budget::Reason::OwnerAbsent) => ConformCase::unobservable(
+            c,
+            name,
+            format!(
+                "{n} member(s) {live} in the {w:.1}s window, within {of}, and the owner was not \
+                 present throughout: {} — a member published while it was away, or before this \
+                 run was matched, may be live (§2.7)",
+                match &obs.window_presence {
+                    Some(Ok(p)) if !p.complete => {
+                        "the read of its instance tokens ended at its timeout".to_owned()
+                    }
+                    Some(Ok(p)) if p.held.is_empty() => {
+                        "no instance token of it was visible when the window opened".to_owned()
+                    }
+                    Some(Ok(p)) => format!(
+                        "{} of its instance token(s) went while the window listened",
+                        p.gone.len()
+                    ),
+                    Some(Err(e)) => format!("its presence could not be watched: {e}"),
+                    None => "its presence was not watched".to_owned(),
+                }
+            ),
+        ),
+        (budget::Verdict::Unobservable, why) => ConformCase::unobservable(c, name, why.as_str()),
     })
 }
 
@@ -1615,7 +1678,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::bus::conform::ConformSpec;
+    use crate::bus::conform::{ConformSpec, WindowPresence};
     use crate::model::catalog::{DescriptorRead, Observed};
     use crate::model::render::{Member, render_with};
     use crate::report::{
@@ -1914,6 +1977,11 @@ mod tests {
             heard: BTreeMap::new(),
             gets: BTreeMap::new(),
             gets_complete: BTreeMap::from([("state/status/{dev}".to_owned(), true)]),
+            window_presence: Some(Ok(WindowPresence {
+                held: [format!("zk2/lab/m/@zk/instance/{INST}")].into(),
+                complete: true,
+                gone: BTreeSet::new(),
+            })),
             calls: BTreeMap::new(),
             admin: Some(Ok(AdminSpace {
                 routers: vec![crate::report::RouterInfo {
@@ -1978,22 +2046,26 @@ mod tests {
     #[test]
     fn a_conforming_service_passes_every_case_asked() {
         let mut r = judge(&conforming());
-        // A window bounds a stream's population from below only (§2.7):
-        // its budget is the one case left unobservable, and skipping it is
-        // what leaves the run clean.
-        let bw = case(&r, CaseId::Budget, "stream/bandwidth/{dev}");
+        // A 2 s window is short of a stream's hour (§2.7): its
+        // `budget-window` is the one case left unobservable, and skipping
+        // it is what leaves the run clean, the state's `budget` still asked.
+        let bw = case(&r, CaseId::BudgetWindow, "stream/bandwidth/{dev}");
         assert!(
             matches!(&bw.verdict, Judgement::Unobservable { reason }
-                if reason.contains("bounds the population from below only")),
+                if reason.contains("at least 3600 s (`--for 3600`)")),
             "{bw:#?}"
         );
         assert!(matches!(
             &r.judgement(),
             Judgement::Unobservable { reason }
-                if reason.contains("1 case(s)") && reason.contains("budget stream/bandwidth/{dev}")
+                if reason.contains("1 case(s)") && reason.contains("budget-window stream/bandwidth/{dev}")
         ));
-        r.skip(&[CaseId::Budget]);
+        r.skip(&[CaseId::BudgetWindow]);
         assert_eq!(judgement_exit_code(&r.judgement()), 0, "{r:#?}");
+        assert!(matches!(
+            case(&r, CaseId::Budget, "state/status/{dev}").verdict,
+            Judgement::NotEstablished { .. }
+        ));
         let r = judge(&conforming());
         assert_eq!(r.fingerprint, Some(fp().to_string()));
         for (id, subject) in [
@@ -2178,8 +2250,8 @@ mod tests {
             case(&r, CaseId::FanoutRefused, "@op/set/{dev}").verdict,
             Judgement::NotEstablished { .. }
         ));
-        // The stream's budget, a window's lower bound, skipped (§2.7).
-        r.skip(&[CaseId::Budget]);
+        // The stream's population, short of an hour's window, skipped.
+        r.skip(&[CaseId::BudgetWindow]);
         assert_eq!(judgement_exit_code(&r.judgement()), 0, "{r:#?}");
     }
 
@@ -2533,7 +2605,7 @@ mod tests {
             })
             .collect();
         o.heard.insert(BW.into(), heard(samples));
-        let msg = failed(&judge(&o), CaseId::Budget, BW);
+        let msg = failed(&judge(&o), CaseId::BudgetWindow, BW);
         assert!(
             msg.contains("9 member(s) heard within one hour") && msg.contains("lower bound"),
             "{msg}"
@@ -2706,10 +2778,54 @@ mod tests {
                 .contains("within its retention of an hour"),
             "{b:#?}"
         );
-        // Two members: within, from a window: unobservable.
+        assert_eq!(b.case, CaseId::BudgetWindow);
+        // Two members within the bound, over 20 s of an hour's retention.
         let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&once), None).unwrap();
         assert!(
-            matches!(b.verdict, Judgement::Unobservable { .. }),
+            matches!(&b.verdict, Judgement::Unobservable { reason }
+                if reason.contains("at least 3600 s (`--for 3600`)")),
+            "{b:#?}"
+        );
+        // Over the whole hour, nothing lost, the owner present: clean.
+        let hour = window(
+            vec![occurrence("a", 1, 1.0, None), occurrence("b", 2, 2.0, None)],
+            3600.0,
+        );
+        o.window_presence = Some(Ok(WindowPresence {
+            held: ["zk2/lab/al/@zk/instance/3fa9c2d41b7e0012".to_owned()].into(),
+            complete: true,
+            gone: BTreeSet::new(),
+        }));
+        let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&hour), None).unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("the owner present throughout")),
+            "{b:#?}"
+        );
+        // The same hour, a delivery lost: unobservable.
+        let mut lossy_hour = hour.clone();
+        lossy_hour.as_mut().unwrap().lagged = 1;
+        let b = budget_case(
+            &o,
+            &alarms_r,
+            "events/alarms/{src}",
+            Some(&lossy_hour),
+            None,
+        )
+        .unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::Unobservable { reason } if reason.contains("lost 1")),
+            "{b:#?}"
+        );
+        // The owner's token went mid-window: unobservable, and said so.
+        if let Some(Ok(p)) = &mut o.window_presence {
+            p.gone = p.held.clone();
+        }
+        let b = budget_case(&o, &alarms_r, "events/alarms/{src}", Some(&hour), None).unwrap();
+        assert!(
+            matches!(&b.verdict, Judgement::Unobservable { reason }
+                if reason.contains("not present throughout")
+                    && reason.contains("went while the window listened")),
             "{b:#?}"
         );
         // The no-ceiling cardinality: not asked.

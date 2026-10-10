@@ -11,9 +11,12 @@
 //! `NotAsked`, with why in `detail`: an operation that is not idempotent
 //! without `--i-know`, a raw type with no structure, a resource that
 //! declares no `freshness.ttl_s`, the no-ceiling cardinality, a case the
-//! operator skipped. The `budget` and `rate` cases are core §2.7's (0.24,
-//! #735): more live members than the bound, or an event's occurrences
-//! beyond its rate, are the findings. The `freshness` case is the "no" of
+//! operator skipped. The `budget`, `budget-window` and `rate` cases are
+//! core §2.7's (0.24, #735): more live members than the bound, or an
+//! event's occurrences beyond its rate, are the findings; `budget` counts a
+//! state by its owner's GET, and `budget-window` a stream or an event over
+//! the window, so a run that cannot listen for a whole liveness span skips
+//! the second and keeps the first. The `freshness` case is the "no" of
 //! `freshness.v1`'s "is this value fresh?" turned into the suite's
 //! polarity: a stale member is the finding (#720). The `health` and
 //! `health-aggregation` cases do the same for `health.v1`'s "is this
@@ -65,13 +68,13 @@ pub enum CaseId {
     /// reply's stamp against a clock trusted to the HLC delta. One verdict
     /// per resource; a resource with no horizon is not asked.
     Freshness,
-    /// A templated stream, state or event resource holds no more live
-    /// members than its bound (core §2.7, 0.24; #735): the descriptor's
-    /// lowered `cardinality`, else the contract's. More members than the
-    /// bound, in any reading, is the finding; within it is clean only after
-    /// the owner's complete GET of a state, and unobservable from a window.
-    /// One verdict per templated resource; no ceiling, and an operation,
-    /// are not asked.
+    /// A templated state resource holds no more live members than its
+    /// bound (core §2.7, 0.24; #735): the descriptor's lowered
+    /// `cardinality`, else the contract's, counted from the owner's GET.
+    /// More members than the bound is the finding, whether or not the GET
+    /// ran to its final reply; within it is clean only when it did. One
+    /// verdict per templated state; no ceiling is not asked, and neither is
+    /// a templated operation, whose row is this case's.
     Budget,
     /// The service, implementing `health.v1`, is healthy (`health.v1` §5,
     /// §2.11; #721): unhealthy or stale is the finding. Not asked of a
@@ -87,11 +90,19 @@ pub enum CaseId {
     /// clean only over a window of a whole period that lost nothing. One
     /// verdict per event resource.
     Rate,
+    /// A templated stream or event resource holds no more live members than
+    /// its bound (core §2.7, 0.24; #735), counted over the window: a
+    /// stream's members heard within one hour, an event's with occurrences
+    /// within its retention. More than the bound is the finding from any
+    /// window; within it is clean only over a window of at least one
+    /// liveness span, nothing lost, the owner present throughout. One
+    /// verdict per templated stream or event.
+    BudgetWindow,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 13] = [
+    pub const ALL: [CaseId; 14] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -105,6 +116,7 @@ impl CaseId {
         CaseId::Health,
         CaseId::HealthAggregation,
         CaseId::Rate,
+        CaseId::BudgetWindow,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -123,6 +135,7 @@ impl CaseId {
             CaseId::Health => "health",
             CaseId::HealthAggregation => "health-aggregation",
             CaseId::Rate => "rate",
+            CaseId::BudgetWindow => "budget-window",
         }
     }
 
@@ -148,6 +161,7 @@ impl CaseId {
             CaseId::Health => "health.v1 §5",
             CaseId::HealthAggregation => "health.v1 §2.2",
             CaseId::Rate => "§2.7 rate",
+            CaseId::BudgetWindow => "§2.7 window",
         }
     }
 }
@@ -250,8 +264,8 @@ impl ConformReport {
     /// The cases the operator chose not to ask (`check conform --skip`):
     /// each becomes `NotAsked`, which neither passes nor fails the run, its
     /// verdict as read kept nowhere. A case a run cannot judge here, such as
-    /// `budget` on a stream a window only ever bounds from below (§2.7), is
-    /// skipped rather than left to read 2, as the doctor's `--skip` does.
+    /// `budget-window` over a window shorter than an hour (§2.7), is skipped
+    /// rather than left to read 2, as the doctor's `--skip` does.
     pub fn skip(&mut self, cases: &[CaseId]) {
         for c in self.cases.iter_mut().filter(|c| cases.contains(&c.case)) {
             *c = ConformCase::not_asked(c.case, c.subject.clone(), "skipped by the operator");
@@ -339,6 +353,7 @@ mod tests {
                 "health",
                 "health-aggregation",
                 "rate",
+                "budget-window",
             ]
         );
         for c in CaseId::ALL {
@@ -350,21 +365,23 @@ mod tests {
     }
 
     /// `--skip` turns a case not asked whatever it read, on every subject,
-    /// and leaves the others as they were (#735).
+    /// and leaves the others as they were (#735): skipping `budget-window`
+    /// keeps the state's `budget` asked.
     #[test]
     fn a_skipped_case_is_not_asked() {
         let mut r = report(vec![
-            ConformCase::unobservable(CaseId::Budget, "stream/bw/{dev}", "a window"),
+            ConformCase::unobservable(CaseId::BudgetWindow, "stream/bw/{dev}", "too short"),
+            ConformCase::unobservable(CaseId::BudgetWindow, "events/ev/{dev}", "too short"),
             ConformCase::passed(CaseId::Budget, "state/st/{dev}", "3 member(s)"),
             ConformCase::passed(CaseId::Qos, "stream/bw/{dev}", "12 sample(s)"),
         ]);
-        r.skip(&[CaseId::Budget]);
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
+        r.skip(&[CaseId::BudgetWindow]);
         assert!(
             r.cases[..2].iter().all(|c| c.verdict.is_not_asked()
                 && c.detail.as_deref() == Some("skipped by the operator"))
         );
-        assert_eq!(r.cases[2].case, CaseId::Qos);
-        assert!(!r.cases[2].verdict.is_not_asked());
+        assert!(r.cases[2..].iter().all(|c| !c.verdict.is_not_asked()));
         assert_eq!(judgement_exit_code(&r.judgement()), 0);
     }
 
@@ -411,6 +428,11 @@ mod tests {
                 "3 live member(s), above its bound of 2",
             ),
             ConformCase::unobservable(CaseId::Rate, "events/alarms/{source}", "too short"),
+            ConformCase::passed(
+                CaseId::BudgetWindow,
+                "events/alarms/{source}",
+                "2 member(s)",
+            ),
         ]);
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
@@ -444,6 +466,9 @@ mod tests {
                      "detail": "3 live member(s), above its bound of 2"},
                     {"case": "rate", "subject": "events/alarms/{source}", "section": "§2.7 rate",
                      "verdict": {"answer": "unobservable", "reason": "too short"}},
+                    {"case": "budget-window", "subject": "events/alarms/{source}",
+                     "section": "§2.7 window",
+                     "verdict": {"answer": "not_established", "reason": "2 member(s)"}},
                 ],
             })
         );

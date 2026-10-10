@@ -22,8 +22,12 @@
 //! 5. for the population budget (core §2.7, 0.24; #735): each delivery's
 //!    instant on this host's monotonic clock and its stamp, per key, which
 //!    a stream's and an event's members and an event's rate are counted
-//!    from, and whether each state GET ran to its final reply, the one
-//!    complete reading of a state population.
+//!    from; whether each state GET ran to its final reply, a complete
+//!    reading of a state population; and, when a templated stream or event
+//!    is exposed, whether the owner held its instance token from before
+//!    the window to its end — a liveliness subscriber on its instance
+//!    tokens, then a read of them, before the window opens — which a window
+//!    needs to be a complete reading of a stream's or an event's.
 //!
 //! Nothing is judged here: [`crate::judge::conform`] decides every case
 //! from the [`ConformObservation`] this returns.
@@ -128,6 +132,27 @@ pub struct Heard {
     pub arrivals_capped: u64,
 }
 
+/// Whether the owner held its instance token over the whole window (§2.7):
+/// a window of a stream or an event is a complete reading only then.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowPresence {
+    /// The instance tokens a read just before the window found.
+    pub held: BTreeSet<String>,
+    /// Whether that read ran to the routers' final reply (§8.1).
+    pub complete: bool,
+    /// Those tokens a liveliness subscriber, declared before the read, saw
+    /// deleted by the window's end.
+    pub gone: BTreeSet<String>,
+}
+
+impl WindowPresence {
+    /// Present throughout: a complete read found a token, and none of the
+    /// tokens it found was deleted before the window ended.
+    pub fn throughout(&self) -> bool {
+        self.complete && !self.held.is_empty() && self.gone.is_empty()
+    }
+}
+
 /// What a call over an operation's template wildcard drew (O2).
 #[derive(Debug, Clone, Default)]
 pub struct FanoutSeen {
@@ -183,6 +208,10 @@ pub struct ConformObservation {
     /// Whether each state resource's GET ran to its final reply, with no
     /// error reply: the one complete reading of its population (§2.7).
     pub gets_complete: BTreeMap<String, bool>,
+    /// Whether the owner held its instance token over the window (§2.7);
+    /// `None` when no templated stream or event is exposed, so nothing
+    /// needed it.
+    pub window_presence: Option<std::result::Result<WindowPresence, String>>,
     /// Each exposed operation.
     pub calls: BTreeMap<String, OpObserved>,
     /// The routers' admin space, read un-namespaced: an owner's own stamp
@@ -357,6 +386,7 @@ async fn suite(
         heard: BTreeMap::new(),
         gets: BTreeMap::new(),
         gets_complete: BTreeMap::new(),
+        window_presence: None,
         calls: BTreeMap::new(),
         admin: Some(admin),
         read_at: None,
@@ -390,6 +420,18 @@ async fn suite(
         Err(_) => return obs,
     };
     let exposed: Vec<Resource> = obs.exposed().into_iter().cloned().collect();
+
+    // §2.7: a window of a stream or an event is complete only with the
+    // owner present throughout. The subscriber first, so a token the read
+    // finds and that goes later is seen going.
+    let windowed = exposed
+        .iter()
+        .any(|r| matches!(r.kind, Kind::Stream | Kind::Event) && r.template.has_params());
+    let presence_watch = if windowed {
+        Some(watch_instances(session, &obs.address, t).await)
+    } else {
+        None
+    };
 
     // The subscriptions first, so what the GETs and the calls stir up is
     // heard too.
@@ -489,7 +531,59 @@ async fn suite(
     obs.gets = gets;
     obs.gets_complete = complete;
     obs.calls = calls;
+    obs.window_presence = presence_watch.map(|w| {
+        w.map(|(mut p, gone, _subscriber)| {
+            let gone = gone.lock().expect("not poisoned");
+            p.gone = p.held.intersection(&gone).cloned().collect();
+            p
+        })
+    });
     obs
+}
+
+/// What [`watch_instances`] hands back: the read's tokens, the deletes seen
+/// so far, and the subscriber that keeps seeing them until dropped.
+type InstanceWatch = (
+    WindowPresence,
+    Arc<std::sync::Mutex<BTreeSet<String>>>,
+    zenoh::pubsub::Subscriber<()>,
+);
+
+/// A callback liveliness subscriber on `addr`'s instance tokens (§8.1: a
+/// subscriber beside a GET is callback-driven), then a read of them: the
+/// tokens held when the window opens, and every one deleted from then on.
+async fn watch_instances(
+    session: &Session,
+    addr: &Addr,
+    timeout: Duration,
+) -> std::result::Result<InstanceWatch, String> {
+    let selector = format!("{GRAMMAR}/{}/{}/@zk/instance/*", addr.system, addr.service);
+    let gone: Arc<std::sync::Mutex<BTreeSet<String>>> = Arc::default();
+    let g = Arc::clone(&gone);
+    let subscriber = session
+        .liveliness()
+        .declare_subscriber(&selector)
+        .callback(move |sample| {
+            if sample.kind() == zenoh::sample::SampleKind::Delete {
+                g.lock()
+                    .expect("not poisoned")
+                    .insert(sample.key_expr().as_str().to_owned());
+            }
+        })
+        .await
+        .map_err(|e| format!("a liveliness subscriber on `{selector}`: {e}"))?;
+    let read = zenkey::presence::liveliness_read(session, &selector, timeout)
+        .await
+        .map_err(|e| format!("the read of `{selector}`: {e}"))?;
+    Ok((
+        WindowPresence {
+            held: read.keys.into_iter().collect(),
+            complete: read.complete,
+            gone: BTreeSet::new(),
+        },
+        gone,
+        subscriber,
+    ))
 }
 
 /// A member value per template parameter: what a concrete call to a
