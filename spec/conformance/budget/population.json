@@ -1,5 +1,5 @@
 {
-  "description": "core §2.7 (0.24), a population: a resource's `kind`, its `bound` (an integer, \"no_ceiling\" or \"untemplated\"), an event's `retention_s`, and one reading → whether the instance holds more live members than its bound (`expect.verdict`: exceeds, within, unobservable or not_asked) and the reason class (`expect.reason`). A reading is an owner's S4 GET of a state resource (`via: get`: how many keys it answered with a value, and whether it ran to its final reply) or a subscription window over a stream or an event (`via: window`: per member, the seconds at which it was heard, on one clock). A window counts the most members heard within any span shorter than the liveness period, an hour for a stream and the retention for an event: two instants exactly one period apart are not within it. Reasons are chosen in this order: not_asked (kind: an operation; no_ceiling; untemplated); unobservable reading_kind (a window of a state, a GET of a stream or an event); exceeds over_bound (in any reading); unobservable empty (no member, O5); unobservable incomplete (a GET that did not run to its final reply) or window; within complete.",
+  "description": "core §2.7 (0.24), a population: a resource's `kind`, its `bound` (an integer, \"no_ceiling\" or \"untemplated\"), an event's `retention_s`, and one reading → whether the instance holds more live members than its bound (`expect.verdict`: exceeds, within, unobservable or not_asked) and the reason class (`expect.reason`). A reading is an owner's S4 GET of a state resource (`via: get`: how many keys it answered with a value, and whether it ran to its final reply) or a subscription window over a stream or an event (`via: window`: per member, the seconds at which it was heard, on one clock; `listened_s`, how long it listened; `lossless`, false when it lost a delivery; `present`, false when the owner was not present, an instance token held, from the window's start to its end). A window counts the most members heard within any span shorter than the liveness span, an hour for a stream and the retention for an event: two instants exactly one span apart are not within it. A window is complete when it listened at least one span, was lossless, and the owner was present throughout. Reasons are chosen in this order: not_asked (kind: an operation; no_ceiling; untemplated); unobservable reading_kind (a window of a state, a GET of a stream or an event); exceeds over_bound (in any reading); unobservable incomplete (a GET that did not run to its final reply), or, for a window, lossy, then window_too_short, then owner_absent; unobservable empty (no member, O5); within complete.",
   "cases": [
     {
       "note": "a complete GET within the bound: clean",
@@ -92,7 +92,7 @@
       }
     },
     {
-      "note": "an incomplete GET with no member",
+      "note": "an incomplete GET with no member: incomplete comes before empty",
       "kind": "state",
       "bound": 8,
       "retention_s": null,
@@ -103,7 +103,7 @@
       },
       "expect": {
         "verdict": "unobservable",
-        "reason": "empty"
+        "reason": "incomplete"
       }
     },
     {
@@ -150,7 +150,10 @@
           "b": [
             1
           ]
-        }
+        },
+        "listened_s": 7200,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "unobservable",
@@ -158,7 +161,7 @@
       }
     },
     {
-      "note": "a stream: more members heard within an hour than the bound",
+      "note": "a stream: more members heard within an hour than the bound, in a short window",
       "kind": "stream",
       "bound": 2,
       "retention_s": null,
@@ -176,7 +179,10 @@
           "c": [
             1.5
           ]
-        }
+        },
+        "listened_s": 5,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "exceeds",
@@ -184,7 +190,34 @@
       }
     },
     {
-      "note": "a stream within the bound in its window: a window never shows a member it did not hear",
+      "note": "a stream over its bound in a lossy window, the owner absent: still the finding",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            0.5
+          ],
+          "c": [
+            1.5
+          ]
+        },
+        "listened_s": 5,
+        "lossless": false,
+        "present": false
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "a stream within its bound over exactly an hour, lossless, the owner present throughout: clean",
       "kind": "stream",
       "bound": 2,
       "retention_s": null,
@@ -199,15 +232,138 @@
           "b": [
             0.5
           ]
-        }
+        },
+        "listened_s": 3600,
+        "lossless": true,
+        "present": true
       },
       "expect": {
-        "verdict": "unobservable",
-        "reason": "window"
+        "verdict": "within",
+        "reason": "complete"
       }
     },
     {
-      "note": "a stream whose members churn: three heard, never more than two within an hour",
+      "note": "the same one second short of an hour",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            1,
+            2
+          ],
+          "b": [
+            0.5
+          ]
+        },
+        "listened_s": 3599,
+        "lossless": true,
+        "present": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "the same over an hour, with a delivery lost",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            1,
+            2
+          ],
+          "b": [
+            0.5
+          ]
+        },
+        "listened_s": 3600,
+        "lossless": false,
+        "present": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "lossy"
+      }
+    },
+    {
+      "note": "the same over an hour, the owner joining mid-window",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            1,
+            2
+          ],
+          "b": [
+            0.5
+          ]
+        },
+        "listened_s": 3600,
+        "lossless": true,
+        "present": false
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "owner_absent"
+      }
+    },
+    {
+      "note": "lost deliveries come before a short window",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ]
+        },
+        "listened_s": 5,
+        "lossless": false,
+        "present": false
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "lossy"
+      }
+    },
+    {
+      "note": "a short window comes before an absent owner",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ]
+        },
+        "listened_s": 5,
+        "lossless": true,
+        "present": false
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "a stream whose members churn: three heard, never more than two within an hour, over two hours: clean",
       "kind": "stream",
       "bound": 2,
       "retention_s": null,
@@ -223,11 +379,14 @@
           "c": [
             4000
           ]
-        }
+        },
+        "listened_s": 7200,
+        "lossless": true,
+        "present": true
       },
       "expect": {
-        "verdict": "unobservable",
-        "reason": "window"
+        "verdict": "within",
+        "reason": "complete"
       }
     },
     {
@@ -247,7 +406,10 @@
           "c": [
             4000
           ]
-        }
+        },
+        "listened_s": 7200,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "exceeds",
@@ -268,25 +430,48 @@
           "b": [
             3600
           ]
-        }
+        },
+        "listened_s": 7200,
+        "lossless": true,
+        "present": true
       },
       "expect": {
-        "verdict": "unobservable",
-        "reason": "window"
+        "verdict": "within",
+        "reason": "complete"
       }
     },
     {
-      "note": "a stream heard nothing: empty",
+      "note": "a complete window that heard nothing: empty (O5)",
       "kind": "stream",
       "bound": 2,
       "retention_s": null,
       "reading": {
         "via": "window",
-        "heard": {}
+        "heard": {},
+        "listened_s": 3600,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "unobservable",
         "reason": "empty"
+      }
+    },
+    {
+      "note": "a short window that heard nothing: too short comes before empty",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {},
+        "listened_s": 5,
+        "lossless": true,
+        "present": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
       }
     },
     {
@@ -321,7 +506,10 @@
           "c": [
             200
           ]
-        }
+        },
+        "listened_s": 300,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "exceeds",
@@ -329,7 +517,57 @@
       }
     },
     {
-      "note": "an event's members are live for its retention: never more than one within 60 s",
+      "note": "an event whose retention exceeds the window: within its bound, unobservable",
+      "kind": "event",
+      "bound": 4,
+      "retention_s": 86400,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            5
+          ],
+          "b": [
+            10
+          ]
+        },
+        "listened_s": 20,
+        "lossless": true,
+        "present": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "an event over a window of its whole retention, lossless, the owner present: clean",
+      "kind": "event",
+      "bound": 2,
+      "retention_s": 60,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            5
+          ],
+          "b": [
+            10
+          ]
+        },
+        "listened_s": 60,
+        "lossless": true,
+        "present": true
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "complete"
+      }
+    },
+    {
+      "note": "an event's members are live for its retention: never more than one within 60 s, over 140 s: clean",
       "kind": "event",
       "bound": 1,
       "retention_s": 60,
@@ -345,33 +583,14 @@
           "c": [
             130
           ]
-        }
+        },
+        "listened_s": 140,
+        "lossless": true,
+        "present": true
       },
       "expect": {
-        "verdict": "unobservable",
-        "reason": "window"
-      }
-    },
-    {
-      "note": "an event within the bound in its window",
-      "kind": "event",
-      "bound": 4,
-      "retention_s": 3600,
-      "reading": {
-        "via": "window",
-        "heard": {
-          "a": [
-            0,
-            5
-          ],
-          "b": [
-            10
-          ]
-        }
-      },
-      "expect": {
-        "verdict": "unobservable",
-        "reason": "window"
+        "verdict": "within",
+        "reason": "complete"
       }
     },
     {
@@ -388,7 +607,10 @@
           "b": [
             1
           ]
-        }
+        },
+        "listened_s": 120,
+        "lossless": true,
+        "present": true
       },
       "expect": {
         "verdict": "not_asked",

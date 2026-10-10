@@ -46,22 +46,37 @@ tool may conclude from a reading.
     measured, since a key names no instance, and a re-mint does not reset
     it.
 - **What a tool reads.** A state resource's S4 GET that ran to its final
-  reply is complete; nothing else is: a GET that ended at its timeout, a
-  subscription window (a member it never heard may be live), an archive.
-  A window shows no state population, since a missed delete would count a
-  member twice. A refusal narrows even a complete reading (§8.1, 0.8).
-  A rate's spans are measured between stamps of one clock where the
-  occurrences carry them, and on the receive clock otherwise.
+  reply is complete. So is a stream's or an event's subscription window
+  that lasted at least one liveness span (an hour, or the retention), lost
+  no delivery, and over which the owner was present, its instance token
+  held, from start to end.
+  - **Why a window can be complete.** A member is live for one span after
+    its last publication, so such a window heard every member live at its
+    end. These are the premises `rate`'s clean pole already rests on (a
+    lossless window of a whole period), plus presence. An owner that
+    joined, left or re-minted mid-window is a new instance or a gap. A
+    rule that refused every window would leave a stream's population a
+    question no reading could ever answer no to.
+  - Nothing else is complete: a GET that ended at its timeout, a shorter
+    or lossy window or one with the owner absent (a member it never heard
+    may be live), an archive.
+  - A window shows no state population, however long, since a missed
+    delete would count a member twice. A refusal narrows even a complete
+    reading (§8.1, 0.8). A rate's spans are measured between stamps of
+    one clock where the occurrences carry them, and on the receive clock
+    otherwise.
 - **What a tool concludes,** to "does this instance exceed its budget
   here?":
   - the finding: more members than the bound in any reading, or `<n>` + 1
     occurrences of one member less than the period apart in any window. A
     lower bound that exceeds is already the finding;
-  - clean: at most the bound after a complete reading with a member, or a
-    window of a whole period that lost nothing and heard an occurrence,
-    none beyond the rate;
-  - unobservable: within from an incomplete reading or a window, no member
-    at all (O5), a window shorter than one period, deliveries lost;
+  - clean: at most the bound after a complete reading with a member (a
+    complete GET, or a complete window), or, for a rate, a window of a
+    whole period that lost nothing and heard an occurrence, none beyond
+    the rate;
+  - unobservable: within from an incomplete reading (a timed-out GET; a
+    window short of one span, lossy, or with the owner absent), no member
+    at all (O5), a rate window shorter than one period, deliveries lost;
   - not asked: no ceiling, a template without parameters, an operation, a
     resource without a rate.
 - **Evidence:** new fixtures `conformance/budget/` (`bounds.json`,

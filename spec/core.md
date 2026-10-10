@@ -455,21 +455,34 @@ presence budget (§8.3) is another. `[F: budget/]`
     resource.
 
 **What a tool reads.**
-- **A complete reading** of a state resource is an S4 GET to its owner
-  (§4.2) that ran to its final reply, with no error reply: a GET that
-  reached its timeout ends with one (Appendix B). Its members are the
-  keys answered with a value. A `reply_del` is not a member.
-- **Every other reading is incomplete.**
+- **A complete reading of a state** is an S4 GET to its owner (§4.2) that
+  ran to its final reply, with no error reply: a GET that reached its
+  timeout ends with one (Appendix B). Its members are the keys answered
+  with a value. A `reply_del` is not a member.
+- **A complete reading of a stream or an event** is a subscription window
+  that hears every member live at its end. It is complete when all three
+  hold:
+  - it lasted at least one liveness span: an hour for a stream, the
+    retention for an event;
+  - it lost no delivery, as a rate's clean pole requires (below);
+  - the owner was present, its instance token held, from the window's
+    start to its end. An owner that joined, left or re-minted while the
+    window listened is a new instance or a gap (§1.5, §8.1), so the window
+    is incomplete.
+
+  A member is live for one span after its last publication, so such a
+  window heard it. For a stream, a window counts the members heard within
+  one hour; for an event, the members with occurrences within the
+  retention. Two instants exactly one span apart are not within one span.
+- **Every other reading is incomplete.** A member it never heard may be
+  live: a sample lost, a publisher matched late, and a member quiet while
+  it listened look the same as no member.
   - A GET that ended at its timeout, or with an error reply.
-  - A subscription window. A member it never heard may be live: a sample
-    lost, a publisher matched late, and a member quiet while it listened
-    look the same as no member. For a stream, a window counts the members
-    heard within one hour; for an event, the members with occurrences
-    within the retention. Two instants exactly one period apart are not
-    within one period.
+  - A window shorter than one span, one that lost a delivery, or one over
+    which the owner was not present throughout.
   - An archive's answer, which is last-known (S6).
-- **A window shows no state population.** It hears puts and deletes, and a
-  delete it missed would count a member twice.
+- **A window shows no state population,** however long. It hears puts and
+  deletes, and a delete it missed would count a member twice.
 - **A refusal narrows even a complete reading** (§8.1, 0.8). A tool
   reports its count as what its reader could see.
 - **Spans.** A tool measures a rate's span between the occurrences'
@@ -487,8 +500,8 @@ period.
 | | Population | Rate (events) |
 |---|---|---|
 | **Finding** | more members than the bound, in any reading | `<n>` + 1 occurrences of one member less than the period apart, in any window |
-| **Clean** | at most the bound, in a complete reading with at least one member | a window at least one period long, no delivery lost, an occurrence heard, none beyond the rate |
-| **Unobservable** | at most the bound in an incomplete reading; no member at all, complete or not (O5); a reading that does not count the kind | a window shorter than one period; deliveries lost; no occurrence heard (O5) |
+| **Clean** | at most the bound, in a complete reading with at least one member: a state's complete GET, or a stream's or event's complete window | a window at least one period long, no delivery lost, an occurrence heard, none beyond the rate |
+| **Unobservable** | at most the bound in an incomplete reading: a GET that did not run to its final reply; a window that lost a delivery, was shorter than one span, or over which the owner was not present throughout; no member at all (O5); a reading that does not count the kind | a window shorter than one period; deliveries lost; no occurrence heard (O5) |
 | **Not asked** | the no-ceiling bound; a template without parameters; an operation | a resource that declares no rate |
 
 `[F: budget/]`
@@ -2891,8 +2904,10 @@ brief:
 - **`budget/`** (0.24): a bound from the contract's `cardinality` and
   each instance's stated one (`bounds.json`); a population's verdict and
   reason class from a kind, a bound and one reading (`population.json`);
-  a rate's from the occurrences a window heard (`rate.json`). Each file's
-  description states the order a reason is chosen in.
+  a rate's from the occurrences a window heard (`rate.json`). A window
+  case gives how long it listened, whether it lost a delivery, and whether
+  the owner was present throughout. Each file's description states the
+  order a reason is chosen in.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).
