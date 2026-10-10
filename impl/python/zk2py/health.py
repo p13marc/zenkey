@@ -404,7 +404,12 @@ class HealthOwner:
         if code_class(code) == "malformed":
             raise HealthRuleError(f"fault code {code!r} is not [a-z][a-z0-9_]* (§2.10)")
         at = self.clock_ns()
-        self.owner.publish(self.key("stream/faults"), fault(code, level, detail, at))
+        # §2.5 (0.2): "An owner that sets the stamp itself MAY, from the
+        # clock it mints its state stamps with". zk2py does when that clock
+        # is set apart from its session's (a test's offset clock), so the
+        # offset stamps its faults as it stamps its state.
+        stamp = self.owner.clock() if self.owner.clock is not None else None
+        self.owner.publish(self.key("stream/faults"), fault(code, level, detail, at), timestamp=stamp)
         self.faults.append({"code": code, "level": level, "detail": detail, "at_ns": at})
 
     # §2.5

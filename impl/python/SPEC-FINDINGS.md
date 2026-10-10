@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-one rounds.**
+**Twenty-two rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -37,9 +37,11 @@ where that was not enough, or where the spec said two things.
 - F-100 to F-102 were found against `freshness.v1`'s text 0.1, the second
   profile, read cold with core 0.21 and 0.22 (see "At 0.21–0.22:
   freshness.v1 0.1"). `freshness.v1` 0.2 resolved them.
-- **F-103 and F-104 are new**, found against `health.v1`'s text 0.1, the
-  third profile, read cold with core 0.23 and `freshness.v1` 0.2 (see "At
-  0.23: health.v1 0.1" at the end). Both are about its scenarios.
+- F-103 and F-104 were found against `health.v1`'s text 0.1, the third
+  profile, read cold with core 0.23 and `freshness.v1` 0.2 (see "At 0.23:
+  health.v1 0.1"). `health.v1` 0.2 resolved them.
+- Nothing new was found against `health.v1` 0.2, read and run live against
+  the Rust owner example (see "At health.v1 0.2" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -49,8 +51,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.23, hostid.v1 0.3, freshness.v1 0.2 and health.v1 0.1:**
-104 entries.
+**Counts at core 0.23, hostid.v1 0.3, freshness.v1 0.2 and health.v1 0.2:**
+104 entries, none open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -121,7 +123,12 @@ where that was not enough, or where the spec said two things.
     F-102: over one reading, the offset closest to zero decides, and a
     stamp ahead beyond the delta withdraws the trust. zk2py had trusted on
     any one put for the reader's life.
-- F-103 and F-104: **new**, two gaps against `health.v1` 0.1's scenarios.
+- F-103 and F-104: resolved by `health.v1` 0.2.
+  - F-103 kept zk2py's measurement and its check. Without root, the fault's
+    stamp is not checked. 0.2 adds a [moved clock] tier, which zk2py now
+    runs: an owner without an HLC, stamping from its offset clock.
+  - F-104 overturned zk2py's guess. The tool takes the deployment's word for
+    its clock, where zk2py had subscribed and measured.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
@@ -230,8 +237,8 @@ by the spec section that now states the rule.
 | F-100 | contradiction | resolved by freshness 0.2 | freshness.v1 0.1 §2.3 against §2.5 and judgements.json | "No value, no verdict … whatever the horizon: unobservable", yet a subscriber that heard nothing is stale past ttl, and fresh at ttl 0. |
 | F-101 | ambiguity | resolved by freshness 0.2 | freshness.v1 0.1 §2.7 and judgements.json's description, against §2.3 and §5 | A member of a resource with no horizon that nobody observed: unobservable (`no_observation`), or not asked? |
 | F-102 | gap | resolved by freshness 0.2 | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
-| F-103 | gap (measured) | **new** | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
-| F-104 | gap | **new** | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
+| F-103 | gap (measured) | resolved by health 0.2 | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
+| F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
 
 ---
 
@@ -3252,6 +3259,12 @@ HLC itself ahead, or how.
 fault arrives with a stamp that is not future-dated. Its report names the
 stamp's origin (the owner's session), and cites this entry.
 
+**Status at health 0.2: resolved by health 0.2, with zk2py's measurement.** §2.5: "A simulated offset is not a drift": a session whose HLC runs re-stamps a put given a stamp ahead of it, "measured at 2 s ahead on zenoh 1.10.1, from Rust … and from Python". Nothing a reader concludes rests on the fault's stamp. scenarios §4 marks the R1 re-stamp **[moved clock]**, with a new step 4 under `drop_future_timestamp`. A runner meets that tier "with an owner that stamps from its offset clock on a session without an HLC". zk2py now runs both tiers:
+- without root (`--only 4`), where it no longer checks the stamp;
+- [moved clock] (`--only 4m`), with a client owner whose session has no HLC (`Owner(hlc=False)`), its faults stamped from its offset clock (§2.5's MAY, which zk2py now takes when the owner's clock is set apart from its session's). R1 re-stamps the fault with its own zid. Under `drop_future_timestamp`, S receives neither the fault nor the status, and G's reply holds the status under the owner's stamp.
+
+py-live runs the same tier against the owner example under `--clock-offset-ms 2000`.
+
 ### F-104 · gap · health.v1 0.1 scenarios.md §5 to §7, with freshness.v1 0.2 §2.6: how the tool trusts its clock
 
 > scenarios.md §5: "A tool lists `zk2/p5/*/@zk/**` … then GETs each
@@ -3274,3 +3287,83 @@ subscribes and waits that long.
 owners start, as S does, and measures its clock from their first puts.
 The deployment's word would also do on one host, and the text does not
 say which of the two the scenarios mean.
+
+**Status at health 0.2: resolved by health 0.2, against zk2py's guess.** The conventions and §5 to §7's setups: "T takes the deployment's word, `freshness.v1` §2.6's ground 1: every session of a scenario runs on one host … T measures nothing, and its verdicts rest on no subscription." Measuring was "the other way", not chosen because it ties those sections to a start order and a 30 s wait. zk2py's T now reads by presence and GET alone, with `ClockTrust(word=True)` (`Bus.t_read`), and §5 to §7 pass so.
+
+## At health.v1 0.2: live against the Rust owner (#609)
+
+`health.v1` 0.2 resolves F-103 and F-104, and the Rust owner example now
+implements `health.v1`. zk2py drove it as a black box, by its flags and its
+stdin commands, as `--help` and the coordinator's brief describe them. It
+never read the example's source. The build used zk2py's own `target/`, with
+line tables only, since the disk is tight.
+
+**`just py-conformance`: 761 of 761**, unchanged: 0.2 changed no fixture.
+
+**`just py-health`: 29 of 29**, following 0.2.
+- §4 runs both tiers. Without root (`--only 4`) the stamp is not checked.
+  [moved clock] (`--only 4m`) runs an HLC-less client owner, whose fault R1
+  re-stamps with R1's zid, and step 4 under `drop_future_timestamp`.
+- §5 to §7's T reads by presence and GET, on the deployment's word.
+
+**`just py-live`: 303 passed, 0 failed, 0 known deviations.** The new run `health` adds 25 checks.
+- **The owner example's health** (`--health`, `lab/svc`), read by zk2py:
+  - a GET at its instance token answers its status, put before the
+    tokens;
+  - its descriptor lists `health.v1` in `interfaces`, and its `profiles` is
+    `["freshness.v1"]`, without `health.v1`;
+  - its bundle is revision 1.0, `sha256:e9dbcdcb…`, as zk2py builds it;
+  - T, on the deployment's word, judges it `healthy`, `ok`, with
+    `checks/disk` read.
+- **The order of its puts** (§2.2), driven over its stdin, as zk2py's S saw
+  it:
+  - a check worse than the status: the status first, raised (`raised_by=`
+    names the check), then the check;
+  - a check better, or retired: the check first (or its delete), then the
+    status;
+  - at no delivery is the latest status better than a current check;
+  - after each command, T's verdict follows: `unhealthy`, `failed` or
+    `degraded`, then `healthy`, `ok`.
+- **Faults:** an application's code is published, and `Bad-Code` is
+  refused with §2.10 cited, nothing published. `status BOGUS` is refused.
+- **Re-puts:** its status is re-put unchanged, 28.5 s after its last change.
+  After `confirm off` it is stale at 65 s, never `FAILED`, with its tokens
+  present.
+- **Clock ahead** (`--clock-reference`, `--clock-offset-ms 2000`, the
+  [moved clock] tier):
+  - its first status reaches S re-stamped by R1;
+  - on the heartbeat, `clock_ahead` at `FAILED` arrives, its detail naming
+    2000 ms, under R1's stamp, and again 28.5 s later;
+  - no status put is made while it holds, and at 65 s the status is
+    `stale` and the clock question answers yes;
+  - after `clock-offset 0`, the status is re-put within 0.8 s with no
+    fault after: `healthy`, and the clock question answers no.
+- **§4 step 4 under `drop_future_timestamp`:** S receives neither the fault
+  nor any status put. G's reply holds the status under the owner's stamp.
+- **The reverse.** The Rust `consume` example finds zk2py's health owner
+  present, and reads its status: the protobuf bytes of `FAILED`
+  "check disk: full", raised by the check, under zk2py's stamp. It then
+  stops with `NoResource`, since `health.v1` has no operation for its call
+  step, and it cannot name a member of `checks/{check}`.
+  - Nothing on the Rust side judges health yet: `zenctl health` comes with
+    chunk PF. zk2py could not check a Rust reader's verdicts on its owner.
+
+**What changed in zk2py.**
+- **`Owner(hlc=False)`** gives a client a session without an HLC, as a test
+  rig, and `publish` takes a stamp. `HealthOwner` stamps faults from the
+  owner's clock when it is set apart from its session's (§2.5's MAY).
+- `_r1(drop_future=True)` sets `timestamping.drop_future_timestamp`.
+- **The health scenarios** follow 0.2. `Bus.t_read` is T on the
+  deployment's word, and `section4m` is the [moved clock] tier.
+- **The live runner's Rust `Owner`** takes `flags`, and `command()` sends a
+  stdin command and reads its one answering line.
+
+**Observations, not findings.**
+- **The two runtimes differ in API, not on the wire.** The owner example
+  keeps a declared level and raises its status to the worst check by
+  itself, lowering it when the check recovers. zk2py raises it, and leaves
+  any lowering to the application. Both meet §2.2, whose "then the status,
+  if it improves" allows either.
+- **The `consume` example prints a protobuf state as its raw bytes,**
+  lossily decoded as UTF-8. It is a test harness's printer, not a tool's
+  rendering (core §7.2), so zk2py compares the bytes it can.

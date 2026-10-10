@@ -414,8 +414,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 278 passed, 0 failed, 0 known deviations of the Rust
-owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 303 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -551,7 +550,7 @@ it in as described below.
     example reads two different re-put stamps 1.5 s apart, then one once
     the writer closes.
 
-## health.v1 (profile text 0.1, core 0.23)
+## health.v1 (profile text 0.2, core 0.23)
 
 ```bash
 just py-health
@@ -579,10 +578,28 @@ described below.
   - faults with codes of §2.10's form;
   - `clock_ahead` when the guard first holds, every 30 s while it holds,
     and none after it releases (§2.5).
-- **`python -m zk2py.health_scenarios`** runs scenarios.md §1 to §8, 28
-  of 28, on in-process zenoh-python routers. §2, §4 and §8 wait out the
+- **`python -m zk2py.health_scenarios`** runs scenarios.md §1 to §8,
+  29 of 29, on in-process zenoh-python routers. §2, §4 and §8 wait out the
   60 s horizon. §6's archive is a stand-in, and §8's face is a router with
   usrpwd and access control.
+  - §4 runs 0.2's two tiers. Without root (`--only 4`) the fault's stamp is
+    not checked. In [moved clock] (`--only 4m`), an owner client without an
+    HLC (`Owner(hlc=False)`) stamps from its offset clock, so R1 re-stamps
+    its fault. Step 4 runs under `drop_future_timestamp`.
+  - §5 to §7's tool T reads by presence and GET, on the deployment's word
+    for its clock (0.2).
+- **Across the two implementations** (`just py-live`, `--only health`):
+  - zk2py reads the owner example's health (`--health`). Its puts are
+    driven over its stdin, and their order is seen by zk2py's subscriber.
+    T judges after each command;
+  - its faults are seen, and a malformed code is refused;
+  - its status is re-put, and goes stale after `confirm off`;
+  - `clock_ahead` under `--clock-offset-ms 2000`, in the [moved clock]
+    tier, re-stamped by R1, with the status stale at 65 s. After
+    `clock-offset 0` there is a re-put and no fault;
+  - §4 step 4 runs under `drop_future_timestamp`;
+  - the Rust `consume` example reads zk2py's health status, and stops at
+    its operation step, since `health.v1` has none.
 
 ## What it does not cover
 

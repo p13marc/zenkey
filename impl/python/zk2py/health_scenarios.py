@@ -1,4 +1,5 @@
-"""The ``health.v1`` scenarios (``spec/profiles/health/scenarios.md``) on
+"""The ``health.v1`` scenarios (``spec/profiles/health/scenarios.md``, text
+0.2) on
 in-process zenoh-python routers: ``python -m zk2py.health_scenarios
 [--only 1 …]``.
 
@@ -14,13 +15,16 @@ in-process zenoh-python routers: ``python -m zk2py.health_scenarios
   (freshness.v1 §2.6, ground 2). "Judges" is :func:`zk2py.health.judge`
   over :func:`zk2py.health.read_near`.
 - **The horizon** is 60 s, so §2, §4 and §8 wait it out: about 70 s, 100 s
-  and 200 s (§8's two runs side by side).
-- **A clock ahead** (§4) is the owner's ``clock``, offset 2 s: zenoh-python
-  cannot move a session's HLC, and its own session re-stamps a put given a
-  stamp beyond its delta (SPEC-FINDINGS F-103).
-- **The tool T** of §5 to §7 reads with a subscription declared before the
-  owners start, from which its clock is measured: the text does not say
-  how a GET-only tool trusts its clock (SPEC-FINDINGS F-104).
+  and 200 s (§8's two runs side by side). §4's [moved clock] tier waits
+  seconds.
+- **A clock ahead** (§4) is the owner's ``clock``, offset 2 s, in both of
+  0.2's tiers. Without root (``--only 4``), on a session whose HLC runs: the
+  fault's stamp is not checked. [moved clock] (``--only 4m``): an owner
+  client whose session has no HLC (``hlc=False``), stamping its puts and its
+  faults from the offset clock, so they reach R1 dated ahead, and step 4
+  under ``drop_future_timestamp``.
+- **The tool T** of §5 to §7 reads by presence and GET alone, and takes the
+  deployment's word for its clock (freshness.v1 §2.6, ground 1; 0.2).
 - **§6's archive** is a stand-in that records the owner's
   ``health.v1/state/**`` and answers its archive form with core §4.4's
   attachment. It is not ``archive.v1``, which no text defines.
@@ -126,9 +130,16 @@ class Bus:
         self.owners.append(o)
         return o
 
-    def read(self, address: str, s: fr.Subscriber | None = None, get: bool = True):
+    def read(self, address: str, s: fr.Subscriber | None = None, get: bool = True,
+             trust: fr.ClockTrust | None = None):
         return h.read_near(self.t_session if s is None else self.g_session, address, subscriber=s,
-                           trust=self.trust, get=get)
+                           trust=self.trust if trust is None else trust, get=get)
+
+    def t_read(self, address: str):
+        """T in §5 to §7 (0.2): presence and GET, on the deployment's word
+        for its clock (freshness.v1 §2.6, ground 1). Every session here runs
+        on one host, whose one clock keeps the word."""
+        return h.read_near(self.t_session, address, trust=fr.ClockTrust(word=True))
 
     def close(self) -> None:
         for s in self.subs:
@@ -435,15 +446,9 @@ def section4(report: Report) -> None:
                           "FAILED, its detail naming the offset",
                      len(first) >= 1 and first[0][1]["level"] == h.FAILED and "2." in first[0][1]["detail"],
                      str([f for _, f in faults]))
-        if first:
-            r0 = first[0][0]
-            report.check(sec, "step 2: the fault arrives with a stamp that is not future-dated. Here it is the "
-                              "owner's session's own, since a simulated offset cannot move that session's HLC, so R1 "
-                              "has nothing to re-stamp; the text expects R1's (SPEC-FINDINGS F-103)",
-                         r0.stamp_ns is not None and abs(r0.receipt_utc_ns - r0.stamp_ns) < 500_000_000,
-                         f"stamp id {r0.stamp_id} (owner {zid is not None and _zid(r0.stamp_id) == zid}, R1 "
-                         f"{_zid(r0.stamp_id) == _zid(bus.r1_zid)}), "
-                         f"{(r0.receipt_utc_ns - r0.stamp_ns) / fr.NS if r0.stamp_ns else None} s before receipt")
+        # Without root (0.2), "the fault's stamp is the owner's honest one,
+        # set or re-stamped by its own session (v1.md §2.5), and is not
+        # checked": S judges nothing by it.
         _sleep_until(t_det + 65 * fr.NS)
         puts_after = [r for r in s.of(sk) if r.kind == "put" and r.arrival_ns > t_det]
         ahead_faults = [r for r, f in ((r, h.decode_fault(r.payload)) for r in s.of(fk)) if f and f["code"] == "clock_ahead"]
@@ -492,6 +497,75 @@ def section4(report: Report) -> None:
         bus.close()
 
 
+def section4m(report: Report) -> None:
+    """§4's [moved clock] expectations (0.2): an owner that stamps from its
+    offset clock on a session without an HLC, as a client's is by default
+    (core §4.1), so its puts reach R1 dated 2 s ahead."""
+    from . import live
+    from .live_interop import _r1
+
+    sec = "§4 clock ahead [moved clock]"
+    beat = "zk2py/health/heartbeat"
+
+    def run(drop: bool):
+        r1, ep, r1_zid = _r1(drop_future=drop)
+        s_sess, g_sess = live.open_client(ep), live.open_client(ep)
+        s = fr.Subscriber(s_sess, "zk2/lab/ahead/health.v1/**")
+        time.sleep(0.2)
+        off = Offset(2 * fr.NS)
+        o = h.HealthOwner("lab", "ahead", connect=ep, level=h.OK, reason="serving", heartbeat=beat, hlc=False,
+                          clock_ns=off.ns_now)
+        o.owner.clock = off.clock(o.owner)
+        stop = threading.Event()
+        try:
+            o.start()
+            time.sleep(0.5)
+            got_status = [r for r in s.of(o.status_key) if r.kind == "put"]
+
+            def beats() -> None:
+                while not stop.wait(0.3):
+                    g_sess.put(beat, b"beat")
+
+            threading.Thread(target=beats, daemon=True).start()
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not o.owner.ahead:
+                time.sleep(0.05)
+            t_det = time.monotonic_ns()
+            time.sleep(1.0 if not drop else 3.0)
+            faults = [(r, h.decode_fault(r.payload)) for r in s.of(o.key("stream/faults"))]
+            st = live.get_state(g_sess, o.status_key)
+            return dict(ahead=o.owner.ahead, status=got_status, faults=faults, t_det=t_det, r1=r1_zid,
+                        owner=str(o.owner.session.zid()), get=st.replies,
+                        puts=[r for r in s.of(o.status_key) if r.kind == "put"])
+        finally:
+            stop.set()
+            o.close()
+            s.close()
+            s_sess.close()
+            g_sess.close()
+            r1.close()
+
+    a = run(drop=False)
+    report.check(sec, "steps 1 and 2: S receives the status, the owner reports itself ahead, and within 1 s S "
+                      "receives clock_ahead at FAILED whose stamp is not the owner's: R1 re-stamped a future-dated "
+                      "put (core §4.1)",
+                 a["ahead"] and a["status"] and len(a["faults"]) >= 1 and a["faults"][0][1]["code"] == "clock_ahead"
+                 and a["faults"][0][1]["level"] == h.FAILED
+                 and a["faults"][0][0].arrival_ns <= a["t_det"] + fr.NS
+                 and _zid(a["faults"][0][0].stamp_id) == _zid(a["r1"]) != _zid(a["owner"]),
+                 f"status {len(a['status'])}, fault stamp id "
+                 f"{a['faults'][0][0].stamp_id if a['faults'] else None}, R1 {a['r1']}, owner {a['owner']}")
+    b = run(drop=True)
+    gets = [(x.stamp_id, h.decode_status(x.payload)) for x in b["get"]]
+    report.check(sec, "step 4: under drop_future_timestamp, S receives neither the fault nor the status put while "
+                      "the owner was ahead: R1 dropped both; G's reply holds the status under the owner's stamp, "
+                      "since a router never drops or re-stamps a reply (core §4.1)",
+                 b["ahead"] and not b["faults"] and not b["puts"] and len(gets) == 1
+                 and _zid(gets[0][0]) == _zid(b["owner"]) and gets[0][1] is not None and gets[0][1]["level"] == h.OK,
+                 f"ahead {b['ahead']}, {len(b['faults'])} faults, {len(b['puts'])} status puts; GET {gets}; owner "
+                 f"{b['owner']}")
+
+
 # -- §5 ------------------------------------------------------------------------------
 
 def section5(report: Report, n: int = 100) -> None:
@@ -502,12 +576,6 @@ def section5(report: Report, n: int = 100) -> None:
     bus = Bus()
     try:
         nav = load_contract(NAV)
-        # The tool's GETs need a trusted clock, which the text does not say
-        # how it gets: it measures from a subscription declared before the
-        # owners start, as S does (SPEC-FINDINGS F-104).
-        s = fr.Subscriber(bus.s_session, "zk2/p5/*/health.v1/state/status", bus.trust)
-        bus.subs.append(s)
-        time.sleep(0.2)
         for i in range(n):
             bus.owner(f"p5/dev{i}", level=h.OK, reason="serving", contracts=[nav], tokenless={"health.v1"})
         time.sleep(1.5)
@@ -523,7 +591,7 @@ def section5(report: Report, n: int = 100) -> None:
         answers = []
         tokenless = 0
         for i in range(n):
-            r, info = h.read_near(bus.t_session, f"p5/dev{i}", subscriber=s, trust=bus.trust)
+            r, info = bus.t_read(f"p5/dev{i}")
             tokenless += int(r.descriptor == {"lists": True, "token": False})
             answers.append(h.judge(r))
         healthy = sum(1 for a in answers if a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"})
@@ -615,7 +683,6 @@ def section6(report: Report) -> None:
     sec = "§6 an absent owner"
     bus = Bus()
     try:
-        s = bus.subscriber("lab/svc")
         o = bus.owner("lab/svc", level=h.DEGRADED, reason="upstream lost")
         status_r = next(r for r in o.contract.canonical["resources"] if r["template"] == "status")
         archive = StandInArchive(bus.endpoint, "lab/archive", "zk2/lab/svc/health.v1/state/**",
@@ -623,14 +690,14 @@ def section6(report: Report) -> None:
                                   "type": status_r["type"]})
         bus.extra.append(archive)
         time.sleep(0.5)
-        r1, _ = bus.read("lab/svc", s)
+        r1, _ = bus.t_read("lab/svc")
         a1 = h.judge(r1)
         report.check(sec, "step 1: unhealthy, degraded",
                      a1.expect() == {"verdict": "unhealthy", "reason": "degraded", "level": "degraded"}, _answer(a1))
         o.close()
         bus.owners.remove(o)
         time.sleep(1.0)
-        r3, info = bus.read("lab/svc", s)
+        r3, info = bus.t_read("lab/svc")
         form = archive.form(o.status_key)
         got: list[Any] = []
         done = threading.Event()
@@ -667,7 +734,6 @@ def section7(report: Report) -> None:
     sec = "§7 an inconsistent status, for a tool"
     bus = Bus()
     try:
-        s_l, s_f = bus.subscriber("lab/liar"), bus.subscriber("lab/frank")
         liar = bus.owner("lab/liar", level=h.OK, reason="fine")
         # It breaks §2.2 on purpose, past HealthOwner's own refusal.
         liar.owner.set_state(liar.check_key("disk"), h.check(h.FAILED, "full", time.time_ns()))
@@ -678,8 +744,8 @@ def section7(report: Report) -> None:
         for i in range(2):
             if i:
                 time.sleep(2.0)
-            for addr, s in (("lab/liar", s_l), ("lab/frank", s_f)):
-                r, _ = bus.read(addr, s)
+            for addr in ("lab/liar", "lab/frank"):
+                r, _ = bus.t_read(addr)
                 rows[addr].append((h.judge(r), h.status_agrees(r)))
         liar_ok = all(a.expect() == {"verdict": "unhealthy", "reason": "inconsistent", "level": "failed"} and ag == "no"
                       for a, ag in rows["lab/liar"])
@@ -789,8 +855,8 @@ def section8(report: Report, wait_s: float = 65.0) -> None:
         t.join()
 
 
-SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8}
+SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "4m": section4m, "5": section5,
+            "6": section6, "7": section7, "8": section8}
 
 
 def main(argv: list[str] | None = None) -> int:

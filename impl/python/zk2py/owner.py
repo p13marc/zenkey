@@ -266,7 +266,7 @@ class Owner:
                  router_connect: str | None = None, hostid: Any = None,
                  hostid_ephemeral: bool | None = None, meta_host: str | None = None,
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
-                 initial: dict[str, bytes] | None = None):
+                 initial: dict[str, bytes] | None = None, hlc: bool = True):
         """A router listening on ``port`` (a free loopback port by default),
         or, with ``connect``, a client of that router endpoint.
         - ``bindings``: a role's configured providers (R1); a role left out
@@ -308,6 +308,11 @@ class Owner:
           raises :class:`ClockAhead`, and no re-put is made
           (freshness.v1 §2.10).
 
+        - ``hlc``: False runs a client's session without its HLC, a test
+          rig only: core §4.3 asks every serving session for one. Its puts
+          then leave with the stamps the owner gives them, so an offset
+          ``clock`` reaches the router dated ahead (health.v1 scenarios §4,
+          the [moved clock] tier, 0.2).
         - ``initial``: state values held at start, by key relative to the
           address (``health.v1/state/status``), put with the others before
           the tokens (§8.2 "State values"; a MUST for health.v1's status,
@@ -375,6 +380,7 @@ class Owner:
         self._stop = threading.Event()
         self._refresher: threading.Thread | None = None
         self.initial = dict(initial or {})
+        self.hlc = hlc
         #: called with (held, offset in ns) on each of the guard's transitions
         self.on_guard: Any = None
 
@@ -482,7 +488,8 @@ class Owner:
                 conf.insert_json5("connect/endpoints", json.dumps([self.router_connect]))
         conf.insert_json5("scouting/multicast/enabled", "false")
         # §4.3: "A session that serves state MUST enable Zenoh's HLC."
-        conf.insert_json5("timestamping/enabled", "true")
+        # Only a client test rig turns it off (``hlc``).
+        conf.insert_json5("timestamping/enabled", "true" if self.hlc or not self.connect else "false")
         self.session = zenoh.open(conf)
         try:
             self._bring_up(plan)
@@ -728,10 +735,14 @@ class Owner:
                     self._held[key] = _Held(held.payload, held.encoding, stamp, time.monotonic())
                     self.reputs.append((key, stamp))
 
-    def publish(self, key: str, payload: bytes) -> None:
+    def publish(self, key: str, payload: bytes, timestamp: zenoh.Timestamp | None = None) -> None:
         """Put a stream sample on its declared publisher, with the
-        resource's Encoding (§7.2)."""
-        self._publishers[key].put(payload, encoding=self._encodings[key])
+        resource's Encoding (§7.2), stamped ``timestamp`` when given (else
+        by the session, core §4.1)."""
+        if timestamp is None:
+            self._publishers[key].put(payload, encoding=self._encodings[key])
+        else:
+            self._publishers[key].put(payload, encoding=self._encodings[key], timestamp=timestamp)
 
     # -- the consumer's side (§3.2) ---------------------------------------
 
