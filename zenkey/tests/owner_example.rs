@@ -382,11 +382,18 @@ async fn the_owner_example_implements_health() {
     assert_eq!(line(&o.lines).await, format!("connected {ep}"));
     let ready = line(&o.lines).await;
     let instance = ready.rsplit('/').next().unwrap().parse().unwrap();
-    let d = presence::descriptor(&tool, &"ex/healthy".parse().unwrap(), &instance, T)
-        .await
-        .unwrap()
-        .into_descriptor()
-        .unwrap();
+    // `ready` comes before the declarations reach R1: wait for the
+    // descriptor, which follows the state queryables (§8.2).
+    let addr = "ex/healthy".parse().unwrap();
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
     let e = d
         .interfaces
         .iter()

@@ -10,8 +10,14 @@
 //! this host's monotonic clock, key, kind, payload, stamp), with a
 //! consumer's subscription on the status for its freshness and its clock
 //! measurement; G GETs the owner's `health.v1/state/**` as core S4 says
-//! (target `All`, consolidation `Latest`). Every verdict is
-//! `zenkey_model::health::judge`'s.
+//! (target `All`, consolidation `Latest`), its clock measured from S's
+//! deliveries; T, in §5, takes the deployment's word for its clock (text
+//! 0.2). Every verdict is `zenkey_model::health::judge`'s.
+//!
+//! §4's **[moved clock]** expectations (text 0.2) are met as the text says
+//! the reference meets them: the owners are clients, whose HLC is off, and
+//! the runtime stamps every fault from its offset clock, so a fault reaches
+//! R1 dated 2 s ahead, as from a clock that is.
 //!
 //! The horizon is the contract's 60 s: §2 and §4 wait it out (about 70 s
 //! and 100 s), §1 waits one confirmation interval (35 s).
@@ -259,15 +265,25 @@ fn verdict(j: Judged) -> (Verdict, Reason, Option<Level>) {
 }
 
 /// A present owner whose descriptor lists `health.v1`, as a tool reads it
-/// (§2.7): through its instance token and descriptor.
+/// (§2.7): through its instance token and descriptor. Every caller expects
+/// the owner present, so the read waits for its instance token to reach
+/// the tool: a start returns before its declarations reach R1.
 async fn presence_of(tool: &zenoh::Session, address: &str) -> Presence {
-    let tokens = presence::tokens(tool, &format!("zk2/{address}/@zk/**"), T)
-        .await
-        .unwrap();
-    let Some(instance) = tokens.iter().find_map(|k| match k {
-        ZkKey::Instance { instance, .. } => Some(instance.clone()),
-        _ => None,
-    }) else {
+    let instance = || async {
+        presence::tokens(tool, &format!("zk2/{address}/@zk/**"), T)
+            .await
+            .unwrap()
+            .into_iter()
+            .find_map(|k| match k {
+                ZkKey::Instance { instance, .. } => Some(instance),
+                _ => None,
+            })
+    };
+    eventually("the owner's instance token", || async {
+        instance().await.is_some()
+    })
+    .await;
+    let Some(instance) = instance().await else {
         return Presence::Absent;
     };
     let d = presence::descriptor(tool, &addr(address), &instance, T)
@@ -715,8 +731,11 @@ async fn s3_the_checks_bound() {
         Err(zenkey::Error::Contract(_))
     ));
     let svc = b.start().await.unwrap();
-    let got = split(get_state(&rs, "lab/many").await);
-    assert_eq!(got.checks.len(), 64);
+    // The GET waits for the owner's queryable to reach R1.
+    eventually("the 64 checks answer", || async {
+        split(get_state(&rs, "lab/many").await).checks.len() == 64
+    })
+    .await;
     svc.close().await.unwrap();
 
     let (mut b, h) = owner(&os, config("lab/few")).await;
@@ -736,6 +755,10 @@ async fn s3_the_checks_bound() {
         (Some(Level::Ok), None, None),
         "UNSPECIFIED bounds nothing"
     );
+    eventually("the owner answers", || async {
+        split(get_state(&rs, "lab/few").await).status.is_some()
+    })
+    .await;
     let got = split(get_state(&rs, "lab/few").await);
     assert_eq!(got.checks["a"].as_ref().unwrap().read(), Read::Unspecified);
     assert_eq!(got.status.unwrap().1.read(), Read::Level(Level::Ok));
@@ -744,9 +767,10 @@ async fn s3_the_checks_bound() {
     svc.close().await.unwrap();
 }
 
-/// §4: a clock 2 s ahead: `clock_ahead` at the first hold, re-stamped by
-/// R1, again within a status interval; the status stale, never FAILED;
-/// after the correction, the status re-put and no more faults.
+/// §4, steps 1 to 3: a clock 2 s ahead: `clock_ahead` at the first hold,
+/// re-stamped by R1 ([moved clock], the module doc), again within a status
+/// interval; the status stale, never FAILED; after the correction, the
+/// status re-put and no more faults.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_clock_ahead() {
     let (r1, ep) = router(None).await;
@@ -796,7 +820,7 @@ async fn s4_clock_ahead() {
     assert_eq!(
         first.stamp_id(),
         r1.zid().to_string(),
-        "R1 re-stamped the future-dated fault (core §4.1)"
+        "[moved clock] R1 re-stamped the future-dated fault (core §4.1)"
     );
     assert_ne!(first.stamp_id(), owner_zid);
     assert!(set_status_refused(&h).await, "the guard holds state writes");
@@ -880,13 +904,13 @@ async fn set_status_refused(h: &Health) -> bool {
     )
 }
 
-/// §4, what the text leaves to zenoh, measured. A fault carries the owner's
-/// clock as its stamp (v1.md §2.5): a router with
-/// `timestamping.drop_future_timestamp` drops a fault from a clock beyond
-/// its delta, and the status puts made before the guard tripped too, so S
-/// hears nothing while the owner's GET still answers its status. An owner
-/// whose own session runs its HLC, as the owner example's `--connect` does,
-/// has its session re-stamp the simulated offset before R1 sees it.
+/// §4, step 4 ([moved clock]): R1 under `timestamping.drop_future_timestamp`
+/// drops the fault from a clock ahead, and the status put while ahead, so
+/// S hears nothing, while G's GET still answers the status under the
+/// owner's stamp. Then v1.md §2.5's "a simulated offset is not a drift"
+/// (text 0.2), measured: an owner whose own session runs its HLC has that
+/// session re-stamp the offset clock's stamp before R1 sees it, so without
+/// root the fault arrives under the owner's honest stamp.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_the_faults_stamp_measured() {
     // drop_future_timestamp: nothing of the owner ahead reaches S.
@@ -907,10 +931,10 @@ async fn s4_the_faults_stamp_measured() {
         h.is_clock_ahead()
     })
     .await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
     assert!(
         snapshot(&log).is_empty(),
-        "R2 drops the fault and the future-dated status: {:#?}",
+        "a router under drop_future_timestamp drops the fault and the future-dated status: {:#?}",
         snapshot(&log)
     );
     let got = split(get_state(&rs, "lab/ahead").await);
@@ -999,16 +1023,14 @@ async fn nav_builder(
 
 /// §5: 100 services with `health.v1` tokenless: 200 tokens, none of them
 /// `health.v1`'s, and every service found by its descriptor and judged
-/// healthy.
+/// healthy. T reads by GET alone, on the deployment's word for its clock
+/// (the conventions, 0.2: one host, one clock).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s5_a_tokenless_set_of_100() {
     const N: usize = 100;
     let (_r1, ep) = router(None).await;
     let tool = client(&ep).await;
     let host = client(&ep).await;
-    let host_zid = host.zid().to_string();
-    let c = reader(&tool, "p5/*");
-    let sub = watch_status(&c).await;
     let mut services = Vec::new();
     for i in 0..N {
         let cfg = config(&format!("p5/dev{i}")).tokenless(health::iface());
@@ -1043,12 +1065,11 @@ async fn s5_a_tokenless_set_of_100() {
         "the second read finds nothing"
     );
 
-    // Each descriptor, then each listed service's health.v1/state/**.
-    eventually("S measured the host's clock", || async {
-        !sub.members().is_empty()
-    })
-    .await;
-    let trust = sub.clock_trust(&host_zid, DEFAULT_DELTA);
+    // Each descriptor, then each listed service's health.v1/state/**,
+    // judged on the deployment's word (freshness.v1 §2.6, ground 1).
+    let trust = ClockTrust::Trusted {
+        delta: DEFAULT_DELTA,
+    };
     let mut healthy = 0;
     for k in &all {
         let ZkKey::Instance { addr: a, instance } = k else {
