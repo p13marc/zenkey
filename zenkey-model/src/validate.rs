@@ -405,10 +405,15 @@ mod tests {
     use crate::bundle::Bundle;
 
     fn bundle(toml: &str, files: &[(&str, &str)]) -> Bundle {
+        // A directory per call: tests building the same contract run at
+        // once, and one truncating a file another reads made it read empty.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NTH: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "zk2-validate-{}-{}",
+            "zk2-validate-{}-{}-{}",
             std::process::id(),
-            toml.len()
+            toml.len(),
+            NTH.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
         for (name, text) in files {
