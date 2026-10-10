@@ -1,0 +1,149 @@
+{
+  "description": "core §2.7 (0.24), the bound: a templated resource's `cardinality` in the contract (`contract`, null for a template without parameters) and the value each instance exposing it states in its descriptor (`stated`, one entry per instance, null for none) → the bound a tool judges against (`expect.bound`): an integer, \"no_ceiling\" for 4294967295 from either source, or \"untemplated\". A stated value outside 1 to the contract's is D007's, and the contract's applies to that instance. Instances share one population, since a key names no instance: across them, the greatest bound applies.",
+  "cases": [
+    {
+      "note": "no descriptor states one: the contract's",
+      "contract": 64,
+      "stated": [],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "an instance that states none has the contract's",
+      "contract": 64,
+      "stated": [
+        null
+      ],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "a lowered bound applies",
+      "contract": 64,
+      "stated": [
+        32
+      ],
+      "expect": {
+        "bound": 32
+      }
+    },
+    {
+      "note": "the contract's own value, stated, is valid",
+      "contract": 64,
+      "stated": [
+        64
+      ],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "two instances (a re-mint's overlap): the greater",
+      "contract": 64,
+      "stated": [
+        16,
+        32
+      ],
+      "expect": {
+        "bound": 32
+      }
+    },
+    {
+      "note": "two instances, one stating none: the contract's",
+      "contract": 64,
+      "stated": [
+        32,
+        null
+      ],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "above the contract's is D007's: the contract's applies",
+      "contract": 64,
+      "stated": [
+        128
+      ],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "0 is D007's: the contract's applies",
+      "contract": 64,
+      "stated": [
+        0
+      ],
+      "expect": {
+        "bound": 64
+      }
+    },
+    {
+      "note": "a bound of 1",
+      "contract": 64,
+      "stated": [
+        1
+      ],
+      "expect": {
+        "bound": 1
+      }
+    },
+    {
+      "note": "the no-ceiling convention (§2.2)",
+      "contract": 4294967295,
+      "stated": [],
+      "expect": {
+        "bound": "no_ceiling"
+      }
+    },
+    {
+      "note": "an instance that knows its population lowers no ceiling to a bound (§2.2)",
+      "contract": 4294967295,
+      "stated": [
+        500
+      ],
+      "expect": {
+        "bound": 500
+      }
+    },
+    {
+      "note": "no ceiling, stated again: still none",
+      "contract": 4294967295,
+      "stated": [
+        4294967295
+      ],
+      "expect": {
+        "bound": "no_ceiling"
+      }
+    },
+    {
+      "note": "4294967295 stated under a larger contract bound reads as no ceiling",
+      "contract": 4294967296,
+      "stated": [
+        4294967295
+      ],
+      "expect": {
+        "bound": "no_ceiling"
+      }
+    },
+    {
+      "note": "a contract bound above 4294967295 is a bound like any other",
+      "contract": 4294967296,
+      "stated": [],
+      "expect": {
+        "bound": 4294967296
+      }
+    },
+    {
+      "note": "a template without parameters declares none",
+      "contract": null,
+      "stated": [],
+      "expect": {
+        "bound": "untemplated"
+      }
+    }
+  ]
+}

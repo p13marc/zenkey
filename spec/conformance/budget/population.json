@@ -1,0 +1,414 @@
+{
+  "description": "core §2.7 (0.24), a population: a resource's `kind`, its `bound` (an integer, \"no_ceiling\" or \"untemplated\"), an event's `retention_s`, and one reading → whether the instance holds more live members than its bound (`expect.verdict`: exceeds, within, unobservable or not_asked) and the reason class (`expect.reason`). A reading is an owner's S4 GET of a state resource (`via: get`: how many keys it answered with a value, and whether it ran to its final reply) or a subscription window over a stream or an event (`via: window`: per member, the seconds at which it was heard, on one clock). A window counts the most members heard within any span shorter than the liveness period, an hour for a stream and the retention for an event: two instants exactly one period apart are not within it. Reasons are chosen in this order: not_asked (kind: an operation; no_ceiling; untemplated); unobservable reading_kind (a window of a state, a GET of a stream or an event); exceeds over_bound (in any reading); unobservable empty (no member, O5); unobservable incomplete (a GET that did not run to its final reply) or window; within complete.",
+  "cases": [
+    {
+      "note": "a complete GET within the bound: clean",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 5,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "complete"
+      }
+    },
+    {
+      "note": "exactly the bound is within it",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 8,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "complete"
+      }
+    },
+    {
+      "note": "one more than the bound: the finding",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 9,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "an incomplete GET above the bound: a lower bound already exceeds it",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 9,
+        "complete": false
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "an incomplete GET within the bound: a member unanswered may be live",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 5,
+        "complete": false
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "incomplete"
+      }
+    },
+    {
+      "note": "a complete GET with no member: an empty reply set is never a verdict (O5)",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 0,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "empty"
+      }
+    },
+    {
+      "note": "an incomplete GET with no member",
+      "kind": "state",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 0,
+        "complete": false
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "empty"
+      }
+    },
+    {
+      "note": "the no-ceiling bound is not asked, however many members",
+      "kind": "state",
+      "bound": "no_ceiling",
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 100000,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "not_asked",
+        "reason": "no_ceiling"
+      }
+    },
+    {
+      "note": "a template without parameters is not asked",
+      "kind": "state",
+      "bound": "untemplated",
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 1,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "not_asked",
+        "reason": "untemplated"
+      }
+    },
+    {
+      "note": "a window shows no state population: a delete it missed would count a member twice",
+      "kind": "state",
+      "bound": 1,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            1
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "reading_kind"
+      }
+    },
+    {
+      "note": "a stream: more members heard within an hour than the bound",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            1,
+            2
+          ],
+          "b": [
+            0.5
+          ],
+          "c": [
+            1.5
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "a stream within the bound in its window: a window never shows a member it did not hear",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            1,
+            2
+          ],
+          "b": [
+            0.5
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window"
+      }
+    },
+    {
+      "note": "a stream whose members churn: three heard, never more than two within an hour",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            10
+          ],
+          "c": [
+            4000
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window"
+      }
+    },
+    {
+      "note": "the same churn against a bound of one: two within an hour",
+      "kind": "stream",
+      "bound": 1,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            10
+          ],
+          "c": [
+            4000
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "exactly an hour apart is not within one hour",
+      "kind": "stream",
+      "bound": 1,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            3600
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window"
+      }
+    },
+    {
+      "note": "a stream heard nothing: empty",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "window",
+        "heard": {}
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "empty"
+      }
+    },
+    {
+      "note": "a GET of a stream counts nothing (S4 is state's)",
+      "kind": "stream",
+      "bound": 2,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 3,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "reading_kind"
+      }
+    },
+    {
+      "note": "an event: more members with occurrences within the retention than the bound",
+      "kind": "event",
+      "bound": 2,
+      "retention_s": 86400,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            100
+          ],
+          "c": [
+            200
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "over_bound"
+      }
+    },
+    {
+      "note": "an event's members are live for its retention: never more than one within 60 s",
+      "kind": "event",
+      "bound": 1,
+      "retention_s": 60,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            61
+          ],
+          "c": [
+            130
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window"
+      }
+    },
+    {
+      "note": "an event within the bound in its window",
+      "kind": "event",
+      "bound": 4,
+      "retention_s": 3600,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0,
+            5
+          ],
+          "b": [
+            10
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window"
+      }
+    },
+    {
+      "note": "the no-ceiling bound on an event is not asked",
+      "kind": "event",
+      "bound": "no_ceiling",
+      "retention_s": 60,
+      "reading": {
+        "via": "window",
+        "heard": {
+          "a": [
+            0
+          ],
+          "b": [
+            1
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "not_asked",
+        "reason": "no_ceiling"
+      }
+    },
+    {
+      "note": "an operation's members are the values callers name: not asked",
+      "kind": "operation",
+      "bound": 8,
+      "retention_s": null,
+      "reading": {
+        "via": "get",
+        "members": 9,
+        "complete": true
+      },
+      "expect": {
+        "verdict": "not_asked",
+        "reason": "kind"
+      }
+    }
+  ]
+}

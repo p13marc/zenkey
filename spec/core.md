@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.23** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.24** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -16,9 +16,11 @@ what a tool needs that it cannot read off the bus, in 0.18 two words
 profiles live, in 0.20 a provider on the service's own system, the
 order of `profiles`, and a derived address, in 0.21 the first
 vocabulary a profile publishes, `freshness.v1`'s, with a re-put, in
-0.22 one major of a profile per contract, and in 0.23 what `health.v1`
+0.22 one major of a profile per contract, in 0.23 what `health.v1`
 needed: a clock ahead reported by a stream, and the first standard
-contract a profile publishes).
+contract a profile publishes, and in 0.24 the population budget: what a
+member and a live member are, what `rate` bounds, and what a tool
+concludes).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -300,6 +302,8 @@ without parameters MUST NOT declare it. An instance MAY declare a lower
 bound in its descriptor, from 1 to the contract's (§3.3). On an event,
 `cardinality` bounds the template's own parameters, and the key population
 is cardinality × rate × retention. `[F: contracts/e013-cardinality, e014-field]`
+What a member is, when one is live, and what a tool concludes from a
+reading are §2.7's (0.24).
 - **No ceiling.** A template whose population no contract can fix, such as
   an archive's `{origin...}` (§4.4), still declares a cardinality. By
   convention it declares **4294967295** (2^32−1), which reads "no ceiling".
@@ -370,9 +374,10 @@ subtree.
   a one-shot put, on `…/<iface>/events/<template>/<ulid>`. The last chunk is
   a lowercase ULID (§1.2) minted by the owner. A reader strips it before
   resolving the template. `[F: keys.json]`
-- **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`.
-  **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`. Both are
-  required on an event. `[F: contracts/e015-event, e026-rate]`
+- **`rate`** is `rare` (at most 1/h), `low` (at most 1/min) or `burst(<n>/h)`,
+  for each member of the template, within any period that long (§2.7,
+  0.24). **`retention`** is `<n>` followed by `s`, `m`, `h`, `d` or `w`.
+  Both are required on an event. `[F: contracts/e015-event, e026-rate]`
   - In a rate, `<n>` is decimal without a leading zero, from 1 to 2^32−1:
     the canonical form keeps the rate's text, so `burst(012/h)` would be a
     second spelling.
@@ -393,6 +398,100 @@ subtree.
   retention. Enforcing the bound needs a time-series backend, or a filter on
   the consumer's side: the storage manager's memory backend ignores `_time`
   (spike S5). `[Sc: state.md §8]`
+
+### 2.7 The population budget
+
+A templated resource's `cardinality` (§2.2) is a budget the owner keeps,
+and a tool can see broken (0.24). It counts members, not tokens: the
+presence budget (§8.3) is another. `[F: budget/]`
+
+- **The bound.** In an instance, a templated resource's bound is the
+  `cardinality` its descriptor states for it (§3.3), else the contract's.
+  - A stated value outside 1 to the contract's is D007's, and does not
+    apply: the contract's does.
+  - The no-ceiling value, 4294967295, is no bound, from either source
+    (§2.2).
+  - **One service, one population.** A key names no instance (§1.1), so
+    the members of a resource are the service's. At most one instance
+    exposes it (§6), and a re-mint's overlap shows two instances holding
+    the same members. A tool judges them against the greatest bound among
+    the instances whose descriptors expose the resource.
+
+  `[F: budget/bounds.json]`
+- **A member** is one value of the template's parameters: a key, for a
+  stream or a state; for an event, its key without the ULID chunk (§2.6).
+- **The owner's rule.** An owner MUST NOT hold more live members of a
+  templated stream, state or event than its bound. A member is **live**:
+  - **state:** while its key has a value. A deleted key is not live;
+  - **stream:** for an hour after the owner last published on it;
+  - **event:** for the retention after its last occurrence.
+
+  `[F: budget/population.json]`
+  - **Why an hour.** A stream has no delete, so when a member stops
+    existing is the owner's knowledge and never the reader's. A reader
+    that forgets a stream member after an hour of silence holds at most
+    the bound. "Since the instance started" was rejected: an owner whose
+    entities churn, such as interfaces created and destroyed, would
+    exceed any bound in a long run, and could keep it only by minting
+    instances it does not need (§1.5). An hour is the longest period the
+    core already names (`rare`, `burst`).
+- **An operation's** `cardinality` (E013 requires one on a template) is
+  the population of values its owner serves calls for. No reading of the
+  owner counts it, since the values are the callers', so it is not judged
+  at this version.
+- **`rate` bounds each member** (§2.6): at most one occurrence of a member
+  within any hour (`rare`), within any minute (`low`), or `<n>` within any
+  hour (`burst(<n>/h)`). An owner MUST NOT publish more: `<n>` + 1
+  occurrences of one member less than the period apart break it.
+  `[F: budget/rate.json]`
+  - **Per member, because** §2.2 already states an event's key population
+    as cardinality × rate × retention, which holds only when each member
+    has the rate. A rate per template would make it rate × retention.
+  - An owner keeps it by counting its own occurrences per member, and a
+    tool measures it from keys alone: the ULID stripped and the template
+    resolved (§2.2). A rate per instance could not be measured, since a
+    key names no instance, and a re-mint does not reset it.
+  - A template without parameters has one member, so its rate bounds the
+    resource.
+
+**What a tool reads.**
+- **A complete reading** of a state resource is an S4 GET to its owner
+  (§4.2) that ran to its final reply, with no error reply: a GET that
+  reached its timeout ends with one (Appendix B). Its members are the
+  keys answered with a value. A `reply_del` is not a member.
+- **Every other reading is incomplete.**
+  - A GET that ended at its timeout, or with an error reply.
+  - A subscription window. A member it never heard may be live: a sample
+    lost, a publisher matched late, and a member quiet while it listened
+    look the same as no member. For a stream, a window counts the members
+    heard within one hour; for an event, the members with occurrences
+    within the retention. Two instants exactly one period apart are not
+    within one period.
+  - An archive's answer, which is last-known (S6).
+- **A window shows no state population.** It hears puts and deletes, and a
+  delete it missed would count a member twice.
+- **A refusal narrows even a complete reading** (§8.1, 0.8). A tool
+  reports its count as what its reader could see.
+- **Spans.** A tool measures a rate's span between the occurrences'
+  timestamps when they carry one clock id (a session with its HLC enabled
+  stamps every put, §4.1), and on its receive clock otherwise, where
+  transit can shorten a span. A population's spans are on the tool's
+  receive clock, which every member shares.
+
+**What a tool concludes.** The question is "does this instance exceed its
+budget here?", per templated resource, and the finding is the yes. A
+lower bound that already exceeds the bound is a finding, so a finding
+needs no complete reading, and a rate's needs no window of a whole
+period.
+
+| | Population | Rate (events) |
+|---|---|---|
+| **Finding** | more members than the bound, in any reading | `<n>` + 1 occurrences of one member less than the period apart, in any window |
+| **Clean** | at most the bound, in a complete reading with at least one member | a window at least one period long, no delivery lost, an occurrence heard, none beyond the rate |
+| **Unobservable** | at most the bound in an incomplete reading; no member at all, complete or not (O5); a reading that does not count the kind | a window shorter than one period; deliveries lost; no occurrence heard (O5) |
+| **Not asked** | the no-ceiling bound; a template without parameters; an operation | a resource that declares no rate |
+
+`[F: budget/]`
 
 ---
 
@@ -526,7 +625,8 @@ gate does not name.
   (§8.1), and `true` otherwise, which is the default.
 - **`cardinality`** MAY lower a template's bound for this instance, keyed
   `<kind token>/<template>`, to a value from 1 to the contract's. It MUST
-  NOT raise it. `[F: descriptors/d007-*]`
+  NOT raise it. `[F: descriptors/d007-*]` The bound it states is the one
+  the instance's owner keeps, and a tool judges against (§2.7, 0.24).
 - **Integers.** As in a contract (§9.1), the schema's `format` is a bound,
   not an annotation. Here `uint64` is 0 to 2^64−1, a JSON number with no
   TOML limit, for `minor` and every `cardinality` value. A value outside it
@@ -2704,6 +2804,7 @@ Appendix B. These are the ones the rules above cite:
 | `conformance/history/` | §9.7 |
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
+| `conformance/budget/` | §2.7 (0.24) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4 |
@@ -2787,6 +2888,11 @@ brief:
   (descriptors).
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
   value. The tags' meanings are §9.6's, §9.7's and §5.2's.
+- **`budget/`** (0.24): a bound from the contract's `cardinality` and
+  each instance's stated one (`bounds.json`); a population's verdict and
+  reason class from a kind, a bound and one reading (`population.json`);
+  a rate's from the occurrences a window heard (`rate.json`). Each file's
+  description states the order a reason is chosen in.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).
