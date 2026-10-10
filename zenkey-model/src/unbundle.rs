@@ -265,8 +265,9 @@ mod tests {
     }
 
     /// The round trip is the test: for every valid contract of the
-    /// conformance set and the examples, the model read back from its
-    /// bundle builds the same bundle, byte for byte.
+    /// conformance set, the examples and the profiles' standard contracts
+    /// (`health.v1`, #721), the model read back from its bundle builds the
+    /// same bundle, byte for byte.
     #[test]
     fn a_bundle_round_trips_through_its_model() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -274,6 +275,7 @@ mod tests {
         tomls(&root.join("spec/conformance/contracts"), "ok-", &mut files);
         let ok = files.len();
         tomls(&root.join("examples/zk2"), "", &mut files);
+        tomls(&root.join("spec/profiles"), "", &mut files);
         assert!(ok >= 10 && files.len() >= ok + 24, "{} files", files.len());
         for p in files {
             let l = load_path(&p);
