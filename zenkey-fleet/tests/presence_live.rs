@@ -405,3 +405,82 @@ async fn a_loss_is_unobservable_until_the_reseed_finds_what_it_hid() {
     drop(feed);
     monitor.shutdown().await.expect("monitor shutdown");
 }
+
+/// The feed is cancel-safe (#614, FL2): a notifier's `select!` drops
+/// `next()` whenever another branch wins, and a `Dropped(n)` whose re-seed
+/// is dropped mid-read loses neither its transitions nor the re-seed — the
+/// next call hands the first out and reads again. Forced as the loss test
+/// forces it, then every call cut short until the owner's stop is found.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reseed_cut_short_by_a_select_is_read_again() {
+    let (_router, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let tool = client(&ep).await;
+    let h1 = addr("h1/tc");
+    let scope = PresenceScope::all();
+    let spec = MonitorSpec {
+        capacity: 2,
+        stats_tick: Duration::from_secs(3600),
+        ..MonitorSpec::default()
+    };
+    let monitor = Monitor::start(&tool, spec.with_presence("", &scope))
+        .await
+        .expect("monitor");
+    let a = bring_up(&owner, config("h1/tc"), &scenario("ping.v1")).await;
+    eventually("h1/tc's instance token at the router", || async {
+        zenkey_fleet::liveliness_read(&tool, "zk2/h1/tc/@zk/instance/*", T)
+            .await
+            .is_ok_and(|r| r.keys.len() == 1)
+    })
+    .await;
+    let (mut feed, seeded) =
+        PresenceFeed::open(&tool, monitor.events(), LivePresence::new(scope), T).await;
+    let mut seen = seeded;
+    assert_eq!(feed.presence().status(&h1), Up);
+
+    a.close().await.expect("close");
+    eventually("h1/tc gone from the router", || async {
+        zenkey_fleet::liveliness_read(&tool, "zk2/h1/tc/@zk/instance/*", T)
+            .await
+            .is_ok_and(|r| r.keys.is_empty() && r.complete)
+    })
+    .await;
+    for i in 0..16 {
+        monitor.core().node_event(format!("demo/flood/{i}"), true);
+    }
+    // Every call polled once and dropped, as a `select!` drops the branch
+    // that lost: a liveliness read never lands in one poll, so each call
+    // that reaches the re-seed is cut short at its read. The loss is handed
+    // out whole all the same, and the re-seed stays owed.
+    use futures_util::FutureExt as _;
+    for _ in 0..4 {
+        if let Some(Some(moved)) = feed.next().now_or_never() {
+            seen.extend(moved);
+        }
+    }
+    assert!(
+        seen.iter().any(|t| t.source == PresenceSource::Dropped
+            && t.change
+                == PresenceChange::Status {
+                    from: Up,
+                    to: Unobservable
+                }),
+        "the loss was handed out, not dropped with a cancelled call: {seen:#?}"
+    );
+    // Uncut, the owed re-seed lands and finds the stop.
+    until(&mut feed, &mut seen, "h1/tc down after the loss", |s| {
+        s.iter().any(|t| {
+            t.source == PresenceSource::Seed
+                && t.change
+                    == PresenceChange::Status {
+                        from: Unobservable,
+                        to: Down,
+                    }
+        })
+    })
+    .await;
+    assert_eq!(*feed.last_seed(), SeedOutcome::Complete);
+    assert_eq!(feed.presence().basis(), PresenceBasis::Complete);
+    drop(feed);
+    monitor.shutdown().await.expect("monitor shutdown");
+}

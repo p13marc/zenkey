@@ -10,9 +10,20 @@
 //! because a tool that merged them could no longer say which one was
 //! missing, and "token missing" and "descriptor silent" are different
 //! findings (FJ6).
+//!
+//! **Live presence** (#614): an address's three states and the moves of
+//! [`crate::model::presence_live`]'s projection — [`AddressStatus`],
+//! [`PresenceTransition`] and what it carries — live here since FL2,
+//! because zenwatch's notifications carry them to a webhook or a program
+//! (`zenwatch/src/sinks/mod.rs`): a script switches on `change.kind` and
+//! reads the address without parsing a sentence.
 
-use serde::Serialize;
+use std::fmt;
+use std::time::SystemTime;
+
+use serde::{Serialize, Serializer};
 use zenkey_model::descriptor::Descriptor;
+use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId};
 
 use crate::report::Asked;
 
@@ -177,6 +188,153 @@ pub enum DescriptorAnswer {
     Silent,
     /// The GET could not be put on the bus.
     Failed { reason: String },
+}
+
+// ─── live presence (#614) ────────────────────────────────────────────────────
+
+/// An address's presence, in the three states (spec §8.1, O5, R7):
+/// `"up"`, `"down"`, `"unobservable"` on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressStatus {
+    /// At least one instance token held, heard since the last loss.
+    Up,
+    /// No instance token held, with a complete seed behind the claim.
+    Down,
+    /// Neither established: no seed, a seed possibly incomplete, or events
+    /// lost since the last complete one (`model::presence_live`'s doc).
+    Unobservable,
+}
+
+impl AddressStatus {
+    /// The status as a person reads it, and as it serializes: `up`,
+    /// `down`, `unobservable`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AddressStatus::Up => "up",
+            AddressStatus::Down => "down",
+            AddressStatus::Unobservable => "unobservable",
+        }
+    }
+}
+
+impl fmt::Display for AddressStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// How a transition was learned: `"event"`, `"seed"`, `"dropped"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenceSource {
+    /// Heard on the subscription, as it happened.
+    Event,
+    /// Found by a seed, against what was held before it: it happened at or
+    /// before the time the transition carries.
+    Seed,
+    /// The basis was lost to a `Dropped(n)`: what follows is unobservable.
+    Dropped,
+}
+
+/// One member of an interface's `epoch` template (§8.1): the interface and
+/// the member's chunk. Its epoch is not part of its identity: a new epoch
+/// is the same member, its continuity broken.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct MemberId {
+    pub iface: IfaceId,
+    /// The slugged value of the template's `epoch` parameter, as the key
+    /// carries it.
+    pub member: String,
+}
+
+/// One move of one address's presence, tagged by `kind` on the wire
+/// (`{"kind": "status", "from": "up", "to": "down"}`); instance ids,
+/// epochs and fingerprint prefixes are their 16 hex digits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PresenceChange {
+    /// The address's status moved, in the three states. `to: Down` is
+    /// presence's word, never a verdict about health.
+    Status {
+        from: AddressStatus,
+        to: AddressStatus,
+    },
+    /// An instance token appeared (§8.1).
+    InstanceAppeared {
+        #[serde(serialize_with = "display")]
+        instance: InstanceId,
+    },
+    /// An instance token went.
+    InstanceGone {
+        #[serde(serialize_with = "display")]
+        instance: InstanceId,
+    },
+    /// An interface token appeared.
+    InterfaceAppeared {
+        #[serde(serialize_with = "display")]
+        instance: InstanceId,
+        iface: IfaceId,
+        #[serde(serialize_with = "display")]
+        fp: Fp16,
+    },
+    /// An interface token went.
+    InterfaceGone {
+        #[serde(serialize_with = "display")]
+        instance: InstanceId,
+        iface: IfaceId,
+        #[serde(serialize_with = "display")]
+        fp: Fp16,
+    },
+    /// A member's first token appeared: the member exists from here (§8.1).
+    MemberAppeared {
+        member: MemberId,
+        #[serde(serialize_with = "display")]
+        epoch: InstanceId,
+    },
+    /// A member's current epoch moved while it held a token throughout:
+    /// make-before-break, never a gap (§8.1).
+    MemberHandover {
+        member: MemberId,
+        #[serde(serialize_with = "display")]
+        from: InstanceId,
+        #[serde(serialize_with = "display")]
+        to: InstanceId,
+    },
+    /// A member's last token went.
+    MemberGone {
+        member: MemberId,
+        #[serde(serialize_with = "display")]
+        epoch: InstanceId,
+    },
+}
+
+/// One transition: what moved, where, when it was folded and how it was
+/// learned. `at` serializes as RFC 3339, to the second.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PresenceTransition {
+    /// The time the caller folded it with.
+    #[serde(serialize_with = "rfc3339")]
+    pub at: SystemTime,
+    pub source: PresenceSource,
+    pub address: Addr,
+    pub change: PresenceChange,
+}
+
+/// A grammar id as its key spelling: the hex ids carry no serde of their
+/// own, and their text form is the one a key, a log line and a script share.
+fn display<T: fmt::Display, S: Serializer>(v: &T, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_str(v)
+}
+
+/// A fold time as RFC 3339, through the one formatter the engine writes
+/// every timestamp with.
+fn rfc3339<S: Serializer>(at: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
+    let secs = at
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    s.serialize_str(&crate::tape::record::rfc3339_from_unix(secs))
 }
 
 #[cfg(test)]
@@ -350,5 +508,134 @@ mod tests {
             .expect("serialize"),
             json!({"answer": "failed", "reason": "session closed"})
         );
+    }
+
+    /// The live presence shapes zenwatch's notifications carry (#614, FL2):
+    /// the three states and the three sources in their wire words, every
+    /// change tagged by `kind`, hex ids as their key spelling, and the fold
+    /// time as RFC 3339.
+    #[test]
+    fn presence_transition_json_shape_is_pinned() {
+        use std::time::Duration;
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_791_331_200);
+        let addr: Addr = "host-a/tc".parse().expect("an address");
+        let iface: IfaceId = "tc.netif.v1".parse().expect("an interface");
+        let i1 = InstanceId::from_u64(0x8f3a_5c2e_9b1d_4f70);
+        let i2 = InstanceId::from_u64(2);
+        let fp = Fp16::new("abababababababab").expect("a prefix");
+        let member = MemberId {
+            iface: iface.clone(),
+            member: "eth0".into(),
+        };
+        let t = PresenceTransition {
+            at,
+            source: PresenceSource::Event,
+            address: addr,
+            change: PresenceChange::Status {
+                from: AddressStatus::Up,
+                to: AddressStatus::Down,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&t).expect("serialize"),
+            json!({
+                "at": "2026-10-07T00:00:00Z",
+                "source": "event",
+                "address": "host-a/tc",
+                "change": {"kind": "status", "from": "up", "to": "down"},
+            })
+        );
+        let tagged = |kind: &str, rest: serde_json::Value| {
+            let mut v = json!({ "kind": kind });
+            v.as_object_mut()
+                .expect("an object")
+                .extend(rest.as_object().expect("an object").clone());
+            v
+        };
+        let member_wire = json!({"iface": "tc.netif.v1", "member": "eth0"});
+        for (change, wire) in [
+            (
+                PresenceChange::InstanceAppeared {
+                    instance: i1.clone(),
+                },
+                tagged("instance_appeared", json!({"instance": "8f3a5c2e9b1d4f70"})),
+            ),
+            (
+                PresenceChange::InstanceGone {
+                    instance: i1.clone(),
+                },
+                tagged("instance_gone", json!({"instance": "8f3a5c2e9b1d4f70"})),
+            ),
+            (
+                PresenceChange::InterfaceAppeared {
+                    instance: i1.clone(),
+                    iface: iface.clone(),
+                    fp: fp.clone(),
+                },
+                tagged(
+                    "interface_appeared",
+                    json!({"instance": "8f3a5c2e9b1d4f70", "iface": "tc.netif.v1",
+                           "fp": "abababababababab"}),
+                ),
+            ),
+            (
+                PresenceChange::InterfaceGone {
+                    instance: i1.clone(),
+                    iface,
+                    fp,
+                },
+                tagged(
+                    "interface_gone",
+                    json!({"instance": "8f3a5c2e9b1d4f70", "iface": "tc.netif.v1",
+                           "fp": "abababababababab"}),
+                ),
+            ),
+            (
+                PresenceChange::MemberAppeared {
+                    member: member.clone(),
+                    epoch: i2.clone(),
+                },
+                tagged(
+                    "member_appeared",
+                    json!({"member": member_wire.clone(), "epoch": "0000000000000002"}),
+                ),
+            ),
+            (
+                PresenceChange::MemberHandover {
+                    member: member.clone(),
+                    from: i2.clone(),
+                    to: i1,
+                },
+                tagged(
+                    "member_handover",
+                    json!({"member": member_wire.clone(), "from": "0000000000000002",
+                           "to": "8f3a5c2e9b1d4f70"}),
+                ),
+            ),
+            (
+                PresenceChange::MemberGone { member, epoch: i2 },
+                tagged(
+                    "member_gone",
+                    json!({"member": member_wire, "epoch": "0000000000000002"}),
+                ),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&change).expect("serialize"), wire);
+        }
+        for (status, word) in [
+            (AddressStatus::Up, "up"),
+            (AddressStatus::Down, "down"),
+            (AddressStatus::Unobservable, "unobservable"),
+        ] {
+            assert_eq!(serde_json::to_value(status).expect("serialize"), word);
+            assert_eq!(status.as_str(), word);
+        }
+        for (source, word) in [
+            (PresenceSource::Event, "event"),
+            (PresenceSource::Seed, "seed"),
+            (PresenceSource::Dropped, "dropped"),
+        ] {
+            assert_eq!(serde_json::to_value(source).expect("serialize"), word);
+        }
     }
 }

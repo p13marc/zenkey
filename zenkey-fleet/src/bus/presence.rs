@@ -39,7 +39,8 @@ use zenoh::Session;
 
 use crate::bus::monitor::{EventStream, FleetEvent, StreamItem};
 use crate::model::catalog::{Catalog, DescriptorRead, Observed};
-use crate::model::presence_live::{LivePresence, PresenceTransition};
+use crate::model::presence_live::LivePresence;
+use crate::report::PresenceTransition;
 use crate::report::{NamespaceListing, ServiceListing};
 use crate::{Error, Result};
 
@@ -290,6 +291,15 @@ pub enum SeedOutcome {
 /// possibly incomplete is retried with backoff too ([`RESEED_BACKOFF`]),
 /// while the feed goes on folding live events.
 ///
+/// **Cancel-safe** (#614, FL2). [`PresenceFeed::next`] may be dropped at
+/// any await — a notifier's `select!` loop drops it whenever another branch
+/// wins — and nothing is lost: every transition folded is held in the feed
+/// until a call hands it out, and a re-seed is owed *before* it is read, so
+/// one dropped mid-read is read again by the next call. Without that, a
+/// `Dropped(n)` whose re-seed was cancelled lost both its transitions and
+/// the re-seed itself, and the projection stayed unobservable with nobody
+/// told.
+///
 /// The monitor must watch the projection's scope: [`presence_selectors`]
 /// with the projection's wire namespace
 /// ([`LivePresence::wire_namespace`]). Its other events (samples, ticks,
@@ -302,8 +312,12 @@ pub struct PresenceFeed {
     presence: LivePresence,
     last_seed: SeedOutcome,
     /// The next re-seed's time and the backoff that set it, while one is
-    /// owed.
+    /// owed. Set before a re-seed is read and cleared only by a complete
+    /// one, so a read that was cancelled is still owed.
     retry: Option<(tokio::time::Instant, Duration)>,
+    /// Transitions folded and not yet handed out: what makes
+    /// [`PresenceFeed::next`] cancel-safe.
+    pending: Vec<PresenceTransition>,
 }
 
 impl std::fmt::Debug for PresenceFeed {
@@ -341,6 +355,7 @@ impl PresenceFeed {
             presence,
             last_seed: SeedOutcome::Failed("not read yet".to_owned()),
             retry: None,
+            pending: Vec::new(),
         };
         let seeded = feed.reseed().await;
         (feed, seeded)
@@ -363,42 +378,62 @@ impl PresenceFeed {
 
     /// The next transitions: waits for an event that moves something, or
     /// for a re-seed that is owed, and returns what moved. `None` only when
-    /// the monitor's broadcast closed.
+    /// the monitor's broadcast closed. Cancel-safe: see the type's doc.
+    ///
+    /// A `Dropped(n)` hands out its transitions (every address unobservable)
+    /// first, and the re-seed it owes on the next call: cause before effect,
+    /// and a loss is never hidden behind a read that may not land.
     pub async fn next(&mut self) -> Option<Vec<PresenceTransition>> {
         loop {
+            if !self.pending.is_empty() {
+                return Some(std::mem::take(&mut self.pending));
+            }
             let wake = match self.retry {
+                // A re-seed that is due goes first: a stream that never
+                // pauses must not starve it.
                 Some((when, _)) => tokio::select! {
-                    item = self.events.recv() => Wake::Item(item),
+                    biased;
                     () = tokio::time::sleep_until(when) => Wake::Retry,
+                    item = self.events.recv() => Wake::Item(item),
                 },
                 None => Wake::Item(self.events.recv().await),
             };
-            let moved = match wake {
-                Wake::Retry => self.reseed().await,
+            match wake {
+                Wake::Retry => self.reseed_pending().await,
                 Wake::Item(None) => return None,
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeUp(key)))) => {
-                    self.presence.token(&key, true, SystemTime::now())
+                    let moved = self.presence.token(&key, true, SystemTime::now());
+                    self.pending.extend(moved);
                 }
                 Wake::Item(Some(StreamItem::Event(FleetEvent::NodeDown(key)))) => {
-                    self.presence.token(&key, false, SystemTime::now())
+                    let moved = self.presence.token(&key, false, SystemTime::now());
+                    self.pending.extend(moved);
                 }
-                Wake::Item(Some(StreamItem::Event(_))) => continue,
+                Wake::Item(Some(StreamItem::Event(_))) => {}
                 Wake::Item(Some(StreamItem::Dropped(n))) => {
-                    let mut moved = self.presence.dropped(n, SystemTime::now());
-                    moved.extend(self.reseed().await);
-                    moved
+                    let moved = self.presence.dropped(n, SystemTime::now());
+                    self.pending.extend(moved);
+                    self.owe_now();
                 }
-            };
-            if !moved.is_empty() {
-                return Some(moved);
             }
         }
     }
 
     /// Read the scope again now and fold it, with what the subscription
-    /// delivered meanwhile; returns what moved.
+    /// delivered meanwhile; returns what moved (and anything folded before
+    /// it that no call had handed out yet).
     pub async fn reseed(&mut self) -> Vec<PresenceTransition> {
-        let mut moved = Vec::new();
+        self.reseed_pending().await;
+        std::mem::take(&mut self.pending)
+    }
+
+    /// [`PresenceFeed::reseed`], folding into the feed's `pending`.
+    /// The re-seed is owed until a complete read lands, so a read dropped at
+    /// its await is read again; nothing is folded before the read returns.
+    async fn reseed_pending(&mut self) {
+        if self.retry.is_none() {
+            self.owe_now();
+        }
         for _ in 0..RESEED_ATTEMPTS {
             let read = read_tokens(&self.session, self.presence.scope(), self.timeout).await;
             let observed = match read {
@@ -406,7 +441,7 @@ impl PresenceFeed {
                 Err(e) => {
                     self.last_seed = SeedOutcome::Failed(crate::one_line(&e));
                     self.back_off();
-                    return moved;
+                    return;
                 }
             };
             let mut then = Vec::new();
@@ -423,15 +458,17 @@ impl PresenceFeed {
             if lost > 0 {
                 // The read's window has a hole in it. What was drained is
                 // reflected in the next read, which starts after it.
-                moved.extend(self.presence.dropped(lost, at));
+                let moved = self.presence.dropped(lost, at);
+                self.pending.extend(moved);
                 self.last_seed = SeedOutcome::Overrun { dropped: lost };
                 continue;
             }
-            moved.extend(self.presence.seed_then(
+            let moved = self.presence.seed_then(
                 &observed,
                 then.iter().map(|(key, held)| (key.as_str(), *held)),
                 at,
-            ));
+            );
+            self.pending.extend(moved);
             if observed.complete {
                 self.last_seed = SeedOutcome::Complete;
                 self.retry = None;
@@ -439,18 +476,23 @@ impl PresenceFeed {
                 self.last_seed = SeedOutcome::Incomplete;
                 self.back_off();
             }
-            return moved;
+            return;
         }
         self.back_off();
-        moved
+    }
+
+    /// Owe a re-seed now, keeping the backoff a run of failures has reached.
+    fn owe_now(&mut self) {
+        let last = self.retry.map_or(Duration::ZERO, |(_, last)| last);
+        self.retry = Some((tokio::time::Instant::now(), last));
     }
 
     /// Owe a re-seed, a backoff from now: [`RESEED_BACKOFF`] first, doubled
     /// each time in a row, up to [`RESEED_BACKOFF_MAX`].
     fn back_off(&mut self) {
         let wait = match self.retry {
-            Some((_, last)) => (last * 2).min(RESEED_BACKOFF_MAX),
-            None => RESEED_BACKOFF,
+            Some((_, last)) if !last.is_zero() => (last * 2).min(RESEED_BACKOFF_MAX),
+            _ => RESEED_BACKOFF,
         };
         self.retry = Some((tokio::time::Instant::now() + wait, wait));
     }
