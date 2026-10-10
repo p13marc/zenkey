@@ -228,16 +228,31 @@ pub enum FleetEvent {
 pub struct MonitorSpec {
     /// Full wire selectors to subscribe to.
     pub selectors: Vec<String>,
-    /// Also watch these liveliness selectors (with history: current tokens
-    /// arrive on join — no separate seed GET).
+    /// Also watch these liveliness selectors, as wire selectors on the
+    /// monitor's session: each token's put and delete arrives as
+    /// [`FleetEvent::NodeUp`] and [`FleetEvent::NodeDown`], with its full key.
     ///
-    /// A list, not a single selector, because one selector cannot express the
-    /// roster: `*` in the origin position never matches a verbatim service
-    /// origin (RFC 03 §4 **D4**), so the fleet sweep
-    /// `<base>/v1/*/state/*/alive` and `<base>/v1/@catalog/state/alive` are
-    /// necessarily two entries. A dashboard that watches only the first
-    /// renders "catalog dead" and "no entities" identically — the false
-    /// verdict RFC 05 §3.1 forbids.
+    /// **History is not a seed.** Each subscriber is declared with history,
+    /// so the tokens held now arrive on join, but liveliness history has no
+    /// end-of-history mark: a token not heard yet is not absent (spec §8.1,
+    /// O5). A consumer that needs absence to mean something seeds from a
+    /// liveliness read and folds these events after it, as
+    /// [`crate::bus::presence::PresenceFeed`] does.
+    ///
+    /// **A list, because a zk2 presence selector names `@zk`.** `*` and
+    /// `**` never cross a verbatim chunk (spec §1.3; RFC 03 §4 D2, carried
+    /// into zk2), so an ambient `zk2/**` sees no token at all, and each
+    /// token form is its own entry: `zk2/<system>/<service>/@zk/instance/*`,
+    /// `…/@zk/alive/**` and `…/@zk/member/**`.
+    /// [`MonitorSpec::with_presence`] adds the three for a scope. A watch of
+    /// the instance tokens alone cannot tell an interface gone from one it
+    /// never watched, so a consumer says which forms it watched.
+    ///
+    /// **Callback subscribers** (spec §8.1, zenoh#2678): each one hands its
+    /// sample straight to the broadcast on zenoh's thread, with no bounded
+    /// handler between them. A liveliness GET on the same session therefore
+    /// cannot be starved by a subscriber nobody drains, and a lagging
+    /// receiver is told by `Dropped(n)`, as for samples.
     pub liveliness: Vec<String>,
     /// Snapshot cadence.
     pub stats_tick: Duration,
@@ -260,6 +275,23 @@ impl Default for MonitorSpec {
             capacity: 1024,
             max_keys: crate::model::bounded::DEFAULT_MAX_KEYS,
         }
+    }
+}
+
+impl MonitorSpec {
+    /// Also watch `scope`'s zk2 presence tokens: its three token selectors
+    /// ([`crate::bus::presence::Scope::token_selectors`]) as the wire spells
+    /// them in `namespace` — the deployment's when this monitor runs on a
+    /// session in no namespace, empty when it runs in the namespace.
+    /// Appended to [`MonitorSpec::liveliness`]; what was there stays.
+    pub fn with_presence(
+        mut self,
+        namespace: &str,
+        scope: &crate::bus::presence::Scope,
+    ) -> MonitorSpec {
+        self.liveliness
+            .extend(crate::bus::presence::presence_selectors(namespace, scope));
+        self
     }
 }
 
@@ -598,6 +630,27 @@ impl EventStream {
             Err(broadcast::error::RecvError::Closed) => None,
         }
     }
+
+    /// The next item already buffered, without waiting: `None` when nothing
+    /// is (or the monitor stopped). Lag folds into the monitor's `dropped`
+    /// counter and arrives as [`StreamItem::Dropped`], as with
+    /// [`recv`](Self::recv).
+    ///
+    /// What a seed needs (#614, FL1): the events delivered while a
+    /// liveliness read was in flight, folded into it in one step
+    /// ([`crate::model::presence_live::LivePresence::seed_then`]).
+    pub fn try_recv(&mut self) -> Option<StreamItem> {
+        match self.rx.try_recv() {
+            Ok(ev) => Some(StreamItem::Event(ev)),
+            Err(broadcast::error::TryRecvError::Lagged(n)) => {
+                self.core.dropped.fetch_add(n, Ordering::Relaxed);
+                Some(StreamItem::Dropped(n))
+            }
+            Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
+                None
+            }
+        }
+    }
 }
 
 /// Opaque handle naming one active watch.
@@ -634,6 +687,10 @@ pub struct Monitor {
     session: Session,
     watches: tokio::sync::Mutex<std::collections::HashMap<WatchId, WatchEntry>>,
     next_watch: AtomicU64,
+    /// The liveliness subscribers, by selector: callbacks, so they need no
+    /// task (spec §8.1, zenoh#2678). Undeclared, acknowledged, by
+    /// [`Monitor::shutdown`]; dropped with the monitor otherwise.
+    liveliness: Vec<(String, zenoh::pubsub::Subscriber<()>)>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
@@ -651,23 +708,32 @@ impl Monitor {
         let core = MonitorCore::bounded(spec.capacity, spec.max_keys);
         let mut tasks = Vec::new();
 
+        // Callbacks, not zenoh's default 256-slot handler drained by a task
+        // (#614, FL1): that subscriber was drained only as fast as the
+        // runtime scheduled its task, and while it lagged, zenoh's thread
+        // blocked on the full handler — the starvation spec §8.1 forbids
+        // beside a liveliness GET (zenoh#2678). `node_event` is one
+        // bounded broadcast send, the same work `watch`'s callbacks do.
+        //
+        // A declaration that fails drops the ones before it, which
+        // undeclares them; the spawned task used to keep each one alive.
+        let mut liveliness = Vec::with_capacity(spec.liveliness.len());
         for liveliness_sel in &spec.liveliness {
+            let core = Arc::clone(&core);
             let subscriber = crate::bus::teardown::declared(
                 "liveliness subscribe",
                 liveliness_sel,
                 session
                     .liveliness()
                     .declare_subscriber(liveliness_sel)
-                    .history(true),
+                    .history(true)
+                    .callback(move |sample| {
+                        let key = sample.key_expr().as_str().to_string();
+                        core.node_event(key, sample.kind() == SampleKind::Put);
+                    }),
             )
             .await?;
-            let core = Arc::clone(&core);
-            tasks.push(tokio::spawn(async move {
-                while let Ok(sample) = subscriber.recv_async().await {
-                    let key = sample.key_expr().as_str().to_string();
-                    core.node_event(key, sample.kind() == SampleKind::Put);
-                }
-            }));
+            liveliness.push((liveliness_sel.clone(), subscriber));
         }
 
         {
@@ -692,6 +758,7 @@ impl Monitor {
             session: session.clone(),
             watches: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             next_watch: AtomicU64::new(0),
+            liveliness,
             tasks,
         };
         for selector in &spec.selectors {
@@ -975,16 +1042,17 @@ impl Monitor {
     ///
     /// Every watch is drained even if one fails to undeclare — a monitor half
     /// torn down is worse than one torn down noisily — and the failures are
-    /// reported together. `Drop` still runs afterwards, aborting the
-    /// liveliness and tick tasks, and remains the fallback for every path
-    /// that does not come through here.
+    /// reported together. The liveliness subscribers are undeclared the
+    /// same way, after the watches. `Drop` still runs afterwards, aborting
+    /// the tick task, and remains the fallback for every path that does not
+    /// come through here.
     ///
     /// Statistics are **not** retired the way `unwatch` retires them: that
     /// counter answers "the key set shrank because you stopped looking"
     /// (RFC 09 §5.1 O6) for a monitor that goes on running. This one is the
     /// end of the observation; the core goes with it unless a caller kept an
     /// `Arc`, and a re-scope's next monitor starts from a fresh one.
-    pub async fn shutdown(self) -> Result<()> {
+    pub async fn shutdown(mut self) -> Result<()> {
         let drained: Vec<WatchEntry> = {
             let mut watches = self.watches.lock().await;
             watches.drain().map(|(_, entry)| entry).collect()
@@ -996,6 +1064,11 @@ impl Monitor {
             }
             if let Err(e) = entry.subscriber.undeclare().await {
                 failed.push(format!("{}: {e}", entry.selector));
+            }
+        }
+        for (selector, subscriber) in std::mem::take(&mut self.liveliness) {
+            if let Err(e) = subscriber.undeclare().await {
+                failed.push(format!("{selector}: {e}"));
             }
         }
         drop(self);
@@ -1029,6 +1102,9 @@ impl Monitor {
 /// timeout. `unwatch` and `shutdown` had aborted them all along; the async
 /// mutex is `get_mut` here, which needs no lock because `Drop` holds
 /// `&mut self`.
+///
+/// The liveliness subscribers are callbacks (#614, FL1) and have no task:
+/// they drop with the monitor's fields, which undeclares them.
 impl Drop for Monitor {
     fn drop(&mut self) {
         for t in &self.tasks {
