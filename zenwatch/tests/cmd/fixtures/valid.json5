@@ -16,4 +16,7 @@
   },
   render: { max_message_bytes: 2048, max_structural_bytes: 512 },
   doctor: { every_h: 6, sinks: ["ops"], severity_floor: "warning" },
+  // A literal address: nothing to mint, so the corpus reads the same on a
+  // host with no machine id (the default is @hostid.v1/zenwatch).
+  publish: { address: "ops-1/zenwatch" },
 }

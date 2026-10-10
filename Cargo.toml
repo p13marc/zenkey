@@ -156,17 +156,16 @@ serde_yaml = "0.9"
 # Internal
 # The strangler layout (#615). `main` is the zk2 line. The v1 tool still
 # on it (zengui) builds against the v1 libraries pinned from crates.io until
-# #614 ports it — and zenwatch's write side does, under renamed
-# dependencies of its own, until FL3; zenctl and the in-tree zenkey-fleet left
-# them at FJ9 (#612) and depend on the zk2 crates by path. The v1 sources
-# live on the `v1` branch, which releases 0.14.x patches. zk2 re-creates
-# these crate names at 0.20.0; two `zenkey` packages coexist then, because
-# 0.x minors are semver-incompatible.
+# #614 ports it; zenctl and the in-tree zenkey-fleet left them at FJ9 (#612),
+# zenwatch at FL3 (#614), and depend on the zk2 crates by path. The v1
+# sources live on the `v1` branch, which releases 0.14.x patches. zk2
+# re-creates these crate names at 0.20.0; two `zenkey` packages coexist then,
+# because 0.x minors are semver-incompatible. (v1's `zenkey-build =0.11.1`
+# left with zenwatch's v1 registry: no member generates v1 code.)
 zenkey = { version = "=0.11.1" }
-zenkey-build = { version = "=0.11.1" }
 # zengui keeps the v1 engine from crates.io (#612, FJ1), the same move #615
 # made for `zenkey`; the in-tree `zenkey-fleet` is 0.20.0, being ported to
-# zk2, and zenctl and zenwatch (since FL2, #614) depend on it by path.
+# zk2, and zenctl and zenwatch depend on it by path.
 zenkey-fleet = { version = "=0.18.0" }
 zenkey-explorer-config = { version = "0.1.0", path = "zenkey-explorer-config" }
 zenkey-report-fixtures = { path = "report-fixtures" }

@@ -1,0 +1,8 @@
+// The daemon's own service (#614, FL3): `ephemeral` asks hostid.v1 for an
+// ephemeral system, and a literal address names its system — refused at
+// the path, before anything reads the host.
+{
+  rules: [{ name: "drops", rule: "dropped", sinks: ["hook"] }],
+  sinks: { hook: { kind: "webhook", url: "https://hooks.example.org/z" } },
+  publish: { address: "ops-1/zenwatch", ephemeral: true },
+}

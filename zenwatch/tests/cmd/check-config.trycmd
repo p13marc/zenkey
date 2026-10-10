@@ -7,7 +7,7 @@ A config that checks clean says what it holds:
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/valid.json5
-tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), doctor every 6h — ok
+tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), doctor every 6h, published as ops-1/zenwatch — ok
 
 ```
 
@@ -156,6 +156,27 @@ Error: tests/cmd/fixtures/valid.json5: 1 problem(s) — nothing was run
 
 ```console
 $ zenwatch check-config --config tests/cmd/fixtures/valid.json5 --contracts ../examples/zk2/tcgui/tc.netif.v1.toml --contracts ../examples/zk2/tcgui/tc.netem.v1.toml
-tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), 2 contract revision(s), doctor every 6h — ok
+tests/cmd/fixtures/valid.json5: 4 rule(s), 4 sink(s), 2 contract revision(s), doctor every 6h, published as ops-1/zenwatch — ok
+
+```
+
+The daemon is a zk2 service of its own (#614, FL3), at `@hostid.v1/zenwatch`
+unless `publish.address` names another; on a host with no id it refuses to
+start, naming every way out. An `ephemeral` beside a literal address asks for
+two things at once, and is refused at its path:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/publish-ephemeral-literal.json5
+? 2
+  publish.address: `ephemeral: true` asks hostid.v1 for an ephemeral system, and the address ops-1/zenwatch names its system: write `@hostid.v1/zenwatch`, or drop `ephemeral` (hostid.v1 §2.3)
+Error: tests/cmd/fixtures/publish-ephemeral-literal.json5: 1 problem(s) — nothing was run
+
+```
+
+`publish: false` runs no service at all:
+
+```console
+$ zenwatch check-config --config tests/cmd/fixtures/dead-bus-run.json5
+tests/cmd/fixtures/dead-bus-run.json5: 1 rule(s), 1 sink(s), no service (publish: false) — ok
 
 ```

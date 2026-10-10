@@ -1,0 +1,59 @@
+# zenwatch's own interface (#614, FL3): what the notifier publishes about
+# itself beside health.v1, which carries its level (the status, and a check
+# per part of its job: its sinks, its observers, its doctor, its state file).
+#
+#   zk2/<system>/zenwatch/zenwatch.v1/state/firing/{rule_id}   one per rule with something announced
+#   zk2/<system>/zenwatch/zenwatch.v1/state/doctor             the scheduled doctor's last report
+#   zk2/<system>/zenwatch/zenwatch.v1/state/counters           what its bounds cost (RFC 13 §3 O6)
+#
+# The system is minted by hostid.v1 unless the configuration names one
+# (`publish.address`). Rust-first: every type is a struct the daemon already
+# has, and schemas/zenwatch.json is what those structs derive (zenwatch's
+# `check_schema` tests keep the two in step). After an intended change:
+#
+#   cargo run -p zenkey-model --bin zk2 -- contract bundle zenwatch/contracts/zenwatch.v1.toml \
+#       --history zenwatch/contracts/.history
+[interface]
+name    = "zenwatch"
+major   = 1
+minor   = 0
+summary = "A notifier's announced rules, its scheduled doctor's last report, and what its bounds cost"
+uses    = ["freshness.v1"]
+
+[schemas]
+jsonschema = ["schemas/zenwatch.json"]
+
+# State, reliable and blocking (core §2.4's SHOULD): a reader must not lose
+# the put that says a rule fired, nor the delete that says it went quiet,
+# and only a reliable, blocking resource reads clean for its population
+# (§2.7). Re-put every ttl/2 by the runtime, so a subscriber can age the
+# document of a notifier that died without deleting it.
+[resources."firing/{rule_id}"]
+kind        = "state"
+type        = "json:FiringRule"
+params      = { rule_id = "string" }
+cardinality = 256
+doc         = "What one rule has announced: the most severe (then oldest) notice under it named, the rest counted. Put on change, deleted when the rule goes quiet and at a clean stop. A rule past the bound is refused by the runtime and counted in `counters`, never published past it."
+annotations = { "freshness.ttl_s" = 300 }
+
+# Written once per scheduled run (hours apart), possibly large: background
+# priority, so it never crowds out the deployment's data. No horizon: the
+# report is a fact about one run, dated by its own `ran_at` and `next_at`
+# (a `next_at` in the past is a schedule that lapsed), never re-put.
+# Unavailable (cause `config`) when no `doctor` block is configured.
+[resources.doctor]
+kind     = "state"
+type     = "json:ZenwatchDoctor"
+optional = true
+gate     = ["config:doctor"]
+priority = "background"
+doc      = "The scheduled doctor's last run: its outcome, its counts, and the report exactly as `zenctl doctor --format json` prints it; after a failed run, the last report that succeeded, retained. Not deleted at a clean stop: an archive keeps it as last-known."
+
+# Bookkeeping, put on change at most once per tick: low priority, and a
+# horizon so a reader tells a notifier's current counts from a dead one's.
+[resources.counters]
+kind        = "state"
+type        = "json:ZenwatchCounters"
+priority    = "data_low"
+doc         = "What the notifier did and what its bounds cost since it started (RFC 13 §3 O6): deliveries, observer drops, ledger evictions, firing documents refused at the bound, and the discipline's counters."
+annotations = { "freshness.ttl_s" = 60 }

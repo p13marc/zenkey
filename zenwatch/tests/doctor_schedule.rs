@@ -4,16 +4,17 @@
 //! `binding-unsatisfied` finding, named by the **baseline** notification,
 //! not paged on its own. A provider comes up; the next run yields exactly
 //! one `resolved` naming the check; and every run publishes
-//! `state/zenwatch/doctor` (v1's write side, until FL3), which a second
-//! session parses as the served type with `outcome: ok`. `every_s` — the
-//! tests-and-demos spelling — keeps it under half a minute.
+//! `zenwatch.v1`'s `state/doctor` (the daemon a zk2 service since #614,
+//! FL3), which a second session parses as the contract's type with
+//! `outcome: ok`. `every_s` — the tests-and-demos spelling — keeps it under
+//! half a minute.
 
 mod util;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use util::engine::{self, Capture, Options};
+use util::engine::{self, Capture, Options, TestPublish};
 use util::zk2;
 use zenkey::ServiceBuilder;
 use zenkey_fleet::CondState;
@@ -56,7 +57,7 @@ async fn an_unsatisfied_role_is_named_by_the_baseline_and_its_provider_is_one_re
     let published: Published = Arc::new(Mutex::new(Vec::new()));
     let _sub = {
         let published = Arc::clone(&published);
-        tool.declare_subscriber("v1/*/state/zenwatch/doctor")
+        tool.declare_subscriber("zk2/ops-1/zenwatch/zenwatch.v1/state/doctor")
             .callback(move |s| {
                 published
                     .lock()
@@ -76,7 +77,7 @@ async fn an_unsatisfied_role_is_named_by_the_baseline_and_its_provider_is_one_re
         ops.clone(),
         Options {
             tick: Duration::from_millis(250),
-            publish: true,
+            publish: Some(TestPublish::at("ops-1/zenwatch")),
             doctor: Some(DoctorConfig {
                 every_h: None,
                 every_s: Some(1.0),
@@ -166,7 +167,7 @@ async fn an_unsatisfied_role_is_named_by_the_baseline_and_its_provider_is_one_re
     );
 
     // 3. The published report, read by a second session, parses as the
-    // served type: the baseline run's document counts the finding, a later
+    // contract's type: the baseline run's document counts the finding, a later
     // one counts it fixed, and every one says `ok`.
     let docs: Vec<ZenwatchDoctor> = published
         .lock()
