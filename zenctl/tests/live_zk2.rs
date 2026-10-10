@@ -4148,18 +4148,26 @@ fn inv() -> Contract {
     )
 }
 
-/// An owner of `inv.v1` at `address`, its descriptor lowering the bound to
-/// `bound`, holding `members` items it re-puts every 200 ms.
-async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Service, Task) {
+/// An instance of `inv.v1` at `address` on `session`, its descriptor
+/// lowering the bound to `bound`, holding `items` it re-puts every 200 ms.
+/// The runtime keeps the bound (§2.7, #741): it refuses more items than it.
+async fn inventory(
+    session: &zenoh::Session,
+    address: &str,
+    bound: u64,
+    items: &[&str],
+) -> (Service, Task) {
     let id = iface("inv.v1");
     let mut b = ServiceBuilder::new(
-        &bus.owners,
+        session,
         ServiceConfig::new(address.parse().expect("an address")),
     );
     b.implement(Implementation::new(inv())).expect("implement");
+    b.cardinality(&id, "state/items/{item}", bound)
+        .expect("a lowering");
     let mut writers = Vec::new();
-    for i in 0..members {
-        let item: Bindings = [("item".to_owned(), vec![format!("i{i}")])].into();
+    for (i, item) in items.iter().enumerate() {
+        let item: Bindings = [("item".to_owned(), vec![(*item).to_owned()])].into();
         let w = b
             .declare_state_writer(&id, "state/items/{item}", &item)
             .await
@@ -4167,8 +4175,6 @@ async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Ser
         w.put(format!("{i}")).await.expect("put");
         writers.push(w);
     }
-    b.cardinality(&id, "state/items/{item}", bound)
-        .expect("a lowering");
     let service = b.start().await.expect("start");
     let task = Task(tokio::spawn(async move {
         loop {
@@ -4181,20 +4187,31 @@ async fn inventory(bus: &Bus, address: &str, bound: u64, members: usize) -> (Ser
     (service, task)
 }
 
-/// Core §2.7 (#735): an owner holding two members where its descriptor
-/// lowers the bound to one breaks the budget, by its own complete GET:
-/// `check conform`'s `budget` case is the violation, exit 1, naming the
-/// descriptor's bound. Beside it, an owner of the same contract holding two
-/// members within its lowered bound of two passes every case asked, exit 0:
-/// a state's population is the one a reading can show within its bound.
+/// Core §2.7 (#735): two instances of one service, each holding one member
+/// within its descriptor's bound of one — the runtime keeps each instance's
+/// (#741) — hold two members of one population, since a key names no
+/// instance: by the owners' complete GET, `check conform`'s `budget` case
+/// is the violation, exit 1, naming the descriptor's bound. Beside it, an
+/// owner of the same contract holding two members within its lowered bound
+/// of two passes every case asked, exit 0: a state's population is the one
+/// a reading can show within its bound.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_judges_a_population_against_its_lowered_bound() {
     let mut bus = Bus::admin(None).await;
-    for (address, bound) in [("host-a/inv", 1), ("host-b/inv", 2)] {
-        let (owner, task) = inventory(&bus, address, bound, 2).await;
+    let other = client(&bus.endpoint, None).await;
+    let mut up = Vec::new();
+    for (session, address, bound, items) in [
+        (&bus.owners, "host-a/inv", 1, &["i0"][..]),
+        (&other, "host-a/inv", 1, &["i1"][..]),
+        (&bus.owners, "host-b/inv", 2, &["i0", "i1"][..]),
+    ] {
+        up.push(inventory(session, address, bound, items).await);
+    }
+    for (owner, task) in up {
         bus.services.push(owner);
         bus.keep(task);
     }
+    bus.keep(other);
     wait_for(&bus, &["host-a/inv", "host-b/inv"]).await;
     let conform = |address: &'static str| {
         [
@@ -4257,7 +4274,9 @@ fn alarms() -> Contract {
 /// the retention, above its two — and a window of two seconds shows both:
 /// `rate` and `budget-window` are violations, exit 1. A window that heard
 /// no excess could only say `low` kept after a whole minute (unit-tested; a
-/// live minute is not spent here).
+/// live minute is not spent here). The reference runtime refuses both
+/// (#741), so the occurrences are the owner's session's own puts, on the
+/// event's keys and QoS: an owner whose runtime does not keep §2.7.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn check_conform_judges_an_events_rate_and_population() {
     let mut bus = Bus::admin(None).await;
@@ -4268,19 +4287,21 @@ async fn check_conform_judges_an_events_rate_and_population() {
     );
     b.implement(Implementation::new(alarms()))
         .expect("implement");
-    let writers: Vec<_> = ["a", "b", "c"]
-        .into_iter()
-        .map(|src| {
-            let v: Bindings = [("src".to_owned(), vec![src.to_owned()])].into();
-            b.event_writer(&id, "events/alarms/{src}", &v)
-                .expect("an event writer")
-        })
-        .collect();
+    b.expose(&id, "events/alarms/{src}").expect("exposed");
     bus.services.push(b.start().await.expect("start"));
+    let session = bus.owners.clone();
     bus.keep(Task(tokio::spawn(async move {
         loop {
-            for w in &writers {
-                let _ = w.put("alarm").await;
+            for src in ["a", "b", "c"] {
+                let ulid = zenkey::writer::ulid(std::time::SystemTime::now());
+                let _ = session
+                    .put(
+                        format!("zk2/host-a/al/al.v1/events/alarms/{src}/{ulid}"),
+                        "alarm",
+                    )
+                    .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                    .congestion_control(zenoh::qos::CongestionControl::Block)
+                    .await;
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }

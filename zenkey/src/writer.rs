@@ -5,7 +5,8 @@
 //! State's own rules (stamps, tombstones, GET answering, S1–S7) are #620's,
 //! built on [`Writer`]; this module only publishes.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use zenkey_model::authoring::{Encoding as WireEncoding, Kind};
@@ -18,6 +19,7 @@ use zenoh::pubsub::Publisher;
 use zenoh::qos::{CongestionControl, Priority, Reliability};
 use zenoh_ext::{AdvancedPublisher, AdvancedPublisherBuilderExt, CacheConfig, MissDetectionConfig};
 
+use crate::budget::Budget;
 use crate::error::{Error, Result, zenoh};
 use crate::qos;
 
@@ -69,11 +71,16 @@ enum Inner {
 /// `Encoding` (§2.4, §7.2). With `history` in the contract it is zenoh-ext's
 /// advanced publisher (§2.5): a cache of that depth, publisher detection,
 /// and heartbeats when `miss_detection_ms` is set.
+///
+/// Made by its service, it keeps the resource's budget (§2.7, #741): a put
+/// that would make its member a new live one while the live members are at
+/// the bound is refused, [`Error::Budget`], and nothing is published.
 pub struct Writer {
     inner: Inner,
     encoding: Encoding,
     wire: Option<WireEncoding>,
     json_typed: bool,
+    budget: Option<Arc<Budget>>,
 }
 
 impl Writer {
@@ -129,7 +136,30 @@ impl Writer {
             encoding,
             wire: d.encoding,
             json_typed: matches!(d.type_, TypeId::JsonSchema { .. }),
+            budget: None,
         })
+    }
+
+    /// Keeps `budget`, its resource's in its service (§2.7).
+    pub(crate) fn bounded(mut self, budget: Option<Arc<Budget>>) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// The member's write admitted by its resource's budget now, or refused
+    /// (§2.7): a put of a state member, a publication of a stream one.
+    pub(crate) fn admit(&self) -> Result<()> {
+        match &self.budget {
+            Some(b) => Ok(b.admit(self.key_expr().as_str(), Instant::now())?),
+            None => Ok(()),
+        }
+    }
+
+    /// The member deleted: a state member is live no more (§2.7).
+    pub(crate) fn release(&self) {
+        if let Some(b) = &self.budget {
+            b.release(self.key_expr().as_str());
+        }
     }
 
     /// The `Encoding` every sample carries.
@@ -172,11 +202,14 @@ impl Writer {
 
     /// Puts an encoded payload with an attachment, encoded per the
     /// contract's `attachment` type and `attachment_encoding` (§2.3, §7.2).
+    /// Refused, nothing published, when the member would be a new live one
+    /// at the bound (§2.7).
     pub async fn put_with(
         &self,
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
     ) -> Result<()> {
+        self.admit()?;
         let attachment: Option<ZBytes> = attachment.map(Into::into);
         match &self.inner {
             Inner::Plain(p) => p.put(payload).attachment(attachment).await,
@@ -237,6 +270,11 @@ pub(crate) fn encode_value<T: Serialize>(value: &T, wire: Option<WireEncoding>) 
 
 /// One-shot puts on `…/events/<template>/<ulid>`, one key per occurrence
 /// (§2.6), with the contract's QoS and `Encoding`.
+///
+/// Made by its service, it keeps the resource's budget (§2.7, #741): an
+/// occurrence that would make its member a new live one while the live
+/// members are at the bound, or that the member's rate does not allow, is
+/// refused, [`Error::Budget`], and nothing is published.
 pub struct EventWriter {
     session: zenoh::Session,
     prefix: String,
@@ -245,6 +283,7 @@ pub struct EventWriter {
     congestion: CongestionControl,
     priority: Priority,
     express: bool,
+    budget: Option<Arc<Budget>>,
 }
 
 impl EventWriter {
@@ -266,7 +305,14 @@ impl EventWriter {
             congestion: qos::congestion(d.congestion),
             priority: qos::priority(d.priority),
             express: d.express,
+            budget: None,
         })
+    }
+
+    /// Keeps `budget`, its resource's in its service (§2.7).
+    pub(crate) fn bounded(mut self, budget: Option<Arc<Budget>>) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// Publishes one occurrence now, and returns its key.
@@ -291,13 +337,17 @@ impl EventWriter {
             .await
     }
 
-    /// [`EventWriter::put_at`] with an attachment (§2.3; #698).
+    /// [`EventWriter::put_at`] with an attachment (§2.3; #698). The budget
+    /// counts the occurrence when it is published, not at `at` (§2.7).
     pub async fn put_at_with(
         &self,
         payload: impl Into<ZBytes>,
         attachment: Option<impl Into<ZBytes>>,
         at: SystemTime,
     ) -> Result<String> {
+        if let Some(b) = &self.budget {
+            b.admit(&self.prefix, Instant::now())?;
+        }
         let key = format!("{}/{}", self.prefix, ulid(at));
         let attachment: Option<ZBytes> = attachment.map(Into::into);
         self.session

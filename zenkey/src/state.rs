@@ -417,6 +417,11 @@ impl Refresher {
 /// On a resource whose contract declares `freshness.ttl_s` above 0, it
 /// re-puts the member's value unchanged whenever ttl/2 passes without a
 /// put (the module doc's refresher). Dropping it stops that.
+///
+/// Made by its service, it keeps the resource's budget (core §2.7, #741):
+/// a put of a key without a value while the live members are at the bound
+/// is refused, [`Error::Budget`], nothing stored or published; a put to a
+/// live key adds no member, and a delete frees one.
 pub struct StateWriter {
     writer: Arc<Writer>,
     key: OwnedKeyExpr,
@@ -547,6 +552,10 @@ impl StateWriter {
     ) -> Result<Timestamp> {
         let mut held = self.member.held.lock().await;
         let ts = self.minter.mint()?;
+        // §2.7 (#741): a new live member at the bound is refused, nothing
+        // stored or published. After the mint, so a stopped clock never
+        // leaves a member counted live without a value.
+        self.writer.admit()?;
         let payload: ZBytes = payload.into();
         let attachment: Option<ZBytes> = attachment.map(Into::into);
         let bytes = payload.to_bytes().into_owned();
@@ -579,6 +588,8 @@ impl StateWriter {
         held.value = None;
         held.at = tokio::time::Instant::now();
         self.store.delete(&self.key, ts);
+        // §2.7: a deleted key is not live, so it frees a member.
+        self.writer.release();
         let sent = self.writer.delete_stamped(ts).await;
         drop(held);
         self.member.wake.notify_one();

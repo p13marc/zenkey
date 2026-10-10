@@ -571,3 +571,396 @@ async fn s3_miss_detection_cannot_see_a_publisher_it_never_heard() {
         "a gap after a sample heard is reported: {after}"
     );
 }
+
+// ── §4–§7: the owner keeps its bound and its rate (#741) ──────────────────
+
+/// An owner of `budget.v1` at `lab/budget`, every resource exposed and no
+/// member written, its descriptor lowering `state/items/{item}` to
+/// `lowered` when given; with a consumer beside it recording every key put
+/// on the interface.
+struct Owner {
+    svc: zenkey::Service,
+    keys: Arc<Mutex<Vec<String>>>,
+    /// The consumer's session.
+    reader: zenoh::Session,
+    _r: zenoh::Session,
+    _sub: zenoh::pubsub::Subscriber<()>,
+    _owner: zenoh::Session,
+}
+
+async fn owner(lowered: Option<u64>) -> Owner {
+    let (r, ep) = router(None).await;
+    let s = client(&ep).await;
+    let consumer = client(&ep).await;
+    let keys: Arc<Mutex<Vec<String>>> = Arc::default();
+    let k = Arc::clone(&keys);
+    let sub = consumer
+        .declare_subscriber("zk2/lab/budget/budget.v1/**")
+        .callback(move |s| {
+            if s.kind() == SampleKind::Put {
+                k.lock().unwrap().push(s.key_expr().as_str().to_owned());
+            }
+        })
+        .await
+        .unwrap();
+    let mut b = ServiceBuilder::new(&s, ServiceConfig::new("lab/budget".parse().unwrap()));
+    b.implement(Implementation::new(budget())).unwrap();
+    for r in [
+        "state/items/{item}",
+        "stream/load/{cpu}",
+        "events/alarms/{src}",
+    ] {
+        b.expose(&iface(), r).unwrap();
+    }
+    b.serve_state(&iface()).unwrap();
+    if let Some(n) = lowered {
+        b.cardinality(&iface(), "state/items/{item}", n).unwrap();
+    }
+    Owner {
+        svc: b.start().await.unwrap(),
+        keys,
+        reader: consumer,
+        _r: r,
+        _sub: sub,
+        _owner: s,
+    }
+}
+
+impl Owner {
+    /// Waits until the consumer heard a put on a key ending in `tail`.
+    async fn heard(&self, tail: &str) {
+        eventually(&format!("a put on …{tail} is heard"), || async {
+            self.keys.lock().unwrap().iter().any(|k| k.ends_with(tail))
+        })
+        .await;
+    }
+
+    /// Waits until the consumer heard an event occurrence under `part`
+    /// (`/alarms/<src>/`, its ULID after it).
+    async fn heard_event(&self, part: &str) {
+        eventually(&format!("an occurrence under …{part} is heard"), || async {
+            self.ever(part)
+        })
+        .await;
+    }
+
+    /// Whether the consumer heard anything on a key containing `part`.
+    fn ever(&self, part: &str) -> bool {
+        self.keys.lock().unwrap().iter().any(|k| k.contains(part))
+    }
+}
+
+/// The breach of a refused write, which must be §2.7's.
+#[track_caller]
+fn breach(e: zenkey::Error) -> (zenkey::budget::Breach, String) {
+    match e {
+        zenkey::Error::Budget(r) => (r.breach.clone(), r.to_string()),
+        other => panic!("a §2.7 refusal, not {other}"),
+    }
+}
+
+/// §4 steps 1, 3, 4: three live members at the bound of 3; a put to a live
+/// key adds none; a delete frees one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s4_a_state_at_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let mut o = owner(None).await;
+    let mut w = Vec::new();
+    for item in ["a", "b", "c"] {
+        let sw = o
+            .svc
+            .state_writer(&iface(), "state/items/{item}", &one("item", item))
+            .await
+            .unwrap();
+        sw.put("ok").await.unwrap();
+        w.push(sw);
+    }
+    o.heard("/items/c").await;
+    let live = |o: &Owner| {
+        o.svc
+            .budget(&iface(), "state/items/{item}")
+            .unwrap()
+            .unwrap()
+    };
+    let (n, bound, source) = live(&o);
+    assert_eq!((n, bound), (3, zenkey::model::budget::Bound::Of(3)));
+    assert_eq!(source, zenkey::budget::Source::Contract);
+    w[0].put("again")
+        .await
+        .expect("a put to a live key adds no member");
+    w[1].delete().await.unwrap();
+    assert_eq!(live(&o).0, 2, "a delete frees a member");
+    let d = o
+        .svc
+        .state_writer(&iface(), "state/items/{item}", &one("item", "d"))
+        .await
+        .unwrap();
+    d.put("ok").await.expect("the freed member is d's");
+    o.heard("/items/d").await;
+    assert_eq!(live(&o).0, 3);
+}
+
+/// §4 steps 2 and 5: a fourth key at the bound of 3 is refused, naming the
+/// resource, the bound and the contract's; nothing is published, nor
+/// answered on a GET. Lowered by the descriptor to 2, the third is refused
+/// naming the descriptor's; and a lowering below the live members is
+/// refused, the bound unchanged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s4_a_state_past_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let mut o = owner(None).await;
+    let mut w = Vec::new();
+    for item in ["a", "b", "c", "d"] {
+        w.push(
+            o.svc
+                .state_writer(&iface(), "state/items/{item}", &one("item", item))
+                .await
+                .unwrap(),
+        );
+    }
+    for sw in &w[..3] {
+        sw.put("ok").await.unwrap();
+    }
+    let (b, said) = breach(w[3].put("ok").await.unwrap_err());
+    assert_eq!(
+        b,
+        zenkey::budget::Breach::Bound {
+            bound: 3,
+            source: zenkey::budget::Source::Contract,
+            live: 3
+        }
+    );
+    assert!(
+        said.contains("budget.v1 \"state/items/{item}\"")
+            && said.contains("at its bound of 3 (the contract's)")
+            && said.contains("nothing published"),
+        "{said}"
+    );
+    w[0].put("marker").await.unwrap();
+    o.heard("/items/a").await;
+    o.heard("/items/c").await;
+    assert!(!o.ever("/items/d"), "the refused put was never published");
+    let consumer = zenkey::consumer::Consumer::for_tool(
+        &o.reader,
+        Arc::new(budget()),
+        &["lab/budget"],
+        &Default::default(),
+    )
+    .unwrap();
+    let got = consumer
+        .get("state/items/{item}", None, common::T)
+        .await
+        .unwrap();
+    let zenkey::state::StateGet::Answered(rows) = got else {
+        panic!("the owner answers its GET")
+    };
+    assert_eq!(rows.len(), 3, "nor answered on a GET: {rows:?}");
+
+    let mut o = owner(Some(2)).await;
+    let mut w = Vec::new();
+    for item in ["a", "b", "c"] {
+        w.push(
+            o.svc
+                .state_writer(&iface(), "state/items/{item}", &one("item", item))
+                .await
+                .unwrap(),
+        );
+    }
+    w[0].put("ok").await.unwrap();
+    w[1].put("ok").await.unwrap();
+    let (b, said) = breach(w[2].put("ok").await.unwrap_err());
+    assert_eq!(
+        b,
+        zenkey::budget::Breach::Bound {
+            bound: 2,
+            source: zenkey::budget::Source::Descriptor,
+            live: 2
+        }
+    );
+    assert!(
+        said.contains("at its bound of 2 (the descriptor's)"),
+        "{said}"
+    );
+
+    // A lowering below the members already live, on the builder.
+    let (_r, ep) = router(None).await;
+    let s = client(&ep).await;
+    let mut b = ServiceBuilder::new(&s, ServiceConfig::new("lab/budget".parse().unwrap()));
+    b.implement(Implementation::new(budget())).unwrap();
+    for item in ["a", "b"] {
+        b.declare_state_writer(&iface(), "state/items/{item}", &one("item", item))
+            .await
+            .unwrap()
+            .put("ok")
+            .await
+            .unwrap();
+    }
+    let (b_, said) = breach(
+        b.cardinality(&iface(), "state/items/{item}", 1)
+            .map(|_| ())
+            .unwrap_err(),
+    );
+    assert!(
+        matches!(b_, zenkey::budget::Breach::Bound { live: 2, .. }),
+        "{said}"
+    );
+}
+
+/// Stream writers on `stream/load/{cpu}`, one per `cpu`.
+async fn streams(o: &Owner, cpus: &[&str]) -> Vec<zenkey::writer::Writer> {
+    let mut w = Vec::new();
+    for cpu in cpus {
+        w.push(
+            o.svc
+                .writer(&iface(), "stream/load/{cpu}", &one("cpu", cpu))
+                .await
+                .unwrap(),
+        );
+    }
+    w
+}
+
+/// §5 steps 1 and 3: three members published within the hour, at the
+/// bound of 3; a publication on a live one adds none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_a_stream_at_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let o = owner(None).await;
+    let w = streams(&o, &["c0", "c1", "c2"]).await;
+    for sw in &w {
+        sw.put("ok").await.unwrap();
+    }
+    o.heard("/load/c2").await;
+    w[0].put("again").await.expect("c0 is live");
+    assert_eq!(
+        o.svc
+            .budget(&iface(), "stream/load/{cpu}")
+            .unwrap()
+            .unwrap()
+            .0,
+        3
+    );
+}
+
+/// §5 step 2: a fourth member within the hour is refused, nothing
+/// published.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_a_stream_past_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let o = owner(None).await;
+    let w = streams(&o, &["c0", "c1", "c2", "c3"]).await;
+    for sw in &w[..3] {
+        sw.put("ok").await.unwrap();
+    }
+    let (b, said) = breach(w[3].put("ok").await.unwrap_err());
+    assert_eq!(
+        b,
+        zenkey::budget::Breach::Bound {
+            bound: 3,
+            source: zenkey::budget::Source::Contract,
+            live: 3
+        },
+        "{said}"
+    );
+    assert!(said.contains("budget.v1 \"stream/load/{cpu}\""), "{said}");
+    w[0].put("marker").await.unwrap();
+    o.heard("/load/c2").await;
+    o.heard("/load/c0").await;
+    assert!(!o.ever("/load/c3"), "the refused publication never left");
+}
+
+/// An event writer on `events/alarms/{src}` for `src`.
+fn alarm(o: &Owner, src: &str) -> zenkey::writer::EventWriter {
+    o.svc
+        .event_writer(&iface(), "events/alarms/{src}", &one("src", src))
+        .unwrap()
+}
+
+/// §6 steps 1 and 3: two sources within the 2 s retention, at the bound of
+/// 2; once the retention passes, a third source is a member.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s6_an_event_at_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let o = owner(None).await;
+    alarm(&o, "a").put("ok").await.unwrap();
+    alarm(&o, "b").put("ok").await.unwrap();
+    o.heard_event("/alarms/b/").await;
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    alarm(&o, "c")
+        .put("ok")
+        .await
+        .expect("a and b are past their retention");
+    o.heard_event("/alarms/c/").await;
+}
+
+/// §6 step 2: a third source while two have occurrences within the
+/// retention is refused, nothing published.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s6_an_event_past_its_bound() {
+    let _serial = SERIAL.lock().await;
+    let o = owner(None).await;
+    let a = alarm(&o, "a");
+    a.put("ok").await.unwrap();
+    alarm(&o, "b").put("ok").await.unwrap();
+    let (b, said) = breach(alarm(&o, "c").put("ok").await.unwrap_err());
+    assert_eq!(
+        b,
+        zenkey::budget::Breach::Bound {
+            bound: 2,
+            source: zenkey::budget::Source::Contract,
+            live: 2
+        },
+        "{said}"
+    );
+    assert!(
+        said.contains("zk2/lab/budget/budget.v1/events/alarms/c would be a new live member"),
+        "{said}"
+    );
+    a.put("marker").await.unwrap();
+    o.heard_event("/alarms/b/").await;
+    eventually("a's second occurrence is heard", || async {
+        o.keys
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|k| k.contains("/alarms/a/"))
+            .count()
+            == 2
+    })
+    .await;
+    assert!(!o.ever("/alarms/c/"), "the refused occurrence never left");
+}
+
+/// §7: `burst(3/h)` — three occurrences of one source, then a fourth within
+/// the hour refused, naming the rate; another source's is its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s7_an_owner_keeps_its_rate() {
+    let _serial = SERIAL.lock().await;
+    let o = owner(None).await;
+    let a = alarm(&o, "a");
+    for _ in 0..3 {
+        a.put("ok").await.unwrap();
+    }
+    let (b, said) = breach(a.put("ok").await.unwrap_err());
+    assert!(
+        matches!(b, zenkey::budget::Breach::Rate { allowed: 3, .. }),
+        "{said}"
+    );
+    assert!(
+        said.contains("beyond its rate burst(3/h), which allows 3 within an hour"),
+        "{said}"
+    );
+    alarm(&o, "b")
+        .put("ok")
+        .await
+        .expect("the rate bounds each member");
+    o.heard_event("/alarms/b/").await;
+    let heard_a = o
+        .keys
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|k| k.contains("/alarms/a/"))
+        .count();
+    assert_eq!(heard_a, 3, "the fourth never left");
+}

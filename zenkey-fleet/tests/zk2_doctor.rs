@@ -817,13 +817,14 @@ async fn a_state_reply_not_stamped_by_its_owner_is_a_finding() {
 
 // ─── population-over-bound: core §2.7 (deep, 0.24, #735) ─────────────────────
 
-/// An owner of `inv.v1` (one templated state, bound 4) at `address`, its
-/// descriptor lowering the bound to `bound`, holding `members` items.
+/// An instance of `inv.v1` (one templated state, bound 4) at `address`, its
+/// descriptor lowering the bound to `bound`, holding `items`. The runtime
+/// keeps the bound (§2.7, #741): it refuses more items than it.
 async fn inventory(
     session: &zenoh::Session,
     address: &str,
     bound: u64,
-    members: usize,
+    items: &[&str],
 ) -> (Service, Vec<zenkey::state::StateWriter>) {
     let inv = load(
         "[interface]\nname = \"inv\"\nmajor = 1\n\
@@ -833,9 +834,11 @@ async fn inventory(
     let id = iface("inv.v1");
     let mut b = ServiceBuilder::new(session, config(address));
     b.implement(Implementation::new(inv)).expect("implement");
+    b.cardinality(&id, "state/items/{item}", bound)
+        .expect("a lowering");
     let mut writers = Vec::new();
-    for i in 0..members {
-        let item: Bindings = [("item".to_owned(), vec![format!("i{i}")])].into();
+    for (i, item) in items.iter().enumerate() {
+        let item: Bindings = [("item".to_owned(), vec![(*item).to_owned()])].into();
         let w = b
             .declare_state_writer(&id, "state/items/{item}", &item)
             .await
@@ -843,21 +846,22 @@ async fn inventory(
         w.put(format!("{i}")).await.expect("a put");
         writers.push(w);
     }
-    b.cardinality(&id, "state/items/{item}", bound)
-        .expect("a lowering");
     (b.start().await.expect("start"), writers)
 }
 
 /// Core §2.7 under `deep`: the doctor counts each owner's templated state
 /// from the GET `state-stamp-foreign` reads. Two members where the
-/// descriptor lowers the bound to one is the finding, an error; two within
-/// a lowered bound of two adds nothing. Without `deep`, not asked.
+/// descriptors lower the bound to one is the finding, an error — two
+/// instances of one service, each keeping its own bound of one (#741), hold
+/// one population — and two within a lowered bound of two add nothing.
+/// Without `deep`, not asked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_population_above_its_bound_is_a_finding_under_deep() {
     let (_r, ep) = router(false).await;
-    let (owners, tool) = (client(&ep).await, client(&ep).await);
-    let (_over, _w1) = inventory(&owners, "host-a/inv", 1, 2).await;
-    let (_within, _w2) = inventory(&owners, "host-b/inv", 2, 2).await;
+    let (owners, other, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let (_over, _w1) = inventory(&owners, "host-a/inv", 1, &["i0"]).await;
+    let (_twin, _w3) = inventory(&other, "host-a/inv", 1, &["i1"]).await;
+    let (_within, _w2) = inventory(&owners, "host-b/inv", 2, &["i0", "i1"]).await;
     settled(&tool, &["host-a/inv", "host-b/inv"]).await;
     let mut deep = spec(&[CheckId::PopulationOverBound]);
     deep.deep = true;
