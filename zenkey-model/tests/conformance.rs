@@ -853,9 +853,10 @@ fn budget_populations() {
     }
 }
 
-/// `spec/conformance/budget/rate.json` (core §2.7, 0.24): an event's rate
-/// and the occurrences a window heard → the verdict and its reason class.
-/// Written by hand from the text, checked, never blessed.
+/// `spec/conformance/budget/rate.json` (core §2.7, 0.24; 0.25): an event's
+/// rate and the occurrences a window heard, with the window's premises →
+/// the verdict and its reason class. Written by hand from the text,
+/// checked, never blessed.
 #[test]
 fn budget_rates() {
     use zenkey_model::budget::{Occurrences, rate};
@@ -868,13 +869,56 @@ fn budget_rates() {
         let o = &case["reading"];
         let occurrences = Occurrences {
             listened: secs(&o["listened_s"]),
-            complete: o["complete"].as_bool().expect("complete"),
+            lossless: o["lossless"].as_bool().expect("lossless"),
+            present: o["present"].as_bool().expect("present"),
             members: instants(&o["members"]),
         };
         let j = rate(r, &occurrences);
         assert_eq!(
             case["expect"],
             json!({"verdict": j.verdict.as_str(), "reason": j.reason.as_str()}),
+            "{}",
+            case["note"]
+        );
+    }
+}
+
+/// `spec/conformance/budget/lossless.json` (core §2.7, 0.25): a resource's
+/// declared QoS, the reader's own loss and miss detection → whether a
+/// window lost no delivery, and why. Written by hand from the text,
+/// checked, never blessed.
+#[test]
+fn budget_lossless() {
+    use zenkey_model::authoring::{Congestion, Reliability};
+    use zenkey_model::budget::{Delivery, MissDetection, lossless};
+    let doc = read_json(&spec().join("conformance/budget/lossless.json"));
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let q = &case["qos"];
+        let m = &case["miss_detection"];
+        let d = Delivery {
+            reliability: match q["reliability"].as_str().expect("reliability") {
+                "reliable" => Reliability::Reliable,
+                "best_effort" => Reliability::BestEffort,
+                other => panic!("reliability {other:?}"),
+            },
+            congestion: match q["congestion"].as_str().expect("congestion") {
+                "block" => Congestion::Block,
+                "drop" => Congestion::Drop,
+                other => panic!("congestion {other:?}"),
+            },
+            reader_lost: case["reader_lost"].as_u64().expect("reader_lost"),
+            miss_detection: MissDetection {
+                declared: m["declared"].as_bool().expect("declared"),
+                used: m["used"].as_bool().expect("used"),
+                misses: m["misses"].as_u64().expect("misses"),
+            },
+        };
+        let why = lossless(&d);
+        assert_eq!(
+            case["expect"],
+            json!({"lossless": why.is_lossless(), "reason": why.as_str()}),
             "{}",
             case["note"]
         );
