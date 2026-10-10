@@ -62,6 +62,7 @@ fn spec(rule: &str, semantics: Option<PreambleSemantics>, give_up: Duration) -> 
         rules: vec![Condition::parse(rule).expect("rule")],
         tick: Duration::from_millis(250),
         timeout: Duration::from_secs(1),
+        clocks_synced: false,
         deployment: None,
         contracts: zenkey_fleet::ContractSet::new(),
         give_up: Some(give_up),

@@ -34,9 +34,11 @@
 //! `contract-unavailable`'s finding, and every other check that needed it
 //! leaves that subject unjudged with the reason, rather than guessing.
 //!
-//! **Not asked.** A check the spec leaves out is `NotAsked`, and so is
-//! `state-stamp-foreign` without [`DoctorSpec::deep`]: its GETs cost the
-//! owners' data plane, the frugality v1's `--deep` checks had.
+//! **Not asked.** A check the spec leaves out is `NotAsked`, and so are
+//! `state-stamp-foreign` and `population-over-bound` without
+//! [`DoctorSpec::deep`]: their GETs, one per owner interface and shared
+//! between them, cost the owners' data plane, the frugality v1's `--deep`
+//! checks had.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -110,7 +112,9 @@ pub struct DoctorSpec {
     pub grace: Duration,
     /// The token count `presence-over-budget` judges against (§8.3).
     pub presence_budget: usize,
-    /// Ask `state-stamp-foreign`, whose GETs cost the owners' data plane.
+    /// Ask the checks that read the owners' data plane
+    /// ([`CheckId::reads_data`]): `state-stamp-foreign` and
+    /// `population-over-bound`, whose GETs of every owner's state cost it.
     pub deep: bool,
     /// The checks to ask; the rest are `NotAsked`.
     pub checks: BTreeSet<CheckId>,
@@ -149,7 +153,7 @@ impl DoctorSpec {
 
     /// Whether the run asks `check`.
     pub fn asks(&self, check: CheckId) -> bool {
-        self.checks.contains(&check) && (check != CheckId::StateStampForeign || self.deep)
+        self.checks.contains(&check) && (!check.reads_data() || self.deep)
     }
 
     fn asks_presence(&self) -> bool {
@@ -279,6 +283,9 @@ pub struct ArchiveKeys {
 pub struct StateStamps {
     /// Per clock: how many replies, and the first keys.
     pub by_clock: BTreeMap<Option<String>, (usize, Vec<String>)>,
+    /// Every key answered with a value, not a `reply_del`: the members
+    /// `population-over-bound` counts (§2.7, 0.24).
+    pub values: BTreeSet<String>,
     /// Whether every GET ended at the final reply.
     pub complete: bool,
 }
@@ -450,7 +457,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         out
     };
     let stamps = async {
-        if !spec.asks(CheckId::StateStampForeign) {
+        if !spec.asks(CheckId::StateStampForeign) && !spec.asks(CheckId::PopulationOverBound) {
             return BTreeMap::new();
         }
         let mut out = BTreeMap::new();
@@ -690,6 +697,9 @@ async fn state_stamps(
             if keys.len() < crate::judge::common::EXPANSION_CAP {
                 keys.push(sample.key_expr().as_str().to_owned());
             }
+            if sample.kind() == SampleKind::Put {
+                out.values.insert(sample.key_expr().as_str().to_owned());
+            }
         }
     }
     Ok(out)
@@ -740,6 +750,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::HealthStale => health_stale(p, spec),
                 CheckId::HealthInconsistent => health_inconsistent(p, spec),
                 CheckId::HostidDuplicate => hostid_duplicate(p),
+                CheckId::PopulationOverBound => population_over_bound(p),
                 _ => unreachable!("every check that reads presence is above"),
             }
         })
@@ -1878,6 +1889,164 @@ fn state_stamp_foreign(p: &Presence<'_>) -> CheckReport {
             )
         },
     )
+}
+
+/// §2.7 (0.24; #735): each owner interface's templated state resources,
+/// counted from the GET `state-stamp-foreign` reads — every key answered
+/// with a value — against the bound its descriptors state, else its
+/// contract's. More members than the bound is the finding, whether or not
+/// the GET ran to its final reply; within it from a GET that did not is
+/// unjudged. A resource the GET answered no member of adds nothing (an
+/// empty reply set is never a verdict, O5), as an owner that answered no
+/// state adds nothing to `state-stamp-foreign`; the evidence counts them.
+/// Streams and events are not read here: the doctor listens to no window,
+/// and `check conform` counts them.
+fn population_over_bound(p: &Presence<'_>) -> CheckReport {
+    const C: CheckId = CheckId::PopulationOverBound;
+    use zenkey_model::budget::{self, Bound, Reading, Verdict};
+    let mut findings = Vec::new();
+    let mut undecided = Vec::new();
+    let (mut judged, mut members, mut empty, mut unbounded) = (0usize, 0u64, 0usize, 0usize);
+    for ((addr, iface), read) in &p.obs.stamps {
+        let subject = format!("{addr} {iface}");
+        let stamps = match read {
+            Ok(s) => s,
+            Err(e) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!("its state could not be read: {e}"),
+                ));
+                continue;
+            }
+        };
+        let want = iface.to_string();
+        let entries: Vec<(&Descriptor, &InterfaceEntry)> = p
+            .served()
+            .filter(|(a, _, _)| *a == addr)
+            .filter_map(|(_, _, d)| Some((d, d.interfaces.iter().find(|e| e.iface == want)?)))
+            .collect();
+        let fps: BTreeSet<&str> = entries.iter().map(|(_, e)| e.contract.as_str()).collect();
+        if fps.len() > 1 {
+            undecided.push(unjudged(
+                subject,
+                format!(
+                    "its instances claim {} revisions of {iface}: whose bound applies to one \
+                     population cannot be told",
+                    fps.len()
+                ),
+            ));
+            continue;
+        }
+        let Some((_, entry)) = entries.first() else {
+            continue;
+        };
+        let rev = match p.entry_revision(entry) {
+            Ok(r) => r,
+            Err(why) => {
+                undecided.push(unjudged(subject, why));
+                continue;
+            }
+        };
+        let contract = rev.contract();
+        // Every key answered with a value, resolved to its template (§2.2).
+        let mut counted: BTreeMap<usize, u64> = BTreeMap::new();
+        for key in &stamps.values {
+            let Ok(ZkKey::Data { kind, resource, .. }) = zenkey_model::grammar::parse(key) else {
+                continue;
+            };
+            let candidates: Vec<(usize, &zenkey_model::contract::Resource)> = contract
+                .resources
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.token == kind)
+                .collect();
+            let refs: Vec<&str> = resource.iter().map(String::as_str).collect();
+            if let Some((i, _)) =
+                zenkey_model::template::resolve(candidates.iter().map(|(_, r)| &r.template), &refs)
+            {
+                *counted.entry(candidates[i].0).or_default() += 1;
+            }
+        }
+        for (i, r) in contract.resources.iter().enumerate() {
+            if r.kind != zenkey_model::authoring::Kind::State || !r.template.has_params() {
+                continue;
+            }
+            let name = zenkey::implementation::resource_name(r);
+            let exposing: Vec<Option<u64>> = entries
+                .iter()
+                .filter(|(d, _)| {
+                    d.exposed(contract)
+                        .is_some_and(|rs| rs.iter().any(|x| std::ptr::eq(*x, r)))
+                })
+                .map(|(_, e)| e.cardinality.get(&name).copied())
+                .collect();
+            if exposing.is_empty() {
+                continue;
+            }
+            let b = budget::bound_of(r, exposing);
+            let n = counted.get(&i).copied().unwrap_or(0);
+            let j = budget::population(
+                r.kind,
+                b,
+                None,
+                &Reading::Get {
+                    members: n,
+                    complete: stamps.complete,
+                },
+            );
+            let of = match (b, r.cardinality) {
+                (Bound::Of(b), Some(c)) if b < c => {
+                    format!("its bound of {b} (its descriptor's; the contract's is {c})")
+                }
+                (b, _) => format!("its bound of {b} (the contract's)"),
+            };
+            match j.verdict {
+                Verdict::Exceeds => findings.push(finding(
+                    C,
+                    DoctorSeverity::Error,
+                    format!("{subject} {name}"),
+                    format!(
+                        "{n} member(s) answered with a value, above {of}: an owner MUST NOT \
+                         hold more live members than its bound (§2.7){}",
+                        if stamps.complete {
+                            ""
+                        } else {
+                            "; the GET ended at its timeout, so this is a lower bound"
+                        }
+                    ),
+                )),
+                Verdict::Within => {
+                    judged += 1;
+                    members += n;
+                }
+                Verdict::NotAsked => unbounded += 1,
+                Verdict::Unobservable if n == 0 => empty += 1,
+                Verdict::Unobservable => undecided.push(unjudged(
+                    format!("{subject} {name}"),
+                    format!(
+                        "{n} member(s) within {of}, and the GET ended at its timeout: a member \
+                         unanswered may be live (§2.7)"
+                    ),
+                )),
+            }
+        }
+    }
+    let mut clean = format!(
+        "{members} member(s) of {judged} templated state resource(s), each within its bound, \
+         by GETs that ran to their final reply"
+    );
+    if empty > 0 {
+        clean.push_str(&format!(
+            "; {empty} resource(s) answered no member, which is no pass for them (O5)"
+        ));
+    }
+    if unbounded > 0 {
+        clean.push_str(&format!(
+            "; {unbounded} with the no-ceiling bound, not asked"
+        ));
+    }
+    clean.push_str("; streams and events are check conform's");
+    CheckReport::of(C, findings, undecided, clean)
 }
 
 // ─── health.v1 (#721, PF) ───────────────────────────────────────────────────
@@ -3313,14 +3482,11 @@ mod tests {
         }
         let s = DoctorSpec::new(Duration::from_secs(1));
         assert!(!s.asks(CheckId::StateStampForeign), "deep only");
+        assert!(!s.asks(CheckId::PopulationOverBound), "deep only");
         let report = judge(&o, &s);
-        assert!(
-            report
-                .check(CheckId::StateStampForeign)
-                .unwrap()
-                .verdict
-                .is_not_asked()
-        );
+        for c in [CheckId::StateStampForeign, CheckId::PopulationOverBound] {
+            assert!(report.check(c).unwrap().verdict.is_not_asked(), "{c}");
+        }
     }
 
     // ── presence-over-budget (§8.3) ─────────────────────────────────────
@@ -3557,6 +3723,110 @@ mod tests {
         }));
         assert!(unseen(&read(&mut o, &[Some(&own)])).contains("A tool's S1 check"));
         assert!(foreign(&read(&mut o, &[Some("feed")])));
+    }
+
+    // ── population-over-bound (§2.7, 0.24) ───────────────────────────────
+
+    /// `inv.v1`: a templated state of bound 4, a no-ceiling one, a plain one.
+    fn inv() -> Contract {
+        load(
+            "[interface]\nname = \"inv\"\nmajor = 1\n\
+             [resources.\"items/{item}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             params = { item = \"string\" }\ncardinality = 4\n\
+             [resources.\"log/{entry}\"]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
+             params = { entry = \"string\" }\ncardinality = 4294967295\n\
+             [resources.summary]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n",
+        )
+    }
+
+    /// §2.7: each owner interface's templated state, counted from the deep
+    /// GET's keys answered with a value, against the descriptor's lowered
+    /// bound, else the contract's. Above it is the finding, whether or not
+    /// the GET ran to its final reply; within it, complete, is clean, and
+    /// incomplete is unjudged; a resource with no member adds nothing; the
+    /// no-ceiling bound is not asked; a `reply_del` is no member.
+    #[test]
+    fn a_state_population_above_its_bound_is_the_finding() {
+        let c = inv();
+        let items = |n: usize| -> Vec<String> {
+            (0..n)
+                .map(|i| format!("zk2/h1/inv/inv.v1/state/items/i{i}"))
+                .collect()
+        };
+        let at: (Addr, IfaceId) = ("h1/inv".parse().unwrap(), "inv.v1".parse().unwrap());
+        let with = |lowered: Option<u64>, keys: Vec<String>, complete: bool| {
+            let mut e = entry(&c);
+            if let Some(n) = lowered {
+                e["cardinality"] = json!({"state/items/{item}": n});
+            }
+            let ks = [inst("h1/inv", A), alive("h1/inv", "inv.v1", A, &c)];
+            let mut o = obs(
+                observed(
+                    &ks,
+                    vec![(("h1/inv", A), descriptor("h1/inv", A, &[e], &[]))],
+                ),
+                &[&c],
+                &[],
+            );
+            let s = StateStamps {
+                complete,
+                values: keys.into_iter().collect(),
+                ..Default::default()
+            };
+            o.stamps = [(at.clone(), Ok(s))].into();
+            check(&o, CheckId::PopulationOverBound)
+        };
+        // Three members against the descriptor's bound of 2.
+        let r = with(Some(2), items(3), true);
+        let f = found(&r).clone();
+        assert_eq!(f.subject, "h1/inv inv.v1 state/items/{item}");
+        assert_eq!(f.severity, DoctorSeverity::Error);
+        assert!(
+            f.evidence.contains("3 member(s)") && f.evidence.contains("its bound of 2"),
+            "{f:?}"
+        );
+        // Five against the contract's 4, from a GET that timed out: still
+        // the finding, said to be a lower bound.
+        assert!(
+            found(&with(None, items(5), false))
+                .evidence
+                .contains("lower bound")
+        );
+        // Within, complete: clean, with the counts.
+        assert!(clean(&with(None, items(3), true)).starts_with("3 member(s) of 1 templated"));
+        // Within, incomplete: unjudged.
+        assert!(unseen(&with(None, items(3), false)).contains("may be live"));
+        // No member: nothing to count, and the evidence says so.
+        assert!(clean(&with(None, vec![], true)).contains("1 resource(s) answered no member"));
+        // The no-ceiling log, however long, is not asked; the plain summary
+        // has no bound.
+        let mut keys = items(1);
+        keys.extend((0..100).map(|i| format!("zk2/h1/inv/inv.v1/state/log/e{i}")));
+        keys.push("zk2/h1/inv/inv.v1/state/summary".into());
+        let report = with(None, keys, true);
+        assert!(
+            clean(&report).contains("1 with the no-ceiling bound"),
+            "{report:?}"
+        );
+        // A revision no holder serves leaves the interface unjudged.
+        let mut o = obs(
+            observed(
+                &[inst("h1/inv", A)],
+                vec![(("h1/inv", A), descriptor("h1/inv", A, &[entry(&c)], &[]))],
+            ),
+            &[],
+            &[&c],
+        );
+        o.stamps = [(
+            at.clone(),
+            Ok(StateStamps {
+                complete: true,
+                values: items(9).into_iter().collect(),
+                ..Default::default()
+            }),
+        )]
+        .into();
+        assert!(unseen(&check(&o, CheckId::PopulationOverBound)).contains("unavailable"));
     }
 
     // ── shm-memlock-low (§7.4) ──────────────────────────────────────────

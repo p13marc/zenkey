@@ -661,6 +661,29 @@ pub enum StateGet {
     Silent,
 }
 
+/// A state GET's answer with how it ended (§2.7, 0.24; #735): what
+/// [`crate::consumer::Consumer::get_answer`] returns, for a reader that must
+/// tell a complete reading from one that may miss a member.
+#[derive(Debug, Clone, Default)]
+pub struct StateAnswer {
+    /// Every key answered, its value or its deletion. Empty is silence.
+    pub current: Vec<Current>,
+    /// Whether every GET ran to its final reply with no error reply: a GET
+    /// that reached its timeout ends with one (Appendix B), and so may miss
+    /// a member. A refused GET is complete and empty (§8.1, 0.8).
+    pub complete: bool,
+}
+
+impl From<StateAnswer> for StateGet {
+    fn from(a: StateAnswer) -> Self {
+        if a.current.is_empty() {
+            StateGet::Silent
+        } else {
+            StateGet::Answered(a.current)
+        }
+    }
+}
+
 /// Orders one owner's values (§4.3, the consumer rule): by time within one
 /// timestamp id, accepting the first value under a new id and restarting
 /// the ordering there. Per key.

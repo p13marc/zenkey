@@ -3,6 +3,120 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.24 — 2026-10-10: the population budget (#735)
+
+FJ (#612) left the tools' budget checks dark as profile-backed, beside
+kinds, alerts and configuration. The maintainer decided on 2026-10-09 that
+the budget is core: `cardinality` bounds a template's population in one
+instance (§2.2), and an event's `rate` and `retention` are core fields
+(§2.6). Lighting it up showed that the core named the bound and never said
+what it counts, when a member is live, what `rate` is a rate of, or what a
+tool may conclude from a reading.
+
+**Changed: rules stated (new §2.7).**
+- **The bound.** The descriptor's lowered `cardinality` when it states one
+  from 1 to the contract's, else the contract's. A value outside that
+  range is D007's and does not apply. 4294967295 is no ceiling from either
+  source, as §2.2 already said of the contract's.
+  - **Across instances, the greatest.** A key names no instance, so a
+    resource's members are the service's, and a re-mint's overlap shows
+    two instances holding one population. A finding then never rests on a
+    bound one of them did not state.
+- **Members, and when one is live.** A member is one value of the
+  template's parameters: a key, or an event's key without its ULID. An
+  owner MUST NOT hold more live members of a templated stream, state or
+  event than its bound. Live is:
+  - **state:** a key with a value; a deleted key is not live;
+  - **stream:** published within the last hour. A stream has no delete,
+    so a reader cannot see a member stop. One that forgets a member after
+    an hour of silence holds at most the bound. "Since the instance
+    started" was rejected: an owner whose entities churn would exceed any
+    bound in a long run, and could keep it only by minting instances it
+    does not need;
+  - **event:** an occurrence within the retention, as §2.2's "cardinality
+    × rate × retention" already implied.
+- **`rate` is per member,** within any period of its own: at most one
+  occurrence of a member in any hour (`rare`), any minute (`low`), or
+  `<n>` in any hour (`burst(<n>/h)`). `<n>` + 1 occurrences of one member
+  less than the period apart break it.
+  - §2.2's key population, cardinality × rate × retention, holds only per
+    member: per template it would be rate × retention.
+  - An owner keeps it by counting its own occurrences per member, and a
+    tool measures it from keys alone. Per instance it could not be
+    measured, since a key names no instance, and a re-mint does not reset
+    it.
+- **What a tool reads.** A state resource's S4 GET that ran to its final
+  reply is complete. So is a stream's or an event's subscription window
+  that lasted at least one liveness span (an hour, or the retention), lost
+  no delivery, and over which the owner was present, its instance token
+  held, from start to end.
+  - **Why a window can be complete.** A member is live for one span after
+    its last publication, so such a window heard every member live at its
+    end. These are the premises `rate`'s clean pole already rests on (a
+    lossless window of a whole period), plus presence. An owner that
+    joined, left or re-minted mid-window is a new instance or a gap. A
+    rule that refused every window would leave a stream's population a
+    question no reading could ever answer no to.
+  - Nothing else is complete: a GET that ended at its timeout, a shorter
+    or lossy window or one with the owner absent (a member it never heard
+    may be live), an archive.
+  - A window shows no state population, however long, since a missed
+    delete would count a member twice. A refusal narrows even a complete
+    reading (§8.1, 0.8). A rate's spans are measured between stamps of
+    one clock where the occurrences carry them, and on the receive clock
+    otherwise.
+- **What a tool concludes,** to "does this instance exceed its budget
+  here?":
+  - the finding: more members than the bound in any reading, or `<n>` + 1
+    occurrences of one member less than the period apart in any window. A
+    lower bound that exceeds is already the finding;
+  - clean: at most the bound after a complete reading with a member (a
+    complete GET, or a complete window), or, for a rate, a window of a
+    whole period that lost nothing and heard an occurrence, none beyond
+    the rate;
+  - unobservable: within from an incomplete reading (a timed-out GET; a
+    window short of one span, lossy, or with the owner absent), no member
+    at all (O5), a rate window shorter than one period, deliveries lost;
+  - not asked: no ceiling, a template without parameters, an operation, a
+    resource without a rate.
+- **Evidence:** new fixtures `conformance/budget/` (`bounds.json`,
+  `population.json`, `rate.json`), written by hand from the text and
+  checked by `zenkey-model/tests/conformance.rs`; Appendix C and E list
+  them.
+
+**Changed: wording.**
+- **§2.2** points at §2.7 for what the bound counts. **§2.6** says the
+  rate is per member, within any period that long. **§3.3**'s
+  `cardinality` is the bound the owner keeps and a tool judges against.
+
+**Found while writing it.**
+- **An operation's `cardinality`.** E013 requires one on a templated
+  operation, and nothing said what it bounds. It is the population of
+  values the owner serves calls for. No reading of the owner counts it,
+  since the values are the callers', so it is not judged at this version.
+- **"At most 1/h"** could be read per calendar hour, as an average, or
+  within any hour. It is within any hour, the one reading a tool can
+  check from instants alone, and the one an owner keeps by counting.
+- **An empty complete reading** could read as within any bound. An empty
+  reply set is never a verdict (O5), and a refusal returns one too, so it
+  is unobservable.
+
+**Deliberately not changed.**
+- **The presence budget (§8.3)** counts tokens in a presence domain, and
+  is judged against a deployment's number, not a contract's. §2.7 counts
+  members, and says the two are different.
+- **D007.** Its range check is unchanged. §2.7 only says that a value it
+  reports does not apply.
+- **No new lint.** Nothing a contract could state is newly wrong: the
+  bound, the rate and the retention keep their syntax and their codes
+  (E013, E015, E026, E028).
+- **No runtime rule.** The owner's MUST binds every runtime, and the
+  reference runtime does not yet refuse a member beyond its bound: that
+  is runtime work, not wire.
+- **Profiles.** None was needed: `cardinality`, `rate` and `retention`
+  are core fields, so the budget is core, and the tools' judgement of it
+  no longer waits for #613.
+
 ## 0.23 — 2026-10-10: a clock ahead reported by a stream, and the first standard contract a profile publishes (#721, PD)
 
 `health.v1` (text 0.1, draft) is the third profile written, and the first

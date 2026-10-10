@@ -32,6 +32,10 @@
 //! - [`compat`]: the FULL_TRANSITIVE compatibility classifier (spec §9.8),
 //!   over revisions from contracts or bundles, and the retention rule's
 //!   identity check.
+//! - [`budget`]: the population budget (core §2.7, 0.24; #735): a
+//!   templated resource's bound in an instance, what an event's `rate`
+//!   bounds, and the pure judgement of a reading against them. The reads
+//!   are the tools'.
 //! - [`descriptor`]: the descriptor record an instance serves, checked
 //!   against its contracts; `spec/descriptor.schema.json` is generated
 //!   from it.
@@ -56,6 +60,7 @@
 //! tools and the Python verifier's fixtures all stand on this crate.
 
 pub mod authoring;
+pub mod budget;
 pub mod bundle;
 pub mod canonical;
 pub mod chunk;

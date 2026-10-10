@@ -38,6 +38,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         trust_admin_space,
         calls_granted,
         clocks_synced,
+        skip,
         contracts,
         ns,
     } = cli;
@@ -60,7 +61,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         raw: ASKING.ask(dep.link().session().await),
         namespace: dep.namespace().to_owned(),
     };
-    let report = zenkey_fleet::run_conform(
+    let mut report = zenkey_fleet::run_conform(
         &bus,
         &offline,
         address,
@@ -69,6 +70,8 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         spec,
     )
     .await;
+    // `--skip`: the operator's choice, never the engine's (#735).
+    report.skip(&skip);
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     if let Some(path) = junit {
         // The artifact CI asked for: without it, no verdict either.
@@ -200,7 +203,7 @@ mod tests {
                 ConformCase::passed(CaseId::Qos, "stream/x", "3 sample(s)"),
                 ConformCase::failed(CaseId::PayloadType, "stream/x", "/rx: <not> an \"integer\""),
                 ConformCase::unobservable(CaseId::ResourceServed, "state/y", "silent"),
-                ConformCase::not_asked(CaseId::Budget, "service", "#613"),
+                ConformCase::not_asked(CaseId::Budget, "state/y/{id}", "no ceiling"),
             ],
             unobservable: None,
         }
@@ -223,7 +226,7 @@ mod tests {
              type=\"violation\" message=\"/rx: &lt;not&gt; an &quot;integer&quot;\">"
         ));
         assert!(xml.contains("<error type=\"unobservable\" message=\"silent\"/>"));
-        assert!(xml.contains("<skipped message=\"not asked: #613\"/>"));
+        assert!(xml.contains("<skipped message=\"not asked: no ceiling\"/>"));
         assert!(xml.contains("<system-out>3 sample(s)</system-out>"));
         assert_eq!(xml.matches("<testcase ").count(), 4);
         assert!(xml.ends_with("</testsuite>\n</testsuites>\n"));

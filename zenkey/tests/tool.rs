@@ -176,3 +176,72 @@ async fn a_tool_subscription_counts_unresolved_samples_apart() {
     .await;
     assert_eq!(*got.lock().unwrap(), ["zk2/p1/nav/nav.v2/state/tracks/t1"]);
 }
+
+/// A tool's state GET says whether it ran to its end (core §2.7, 0.24;
+/// #735): an owner that answers is a complete reading, and a queryable that
+/// holds the query past the timeout leaves it incomplete — the timeout
+/// arrives as an error reply (Appendix B), kept out of the answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_tool_state_get_says_whether_it_ran_to_its_end() {
+    let (_r1, ep) = router(None).await;
+    let (owner, mute, tool) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let probe: IfaceId = "probe.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("lab/probe"));
+    b.implement(imp("probe.v1")).unwrap();
+    let none = Bindings::new();
+    let st = b
+        .declare_state_writer(&probe, "state/st", &none)
+        .await
+        .unwrap();
+    st.put("v").await.unwrap();
+    for res in [
+        "stream/s",
+        "@stream/xs",
+        "@state/xst",
+        "events/ev",
+        "@op/op",
+    ] {
+        b.expose(&probe, res).unwrap();
+    }
+    let _svc = b.start().await.unwrap();
+    let consumer = Consumer::for_tool(
+        &tool,
+        imp("probe.v1").shared_contract(),
+        &["lab/probe"],
+        &Default::default(),
+    )
+    .unwrap();
+    eventually("the owner answers, to the end", || async {
+        let a = consumer.get_answer("state/st", None, T).await.unwrap();
+        a.complete && a.current.len() == 1
+    })
+    .await;
+    // A queryable that never replies: each query is held, then dropped
+    // only after the GET's timeout.
+    let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let h = Arc::clone(&held);
+    let _q = mute
+        .declare_queryable("zk2/lab/mute/probe.v1/state/**")
+        .callback(move |q| h.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    let silent = Consumer::for_tool(
+        &tool,
+        imp("probe.v1").shared_contract(),
+        &["lab/mute"],
+        &Default::default(),
+    )
+    .unwrap();
+    eventually("a held GET ends at its timeout, incomplete", || async {
+        let a = silent
+            .get_answer("state/st", None, Duration::from_millis(300))
+            .await
+            .unwrap();
+        !a.complete && a.current.is_empty()
+    })
+    .await;
+    assert!(
+        !held.lock().unwrap().is_empty(),
+        "the queryable was reached"
+    );
+}

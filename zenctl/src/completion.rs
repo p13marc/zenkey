@@ -338,6 +338,15 @@ pub fn check_ids() -> Vec<CompletionCandidate> {
     )
 }
 
+/// `check conform --skip`'s case ids (#735).
+pub fn case_ids() -> Vec<CompletionCandidate> {
+    candidates(
+        zenkey_fleet::report::CaseId::ALL
+            .into_iter()
+            .map(|c| c.as_str().to_owned()),
+    )
+}
+
 /// Wire keys, completed from the services a presence read last saw in the
 /// line's namespace: `<ns>/zk2/<system>/<service>/**`, one per address.
 ///

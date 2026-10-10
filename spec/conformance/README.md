@@ -17,6 +17,7 @@ the same files.
 | [`history/`](history/) | A history root → its problems as `[at, tag]` (§9.7). Hand-written. |
 | [`descriptors/`](descriptors/) | A descriptor document → its `D…` codes, checked against `contracts/nav.v2.toml` (`expect.json`) (§3.3). |
 | [`errors/`](errors/) | An error envelope and its Zenoh encoding → the decoded envelope, or a refusal tag (§5.2). Written by an encoder independent of the reference implementation. |
+| [`budget/`](budget/) | A contract's `cardinality` and each instance's stated one → the bound (`bounds.json`); a kind, a bound and one reading (an owner's GET, or a window's members and instants, how long it listened, whether it lost a delivery, whether the owner was present throughout) → the population verdict and its reason (`population.json`); an event's rate and a window's occurrences → the rate verdict and its reason (`rate.json`) (§2.7, 0.24). Written by hand from the text, checked, never blessed. |
 | [`compat/`](compat/) | Old/new payload schemas, contract pairs, and transitive histories → the FULL_TRANSITIVE class (`expect.json`) (§9.8). Layout and the departures from `buf` in [`compat/README.md`](compat/README.md). |
 
 ## What the contract fixtures pin

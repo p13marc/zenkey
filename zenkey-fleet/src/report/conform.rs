@@ -6,11 +6,17 @@
 //! `Established`, with what broke it in `detail`. A case the service passes
 //! is `NotEstablished`, with the evidence as its reason; one whose
 //! observation could not be had is `Unobservable` — a resource nothing was
-//! heard from in the window, a stamp no `meta.zid` attributes — and one the
-//! run did not ask is `NotAsked`, with why in `detail`: an operation that
-//! is not idempotent without `--i-know`, a raw type with no structure, a
-//! resource that declares no `freshness.ttl_s`, a profile-backed case whose
-//! profile does not exist yet (#613). The `freshness` case is the "no" of
+//! heard from in the window, a stamp no `meta.zid` attributes, a population
+//! a window can only bound from below — and one the run did not ask is
+//! `NotAsked`, with why in `detail`: an operation that is not idempotent
+//! without `--i-know`, a raw type with no structure, a resource that
+//! declares no `freshness.ttl_s`, the no-ceiling cardinality, a case the
+//! operator skipped. The `budget`, `budget-window` and `rate` cases are
+//! core §2.7's (0.24, #735): more live members than the bound, or an
+//! event's occurrences beyond its rate, are the findings; `budget` counts a
+//! state by its owner's GET, and `budget-window` a stream or an event over
+//! the window, so a run that cannot listen for a whole liveness span skips
+//! the second and keeps the first. The `freshness` case is the "no" of
 //! `freshness.v1`'s "is this value fresh?" turned into the suite's
 //! polarity: a stale member is the finding (#720). The `health` and
 //! `health-aggregation` cases do the same for `health.v1`'s "is this
@@ -62,8 +68,13 @@ pub enum CaseId {
     /// reply's stamp against a clock trusted to the HLC delta. One verdict
     /// per resource; a resource with no horizon is not asked.
     Freshness,
-    /// Rates and populations within a declared budget: a profile's, which
-    /// waits for it (#613). Never asked here.
+    /// A templated state resource holds no more live members than its
+    /// bound (core §2.7, 0.24; #735): the descriptor's lowered
+    /// `cardinality`, else the contract's, counted from the owner's GET.
+    /// More members than the bound is the finding, whether or not the GET
+    /// ran to its final reply; within it is clean only when it did. One
+    /// verdict per templated state; no ceiling is not asked, and neither is
+    /// a templated operation, whose row is this case's.
     Budget,
     /// The service, implementing `health.v1`, is healthy (`health.v1` §5,
     /// §2.11; #721): unhealthy or stale is the finding. Not asked of a
@@ -73,11 +84,25 @@ pub enum CaseId {
     /// fresh status, in either of two readings (`health.v1` §2.2, §5). The
     /// break, seen in both, is the finding.
     HealthAggregation,
+    /// An event's occurrences within its declared `rate`, per member
+    /// (core §2.7, 0.24; #735): `n + 1` occurrences of one member less than
+    /// the period apart are the finding, in a window of any length; kept is
+    /// clean only over a window of a whole period that lost nothing. One
+    /// verdict per event resource.
+    Rate,
+    /// A templated stream or event resource holds no more live members than
+    /// its bound (core §2.7, 0.24; #735), counted over the window: a
+    /// stream's members heard within one hour, an event's with occurrences
+    /// within its retention. More than the bound is the finding from any
+    /// window; within it is clean only over a window of at least one
+    /// liveness span, nothing lost, the owner present throughout. One
+    /// verdict per templated stream or event.
+    BudgetWindow,
 }
 
 impl CaseId {
     /// Every case, in the order the suite reports them.
-    pub const ALL: [CaseId; 12] = [
+    pub const ALL: [CaseId; 14] = [
         CaseId::ContractServed,
         CaseId::ResourceServed,
         CaseId::PayloadType,
@@ -90,6 +115,8 @@ impl CaseId {
         CaseId::Budget,
         CaseId::Health,
         CaseId::HealthAggregation,
+        CaseId::Rate,
+        CaseId::BudgetWindow,
     ];
 
     /// The wire token, exactly as it serializes.
@@ -107,7 +134,15 @@ impl CaseId {
             CaseId::Budget => "budget",
             CaseId::Health => "health",
             CaseId::HealthAggregation => "health-aggregation",
+            CaseId::Rate => "rate",
+            CaseId::BudgetWindow => "budget-window",
         }
+    }
+
+    /// Read a case id a caller supplied: `check conform --skip`, a script's
+    /// filter.
+    pub fn parse(token: &str) -> Option<CaseId> {
+        CaseId::ALL.into_iter().find(|c| c.as_str() == token)
     }
 
     /// The core section (or profile) the case reads.
@@ -122,9 +157,11 @@ impl CaseId {
             CaseId::StateStamp => "§4.2 S1",
             CaseId::StateGet => "§4.2 S2",
             CaseId::Freshness => "freshness.v1",
-            CaseId::Budget => "#613",
+            CaseId::Budget => "§2.7",
             CaseId::Health => "health.v1 §5",
             CaseId::HealthAggregation => "health.v1 §2.2",
+            CaseId::Rate => "§2.7 rate",
+            CaseId::BudgetWindow => "§2.7 window",
         }
     }
 }
@@ -224,6 +261,17 @@ pub struct ConformReport {
 }
 
 impl ConformReport {
+    /// The cases the operator chose not to ask (`check conform --skip`):
+    /// each becomes `NotAsked`, which neither passes nor fails the run, its
+    /// verdict as read kept nowhere. A case a run cannot judge here, such as
+    /// `budget-window` over a window shorter than an hour (§2.7), is skipped
+    /// rather than left to read 2, as the doctor's `--skip` does.
+    pub fn skip(&mut self, cases: &[CaseId]) {
+        for c in self.cases.iter_mut().filter(|c| cases.contains(&c.case)) {
+            *c = ConformCase::not_asked(c.case, c.subject.clone(), "skipped by the operator");
+        }
+    }
+
     /// Every case that found a violation.
     pub fn failures(&self) -> impl Iterator<Item = &ConformCase> {
         self.cases
@@ -304,12 +352,37 @@ mod tests {
                 "budget",
                 "health",
                 "health-aggregation",
+                "rate",
+                "budget-window",
             ]
         );
         for c in CaseId::ALL {
             assert_eq!(serde_json::to_value(c).unwrap(), json!(c.as_str()));
             assert!(!c.section().is_empty());
+            assert_eq!(CaseId::parse(c.as_str()), Some(c));
         }
+        assert_eq!(CaseId::parse("budgets"), None);
+    }
+
+    /// `--skip` turns a case not asked whatever it read, on every subject,
+    /// and leaves the others as they were (#735): skipping `budget-window`
+    /// keeps the state's `budget` asked.
+    #[test]
+    fn a_skipped_case_is_not_asked() {
+        let mut r = report(vec![
+            ConformCase::unobservable(CaseId::BudgetWindow, "stream/bw/{dev}", "too short"),
+            ConformCase::unobservable(CaseId::BudgetWindow, "events/ev/{dev}", "too short"),
+            ConformCase::passed(CaseId::Budget, "state/st/{dev}", "3 member(s)"),
+            ConformCase::passed(CaseId::Qos, "stream/bw/{dev}", "12 sample(s)"),
+        ]);
+        assert_eq!(judgement_exit_code(&r.judgement()), 2);
+        r.skip(&[CaseId::BudgetWindow]);
+        assert!(
+            r.cases[..2].iter().all(|c| c.verdict.is_not_asked()
+                && c.detail.as_deref() == Some("skipped by the operator"))
+        );
+        assert!(r.cases[2..].iter().all(|c| !c.verdict.is_not_asked()));
+        assert_eq!(judgement_exit_code(&r.judgement()), 0);
     }
 
     fn report(cases: Vec<ConformCase>) -> ConformReport {
@@ -349,6 +422,17 @@ mod tests {
                 "service",
                 "its descriptor does not list health.v1",
             ),
+            ConformCase::failed(
+                CaseId::Budget,
+                "state/interfaces/{ns}/{iface}",
+                "3 live member(s), above its bound of 2",
+            ),
+            ConformCase::unobservable(CaseId::Rate, "events/alarms/{source}", "too short"),
+            ConformCase::passed(
+                CaseId::BudgetWindow,
+                "events/alarms/{source}",
+                "2 member(s)",
+            ),
         ]);
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
@@ -377,6 +461,14 @@ mod tests {
                     {"case": "health-aggregation", "subject": "service",
                      "section": "health.v1 §2.2", "verdict": {"answer": "not_asked"},
                      "detail": "its descriptor does not list health.v1"},
+                    {"case": "budget", "subject": "state/interfaces/{ns}/{iface}",
+                     "section": "§2.7", "verdict": {"answer": "established"},
+                     "detail": "3 live member(s), above its bound of 2"},
+                    {"case": "rate", "subject": "events/alarms/{source}", "section": "§2.7 rate",
+                     "verdict": {"answer": "unobservable", "reason": "too short"}},
+                    {"case": "budget-window", "subject": "events/alarms/{source}",
+                     "section": "§2.7 window",
+                     "verdict": {"answer": "not_established", "reason": "2 member(s)"}},
                 ],
             })
         );
@@ -390,7 +482,7 @@ mod tests {
         let pass = ConformCase::passed(CaseId::Qos, "s", "ok");
         let fail = ConformCase::failed(CaseId::Qos, "t", "bad");
         let unseen = ConformCase::unobservable(CaseId::ResourceServed, "u", "silent");
-        let skip = ConformCase::not_asked(CaseId::Budget, "service", "#613");
+        let skip = ConformCase::not_asked(CaseId::Budget, "state/x", "no ceiling");
         let exit = |r: &ConformReport| judgement_exit_code(&r.judgement());
         assert_eq!(exit(&report(vec![pass.clone(), skip.clone()])), 0);
         assert_eq!(exit(&report(vec![pass.clone(), fail, unseen.clone()])), 1);

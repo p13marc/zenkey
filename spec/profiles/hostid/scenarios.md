@@ -4,7 +4,9 @@ The rules of [`v1.md`](v1.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. The reference runtime runs §1
 to §5 (`zenkey/tests/profile_hostid.rs`, one test per section, named after
-it). §6 is a tool's, and waits for one that asks its question.
+it). §6 is a tool's: the reference doctor's `hostid-duplicate` asks its
+question (`zenkey-fleet/tests/zk2_doctor.rs`,
+`hostid_s6_what_a_tool_concludes`; 0.4).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v1.md's rules; core
@@ -244,10 +246,11 @@ core §6 recommends (under 1 s).
 4. A third service is configured with the literal address
    `h-504c6767c349/logger`. The tool is asked whether its system is
    minted.
-5. (0.2) As step 1, with each service also an owner of `sysinfo-x.v1`, an
-   interface of plain streams whose contract lists `hostid.v1` in `uses`,
-   which the tool reads (core §8.4). Each holds it in its tokenless set
-   (core §8.1), so that core §6's split-brain still does not apply.
+5. (0.2; its id spelled right in 0.4) As step 1, with each service also an
+   owner of `sysinfo_x.v1`, an interface of plain streams whose contract
+   lists `hostid.v1` in `uses`, which the tool reads (core §8.4). Each holds
+   it in its tokenless set (core §8.1), so that core §6's split-brain still
+   does not apply.
 
 **Expected.**
 1. Both services have the system `h-bbd1aa1db10b`. The tool sees two

@@ -145,8 +145,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: eighteen checks
-  since PF (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
+  FJ6's `doctor` judges a zk2 deployment against the core: nineteen checks
+  since #735 (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
   `Judgement` whose finding is the yes, read through a session in the
   namespace and one in none for the admin space and the presence domain;
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
@@ -189,7 +189,12 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
   does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
   `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
-  `health-aggregation` case.
+  `health-aggregation` case. #735 lights the population budget (core 0.24,
+  §2.7) through `zenkey_model::budget`: `check conform`'s `budget` (per
+  templated state, by the owner's GET), `budget-window` (per templated
+  stream or event, complete over a whole liveness span, lossless, the owner
+  present throughout) and `rate` (per event) cases, `--skip <CASE>`, and
+  the doctor's `population-over-bound` under `--deep`.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
@@ -404,7 +409,7 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
     exclusivity;
   - the protobuf classifier uses WIRE semantics with renumber detection;
   - the draft upstream reports in `docs/zk2/upstream/` are not filed;
-  - `spec/core.md` v0.1 is accepted, and v0.23 is the current version
+  - `spec/core.md` v0.1 is accepted, and v0.24 is the current version
     (changes go through `spec/CHANGELOG.md`):
     - U22 is a deployment-configured tokenless set of interfaces (descriptor
       `"token": false`);
@@ -429,7 +434,8 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   - zenwatch ports with `alerts` dark until alarms.v1. Inhibition is
     removed, not dark: it read v1's catalog, and no profile brings it back;
   - the population budget is core (§2.2, `cardinality`), lit up with a spec
-    amendment. This reverses that part of FJ's "kind and budget go dark";
+    amendment (0.24, §2.7, #735). This reverses that part of FJ's "kind and
+    budget go dark";
   - zengui moves pane by pane, beside v1's fleet under a renamed dependency
     (`zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }`);
     zenwatch requires `publish.address` until hostid.v1; contracts come by

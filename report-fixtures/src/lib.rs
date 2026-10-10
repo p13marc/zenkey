@@ -225,6 +225,8 @@ pub fn doctor_report() -> DoctorReport {
                 vec![],
                 "unused",
             ),
+            // Deep, like state-stamp-foreign: not asked without --deep.
+            CheckReport::not_asked(CheckId::PopulationOverBound),
         ],
         unobservable: None,
     }
@@ -1129,8 +1131,9 @@ pub fn why_report_silent() -> WhyReport {
 
 /// `check conform` over one service (#703): every pole on some case — a
 /// pass, a violation, a resource unobservable in its window, an operation
-/// not called and the profile cases not asked — so a renderer that merged
-/// two fails.
+/// not called, a resource with no horizon not asked, a state over its bound
+/// and a stream's population over a window short of an hour (§2.7, #735)
+/// — so a renderer that merged two fails.
 pub fn conform_report() -> ConformReport {
     let fp = format!("sha256:{}", "5d1c0a9b2e3f4a6b".repeat(4));
     ConformReport {
@@ -1188,6 +1191,21 @@ pub fn conform_report() -> ConformReport {
                 CaseId::Freshness,
                 "stream/bandwidth/{ns}/{iface}",
                 "it declares no freshness.ttl_s",
+            ),
+            ConformCase::failed(
+                CaseId::Budget,
+                "state/interfaces/{ns}/{iface}",
+                "3 member(s) answered with a value by the owner's GET, above its bound of 2 (its \
+                 descriptor's; the contract's is 1024): an owner MUST NOT hold more live members \
+                 than its bound (§2.7)",
+            ),
+            ConformCase::unobservable(
+                CaseId::BudgetWindow,
+                "stream/bandwidth/{ns}/{iface}",
+                "2 member(s) heard within one hour in the 5.0s window, within its bound of 1024 \
+                 (the contract's): a window shows a population within its bound only after one \
+                 liveness span, so a window of at least 3600 s (`--for 3600`), or --skip \
+                 budget-window (§2.7)",
             ),
         ],
         unobservable: None,

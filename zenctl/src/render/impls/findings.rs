@@ -397,13 +397,28 @@ impl Render for zenkey_fleet::ConformReport {
                 .cite("tooling guide O4"),
             );
         }
-        notes.push(
-            Note::coverage(
-                "budget is not asked: its profile does not exist yet (#613) — not asked is \
-                 neither a pass nor a violation",
-            )
-            .cite("tooling guide O4"),
-        );
+        // §2.7 (0.24): a window shows a stream's or an event's population
+        // within its bound only once it is complete — a whole liveness span,
+        // lossless, the owner present throughout.
+        let windowed = self
+            .cases
+            .iter()
+            .filter(|c| {
+                c.case == zenkey_fleet::report::CaseId::BudgetWindow && c.verdict.is_unobservable()
+            })
+            .count();
+        if windowed > 0 {
+            notes.push(
+                Note::coverage(format!(
+                    "{windowed} budget-window case(s) unobservable: a window shows a stream's or \
+                     an event's population within its bound only over a whole liveness span (an \
+                     hour, or the retention: --for), nothing lost, the owner present throughout \
+                     — more than the bound would be a violation; --skip budget-window leaves the \
+                     case unasked and the state's budget asked"
+                ))
+                .cite("spec §2.7"),
+            );
+        }
         let count = |p: fn(&Judgement) -> bool| self.cases.iter().filter(|c| p(&c.verdict)).count();
         notes.push(Note::summary(format!(
             "{} case(s): {} violation(s), {} passed, {} unobservable, {} not asked.",

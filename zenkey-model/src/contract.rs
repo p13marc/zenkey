@@ -135,7 +135,10 @@ pub enum Rate {
 }
 
 impl Rate {
-    pub(crate) fn parse(s: &str) -> Option<Self> {
+    /// Reads a rate as the authoring format spells it (§2.6): `rare`,
+    /// `low` or `burst(<n>/h)`, `<n>` from 1 without a leading zero.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "rare" => Some(Self::Rare),
             "low" => Some(Self::Low),

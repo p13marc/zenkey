@@ -18,7 +18,16 @@
 //! 4. at the window's end, for `freshness.v1` (#720): each member's last
 //!    delivery on this host's monotonic clock, each stamping clock's offset
 //!    at receipt, and this host's wall clock, which the GET replies' stamps
-//!    are aged against.
+//!    are aged against;
+//! 5. for the population budget (core §2.7, 0.24; #735): each delivery's
+//!    instant on this host's monotonic clock and its stamp, per key, which
+//!    a stream's and an event's members and an event's rate are counted
+//!    from; whether each state GET ran to its final reply, a complete
+//!    reading of a state population; and, when a templated stream or event
+//!    is exposed, whether the owner held its instance token from before
+//!    the window to its end — a liveliness subscriber on its instance
+//!    tokens, then a read of them, before the window opens — which a window
+//!    needs to be a complete reading of a stream's or an event's.
 //!
 //! Nothing is judged here: [`crate::judge::conform`] decides every case
 //! from the [`ConformObservation`] this returns.
@@ -47,6 +56,20 @@ use crate::report::{OperationReport, StateReport, WatchSample};
 /// How many samples a resource's subscription keeps for the judge; past
 /// it they are counted, and the cases say what they judged.
 pub const SAMPLE_CAP: usize = 256;
+
+/// How many deliveries' instants a resource's subscription keeps for the
+/// budget (§2.7); past it, [`Heard::arrivals_capped`] says so, and a count
+/// from what was kept is a lower bound still.
+pub const ARRIVAL_CAP: usize = 65_536;
+
+/// One delivery, as the budget counts it (§2.7): when it arrived, on this
+/// host's monotonic clock from the subscription's declaration, and the
+/// stamp it carried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Arrival {
+    pub at: Duration,
+    pub stamp: Option<crate::report::Stamp>,
+}
 
 /// What a `check conform` run waits for and may do.
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +124,33 @@ pub struct Heard {
     /// How long the subscription listened: from its declaration to the
     /// window's end. A member it never heard is judged on this (§2.5).
     pub listened: Duration,
+    /// Every put delivered, by key, at most [`ARRIVAL_CAP`] in all: what a
+    /// stream's or an event's population and an event's rate are counted
+    /// from (§2.7). An event's key still carries its ULID.
+    pub arrivals: BTreeMap<String, Vec<Arrival>>,
+    /// Puts delivered past [`ARRIVAL_CAP`], not kept.
+    pub arrivals_capped: u64,
+}
+
+/// Whether the owner held its instance token over the whole window (§2.7):
+/// a window of a stream or an event is a complete reading only then.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WindowPresence {
+    /// The instance tokens a read just before the window found.
+    pub held: BTreeSet<String>,
+    /// Whether that read ran to the routers' final reply (§8.1).
+    pub complete: bool,
+    /// Those tokens a liveliness subscriber, declared before the read, saw
+    /// deleted by the window's end.
+    pub gone: BTreeSet<String>,
+}
+
+impl WindowPresence {
+    /// Present throughout: a complete read found a token, and none of the
+    /// tokens it found was deleted before the window ended.
+    pub fn throughout(&self) -> bool {
+        self.complete && !self.held.is_empty() && self.gone.is_empty()
+    }
 }
 
 /// What a call over an operation's template wildcard drew (O2).
@@ -155,6 +205,13 @@ pub struct ConformObservation {
     pub heard: BTreeMap<String, std::result::Result<Heard, String>>,
     /// Each exposed state resource's GET (S2).
     pub gets: BTreeMap<String, std::result::Result<StateReport, String>>,
+    /// Whether each state resource's GET ran to its final reply, with no
+    /// error reply: the one complete reading of its population (§2.7).
+    pub gets_complete: BTreeMap<String, bool>,
+    /// Whether the owner held its instance token over the window (§2.7);
+    /// `None` when no templated stream or event is exposed, so nothing
+    /// needed it.
+    pub window_presence: Option<std::result::Result<WindowPresence, String>>,
     /// Each exposed operation.
     pub calls: BTreeMap<String, OpObserved>,
     /// The routers' admin space, read un-namespaced: an owner's own stamp
@@ -328,6 +385,8 @@ async fn suite(
         revision: None,
         heard: BTreeMap::new(),
         gets: BTreeMap::new(),
+        gets_complete: BTreeMap::new(),
+        window_presence: None,
         calls: BTreeMap::new(),
         admin: Some(admin),
         read_at: None,
@@ -362,6 +421,18 @@ async fn suite(
     };
     let exposed: Vec<Resource> = obs.exposed().into_iter().cloned().collect();
 
+    // §2.7: a window of a stream or an event is complete only with the
+    // owner present throughout. The subscriber first, so a token the read
+    // finds and that goes later is seen going.
+    let windowed = exposed
+        .iter()
+        .any(|r| matches!(r.kind, Kind::Stream | Kind::Event) && r.template.has_params());
+    let presence_watch = if windowed {
+        Some(watch_instances(session, &obs.address, t).await)
+    } else {
+        None
+    };
+
     // The subscriptions first, so what the GETs and the calls stir up is
     // heard too.
     let deadline = tokio::time::Instant::now() + spec.window;
@@ -384,8 +455,25 @@ async fn suite(
                 selectors: w.selectors().to_vec(),
                 ..Heard::default()
             };
+            let mut kept = 0usize;
             while let Ok(Some(sample)) = tokio::time::timeout_at(deadline, w.next()).await {
                 heard.received += 1;
+                // §2.7: a put's instant, on this host's clock, and its stamp.
+                if matches!(sample.event, crate::report::WatchEvent::Put { .. }) {
+                    if kept < ARRIVAL_CAP {
+                        kept += 1;
+                        heard
+                            .arrivals
+                            .entry(sample.key.clone())
+                            .or_default()
+                            .push(Arrival {
+                                at: w.subscription().listened(),
+                                stamp: sample.timestamp.clone(),
+                            });
+                    } else {
+                        heard.arrivals_capped += 1;
+                    }
+                }
                 if heard.samples.len() < SAMPLE_CAP {
                     heard.samples.push(sample);
                 }
@@ -409,6 +497,7 @@ async fn suite(
         }));
     let asks = async {
         let mut gets = BTreeMap::new();
+        let mut complete = BTreeMap::new();
         for r in exposed.iter().filter(|r| r.kind == Kind::State) {
             let read = crate::bus::consume::StateRead {
                 revision: &rev,
@@ -417,12 +506,15 @@ async fn suite(
                 values: &Bindings::new(),
                 timeout: t,
             };
-            gets.insert(
-                zenkey::implementation::resource_name(r),
-                crate::bus::consume::get_state(session, read)
-                    .await
-                    .map_err(|e| crate::one_line(&e)),
-            );
+            let name = zenkey::implementation::resource_name(r);
+            let got = crate::bus::consume::get_state_answer(session, read)
+                .await
+                .map(|(report, done)| {
+                    complete.insert(name.clone(), done);
+                    report
+                })
+                .map_err(|e| crate::one_line(&e));
+            gets.insert(name, got);
         }
         let mut calls = BTreeMap::new();
         for r in exposed.iter().filter(|r| r.kind == Kind::Operation) {
@@ -432,13 +524,66 @@ async fn suite(
                 call(session, &rev, &target, &obs.address, r, spec).await,
             );
         }
-        (gets, calls)
+        (gets, complete, calls)
     };
-    let (heard, (gets, calls)) = tokio::join!(listen, asks);
+    let (heard, (gets, complete, calls)) = tokio::join!(listen, asks);
     obs.heard.extend(heard.into_iter().map(|(n, h)| (n, Ok(h))));
     obs.gets = gets;
+    obs.gets_complete = complete;
     obs.calls = calls;
+    obs.window_presence = presence_watch.map(|w| {
+        w.map(|(mut p, gone, _subscriber)| {
+            let gone = gone.lock().expect("not poisoned");
+            p.gone = p.held.intersection(&gone).cloned().collect();
+            p
+        })
+    });
     obs
+}
+
+/// What [`watch_instances`] hands back: the read's tokens, the deletes seen
+/// so far, and the subscriber that keeps seeing them until dropped.
+type InstanceWatch = (
+    WindowPresence,
+    Arc<std::sync::Mutex<BTreeSet<String>>>,
+    zenoh::pubsub::Subscriber<()>,
+);
+
+/// A callback liveliness subscriber on `addr`'s instance tokens (§8.1: a
+/// subscriber beside a GET is callback-driven), then a read of them: the
+/// tokens held when the window opens, and every one deleted from then on.
+async fn watch_instances(
+    session: &Session,
+    addr: &Addr,
+    timeout: Duration,
+) -> std::result::Result<InstanceWatch, String> {
+    let selector = format!("{GRAMMAR}/{}/{}/@zk/instance/*", addr.system, addr.service);
+    let gone: Arc<std::sync::Mutex<BTreeSet<String>>> = Arc::default();
+    let g = Arc::clone(&gone);
+    let subscriber = session
+        .liveliness()
+        .declare_subscriber(&selector)
+        .callback(move |sample| {
+            if sample.kind() == zenoh::sample::SampleKind::Delete {
+                g.lock()
+                    .expect("not poisoned")
+                    .insert(sample.key_expr().as_str().to_owned());
+            }
+        })
+        .await
+        .map_err(|e| format!("a liveliness subscriber on `{selector}`: {e}"))?;
+    let read = zenkey::presence::liveliness_read(session, &selector, timeout)
+        .await
+        .map_err(|e| format!("the read of `{selector}`: {e}"))?;
+    Ok((
+        WindowPresence {
+            held: read.keys.into_iter().collect(),
+            complete: read.complete,
+            gone: BTreeSet::new(),
+        },
+        gone,
+        subscriber,
+    ))
 }
 
 /// A member value per template parameter: what a concrete call to a

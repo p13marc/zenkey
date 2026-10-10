@@ -760,3 +760,123 @@ fn compat() {
     }
     assert_eq!(seen, doc["cases"].as_object().unwrap().len());
 }
+
+/// Seconds as a fixture writes them.
+fn secs(v: &Value) -> std::time::Duration {
+    std::time::Duration::from_secs_f64(v.as_f64().unwrap_or_else(|| panic!("seconds: {v}")))
+}
+
+/// Instants per member, as `budget/` writes them.
+fn instants(v: &Value) -> BTreeMap<String, Vec<std::time::Duration>> {
+    v.as_object()
+        .expect("members")
+        .iter()
+        .map(|(m, ts)| {
+            (
+                m.clone(),
+                ts.as_array().expect("instants").iter().map(secs).collect(),
+            )
+        })
+        .collect()
+}
+
+/// A bound as `budget/` writes it.
+fn bound_read(v: &Value) -> zenkey_model::budget::Bound {
+    use zenkey_model::budget::Bound;
+    match v {
+        Value::String(s) if s == "no_ceiling" => Bound::NoCeiling,
+        Value::String(s) if s == "untemplated" => Bound::Untemplated,
+        v => Bound::Of(v.as_u64().unwrap_or_else(|| panic!("bound {v}"))),
+    }
+}
+
+/// `spec/conformance/budget/bounds.json` (core §2.7, 0.24): the contract's
+/// `cardinality` and each exposing instance's stated one → the bound.
+/// Written by hand from the text, checked, never blessed.
+#[test]
+fn budget_bounds() {
+    let doc = read_json(&spec().join("conformance/budget/bounds.json"));
+    for case in doc["cases"].as_array().expect("cases") {
+        let stated: Vec<Option<u64>> = case["stated"]
+            .as_array()
+            .expect("stated")
+            .iter()
+            .map(Value::as_u64)
+            .collect();
+        let b = zenkey_model::budget::bound(case["contract"].as_u64(), stated);
+        let got = match b {
+            zenkey_model::budget::Bound::Of(n) => json!({"bound": n}),
+            other => json!({"bound": other.token()}),
+        };
+        assert_eq!(case["expect"], got, "{}", case["note"]);
+    }
+}
+
+/// `spec/conformance/budget/population.json` (core §2.7, 0.24): a kind, a
+/// bound and one reading → the verdict and its reason class. Written by
+/// hand from the text, checked, never blessed.
+#[test]
+fn budget_populations() {
+    use zenkey_model::authoring::Kind;
+    use zenkey_model::budget::{Reading, Window, population};
+    let doc = read_json(&spec().join("conformance/budget/population.json"));
+    for case in doc["cases"].as_array().expect("cases") {
+        let kind = match case["kind"].as_str().expect("kind") {
+            "stream" => Kind::Stream,
+            "state" => Kind::State,
+            "event" => Kind::Event,
+            "operation" => Kind::Operation,
+            other => panic!("kind {other:?}"),
+        };
+        let r = &case["reading"];
+        let reading = match r["via"].as_str().expect("via") {
+            "get" => Reading::Get {
+                members: r["members"].as_u64().expect("members"),
+                complete: r["complete"].as_bool().expect("complete"),
+            },
+            "window" => Reading::Window(Window {
+                heard: instants(&r["heard"]),
+                listened: secs(&r["listened_s"]),
+                lossless: r["lossless"].as_bool().expect("lossless"),
+                present: r["present"].as_bool().expect("present"),
+            }),
+            other => panic!("via {other:?}"),
+        };
+        let retention = (!case["retention_s"].is_null()).then(|| secs(&case["retention_s"]));
+        let j = population(kind, bound_read(&case["bound"]), retention, &reading);
+        assert_eq!(
+            case["expect"],
+            json!({"verdict": j.verdict.as_str(), "reason": j.reason.as_str()}),
+            "{}",
+            case["note"]
+        );
+    }
+}
+
+/// `spec/conformance/budget/rate.json` (core §2.7, 0.24): an event's rate
+/// and the occurrences a window heard → the verdict and its reason class.
+/// Written by hand from the text, checked, never blessed.
+#[test]
+fn budget_rates() {
+    use zenkey_model::budget::{Occurrences, rate};
+    use zenkey_model::contract::Rate;
+    let doc = read_json(&spec().join("conformance/budget/rate.json"));
+    for case in doc["cases"].as_array().expect("cases") {
+        let r = case["rate"]
+            .as_str()
+            .map(|s| Rate::parse(s).unwrap_or_else(|| panic!("rate {s:?}")));
+        let o = &case["reading"];
+        let occurrences = Occurrences {
+            listened: secs(&o["listened_s"]),
+            complete: o["complete"].as_bool().expect("complete"),
+            members: instants(&o["members"]),
+        };
+        let j = rate(r, &occurrences);
+        assert_eq!(
+            case["expect"],
+            json!({"verdict": j.verdict.as_str(), "reason": j.reason.as_str()}),
+            "{}",
+            case["note"]
+        );
+    }
+}

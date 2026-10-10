@@ -6,6 +6,28 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the population budget (#735)
+
+Core 0.24 (spec §2.7) makes the budget core: `cardinality` bounds a
+template's live members in one instance, and an event's `rate` bounds each
+member. The tools judge both; nothing waits for #613 any more.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`: one `budget` row, subject `service`, not asked (#613) | one `budget` row per templated state resource, and per templated operation (not asked) | The bound is the descriptor's lowered `cardinality`, else the contract's, counted from the owner's GET. More live members than the bound is a violation, whether or not the GET ran to its final reply; within it passes only when it did. An empty GET is unobservable (O5); the no-ceiling bound is not asked. Scripts that keyed on `subject == "service"` key on the resource |
+| — | `check conform`: a `budget-window` row per templated stream and event resource | Counted over the window: a stream's members heard within an hour, an event's within its retention. More than the bound is a violation from any window. Within it passes only over a window of at least that span (`--for 3600` for a stream), nothing lost, the owner holding its instance token throughout; otherwise unobservable, exit 2, the reason naming the span and the flag |
+| — | `check conform`: a `rate` row per event resource | Per member: n + 1 occurrences less than the period apart (a minute for `low`, an hour for `rare` and `burst(n/h)`) is a violation in any window. Kept passes only over a window of a whole period that lost nothing; shorter, unobservable. Spans are measured between stamps of one clock where the occurrences carry them |
+| — | `check conform --skip <CASE>` | Repeatable: every row of the case reads `not_asked` ("skipped by the operator"), which neither passes nor fails the run, as the doctor's `--skip`. A run shorter than an hour over a service with a templated stream reads 2 on its `budget-window` until `--skip budget-window`, which leaves the state's `budget` asked |
+| `doctor`: eighteen checks | nineteen: `population-over-bound` (error, `--deep`) | Each owner's templated state counted from the GETs `state-stamp-foreign` reads, against its bound; within it from a GET that ended at its timeout is unjudged. Appended to the check-id vocabulary; a watchdog's `doctor population-over-bound` rule turns `deep` on, as `state-stamp-foreign` does |
+| `doctor --deep`: asks `state-stamp-foreign` | asks it and `population-over-bound`, from one GET per owner interface | |
+
+## Unreleased (`main`, zk2) — the doctor rules' clocks (#735, a PF follow-up)
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog --rule 'doctor health-*'`: always unobservable | `watchdog --clocks-synced` | The rule's doctor listens to no status, so a `health.v1` status reply's age needs the operator's word that the clocks agree within the HLC delta, as `doctor --clocks-synced`. Without the flag, such a rule still reads unobservable, its reason naming the flag |
+| `record --on 'doctor health-*'`: always unobservable | `record --on … --clocks-synced` | The same word for a trigger capture's doctor rules; it requires `--on` |
+
 ## Unreleased (`main`, zk2) — `health.v1` and `hostid.v1`'s cloned ids (#721, PF)
 
 A judgement verb over `health.v1` (`spec/profiles/health/v1.md`, text
@@ -17,7 +39,7 @@ two sessions claiming one minted address (`spec/profiles/hostid/v1.md`
 |---|---|---|
 | — | `health [SYSTEM/SERVICE] [--clocks-synced] [--for SECS] [--grace SECS] [--across-face crosses\|denied] [--namespace NS]` | §2.11's reader: presence and descriptors (a service implements `health.v1` when its descriptor lists it, token or not), two readings — each one GET of `health.v1/state/**` answering a status and its checks together — after a window's subscription to every status and to the faults. Per service, `verdict` is `healthy`, `unhealthy` (at its `level`), `stale` (never a level), `unobservable` or `not_asked`, with `readings`, `agrees` (a break of §2.2 is `no` only in both readings), `clock_ahead`, the status and checks as read, and an archive's `last_known` for an absent owner, never current; a `rollup`. Rows tagged `service`; the envelope carries `judgement`. Exit 1 on unhealthy, stale, a break or a clock ahead; 0 every service asked healthy; 2 a service unobservable, none asked, or a run that could not start. `--for` defaults to 31 s, or none with `--clocks-synced` |
 | `doctor`: thirteen checks | eighteen: `health-failed` (error), `health-degraded` (warning), `health-stale` (warning), `health-inconsistent` (error), `hostid-duplicate` (warning) | Appended to the check-id vocabulary; `--check`/`--skip`/`--transitions` and a watchdog's `doctor <CHECK-ID>` take them. `hostid-duplicate` names no cause: a collision, a cloned machine id and a second process look alike. A deployment with no `health.v1` service reads the health checks clean ("asked of none"); a scope with no minted address, `hostid-duplicate` clean |
-| — | `doctor --clocks-synced` | The doctor listens to no status, so a `health.v1` status reply's age needs the operator's word that the clocks agree within the HLC delta. Without it, the `health-*` checks of every service implementing `health.v1` are unobservable (exit 2), each reason naming the flag. A watchdog's `doctor health-*` rule runs without it |
+| — | `doctor --clocks-synced` | The doctor listens to no status, so a `health.v1` status reply's age needs the operator's word that the clocks agree within the HLC delta. Without it, the `health-*` checks of every service implementing `health.v1` are unobservable (exit 2), each reason naming the flag. A watchdog's `doctor health-*` rule runs without it (`watchdog --clocks-synced` since #735) |
 | `doctor`'s scope: presence and routers | and `health` (the GET selector, the services listing `health.v1`, whether `--clocks-synced` was given) | Absent when no `health-*` check was asked |
 | `check conform`: ten cases | twelve: `health` and `health-aggregation`, subject `service` | Asked of a service whose descriptor lists `health.v1`, over the `--for` window: unhealthy or stale, and a break seen in both readings, are violations. Not asked otherwise |
 
@@ -30,7 +52,7 @@ resource declares (`spec/profiles/freshness/v1.md`).
 |---|---|---|
 | `check conform`: one `freshness` row, subject `service`, not asked | one `freshness` row per exposed stream, state and event resource | A resource that declares `freshness.ttl_s` is judged at the end of the `--for` window, each member by this run's receive clock and the GET reply's stamp: stale is a violation (exit 1), and a reply's age is unobservable unless the clock is trusted to the HLC delta. One with no horizon, and an event, is not asked. Scripts that keyed on `subject == "service"` key on the resource |
 | — | `check conform --clocks-synced` | The operator's word that this host's clock and the owners' agree within the HLC delta (500 ms): a state reply's stamp is then aged against it. Without it, a stamp is aged only against a clock this run measured on a live put of the same clock (freshness.v1 §2.6) |
-| `check conform`'s note: freshness and budget not asked | budget alone not asked | Its profile does not exist yet (#613) |
+| `check conform`'s note: freshness and budget not asked | budget alone not asked | Its profile does not exist yet (#613); asked since #735, core 0.24 |
 
 ## Unreleased (`main`, zk2) — `hostid.v1` (#719, PB)
 

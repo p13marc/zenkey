@@ -113,6 +113,7 @@ fn a_doctor_run_spells_every_verdict_pole_apart_in_every_medium() {
 ✓  health-inconsistent (health.v1 §2.2)  clean — 1 service(s) implementing health.v1, each fresh status no better than its current checks
 ⚠  hostid-duplicate (hostid.v1 §2.12)    finding — 1 subject(s)
     ⚠ warning: h-bbd1aa1db10b/sysinfo — in both presence reads 2.0s apart, instances of h-bbd1aa1db10b/sysinfo on a system their descriptors declare minted state 2 session zids: the cause is undecided
+—  population-over-bound (§2.7)          not asked
 
 "#]]
     );
@@ -267,14 +268,16 @@ fn a_conform_suite_spells_every_case_pole_apart_in_every_medium() {
         table(&report),
         str![[r#"
 conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b
-✓  contract-served (§8.4)    tc.netif.v1 sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b  passed — a holder served the bundle the descriptor names, and it verified
-✓  resource-served (§8.2)    stream/bandwidth/{ns}/{iface}                                                        passed — 12 sample(s) in the 5s window
-✗  payload-type (§7.2)       stream/bandwidth/{ns}/{iface}                                                        violation — 1 of 12 value(s) do not conform to the declared type; the first, zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object
-?  resource-served (§8.2)    state/namespaces                                                                     unobservable — nothing heard in the 5s window, and the state GET drew no reply
-✗  operation (§5.1)          @op/diagnostics                                                                      violation — host-a/tc holds its tokens, and the call drew neither a value nor an envelope within 1s: never silence (O3)
-—  operation (§5.1)          @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
-✗  freshness (freshness.v1)  state/interfaces/{ns}/{iface}                                                        violation — 1 of 2 member(s) stale against its horizon of 60 s: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within its horizon
-—  freshness (freshness.v1)  stream/bandwidth/{ns}/{iface}                                                        not asked — it declares no freshness.ttl_s
+✓  contract-served (§8.4)       tc.netif.v1 sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b  passed — a holder served the bundle the descriptor names, and it verified
+✓  resource-served (§8.2)       stream/bandwidth/{ns}/{iface}                                                        passed — 12 sample(s) in the 5s window
+✗  payload-type (§7.2)          stream/bandwidth/{ns}/{iface}                                                        violation — 1 of 12 value(s) do not conform to the declared type; the first, zk2/host-a/tc/tc.netif.v1/stream/bandwidth/default/eth0: /stats: not an object
+?  resource-served (§8.2)       state/namespaces                                                                     unobservable — nothing heard in the 5s window, and the state GET drew no reply
+✗  operation (§5.1)             @op/diagnostics                                                                      violation — host-a/tc holds its tokens, and the call drew neither a value nor an envelope within 1s: never silence (O3)
+—  operation (§5.1)             @op/interfaces/{ns}/{iface}/set                                                      not asked — not idempotent: each call is a write, which this suite makes only under --i-know
+✗  freshness (freshness.v1)     state/interfaces/{ns}/{iface}                                                        violation — 1 of 2 member(s) stale against its horizon of 60 s: zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth1: not confirmed within its horizon
+—  freshness (freshness.v1)     stream/bandwidth/{ns}/{iface}                                                        not asked — it declares no freshness.ttl_s
+✗  budget (§2.7)                state/interfaces/{ns}/{iface}                                                        violation — 3 member(s) answered with a value by the owner's GET, above its bound of 2 (its descriptor's; the contract's is 1024): an owner MUST NOT hold more live members than its bound (§2.7)
+?  budget-window (§2.7 window)  stream/bandwidth/{ns}/{iface}                                                        unobservable — 2 member(s) heard within one hour in the 5.0s window, within its bound of 1024 (the contract's): a window shows a population within its bound only after one liveness span, so a window of at least 3600 s (`--for 3600`), or --skip budget-window (§2.7)
 
 "#]]
     );
@@ -313,9 +316,14 @@ conform host-a/tc tc.netif.v1 at sha256:5d1c0a9b2e3f4a6b5d1c0a9b2e3f4a6b5d1c0a9b
     }
     let said = notes(&report);
     assert!(said.contains("pass --i-know"), "{said}");
-    assert!(said.contains("its profile does not exist yet"), "{said}");
     assert!(
-        said.contains("8 case(s): 3 violation(s), 2 passed, 1 unobservable, 2 not asked."),
+        said.contains("1 budget-window case(s) unobservable")
+            && said.contains("over a whole liveness span")
+            && said.contains("--skip budget-window"),
+        "{said}"
+    );
+    assert!(
+        said.contains("10 case(s): 4 violation(s), 2 passed, 2 unobservable, 2 not asked."),
         "{said}"
     );
 }

@@ -47,6 +47,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
         post,
         every,
         preamble,
+        clocks_synced,
         overwrite,
         contracts,
         ns: _,
@@ -83,6 +84,7 @@ pub async fn run(cli: crate::cli::RecordArgs) -> Result<()> {
             PreambleMode::Full => Some(PreambleSemantics::Full),
             PreambleMode::None => None,
         },
+        clocks_synced,
     };
     run_triggered(&selectors, &out, mode, triggered, &dep).await
 }
@@ -226,6 +228,7 @@ struct Triggered {
     give_up: Option<std::time::Duration>,
     max_samples: Option<u64>,
     preamble: Option<PreambleSemantics>,
+    clocks_synced: bool,
 }
 
 async fn run_triggered(
@@ -268,6 +271,7 @@ async fn run_triggered(
         rules,
         tick: t.every,
         timeout: dep.timeout(),
+        clocks_synced: t.clocks_synced,
         give_up: t.give_up,
         preamble: t.preamble,
         max_samples: t.max_samples,

@@ -1,0 +1,307 @@
+{
+  "description": "core §2.7 (0.24), an event's rate: its `rate` as the contract spells it (null for a resource that is not an event) and the occurrences a window heard (`listened_s`, how long it listened; `complete`, false when it lost deliveries; per member, the seconds of each occurrence on one clock) → whether the instance publishes beyond its rate (`expect.verdict`) and the reason class (`expect.reason`). The rate bounds each member: `rare` at most 1 within any hour, `low` at most 1 within any minute, `burst(<n>/h)` at most n within any hour. n + 1 occurrences of one member less than the period apart are the finding, in a window of any length. Reasons are chosen in this order: not_asked no_rate; exceeds rate_exceeded; unobservable lossy (deliveries lost); unobservable window_too_short (listened less than one period); unobservable empty (no occurrence, O5); within rate_kept.",
+  "cases": [
+    {
+      "note": "low: two occurrences of one member within a minute, in a short window",
+      "rate": "low",
+      "reading": {
+        "listened_s": 5,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            30
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "low: just under a minute apart",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            59.999
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "low: exactly a minute apart keeps it",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            60
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "rate_kept"
+      }
+    },
+    {
+      "note": "low: per member, two members once each",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": true,
+        "members": {
+          "a": [
+            0
+          ],
+          "b": [
+            1
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "rate_kept"
+      }
+    },
+    {
+      "note": "low: a window shorter than a minute cannot show the rate kept",
+      "rate": "low",
+      "reading": {
+        "listened_s": 30,
+        "complete": true,
+        "members": {
+          "a": [
+            0
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "low: deliveries lost",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": false,
+        "members": {
+          "a": [
+            0
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "lossy"
+      }
+    },
+    {
+      "note": "low: lost deliveries do not hide an excess heard",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": false,
+        "members": {
+          "a": [
+            0,
+            1
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "low: nothing heard in a long enough window: an empty set is never a verdict (O5)",
+      "rate": "low",
+      "reading": {
+        "listened_s": 120,
+        "complete": true,
+        "members": {}
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "empty"
+      }
+    },
+    {
+      "note": "low: nothing heard in a short window: too short comes first",
+      "rate": "low",
+      "reading": {
+        "listened_s": 30,
+        "complete": true,
+        "members": {}
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "rare: two within an hour",
+      "rate": "rare",
+      "reading": {
+        "listened_s": 10,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            3599
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "rare: an hour apart keeps it",
+      "rate": "rare",
+      "reading": {
+        "listened_s": 7200,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            3600
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "rate_kept"
+      }
+    },
+    {
+      "note": "rare: a minute's window is too short",
+      "rate": "rare",
+      "reading": {
+        "listened_s": 60,
+        "complete": true,
+        "members": {
+          "a": [
+            0
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "unobservable",
+        "reason": "window_too_short"
+      }
+    },
+    {
+      "note": "burst(3/h): four within an hour",
+      "rate": "burst(3/h)",
+      "reading": {
+        "listened_s": 3600,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            1200,
+            2400,
+            3599
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "burst(3/h): the fourth an hour after the first keeps it",
+      "rate": "burst(3/h)",
+      "reading": {
+        "listened_s": 3600,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            1200,
+            2400,
+            3600
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "rate_kept"
+      }
+    },
+    {
+      "note": "burst(3/h): three at one instant is within",
+      "rate": "burst(3/h)",
+      "reading": {
+        "listened_s": 3600,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "within",
+        "reason": "rate_kept"
+      }
+    },
+    {
+      "note": "burst(3/h): the instants need not arrive in order",
+      "rate": "burst(3/h)",
+      "reading": {
+        "listened_s": 10,
+        "complete": true,
+        "members": {
+          "a": [
+            3,
+            1,
+            2,
+            0
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "exceeds",
+        "reason": "rate_exceeded"
+      }
+    },
+    {
+      "note": "no rate: not an event",
+      "rate": null,
+      "reading": {
+        "listened_s": 120,
+        "complete": true,
+        "members": {
+          "a": [
+            0,
+            1
+          ]
+        }
+      },
+      "expect": {
+        "verdict": "not_asked",
+        "reason": "no_rate"
+      }
+    }
+  ]
+}

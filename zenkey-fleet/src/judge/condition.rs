@@ -857,6 +857,12 @@ pub struct WatchdogSpec {
     pub ticks: Option<u64>,
     /// Per-ask timeout for the presence, contract and doctor asks.
     pub timeout: Duration,
+    /// The operator's word that this host's clock and the owners' agree
+    /// within the HLC delta, handed to a `doctor` rule's doctor as
+    /// [`crate::judge::doctor::DoctorSpec::clocks_synced`]: the doctor
+    /// listens to no status, so without it a `doctor health-*` rule reads a
+    /// `health.v1` status's age as unobservable (#735, a PF follow-up).
+    pub clocks_synced: bool,
 }
 
 /// How many payload checks each key gets per tick under an
@@ -997,9 +1003,15 @@ impl RuleSet {
     }
 
     /// The doctor a tick runs for the rules (#612, FJ6): only the checks
-    /// they name, and `deep` when one names `state-stamp-foreign` — a rule
-    /// asked for it — with every other setting the doctor's default.
-    pub fn doctor_spec(&self, timeout: Duration) -> crate::judge::doctor::DoctorSpec {
+    /// they name, and `deep` when one names a check that reads the owners'
+    /// data plane (`state-stamp-foreign`) — a rule asked for it — with
+    /// `clocks_synced` as the operator gave it (#735) and every other
+    /// setting the doctor's default.
+    pub fn doctor_spec(
+        &self,
+        timeout: Duration,
+        clocks_synced: bool,
+    ) -> crate::judge::doctor::DoctorSpec {
         let checks: std::collections::BTreeSet<CheckId> = self
             .rules
             .iter()
@@ -1009,8 +1021,9 @@ impl RuleSet {
             })
             .collect();
         let mut spec = crate::judge::doctor::DoctorSpec::new(timeout);
-        spec.deep = checks.contains(&CheckId::StateStampForeign);
+        spec.deep = checks.iter().any(|c| c.reads_data());
         spec.checks = checks;
+        spec.clocks_synced = clocks_synced;
         spec
     }
 
@@ -1285,7 +1298,7 @@ pub fn watchdog<'a>(
         let mut rules = RuleSet::new(&spec.rules)?;
         let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
         let addresses = rules.instance_addresses();
-        let doctor_spec = rules.doctor_spec(spec.timeout);
+        let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
 
         // The lens before the first window (#337's rule, kept): a check
         // inside the drain loop must never become a presence read or a
@@ -1790,5 +1803,33 @@ mod tests {
         let back = watch.observe(Ok(&report_with(&[])), "t1");
         assert_eq!(back.len(), CheckId::ALL.len());
         assert!(back.iter().all(|t| t.to == CondState::Ok));
+    }
+
+    /// The doctor a tick runs for its rules (#735): the checks they name,
+    /// `deep` when one reads the owners' data plane, and the operator's word
+    /// on the clocks handed through, never assumed.
+    #[test]
+    fn the_rules_doctor_takes_the_operators_word_on_the_clocks() {
+        let rules = RuleSet::new(&[
+            Condition::parse("doctor health-stale").expect("rule"),
+            Condition::parse("doctor state-stamp-foreign").expect("rule"),
+        ])
+        .expect("compiles");
+        let t = Duration::from_secs(1);
+        let unsaid = rules.doctor_spec(t, false);
+        assert!(!unsaid.clocks_synced);
+        assert!(unsaid.deep);
+        assert_eq!(
+            unsaid.checks,
+            [CheckId::StateStampForeign, CheckId::HealthStale]
+                .into_iter()
+                .collect()
+        );
+        assert!(rules.doctor_spec(t, true).clocks_synced);
+        // population-over-bound reads the owners' data plane too (#735).
+        let rules =
+            RuleSet::new(&[Condition::parse("doctor population-over-bound").expect("rule")])
+                .expect("compiles");
+        assert!(rules.doctor_spec(t, false).deep);
     }
 }
