@@ -1,17 +1,33 @@
-// zenwatch: one process, one config, N rules, M sinks.
+// zenwatch: one process, one config, N rules, M sinks — on a zk2 deployment.
 //
-// Rules are the closed `zenctl watchdog` vocabulary plus `alerts <SEL>` and
-// `liveliness-gone <SEL>`; selectors are full wire form (prefix your base).
-// Secrets are never inline: `{ env: "NAME" }` or `{ file: "/path" }`, and a
-// bare string in a secret position does not parse. `zenwatch check-config`
-// refuses exactly what `run` would.
+// Rules are zenctl watchdog's closed zk2 vocabulary plus
+// `instance-gone <SYSTEM/SERVICE>` and `liveliness-gone <SEL>`. Selectors are
+// wire keys: prefix the deployment's namespace. `alerts` is dark until zk2's
+// alarm profile exists (#613). Secrets are never inline: `{ env: "NAME" }` or
+// `{ file: "/path" }`, and a bare string in a secret position does not parse.
+// `zenwatch check-config` refuses exactly what `run` would.
 {
-  bus: { context: "lab" },            // or base/connect/listen/scouting/timeout_s/zenoh_config/registry
+  // The deployment: a named context's connection, and the namespace the
+  // resolved reads (presence, contracts, the doctor) open their session in.
+  // Or connect/listen/scouting/timeout_s/zenoh_config; `base` is `namespace`.
+  bus: { context: "lab", namespace: "site" },
+  // Contracts known offline: authoring files, a directory, a .history root.
+  // A revision held here is never retrieved; the rest come from the bus.
+  contracts: ["/etc/zenwatch/contracts"],
+  // The operator's word that this host's clock and the owners' agree within
+  // the HLC delta (freshness.v1 §2.6): the doctor's health-* checks need it.
+  clocks_synced: false,
   tick_s: 5,
   rules: [
-    { name: "sysinfo-quiet", rule: "silent-for v1/*/telemetry/sysinfo/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
-    { name: "fleet-alerts", rule: "alerts v1/*/state/*/alert/*", sinks: ["ops", "mail"] },
-    { name: "hosts-gone", rule: "liveliness-gone v1/*/state/*/alive", severity: "error", sinks: ["ops", "page"] },
+    { name: "streams-quiet", rule: "silent-for site/zk2/*/*/*/stream/** 30", severity: "warning", labels: { team: "infra" }, sinks: ["ops"] },
+    // Each tc address up while an instance token is held, gone under a
+    // complete read; a second one appearing is watched too.
+    { name: "tc-gone", rule: "instance-gone */tc", severity: "error", sinks: ["ops", "mail"] },
+    // The dead-man's switch on another application's tokens (zenwatch's own
+    // ledger); on the deployment's zk2 tokens it rides the presence
+    // projection: liveliness-gone site/zk2/*/tc/@zk/alive/tc.netif.v1/**
+    { name: "held-gone", rule: "liveliness-gone demo/held/*/alive", severity: "error", sinks: ["ops", "page"] },
+    { name: "bad-payloads", rule: "invalid-payload site/zk2/**", sinks: ["hook"] },
     { name: "observer-drops", rule: "dropped", severity: "info", sinks: ["hook"] },
   ],
   sinks: {
@@ -21,30 +37,30 @@
     mail: { kind: "smtp", host: "smtp.example.org", port: 587, tls: "starttls", username: "zenwatch", password: { file: "/run/secrets/smtp-password" }, from: "zenwatch@example.org", to: ["oncall@example.org"], subject_prefix: "[zenwatch]" },
   },
   render: { max_message_bytes: 2048, max_structural_bytes: 512 },
-  // The discipline (#389): `for`, dedup, grouping, repeat, inhibition, the
-  // resolved family — what makes a notifier one you keep enabled.
+  // The discipline (#389): `for`, dedup, grouping, repeat, the resolved
+  // family — what makes a notifier one you keep enabled. (Inhibition was
+  // removed with v1's catalog: `inhibit: { enabled: true }` is refused.)
   discipline: {
     for_s: 30,                        // announce a firing only if still firing 30 s later; a rule's for_s overrides
     group_window_s: 5,                // notices sharing a group key within 5 s are one notification
-    group_by: ["origin"],             // the group key: labels, or `origin` for the key's origin chunk
+    group_by: ["system"],             // the group key: `system`, `address`, or a rule's labels
     repeat_s: 14400,                  // still firing after 4 h: re-send once per interval; 0 = never
-    inhibit: { enabled: true, depth: 4 },  // symptoms of a down host ride with the host (RFC 06 §5.6)
     resolved_notice: true,            // send `resolved` / `observable_again` at all
   },
-  // The ledger across restarts: missing is fresh, malformed is a refusal.
+  // The ledger across restarts (version 2): missing is fresh, malformed is a
+  // refusal, and so is a version-1 file or one written in another namespace.
   state_file: "/var/lib/zenwatch/state.json",
   state_max_entries: 4096,
-  // The scheduled doctor (#390): `zenctl doctor` over the whole deployment
-  // every few HOURS — a fan-in sweep, not a tick. The first run is a
-  // baseline (one notification, findings true since deployment are not
-  // news); every later run notifies what is new and what was fixed; a run
-  // that could not happen is unobservable, never clean. The last report is
-  // published on state/zenwatch/doctor.
+  // The scheduled doctor (#390): zk2's `zenctl doctor` over the whole
+  // deployment every few HOURS — a fan-in sweep, not a tick. The first run
+  // is a baseline (one notification, findings true since deployment are not
+  // news); every later run notifies what is new and what was fixed — fixed
+  // only where the check was established; a run over an empty scope is
+  // unobservable, never clean. The last report is published.
   doctor: {
     every_h: 6,                       // or every_s — for tests and demos only; exactly one of the two
-    deep: false,                      // the freshness/storage/budget checks too: real query load
-    // sample: 200,                   // at most this many state samples per family under deep
-    // timeout_s: 10,                 // per-query; the bus timeout when unsaid
+    deep: false,                      // state-stamp-foreign and population-over-bound too: a GET of every owner's state
+    // timeout_s: 10,                 // per-read; the bus timeout when unsaid
     sinks: ["ops"],
     severity_floor: "warning",        // info findings stay in the report, never a notification
   },

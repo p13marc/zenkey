@@ -945,3 +945,138 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::RuleConfig;
+    use zenkey_fleet::{AddressStatus, PresenceChange, PresenceSource};
+
+    fn rule(name: &str, text: &str, labels: &[(&str, &str)]) -> Rule {
+        Rule::from_config(&RuleConfig {
+            name: name.into(),
+            rule: text.into(),
+            severity: Some("error".into()),
+            labels: labels
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            sinks: vec!["ops".into()],
+            for_s: None,
+        })
+        .unwrap()
+    }
+
+    /// An engine transition routes to the rule spelling its condition, its
+    /// three states whole — `unobservable` stays `unobservable` — under the
+    /// identity of the rule's sorted labels; no other rule takes it.
+    #[test]
+    fn an_engine_transition_routes_to_its_condition_three_states_whole() {
+        let rules = vec![
+            rule(
+                "quiet",
+                "silent-for site/zk2/** 30",
+                &[("team", "infra"), ("env", "prod")],
+            ),
+            rule("tc-gone", "instance-gone */tc", &[]),
+        ];
+        let t = Transition {
+            rule: "silent-for site/zk2/** 30".into(),
+            from: Some(CondState::Ok),
+            to: CondState::Unobservable,
+            at: "2026-10-10T00:00:00Z".into(),
+            evidence: "no sample seen, but the observer dropped".into(),
+        };
+        let out = route(&Notice::Engine(t), &rules, &RenderConfig::default());
+        assert_eq!(out.len(), 1);
+        let n = &out[0].notification;
+        assert_eq!(n.id, "quiet:env=prod,team=infra");
+        assert_eq!(n.rule_kind, "silent-for");
+        assert_eq!(n.kind, NoticeKind::Transition);
+        assert_eq!(
+            (n.state, n.prior),
+            (CondState::Unobservable, Some(CondState::Ok))
+        );
+        assert_eq!(n.title, "error quiet unobservable");
+        assert!(n.message.contains("key: site/zk2/**"), "{}", n.message);
+        assert_eq!(n.rendering, RenderSource::KeyOnly);
+        assert!(n.presence.is_none());
+        assert_eq!(
+            meta_of(&Notice::Engine(Transition {
+                rule: String::new(),
+                from: None,
+                to: CondState::Ok,
+                at: String::new(),
+                evidence: String::new(),
+            }))
+            .address,
+            None
+        );
+    }
+
+    /// A presence rule's notice routes to its rule alone, under
+    /// `<rule_id>:<identity>`, carrying the move that decided it, its
+    /// address as a line and as the discipline's grouping fact; a baseline's
+    /// own severity wins over the rule's.
+    #[test]
+    fn a_rule_notice_routes_to_its_rule_with_its_move() {
+        let rules = vec![
+            rule("tc-gone", "instance-gone */tc", &[]),
+            rule("other", "instance-gone */gui", &[]),
+        ];
+        let moved = PresenceTransition {
+            at: SystemTime::UNIX_EPOCH,
+            source: PresenceSource::Seed,
+            address: "host-a/tc".parse().unwrap(),
+            change: PresenceChange::Status {
+                from: AddressStatus::Unobservable,
+                to: AddressStatus::Down,
+            },
+        };
+        let n = RuleNotice {
+            rule: "tc-gone".into(),
+            what: "host-a/tc".into(),
+            kind: NoticeKind::Presence,
+            state: CondState::Firing,
+            prior: Some(CondState::Ok),
+            severity: None,
+            evidence: "no instance token of host-a/tc".into(),
+            lines: vec![],
+            key: None,
+            address: Some("host-a/tc".into()),
+            at: "t".into(),
+            presence: Some(moved.clone()),
+            assume: false,
+            passthrough: false,
+            reason: "a presence token carries no payload",
+        };
+        let notice = Notice::Rule(Box::new(n.clone()));
+        let out = route(&notice, &rules, &RenderConfig::default());
+        assert_eq!(out.len(), 1, "its rule alone");
+        let o = &out[0].notification;
+        assert_eq!(o.id, "tc-gone:host-a/tc");
+        assert_eq!(o.rule_kind, "instance-gone");
+        assert_eq!(o.presence.as_ref(), Some(&moved));
+        assert!(o.message.contains("address: host-a/tc"), "{}", o.message);
+        let meta = meta_of(&notice);
+        assert_eq!(meta.address.as_deref(), Some("host-a/tc"));
+        assert!(!meta.assume && !meta.passthrough);
+
+        let baseline = RuleNotice {
+            what: "baseline".into(),
+            kind: NoticeKind::Baseline,
+            severity: Some("info".into()),
+            passthrough: true,
+            presence: None,
+            ..n
+        };
+        let out = route(
+            &Notice::Rule(Box::new(baseline)),
+            &rules,
+            &RenderConfig::default(),
+        );
+        assert_eq!(out[0].notification.severity, "info");
+        assert_eq!(out[0].notification.kind, NoticeKind::Baseline);
+        assert_eq!(out[0].notification.id, "tc-gone:baseline");
+    }
+}

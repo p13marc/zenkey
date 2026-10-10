@@ -1287,6 +1287,20 @@ mod tests {
         crate::discipline::severity_rank(s)
     }
 
+    /// The shipped example parses, and every rule in it is a spelling of
+    /// the zk2 vocabulary (its secrets and paths are the operator's, so it
+    /// is not `check`ed here).
+    #[test]
+    fn the_example_config_parses_into_zk2_rules() {
+        let cfg = parse(include_str!("../examples/zenwatch.json5")).expect("the example");
+        assert_eq!(cfg.bus.namespace.as_deref(), Some("site"));
+        assert!(!cfg.contracts.is_empty());
+        assert_eq!(cfg.discipline.group_by, ["system"]);
+        for r in &cfg.rules {
+            parse_rule(&r.rule).unwrap_or_else(|e| panic!("{}: {e}", r.rule));
+        }
+    }
+
     /// A file secret reads with its newline trimmed; an unreadable one is a
     /// problem that names the file.
     #[test]
