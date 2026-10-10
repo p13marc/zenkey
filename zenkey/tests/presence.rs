@@ -597,35 +597,28 @@ async fn s3_epochs_and_re_minting() {
 }
 
 /// §5: with `health.v1` in the tokenless set, 100 services hold 200 tokens,
-/// and a tool still finds every `health.v1` provider.
+/// and a tool still finds every `health.v1` provider. `health.v1` is the
+/// standard contract, implemented by the runtime (#721); its verdicts are
+/// `profile_health.rs` §5's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s5_a_tokenless_set() {
     const N: usize = 100;
     let (_r1, ep) = router(None).await;
     let tool = client(&ep).await;
     let host = client(&ep).await;
-    let health: IfaceId = "health.v1".parse().unwrap();
+    let health = zenkey::health::iface();
     let mut services: Vec<(Service, Vec<Queryable<()>>)> = Vec::new();
     for i in 0..N {
         let address = format!("p5/dev{i}");
         // The deployment's tokenless set.
         let cfg = config(&address).tokenless(health.clone());
-        let (mut b, mut held) = nav_builder_with(&host, cfg).await;
-        b.implement(imp("health.v1")).unwrap();
-        let key = b
-            .key(&health, "state/status", &Bindings::new())
-            .unwrap()
-            .into_keyexpr();
-        held.push(
-            b.declare_queryable(
-                &health,
-                "state/status",
-                Some(&Bindings::new()),
-                answer(key, "ok"),
-            )
+        let (mut b, held) = nav_builder_with(&host, cfg).await;
+        b.health()
             .await
-            .unwrap(),
-        );
+            .unwrap()
+            .set_status(zenkey::health::Level::Ok, "serving")
+            .await
+            .unwrap();
         services.push((b.start().await.unwrap(), held));
     }
     eventually("200 tokens", || async {
