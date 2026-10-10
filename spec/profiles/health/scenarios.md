@@ -30,10 +30,23 @@ health`; #721, PF).
   core S4 says, and measures its clock from S's deliveries
   (`freshness.v1` §2.6, ground 2). "Judges" applies v1.md §2.11 to the
   reading at that instant, the descriptor read as core §3.3 says.
+- **T's clock** (0.2). T reads by presence and GET, and a GET reader ages
+  a reply only with a trusted clock (`freshness.v1` §2.6). In §5 to §7, T
+  takes the deployment's word, `freshness.v1` §2.6's ground 1: every
+  session of a scenario runs on one host, whose one clock keeps the word.
+  T measures nothing, and its verdicts rest on no subscription.
+  - A tool in a deployment takes that word only as its operator's option
+    (`freshness.v1` §2.6). Without it, a tool measures its clock from puts
+    it hears during its reading, and the status is re-put every 30 s, so
+    the reading lasts 30 s, or its subscription is declared before the
+    owners start.
+  - §5 to §7 check health's reading, not the grounds of a clock's trust,
+    which `freshness.v1`'s scenarios check (its §4 and §6). In §1 to §4, G
+    measures its clock from S's deliveries, as above.
 - **The horizon** is the contract's, 60 s, so the owner confirms its status
-  at least every 30 s. §2, §4 and §8 wait it out, §2 and §4 for about
-  70 s each and §8 for about 200 s, and a runner MAY keep them in a slow
-  tier.
+  at least every 30 s. §2, §4 and §8 wait it out, §2 for about 70 s, §4
+  for about 100 s and §8 for about 200 s, and a runner MAY keep them in a
+  slow tier.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent. The reference allows 200 ms on
   loopback.
@@ -108,9 +121,25 @@ health`; #721, PF).
 ## §4 Clock ahead (§2.5)
 
 **Setup.** `spec/scenarios/state.md` §7's step 3: an owner, `lab/ahead`,
-implementing `health.v1`, its clock 2 s ahead of R1 (the reference's
-`simulate_offset`), watches a router-stamped heartbeat key as its clock
-reference (core §4.3). S subscribes to `zk2/lab/ahead/health.v1/**`.
+implementing `health.v1`, its clock 2 s ahead of R1, watches a
+router-stamped heartbeat key as its clock reference (core §4.3). S
+subscribes to `zk2/lab/ahead/health.v1/**`, and G GETs as the
+conventions say.
+- **Without root** (0.2). Moving a host's clock needs root, and zenoh
+  lets no program move its session's HLC (core §4.3, Appendix B). A runner
+  without root offsets the owner's clock in its runtime, as the
+  reference's `simulate_offset` does: the clock guard and the owner's
+  stamps read the offset clock. Every expectation below holds so, except
+  those marked **[moved clock]**.
+- **[moved clock]** expectations need the fault to reach R1 under a stamp
+  2 s ahead of R1's clock, as from an owner whose clock is ahead. A runner
+  meets them by moving the owner host's clock, or with an owner that
+  stamps from its offset clock on a session without an HLC: a session
+  whose HLC runs re-stamps a future stamp before the put leaves it (v1.md
+  §2.5). The reference does the second. Its in-process owners are
+  clients, whose HLC is off by default (core §4.1), and its runtime
+  stamps every fault from its offset clock (v1.md §2.5). Its owner example
+  does the same under `--clock-offset-ms`.
 
 **Steps.**
 1. The owner puts status `OK` before any heartbeat.
@@ -118,43 +147,57 @@ reference (core §4.3). S subscribes to `zk2/lab/ahead/health.v1/**`.
    for 65 s from then, and judges.
 3. The owner's clock is set right, and the heartbeat goes on. S listens
    for 35 s, and judges.
+4. **[moved clock]** Steps 1 and 2 again, with R1 running
+   `timestamping.drop_future_timestamp`. S listens for 3 s from the
+   detection, and G GETs.
 
 **Expected.**
 1. S receives the status.
 2. Within 1 s of the detection, S receives a `faults` sample with code
-   `clock_ahead` and level `FAILED`, whose stamp is not the owner's (R1
-   re-stamped a future-dated put, core §4.1). S receives no status put
-   from the detection on. The reference publishes the fault again within
-   31 s (§2.5, a SHOULD). The owner's tokens stay present. At 65 s, S
-   judges the status **stale**, never `FAILED`, and a tool reading the
-   faults answers "is its clock ahead?" yes (v1.md §5).
+   `clock_ahead` and level `FAILED`. S judges nothing by its stamp (v1.md
+   §2.5). S receives no status put from the detection on. The reference
+   publishes the fault again within 31 s (§2.5, a SHOULD). The owner's
+   tokens stay present. At 65 s, S judges the status **stale**, never
+   `FAILED`, and a tool reading the faults answers "is its clock ahead?"
+   yes (v1.md §5).
+   - **[moved clock]** The fault's stamp is not the owner's: R1 re-stamped
+     a future-dated put (core §4.1).
+   - Without root, the fault's stamp is the owner's honest one, set or
+     re-stamped by its own session (v1.md §2.5), and is not checked.
 3. S receives the status again, re-put within a few seconds of the
    correction (`freshness.v1` §2.10), and no `clock_ahead` fault after
    it. S judges **healthy**, `ok`, and the clock question no.
+4. **[moved clock]** S receives neither the fault nor the status put
+   while the owner was ahead: R1 dropped both (v1.md §2.5). G's reply
+   holds the status, under the owner's stamp, since a router never drops
+   or re-stamps a reply (core §4.1). That deployment's readers have only
+   the status's staleness to go on (v1.md §2.5).
 
 ## §5 A tokenless set of 100 (§2.7)
 
 **Setup.** `spec/scenarios/presence.md` §5's, with the standard contract:
 100 services `p5/dev0` to `p5/dev99`, each implementing `health.v1`, in
 its tokenless set, and `nav.v2`, each with status `OK` put before it
-starts.
+starts. The tool T takes the deployment's word for its clock (the
+conventions, 0.2).
 
-**Steps.** A tool lists `zk2/p5/*/@zk/**`, then `zk2/p5/*/@zk/alive/health.v1/**`,
+**Steps.** T lists `zk2/p5/*/@zk/**`, then `zk2/p5/*/@zk/alive/health.v1/**`,
 then GETs each instance's descriptor, and each listed service's
 `health.v1/state/**`, and judges.
 
 **Expected.**
 - 200 tokens: an instance token and an `alive/nav.v2/…` token each, and no
   `alive/health.v1/…` token. The second read finds nothing.
-- Every descriptor lists `health.v1` with `"token": false`. The tool finds
-  all 100 providers, and judges each **healthy**, `ok`: none is reported as
+- Every descriptor lists `health.v1` with `"token": false`. T finds all
+  100 providers, and judges each **healthy**, `ok`: none is reported as
   not implementing `health.v1` because it holds no interface token.
 
 ## §6 An absent owner (§2.1)
 
 **Setup.** The owner holds status `DEGRADED`, reason `"upstream lost"`.
 An archive, `lab/archive` (core §4.4), records
-`zk2/lab/svc/health.v1/state/**`. The tool T reads the deployment.
+`zk2/lab/svc/health.v1/state/**`. The tool T reads the deployment, and
+takes the deployment's word for its clock (the conventions, 0.2).
 
 **Steps.**
 1. T reads the owner, and judges.
@@ -173,7 +216,8 @@ An archive, `lab/archive` (core §4.4), records
 
 **Setup.** A test owner, `lab/liar`, breaks §2.2 on purpose: it holds
 status `OK` and check `disk` `FAILED`. A second test owner, `lab/frank`,
-holds status `FAILED` and check `disk` `OK`.
+holds status `FAILED` and check `disk` `OK`. T takes the deployment's
+word for its clock (the conventions, 0.2).
 
 **Steps.** T reads both twice, 2 s apart.
 

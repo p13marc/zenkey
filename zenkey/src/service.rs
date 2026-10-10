@@ -21,6 +21,10 @@
 //!        ▼
 //!     Service ─ set_capabilities / new_epoch / declare_member / cycle_member
 //! ```
+//!
+//! A service implementing `health.v1` through [`ServiceBuilder::health`]
+//! has its status put before step 3, as `health.v1` §2.3 makes a MUST
+//! ([`crate::health`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -100,6 +104,8 @@ pub struct ServiceBuilder {
     /// Set when the service closes, and dropped with it: its state
     /// writers' refreshers stop on either (`freshness.v1` §2.4).
     closed: tokio::sync::watch::Sender<bool>,
+    /// `health.v1`, once [`ServiceBuilder::health`] implemented it.
+    pub(crate) health: Option<crate::health::Health>,
 }
 
 fn mint() -> InstanceId {
@@ -199,7 +205,25 @@ impl ServiceBuilder {
             store: Arc::new(Store::new(window)),
             state_ifaces: BTreeSet::new(),
             closed: tokio::sync::watch::Sender::new(false),
+            health: None,
         }
+    }
+
+    /// Implements `health.v1`, its standard contract embedded
+    /// ([`crate::health`]): the status's writer is declared, the checks'
+    /// template exposed and the faults' writer declared, and the handle
+    /// returned puts them as the profile says. [`ServiceBuilder::start`]
+    /// puts the status before step 3, `UNSPECIFIED` with reason
+    /// `"starting"` unless [`crate::health::Health::set_status`] put one
+    /// first (§2.3), and with a clock reference configured, reports a clock
+    /// ahead as `clock_ahead` faults (§2.5). Refused when the service
+    /// implements `health.v1` already.
+    pub async fn health(&mut self) -> Result<crate::health::Health> {
+        let iface = crate::health::iface();
+        if self.health.is_some() || self.implements(&iface) {
+            return Err(Error::Duplicate(iface));
+        }
+        crate::health::Health::declare(self).await
     }
 
     /// The service's state stamp minter (§4.3): catch-up before the first
@@ -355,6 +379,12 @@ impl ServiceBuilder {
             }
         }
         s.cardinality.insert(resource.to_owned(), n);
+        if let Some(h) = &self.health
+            && h.iface() == iface
+            && resource == crate::health::CHECKS
+        {
+            h.lower_checks(n);
+        }
         Ok(self)
     }
 
@@ -531,6 +561,7 @@ impl ServiceBuilder {
             ops,
             state_qs: BTreeMap::new(),
             clock: None,
+            health: self.health,
             descriptor: Arc::new(RwLock::new(Arc::from(Vec::new()))),
             session: self.session,
             config: self.config,
@@ -548,8 +579,17 @@ impl ServiceBuilder {
         for iface in &self.state_ifaces {
             svc.ensure_state_server(iface).await?;
         }
+        // health.v1 §2.3: the status before step 4, and before the
+        // descriptor lists health.v1, so a GET made at either finds it.
+        if let Some(h) = &svc.health {
+            h.bring_up().await?;
+        }
         if let Some(key) = svc.config.clock_reference.clone() {
             svc.clock = Some(ClockGuard::start(&svc.session, &key, Arc::clone(&svc.minter)).await?);
+            // health.v1 §2.5: a clock ahead is reported as a fault.
+            if let Some(h) = &svc.health {
+                h.watch_clock(svc.closed.subscribe());
+            }
         }
         // 3. The descriptor, then the contracts.
         let (q, current) = svc.serve_descriptor(&svc.instance.clone()).await?;
@@ -662,6 +702,8 @@ pub struct Service {
     ops: crate::operation::Ops,
     state_qs: BTreeMap<IfaceId, Vec<Queryable<()>>>,
     clock: Option<ClockGuard>,
+    /// `health.v1`, when the builder implemented it (`health.v1` §2.3).
+    health: Option<crate::health::Health>,
     descriptor: Arc<RwLock<Arc<[u8]>>>,
     session: zenoh::Session,
     config: ServiceConfig,
@@ -762,6 +804,13 @@ impl Service {
     #[must_use]
     pub fn minter(&self) -> &Arc<Minter> {
         &self.minter
+    }
+
+    /// Its `health.v1`, when [`ServiceBuilder::health`] implemented it: the
+    /// handle the builder returned.
+    #[must_use]
+    pub fn health(&self) -> Option<&crate::health::Health> {
+        self.health.as_ref()
     }
 
     /// Declares `iface`'s state queryables, once: one over `state/**` and
@@ -1119,6 +1168,25 @@ impl ServiceBuilder {
 
     pub(crate) fn availability(&self) -> &Arc<crate::operation::Availability> {
         &self.ops
+    }
+
+    /// What a state writer made outside the builder is made of
+    /// (`health.v1`'s checks): the session, the store its GETs are answered
+    /// from, the stamp minter, and the service's close.
+    pub(crate) fn state_parts(
+        &self,
+    ) -> (
+        zenoh::Session,
+        Arc<Store>,
+        Arc<Minter>,
+        tokio::sync::watch::Receiver<bool>,
+    ) {
+        (
+            self.session.clone(),
+            Arc::clone(&self.store),
+            Arc::clone(&self.minter),
+            self.closed.subscribe(),
+        )
     }
 }
 

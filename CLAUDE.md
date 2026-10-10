@@ -354,6 +354,13 @@ point at `p13marc/zensight` issues, `tcgui#43` at `p13marc/tcgui`.
   or drop, a delete, and the clock guard. The judgement is
   `zenkey_model::freshness`; `Subscription::freshness`/`clock_trust` and
   `Current::freshness` make its observations.
+  `health` (#721, PE) is `health.v1`'s owner on the embedded standard
+  bundle: `ServiceBuilder::health()` → a `Health` (also
+  `Service::health()`) whose status is the declared level raised to the
+  worst check, with §2.2's put order, put before step 3 (`UNSPECIFIED`,
+  `"starting"` by default) and never deleted; checks on change, faults on
+  the stream, and `clock_ahead` while the guard holds (the `Minter`'s hold
+  watch). The owner example drives it from stdin.
   `tests/` runs `spec/scenarios/` sections as in-process routers and
   clients, one test per section, named after it. On `main` it shares the
   name with v1's crates.io `zenkey =0.11.1`; `-p zenkey` selects the member.

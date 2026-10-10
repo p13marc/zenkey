@@ -11,7 +11,7 @@ and `examples/zk2/`.
 |---|---|---|---|---|---|
 | [`hostid.v1`](hostid/v1.md) | 0.3 | draft | 0.22 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
 | [`freshness.v1`](freshness/v1.md) | 0.2 | draft | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
-| [`health.v1`](health/v1.md) | 0.1 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
+| [`health.v1`](health/v1.md) | 0.2 | draft | 0.23 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v1`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 
 ## Layout
 
