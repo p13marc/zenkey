@@ -6,7 +6,7 @@ inputs. It never read the Rust implementation or `docs/zk2/`, and it runs
 the Rust owner example only as a black box. Each entry below is a place
 where that was not enough, or where the spec said two things.
 
-**Twenty-three rounds.**
+**Twenty-four rounds.**
 - F-01 to F-39 were found against `core.md` 0.2.
 - F-40 to F-45 were found against 0.4.
 - F-46 to F-55 come from the live half's first slice.
@@ -42,9 +42,10 @@ where that was not enough, or where the spec said two things.
   health.v1 0.1"). `health.v1` 0.2 resolved them.
 - Nothing new was found against `health.v1` 0.2, read and run live against
   the Rust owner example (see "At health.v1 0.2").
-- **F-105 is new**, found against core 0.24's §2.7, the population budget,
-  read cold with `health.v1` 0.3 and `hostid.v1` 0.4 (see "At 0.24: the
-  population budget" at the end).
+- F-105 was found against core 0.24's §2.7, the population budget, read cold
+  with `health.v1` 0.3 and `hostid.v1` 0.4 (see "At 0.24: the population
+  budget"). Core 0.25 resolved it.
+- Nothing new was found against core 0.25 (see "At 0.25" at the end).
 
 **Severities.**
 - **gap:** the prose is silent. The entry says whether a fixture's expected
@@ -54,8 +55,8 @@ where that was not enough, or where the spec said two things.
   two parts of the spec do.
 - **blocker:** zk2py could not implement the rule. None was found.
 
-**Counts at core 0.24, hostid.v1 0.4, freshness.v1 0.2 and health.v1 0.3:**
-105 entries, one open.
+**Counts at core 0.25, hostid.v1 0.4, freshness.v1 0.2 and health.v1 0.3:**
+105 entries, none open.
 - F-01 to F-55: resolved by 0.5.
 - F-56 to F-63: resolved by 0.6.
 - F-64 to F-70: resolved by 0.7.
@@ -132,7 +133,11 @@ where that was not enough, or where the spec said two things.
     runs: an owner without an HLC, stamping from its offset clock.
   - F-104 overturned zk2py's guess. The tool takes the deployment's word for
     its clock, where zk2py had subscribed and measured.
-- F-105: **new**, an ambiguity against core 0.24 §2.7.
+- F-105: resolved by core 0.25, against zk2py's guess. "Lost no delivery"
+  is established from what the reader can see, never assumed: the reader
+  lost none, and the resource is `reliable` with `block`. zk2py had read
+  it as knowledge, so a best-effort window was lossless unless it knew of
+  a loss. Now no such window is.
 
 Code comments cite open entries as `SPEC-FINDINGS F-nn`, and resolved ones
 by the spec section that now states the rule.
@@ -243,7 +248,7 @@ by the spec section that now states the rule.
 | F-102 | gap | resolved by freshness 0.2 | freshness.v1 0.1 §2.6, ground 2 | One live put within the delta trusts a clock, but for how long, and does a later put outside it withdraw the trust? |
 | F-103 | gap (measured) | resolved by health 0.2 | health.v1 0.1 scenarios.md §4 expected 2, with core 0.23 §4.1 and Appendix B | The fault's stamp "is not the owner's (R1 re-stamped…)" needs the owner's session HLC ahead, which a simulated offset cannot move. |
 | F-104 | gap | resolved by health 0.2 | health.v1 0.1 scenarios.md §5–§7, with freshness.v1 0.2 §2.6 | The tool T judges by GET, and nothing says how it trusts its clock: without that, every status is `clock_untrusted`, never healthy. |
-| F-105 | ambiguity | **new** | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
+| F-105 | ambiguity | resolved by 0.25 | core 0.24 §2.7, "What a tool reads" and its table; budget/population.json, rate.json | A complete window and a rate's clean pole need a window that "lost no delivery": a fact a plain subscription cannot establish, only fail to see contradicted. |
 
 ---
 
@@ -3489,3 +3494,104 @@ it as a fact. The two readings differ:
 does. Its callback subscriptions drop nothing locally, so its windows are
 lossless unless it knows of a loss. Its live event window ran on loopback,
 with the event's reliable, `block` QoS.
+
+**Status at 0.25: resolved by 0.25, against zk2py's guess.** §2.7: "**Lost no delivery is established, never assumed** … A window lost no delivery when both hold: 1. **Its reader lost none.** Its own queue neither overflowed nor fell behind, and no delivery was kept out of its count by a cap. 2. **The path could not drop one silently.** The resource declares `reliable` with congestion `block` … Otherwise no window of the resource is lossless, whatever it heard". "Miss detection is evidence of a loss, never of none." The fact reading is kept, and made reachable. A reliable, `block` path loses a delivery only by failing, and a failure withdraws the owner's token, which the presence premise reads until one lease after the window's end. zk2py's `budget.lossless` follows the rule, and the new fixture `lossless.json` (14 cases) passes. A best-effort window is now `lossy` at any length, where zk2py had called it lossless.
+
+## At 0.25: "lost no delivery" established, and the owner keeping its budget (#609)
+
+Core 0.25 resolves F-105, says how an owner keeps its bound and its rate,
+and adds `scenarios/budget.md`. zk2py read it cold, and drove the Rust owner
+example as a black box through its new knobs: the `--cardinality` flag, and
+the `put`, `delete` and `fill` stdin commands, as its usage line and
+refusals describe them.
+
+**`just py-conformance`: 875 of 875.** `budget` is 81:
+- the new `lossless.json`, 14 cases;
+- `rate.json`, now 22, its readings carrying `lossless` and `present`;
+- `bounds.json`, 15;
+- `population.json`, 30.
+
+All the new and changed cases passed the first time once `budget.lossless`
+and `budget.rate(…, present)` followed 0.25.
+
+**`python -m zk2py.budget_scenarios`** (new): 38 of 38. zk2py writes nothing
+outside `impl/python/`, so this runner has no `just` recipe.
+- **§1** used routers and an owner each in a process of its own
+  (`python -m zk2py.proc`), and a consumer whose callback takes 2 ms per
+  sample:
+  - reliable, `block`: 1,000 of 1,000 arrived in order, with no withdrawal;
+  - best effort, `drop`: 95 to 340 lost across runs, with nothing said;
+  - reliable, `block`, the consumer stuck for 7 s on the 100th: 91 to 112
+    lost, and the owner's token was withdrawn.
+
+  The owner's puts did not visibly wait. The path's loopback buffers held
+  the 16 MiB, so the 1,000 puts returned in about 0.05 s while the reader
+  took 2 s. The text's waiting is the reference host's. Not reproduced, and
+  no finding.
+- **§2,** relays of this runner's, a 1 s lease on the routers and the
+  consumer, the owner putting every 10 ms:
+  - closed: the token withdrawn in 0.4 to 3.1 ms;
+  - stalled: withdrawn after 962 to 1,010 ms, with 97 to 99 samples lost.
+
+  This held between the routers and on the consumer's own link, and each
+  link healed. The text measured 0.8–2.0 ms, and 986–1,037 ms with 88–93
+  lost.
+- **§3,** zenoh-python's `zenoh.ext` advanced publisher and subscriber.
+  The first sample heard was the seventh, with no miss reported. After a
+  cut, three puts and a heal, a miss of 15 or 16 was reported.
+- **§4 to §7** were run on zk2py's owner and on the owner example, the same
+  writes, 14 checks each. The same writes were accepted and refused.
+  - Each refusal named the resource, the bound and its source (contract or
+    descriptor), or the rate.
+  - A subscriber saw nothing published for any refused write.
+
+**`just py-health`: 29 of 29. `just py-freshness`: 21 of 21. `just py-hostid`:
+34 of 34.**
+
+**`just py-live`: 319 passed, 0 failed, 0 known deviations.** The `budget` run now has 16 checks,
+reading windows by 0.25:
+- zk2py's best-effort stream window is `lossy`, at any length;
+- zk2py's event window of one retention, reliable and `block`, counted from
+  its declaration plus the 1 s reply timeout, with the owner watched for 10 s
+  and 1 s after its end, is `within`, `complete`, and its rate kept;
+- the owner example's windows:
+  - its event `alarms/{src}` (retention 2 s): `within`, `complete`. Its rate
+    `burst(3/h)` is `window_too_short` in so short a window;
+  - its reliable stream `load/{cpu}` is `window_too_short`, and its
+    best-effort `samples/{id}` is `lossy`;
+  - a second owner example whose process ended 2 s after its window's end,
+    within the lease the tool watches: `owner_absent`.
+- The owner example offers no lease setting, so the tool watches zenoh's
+  default lease of 10 s.
+
+**What changed in zk2py.**
+- **`budget.lossless`** implements §2.7's rule and `lossless.json`'s order.
+  `budget.rate` takes `present`.
+- **`budget.Window`:**
+  - it counts its span from its declaration plus the reply timeout;
+  - it establishes losslessness from the resource's QoS;
+  - it watches the owner's instance token from before its start until one
+    lease and the reply timeout after its end, and it can be ended
+    (`end()`) before that.
+- **The owner's refusals** name the resource, the bound and its source, or
+  the rate. A refused write publishes nothing, and its writer gets
+  `BudgetExceeded`.
+- **New:**
+  - `zk2py.proc`, a router and a publisher in processes of their own;
+  - `zk2py.budget_scenarios`;
+  - `interop/budget/budget.v1.toml`, copied from the text with `minor` and
+    `summary` added, so that it loads with no finding.
+
+**Where zk2py's reading of 0.25 needed a guess.**
+- **The window's start for presence.** zk2py requires the owner's token
+  from before the window's declaration, which is stricter than from its
+  counted start.
+- **Members heard before the counted start**, between the declaration and
+  the reply timeout, are counted. A member heard was live, and only the
+  span is measured from the later instant.
+- **The reader's own loss.** zenoh-python's callback handler has no queue,
+  and zk2py's window keeps nothing out of its count, so its reader loses
+  none.
+- **The lease.** zk2py's in-process routers and owners, and the owner
+  example, run zenoh's default 10 s. The tool watches 10 s after a window's
+  end, as §2.7 says of the default.

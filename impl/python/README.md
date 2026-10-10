@@ -68,7 +68,7 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes, against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2 | `envelope`, `cbor` | JSON, CBOR and protobuf envelopes, and the refusal tags |
-| budget | §2.7 (0.24) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it) and `rate.json` (an event's rate per member). An unknown file there fails. |
+| budget | §2.7 (0.24, 0.25) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25). An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
@@ -89,17 +89,17 @@ history        10 passed     0 failed
 descriptors    42 passed     0 failed
 errors         42 passed     0 failed
 compat        100 passed     0 failed
-budget         62 passed     0 failed
+budget         81 passed     0 failed
 examples       99 passed     0 failed
 hostid         42 passed     0 failed
 freshness     102 passed     0 failed
 health        112 passed     0 failed
-total         856 passed     0 failed
+total         875 passed     0 failed
 ```
 
-The figures are against `core.md` 0.24, `hostid.v1` 0.4, `freshness.v1`
-0.2 and `health.v1` 0.3. 0.22 added `contracts/e002-two-majors`, and 0.24
-the `budget/` family. `freshness.v1` 0.2 added `clock-trust.json` and four
+The figures are against `core.md` 0.25, `hostid.v1` 0.4, `freshness.v1`
+0.2 and `health.v1` 0.3. 0.22 added `contracts/e002-two-majors`, 0.24
+the `budget/` family, and 0.25 its `lossless.json`. `freshness.v1` 0.2 added `clock-trust.json` and four
 judgement cases. `health.v1` 0.1 added three fixture files, and 0.3
 `clock.json`. Five earlier releases added descriptor
 fixtures:
@@ -111,8 +111,8 @@ fixtures:
 
 - Amendments 0.5 to 0.18 resolved F-01 to F-93. `hostid.v1` 0.2 resolved
   F-94 to F-97, core 0.22 F-98, `hostid.v1` 0.3 F-99, `freshness.v1` 0.2
-  F-100 to F-102, and `health.v1` 0.2 F-103 and F-104. F-105 is open,
-  against core 0.24 §2.7.
+  F-100 to F-102, `health.v1` 0.2 F-103 and F-104, and core 0.25 F-105.
+  None is open.
 - They decided 13, 3, 1 and 2 of zk2py's guesses the other way. Since
   then, `hostid.v1` 0.2 decided two more the other way (F-96, F-97), 0.22
   one (F-98), `freshness.v1` 0.2 two (F-101, F-102), and `health.v1` 0.2 one
@@ -420,7 +420,7 @@ zk2py-owner runs:
 - the refusal of presence.md §2 step 4, watched through a router of the
   runner's own with a control (`interop/zk2py_needs.v1.toml`).
 
-Result: `live interop: 315 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
+Result: `live interop: 319 passed, 0 failed, 0 known deviations of the Rust owner example`. Exit codes are as for the static runner. `--only <run>`
 (repeatable) runs some of the runs behind R1 alone, for instance
 `--only fanout --only o1`.
 
@@ -607,10 +607,15 @@ described below.
   - the Rust `consume` example reads zk2py's health status, and stops at
     its operation step, since `health.v1` has none.
 
-## The population budget (core §2.7, 0.24)
+## The population budget (core §2.7, 0.24 and 0.25)
 
-- **The `budget` conformance family:** `bounds.json`, `population.json` and
-  `rate.json`, 62 of 62.
+- **The `budget` conformance family:** `bounds.json`, `population.json`,
+  `rate.json` and `lossless.json`, 81 of 81.
+- **Lost no delivery is established** (0.25). `budget.lossless` takes the
+  resource's declared QoS, the reader's own loss and miss detection. Only a
+  `reliable`, `block` resource's window can be lossless. A `Window` counts
+  its span from its declaration plus the reply timeout, and watches the
+  owner's token until one lease after its end.
 - **`zk2py.budget`:** `bound`, `population` and `rate`, as the fixtures read
   them. `get_population` is a complete S4 GET, and `Window` a window over a
   stream's or an event's members, with the owner's presence watched
@@ -620,7 +625,15 @@ described below.
   retention), or an occurrence beyond its rate, raises `BudgetExceeded`.
   `cardinality=` lowers the bound in the descriptor, `budget=False` makes a
   test owner that breaks the rule, and `occur()` publishes an event.
-- **Across the two implementations** (`just py-live`, `--only budget`, 12
+- **`python -m zk2py.budget_scenarios`** runs `scenarios/budget.md`, 38 of
+  38. zk2py writes nothing outside `impl/python/`, so it has no `just`
+  recipe.
+  - §1 to §3 are the measurements, from Python. §1 runs routers in
+    processes of their own (`zk2py.proc`), §2 uses relays that close and
+    stall, and §3 uses `zenoh.ext`'s miss detection.
+  - §4 to §7 are the owner keeping its bound and its rate, run on zk2py's
+    owner and on the owner example, the same writes.
+- **Across the two implementations** (`just py-live`, `--only budget`, 16
   checks):
   - the owner example's `health.v1` checks, a templated state of
     cardinality 64, are judged from complete S4 GETs: `within` at 10 and at
@@ -629,7 +642,11 @@ described below.
   - zk2py's owners give a state with its bound lowered, a stream, and an
     event whose window of one retention, 61 s, is a complete reading. Each
     is shown both ways: a conforming owner, and a test owner that breaks
-    the rule and is the finding.
+    the rule and is the finding;
+  - windows by 0.25: a best-effort stream is `lossy` at any length. The
+    owner example's event window is `complete`, its stream window too
+    short, and a window whose owner left within the watched lease is
+    `owner_absent`.
 
 ## What it does not cover
 
@@ -726,9 +743,11 @@ impl/python/
     freshness_scenarios.py freshness.v1 scenarios.md §1–§6 on an in-process router
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
-    budget.py         §2.7      the population budget: the bound, a population, a rate, readings on a bus
+    budget.py         §2.7      the population budget: the bound, a population, a rate, lossless, readings on a bus
+    budget_scenarios.py §2.7    scenarios/budget.md §1–§7: the measurements, and the owner keeping its budget
+    proc.py                     helper processes for the measurements: a router, a publisher
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget; freshness/ holds beacon.v1 and zk2py_fresh.v1;
+                      sysinfo_x, tracker, order, order_b, budget; freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4)
 ```
 

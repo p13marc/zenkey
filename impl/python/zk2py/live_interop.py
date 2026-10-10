@@ -2807,6 +2807,7 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
 
 
 BUDGET_TOML = "impl/python/interop/zk2py_budget.v1.toml"
+BUDGET_V1 = "impl/python/interop/budget/budget.v1.toml"
 
 
 def run_python_budget(report: Report, exe: Path) -> None:
@@ -2901,7 +2902,8 @@ def run_python_budget(report: Report, exe: Path) -> None:
         # The event window opens now, the owner present: it must last one
         # retention, 60 s.
         ev_sel = "zk2/lab/budget/zk2py_budget.v1/events/alarms/*/*"
-        w_ev = bg.Window(tool, ev_sel, "lab/budget", event=True)
+        ev_r = next(r for r in contract.canonical["resources"] if r["template"] == "alarms/{id}")
+        w_ev = bg.Window(tool, ev_sel, "lab/budget", event=True, qos=(ev_r["reliability"], ev_r["congestion"]))
         windows.append(w_ev)
         base = good.prefix(contract)
         for i in "abc":
@@ -2938,12 +2940,14 @@ def run_python_budget(report: Report, exe: Path) -> None:
         report.check(run, "a test owner that breaks the rule holds 5 items against 4: the finding, over_bound",
                      v.pair() == {"verdict": "exceeds", "reason": "over_bound"}, f"{reading}; {v.pair()}")
 
-        # -- a stream: a window short of an hour --------------------------------
-        run = "core 0.24 §2.7: a templated stream of cardinality 2, read by a window"
-        w_good = bg.Window(tool, f"{base}/stream/samples/*", "lab/budget")
-        w_over = bg.Window(tool, f"{obase}/stream/samples/*", "lab/over")
+        # -- a stream: best effort is unobservable at any length (0.25) ---------
+        run = "core 0.25 §2.7: a best-effort templated stream of cardinality 2, read by a window"
+        qos_of = {f"{r['token']}/{r['template']}": (r["reliability"], r["congestion"])
+                  for r in contract.canonical["resources"]}
+        w_good = bg.Window(tool, f"{base}/stream/samples/*", "lab/budget", qos=qos_of["stream/samples/{id}"])
+        w_over = bg.Window(tool, f"{obase}/stream/samples/*", "lab/over", qos=qos_of["stream/samples/{id}"])
         windows += [w_good, w_over]
-        time.sleep(0.3)
+        time.sleep(1.2)
         good.publish(f"{base}/stream/samples/a", b"1")
         good.publish(f"{base}/stream/samples/b", b"1")
         try:
@@ -2954,20 +2958,22 @@ def run_python_budget(report: Report, exe: Path) -> None:
         for i in "abc":
             over.publish(f"{obase}/stream/samples/{i}", b"1")
         time.sleep(1.0)
-        vg = bg.population("stream", 2, None, w_good.reading())
-        vo = bg.population("stream", 2, None, w_over.reading())
-        report.check(run, "the conforming owner refuses a third live member; its 2 in a window of seconds are "
-                          "unobservable, window_too_short (a complete window lasts an hour); the test owner's 3 are "
-                          "the finding in the same short window",
-                     refused is not None and vg.pair() == {"verdict": "unobservable", "reason": "window_too_short"}
+        vg = bg.population("stream", 2, None, w_good.reading(lease_s=0))
+        vo = bg.population("stream", 2, None, w_over.reading(lease_s=0))
+        report.check(run, "the conforming owner refuses a third live member. Its window is unobservable, lossy: a "
+                          "best-effort, drop stream is never shown to have lost no delivery, whatever the window's "
+                          "length (§2.7, 0.25). The test owner's 3 members are the finding in the same window",
+                     refused is not None and vg.pair() == {"verdict": "unobservable", "reason": "lossy"}
+                     and w_good.lossless_reason() == "best_effort"
                      and vo.pair() == {"verdict": "exceeds", "reason": "over_bound"},
-                     f"refused {refused!r}; good {vg.pair()}, over {vo.pair()}")
+                     f"refused {refused!r}; good {vg.pair()} ({w_good.lossless_reason()}), over {vo.pair()}")
 
         # -- an event: a window of one retention ---------------------------------
-        run = "core 0.24 §2.7: a templated event, cardinality 2, rate low, retention 60 s, read by a window"
-        w_ov_ev = bg.Window(tool, f"{obase}/events/alarms/*/*", "lab/over", event=True)
+        run = "core 0.25 §2.7: a templated event, cardinality 2, rate low, retention 60 s, reliable and block"
+        w_ov_ev = bg.Window(tool, f"{obase}/events/alarms/*/*", "lab/over", event=True,
+                            qos=qos_of["events/alarms/{id}"])
         windows.append(w_ov_ev)
-        time.sleep(0.3)
+        time.sleep(1.2)
         good.occur(f"{base}/events/alarms/a", b"!")
         good.occur(f"{base}/events/alarms/b", b"!")
         refusals = []
@@ -2980,9 +2986,9 @@ def run_python_budget(report: Report, exe: Path) -> None:
         for member in ("a", "a", "b", "c"):
             over.occur(f"{obase}/events/alarms/{member}", b"!")
         time.sleep(1.0)
-        r_ov = w_ov_ev.reading()
+        r_ov = w_ov_ev.reading(lease_s=0)
         vp = bg.population("event", 2, 60 * bg.NS, r_ov)
-        vr = bg.rate("low", w_ov_ev.rate_members(), r_ov.listened_ns, r_ov.lossless)
+        vr = bg.rate("low", w_ov_ev.rate_members(), r_ov.listened_ns, r_ov.lossless, r_ov.present)
         report.check(run, "the conforming owner refuses a second occurrence of a within a minute (the rate) and a "
                           "third member (the bound); the test owner's a twice and three members are both findings, "
                           "in a window of a second",
@@ -2991,16 +2997,76 @@ def run_python_budget(report: Report, exe: Path) -> None:
                      and vr.pair() == {"verdict": "exceeds", "reason": "rate_exceeded"},
                      f"refusals {refusals}; population {vp.pair()}, rate {vr.pair()}")
         _sleep_until(w_ev.start_ns + 61 * bg.NS)
-        r_ev = w_ev.reading()
+        w_ev.end()
+        r_ev = w_ev.reading(lease_s=10.0)
         vp = bg.population("event", 2, 60 * bg.NS, r_ev)
-        vr = bg.rate("low", w_ev.rate_members(), r_ev.listened_ns, r_ev.lossless)
-        report.check(run, "a window of one retention (61 s), the owner present throughout, no delivery lost: two "
-                          "members, within, complete, and the rate kept",
-                     r_ev.present and r_ev.listened_ns >= 60 * bg.NS
+        vr = bg.rate("low", w_ev.rate_members(), r_ev.listened_ns, r_ev.lossless, r_ev.present)
+        report.check(run, "a window of one retention, counted from its declaration plus the 1 s reply timeout (61 s), "
+                          "reliable and block, the owner present until one lease (10 s, zenoh's default) and the "
+                          "reply timeout after its end: two members, within, complete, and the rate kept",
+                     r_ev.present and r_ev.listened_ns >= 60 * bg.NS and r_ev.lossless
                      and vp.pair() == {"verdict": "within", "reason": "complete"}
                      and vr.pair() == {"verdict": "within", "reason": "rate_kept"},
-                     f"heard {sorted(r_ev.heard)}, listened {r_ev.listened_ns / 1e9:.1f} s, present {r_ev.present}; "
-                     f"population {vp.pair()}, rate {vr.pair()}")
+                     f"heard {sorted(r_ev.heard)}, listened {r_ev.listened_ns / 1e9:.1f} s, present {r_ev.present}, "
+                     f"{w_ev.lossless_reason()}; population {vp.pair()}, rate {vr.pair()}")
+
+        # -- the owner example's windows (0.25) -----------------------------------
+        run = "core 0.25 §2.7: the owner example's windows, its writes driven over its stdin"
+        rw = Owner(exe, "lab/rw", [REPO / BUDGET_V1, REPO / BUDGET_TOML], connect=ep)
+        rw2 = Owner(exe, "lab/rw2", [REPO / BUDGET_V1], connect=ep)
+        rusts += [rw, rw2]
+        if not report.check(run, "two owner examples start, with budget.v1 and zk2py_budget.v1",
+                            rw.wait_for("ready ", 120) is not None and rw2.wait_for("ready ", 120) is not None,
+                            f"{rw.stderr[-1:]} {rw2.stderr[-1:]}"):
+            return
+        bq = {f"{r['token']}/{r['template']}": (r["reliability"], r["congestion"])
+              for r in load_contract(REPO / BUDGET_V1).canonical["resources"]}
+        we = bg.Window(tool, "zk2/lab/rw/budget.v1/events/alarms/*/*", "lab/rw", event=True,
+                       qos=bq["events/alarms/{src}"])
+        wl = bg.Window(tool, "zk2/lab/rw/budget.v1/stream/load/*", "lab/rw", qos=bq["stream/load/{cpu}"])
+        wb = bg.Window(tool, "zk2/lab/rw/zk2py_budget.v1/stream/samples/*", "lab/rw",
+                       qos=qos_of["stream/samples/{id}"])
+        we2 = bg.Window(tool, "zk2/lab/rw2/budget.v1/events/alarms/*/*", "lab/rw2", event=True,
+                        qos=bq["events/alarms/{src}"])
+        windows += [we, wl, wb, we2]
+        time.sleep(1.2)
+        answers = [rw.command(c) for c in ("put budget.v1 events/alarms/{src} a", "put budget.v1 events/alarms/{src} b",
+                                           "put budget.v1 stream/load/{cpu} c0", "put budget.v1 stream/load/{cpu} c1",
+                                           "put zk2py_budget.v1 stream/samples/{id} a")]
+        answers += [rw2.command(c) for c in ("put budget.v1 events/alarms/{src} a",
+                                             "put budget.v1 events/alarms/{src} b")]
+        _sleep_until(we.start_ns + int(2.5 * bg.NS))
+        for w in (we, wl, wb, we2):
+            w.end()
+        time.sleep(2.0)
+        code2 = rw2.close()  # within the lease after its window's end
+        rusts.remove(rw2)
+        r_e, r_e2 = we.reading(lease_s=10.0), we2.reading(lease_s=10.0)
+        v_e = bg.population("event", 2, 2 * bg.NS, r_e)
+        v_r = bg.rate("burst(3/h)", we.rate_members(), r_e.listened_ns, r_e.lossless, r_e.present)
+        v_l = bg.population("stream", 3, None, wl.reading(lease_s=0))
+        v_b = bg.population("stream", 2, None, wb.reading(lease_s=0))
+        v_e2 = bg.population("event", 2, 2 * bg.NS, r_e2)
+        report.check(run, "its event alarms/{src} (retention 2 s, reliable, block): a window of 2.5 s from its "
+                          "declaration plus the reply timeout, the owner present until a lease after it, is complete: "
+                          "a and b, within; its rate burst(3/h) needs an hour's window: window_too_short",
+                     all(a and a.startswith("put ") for a in answers) and r_e.present and r_e.lossless
+                     and v_e.pair() == {"verdict": "within", "reason": "complete"}
+                     and v_r.pair() == {"verdict": "unobservable", "reason": "window_too_short"},
+                     f"heard {sorted(r_e.heard)}, listened {r_e.listened_ns / 1e9:.2f} s; {v_e.pair()}, "
+                     f"rate {v_r.pair()}; answers {answers}")
+        report.check(run, "its reliable, block stream load/{cpu}: a window of seconds is window_too_short (a stream "
+                          "member is live for an hour); its best-effort stream samples/{id}: lossy, at any length",
+                     v_l.pair() == {"verdict": "unobservable", "reason": "window_too_short"}
+                     and v_b.pair() == {"verdict": "unobservable", "reason": "lossy"},
+                     f"load {v_l.pair()}, samples {v_b.pair()}")
+        report.check(run, "a second owner example whose process ends 2 s after its window's end, within the lease "
+                          "the tool watches: the same window is owner_absent, never within (§2.7, 0.25)",
+                     code2 == 0 and not r_e2.present and v_e2.pair() == {"verdict": "unobservable",
+                                                                         "reason": "owner_absent"},
+                     f"exit {code2}, present {r_e2.present}, {v_e2.pair()}")
+        report.info(run, "the owner example offers no lease setting, so the tool watches zenoh's default lease, 10 s, "
+                         "and the 1 s reply timeout, after each window's end")
     finally:
         for w in windows:
             w.close()
