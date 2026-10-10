@@ -4,6 +4,26 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.4 — 2026-10-10: §6's scenario, asked by a tool (#735)
+
+Chunk PF (#721) gave the reference doctor `hostid-duplicate`, which runs
+`scenarios.md` §6 (`zenkey-fleet/tests/zk2_doctor.rs`,
+`hostid_s6_what_a_tool_concludes`). Two sentences of the scenarios still
+read as before it.
+
+**Changed: wording, in `scenarios.md`.**
+- **The preamble** said §6 "waits for one that asks its question". A tool
+  now asks it, and the preamble names the test that runs it.
+- **§6 step 5** named `sysinfo-x.v1`, which is not an interface id: a
+  name's segments are `[a-z][a-z0-9_]*`, so a hyphen is E001 (core §1.2).
+  It is `sysinfo_x.v1`, as the test spells it.
+
+**Deliberately not changed.**
+- **No rule.** v1.md's text is unchanged, and so are the setups, the
+  other steps and every expected observation.
+- **Written against core 0.22.** Neither 0.23 nor 0.24 changes anything
+  this text relies on.
+
 ## 0.3 — 2026-10-09: where an ephemeral start is logged (#726)
 
 The Python implementation's live round against 0.2 (PR #725, F-99) drove
