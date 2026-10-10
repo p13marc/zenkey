@@ -598,9 +598,8 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let doctor_every = e.doctor.map(DoctorConfig::every_spelled);
 
     let counters = Arc::new(Counters::default());
-    // The persist error and the health checks' inputs that live between
-    // ticks, as one record so the final tick's writes are reads for the
-    // next, not dead stores.
+    // The last persist error, which the `state-file` check reads: a record,
+    // so the final tick's write is not a dead store.
     struct Pulse {
         last_persist_error: Option<String>,
     }
