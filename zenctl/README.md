@@ -216,8 +216,9 @@ esac
 ```bash
 # The deployment against the core: exit 1 on an error-severity finding.
 zenctl doctor --namespace prod --fail-on error
-zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state; no admin space here
+zenctl doctor --namespace prod --deep --skip storage-on-state   # + whose clock stamps state, and populations over their bounds; no admin space here
 zenctl doctor --namespace prod --clocks-synced         # + health.v1's checks, on the word that the clocks agree
+zenctl check conform host-a/tc tc.netif.v1 --namespace prod --skip budget   # a suite in CI; a stream's population is a window's lower bound only
 
 # Every service's health.v1: exit 1 on unhealthy, stale, a status better than its checks.
 zenctl health --namespace prod --clocks-synced
