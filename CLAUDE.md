@@ -145,8 +145,8 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `--last-known <archive>`, never shown as current) beside the raw `get
   <selector>`, `watch` (R6 discards counted apart), `replay --namespace`;
   `pub` refuses a key a zk2 service owns (P3), and `retire` is gone.
-  FJ6's `doctor` judges a zk2 deployment against the core: thirteen checks
-  (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
+  FJ6's `doctor` judges a zk2 deployment against the core: thirteen checks,
+  eighteen since PF (`zenkey_fleet::judge::doctor`, ids in `report::CheckId`), each a
   `Judgement` whose finding is the yes, read through a session in the
   namespace and one in none for the admin space and the presence domain;
   exit 1 on a finding at or above `--fail-on` (default warning), 2 when a
@@ -186,6 +186,10 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `origin-down` is `instance-gone`, `alert-firing` and field-stuck are dark
   until their profiles exist (#613). The zk2 `why` and `check conform` are
   follow-ups.
+  PF's `health [SYSTEM/SERVICE]` (#721) reads health.v1 as its §2.11 reader
+  does (the clock on `--clocks-synced` or a `--for` window), the doctor adds
+  `health-*` and `hostid-duplicate`, and `check conform` a `health` and a
+  `health-aggregation` case.
   **Tree (#307)**, and the depth carries meaning: a **noun** is something
   declared, alive or persisted and gets verbs under it (`service
   list|show`, `iface list|show`, `schema show`, `namespace list`,
@@ -195,7 +199,7 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   `rate`, `field`, `record`, `replay`, `timeline`, `snapshot`, `graph`,
   `serve`, `gen`, `scout`); `compat` compares two contract revisions
   offline, exit-coded like a judgement; a **judgement** is exit-coded
-  (`check expect|probe|schema`, `doctor`, `watchdog`).
+  (`check expect|probe|schema`, `doctor`, `health`, `watchdog`).
   **Flag vocabulary**: `--for` is every passive window (f64 seconds),
   `--timeout` is reply-wait only, `--duration` bounds generated output (`gen`
   alone), `--watch` is a bare bool with `--every` as the one period,
