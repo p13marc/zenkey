@@ -8675,7 +8675,6 @@ dependencies = [
  "kdl",
  "prost",
  "prost-reflect",
- "schemars 1.2.2",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -8712,16 +8711,6 @@ dependencies = [
 
 [[package]]
 name = "zenkey-build"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "953b5f759fc17349203379a51398939ee26f2ce8c4a445cad2fb1e33d28e186b"
-dependencies = [
- "thiserror 2.0.20",
- "zenkey 0.11.1",
-]
-
-[[package]]
-name = "zenkey-build"
 version = "0.20.0"
 dependencies = [
  "heck",
@@ -8747,7 +8736,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "zenkey 0.20.0",
- "zenkey-build 0.20.0",
+ "zenkey-build",
 ]
 
 [[package]]
@@ -8798,6 +8787,7 @@ dependencies = [
  "futures-util",
  "json5 1.3.1",
  "prost-reflect",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -9403,11 +9393,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trycmd",
- "zenkey 0.11.1",
  "zenkey 0.20.0",
- "zenkey-build 0.11.1",
+ "zenkey-build",
  "zenkey-explorer-config",
- "zenkey-fleet 0.18.0",
  "zenkey-fleet 0.20.0",
  "zenkey-model",
  "zenoh",
@@ -9498,7 +9486,7 @@ name = "zk2-walkthrough-contract"
 version = "0.0.0"
 dependencies = [
  "zenkey 0.20.0",
- "zenkey-build 0.20.0",
+ "zenkey-build",
 ]
 
 [[package]]

@@ -89,16 +89,22 @@ fn the_ports_refusals_are_exit_two_through_the_shared_gate() {
     );
     refused(&with_state, "version 1");
 
-    // The same configs, fixed, pass the gate.
+    // The same configs, fixed, pass the gate. (A literal address for the
+    // daemon's own service: nothing minted, whatever this host holds.)
     let fine = config(
         dir.path(),
         "fine.json5",
         r#"rules: [{ name: "tc", rule: "instance-gone */tc", sinks: ["hook"] }],
-           discipline: { inhibit: { enabled: false } }"#,
+           discipline: { inhibit: { enabled: false } },
+           publish: { address: "ops-1/zenwatch" }"#,
     );
     let loaded = zenwatch::load_checked(&fine, &DeploymentArgs::default()).expect("runnable");
     assert_eq!(loaded.bus.namespace, "");
     assert!(loaded.contracts.is_empty());
+    assert_eq!(
+        loaded.publish.map(|p| p.address.to_string()).as_deref(),
+        Some("ops-1/zenwatch")
+    );
 
     // Contracts that load nothing, and a namespace that is not one.
     let empty = tempfile::tempdir().unwrap();

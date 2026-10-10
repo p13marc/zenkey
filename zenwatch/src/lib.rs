@@ -11,12 +11,13 @@
 //! one notification per sink, and the three states ride through —
 //! `unobservable` is never folded into `ok`.
 //!
-//! **zk2 since FL2** (#614): the read side — rules, presence, contracts,
+//! **zk2 throughout** (#614): the read side — rules, presence, contracts,
 //! the doctor — runs on the in-tree fleet, on two sessions, one in the
-//! deployment's namespace and one in none ([`bus`]). The write side — what
-//! the daemon publishes about itself ([`publish`]) and the build script's
-//! registry — is still v1's, under renamed dependencies (`zenkey_v1`,
-//! `zenkey_fleet_v1`), until FL3 gives it a zk2 contract.
+//! deployment's namespace and one in none ([`bus`], FL2). The write side
+//! (FL3) makes the daemon a zk2 service on the namespaced session
+//! ([`publish`]): `health.v1` through the runtime, and its own `zenwatch.v1`
+//! contract (`contracts/`), whose typed server the build script generates
+//! ([`zk2`]). Nothing here links v1's libraries.
 //!
 //! **A daemon, and not the rejected noun.** The redesign ledger
 //! (`docs/redesign-2026-07.md` §6.1) rejected a hidden, auto-started,
@@ -50,11 +51,11 @@ pub mod render;
 pub mod rules;
 pub mod sinks;
 
-/// The daemon's own registry (RFC 08 §5): `health`, `firing/{rule_id}`,
-/// `doctor`, and the two procedures — v1's write side, compiled through v1's
-/// `zenkey-build` until FL3 (#614). Served and published by [`publish`].
-pub mod registry {
-    include!(concat!(env!("OUT_DIR"), "/zenkey_registry.rs"));
+/// The daemon's own contract, generated (#614, FL3): `zenwatch_v1`, from
+/// `contracts/zenwatch.v1.toml` by zk2's `zenkey-build`, its JSON Schema
+/// types bound to [`publish`]'s structs. Served by [`publish`].
+pub mod zk2 {
+    include!(concat!(env!("OUT_DIR"), "/zk2.rs"));
 }
 
 use std::path::{Path, PathBuf};
@@ -102,14 +103,21 @@ pub struct Loaded {
     pub contracts: ContractSet,
     /// The bus ladders, climbed: the namespace, the transport, the timeout.
     pub bus: BusSettings,
+    /// The daemon's own service (#614, FL3), its address already resolved
+    /// through the process's `hostid.v1` minter, before any session opens
+    /// (§2.7); `None` under `publish: false`.
+    pub publish: Option<zenkey::ServiceConfig>,
 }
 
 /// [`load_config`], then what the deployment decides — the same refusals
 /// for `run` and `check-config`, so the two cannot disagree (#614, FL2):
 /// a context that names nothing, a namespace that is not one, a contracts
 /// path that is not there or loads nothing, a state file that is malformed,
-/// version 1 or another namespace's. A file in a contracts directory that
-/// is not a valid contract is said on stderr and skipped, as zenctl does.
+/// version 1 or another namespace's, and (FL3) a daemon whose own address
+/// `hostid.v1` cannot mint on this host (§2.6) — minted here, once per
+/// process, so `run` declares nothing before it is known. A file in a
+/// contracts directory that is not a valid contract is said on stderr and
+/// skipped, as zenctl does.
 pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
     let cfg = load_config(path)?;
     let mut problems = Vec::new();
@@ -146,10 +154,21 @@ pub fn load_checked(path: &Path, dep: &DeploymentArgs) -> Result<Loaded> {
         });
         return Err(refuse(path, &problems));
     }
+    let publish = match cfg.publish.settings() {
+        None => None,
+        Some(s) => {
+            let config = publish::service_config(s).map_err(|e| unaskable!("publish: {e}"))?;
+            config
+                .resolve()
+                .map_err(|e| unaskable!("{}", publish::unminted(&e)))?;
+            Some(config)
+        }
+    };
     Ok(Loaded {
         cfg,
         contracts,
         bus,
+        publish,
     })
 }
 
@@ -202,7 +221,7 @@ pub async fn run() -> Result<()> {
             let loaded = load_checked(&a.config.config, &a.deployment)?;
             let cfg = &loaded.cfg;
             println!(
-                "{}: {} rule(s), {} sink(s){}{} — ok",
+                "{}: {} rule(s), {} sink(s){}{}{} — ok",
                 a.config.config.display(),
                 cfg.rules.len(),
                 cfg.sinks.len(),
@@ -213,6 +232,10 @@ pub async fn run() -> Result<()> {
                 match &cfg.doctor {
                     Some(d) => format!(", doctor every {}", d.every_spelled()),
                     None => String::new(),
+                },
+                match &loaded.publish {
+                    Some(p) => format!(", published as {}", p.address),
+                    None => ", no service (publish: false)".to_string(),
                 }
             );
             Ok(())

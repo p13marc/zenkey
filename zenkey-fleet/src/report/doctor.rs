@@ -28,6 +28,7 @@ use std::fmt;
 
 use super::asked::Asked;
 use super::judgement::Judgement;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Every check zk2's doctor runs.
@@ -37,7 +38,9 @@ use serde::{Deserialize, Serialize};
 /// deltas on them. New checks append; nothing renames one.
 /// [`CheckId::question`] is each one's question, worded so that its finding
 /// is the yes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum CheckId {
     /// Two instances of one service exposing an exclusive resource at once
@@ -272,7 +275,7 @@ impl fmt::Display for CheckId {
 /// How bad a finding is: the ladder a `--fail-on` floor reads.
 ///
 /// Shared with `field`'s findings ([`crate::report::FieldFinding`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DoctorSeverity {
     /// A rule broken: a MUST or MUST NOT of the core, or the deployment
@@ -315,7 +318,7 @@ impl DoctorSeverity {
 /// compares runs on it, so a subject is spelled the same way every run —
 /// `<system>/<service>@<instance>`, `<system>/<service> <role>`,
 /// `<iface> <fingerprint>`, `<storage>@<zid>`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DoctorFinding {
     pub severity: DoctorSeverity,
     pub check: CheckId,
@@ -325,7 +328,7 @@ pub struct DoctorFinding {
 }
 
 /// A subject a check could not decide, and what stood in the way.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Unjudged {
     pub subject: String,
     pub reason: String,
@@ -335,7 +338,7 @@ pub struct Unjudged {
 /// something, `NotEstablished` with the evidence of a clean answer,
 /// `Unobservable` when a subject it had to decide could not be read, and
 /// `NotAsked` when the run was not to ask it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CheckReport {
     pub check: CheckId,
     /// The core section the check enforces.
@@ -413,7 +416,7 @@ impl CheckReport {
 }
 
 /// What one doctor run read: the scope that makes its silences legible.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct DoctorScope {
     /// The deployment's namespace; empty for the bus root.
     pub namespace: String,
@@ -432,7 +435,7 @@ pub struct DoctorScope {
 }
 
 /// The `health.v1` half of [`DoctorScope`] (#721, PF).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct DoctorHealth {
     /// The selector both readings' GETs went out on, base-relative.
     pub selector: String,
@@ -446,7 +449,7 @@ pub struct DoctorHealth {
 }
 
 /// The presence half of [`DoctorScope`].
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct DoctorPresence {
     pub selector: String,
     /// Whether every presence read ended at the routers' final reply. A
@@ -466,7 +469,7 @@ pub struct DoctorPresence {
 
 /// zk2's doctor report: one [`CheckReport`] per check, in
 /// [`CheckId::ALL`] order, and the scope they were judged over.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct DoctorReport {
     pub scope: DoctorScope,
     pub checks: Vec<CheckReport>,
@@ -552,7 +555,7 @@ impl DoctorReport {
 /// keyed on `(check, subject)`, so evidence and severity drift count as
 /// unchanged. Computed by [`crate::doctor_delta`]; routed by a notifier's
 /// scheduled doctor.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct DoctorDelta {
     /// Findings present now and absent from the previous run.
     pub new: Vec<DoctorFinding>,
@@ -783,7 +786,7 @@ mod tests {
     }
 
     /// The run-over-run delta a notifier publishes beside its report
-    /// (zenwatch's `state/zenwatch/doctor`, #390; zk2's since #614 FL2):
+    /// (zenwatch.v1's `state/doctor`, #390; zk2's since #614 FL2, FL3):
     /// the new and the fixed findings whole, and the count unchanged.
     #[test]
     fn doctor_delta_json_shape_is_pinned() {
@@ -903,5 +906,157 @@ mod check_id_tests {
         }
         assert!(DoctorSeverity::Error.reaches(DoctorSeverity::Warning));
         assert!(!DoctorSeverity::Info.reaches(DoctorSeverity::Warning));
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    /// What a schema says through the zk2 JSON Schema subset (spec §7.3):
+    /// the annotations a schema carries and a reader ignores left out.
+    fn subset(v: Value) -> Value {
+        match v {
+            Value::Object(m) => Value::Object(
+                m.into_iter()
+                    .filter(|(k, _)| !matches!(k.as_str(), "description" | "title" | "format"))
+                    .filter(|(k, _)| k != "$schema")
+                    .map(|(k, x)| (k, subset(x)))
+                    .collect(),
+            ),
+            Value::Array(a) => Value::Array(a.into_iter().map(subset).collect()),
+            other => other,
+        }
+    }
+
+    fn schema_of<T: JsonSchema>() -> Value {
+        subset(serde_json::to_value(schemars::schema_for!(T)).unwrap())
+    }
+
+    /// The report's JSON Schema (#614, FL3), pinned beside the shape it
+    /// describes: what a notifier that publishes the report as Rust-first
+    /// state commits (`zenwatch.v1`'s `doctor`, whose `check_schema` test
+    /// holds its committed copy to this). It says what the pinned JSON
+    /// shape says: every list and the empty-scope reason absent when empty,
+    /// a scope half absent when not asked (`Asked` is transparent), each
+    /// verdict one of the four poles by its `answer` tag. `CheckId` is
+    /// spelled from [`CheckId::ALL`], whose tokens `check_id_tests` pin.
+    #[test]
+    fn the_report_schema_is_pinned() {
+        let uint = json!({"type": "integer", "minimum": 0});
+        let string = json!({"type": "string"});
+        let tokens = |ts: &[&str]| -> Value {
+            json!({"oneOf": ts.iter().map(|t| json!({"type": "string", "const": t})).collect::<Vec<_>>()})
+        };
+        let finding = json!({
+            "type": "object",
+            "properties": {
+                "check": {"$ref": "#/$defs/CheckId"},
+                "evidence": string,
+                "severity": {"$ref": "#/$defs/DoctorSeverity"},
+                "subject": string,
+            },
+            "required": ["severity", "check", "subject", "evidence"],
+        });
+        let pole = |answer: &str, reason: bool| {
+            let mut properties = json!({"answer": {"type": "string", "const": answer}});
+            let mut required = vec!["answer"];
+            if reason {
+                properties["reason"] = string.clone();
+                required.push("reason");
+            }
+            json!({"type": "object", "properties": properties, "required": required})
+        };
+        let check_ids: Vec<&str> = CheckId::ALL.map(CheckId::as_str).to_vec();
+        assert_eq!(
+            schema_of::<DoctorReport>(),
+            json!({
+                "type": "object",
+                "properties": {
+                    "checks": {"type": "array", "items": {"$ref": "#/$defs/CheckReport"}},
+                    "scope": {"$ref": "#/$defs/DoctorScope"},
+                    "unobservable": {"type": ["string", "null"]},
+                },
+                "required": ["scope", "checks"],
+                "$defs": {
+                    "CheckId": tokens(&check_ids),
+                    "CheckReport": {
+                        "type": "object",
+                        "properties": {
+                            "check": {"$ref": "#/$defs/CheckId"},
+                            "findings": {"type": "array", "items": {"$ref": "#/$defs/DoctorFinding"}},
+                            "section": string,
+                            "unjudged": {"type": "array", "items": {"$ref": "#/$defs/Unjudged"}},
+                            "verdict": {"$ref": "#/$defs/Judgement"},
+                        },
+                        "required": ["check", "section", "verdict"],
+                    },
+                    "DoctorFinding": finding,
+                    "DoctorHealth": {
+                        "type": "object",
+                        "properties": {
+                            "clocks_synced": {"type": "boolean"},
+                            "selector": string,
+                            "services": uint,
+                        },
+                        "required": ["selector", "services", "clocks_synced"],
+                    },
+                    "DoctorPresence": {
+                        "type": "object",
+                        "properties": {
+                            "complete": {"type": "boolean"},
+                            "grace_s": {"type": "number"},
+                            "held": uint,
+                            "instances": uint,
+                            "revisions": uint,
+                            "selector": string,
+                            "services": uint,
+                            "tokens": uint,
+                            "undescribed": uint,
+                        },
+                        "required": ["selector", "complete", "grace_s", "services", "instances",
+                            "tokens", "undescribed", "revisions", "held"],
+                    },
+                    "DoctorScope": {
+                        "type": "object",
+                        "properties": {
+                            "health": {"$ref": "#/$defs/DoctorHealth"},
+                            "namespace": string,
+                            "presence": {"$ref": "#/$defs/DoctorPresence"},
+                            "routers": uint,
+                        },
+                        "required": ["namespace"],
+                    },
+                    "DoctorSeverity": tokens(&["error", "warning", "info"]),
+                    "Judgement": {"oneOf": [
+                        pole("established", false),
+                        pole("not_established", true),
+                        pole("not_asked", false),
+                        pole("unobservable", true),
+                    ]},
+                    "Unjudged": {
+                        "type": "object",
+                        "properties": {"reason": string, "subject": string},
+                        "required": ["subject", "reason"],
+                    },
+                },
+            })
+        );
+        // The delta: its findings are the report's, by the same definitions.
+        let delta = schema_of::<DoctorDelta>();
+        let report = schema_of::<DoctorReport>();
+        assert_eq!(
+            delta["properties"],
+            json!({
+                "fixed": {"type": "array", "items": {"$ref": "#/$defs/DoctorFinding"}},
+                "new": {"type": "array", "items": {"$ref": "#/$defs/DoctorFinding"}},
+                "unchanged": uint,
+            })
+        );
+        assert_eq!(delta["required"], json!(["new", "fixed", "unchanged"]));
+        for (name, def) in delta["$defs"].as_object().unwrap() {
+            assert_eq!(def, &report["$defs"][name], "{name}");
+        }
     }
 }

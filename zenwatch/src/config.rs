@@ -78,8 +78,77 @@ pub struct Config {
     /// The scheduled doctor (#390): zk2's `run_doctor` over the whole
     /// deployment every few **hours**, run-over-run deltas to the named
     /// sinks, the last report published. Absent: not scheduled — nothing
-    /// runs, nothing is published, and the health document says so.
+    /// runs, and the service lists `state/doctor` unavailable.
     pub doctor: Option<DoctorConfig>,
+    /// The daemon as a zk2 service (#614, FL3): `health.v1` and its own
+    /// `zenwatch.v1`. Absent (or `{}`): at `@hostid.v1/zenwatch`, refusing
+    /// to start on a host with no id (`hostid.v1` §2.6); `false`: no
+    /// service at all.
+    #[serde(default)]
+    pub publish: PublishConfig,
+}
+
+/// The `publish` section (#614, FL3): `false` runs no service; `true`, `{}`
+/// or absence runs one at the defaults; a table names its address or allows
+/// an ephemeral system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublishConfig {
+    Off,
+    On(PublishSettings),
+}
+
+impl Default for PublishConfig {
+    fn default() -> Self {
+        PublishConfig::On(PublishSettings::default())
+    }
+}
+
+impl PublishConfig {
+    /// The settings, when a service runs.
+    pub fn settings(&self) -> Option<&PublishSettings> {
+        match self {
+            PublishConfig::Off => None,
+            PublishConfig::On(s) => Some(s),
+        }
+    }
+}
+
+/// How the daemon's service is addressed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishSettings {
+    /// `<system>/<service>`, or `@hostid.v1/<service>` for a minted system;
+    /// `@hostid.v1/zenwatch` when unsaid.
+    pub address: Option<String>,
+    /// Allow `hostid.v1`'s ephemeral system (§2.6) on a host with no id: a
+    /// system living one run, another at the next start. Only with a
+    /// minted address.
+    #[serde(default)]
+    pub ephemeral: bool,
+}
+
+impl<'de> Deserialize<'de> for PublishConfig {
+    fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = PublishConfig;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("false, true, or { address: \"<system>/<service>\", ephemeral: bool }")
+            }
+            fn visit_bool<E: de::Error>(self, on: bool) -> Result<PublishConfig, E> {
+                Ok(if on {
+                    PublishConfig::default()
+                } else {
+                    PublishConfig::Off
+                })
+            }
+            fn visit_map<A: MapAccess<'de>>(self, m: A) -> Result<PublishConfig, A::Error> {
+                PublishSettings::deserialize(de::value::MapAccessDeserializer::new(m))
+                    .map(PublishConfig::On)
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 fn default_tick() -> f64 {
@@ -569,6 +638,18 @@ pub fn check(cfg: &Config) -> Vec<ConfigProblem> {
     }
     check_discipline(&mut problem, cfg);
     check_doctor(&mut problem, cfg);
+    // The service's address, as written (#614, FL3). Whether the host can
+    // mint it is [`crate::load_checked`]'s: that reads the host.
+    if let Some(s) = cfg.publish.settings()
+        && let Err(e) = crate::publish::service_config(s)
+    {
+        let at = if s.address.is_some() {
+            "publish.address"
+        } else {
+            "publish.ephemeral"
+        };
+        problem(at.into(), e);
+    }
 
     // Rules: parse, closed severities, every sink named exists, names and
     // ids unique, and no two rules spelling one engine condition — the
@@ -1299,6 +1380,46 @@ mod tests {
         for r in &cfg.rules {
             parse_rule(&r.rule).unwrap_or_else(|e| panic!("{}: {e}", r.rule));
         }
+        assert_eq!(cfg.publish, PublishConfig::On(PublishSettings::default()));
+    }
+
+    /// The `publish` block (#614, FL3): absent, `true` and `{}` are the
+    /// defaults, `false` is no service, a table names the address or allows
+    /// an ephemeral system; an unknown field is refused at parse, and an
+    /// `ephemeral` beside a literal address by `check`, at its path.
+    #[test]
+    fn the_publish_block_parses_and_is_checked() {
+        let with = |publish: &str| {
+            parse(&format!(
+                r#"{{ rules: [{{ name: "d", rule: "dropped", sinks: ["hook"] }}],
+                     sinks: {{ hook: {{ kind: "webhook", url: "https://example.org/h" }} }}
+                     {publish} }}"#
+            ))
+        };
+        let default = PublishConfig::On(PublishSettings::default());
+        assert_eq!(with("").unwrap().publish, default);
+        assert_eq!(with(", publish: true").unwrap().publish, default);
+        assert_eq!(with(", publish: {}").unwrap().publish, default);
+        assert_eq!(
+            with(", publish: false").unwrap().publish,
+            PublishConfig::Off
+        );
+        let named = with(r#", publish: { address: "ops-1/zenwatch" }"#).unwrap();
+        assert_eq!(
+            named.publish.settings().unwrap().address.as_deref(),
+            Some("ops-1/zenwatch")
+        );
+        assert!(check(&named).is_empty(), "{:?}", check(&named));
+        let e = with(r#", publish: { adress: "ops-1/zenwatch" }"#).unwrap_err();
+        assert!(e.to_string().contains("unknown field `adress`"), "{e}");
+        let bad = with(r#", publish: { address: "ops-1/zenwatch", ephemeral: true }"#).unwrap();
+        let problems = check(&bad);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0].path, "publish.address");
+        assert!(
+            problems[0].message.contains("hostid.v1 §2.3"),
+            "{problems:?}"
+        );
     }
 
     /// A file secret reads with its newline trimmed; an unreadable one is a

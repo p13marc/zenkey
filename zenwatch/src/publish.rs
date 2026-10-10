@@ -1,142 +1,98 @@
-//! Self-publication (#389): the daemon as a producer, so `zengui` and
-//! `zenctl` see the notifier without SSH and something else can watch the
-//! watcher.
+//! Self-publication (#389; zk2 since #614, FL3): the daemon is a zk2
+//! service, so `zengui` and `zenctl` see the notifier without SSH and
+//! something else can watch the watcher — another zenwatch included.
 //!
-//! **v1's write side, until FL3** (#614). The read side moved to zk2 in
-//! FL2; this module still brings the daemon up as a v1 producer, through
-//! the v1 libraries under renamed dependencies (`zenkey_v1`,
-//! `zenkey_fleet_v1`) and the build script's v1 registry, on the session in
-//! no namespace with the deployment's namespace as its base — the keys v1
-//! zenwatch published. FL3 replaces it with a `zenwatch.v1` contract served
-//! through zk2's `ServiceBuilder`.
+//! **The service.** One instance of `zenwatch` (by default at
+//! `@hostid.v1/zenwatch`, the system minted from the host's machine id,
+//! failing closed on a host with none: `hostid.v1` §2.6), brought up on the
+//! session in the deployment's namespace through the runtime's
+//! [`ServiceBuilder`] in spec §8.2's order: the resources declared, the
+//! exposure checked, the descriptor and both bundles served, then the
+//! instance token and the interface tokens. Two interfaces:
 //!
-//! The same bring-up every producer does (RFC 04 §5, through the engine's
-//! [`BringUp`]): the two `@rpc` queryables first — `introspect` answers
-//! the generated registry slice verbatim, `describe` the served
-//! [`SchemaSet`] over the three registered types — and the `alive` token
-//! last, so "alive ⇒ callable" holds from the first moment the roster
-//! lists this process. Then, as state:
+//! - **`health.v1`**, through [`zenkey::health`]: the status says whether
+//!   zenwatch can do its job, declared `OK` and raised by the runtime to
+//!   its worst check (§2.2). The checks are the parts of the job, at most
+//!   six of the profile's 64 ([`checks`]): `sinks` (the last delivery of
+//!   each), `presence` and `tokens` (what the observers' basis lets the
+//!   rules conclude: a monitor's `Dropped(n)` is `DEGRADED` until a
+//!   complete re-read), `doctor` (a scheduled run that could not happen),
+//!   `state-file` (a ledger that did not save) and `firing` (rules the
+//!   bound refused). The runtime re-puts the status every 28.5 s.
+//! - **`zenwatch.v1`** (`contracts/zenwatch.v1.toml`), through the
+//!   generated [`zenwatch_v1::Server`]:
+//!   - `state/firing/{rule_id}` — one [`FiringRule`] per rule with
+//!     something announced, the most severe (then oldest) notice under it
+//!     named and the rest counted; put on change, deleted when the rule
+//!     goes quiet. The runtime keeps the contract's bound of 256 (core
+//!     §2.7): a rule past it is refused with `Error::Budget`, nothing
+//!     published, and counted in [`ZenwatchCounters::firing_refused`] —
+//!     never silent;
+//!   - `state/doctor` — [`ZenwatchDoctor`], after every scheduled doctor
+//!     run (#390, [`crate::doctor`]): the outcome, the counts, and the
+//!     report exactly as `zenctl doctor --format json` prints it. Optional,
+//!     gated `config:doctor`: unavailable (cause `config`) in the
+//!     descriptor when no `doctor` block is configured;
+//!   - `state/counters` — [`ZenwatchCounters`], what the daemon's bounds
+//!     cost (RFC 13 §3 O6), put on change at most once per tick. These are
+//!     not health.v1 checks: a count is not a level, and health.v1 carries
+//!     no application field (its Appendix A).
 //!
-//! - `state/zenwatch/health` — [`ZenwatchHealth`], every
-//!   [`HEALTH_PERIOD`] (the registry's `ttl_s = 60`, refreshed at half of
-//!   it) and carrying every counter the discipline keeps, because a
-//!   bounded observer reports what its bounds cost (RFC 13 §3 O6);
-//! - `state/zenwatch/firing/{rule_id}` — one [`FiringRule`] per rule with
-//!   something announced, the most severe (then oldest) notice under it
-//!   named and the rest counted; tombstoned when the rule goes quiet;
-//!   never more than the registry's cardinality, the refusals counted;
-//! - `state/zenwatch/doctor` — [`ZenwatchDoctor`], after every scheduled
-//!   doctor run (#390, [`crate::doctor`]): the outcome, the counts, and the
-//!   report exactly as `zenctl doctor --format json` prints it. The
-//!   registry's `ttl_s = 0` — retained, last writer wins — and it is not
-//!   tombstoned at shutdown: the last report stays the last report, and a
-//!   `next_at` in the past is a schedule that lapsed.
+//!   `firing` and `counters` declare a horizon, so the runtime's state
+//!   writers re-put them every ttl/2 and this module has no refresh code;
+//!   `doctor` declares none and is never re-put.
 //!
-//! Keys are base-relative from the [`V1Context`] and wired with
-//! [`Fleet::wire`]; the profile's origin salt is a compile-time constant,
-//! as every producer's is (`zenkey/src/profile.rs`).
+//! **Shutdown** ([`SelfService::shutdown`]) deletes every `firing/*`
+//! document, then closes the service: the tokens go, then the queryables.
+//! The doctor's last report is not deleted (an archive keeps it as
+//! last-known), and the health status is left as `health.v1` §2.3 asks. The
+//! engine stops its observers and drains its sinks first, so the daemon
+//! never pages about its own clean stop.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use zenkey_fleet_v1::{BringUp, Fleet, Publication, declare_publication};
-use zenkey_v1::qos::QosProfile;
-use zenkey_v1::schema::SchemaSet;
-use zenkey_v1::{AppName, AppProfile, OriginSalt, V1Context};
+use zenkey::health::{Health, Level};
+use zenkey::model::descriptor::Cause;
+use zenkey::model::grammar::{Addr, Name};
+use zenkey::typed::StateWriter;
+use zenkey::{Address, HostIdMinter, Service, ServiceBuilder, ServiceConfig};
+use zenkey_fleet::report::{DoctorDelta, DoctorReport};
 
-use crate::discipline::{Discipline, severity_rank};
+use crate::config::PublishSettings;
+use crate::discipline::{Counters as DisciplineCounters, Discipline, severity_rank};
 use crate::render::state_word;
+use crate::zk2::zenwatch_v1;
 
-/// The application profile: the name (the host-id fallback path) and the
-/// RFC 06 §1 origin salt. Changing the salt re-keys the notifier's origin.
-pub static PROFILE: AppProfile = AppProfile::new(
-    AppName::new("zenwatch"),
-    OriginSalt::new("zenwatch-host-id-v1"),
-);
+/// The service's name: the default address is `@hostid.v1/zenwatch`.
+pub const SERVICE: &str = "zenwatch";
 
-/// The producer name — the registry's `[producer] name`.
-pub const PRODUCER: &str = "zenwatch";
+/// The contract's `cardinality` on `firing/{rule_id}`: the most `firing/*`
+/// documents this service holds at once (core §2.7), kept by the runtime.
+pub const FIRING_CARDINALITY: u64 = 256;
 
-/// How often the health document is refreshed: half the registry's
-/// `ttl_s = 60`, so a reader never sees it expire while the daemon is up.
-pub const HEALTH_PERIOD: Duration = Duration::from_secs(30);
-
-/// The registry's `cardinality` on `firing/{rule_id}`: the most
-/// `firing/*` keys this producer will ever hold at once.
-pub const FIRING_CARDINALITY: usize = 256;
-
-/// The three registered types, in registry order — what `describe` must
-/// cover (RFC 08 §6.1).
-pub const TYPE_NAMES: [&str; 3] = ["ZenwatchHealth", "FiringRule", "ZenwatchDoctor"];
-
-/// This process's producer context.
-pub fn context() -> V1Context {
-    V1Context::for_producer(&PROFILE, PRODUCER).expect("a literal producer name is a valid chunk")
-}
-
-/// `ok` or `degraded`: degraded when the last persist failed or a delivery
-/// failed since the last health document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HealthStatus {
-    Ok,
-    Degraded,
-}
-
-/// Where the scheduled doctor stands, on the health document (#390).
+/// `ok` or `failed`: whether a scheduled doctor run happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub enum DoctorStatus {
-    /// No `doctor` block: nothing runs, nothing is published.
-    #[serde(rename = "not scheduled")]
-    NotScheduled,
-    /// Scheduled; the first run has not happened yet.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The last run succeeded.
-    #[serde(rename = "ok")]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorOutcome {
     Ok,
-    /// The last run could not happen; the report before it is retained.
-    #[serde(rename = "failed")]
     Failed,
 }
 
-/// `state/zenwatch/health` (RFC 04 §1.2; the identity bridge rides it,
-/// RFC 06 §6.2 — `host_id` is the origin).
-#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
-pub struct ZenwatchHealth {
-    pub status: HealthStatus,
-    pub host_id: String,
-    pub started_at: String,
-    pub rules: usize,
-    pub sinks: usize,
-    /// Notice identities currently announced firing.
-    pub firing: usize,
-    /// Notice identities currently announced unobservable.
-    pub unobservable: usize,
-    pub notifications_sent: u64,
-    pub deliveries_failed: u64,
-    /// Symptoms held back by inhibition (RFC 06 §5.6).
-    pub inhibited: u64,
-    /// Events the observer's own broadcast dropped (O6).
-    pub dropped_total: u64,
-    pub state_entries: usize,
-    pub state_evicted: u64,
-    /// `firing/*` documents refused at the registry's cardinality.
-    pub firing_refused: u64,
-    pub last_persist_error: Option<String>,
-    /// The scheduled doctor (#390): `not scheduled`, `pending`, `ok`,
-    /// `failed`.
-    pub doctor: DoctorStatus,
-    /// RFC 3339: when the doctor last ran (or last tried to).
-    pub doctor_last: Option<String>,
-    /// RFC 3339: when it runs next — in the past, the schedule has lapsed.
-    pub doctor_next: Option<String>,
+/// Where the scheduled doctor stands, for its `health.v1` check (#390).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoctorStatus {
+    /// Scheduled; the first run has not happened yet.
+    Pending,
+    /// The last run succeeded.
+    Ok,
+    /// The last run could not happen; the report before it is retained.
+    Failed,
 }
 
-/// `state/zenwatch/firing/{rule_id}`: what a rule currently has announced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+/// `state/firing/{rule_id}`: what one rule currently has announced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct FiringRule {
     pub rule: String,
     /// The notice identity named here: the most severe, then the oldest.
@@ -152,15 +108,7 @@ pub struct FiringRule {
     pub count: usize,
 }
 
-/// Whether a doctor run happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DoctorOutcome {
-    Ok,
-    Failed,
-}
-
-/// `state/zenwatch/doctor`: the scheduled doctor's last run (#390,
+/// `state/doctor`: the scheduled doctor's last run (#390,
 /// [`crate::doctor`]). Published after every run, successful or not.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ZenwatchDoctor {
@@ -180,251 +128,655 @@ pub struct ZenwatchDoctor {
     /// Findings gone since the previous run.
     pub fixed: usize,
     /// The `DoctorReport`, exactly as `zenctl doctor --format json` prints
-    /// it — `synced` absent when the registry diff was not asked (RFC 13
-    /// §1). After a failed run, the last report that succeeded, retained;
-    /// `null` when none has yet.
+    /// it: each check's verdict in the judgement shape, what was not asked
+    /// absent (RFC 13 §1). After a failed run, the last report that
+    /// succeeded, retained; `null` when none has yet. Carried as the value
+    /// it serialized to; its schema is the fleet's (`report::doctor`).
+    #[serde(default)]
+    #[schemars(with = "Option<DoctorReport>")]
     pub report: serde_json::Value,
     /// RFC 3339: the run that produced `report` — `ran_at` on a successful
     /// run, older after a failed one, absent when there is no report.
     pub report_at: Option<String>,
     /// The `DoctorDelta` against the previous run; absent on the baseline
     /// and after a failed run.
+    #[schemars(with = "Option<DoctorDelta>")]
     pub delta: Option<serde_json::Value>,
 }
 
-/// The served schema set: every registered subject's type described
-/// (RFC 08 §6.1 / §7), verified at build so a gap is a startup panic.
-pub fn schema_set() -> SchemaSet {
-    SchemaSet::builder(PRODUCER)
-        .json::<ZenwatchHealth>("ZenwatchHealth")
-        .json::<FiringRule>("FiringRule")
-        .json::<ZenwatchDoctor>("ZenwatchDoctor")
-        .build_verified(&TYPE_NAMES)
+/// `state/counters`: what the daemon did, and what its bounds cost, since
+/// it started (RFC 13 §3 O6: every bound reports its cost).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ZenwatchCounters {
+    /// RFC 3339: when this run started; every count is since then.
+    pub started_at: String,
+    pub rules: usize,
+    pub sinks: usize,
+    /// Notice identities currently announced firing.
+    pub firing: usize,
+    /// Notice identities currently announced unobservable.
+    pub unobservable: usize,
+    /// Deliveries that went out, one per sink a notification reached.
+    pub delivered: u64,
+    /// Deliveries a sink failed.
+    pub deliveries_failed: u64,
+    /// Liveliness events the presence and token observers dropped.
+    pub dropped: u64,
+    /// Address records the presence projection forgot at its bound.
+    pub forgotten: u64,
+    /// Entries the discipline's ledger holds now.
+    pub state_entries: usize,
+    /// `firing/{rule_id}` documents the runtime refused at the bound
+    /// (core §2.7): once each time a rule's document became refused.
+    pub firing_refused: u64,
+    /// Scheduled doctor runs attempted (#390).
+    pub doctor_runs: u64,
+    /// What the discipline did (#389).
+    pub discipline: DisciplineCounters,
 }
 
 /// The `firing/{rule_id}` documents the discipline's ledger implies.
 pub fn firing_docs(discipline: &Discipline) -> BTreeMap<String, FiringRule> {
     let mut out: BTreeMap<String, FiringRule> = BTreeMap::new();
     for e in discipline.announced() {
+        let since = zenkey_fleet::rfc3339_from_unix(e.since.max(0.0) as u64);
         let doc = out.entry(e.rule_id.clone()).or_insert_with(|| FiringRule {
             rule: e.rule.clone(),
             id: e.id.clone(),
             state: state_word(e.state).into(),
             severity: e.severity.clone(),
-            since: zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64),
+            since: since.clone(),
             labels: e.labels.clone(),
             count: 0,
         });
         doc.count += 1;
         let more_severe = severity_rank(&e.severity) > severity_rank(&doc.severity);
-        let older_at_same = severity_rank(&e.severity) == severity_rank(&doc.severity)
-            && zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64) < doc.since;
+        let older_at_same =
+            severity_rank(&e.severity) == severity_rank(&doc.severity) && since < doc.since;
         if more_severe || older_at_same {
             doc.id = e.id.clone();
             doc.state = state_word(e.state).into();
             doc.severity = e.severity.clone();
-            doc.since = zenkey_fleet_v1::rfc3339_from_unix(e.since.max(0.0) as u64);
+            doc.since = since;
             doc.labels = e.labels.clone();
         }
     }
     out
 }
 
-/// The daemon, up as a producer: queryables served on their own task, the
-/// token held, the state publications declared.
-pub struct SelfProducer {
-    session: zenoh::Session,
-    base: String,
-    ctx: V1Context,
-    health: Publication,
-    doctor: Publication,
-    firing: BTreeMap<String, Publication>,
-    published: BTreeMap<String, FiringRule>,
-    refused: u64,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    task: tokio::task::JoinHandle<zenkey_fleet_v1::Result<()>>,
+// ── The address ───────────────────────────────────────────────────────────
+
+/// The service's configuration from the config's `publish` block (#614,
+/// FL3): `@hostid.v1/zenwatch` unless `address` names another, the
+/// ephemeral rung allowed only by `ephemeral: true` (`hostid.v1` §2.6).
+/// Nothing is minted here.
+pub fn service_config(s: &PublishSettings) -> Result<ServiceConfig, String> {
+    let address = match &s.address {
+        None => Address::HostId {
+            service: Name::new("service", SERVICE).expect("a literal service name"),
+            ephemeral: false,
+        },
+        Some(a) => a
+            .parse::<Address>()
+            .map_err(|e| format!("{a:?} is not an address: {e}"))?,
+    };
+    let address = match (address, s.ephemeral) {
+        (Address::HostId { service, .. }, ephemeral) => Address::HostId { service, ephemeral },
+        (Address::Literal(a), true) => {
+            return Err(format!(
+                "`ephemeral: true` asks hostid.v1 for an ephemeral system, and the address {a} \
+                 names its system: write `@hostid.v1/{}`, or drop `ephemeral` (hostid.v1 §2.3)",
+                a.service
+            ));
+        }
+        (literal, false) => literal,
+    };
+    Ok(ServiceConfig::at(address))
 }
 
-impl SelfProducer {
-    /// Bring the producer up in RFC 04 §5 order: `introspect` and
-    /// `describe` declared and served, then the token.
-    pub async fn bring_up(fleet: &Fleet<'_>) -> zenkey_fleet_v1::Result<SelfProducer> {
-        let ctx = context();
-        let session = fleet.session().clone();
-        let base = fleet.base().to_string();
-        let introspect = fleet.wire(ctx.rpc_key(&["introspect"])?.as_str());
-        let describe = fleet.wire(ctx.rpc_key(&["describe"])?.as_str());
-        let alive = fleet.wire(ctx.alive_key().as_str());
-        let health_key = fleet.wire(ctx.health_key().as_str());
-        let doctor_key = fleet.wire(ctx.state_key(&["doctor"])?.as_str());
+/// Why the daemon's own address could not be had, with every way out:
+/// `hostid.v1`'s refusal (§2.6) names each path it tried.
+pub fn unminted(e: &zenkey::HostIdError) -> String {
+    format!(
+        "publish: {e}. zenwatch publishes itself at `@hostid.v1/{SERVICE}` unless told \
+         otherwise: name its system with `publish: {{ address: \"<system>/{SERVICE}\" }}`, \
+         allow an ephemeral one with `publish: {{ ephemeral: true }}`, or run no service with \
+         `publish: false`"
+    )
+}
 
-        let mut up = BringUp::new(&session);
-        up.serve(&introspect).await?;
-        up.serve(&describe).await?;
-        let live = up.alive(&alive).await?;
+// ── health.v1 ─────────────────────────────────────────────────────────────
 
-        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-        let introspect_body = crate::registry::zenwatch::REGISTRY_SOURCE
-            .as_bytes()
-            .to_vec();
-        let describe_body = schema_set().to_json().into_bytes();
-        let task = tokio::spawn(async move {
-            let (intro, desc) = (&live.responders[0], &live.responders[1]);
-            loop {
-                tokio::select! {
-                    _ = &mut stop_rx => break,
-                    q = intro.next() => match q {
-                        Some(q) => {
-                            // The spelling the file is in, declared (RFC 08 §6, v1.44).
-                            if let Err(e) = intro.reply(&q, introspect_body.clone(), Some(crate::registry::zenwatch::REGISTRY_ENCODING)).await {
-                                tracing::warn!(key = %intro.key(), "introspect reply failed: {e}");
-                            }
-                        }
-                        None => break,
-                    },
-                    q = desc.next() => match q {
-                        Some(q) => {
-                            if let Err(e) = desc.reply(&q, describe_body.clone(), Some("application/json")).await {
-                                tracing::warn!(key = %desc.key(), "describe reply failed: {e}");
-                            }
-                        }
-                        None => break,
-                    },
-                }
-            }
-            live.retire().await
+/// The checks' names (`health.v1` §2.3: `{check}`, slugged in the key).
+pub mod check {
+    pub const SINKS: &str = "sinks";
+    pub const PRESENCE: &str = "presence";
+    pub const TOKENS: &str = "tokens";
+    pub const DOCTOR: &str = "doctor";
+    pub const STATE_FILE: &str = "state-file";
+    pub const FIRING: &str = "firing";
+}
+
+/// One part of the daemon's job, as a `health.v1` check (§2.2, §2.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    pub name: &'static str,
+    /// `None`: `UNSPECIFIED`, a check that cannot run yet (§2.6), which
+    /// bounds nothing.
+    pub level: Option<Level>,
+    pub detail: String,
+}
+
+/// A sink's last delivery, as the engine's deliveries record it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SinkOutcome {
+    /// RFC 3339.
+    pub at: String,
+    /// Why it failed; `None` when it went out.
+    pub error: Option<String>,
+}
+
+/// What an observer's basis lets its rules conclude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Observer {
+    /// Not read yet.
+    Unseeded,
+    /// The last read ended at its timeout: what it did not show may be held.
+    Incomplete,
+    /// A complete read stands, and nothing was lost since.
+    Complete,
+    /// Events lost (the monitor's `Dropped(n)`) since the last complete read.
+    Lost { dropped: u64 },
+    /// The monitor stopped: its rules see nothing more.
+    Stopped,
+}
+
+impl From<zenkey_fleet::PresenceBasis> for Observer {
+    fn from(b: zenkey_fleet::PresenceBasis) -> Self {
+        use zenkey_fleet::PresenceBasis as B;
+        match b {
+            B::Unseeded => Observer::Unseeded,
+            B::Incomplete => Observer::Incomplete,
+            B::Complete => Observer::Complete,
+            B::Lost { dropped } => Observer::Lost { dropped },
+        }
+    }
+}
+
+impl From<crate::liveliness::TokenBasis> for Observer {
+    fn from(b: crate::liveliness::TokenBasis) -> Self {
+        use crate::liveliness::TokenBasis as B;
+        match b {
+            B::Unseeded => Observer::Unseeded,
+            B::Incomplete => Observer::Incomplete,
+            B::Complete => Observer::Complete,
+            B::Lost { dropped } => Observer::Lost { dropped },
+        }
+    }
+}
+
+/// The scheduled doctor, for its check.
+#[derive(Debug, Clone, Copy)]
+pub struct DoctorCheck<'a> {
+    pub status: DoctorStatus,
+    /// How the interval was spelled.
+    pub every: &'a str,
+    /// The last run's document, once a run happened.
+    pub last: Option<&'a ZenwatchDoctor>,
+}
+
+/// Everything the checks are computed from, at one tick.
+#[derive(Debug, Clone, Copy)]
+pub struct HealthInputs<'a> {
+    /// Every configured sink, with its last delivery (`None`: none yet).
+    pub sinks: &'a BTreeMap<String, Option<SinkOutcome>>,
+    /// The presence projection; `None` when no rule reads it.
+    pub presence: Option<Observer>,
+    /// The foreign-token ledger; `None` when no rule reads it.
+    pub tokens: Option<Observer>,
+    /// The scheduled doctor; `None` when no `doctor` block is configured.
+    pub doctor: Option<DoctorCheck<'a>>,
+    /// The state file: `None` when none is configured, `Some(None)` when
+    /// the last save went through, `Some(Some(why))` when it failed.
+    pub state_file: Option<Option<&'a str>>,
+    /// Rules with something announced whose `firing/*` document the bound
+    /// refuses right now.
+    pub firing_refused: usize,
+}
+
+/// A detail's error text, bounded: a check's detail is for a person.
+fn short(s: &str) -> String {
+    const MAX: usize = 200;
+    if s.len() <= MAX {
+        return s.to_string();
+    }
+    let mut end = MAX;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
+}
+
+fn observer_check(name: &'static str, o: Observer, what: &str) -> Check {
+    let (level, detail) = match o {
+        Observer::Complete => (
+            Some(Level::Ok),
+            format!("a complete read of {what} stands, and nothing was lost since"),
+        ),
+        Observer::Unseeded => (None, format!("{what} not read yet")),
+        Observer::Incomplete => (
+            Some(Level::Degraded),
+            format!(
+                "the last read of {what} ended at its timeout: what it did not show may be \
+                 held, so nothing is judged gone (core §8.1)"
+            ),
+        ),
+        Observer::Lost { dropped } => (
+            Some(Level::Degraded),
+            format!(
+                "{dropped} event(s) of {what} lost since the last complete read: every \
+                 identity its rules watch is unobservable until a complete re-read (RFC 13 §3 O6)"
+            ),
+        ),
+        Observer::Stopped => (
+            Some(Level::Degraded),
+            format!("the monitor of {what} stopped: its rules see nothing more"),
+        ),
+    };
+    Check {
+        name,
+        level,
+        detail,
+    }
+}
+
+/// The checks one tick's state calls for (`health.v1` §2.3), in a stable
+/// order; a part of the job the configuration does not have is no check.
+///
+/// | Check | `OK` | `DEGRADED` | `FAILED` | `UNSPECIFIED` |
+/// |---|---|---|---|---|
+/// | `sinks` | no sink's last delivery failed | some sinks' last delivery failed | every sink's last delivery failed: no notification can go out | — |
+/// | `presence`, `tokens` | a complete read, nothing lost | a read that timed out, events dropped, or the monitor stopped | — | not read yet |
+/// | `doctor` | scheduled and not run yet, or the last run happened | the last run could not happen | — | — |
+/// | `state-file` | the last save went through | the last save failed | — | — |
+/// | `firing` | every rule with something announced is published | the bound refuses some | — | — |
+pub fn checks(i: &HealthInputs<'_>) -> Vec<Check> {
+    let mut out = Vec::new();
+
+    let failing: Vec<String> = i
+        .sinks
+        .iter()
+        .filter_map(|(name, o)| {
+            let o = o.as_ref()?;
+            o.error
+                .as_ref()
+                .map(|e| format!("{name} (at {}: {})", o.at, short(e)))
+        })
+        .collect();
+    let (level, detail) = if failing.is_empty() {
+        let tried = i.sinks.values().any(Option::is_some);
+        (
+            Level::Ok,
+            if tried {
+                "no sink's last delivery failed".to_string()
+            } else {
+                "no delivery yet".to_string()
+            },
+        )
+    } else if failing.len() == i.sinks.len() {
+        (
+            Level::Failed,
+            format!(
+                "every sink's last delivery failed, so no notification can go out: {}",
+                failing.join("; ")
+            ),
+        )
+    } else {
+        (
+            Level::Degraded,
+            format!(
+                "the last delivery failed on {} of {} sink(s): {}",
+                failing.len(),
+                i.sinks.len(),
+                failing.join("; ")
+            ),
+        )
+    };
+    out.push(Check {
+        name: check::SINKS,
+        level: Some(level),
+        detail,
+    });
+
+    if let Some(o) = i.presence {
+        out.push(observer_check(
+            check::PRESENCE,
+            o,
+            "the deployment's presence",
+        ));
+    }
+    if let Some(o) = i.tokens {
+        out.push(observer_check(check::TOKENS, o, "the watched tokens"));
+    }
+
+    if let Some(d) = i.doctor {
+        let (level, detail) = match (d.status, d.last) {
+            (DoctorStatus::Ok, Some(doc)) => (
+                Level::Ok,
+                format!(
+                    "the last run, at {}, found {} finding(s); the next is due at {}",
+                    doc.ran_at, doc.findings, doc.next_at
+                ),
+            ),
+            (DoctorStatus::Failed, Some(doc)) => (
+                Level::Degraded,
+                format!(
+                    "the last run, at {}, could not happen: {}; {}",
+                    doc.ran_at,
+                    short(doc.error.as_deref().unwrap_or("no reason given")),
+                    match &doc.report_at {
+                        Some(at) => format!("the report of {at} is retained"),
+                        None => "no report has been had yet".to_string(),
+                    }
+                ),
+            ),
+            _ => (
+                Level::Ok,
+                format!("scheduled every {}; no run yet", d.every),
+            ),
+        };
+        out.push(Check {
+            name: check::DOCTOR,
+            level: Some(level),
+            detail,
         });
+    }
 
-        let health = declare_publication(
-            &session,
-            &health_key,
-            QosProfile::Refreshed,
-            Some("application/json"),
-        )
-        .await?;
-        // Written on rare transitions — one per scheduled run — that a
-        // consumer cannot learn late: the transition profile (RFC 04 §3).
-        let doctor = declare_publication(
-            &session,
-            &doctor_key,
-            QosProfile::Transition,
-            Some("application/json"),
-        )
-        .await?;
-        tracing::info!(origin = %ctx.origin().chunk(), alive, "zenwatch is up as a producer");
-        Ok(SelfProducer {
-            session,
-            base,
-            ctx,
+    if let Some(saved) = i.state_file {
+        out.push(match saved {
+            None => Check {
+                name: check::STATE_FILE,
+                level: Some(Level::Ok),
+                detail: "the ledger's last save went through".into(),
+            },
+            Some(why) => Check {
+                name: check::STATE_FILE,
+                level: Some(Level::Degraded),
+                detail: format!(
+                    "the ledger's last save failed: {}; a restart would re-announce what is \
+                     firing",
+                    short(why)
+                ),
+            },
+        });
+    }
+
+    out.push(if i.firing_refused == 0 {
+        Check {
+            name: check::FIRING,
+            level: Some(Level::Ok),
+            detail: "every rule with something announced has its firing document".into(),
+        }
+    } else {
+        Check {
+            name: check::FIRING,
+            level: Some(Level::Degraded),
+            detail: format!(
+                "{} rule(s) with something announced have no firing document: the bound of \
+                 {FIRING_CARDINALITY} refuses them (core §2.7)",
+                i.firing_refused
+            ),
+        }
+    });
+    out
+}
+
+// ── The service ───────────────────────────────────────────────────────────
+
+/// What the service starts with.
+#[derive(Debug, Clone)]
+pub struct Plan {
+    pub rules: usize,
+    pub sinks: usize,
+    /// A `doctor` block is configured: `state/doctor` is exposed, else
+    /// listed unavailable (cause `config`).
+    pub doctor: bool,
+}
+
+/// Why the service did not start.
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    /// `hostid.v1` gave it no system (§2.6): refused input, exit 2.
+    #[error("{}", unminted(.0))]
+    Unminted(std::sync::Arc<zenkey::HostIdError>),
+    /// The runtime refused the bring-up.
+    #[error("zenwatch's own service did not start: {0}")]
+    Runtime(#[from] zenkey::Error),
+}
+
+/// One `firing/{rule_id}` member: its writer, what it last published, and
+/// whether the bound refuses it now.
+struct Firing {
+    writer: StateWriter<zenkey::codec::Json<FiringRule>>,
+    published: Option<FiringRule>,
+    refused: bool,
+}
+
+/// The daemon, up as a zk2 service.
+pub struct SelfService {
+    svc: Service,
+    server: zenwatch_v1::Server,
+    health: Health,
+    firing: BTreeMap<String, Firing>,
+    firing_refused: u64,
+    counters: Option<ZenwatchCounters>,
+    /// The checks as last put, by name.
+    checks: BTreeMap<&'static str, (Option<Level>, String)>,
+}
+
+impl SelfService {
+    /// Brings the service up on `session` (spec §8.2): `config`'s address
+    /// resolved through `hostid` (`hostid.v1` §2.7), `health.v1` and
+    /// `zenwatch.v1` declared, the status declared `OK` and `checks` put
+    /// before the tokens (`health.v1` §2.3), and so are `counters` (§8.2,
+    /// "State values": a GET made when the tokens appear finds them), then
+    /// started.
+    pub async fn start(
+        session: &zenoh::Session,
+        config: ServiceConfig,
+        hostid: &HostIdMinter,
+        plan: &Plan,
+        checks: &[Check],
+        counters: &ZenwatchCounters,
+    ) -> Result<SelfService, StartError> {
+        let mut b = ServiceBuilder::with_hostid(session, config, hostid);
+        if let Err(zenkey::Error::HostId(e)) = b.address() {
+            return Err(StartError::Unminted(e));
+        }
+        let health = b.health().await?;
+        let iface = zenwatch_v1::iface();
+        b.implement(zenwatch_v1::implementation())?;
+        if !plan.doctor {
+            b.unavailable(
+                &iface,
+                zenwatch_v1::resource::DOCTOR,
+                Cause::Config,
+                Some("no `doctor` block: the scheduled doctor is not configured"),
+            )?;
+        }
+        let server = zenwatch_v1::Server::declare(&mut b).await?;
+        health
+            .set_status(
+                Level::Ok,
+                format!("watching {} rule(s), {} sink(s)", plan.rules, plan.sinks),
+            )
+            .await?;
+        let mut applied = BTreeMap::new();
+        for c in checks {
+            put_check(&health, c).await?;
+            applied.insert(c.name, (c.level, c.detail.clone()));
+        }
+        server.counters.put(counters).await?;
+        let svc = b.start().await?;
+        tracing::info!(address = %svc.address(), instance = %svc.instance(),
+            "zenwatch is up as a zk2 service");
+        Ok(SelfService {
+            svc,
+            server,
             health,
-            doctor,
             firing: BTreeMap::new(),
-            published: BTreeMap::new(),
-            refused: 0,
-            stop: Some(stop_tx),
-            task,
+            firing_refused: 0,
+            counters: Some(counters.clone()),
+            checks: applied,
         })
     }
 
-    /// The origin chunk this producer publishes under.
-    pub fn origin(&self) -> String {
-        self.ctx.origin().chunk().to_string()
+    /// The address this service publishes under, resolved.
+    pub fn address(&self) -> &Addr {
+        self.svc.address()
     }
 
-    /// `firing/*` documents refused at the cardinality bound so far.
-    pub fn refused(&self) -> u64 {
-        self.refused
+    /// Its `health.v1` handle.
+    pub fn health(&self) -> &Health {
+        &self.health
     }
 
-    pub async fn publish_health(&self, health: &ZenwatchHealth) -> zenkey_fleet_v1::Result<()> {
-        let body = serde_json::to_vec(health).expect("a health document serializes");
-        self.health.send(body, None).await
+    /// `firing/*` documents refused at the bound so far: once each time a
+    /// rule's document became refused.
+    pub fn firing_refused(&self) -> u64 {
+        self.firing_refused
     }
 
-    /// The scheduled doctor's last run (#390) — after every run, whatever
-    /// its outcome. Never tombstoned: the registry's `ttl_s = 0` is a
-    /// retained document, and the last report stays the last report.
-    pub async fn publish_doctor(&self, doc: &ZenwatchDoctor) -> zenkey_fleet_v1::Result<()> {
-        let body = serde_json::to_vec(doc).expect("a doctor document serializes");
-        self.doctor.send(body, None).await
+    /// Rules with something announced whose document the bound refuses now.
+    pub fn firing_refused_now(&self) -> usize {
+        self.firing.values().filter(|f| f.refused).count()
     }
 
-    /// Bring the published `firing/*` set to `docs`: changed documents are
-    /// put, vanished ones tombstoned, and a new key beyond the registry's
-    /// cardinality is refused and counted rather than declared.
+    /// Brings the published `firing/*` set to `docs`: vanished documents
+    /// deleted first (each frees a member), then changed ones put. A new
+    /// member past the bound is the runtime's `Error::Budget` (core §2.7):
+    /// nothing is published, the refusal is counted once and said, and the
+    /// put is tried again on the next tick, when a member may have freed.
     pub async fn publish_firing(
         &mut self,
         docs: &BTreeMap<String, FiringRule>,
-    ) -> zenkey_fleet_v1::Result<()> {
+    ) -> zenkey::Result<()> {
         let gone: Vec<String> = self
-            .published
+            .firing
             .keys()
             .filter(|id| !docs.contains_key(*id))
             .cloned()
             .collect();
         for id in gone {
-            if let Some(p) = self.firing.get(&id) {
-                p.retire().await?;
+            if let Some(f) = self.firing.remove(&id)
+                && f.published.is_some()
+            {
+                f.writer.delete().await?;
             }
-            self.published.remove(&id);
         }
         for (rule_id, doc) in docs {
-            if self.published.get(rule_id) == Some(doc) {
+            if self
+                .firing
+                .get(rule_id)
+                .is_some_and(|f| f.published.as_ref() == Some(doc))
+            {
                 continue;
             }
             if !self.firing.contains_key(rule_id) {
-                if self.firing.len() >= FIRING_CARDINALITY {
-                    self.refused += 1;
-                    tracing::warn!(
-                        rule_id,
-                        "firing/* at the registry's cardinality ({FIRING_CARDINALITY}); not published"
-                    );
-                    continue;
-                }
-                let key = zenkey_v1::grammar::with_base(
-                    &self.base,
-                    self.ctx.state_key(&["firing", rule_id])?.as_str(),
+                let writer = self.server.firing(&mut self.svc, rule_id).await?;
+                self.firing.insert(
+                    rule_id.clone(),
+                    Firing {
+                        writer,
+                        published: None,
+                        refused: false,
+                    },
                 );
-                let p = declare_publication(
-                    &self.session,
-                    &key,
-                    QosProfile::Refreshed,
-                    Some("application/json"),
-                )
-                .await?;
-                self.firing.insert(rule_id.clone(), p);
             }
-            let body = serde_json::to_vec(doc).expect("a firing document serializes");
-            self.firing[rule_id].send(body, None).await?;
-            self.published.insert(rule_id.clone(), doc.clone());
+            let f = self.firing.get_mut(rule_id).expect("inserted above");
+            match f.writer.put(doc).await {
+                Ok(_) => {
+                    f.published = Some(doc.clone());
+                    f.refused = false;
+                }
+                Err(zenkey::Error::Budget(why)) => {
+                    if !f.refused {
+                        f.refused = true;
+                        self.firing_refused += 1;
+                        tracing::warn!(rule_id, "firing/{rule_id} not published: {why}");
+                    }
+                }
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }
 
-    /// Retire in reverse: every `firing/*` document and the health
-    /// tombstoned (the doctor report deliberately not — it is retained
-    /// state, not a fact about a live process), then the token retracted
-    /// and the queryables undeclared (the engine's
-    /// [`LiveProducer::retire`](zenkey_fleet_v1::bus::producer::LiveProducer::retire) order).
-    pub async fn shutdown(mut self) -> zenkey_fleet_v1::Result<()> {
-        for id in self.published.keys() {
-            if let Some(p) = self.firing.get(id) {
-                p.retire().await?;
+    /// Puts the counters when they changed since the last put.
+    pub async fn publish_counters(&mut self, c: &ZenwatchCounters) -> zenkey::Result<()> {
+        if self.counters.as_ref() == Some(c) {
+            return Ok(());
+        }
+        self.server.counters.put(c).await?;
+        self.counters = Some(c.clone());
+        Ok(())
+    }
+
+    /// The scheduled doctor's last run (#390), after every run, whatever its
+    /// outcome. Nothing when `state/doctor` is unavailable.
+    pub async fn publish_doctor(&self, doc: &ZenwatchDoctor) -> zenkey::Result<()> {
+        match &self.server.doctor {
+            Some(w) => w.put(doc).await.map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
+    /// Brings the `health.v1` checks to `checks`: a changed one put (the
+    /// runtime orders the status's put around it, §2.2), a vanished one
+    /// retired. Each call is one put per change, never a re-put.
+    pub async fn set_checks(&mut self, checks: &[Check]) -> zenkey::Result<()> {
+        for c in checks {
+            let now = (c.level, c.detail.clone());
+            if self.checks.get(c.name) == Some(&now) {
+                continue;
+            }
+            put_check(&self.health, c).await?;
+            self.checks.insert(c.name, now);
+        }
+        let gone: Vec<&'static str> = self
+            .checks
+            .keys()
+            .filter(|n| !checks.iter().any(|c| c.name == **n))
+            .copied()
+            .collect();
+        for name in gone {
+            self.health.retire_check(name).await?;
+            self.checks.remove(name);
+        }
+        Ok(())
+    }
+
+    /// Every `firing/*` document deleted, then the service closed: its
+    /// state writers' re-puts stopped, the tokens undeclared, then the
+    /// queryables. The doctor's report and the health status stay as they
+    /// were last put.
+    pub async fn shutdown(mut self) -> zenkey::Result<()> {
+        for (_, f) in std::mem::take(&mut self.firing) {
+            if f.published.is_some() {
+                f.writer.delete().await?;
             }
         }
-        self.published.clear();
-        self.health.retire().await?;
-        if let Some(stop) = self.stop.take() {
-            let _ = stop.send(());
-        }
-        match self.task.await {
-            Ok(r) => r,
-            Err(e) => Err(zenkey_fleet_v1::Error::bus(
-                "retire self producer",
-                "",
-                std::io::Error::other(e.to_string()),
-            )),
-        }
+        self.svc.close().await
+    }
+}
+
+async fn put_check(h: &Health, c: &Check) -> zenkey::Result<()> {
+    match c.level {
+        Some(l) => h.set_check(c.name, l, c.detail.clone()).await.map(|_| ()),
+        None => h
+            .set_check_unknown(c.name, c.detail.clone())
+            .await
+            .map(|_| ()),
     }
 }
 
@@ -432,71 +784,357 @@ impl SelfProducer {
 mod tests {
     use super::*;
 
-    /// The served describe set names every registered type (RFC 08 §6.1),
-    /// and the health document's JSON is what the schema says.
-    #[test]
-    fn the_schema_set_covers_the_registry_and_health_serializes() {
-        let set = schema_set();
-        for name in TYPE_NAMES {
-            assert!(set.get(name).is_some(), "{name} described");
-        }
-        let parsed = SchemaSet::parse(&set.to_json()).unwrap();
-        assert_eq!(parsed.len(), 3);
-        assert!(crate::registry::zenwatch::REGISTRY_SOURCE.contains("firing/{rule_id}"));
-        let h = ZenwatchHealth {
-            status: HealthStatus::Degraded,
-            host_id: "h-3fa9c2d41b7e".into(),
-            started_at: "2026-09-06T00:00:00Z".into(),
-            rules: 4,
-            sinks: 2,
-            firing: 1,
-            unobservable: 0,
-            notifications_sent: 7,
-            deliveries_failed: 1,
-            inhibited: 2,
-            dropped_total: 0,
-            state_entries: 1,
-            state_evicted: 0,
-            firing_refused: 0,
-            last_persist_error: None,
-            doctor: DoctorStatus::NotScheduled,
-            doctor_last: None,
-            doctor_next: None,
-        };
-        let j = serde_json::to_value(&h).unwrap();
-        assert_eq!(j["status"], "degraded");
-        assert_eq!(j["host_id"], "h-3fa9c2d41b7e");
-        assert_eq!(j["last_persist_error"], serde_json::Value::Null);
-        assert_eq!(j["doctor"], "not scheduled");
-        assert_eq!(j["doctor_last"], serde_json::Value::Null);
-        for (s, word) in [
-            (DoctorStatus::Pending, "pending"),
-            (DoctorStatus::Ok, "ok"),
-            (DoctorStatus::Failed, "failed"),
-        ] {
-            assert_eq!(serde_json::to_value(s).unwrap(), word);
-        }
+    fn contract_file() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("contracts/zenwatch.v1.toml")
     }
 
-    /// The notifier's registry is KDL (RFC 08 §5.1, #374 — migrated with
-    /// `zenctl registry migrate`), and `introspect` declares what the build
-    /// generated rather than a literal: the file served verbatim, read in
-    /// the spelling its `Encoding` names, is the slice.
+    /// Rust-first (#614, FL3): every type the contract binds to a struct,
+    /// and the fleet's report and delta inside the doctor's, say what the
+    /// committed schema says, read through the zk2 subset.
     #[test]
-    fn introspect_serves_the_kdl_file_and_declares_it() {
-        use crate::registry::zenwatch::{REGISTRY_ENCODING, REGISTRY_SOURCE};
-        assert_eq!(REGISTRY_ENCODING, "application/kdl");
-        let format = zenkey_v1::registry_doc::negotiate(Some(REGISTRY_ENCODING), REGISTRY_SOURCE)
-            .expect("a declared spelling");
-        assert_eq!(format, zenkey_v1::SliceFormat::Kdl);
-        let slice = zenkey_v1::parse_slice_as(REGISTRY_SOURCE, format).expect("the served slice");
-        assert_eq!(slice.name, "zenwatch");
-        assert_eq!(slice.subjects.len(), 3);
+    fn every_rust_first_type_matches_its_committed_schema() {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("contracts/schemas/zenwatch.json");
+        let check = |r: Result<(), String>, name: &str| {
+            r.unwrap_or_else(|e| panic!("{name} and {}:\n{e}", file.display()))
+        };
+        check(
+            zenkey_build::check_schema::<FiringRule>(&file, "FiringRule"),
+            "FiringRule",
+        );
+        check(
+            zenkey_build::check_schema::<ZenwatchDoctor>(&file, "ZenwatchDoctor"),
+            "ZenwatchDoctor",
+        );
+        check(
+            zenkey_build::check_schema::<ZenwatchCounters>(&file, "ZenwatchCounters"),
+            "ZenwatchCounters",
+        );
+        check(
+            zenkey_build::check_schema::<DoctorReport>(&file, "DoctorReport"),
+            "DoctorReport",
+        );
+        check(
+            zenkey_build::check_schema::<DoctorDelta>(&file, "DoctorDelta"),
+            "DoctorDelta",
+        );
+    }
+
+    /// What the daemon puts decodes as what the contract declares: each
+    /// document validated against its type in the embedded bundle, as an
+    /// explorer validates it (spec §7.3).
+    #[test]
+    fn what_is_published_validates_against_the_bundle() {
+        let bundle = zenkey_model::bundle::Bundle::verify(zenwatch_v1::BUNDLE).unwrap();
+        let valid = |template: &str, value: serde_json::Value| {
+            let ty = zenkey_model::decode::type_of(&bundle, "state", template, "type")
+                .unwrap_or_else(|| panic!("state/{template} declares a type"));
+            zenkey_model::validate::validate(&bundle, ty, &value)
+                .unwrap_or_else(|e| panic!("state/{template}: {e:?}\n{value}"));
+        };
+        let firing = FiringRule {
+            rule: "tc-gone".into(),
+            id: "tc-gone:h-1/tc".into(),
+            state: "firing".into(),
+            severity: "error".into(),
+            since: "2026-10-10T00:00:00Z".into(),
+            labels: BTreeMap::from([("team".into(), "infra".into())]),
+            count: 2,
+        };
+        valid("firing/{rule_id}", serde_json::to_value(&firing).unwrap());
+        let report = zenkey_fleet::report::DoctorReport {
+            scope: zenkey_fleet::report::DoctorScope {
+                namespace: "site".into(),
+                presence: zenkey_fleet::report::Asked::NotAsked,
+                routers: zenkey_fleet::report::Asked::Asked(1),
+                health: zenkey_fleet::report::Asked::NotAsked,
+            },
+            checks: vec![zenkey_fleet::report::CheckReport::not_asked(
+                zenkey_fleet::report::CheckId::SplitBrain,
+            )],
+            unobservable: None,
+        };
+        let doctor = ZenwatchDoctor {
+            ran_at: "2026-10-10T06:00:00Z".into(),
+            next_at: "2026-10-10T12:00:00Z".into(),
+            every_s: 21600.0,
+            outcome: DoctorOutcome::Ok,
+            error: None,
+            findings: 0,
+            new: 0,
+            fixed: 0,
+            report: serde_json::to_value(&report).unwrap(),
+            report_at: Some("2026-10-10T06:00:00Z".into()),
+            delta: Some(serde_json::to_value(DoctorDelta::default()).unwrap()),
+        };
+        valid("doctor", serde_json::to_value(&doctor).unwrap());
+        let failed = ZenwatchDoctor {
+            outcome: DoctorOutcome::Failed,
+            error: Some("no zk2 token visible".into()),
+            report: serde_json::Value::Null,
+            report_at: None,
+            delta: None,
+            ..doctor
+        };
+        valid("doctor", serde_json::to_value(&failed).unwrap());
+    }
+
+    /// The contract the build embedded is the file, loaded with no finding
+    /// at all and published in its append-only history; its bound is the
+    /// one this module names, and its three resources the ones published.
+    #[test]
+    fn the_embedded_contract_is_the_file() {
+        let l = zenkey_model::contract::load_path(&contract_file());
+        assert!(
+            l.report.0.is_empty(),
+            "no finding, warnings included:\n{}",
+            l.report
+        );
+        let c = l.contract.expect("the contract loads");
+        assert_eq!(
+            zenkey_model::bundle::Bundle::build(&c).to_bytes(),
+            zenwatch_v1::BUNDLE,
+            "the embedded bundle is the file's"
+        );
+        let history = contract_file().with_file_name(".history");
+        assert!(
+            zenkey_model::history::check(&history).is_empty(),
+            "{:?}",
+            zenkey_model::history::check(&history)
+        );
+        let published = history.join(format!(
+            "zenwatch.v1/{}.bundle.json",
+            zenwatch_v1::FINGERPRINT.trim_start_matches("sha256:")
+        ));
+        assert_eq!(
+            std::fs::read(&published).unwrap_or_else(|e| panic!(
+                "{}: {e}; publish it with `zk2 contract bundle zenwatch/contracts/zenwatch.v1.toml \
+                 --history zenwatch/contracts/.history`",
+                published.display()
+            )),
+            zenwatch_v1::BUNDLE,
+            "the revision built is the one published"
+        );
+        let imp = zenwatch_v1::implementation();
+        let firing = imp.resource(zenwatch_v1::resource::FIRING).unwrap();
+        assert_eq!(firing.cardinality, Some(FIRING_CARDINALITY));
+        assert!(
+            imp.resource(zenwatch_v1::resource::DOCTOR)
+                .unwrap()
+                .optional
+        );
+        assert!(imp.resource(zenwatch_v1::resource::COUNTERS).is_ok());
+        assert_eq!(imp.contract().resources.len(), 3);
+    }
+
+    /// The address: `@hostid.v1/zenwatch` by default, ephemeral only when
+    /// asked, a literal one as named, and `ephemeral` beside a literal
+    /// address refused (hostid.v1 §2.3).
+    #[test]
+    fn the_address_defaults_to_the_minted_one() {
+        let at = |s: PublishSettings| service_config(&s).map(|c| c.address);
+        assert_eq!(
+            at(PublishSettings::default()).unwrap(),
+            Address::HostId {
+                service: Name::new("service", "zenwatch").unwrap(),
+                ephemeral: false
+            }
+        );
+        assert_eq!(
+            at(PublishSettings {
+                ephemeral: true,
+                ..PublishSettings::default()
+            })
+            .unwrap(),
+            Address::HostId {
+                service: Name::new("service", "zenwatch").unwrap(),
+                ephemeral: true
+            }
+        );
+        assert_eq!(
+            at(PublishSettings {
+                address: Some("ops-1/watch".into()),
+                ephemeral: false,
+            })
+            .unwrap()
+            .to_string(),
+            "ops-1/watch"
+        );
+        assert_eq!(
+            at(PublishSettings {
+                address: Some("@hostid.v1/watch".into()),
+                ephemeral: true,
+            })
+            .unwrap(),
+            Address::HostId {
+                service: Name::new("service", "watch").unwrap(),
+                ephemeral: true
+            }
+        );
+        let e = at(PublishSettings {
+            address: Some("ops-1/watch".into()),
+            ephemeral: true,
+        })
+        .unwrap_err();
+        assert!(e.contains("hostid.v1 §2.3"), "{e}");
+        let e = at(PublishSettings {
+            address: Some("not an address".into()),
+            ephemeral: false,
+        })
+        .unwrap_err();
+        assert!(e.contains("not an address"), "{e}");
+    }
+
+    fn sinks(outcomes: &[(&str, Option<Option<&str>>)]) -> BTreeMap<String, Option<SinkOutcome>> {
+        outcomes
+            .iter()
+            .map(|(n, o)| {
+                (
+                    n.to_string(),
+                    o.map(|e| SinkOutcome {
+                        at: "2026-10-10T00:00:00Z".into(),
+                        error: e.map(str::to_string),
+                    }),
+                )
+            })
+            .collect()
+    }
+
+    fn level_of(cs: &[Check], name: &str) -> Option<Option<Level>> {
+        cs.iter().find(|c| c.name == name).map(|c| c.level)
+    }
+
+    /// The mapping of the module doc's table, pole by pole: a part the
+    /// configuration does not have is no check, and nothing here is ever
+    /// more than six of health.v1's 64.
+    #[test]
+    fn each_part_of_the_job_maps_onto_a_check() {
+        let none = sinks(&[("ops", None), ("mail", None)]);
+        let base = HealthInputs {
+            sinks: &none,
+            presence: None,
+            tokens: None,
+            doctor: None,
+            state_file: None,
+            firing_refused: 0,
+        };
+        let cs = checks(&base);
+        assert_eq!(
+            cs.iter().map(|c| c.name).collect::<Vec<_>>(),
+            [check::SINKS, check::FIRING]
+        );
+        assert_eq!(cs[0].level, Some(Level::Ok));
+        assert_eq!(cs[0].detail, "no delivery yet");
+
+        let one = sinks(&[("ops", Some(Some("HTTP 500: down"))), ("mail", Some(None))]);
+        let cs = checks(&HealthInputs {
+            sinks: &one,
+            ..base
+        });
+        assert_eq!(level_of(&cs, check::SINKS), Some(Some(Level::Degraded)));
+        assert!(cs[0].detail.contains("ops (at"), "{}", cs[0].detail);
+        let all = sinks(&[("ops", Some(Some("x"))), ("mail", Some(Some("y")))]);
+        let cs = checks(&HealthInputs {
+            sinks: &all,
+            ..base
+        });
+        assert_eq!(level_of(&cs, check::SINKS), Some(Some(Level::Failed)));
+        let fine = sinks(&[("ops", Some(None)), ("mail", None)]);
+        assert_eq!(
+            level_of(
+                &checks(&HealthInputs {
+                    sinks: &fine,
+                    ..base
+                }),
+                check::SINKS
+            ),
+            Some(Some(Level::Ok))
+        );
+
+        for (o, want) in [
+            (Observer::Complete, Some(Level::Ok)),
+            (Observer::Unseeded, None),
+            (Observer::Incomplete, Some(Level::Degraded)),
+            (Observer::Lost { dropped: 3 }, Some(Level::Degraded)),
+            (Observer::Stopped, Some(Level::Degraded)),
+        ] {
+            let cs = checks(&HealthInputs {
+                presence: Some(o),
+                tokens: Some(o),
+                ..base
+            });
+            assert_eq!(level_of(&cs, check::PRESENCE), Some(want), "{o:?}");
+            assert_eq!(level_of(&cs, check::TOKENS), Some(want), "{o:?}");
+        }
+
+        let doc = ZenwatchDoctor {
+            ran_at: "2026-10-10T06:00:00Z".into(),
+            next_at: "2026-10-10T12:00:00Z".into(),
+            every_s: 21600.0,
+            outcome: DoctorOutcome::Failed,
+            error: Some("no zk2 token visible".into()),
+            findings: 0,
+            new: 0,
+            fixed: 0,
+            report: serde_json::Value::Null,
+            report_at: None,
+            delta: None,
+        };
+        for (status, last, want) in [
+            (DoctorStatus::Pending, None, Level::Ok),
+            (DoctorStatus::Ok, Some(&doc), Level::Ok),
+            (DoctorStatus::Failed, Some(&doc), Level::Degraded),
+        ] {
+            let cs = checks(&HealthInputs {
+                doctor: Some(DoctorCheck {
+                    status,
+                    every: "6h",
+                    last,
+                }),
+                ..base
+            });
+            assert_eq!(level_of(&cs, check::DOCTOR), Some(Some(want)), "{status:?}");
+        }
+
+        let cs = checks(&HealthInputs {
+            state_file: Some(Some("disk full")),
+            firing_refused: 2,
+            ..base
+        });
+        assert_eq!(
+            level_of(&cs, check::STATE_FILE),
+            Some(Some(Level::Degraded))
+        );
+        assert_eq!(level_of(&cs, check::FIRING), Some(Some(Level::Degraded)));
+        assert_eq!(
+            level_of(
+                &checks(&HealthInputs {
+                    state_file: Some(None),
+                    ..base
+                }),
+                check::STATE_FILE
+            ),
+            Some(Some(Level::Ok))
+        );
+
+        let every = checks(&HealthInputs {
+            presence: Some(Observer::Complete),
+            tokens: Some(Observer::Complete),
+            doctor: Some(DoctorCheck {
+                status: DoctorStatus::Pending,
+                every: "6h",
+                last: None,
+            }),
+            state_file: Some(None),
+            ..base
+        });
+        assert_eq!(every.len(), 6);
+        assert!(every.len() as u64 <= zenkey_model::health::MAX_CHECKS);
     }
 
     /// The doctor document's wire shape (#390): the report rides verbatim,
     /// `not asked` as absence inside it, and the whole thing round-trips
-    /// through the served schema's type — what an explorer parses.
+    /// through the type an explorer decodes.
     #[test]
     fn the_doctor_document_shape_is_pinned() {
         let d = ZenwatchDoctor {
@@ -508,10 +1146,11 @@ mod tests {
             findings: 1,
             new: 0,
             fixed: 0,
-            report: serde_json::json!({"findings": [{"severity": "error", "check": "slice-sync",
-                "subject": "h-1/sysinfo", "evidence": "e", "citation": "RFC 08 §6"}],
-                "introspect_answered": 1, "live_producers": 1, "describe_served": 0,
-                "describe_missing": 1, "routers": 0, "deep": false}),
+            report: serde_json::json!({"scope": {"namespace": "site"}, "checks": [{
+                "check": "split-brain", "section": "§6",
+                "verdict": {"answer": "established"},
+                "findings": [{"severity": "error", "check": "split-brain",
+                    "subject": "h1/tc tc.v1", "evidence": "two holders"}]}]}),
             report_at: Some("2026-09-05T19:00:00Z".into()),
             delta: None,
         };
@@ -532,48 +1171,50 @@ mod tests {
                 "delta": null,
             })
         );
-        assert!(!j["report"].as_object().unwrap().contains_key("synced"));
         let back: ZenwatchDoctor = serde_json::from_value(j).unwrap();
         assert_eq!(back, d);
-        // The served describe names the document's fields — the shape an
-        // explorer decodes through is the shape that is published.
-        let served = schema_set().to_json();
-        for field in [
-            "ran_at",
-            "next_at",
-            "outcome",
-            "report",
-            "report_at",
-            "delta",
-        ] {
-            assert!(
-                served.contains(&format!("\"{field}\"")),
-                "{field} described"
-            );
-        }
     }
 
-    /// The profile's constants are checked where they are spelled; the
-    /// context builds the keys the registry declares.
+    /// The counters' wire shape: flat counts, the discipline's nested, every
+    /// field present (a zero is a zero, never absence).
     #[test]
-    fn the_context_spells_the_registered_keys() {
-        let ctx = context();
-        let origin = ctx.origin().chunk().to_string();
-        assert!(
-            zenkey_v1::grammar::is_valid_host_origin(&origin),
-            "{origin}"
-        );
+    fn the_counters_shape_is_pinned() {
+        let c = ZenwatchCounters {
+            started_at: "2026-10-10T00:00:00Z".into(),
+            rules: 4,
+            sinks: 2,
+            firing: 1,
+            unobservable: 0,
+            delivered: 7,
+            deliveries_failed: 1,
+            dropped: 0,
+            forgotten: 0,
+            state_entries: 3,
+            firing_refused: 0,
+            doctor_runs: 2,
+            discipline: DisciplineCounters {
+                sent: 7,
+                deduped: 1,
+                cancelled: 0,
+                baseline: 2,
+                grouped: 0,
+                repeats: 0,
+                evicted: 0,
+            },
+        };
+        let j = serde_json::to_value(&c).unwrap();
         assert_eq!(
-            ctx.health_key().as_str(),
-            format!("v1/{origin}/state/zenwatch/health")
+            j,
+            serde_json::json!({
+                "started_at": "2026-10-10T00:00:00Z",
+                "rules": 4, "sinks": 2, "firing": 1, "unobservable": 0,
+                "delivered": 7, "deliveries_failed": 1, "dropped": 0, "forgotten": 0,
+                "state_entries": 3, "firing_refused": 0, "doctor_runs": 2,
+                "discipline": {"sent": 7, "deduped": 1, "cancelled": 0, "baseline": 2,
+                    "grouped": 0, "repeats": 0, "evicted": 0},
+            })
         );
-        assert_eq!(
-            ctx.state_key(&["firing", "fleet-alerts"]).unwrap().as_str(),
-            format!("v1/{origin}/state/zenwatch/firing/fleet-alerts")
-        );
-        assert_eq!(
-            ctx.rpc_key(&["describe"]).unwrap().as_str(),
-            format!("v1/{origin}/@rpc/zenwatch/describe")
-        );
+        let back: ZenwatchCounters = serde_json::from_value(j).unwrap();
+        assert_eq!(back, c);
     }
 }

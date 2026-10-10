@@ -39,8 +39,8 @@
 //! pick the timers up where they were.
 //!
 //! **Bounded.** At most `max_entries` identities are remembered; the least
-//! recently changed go first, and the count rides the health document and
-//! the state file.
+//! recently changed go first, and the count rides `zenwatch.v1`'s
+//! `counters` and the state file.
 //!
 //! **Assumed, not announced** ([`NoticeMeta::assume`], #390): the
 //! scheduled doctor's first run is a baseline — every finding it carries
@@ -133,8 +133,20 @@ struct Queued {
 }
 
 /// What the discipline did, counted (RFC 13 §3 O6: every bound reports
-/// its cost, and every suppression is a number somewhere).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+/// its cost, and every suppression is a number somewhere). Published in
+/// `zenwatch.v1`'s `counters` (#614, FL3).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[schemars(rename = "DisciplineCounters")]
 pub struct Counters {
     /// Notifications handed out for delivery (a group counts once).
     pub sent: u64,

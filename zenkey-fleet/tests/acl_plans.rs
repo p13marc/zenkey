@@ -20,8 +20,10 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-/// An example directory's contracts, with the profiles' standard contracts
-/// an example deployment implements beside its own: `health.v1` (#721).
+/// An example directory's contracts, with the contracts an example
+/// deployment implements beside its own: the profiles' standard
+/// `health.v1` (#721), and zenwatch's own `zenwatch.v1`, which lives with
+/// zenwatch (#614, FL3).
 fn contracts(dir: &str) -> ContractSet {
     let (mut set, problems) = ContractSet::load_path(&root().join("examples/zk2").join(dir));
     // A directory of contracts may hold a deployment file beside them (the
@@ -30,9 +32,15 @@ fn contracts(dir: &str) -> ContractSet {
         assert!(p.at.ends_with(".bindings.toml"), "{p:?}");
     }
     assert!(!set.is_empty());
-    let (standard, problems) = ContractSet::load_path(&root().join("spec/profiles/health"));
-    assert!(problems.is_empty(), "{problems:?}");
-    set.extend(standard);
+    for beside in [
+        "spec/profiles/health",
+        "zenwatch/contracts/zenwatch.v1.toml",
+    ] {
+        let (more, problems) = ContractSet::load_path(&root().join(beside));
+        assert!(problems.is_empty(), "{beside}: {problems:?}");
+        assert!(!more.is_empty(), "{beside}");
+        set.extend(more);
+    }
     set
 }
 

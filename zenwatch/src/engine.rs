@@ -30,8 +30,18 @@
 //! **Between [`route`] and delivery sits the [`Discipline`]** (#389): every
 //! routed [`Outgoing`] is observed, and only what the tick flushes — after
 //! `for`, dedup, grouping and repeat — is dispatched. The tick also
-//! persists the ledger and refreshes what this daemon publishes about
-//! itself ([`crate::publish`], v1's write side until FL3).
+//! persists the ledger and brings what this daemon publishes about itself
+//! up to date ([`crate::publish`], a zk2 service since FL3): its
+//! `firing/*` documents, its counters, and its `health.v1` checks.
+//!
+//! **Its own stop is not news** (#614, FL3). The service comes up after
+//! every observer is watching and seeded, and goes last: on a stop, the
+//! final tick flushes, the observers stop, the sinks drain, and only then
+//! does the service delete its `firing/*` documents and withdraw its
+//! tokens. A rule over this daemon's own address (`instance-gone */*`) is
+//! not excluded — two zenwatches watching each other is a deployment — and
+//! by then no observer is left to see it go, so the daemon never pages
+//! about its own clean stop, nor records itself gone in the state file.
 //!
 //! **The scheduled doctor runs beside the drain** (#390, [`crate::doctor`]):
 //! an interval of hours starts zk2's `run_doctor` as a future the loop
@@ -61,7 +71,9 @@ use crate::doctor::{self, DoctorNotice};
 use crate::exit::unaskable;
 use crate::liveliness::{LivelinessRules, TokenFeed};
 use crate::presence::PresenceRules;
-use crate::publish::{self, DoctorStatus, FiringRule, HealthStatus, SelfProducer, ZenwatchHealth};
+use crate::publish::{
+    self, DoctorCheck, HealthInputs, Observer, SelfService, SinkOutcome, ZenwatchCounters,
+};
 use crate::render::{Draft, Payload, RenderConfig, RenderSource};
 use crate::rules::{DOCTOR_RULE, Rule, RuleKind};
 use crate::sinks::{NoticeKind, Notification, Outgoing, Sink};
@@ -289,10 +301,22 @@ pub struct RunSummary {
     pub watchdog: Option<WatchdogSummary>,
     /// What the discipline did (#389).
     pub discipline: DisciplineCounters,
-    /// The origin this daemon published under, when it did.
-    pub self_origin: Option<String>,
+    /// The address this daemon's own service ran at (`<system>/<service>`,
+    /// resolved), when it ran one (#614, FL3).
+    pub self_address: Option<String>,
+    /// `firing/*` documents the runtime refused at the bound (core §2.7).
+    pub firing_refused: u64,
     /// Scheduled doctor runs, attempted (#390).
     pub doctor_runs: u64,
+}
+
+/// How the daemon publishes itself (#614, FL3): its service's
+/// configuration, and the `hostid.v1` minter its address resolves through —
+/// the process's ([`zenkey::HostIdMinter::global`]) in a daemon, a test's
+/// on a root of its own.
+pub struct Publish<'a> {
+    pub config: zenkey::ServiceConfig,
+    pub hostid: &'a zenkey::HostIdMinter,
 }
 
 /// Everything a run needs, with the sessions already open — the shape the
@@ -322,22 +346,50 @@ pub struct Engine<'a> {
     /// Where the ledger survives a restart; `None` keeps it in memory.
     pub state_file: Option<PathBuf>,
     pub state_max_entries: usize,
-    /// Publish `health`, `firing/*` and the token — a real daemon does;
-    /// a bus test that is not about self-publication does not.
-    pub publish: bool,
+    /// The daemon's own zk2 service (#614, FL3) — a real daemon runs one
+    /// unless told `publish: false`; a bus test that is not about
+    /// self-publication does not.
+    pub publish: Option<Publish<'a>>,
     /// The scheduled doctor (#390); `None` is not scheduled — nothing runs,
-    /// nothing is published, and the health document says so.
+    /// and the service lists `state/doctor` unavailable.
     pub doctor: Option<&'a DoctorConfig>,
     /// The operator's word on the clocks (`freshness.v1` §2.6), for the
     /// doctor's `health-*` checks, scheduled or a rule's.
     pub clocks_synced: bool,
 }
 
-/// Delivery counters shared with the spawned deliveries.
+/// Delivery counters shared with the spawned deliveries, and each sink's
+/// last delivery — what the `sinks` health check reads (#614, FL3).
 #[derive(Default)]
 struct Counters {
     delivered: AtomicU64,
     failed: AtomicU64,
+    last: std::sync::Mutex<BTreeMap<String, SinkOutcome>>,
+}
+
+impl Counters {
+    fn record(&self, sink: &str, error: Option<String>) {
+        match error {
+            None => self.delivered.fetch_add(1, Ordering::Relaxed),
+            Some(_) => self.failed.fetch_add(1, Ordering::Relaxed),
+        };
+        self.last.lock().expect("not poisoned").insert(
+            sink.to_string(),
+            SinkOutcome {
+                at: zenkey_fleet::rfc3339_now(),
+                error,
+            },
+        );
+    }
+
+    /// Every configured sink, with its last delivery.
+    fn by_sink(&self, sinks: &[Sink]) -> BTreeMap<String, Option<SinkOutcome>> {
+        let last = self.last.lock().expect("not poisoned");
+        sinks
+            .iter()
+            .map(|s| (s.name.clone(), last.get(&s.name).cloned()))
+            .collect()
+    }
 }
 
 /// Fan one outgoing to its sinks, each on its own task, each bounded by its
@@ -363,12 +415,12 @@ fn dispatch(
             let n = &outgoing.notification;
             match sink.deliver(&outgoing).await {
                 Ok(d) => {
-                    counters.delivered.fetch_add(1, Ordering::Relaxed);
+                    counters.record(&sink.name, None);
                     tracing::info!(sink = %sink.name, kind = sink.kind_name(), rule = %n.rule,
                         state = crate::render::state_word(n.state), id = %n.id, "delivered: {}", d.detail);
                 }
                 Err(e) => {
-                    counters.failed.fetch_add(1, Ordering::Relaxed);
+                    counters.record(&sink.name, Some(e.to_string()));
                     tracing::warn!(sink = %sink.name, kind = sink.kind_name(), rule = %n.rule,
                         state = crate::render::state_word(n.state), id = %n.id, "delivery failed: {e}");
                 }
@@ -433,6 +485,16 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             Ok(None) => tracing::info!(path = %path.display(), "no state file yet — fresh ledger"),
             Err(err) => return Err(unaskable!("{err}")),
         }
+    }
+
+    // The daemon's own address, minted before anything is declared
+    // (hostid.v1 §2.7): a host with no id refuses here, with every way out
+    // named (§2.6), and nothing has opened. Once per process: the service
+    // brought up below gets the same system.
+    if let Some(p) = &e.publish
+        && let Err(err) = p.config.resolve_with(p.hostid)
+    {
+        return Err(unaskable!("{}", publish::unminted(&err)));
     }
 
     // One notice into the discipline: routed under every rule it matches.
@@ -519,18 +581,95 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let dropped_now = |p: &Option<Monitor>, t: &Option<Monitor>| {
         p.as_ref().map_or(0, |m| m.core().dropped()) + t.as_ref().map_or(0, |m| m.core().dropped())
     };
+    // What each observer's basis lets its rules conclude, for the
+    // `presence` and `tokens` checks: `None` when no rule reads it, and a
+    // feed gone is a monitor that stopped.
+    let had_presence = !presence_rules.is_empty();
+    let had_tokens = !token_rules.is_empty();
+    let observers = |p: &Option<PresenceFeed>, t: &Option<TokenFeed>| {
+        (
+            had_presence.then(|| {
+                p.as_ref()
+                    .map_or(Observer::Stopped, |f| f.presence().basis().into())
+            }),
+            had_tokens.then(|| t.as_ref().map_or(Observer::Stopped, |f| f.basis().into())),
+        )
+    };
+    let doctor_every = e.doctor.map(DoctorConfig::every_spelled);
 
-    // The daemon as a producer — v1's write side until FL3 (#614): its v1
-    // keys under the deployment's base, on the raw session, as v1 zenwatch
-    // published them. After the watches, before `ready`, so a test that
-    // sees the token can already call the queryables.
-    let mut publisher: Option<SelfProducer> = if e.publish {
-        let fleet = zenkey_fleet_v1::Fleet::new(&e.bus.raw, namespace);
-        let p = SelfProducer::bring_up(&fleet).await?;
-        summary.self_origin = Some(p.origin());
-        Some(p)
-    } else {
-        None
+    let counters = Arc::new(Counters::default());
+    // The last persist error, which the `state-file` check reads: a record,
+    // so the final tick's write is not a dead store.
+    struct Pulse {
+        last_persist_error: Option<String>,
+    }
+    let mut pulse = Pulse {
+        last_persist_error: None,
+    };
+
+    // The daemon as a zk2 service (#614, FL3), on the namespaced session:
+    // after the watches, before `ready`, so a test that sees its instance
+    // token can already read it; its status, checks and counters put
+    // before its tokens (health.v1 §2.3, core §8.2).
+    macro_rules! counters_now {
+        ($firing_refused:expr) => {{
+            let announced = |s: CondState| discipline.announced().filter(|x| x.state == s).count();
+            ZenwatchCounters {
+                started_at: started_at.clone(),
+                rules: e.rules.len(),
+                sinks: e.sinks.len(),
+                firing: announced(CondState::Firing),
+                unobservable: announced(CondState::Unobservable),
+                delivered: counters.delivered.load(Ordering::Relaxed),
+                deliveries_failed: counters.failed.load(Ordering::Relaxed),
+                dropped: summary.dropped,
+                forgotten: presence_feed
+                    .as_ref()
+                    .map_or(0, |f| f.presence().forgotten()),
+                state_entries: discipline.len(),
+                firing_refused: $firing_refused,
+                doctor_runs: summary.doctor_runs,
+                discipline: discipline.counters(),
+            }
+        }};
+    }
+    let mut publisher: Option<SelfService> = match e.publish {
+        None => None,
+        Some(p) => {
+            let (presence, tokens) = observers(&presence_feed, &token_feed);
+            let by_sink = counters.by_sink(&e.sinks);
+            let checks = publish::checks(&HealthInputs {
+                sinks: &by_sink,
+                presence,
+                tokens,
+                doctor: doctor_every.as_deref().map(|every| DoctorCheck {
+                    status: publish::DoctorStatus::Pending,
+                    every,
+                    last: None,
+                }),
+                state_file: e.state_file.as_ref().map(|_| None),
+                firing_refused: 0,
+            });
+            let plan = publish::Plan {
+                rules: e.rules.len(),
+                sinks: e.sinks.len(),
+                doctor: e.doctor.is_some(),
+            };
+            summary.dropped = dropped_now(&presence_monitor, &token_monitor);
+            let initial = counters_now!(0);
+            match SelfService::start(&e.bus.session, p.config, p.hostid, &plan, &checks, &initial)
+                .await
+            {
+                Ok(s) => {
+                    summary.self_address = Some(s.address().to_string());
+                    Some(s)
+                }
+                Err(publish::StartError::Unminted(err)) => {
+                    return Err(unaskable!("{}", publish::unminted(&err)));
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
     };
     if let Some(ready) = e.ready {
         let _ = ready.send(());
@@ -564,21 +703,7 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     tokio::pin!(once_deadline);
     let mut stop = std::pin::pin!(stop);
 
-    let counters = Arc::new(Counters::default());
     let mut tasks = tokio::task::JoinSet::new();
-    // The health cadence and what the last document said, as one record
-    // so the final tick's writes are reads for the next daemon, not
-    // dead stores.
-    struct Pulse {
-        last_health: Option<tokio::time::Instant>,
-        last_persist_error: Option<String>,
-        failed_at_last_health: u64,
-    }
-    let mut pulse = Pulse {
-        last_health: None,
-        last_persist_error: None,
-        failed_at_last_health: 0,
-    };
 
     // One tick of the discipline: flush, dispatch, persist, publish.
     macro_rules! discipline_tick {
@@ -603,63 +728,37 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
             }
             summary.dropped = dropped_now(&presence_monitor, &token_monitor);
             if let Some(p) = publisher.as_mut() {
-                let docs: BTreeMap<String, FiringRule> = publish::firing_docs(&discipline);
+                // `firing/*` first, so the `firing` check reads what the
+                // bound refuses after this tick's puts.
+                let docs = publish::firing_docs(&discipline);
                 if let Err(err) = p.publish_firing(&docs).await {
                     tracing::warn!("firing/* publish failed: {err}");
                 }
-                let due = pulse
-                    .last_health
-                    .is_none_or(|t| t.elapsed() >= publish::HEALTH_PERIOD);
-                if due {
-                    let failed = counters.failed.load(Ordering::Relaxed);
-                    let c = discipline.counters();
-                    let health = ZenwatchHealth {
-                        status: if pulse.last_persist_error.is_some()
-                            || failed > pulse.failed_at_last_health
-                        {
-                            HealthStatus::Degraded
-                        } else {
-                            HealthStatus::Ok
+                let c = counters_now!(p.firing_refused());
+                if let Err(err) = p.publish_counters(&c).await {
+                    tracing::warn!("counters publish failed: {err}");
+                }
+                let (presence, tokens) = observers(&presence_feed, &token_feed);
+                let by_sink = counters.by_sink(&e.sinks);
+                let checks = publish::checks(&HealthInputs {
+                    sinks: &by_sink,
+                    presence,
+                    tokens,
+                    doctor: doctor_schedule.as_ref().zip(doctor_every.as_deref()).map(
+                        |(s, every)| DoctorCheck {
+                            status: s.status(),
+                            every,
+                            last: s.document(),
                         },
-                        host_id: p.origin(),
-                        started_at: started_at.clone(),
-                        rules: e.rules.len(),
-                        sinks: e.sinks.len(),
-                        firing: discipline
-                            .announced()
-                            .filter(|x| x.state == CondState::Firing)
-                            .count(),
-                        unobservable: discipline
-                            .announced()
-                            .filter(|x| x.state == CondState::Unobservable)
-                            .count(),
-                        notifications_sent: c.sent,
-                        deliveries_failed: failed,
-                        // Inhibition was removed (#614, FL2); the field is
-                        // v1's served shape until FL3 redraws it.
-                        inhibited: 0,
-                        dropped_total: summary.dropped,
-                        state_entries: discipline.len(),
-                        state_evicted: c.evicted,
-                        firing_refused: p.refused(),
-                        last_persist_error: pulse.last_persist_error.clone(),
-                        doctor: doctor_schedule
-                            .as_ref()
-                            .map_or(DoctorStatus::NotScheduled, |s| s.status()),
-                        doctor_last: doctor_schedule
-                            .as_ref()
-                            .and_then(|s| s.document())
-                            .map(|d| d.ran_at.clone()),
-                        doctor_next: doctor_schedule
-                            .as_ref()
-                            .and_then(|s| s.document())
-                            .map(|d| d.next_at.clone()),
-                    };
-                    if let Err(err) = p.publish_health(&health).await {
-                        tracing::warn!("health publish failed: {err}");
-                    }
-                    pulse.failed_at_last_health = failed;
-                    pulse.last_health = Some(tokio::time::Instant::now());
+                    ),
+                    state_file: e
+                        .state_file
+                        .as_ref()
+                        .map(|_| pulse.last_persist_error.as_deref()),
+                    firing_refused: p.firing_refused_now(),
+                });
+                if let Err(err) = p.set_checks(&checks).await {
+                    tracing::warn!("health.v1 checks not put: {err}");
                 }
             }
         }};
@@ -770,19 +869,19 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     }
 
     // A stop is a stop, but what is already due goes out: the last tick,
-    // every open group flushed, the ledger saved.
+    // every open group flushed, the ledger saved, the service's documents
+    // and checks brought up to date.
     discipline_tick!(true);
 
-    // Teardown, acknowledged: a completed watchdog hands back its summary;
-    // an interrupted one is dropped the way `zenctl watchdog` drops it — it
-    // runs until told to stop, and awaiting it would be waiting forever.
+    // Teardown, acknowledged, in the order the module doc gives: the rules
+    // and sinks stop before the service withdraws its tokens (#614, FL3).
+    // A completed watchdog hands back its summary; an interrupted one is
+    // dropped the way `zenctl watchdog` drops it — it runs until told to
+    // stop, and awaiting it would be waiting forever.
     if watchdog_done && let Some(run) = watchdog.take() {
         summary.watchdog = Some(run.await?);
     }
     drop(watchdog);
-    if let Some(p) = publisher.take() {
-        p.shutdown().await?;
-    }
     summary.dropped = dropped_now(&presence_monitor, &token_monitor);
     summary.evicted = presence_feed
         .as_ref()
@@ -802,6 +901,11 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
         .unwrap_or(Duration::from_secs(5));
     let _ = tokio::time::timeout(grace, async { while tasks.join_next().await.is_some() {} }).await;
     tasks.abort_all();
+    // Last, the service: nothing is left to see it go.
+    if let Some(p) = publisher.take() {
+        summary.firing_refused = p.firing_refused();
+        p.shutdown().await?;
+    }
     summary.delivered = counters.delivered.load(Ordering::Relaxed);
     summary.failed = counters.failed.load(Ordering::Relaxed);
     summary.discipline = discipline.counters();
@@ -849,7 +953,7 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
     store.seed(&loaded.contracts);
     let tick = Duration::from_secs_f64(cfg.tick_s);
     eprintln!(
-        "zenwatch: {} rule(s), {} sink(s), tick {}s, {}{}{}{}{} — three states, \
+        "zenwatch: {} rule(s), {} sink(s), tick {}s, {}{}{}{}{}{} — three states, \
          ok/firing/unobservable, one notification per sink per genuine change (RFC 13 §3)",
         rules.len(),
         sinks.len(),
@@ -858,6 +962,18 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             "the bus-root deployment".to_string()
         } else {
             format!("namespace {:?}", bus.namespace)
+        },
+        match loaded.publish.as_ref().and_then(|p| p.resolve().ok()) {
+            Some(r) => format!(
+                "; published as {} (health.v1, zenwatch.v1){}",
+                r.address,
+                if r.minted.as_ref().is_some_and(zenkey::Minted::is_ephemeral) {
+                    ", its system EPHEMERAL (hostid.v1 §2.6)"
+                } else {
+                    ""
+                }
+            ),
+            None => "; no service of its own (publish: false)".to_string(),
         },
         match loaded.contracts.len() {
             0 => "; contracts: from the bus only".to_string(),
@@ -896,7 +1012,12 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             discipline: &cfg.discipline,
             state_file: cfg.state_file.clone(),
             state_max_entries: cfg.state_max_entries,
-            publish: true,
+            // Resolved by `load_checked`, before the sessions opened, through
+            // the process's minter, which mints once per run (hostid.v1 §2.7).
+            publish: loaded.publish.clone().map(|config| Publish {
+                config,
+                hostid: zenkey::HostIdMinter::global(),
+            }),
             doctor: cfg.doctor.as_ref(),
             clocks_synced: cfg.clocks_synced,
         },
@@ -931,6 +1052,18 @@ pub async fn run(args: crate::cli::RunArgs) -> Result<()> {
             String::new()
         },
     );
+    if let Some(at) = &summary.self_address {
+        eprintln!(
+            "zenwatch: its service at {at} withdrawn, its firing documents deleted{}",
+            match summary.firing_refused {
+                0 => String::new(),
+                n => format!(
+                    "; {n} refused at the bound of {}",
+                    publish::FIRING_CARDINALITY
+                ),
+            }
+        );
+    }
     let d = summary.discipline;
     eprintln!(
         "zenwatch: discipline — {} deduplicated, {} grouped, {} repeat(s), {} cancelled in \

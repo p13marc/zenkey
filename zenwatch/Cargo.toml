@@ -22,19 +22,19 @@ path = "src/main.rs"
 # (the key grammar, the slug a rule's id is spelled with).
 zenkey-fleet = { path = "../zenkey-fleet" }
 zenkey-model = { path = "../zenkey-model" }
-# The write side, still v1's until FL3 (#614): `publish.rs` brings the
-# daemon up as a v1 producer (`schemars`: its served `describe` derives the
-# three registered types' schemas from the structs that publish them, RFC 08
-# §7). Renamed so no read-side line can reach them; FL3 deletes both, and
-# the build dependency below.
-zenkey-v1 = { package = "zenkey", version = "=0.11.1", features = ["schemars"] }
-zenkey-fleet-v1 = { package = "zenkey-fleet", version = "=0.18.0" }
+# The write side, on zk2 (#614, FL3): the daemon is a zk2 service, with its
+# own `zenwatch.v1` contract (`contracts/`) and `health.v1`, brought up
+# through the runtime's `ServiceBuilder`. The build script generates the
+# typed server the contract describes.
+zenkey = { path = "../zenkey" }
 zenkey-explorer-config = { workspace = true }
 zenoh = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# zenwatch.v1 is Rust-first: its payload types are this crate's structs, and
+# the committed schema is kept in step with what they derive (`check_schema`).
 schemars = { workspace = true }
 json5 = { workspace = true }
 anyhow = { workspace = true }
@@ -47,15 +47,14 @@ rustls = { workspace = true }
 lettre = { workspace = true }
 
 [build-dependencies]
-# The daemon's own v1 registry (RFC 08 §5): `health`, `firing/{rule_id}`,
-# `doctor` and the two procedures every producer serves — v1's write side,
-# until FL3 replaces it with a zk2 contract (#614).
-zenkey-build-v1 = { package = "zenkey-build", version = "=0.11.1" }
+# zk2's codegen (#611): the lints and the history's compatibility gate on
+# zenwatch's own contract, its bundle embedded, and the typed `zenwatch_v1`
+# module, its JSON Schema types bound to this crate's structs.
+zenkey-build = { path = "../zenkey-build" }
 
 [dev-dependencies]
-# The zk2 runtime: the live tests' owners are real services, brought up and
-# stopped with its own `ServiceBuilder` (#614, FL2).
-zenkey = { path = "../zenkey" }
+# `check_schema`: each Rust-first type against the schema committed for it.
+zenkey-build = { path = "../zenkey-build" }
 trycmd = { workspace = true }
 snapbox = { workspace = true }
 tempfile = { workspace = true }

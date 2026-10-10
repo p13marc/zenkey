@@ -6,12 +6,15 @@
 #
 #   zenctl acl gen --enrollment examples/zk2/acl/walkthrough.enrollment.toml \
 #                  --contracts examples/zk2/walkthrough \
-#                  --contracts spec/profiles/health --json5
+#                  --contracts spec/profiles/health \
+#                  --contracts zenwatch/contracts/zenwatch.v1.toml --json5
 #   … --face constrained --attach south-region --far ground --region ground
 #
 # `health.v1`, which navigation implements, is a profile's standard contract
 # (spec/profiles/health/health.v1.toml, #721), so it comes by a second
-# `--contracts`; `--contracts examples/zk2/.history` holds it as well.
+# `--contracts`; `--contracts examples/zk2/.history` holds it as well. The
+# vehicle's notifier implements zenwatch's own contract, which lives with
+# zenwatch (#614, FL3): a third.
 #
 # Access control is enforced per hop (§11.3): the ground router's own block
 # enrolls the ground services one by one, and vehicle-01 as one principal.
@@ -113,6 +116,35 @@ address = "vehicle-01/tracker"
 [service.bindings.sources]
 interface = "detections.v1"
 providers = ["vehicle-01/*"]
+
+# ── the vehicle's notifier ─────────────────────────────────────────────────
+#
+# zenwatch (#614, FL3) is one principal that runs a service and inspects the
+# others. As the service `vehicle-01/zenwatch` it owns its prefix
+# (zenwatch.v1, and health.v1 through the runtime). As the tool `zenwatch`
+# it reads what its rules and its scheduled doctor read: every service's
+# presence and health.v1 state, on the doctor's own selectors
+# (`zk2/*/*/@zk/**`, `zk2/*/*/health.v1/state/**`), so the binding names
+# `*/*`; and the routers' admin space, which the doctor reads for S4 (core
+# §11.1 Tool, 0.15). A rule over a stream's traffic would bind that
+# interface here too.
+
+[[principal]]
+user     = "zenwatch"
+services = ["vehicle-01/zenwatch"]
+tools    = ["zenwatch"]
+
+[[service]]
+address    = "vehicle-01/zenwatch"
+implements = ["zenwatch.v1", "health.v1"]
+
+[[tool]]
+name  = "zenwatch"
+admin = true
+
+[tool.bindings.health]
+interface = "health.v1"
+providers = ["*/*"]
 
 # ── 4.3 commanding an intermittently connected vehicle ─────────────────────
 

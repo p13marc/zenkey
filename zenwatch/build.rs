@@ -1,23 +1,22 @@
-//! The daemon's own v1 registry (RFC 08 §5), compiled through v1's
-//! `zenkey-build` — the write side, until FL3 (#614) replaces it with a zk2
-//! contract.
+//! zenwatch's own contract (#614, FL3), compiled through zk2's
+//! `zenkey-build`: `contracts/zenwatch.v1.toml` linted (every error fails
+//! this build), checked against its append-only history
+//! (`contracts/.history`: breaking fails, review warns), its bundle
+//! embedded, and the typed `zenwatch_v1` module generated.
 //!
-//! The generated code spells v1's runtime `::zenkey::`, and on `main` that
-//! name is not v1's in this package: since FL2 the v1 runtime is the
-//! renamed dependency `zenkey_v1`, so no read-side line can reach it. The
-//! one substitution below points the generated paths at it; FL3 deletes
-//! this file whole.
-
-use std::path::PathBuf;
+//! **Rust-first.** The contract's JSON Schema types are the structs the
+//! daemon already publishes (`crate::publish`), bound by name hints, so
+//! nothing is generated for them; `schemas/zenwatch.json` is what they
+//! derive, committed, and a test keeps the two in step
+//! (`zenkey_build::check_schema`).
 
 fn main() {
-    zenkey_build_v1::Config::new()
-        .registry_dir("registry")
+    zenkey_build::Config::new()
+        .contracts_dir("contracts")
+        .history_dir("contracts/.history")
+        .json_type("json:FiringRule", "crate::publish::FiringRule")
+        .json_type("json:ZenwatchDoctor", "crate::publish::ZenwatchDoctor")
+        .json_type("json:ZenwatchCounters", "crate::publish::ZenwatchCounters")
         .generate()
-        .unwrap();
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"))
-        .join("zenkey_registry.rs");
-    let generated = std::fs::read_to_string(&out).expect("the generated registry");
-    std::fs::write(&out, generated.replace("::zenkey::", "::zenkey_v1::"))
-        .expect("the generated registry, re-pathed");
+        .unwrap_or_else(|e| panic!("{e}"));
 }

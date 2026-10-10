@@ -7,14 +7,53 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the write side on zk2 (#614, FL3)
+
+The daemon is a zk2 service of its own: `health.v1`, through the runtime,
+and its own contract, `zenwatch.v1` (`contracts/zenwatch.v1.toml`, its
+append-only `.history`), on the session in the deployment's namespace,
+brought up through `zenkey::ServiceBuilder` in spec §8.2's order. zenwatch
+no longer links v1's libraries: `zenkey =0.11.1`, `zenkey-build =0.11.1`
+and `zenkey-fleet =0.18.0` are gone from it, and with them
+`registry/zenwatch.kdl`.
+
+### What it publishes
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| origin `h-<12hex>` from the `zenwatch-host-id-v1` salt (`AppProfile`) | the address `@hostid.v1/zenwatch`: the system minted from the machine id with zk2's salt (`hostid.v1`), the service `zenwatch` | the same machine id gives a different system (hostid.v1 Appendix B maps one to the other). A host with no id refuses to start, exit 2 (§2.6); `publish.address` and `publish.ephemeral` below are the ways out |
+| keys `<ns>/v1/<origin>/state/zenwatch/…` on the session in no namespace | `zk2/<system>/zenwatch/<iface>/…` on the session in the namespace | the namespace is the session's, as every zk2 owner's |
+| `…/@rpc/zenwatch/introspect` (the registry slice) | the descriptor and the bundles (spec §3.3, §8.4) | `zenctl service show`, `zenctl schema show zenwatch.v1` |
+| `…/@rpc/zenwatch/describe` (the schema set) | the bundle's `schemas/zenwatch.json` | Rust-first: what the daemon's structs derive, committed and held to them |
+| the `…/state/zenwatch/alive` token | the instance token, then the interface tokens (`zenwatch.v1`, `health.v1`) | `instance-gone */zenwatch` watches a zenwatch |
+| `…/state/zenwatch/health` every 30 s, `status: ok \| degraded` | `health.v1`: `state/status` (`OK`, `DEGRADED`, `FAILED`), re-put every 28.5 s; `state/checks/{check}` | the level is the worst of the checks `sinks`, `presence`, `tokens`, `doctor`, `state-file`, `firing` (see the README); `degraded` "a delivery failed since the last document" became `sinks` at each sink's last delivery, which stays failed until one goes out; all of them failing is `FAILED` |
+| `health.host_id` | the address, and the descriptor's `meta.host` | the system is in the key (health.v1 Appendix A) |
+| `health.inhibited` | — | inhibition was removed in FL2 |
+| `health.last_persist_error` | the `state-file` check's detail | |
+| `health.doctor`, `doctor_last`, `doctor_next` | the `doctor` check, and `zenwatch.v1`'s `state/doctor` (`ran_at`, `next_at`) | |
+| `health.notifications_sent`, `deliveries_failed`, `dropped_total`, `state_entries`, `state_evicted`, `firing_refused` | `zenwatch.v1` `state/counters`: `discipline.sent`, `deliveries_failed`, `dropped`, `state_entries`, `discipline.evicted`, `firing_refused` | a count is not a level: counters are not health.v1 checks. New beside them: `delivered`, `forgotten`, `doctor_runs`, and every discipline counter (`deduped`, `cancelled`, `baseline`, `grouped`, `repeats`) |
+| `health.started_at`, `rules`, `sinks`, `firing`, `unobservable` | `state/counters`, same names | `freshness.ttl_s` 60; put on change, at most once per tick |
+| `…/state/zenwatch/firing/{rule_id}` (`ttl_s` 300), tombstoned when quiet | `zenwatch.v1` `state/firing/{rule_id}` (`freshness.ttl_s` 300), deleted when quiet | same document. The bound of 256 is the runtime's now (core §2.7, `Error::Budget`): a refusal is counted once per rule refused, not once per tick |
+| `…/state/zenwatch/doctor` (`ttl_s` 0, retained) | `zenwatch.v1` `state/doctor` (no horizon; optional, gated `config:doctor`) | same document; unavailable (cause `config`) in the descriptor without a `doctor` block. Not deleted at a clean stop: an archive keeps it as last-known |
+| at shutdown: `firing/*` and `health` tombstoned, then the token | the last tick, the observers stopped and the sinks drained, then `firing/*` deleted and the tokens withdrawn | the health status is left, as health.v1 §2.3 asks; the daemon never pages about its own clean stop |
+
+### Configuration
+
+| v1 | zk2 | Notes |
+|---|---|---|
+| — (always published under the salted origin) | `publish: {}` (the default) | `@hostid.v1/zenwatch` |
+| — | `publish: { address: "<system>/<service>" }` | a literal system, nothing minted; or `@hostid.v1/<service>` to rename the service |
+| — | `publish: { ephemeral: true }` | allow hostid.v1's ephemeral system on a host with no id (§2.6): one run's, another at the next start. Refused beside a literal address |
+| — | `publish: false` | no service at all |
+| `check-config` | `check-config` mints the address too | `run` and `check-config` pass one gate: a host with no id is refused by both, before any session opens |
+
 ## Unreleased (`main`, zk2) — the read side on zk2 (#614, FL2)
 
 zenwatch's rules, presence, contracts and doctor read a zk2 deployment
 through the in-tree engine (`zenkey-fleet` 0.20, by path), on two
 sessions: one in the deployment's namespace, one in none (decided
-2026-10-08). What the daemon publishes about itself — the health,
-`firing/{rule_id}` and doctor documents, the registry they are declared
-in — is still v1's until FL3, under renamed dependencies.
+2026-10-08). What the daemon publishes about itself stayed v1's until
+FL3 (above).
 
 ### Rules
 
@@ -92,11 +131,10 @@ a rename.
 | entries' `origin` | entries' `address` | |
 | entries' `inhibited_by` | — | |
 
-### What it publishes (v1's write side, until FL3)
+### What it publishes (FL2's interim; FL3 replaced it, above)
 
 | v1 | zk2 | Notes |
 |---|---|---|
-| keys `<base>/v1/<origin>/…` on the one session | the same keys, the namespace as the base, on the session in no namespace | FL3 replaces them with a `zenwatch.v1` contract served through `ServiceBuilder` |
-| `health.inhibited` | always `0` | |
-| `health.dropped_total`: the monitor's drops | the presence and token observers' drops | |
+| keys `<base>/v1/<origin>/…` on the one session | the same keys, the namespace as the base, on the session in no namespace | until FL3 |
+| `health.dropped_total`: the monitor's drops | the presence and token observers' drops | `counters.dropped` since FL3 |
 | `doctor.report`: v1's `DoctorReport` | zk2's `DoctorReport` | each check's verdict on the RFC 13 core, `scope` instead of the v1 counters |

@@ -43,10 +43,11 @@
 //! check's verdict exactly as `zenctl doctor --format json` prints it.
 //!
 //! **Published.** After every run, [`ZenwatchDoctor`] goes out on
-//! `state/zenwatch/doctor` (registry `ttl_s = 0`: retained, last writer
-//! wins), so the last report is inspectable without SSH and a `next_at` in
-//! the past is a schedule that lapsed. **Hours, not seconds**: a run is a
-//! fan-in sweep, and it runs beside the drain, never on it.
+//! `zenwatch.v1`'s `state/doctor` (#614, FL3: no horizon, never re-put, not
+//! deleted at a clean stop), so the last report is inspectable without SSH
+//! and a `next_at` in the past is a schedule that lapsed. **Hours, not
+//! seconds**: a run is a fan-in sweep, and it runs beside the drain, never
+//! on it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -280,7 +281,7 @@ impl Schedule {
         self.last.as_ref()
     }
 
-    /// For the health document: not yet run, the last run ok, or failed.
+    /// For the `health.v1` check: not yet run, the last run ok, or failed.
     pub fn status(&self) -> DoctorStatus {
         match (&self.last, &self.failed) {
             (None, _) => DoctorStatus::Pending,
@@ -604,8 +605,8 @@ pub fn outgoing(notice: &DoctorNotice, rule: &Rule, render: &RenderConfig) -> Ou
                 vec![
                     "state: unobservable (was: ok)".to_string(),
                     format!("the doctor could not run at {ran_at}: {error}"),
-                    "the previous report is retained on state/zenwatch/doctor; nothing here \
-                     says the deployment is clean (RFC 13 §1)"
+                    "the previous report is retained on zenwatch.v1's state/doctor; nothing \
+                     here says the deployment is clean (RFC 13 §1)"
                         .to_string(),
                 ],
                 BTreeMap::new(),

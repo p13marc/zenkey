@@ -120,6 +120,23 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Asked<T> {
     }
 }
 
+impl<T: schemars::JsonSchema> schemars::JsonSchema for Asked<T> {
+    /// Transparent, as the `Serialize` is: an asked field's schema is its
+    /// answer's, and not-asked is the field's absence, which the field's
+    /// `default` already leaves out of `required` (#614, FL3).
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        format!("Asked_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        generator.subschema_for::<T>()
+    }
+}
+
 /// `skip_serializing_if` helper: a zero here is "nothing dropped", which the
 /// absent field already says.
 pub(crate) fn u64_is_zero(n: &u64) -> bool {

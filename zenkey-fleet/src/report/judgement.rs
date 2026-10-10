@@ -42,11 +42,12 @@
 //! byte-identical, for the three poles it had, to the `why` ladder's shipped
 //! rung answer (#214), whose wire shape this type now carries directly.
 
+use schemars::JsonSchema;
 use serde::Serialize;
 
 /// One question's judgement — the four-pole core every tool verdict maps
 /// onto (RFC 13, v1.24; RFC 09 §5.1 pre-v1.24). See the module doc.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 pub enum Judgement {
     /// Established(yes): the question was put and the claim holds — positive
