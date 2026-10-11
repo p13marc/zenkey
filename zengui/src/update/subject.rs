@@ -20,7 +20,6 @@ use crate::message::{Message, RightPane, Subject, SubjectMsg};
 use crate::scope;
 use crate::services;
 use crate::state::{Deployment, Observation, SubjectState, TreeState, Workspace};
-use crate::view;
 
 /// One key: chosen, observed, fetched, decoded.
 pub(crate) fn update(
@@ -198,26 +197,23 @@ fn select(
     sub.why.forget_subject();
     sub.refresh_series(dep);
 
-    let Some(session) = dep.raw.clone() else {
-        return Task::none();
-    };
     match &sub.current {
         // Lazy value-on-demand: one fetch per subject, nothing ambient
         // (issue #85). Symbolic skeleton paths have no concrete value, and
         // an operation's key has none either (#614, FL6b): a GET on it is a
         // call (spec §5), so selecting a declared `@op` leaf asks nothing.
         Subject::Key(key) if !key.contains('{') && !scope::names_operation(key) => {
-            services::value::fetch(session, key.clone())
+            match dep.raw.clone() {
+                Some(session) => services::value::fetch(session, key.clone()),
+                None => Task::none(),
+            }
         }
-        // The nodes pane's one data-plane cost, paid on selection.
-        Subject::Origin(origin) => {
-            work.verdicts.node_detail = view::nodes::DetailState::Loading(origin.clone());
-            services::sweep::node_info(
-                session,
-                dep.namespace().to_string(),
-                origin.clone(),
-                dep.timeout(),
-            )
+        // The nodes pane's one data-plane cost, paid on selection (#614,
+        // FL9; D11): one `health.v1` reading of the address, on the session
+        // in the namespace — never polled.
+        Subject::Address(addr) => {
+            let addr = addr.clone();
+            super::pane::nodes::health(&mut work.verdicts, dep, addr)
         }
         // A prefix is not a key, and neither is nothing.
         _ => Task::none(),

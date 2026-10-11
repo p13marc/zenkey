@@ -26,4 +26,4 @@ pub use budget::budget;
 pub use consumers::consumers_of;
 pub use declared::declared;
 pub use doctor::doctor;
-pub use nodes::node_info;
+pub use nodes::{HEALTH_GRACE, health};

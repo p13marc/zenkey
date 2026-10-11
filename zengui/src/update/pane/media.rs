@@ -7,7 +7,6 @@
 use iced::Task;
 
 use crate::message::Message;
-use crate::nodes::NodeRoster;
 use crate::services;
 use crate::update::Ctx;
 use crate::view::media::{MediaMsg, MediaState, Viewing};
@@ -15,12 +14,7 @@ use crate::view::media::{MediaMsg, MediaState, Viewing};
 /// The media viewer (issue #69): subscribe on view, release on stop,
 /// and the key is built in exactly one place — `scope::media_key`,
 /// which refuses wildcards and unfilled placeholders (RFC 07 §1).
-pub(crate) fn update(
-    media: &mut MediaState,
-    roster: &NodeRoster,
-    msg: MediaMsg,
-    cx: Ctx,
-) -> Task<Message> {
+pub(crate) fn update(media: &mut MediaState, msg: MediaMsg, cx: Ctx) -> Task<Message> {
     match msg {
         MediaMsg::OriginChanged(s) => {
             media.origin = s;
@@ -35,20 +29,11 @@ pub(crate) fn update(
             Task::none()
         }
         MediaMsg::DeclPicked { producer, path } => {
+            // The operator names the origin: the v1 roster that prefilled a
+            // lone host is gone since #614 (FL9) — no zk2 service holds a v1
+            // alive token — until FL11 removes this viewer.
             media.producer = producer;
             media.subpath = path;
-            // A convenience, not a guess: if exactly one origin is on
-            // the roster, prefill it; otherwise the operator names one.
-            if media.origin.is_empty() {
-                let hosts: Vec<&String> = roster
-                    .iter()
-                    .map(|(origin, _)| origin)
-                    .filter(|o| o.starts_with("h-"))
-                    .collect();
-                if let [only] = hosts.as_slice() {
-                    media.origin = (*only).clone();
-                }
-            }
             Task::none()
         }
         MediaMsg::View => {

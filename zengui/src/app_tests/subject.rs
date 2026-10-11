@@ -48,9 +48,9 @@ fn revealing_a_subtree_opens_every_prefix_and_selects_without_fetching() {
 /// inspector the other. Now the second assignment displaces the first, and
 /// everything derived from the displaced one goes with it.
 #[test]
-fn pointing_at_an_origin_stops_pointing_at_a_key() {
+fn pointing_at_an_address_stops_pointing_at_a_key() {
     let mut app = test_app();
-    let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
+    let key = "zk2/robot1/nav/nav.v2/state/status";
 
     let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Key(
         key.to_string(),
@@ -61,10 +61,11 @@ fn pointing_at_an_origin_stops_pointing_at_a_key() {
         "a key subject records history (#63)"
     );
 
-    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Origin(
-        "h-3fa9c2d41b7e".into(),
+    let nav: zenkey_model::grammar::Addr = "robot1/nav".parse().expect("an address");
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Address(
+        nav.clone(),
     ))));
-    assert_eq!(app.sub.follow.current.origin(), Some("h-3fa9c2d41b7e"));
+    assert_eq!(app.sub.follow.current.address(), Some(&nav));
     assert_eq!(app.sub.follow.current.key(), None);
     assert!(
         app.sub.follow.history.is_none(),
@@ -73,6 +74,67 @@ fn pointing_at_an_origin_stops_pointing_at_a_key() {
          something"
     );
     assert!(app.sub.follow.selected_latency.is_none());
+}
+
+/// A health reading lands only on the address the window points at, in the
+/// namespace it shows (#614, FL9; #109) — and with no session in the
+/// namespace, selecting an address asks nothing, so nothing is "reading".
+#[test]
+fn a_health_reading_lands_only_on_the_selected_address_in_this_namespace() {
+    use crate::nodes::HealthState;
+    use crate::view::nodes::NodesMsg;
+    use zenkey_model::grammar::Addr;
+
+    let report = |addr: &Addr| {
+        std::sync::Arc::new(zenkey_fleet::judge_health(
+            &zenkey_fleet::HealthObservation {
+                namespace: String::new(),
+                target: zenkey_fleet::HealthTarget::One(addr.clone()),
+                spec: zenkey_fleet::HealthSpec {
+                    timeout: std::time::Duration::from_secs(1),
+                    window: None,
+                    grace: std::time::Duration::from_secs(1),
+                    clocks_synced: false,
+                    face: None,
+                },
+                presence: None,
+                first: Err("no session".into()),
+                second: Err("no session".into()),
+                window: None,
+                archived: None,
+            },
+        ))
+    };
+    let nav: Addr = "robot1/nav".parse().expect("an address");
+    let tc: Addr = "host-a/tc".parse().expect("an address");
+    let mut app = test_app();
+    let _ = app.update(Message::Subject(SubjectMsg::Select(Subject::Address(
+        nav.clone(),
+    ))));
+    assert!(
+        matches!(app.work.verdicts.nodes.health, HealthState::NotAsked),
+        "no session in the namespace: nothing was asked, and nothing says it was"
+    );
+    let land = |app: &mut crate::app::Zengui, addr: &Addr, ns: &str| {
+        let _ = app.update(Message::Pane(crate::message::PaneMsg::Nodes(
+            NodesMsg::HealthRead(addr.clone(), ns.to_string(), report(addr)),
+        )));
+    };
+    land(&mut app, &tc, "");
+    assert!(
+        matches!(app.work.verdicts.nodes.health, HealthState::NotAsked),
+        "another address's reading is not this one's"
+    );
+    land(&mut app, &nav, "elsewhere");
+    assert!(
+        matches!(app.work.verdicts.nodes.health, HealthState::NotAsked),
+        "a reading in another namespace is about another deployment"
+    );
+    land(&mut app, &nav, "");
+    assert!(matches!(
+        &app.work.verdicts.nodes.health,
+        HealthState::Read(a, _) if a == &nav
+    ));
 }
 
 /// A symbolic skeleton path is a key by grammar and not by fact.

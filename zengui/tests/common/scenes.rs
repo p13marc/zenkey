@@ -63,9 +63,10 @@ pub const ALL: &[Scene] = &[
         name: "workbench-nodes",
         size: DESKTOP,
         build: workbench_nodes,
-        // The nodes pane reads v1 alive tokens, which a zk2 deployment does
-        // not hold (#614, FL6a): it says so until it reads zk2 presence.
-        landmark: "v1 presence not asked",
+        // An address up, read from zk2 presence (#614, FL9): `robot1/nav`
+        // selected, its instance and descriptor, and the health reading
+        // its selection asked for.
+        landmark: "robot1/nav: up",
     },
     Scene {
         name: "workbench-admin",
@@ -576,8 +577,27 @@ fn publish_log(theme: ThemeChoice) -> Zengui {
     app
 }
 
+/// The nodes tool on zk2 presence (#614, FL9): both addresses the world
+/// holds up, `robot1/nav` selected — its instance, what its descriptor
+/// says, and its `health.v1` as the reading its selection asks for would
+/// answer: not asked, since its descriptor does not list the profile.
 fn workbench_nodes(theme: ThemeChoice) -> Zengui {
-    workbench(theme, RightPane::Nodes)
+    use zengui::view::nodes::NodesMsg;
+    let mut app = workbench(theme, RightPane::Nodes);
+    let nav: zenkey_model::grammar::Addr = "robot1/nav".parse().expect("an address");
+    send(
+        &mut app,
+        Message::Subject(SubjectMsg::Select(Subject::Address(nav.clone()))),
+    );
+    send(
+        &mut app,
+        Message::Pane(PaneMsg::Nodes(NodesMsg::HealthRead(
+            nav,
+            String::new(),
+            World::new().health("robot1/nav"),
+        ))),
+    );
+    app
 }
 
 fn workbench_mesh(theme: ThemeChoice) -> Zengui {

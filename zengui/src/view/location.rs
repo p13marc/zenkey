@@ -63,14 +63,15 @@ pub struct Segment {
 /// The subject as breadcrumb segments. Pure, so the model is testable without
 /// a renderer.
 ///
-/// A [`Subject::Origin`] has no display path of its own; it is placed through
-/// [`crate::scope::origin_display_path`] — the same #61 click-through path the
-/// tree uses — so its ancestors are real tree prefixes.
+/// A [`Subject::Address`] has no display path of its own; it is placed
+/// through [`crate::scope::address_display_path`] — the same #61
+/// click-through path the tree uses — so its ancestors are real tree
+/// prefixes.
 pub fn segments(subject: &Subject, namespace: &str) -> Vec<Segment> {
     let path = match subject {
         Subject::None => return Vec::new(),
         Subject::Key(p) | Subject::Prefix(p) => p.clone(),
-        Subject::Origin(o) => crate::scope::origin_display_path(namespace, o),
+        Subject::Address(a) => crate::scope::address_display_path(namespace, a),
     };
     let chunks: Vec<&str> = path.split('/').collect();
     let roles = crate::view::tree::roles_of(&path, namespace);
@@ -581,17 +582,24 @@ mod tests {
         }
     }
 
-    /// An origin is placed through the tree's own click-through path (#61),
-    /// namespace included, so its ancestors are real tree prefixes.
+    /// An address is placed through the tree's own click-through path (#61;
+    /// #614, FL9), namespace included, so its ancestors are real tree
+    /// prefixes — and its chunks wear zk2's roles, as the tree's do.
     #[test]
-    fn an_origin_subject_is_placed_under_its_namespace() {
-        let segs = segments(&Subject::Origin("h-a".into()), "acme");
+    fn an_address_subject_is_placed_under_its_namespace() {
+        let addr = "robot1/nav".parse().expect("an address");
+        let segs = segments(&Subject::Address(addr), "acme");
         assert_eq!(
             segs.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(),
-            ["acme", "v1", "h-a"]
+            ["acme", "zk2", "robot1", "nav"]
         );
-        assert_eq!(segs[1].select, Some(Subject::Prefix("acme/v1".into())));
-        assert!(segs[2].select.is_none());
+        assert_eq!(segs[1].select, Some(Subject::Prefix("acme/zk2".into())));
+        assert_eq!(
+            segs[2].select,
+            Some(Subject::Prefix("acme/zk2/robot1".into()))
+        );
+        assert!(segs[3].select.is_none());
+        assert_eq!(segs[3].role, Some(crate::view::tree::Role::Service));
     }
 
     /// Nothing selected is an empty model — the bar renders the explanation,

@@ -50,7 +50,7 @@ pub(crate) fn update(
         PaneMsg::Nodes(msg) => nodes::update(&mut work.verdicts, msg, cx),
         PaneMsg::Doctor(msg) => doctor::update(&mut work.verdicts, msg, cx),
         PaneMsg::Blob(msg) => blob::update(&mut work.verdicts.blob, msg, cx),
-        PaneMsg::Media(msg) => media::update(&mut work.bench.media, &work.verdicts.roster, msg, cx),
+        PaneMsg::Media(msg) => media::update(&mut work.bench.media, msg, cx),
         PaneMsg::Admin(msg) => admin::update(&mut work.verdicts.admin, msg, cx),
         PaneMsg::Mesh(msg) => mesh::update(&work.verdicts.admin, msg),
         PaneMsg::Config(msg) => configure::update(&mut work.bench.config_form, msg, cx),

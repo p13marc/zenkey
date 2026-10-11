@@ -20,7 +20,7 @@
 //! Two cadences, as in the engine:
 //!
 //! - **per frame** — `echo/admits_*`, `hex/dump_1k`. `view` runs at frame rate.
-//! - **per tick** — `roster/refresh_*`, `series/*`, `tree/*`. Four times a
+//! - **per tick** — `nodes/refresh_*`, `series/*`, `tree/*`. Four times a
 //!   second.
 //!
 //! ## The tree group had no numbers at all before #177
@@ -147,18 +147,20 @@ fn bench_hex(c: &mut Criterion) {
 
 // ── per tick ─────────────────────────────────────────────────────────────
 
-/// The nodes pane's watched-freshness join.
+/// The nodes pane's watched-freshness join (zk2's since #614, FL9): per
+/// address presence holds, whether a watch covers its `state/**` or
+/// `@state/**`, and the newest state sample under it.
 ///
-/// Quadratic in (producers × watch selectors) by construction, which is why
-/// the per-pair key-expression work mattered: `zenkey_fleet::merge_skeleton`
-/// was fixed to validate borrowed `&keyexpr` once per tick, and this site was
-/// missed.
-fn bench_roster(c: &mut Criterion) {
+/// Quadratic in (addresses × watch selectors) by construction, which is why
+/// the per-pair key-expression work matters: the selectors are validated
+/// borrowed, once per tick (#178). v1's `roster/refresh_40p_8w` measured the
+/// same join over producers.
+fn bench_nodes(c: &mut Criterion) {
     let mut stats = zenkey_fleet::StatsTable::new();
     let now = Instant::now();
     for i in 0..40_000 {
         stats.record(
-            &format!("v1/{HOST}/state/p{}/g{}/k{i}", i % 40, i / 100),
+            &format!("zk2/robot{}/nav/nav.v2/state/g{}/k{i}", i % 40, i / 100),
             64,
             None,
             now,
@@ -167,17 +169,24 @@ fn bench_roster(c: &mut Criterion) {
         );
     }
     let tree = zenkey_fleet::KeyTreeSnapshot::build(&stats);
-    let watched: Vec<String> = (0..8).map(|i| format!("v1/*/state/p{i}/**")).collect();
-
-    let mut roster = zengui::nodes::NodeRoster::default();
-    let transitions: Vec<(String, bool)> = (0..40)
-        .map(|i| (format!("v1/{HOST}/state/p{i}/alive"), true))
+    let watched: Vec<String> = (0..8)
+        .map(|i| format!("zk2/robot{i}/*/*/state/**"))
         .collect();
-    roster.apply_transitions("", &transitions, now);
 
-    c.bench_function("roster/refresh_40p_8w", |b| {
+    let tokens: Vec<String> = (0..40)
+        .map(|i| format!("zk2/robot{i}/nav/@zk/instance/{i:016x}"))
+        .collect();
+    let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
+    presence.seed(
+        &zenkey_fleet::model::catalog::Observed::from_keys("zk2/*/*/@zk/**", &tokens, true),
+        std::time::SystemTime::now(),
+    );
+    let mut nodes = zengui::nodes::NodesState::default();
+
+    c.bench_function("nodes/refresh_40a_8w", |b| {
         b.iter(|| {
-            roster.refresh(
+            nodes.refresh(
+                black_box(Some(&presence)),
                 black_box(&tree),
                 black_box(""),
                 black_box(&watched),
@@ -414,7 +423,7 @@ criterion_group!(
     benches,
     bench_echo,
     bench_hex,
-    bench_roster,
+    bench_nodes,
     bench_series,
     bench_expansion,
     bench_tree

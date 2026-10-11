@@ -138,12 +138,21 @@ impl ScopePreset {
     }
 }
 
-/// The tree display path of one origin's subtree (#61 click-through):
-/// v1's `v1/<origin>`, lifted with the namespace. A v1 notion kept for the
-/// nodes pane's v1 subjects until FL9 replaces origins with addresses —
-/// `origin` comes from a parsed liveliness token, never typed text.
-pub fn origin_display_path(namespace: &str, origin: &str) -> String {
-    zenkey_fleet::with_namespace(namespace, ["v1", origin].join("/"))
+/// The tree display path of one address's subtree (#61 click-through; zk2's
+/// since #614, FL9): `zk2/<system>/<service>`, lifted with the namespace —
+/// where every key the address owns sits, whatever its interface or kind.
+/// Built from the typed [`Addr`](zenkey_model::grammar::Addr), whose chunks
+/// the grammar validated, never from typed text.
+pub fn address_display_path(namespace: &str, addr: &zenkey_model::grammar::Addr) -> String {
+    zenkey_fleet::with_namespace(
+        namespace,
+        [
+            zenkey_model::grammar::GRAMMAR,
+            addr.system.as_str(),
+            addr.service.as_str(),
+        ]
+        .join("/"),
+    )
 }
 
 /// The watch selector for one tree subtree: symbolic skeleton chunks widen

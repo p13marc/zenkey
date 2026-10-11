@@ -91,14 +91,12 @@ pub(crate) fn update(v: &mut Verdicts, msg: DoctorMsg, cx: Ctx) -> Task<Message>
                     Task::done(Message::Workspace(WorkspaceMsg::Reveal(key.clone()))),
                     Task::done(Message::Subject(SubjectMsg::Select(Subject::Key(key)))),
                 ]),
-                // An origin subject: point the workspace at it and land on
-                // the nodes tool, which is where an origin is legible.
-                Some(crate::doctor::Target::Node(origin)) => Task::done(Message::Workspace(
+                // A v1 origin subject: no zk2 address to point at, so the
+                // nodes tool is landed on alone, until FL9b's zk2 doctor
+                // names addresses.
+                Some(crate::doctor::Target::Node(_)) => Task::done(Message::Workspace(
                     WorkspaceMsg::PaneSelected(RightPane::Nodes),
-                ))
-                .chain(Task::done(Message::Subject(SubjectMsg::Select(
-                    Subject::Origin(origin),
-                )))),
+                )),
                 None => Task::none(),
             }
         }

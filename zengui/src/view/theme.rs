@@ -806,36 +806,41 @@ impl RungTone {
     }
 }
 
-/// How a liveliness presence should read (#61) — same discipline as
-/// [`IdentityTone`]: "unknown" must not look like a verdict.
+/// How an address's presence should read (#61; zk2's three states since
+/// #614, FL9: spec §8.1, O5) — same discipline as [`IdentityTone`]:
+/// "unobservable" must not look like a verdict, and above all not like
+/// "down".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceTone {
-    Alive,
-    Suspect,
-    Unknown,
+    /// An instance token held.
+    Up,
+    /// No instance token held, with a complete read behind the claim.
+    Down,
+    /// Neither established.
+    Unobservable,
 }
 
 impl PresenceTone {
     /// Every state of the scale, for the uniqueness tests.
-    pub const ALL: [Self; 3] = [Self::Alive, Self::Suspect, Self::Unknown];
+    pub const ALL: [Self; 3] = [Self::Up, Self::Down, Self::Unobservable];
 
-    /// The swatch this state resolves through — "unknown" is
+    /// The swatch this state resolves through — "unobservable" is
     /// [`Tone::Neutral`], the same discipline as identity.
     pub fn tone(self) -> Tone {
         match self {
-            Self::Alive => Tone::Positive,
-            Self::Suspect => Tone::Negative,
-            Self::Unknown => Tone::Neutral,
+            Self::Up => Tone::Positive,
+            Self::Down => Tone::Negative,
+            Self::Unobservable => Tone::Neutral,
         }
     }
 
-    /// The badge glyph, carried by the type (#193): a token seen, a token
-    /// retracted, and a question never asked.
+    /// The badge glyph, carried by the type (#193): a token held, none held,
+    /// and a question that could not be answered.
     pub fn glyph(self) -> &'static str {
         match self {
-            Self::Alive => "●",
-            Self::Suspect => "✗",
-            Self::Unknown => "·",
+            Self::Up => "●",
+            Self::Down => "✗",
+            Self::Unobservable => "·",
         }
     }
 }

@@ -127,6 +127,9 @@ pub struct World {
     catalog: Arc<zenkey_fleet::Catalog>,
     presence: Arc<zenkey_fleet::LivePresence>,
     seeded: Vec<zenkey_fleet::PresenceTransition>,
+    /// The presence read both were built from: what a health reading of
+    /// this world reads presence and descriptors as (#614, FL9).
+    observed: zenkey_fleet::model::catalog::Observed,
 }
 
 pub const ORIGIN_A: &str = "h-3fa9c2d41b7e";
@@ -280,6 +283,7 @@ fn deployment(
     Arc<zenkey_fleet::Catalog>,
     zenkey_fleet::LivePresence,
     Vec<zenkey_fleet::PresenceTransition>,
+    zenkey_fleet::model::catalog::Observed,
 ) {
     use std::collections::BTreeMap;
     use zenkey_fleet::model::catalog::{DescriptorRead, Observed};
@@ -330,7 +334,7 @@ fn deployment(
     let catalog = Arc::new(zenkey_fleet::Catalog::new(&observed));
     let mut presence = zenkey_fleet::LivePresence::new(zenkey_fleet::PresenceScope::all());
     let seeded = presence.seed(&observed, std::time::SystemTime::now());
-    (catalog, presence, seeded)
+    (catalog, presence, seeded, observed)
 }
 
 impl Default for World {
@@ -342,7 +346,7 @@ impl Default for World {
 impl World {
     pub fn new() -> World {
         let contracts = contracts();
-        let (catalog, presence, seeded) = deployment(&contracts.set);
+        let (catalog, presence, seeded, observed) = deployment(&contracts.set);
         World {
             stats: StatsTable::new(),
             // Far enough back that every rate has settled and every age
@@ -355,7 +359,42 @@ impl World {
             catalog,
             presence: Arc::new(presence),
             seeded,
+            observed,
         }
+    }
+
+    /// `addr`'s `health.v1`, as the engine judges a reading of this world
+    /// (#614, FL9): presence and the descriptors as the world holds them,
+    /// and both readings' GETs answered by nobody — no address here
+    /// implements `health.v1`, so its verdict is "not asked", in the
+    /// engine's own words.
+    pub fn health(&self, addr: &str) -> Arc<zenkey_fleet::report::HealthReport> {
+        let addr: zenkey_model::grammar::Addr = addr.parse().expect("an address");
+        let target = zenkey_fleet::HealthTarget::One(addr);
+        let got = zenkey_fleet::bus::health::HealthGet {
+            selector: target.state_selector(),
+            read_at: std::time::SystemTime::now(),
+            complete: true,
+            services: Default::default(),
+        };
+        Arc::new(zenkey_fleet::judge_health(
+            &zenkey_fleet::HealthObservation {
+                namespace: String::new(),
+                target,
+                spec: zenkey_fleet::HealthSpec {
+                    timeout: Duration::from_secs(2),
+                    window: None,
+                    grace: Duration::from_secs(1),
+                    clocks_synced: false,
+                    face: None,
+                },
+                presence: Some(Ok(self.observed.clone())),
+                first: Ok(got.clone()),
+                second: Ok(got),
+                window: None,
+                archived: None,
+            },
+        ))
     }
 
     /// The window as the link leaves it once the sessions are up (#614,

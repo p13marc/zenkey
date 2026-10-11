@@ -147,13 +147,23 @@ pub(crate) fn apply_tick(
             v.on_frame(sample);
         }
     }
-    // The node dashboard (#61): the zero-cost watched-freshness join. Its
-    // token transitions came off the data pump's liveliness, which carries
-    // none since #614 (FL6a): presence is zk2's, on its own monitor.
-    let now = std::time::Instant::now();
-    work.verdicts
-        .roster
-        .refresh(&tick.tree, dep.namespace(), &tick.watched, now);
+    // The node dashboard (#61; zk2's since #614, FL9): the zero-cost
+    // watched-freshness join, per address presence holds — on live ticks
+    // only, since presence is the live deployment's and a replayed tree is
+    // another world's. Presence itself travels on its own monitor
+    // (`BusMsg::Presence`); the descriptors are indexed when the lens's
+    // catalog moves (`adopt_lens`), and checked here by pointer.
+    if work.replay.replay.is_none() {
+        let now = std::time::Instant::now();
+        work.verdicts.nodes.refresh(
+            dep.presence.as_ref().map(|u| &*u.presence),
+            &tick.tree,
+            dep.namespace(),
+            &tick.watched,
+            now,
+        );
+    }
+    work.verdicts.nodes.describe(dep.catalog.as_ref());
     // The chart's inputs all advanced above — the history ring, the rate
     // sampler, the facts behind the unit. Rebuilt once per slot here rather
     // than once per frame (#178, #257).
@@ -538,6 +548,8 @@ fn adopt_lens(
     dep.catalog = catalog;
     dep.lens_generation = generation;
     dep.reresolve_identities();
+    // The nodes pane's descriptors are the catalog's (#614, FL9).
+    work.verdicts.nodes.describe(dep.catalog.as_ref());
     work.verdicts.payloads.invalidate();
     dep.recount_contracts();
     dep.refresh_skeleton()
