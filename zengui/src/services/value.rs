@@ -215,31 +215,3 @@ pub fn why(
         move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(out))),
     )
 }
-
-/// The declared request type's schema, flattened into the Send form's fields
-/// (§6.4 item 3).
-///
-/// "Not asked yet" is `None` and stays `None` until an answer lands; the pane
-/// renders that as "not asked", never as "no fields" (O4). A producer that
-/// declares no request type is answered here as an empty list, because that
-/// *is* an answer.
-pub fn request_schema(
-    session: zenoh::Session,
-    store: Arc<zenkey_fleet_v1::SchemaStore>,
-    producer: String,
-    request: String,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            store
-                .schema_for(&session, &producer, &request)
-                .await
-                .map(|schema| crate::view::send::schema_fields(&schema))
-        },
-        |fields| {
-            Message::Pane(PaneMsg::Send(crate::view::send::SendMsg::RequestSchema(
-                fields,
-            )))
-        },
-    )
-}

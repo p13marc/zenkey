@@ -16,7 +16,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use common::slices;

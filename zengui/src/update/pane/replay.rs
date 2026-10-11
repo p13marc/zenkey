@@ -152,6 +152,9 @@ pub(crate) fn update(
                     let tick = state.scrub_to(0);
                     work.replay.replay = Some(state);
                     bus::apply_tick(dep, obs, sub, tree, work, &tick);
+                    // Replay writes nothing to the live bus (#74; #614,
+                    // FL10): a repeating publish stops as the mode begins.
+                    return super::send::stop_for_replay(&mut work.bench);
                 }
                 Err(e) => {
                     // The open row comes back with the path that failed, so
@@ -275,7 +278,8 @@ pub(crate) fn update(
                         return Task::none();
                     };
                     enter_retained(dep, obs, sub, tree, work, &core);
-                    Task::none()
+                    // Replay writes nothing to the live bus (#614, FL10).
+                    super::send::stop_for_replay(&mut work.bench)
                 }
             }
         }

@@ -1,28 +1,80 @@
-//! Writing to the bus: the Send pane's call request and publish stream
-//! (#175, #184).
+//! Writing to the bus: the Send pane's publish stream and its operation
+//! calls (#175, #184; zk2's since #614, FL10).
 //!
-//! Everything here goes through the engine — `prepare_publish` for the body
-//! (#97's encode ladder) and `declare_publication` for the write (P7: a
-//! declared publisher, never an ad-hoc put). No codec logic may live on this
-//! side of the seam, which is easier to hold now that the seam is a module
-//! boundary rather than a comment.
+//! Everything here goes through the engine — `declare_publication` for a
+//! write (P7: a declared publisher, never an ad-hoc put), on the QoS axes the
+//! form picked (`WireQos`), and `call_operation` for a call, through the
+//! runtime's client (spec §5.1). Nothing on this side encodes: a foreign key
+//! has no contract to encode against, so a publish writes the bytes as
+//! typed, and a call's request was planned and encoded (`plan_call`,
+//! `encode_request`) before its task started — every refusal of the input
+//! is the form's, before anything is sent. The one v1 call left is the
+//! Config tool's ([`V1Call`]), which leaves with it in FL11.
 
 use std::sync::Arc;
 
 use iced::Task;
-use zenkey_fleet_v1::{Publication, SliceSet};
-use zenkey_v1::qos::QosProfile;
+use zenkey_fleet::{CallPlan, Publication, Revision, WireQos};
 
 use crate::message::{Message, PaneMsg, PublishOutcome};
 use crate::services::ServiceError;
 use crate::view::send::SendMsg;
 
-/// What one RPC needs, gathered from the form before the future starts.
+/// One planned call, gathered before the future starts: the revision it was
+/// planned against, the plan (`plan_call` already refused a forbidden
+/// fan-out, O2), the request's bytes and how long to wait.
+pub struct Call {
+    /// The session **in** the deployment's namespace: an operation's key is
+    /// base-relative, and the runtime's client speaks it there.
+    pub session: zenoh::Session,
+    pub revision: Arc<Revision>,
+    pub plan: CallPlan,
+    pub request: Vec<u8>,
+    pub timeout: std::time::Duration,
+}
+
+/// One call through the runtime's client (one address) or fleet (an
+/// allowed fan-out), landing on the Send tool. The report keeps a value, an
+/// envelope and silence apart (O5); an `Err` is the bus failing, never
+/// silence.
+pub fn call(c: Call) -> Task<Message> {
+    Task::perform(
+        async move {
+            let Call {
+                session,
+                revision,
+                plan,
+                request,
+                timeout,
+            } = c;
+            zenkey_fleet::call_operation(
+                &session,
+                zenkey_fleet::OperationCall {
+                    revision: &revision,
+                    plan: &plan,
+                    request,
+                    timeout,
+                    // A tool's call is asked once: a retry is the operator's
+                    // to make, by calling again.
+                    retries: 0,
+                },
+            )
+            .await
+            .map(Arc::new)
+            .map_err(ServiceError::of)
+        },
+        |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))),
+    )
+}
+
+/// One v1 `@rpc` call, as the Config tool (#481) still makes it — the last
+/// v1 call in the window, and it leaves with that tool (FL11; config.v1
+/// does not exist, #613). The Send pane calls zk2 operations ([`Call`]).
 ///
 /// A struct rather than ten positional parameters (#360): `base`, `target`,
 /// `producer` and `procedure` are four adjacent `String`s, and any permutation
 /// of them compiles into a call to the wrong thing.
-pub struct Call {
+pub struct V1Call {
     pub session: zenoh::Session,
     pub base: String,
     /// The call target, as typed — the engine parses it (a bad target is an
@@ -32,28 +84,20 @@ pub struct Call {
     pub procedure: String,
     pub params: Vec<String>,
     pub body: Option<Vec<u8>>,
-    pub attachment: Option<Vec<u8>>,
     pub timeout: std::time::Duration,
-    pub slices: Option<Arc<SliceSet>>,
 }
 
-/// One RPC, whose target the engine parses (a bad target is an answer, not a
-/// panic) — landing on the Send tool.
-pub fn call(c: Call) -> Task<Message> {
-    call_then(c, |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))))
-}
-
-/// One RPC, landing wherever `land` says (#481: the Config tool's calls are
-/// the same engine call, answered into its own form).
-pub fn call_then(
-    c: Call,
+/// One v1 call, landing wherever `land` says (#481: the Config tool's calls
+/// are answered into its own form).
+pub fn v1_call_then(
+    c: V1Call,
     land: impl FnOnce(Result<Arc<zenkey_fleet_v1::report::CallReport>, ServiceError>) -> Message
     + Send
     + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let Call {
+            let V1Call {
                 session,
                 base,
                 target,
@@ -61,9 +105,7 @@ pub fn call_then(
                 procedure,
                 params,
                 body,
-                attachment,
                 timeout,
-                slices,
             } = c;
             let target = zenkey_fleet_v1::CallTarget::parse(&target).map_err(ServiceError::of)?;
             zenkey_fleet_v1::call(
@@ -74,9 +116,9 @@ pub fn call_then(
                     procedure: &procedure,
                     params: &params,
                     body,
-                    attachment,
+                    attachment: None,
                     timeout,
-                    slices: slices.as_deref(),
+                    slices: None,
                     force: false,
                 },
             )
@@ -90,60 +132,38 @@ pub fn call_then(
 
 /// What one `Send` needs, gathered from the form before the future starts.
 pub struct Publish {
+    /// The session in **no** namespace: the key is a full wire key.
     pub session: zenoh::Session,
-    pub store: Arc<zenkey_fleet_v1::SchemaStore>,
-    pub slices: Option<Arc<SliceSet>>,
-    pub base: String,
     pub key: String,
-    pub encoding: String,
-    pub body: Vec<u8>,
-    pub mode: zenkey_fleet_v1::PrepareMode,
-    pub qos: QosProfile,
+    /// The wire `Encoding`, when the form named one.
+    pub encoding: Option<String>,
+    /// The bytes, as typed.
+    pub body: Arc<Vec<u8>>,
+    pub qos: WireQos,
     pub attachment: Option<Arc<Vec<u8>>>,
     pub repeat: bool,
 }
 
-/// Prepare, declare, send — and hand the declaration back only if it repeats.
+/// Declare, send — and hand the declaration back only if it repeats.
 pub fn publish(p: Publish) -> Task<Message> {
     Task::perform(
         async move {
             let Publish {
                 session,
-                store,
-                slices,
-                base,
                 key,
                 encoding,
                 body,
-                mode,
                 qos,
                 attachment,
                 repeat,
             } = p;
-            let prepared = zenkey_fleet_v1::prepare_publish(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                &store,
-                slices.as_deref(),
-                &key,
-                zenkey_fleet_v1::PrepareSpec {
-                    declared_encoding: (!encoding.is_empty()).then_some(encoding.as_str()),
-                    body: &body,
-                    mode,
-                },
-            )
-            .await
-            .map_err(ServiceError::of)?;
-            let publication = zenkey_fleet_v1::declare_publication(
-                &session,
-                &key,
-                qos,
-                prepared.encoding.as_deref(),
-            )
-            .await
-            .map_err(ServiceError::of)?;
+            let publication =
+                zenkey_fleet::declare_publication(&session, &key, qos, encoding.as_deref())
+                    .await
+                    .map_err(ServiceError::of)?;
             publication
                 .send(
-                    prepared.bytes.clone(),
+                    body.as_ref().clone(),
                     attachment.as_ref().map(|a| a.as_ref().clone()),
                 )
                 .await
@@ -162,7 +182,10 @@ pub fn publish(p: Publish) -> Task<Message> {
                 None
             };
             Ok(Arc::new(PublishOutcome {
-                prepared,
+                key,
+                bytes: body,
+                qos,
+                encoding,
                 publication,
                 matching,
                 attachment,
@@ -201,16 +224,15 @@ pub fn undeclare(publication: Publication) -> Task<Message> {
     )
 }
 
-/// Retire a key: an authoritative delete (RFC 04 §1.2), on the reliable
-/// profile, like `zenctl retire`. The engine has already judged whether
-/// this key may be retired; this is the write.
-pub fn retire(session: zenoh::Session, key: String) -> Task<Message> {
+/// Retire a key: a tombstone (RFC 04 §1.2) on the axes the form picked. The
+/// engine has already judged whether this key may be retired
+/// (`check_retire`, behind `--i-know`); this is the write.
+pub fn retire(session: zenoh::Session, key: String, qos: WireQos) -> Task<Message> {
     Task::perform(
         async move {
-            let publication =
-                zenkey_fleet_v1::declare_publication(&session, &key, QosProfile::Transition, None)
-                    .await
-                    .map_err(ServiceError::of)?;
+            let publication = zenkey_fleet::declare_publication(&session, &key, qos, None)
+                .await
+                .map_err(ServiceError::of)?;
             let matching = publication.matching_status().await.ok();
             publication.retire().await.map_err(ServiceError::of)?;
             publication.undeclare().await.map_err(ServiceError::of)?;
