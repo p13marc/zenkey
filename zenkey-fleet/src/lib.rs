@@ -161,8 +161,8 @@ pub mod tape;
 // below actually **return** are lifted to the root.
 
 pub use judge::condition::{
-    CondWindow, Condition, DoctorWatch, Eval, InstanceAsk, InstanceRead, RuleSet, RuleState,
-    SweepOutcome, WatchdogSpec, WindowExamples, watchdog,
+    CondWindow, Condition, DoctorWatch, Eval, RuleSet, RuleState, SweepOutcome, WatchdogSpec,
+    WindowExamples, watchdog,
 };
 pub use judge::expect::{ExpectAim, ExpectSpec, run_expect};
 pub use judge::field::{
@@ -313,7 +313,7 @@ pub use tape::record::{rfc3339_from_unix, rfc3339_now};
 // The judging vocabulary a caller can drive directly (#349's evidence
 // structs among them).
 pub use judge::condition::{
-    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone,
+    SilenceEvidence, TickEvidence, judge_doctor_check, judge_instance_gone, presence_observer,
 };
 // The remaining items a frontend actually calls. Every one of these was
 // reachable only by module path (#350) — which said nothing about whether it

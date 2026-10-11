@@ -148,9 +148,10 @@ async fn a_watchdog_emits_one_transition_per_genuine_change_and_none_per_tick() 
     );
 }
 
-/// `instance-gone` (zk2's `origin-down`) reads presence: an address holding
-/// no instance token visible to this reader, in a complete read, is a
-/// baseline `firing` — and stays one line across the run.
+/// `instance-gone` (zk2's `origin-down`) reads the live presence projection
+/// (#747): an exact address holding no instance token visible to this
+/// reader, in a complete read, is a baseline `firing` — watched from the
+/// start, the dead-man's switch — and stays one line across the run.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn instance_gone_fires_on_an_absent_address_and_only_once() {
     let (_a, b) = peer_pair().await;
@@ -171,6 +172,94 @@ async fn instance_gone_fires_on_an_absent_address_and_only_once() {
         transitions[0].evidence
     );
     assert_eq!(summary.firing, ["instance-gone lab/nobody"], "{summary:?}");
+}
+
+/// The instance token of `address` (a zk2 presence key, spec §8.1).
+fn instance_token(address: &str, id: u64) -> String {
+    let addr: zenkey_model::grammar::Addr = address.parse().expect("an address");
+    zenkey_model::grammar::instance_key(&addr, &zenkey_model::grammar::InstanceId::from_u64(id))
+        .expect("a key")
+        .as_str()
+        .to_owned()
+}
+
+/// `instance-gone` per address on the live projection (#747), the meaning
+/// zenwatch's rule has: under `*/tc`, one of two addresses going fires
+/// while the other holds, the evidence naming it, and coming back clears
+/// it; a wildcard never matched (`*/gui`) fires nothing; an exact address
+/// absent from the start fires from the baseline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn instance_gone_is_judged_per_address_on_the_live_projection() {
+    let (a, b) = peer_pair().await;
+    let h1 = a
+        .liveliness()
+        .declare_token(instance_token("h1/tc", 1))
+        .await
+        .expect("token");
+    let h2 = a
+        .liveliness()
+        .declare_token(instance_token("h2/tc", 2))
+        .await
+        .expect("token");
+    let spec = WatchdogSpec {
+        rules: vec![
+            Condition::parse("instance-gone */tc").expect("rule"),
+            Condition::parse("instance-gone */gui").expect("rule"),
+            Condition::parse("instance-gone h9/tc").expect("rule"),
+        ],
+        tick: Duration::from_millis(400),
+        ticks: Some(10),
+        timeout: Duration::from_millis(500),
+        clocks_synced: false,
+    };
+    let run = tokio::spawn({
+        let b = b.clone();
+        async move { drain(&b, &spec).await }
+    });
+    // The baseline at the first tick, then h2/tc goes, then comes back.
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    h2.undeclare().await.expect("undeclare");
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    let back = a
+        .liveliness()
+        .declare_token(instance_token("h2/tc", 3))
+        .await
+        .expect("token");
+
+    let (transitions, summary) = run.await.expect("join").expect("run");
+    let path = |rule: &str| -> Vec<CondState> {
+        transitions
+            .iter()
+            .filter(|t| t.rule == rule)
+            .map(|t| t.to)
+            .collect()
+    };
+    assert_eq!(
+        path("instance-gone */tc"),
+        [CondState::Ok, CondState::Firing, CondState::Ok],
+        "{transitions:#?}"
+    );
+    let fired = transitions
+        .iter()
+        .find(|t| t.rule == "instance-gone */tc" && t.to == CondState::Firing)
+        .expect("fired");
+    assert!(
+        fired.evidence.contains("gone: h2/tc") && fired.evidence.contains("1 other address(es)"),
+        "{}",
+        fired.evidence
+    );
+    assert_eq!(
+        path("instance-gone */gui"),
+        [CondState::Ok],
+        "never matched"
+    );
+    assert_eq!(
+        path("instance-gone h9/tc"),
+        [CondState::Firing],
+        "absent from the start"
+    );
+    assert_eq!(summary.firing, ["instance-gone h9/tc"], "{summary:?}");
+    drop((h1, back));
 }
 
 /// #338: the sweep no longer gates the sampling it is judging.

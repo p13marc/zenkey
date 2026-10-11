@@ -19,9 +19,11 @@
 //! a payload through its contract and checks it against its declared type
 //! (spec §7.2, §7.3); `qos-mismatch` compares the QoS a sample rode with
 //! the one its resource declares (§2.4); `instance-gone` — v1's
-//! `origin-down`, renamed for what it asks in zk2 — reads an address's
-//! instance tokens (§8.1); `doctor` runs FJ6's doctor. The rules that read
-//! v1's alert plane are dark until zk2's alerts profile exists (#613).
+//! `origin-down`, renamed for what it asks in zk2 — reads the live presence
+//! projection per address ([`AddressWatch`], #747), the reading zenwatch's
+//! rule of the same name makes, and folds it into the rule's one state;
+//! `doctor` runs FJ6's doctor. The rules that read v1's alert plane are
+//! dark until zk2's alerts profile exists (#613).
 //!
 //! The semantic core is three tiny rules — [`judge_shortfall`],
 //! [`judge_excess`], [`judge_silence`] — shared with [`crate::judge::expect`], so
@@ -38,18 +40,21 @@
 //! genuine state change, none per unchanged tick.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::{Error, Result};
 
 use crate::bus::contracts::BundleStore;
 use crate::bus::monitor::SampleView;
+use crate::bus::presence::{PresenceFeed, Scope};
 use crate::judge::doctor::DoctorBus;
 use crate::model::catalog::{Catalog, ContractSet};
 use crate::model::lens::{Lens, observed_qos, qos_mismatch};
+use crate::model::presence_live::{LivePresence, PresenceBasis};
+use crate::model::presence_watch::{AddressWatch, covering_scope};
 use crate::model::render::Member;
 use crate::model::target::Target;
-use crate::report::{CheckId, Conformance, DoctorReport};
+use crate::report::{CheckId, Conformance, DoctorReport, PresenceTransition};
 use crate::report::{CondState, Judgement, Transition, WatchdogSummary};
 use sipper::{Straw, sipper};
 
@@ -90,11 +95,18 @@ pub enum Condition {
     /// [`crate::report::CheckId`] vocabulary, #612 FJ6). A check the run
     /// could not establish, and a failed run, are unobservable — never `ok`.
     DoctorCheck { check: CheckId },
-    /// The address — `<system>/<service>`, either position `*` — holds no
-    /// instance token visible to this reader (spec §8.1): zk2's spelling of
-    /// v1's `origin-down`. A read that ended at its timeout is unobservable;
-    /// a read access control refused is complete and empty, like absence,
-    /// so the evidence says what this reader could see (0.8).
+    /// An address the pattern — `<system>/<service>`, either position `*`
+    /// — watches holds no instance token visible to this reader, a complete
+    /// read behind it (spec §8.1): zk2's spelling of v1's `origin-down`.
+    /// Judged per address on the live presence projection
+    /// ([`AddressWatch`], #747), as zenwatch's rule is: under a wildcard an
+    /// address seen held that goes fires, even while others hold, and a
+    /// pattern never matched fires nothing; an exact address is watched from
+    /// the start, so one absent from a complete read fires. The rule's one
+    /// state is firing while any address is gone, else unobservable while
+    /// the projection cannot see (a read that ended at its timeout, events
+    /// lost), else ok. A read access control refused is complete and empty,
+    /// like absence, so the evidence says what this reader could see (0.8).
     InstanceGone { address: String },
     /// The observer itself dropped samples this window (O6) — self-knowledge,
     /// so never unobservable.
@@ -221,7 +233,7 @@ impl Condition {
     pub fn judge(&self, ev: &TickEvidence<'_>) -> Eval {
         match self {
             Condition::DoctorCheck { check } => judge_doctor_check(*check, ev.doctor),
-            Condition::InstanceGone { address } => judge_instance_gone(address, ev.instances),
+            Condition::InstanceGone { .. } => judge_instance_gone(ev.addresses, ev.presence),
             _ => self.judge_window_total(ev.window, ev.examples),
         }
     }
@@ -569,16 +581,19 @@ pub fn judge_silence(ev: SilenceEvidence) -> Judgement {
 /// Everything one watchdog tick observed, in the shapes the conditions are
 /// judged against.
 ///
-/// `doctor` and `instances` are `Option` because a tick only runs those
+/// `doctor` and `presence` are `Option` because a tick only runs those
 /// asks if some rule wants them — and "not run this tick" is
 /// *unobservable*, which is the honest reading (#352).
 pub struct TickEvidence<'e> {
     pub window: &'e CondWindow,
     pub examples: &'e WindowExamples,
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
-    /// This tick's presence asks, one per distinct `instance-gone` address;
-    /// `None` when no rule wanted one.
-    pub instances: Option<&'e [InstanceAsk]>,
+    /// The live presence projection the `instance-gone` rules read (#747);
+    /// `None` when none is running.
+    pub presence: Option<&'e LivePresence>,
+    /// This rule's own per-address reading of it, for an `instance-gone`
+    /// rule: what it has seen held and gone.
+    pub addresses: Option<&'e AddressWatch>,
 }
 
 /// Judge one doctor check against this tick's run — total, and total in the
@@ -609,93 +624,161 @@ pub(crate) async fn tick_doctor(
     }
 }
 
-/// One tick's presence ask for one `instance-gone` address (spec §8.1).
-#[derive(Debug, Clone)]
-pub struct InstanceAsk {
-    pub address: String,
-    pub outcome: std::result::Result<InstanceRead, String>,
+/// What a presence reader can conclude under `basis`, of the addresses
+/// under `pattern` (#747): only a complete read with nothing lost since
+/// stands behind a gone, so any other basis is the observer unobservable,
+/// and says why. The watchdog's `instance-gone` fold and zenwatch's
+/// `observer` identity read it alike.
+pub fn presence_observer(basis: PresenceBasis, pattern: &str) -> Eval {
+    let (state, evidence) = match basis {
+        PresenceBasis::Complete => (
+            CondState::Ok,
+            format!("a complete presence read stands: every address under {pattern} is observable"),
+        ),
+        PresenceBasis::Lost { dropped } => (
+            CondState::Unobservable,
+            format!(
+                "the presence projection lost {dropped} liveliness event(s): every address \
+                 under {pattern} is unobservable until a complete re-read — a token gone or \
+                 back inside that span was not seen, and nothing here says it is fine (RFC 13 \
+                 §3 O6)"
+            ),
+        ),
+        PresenceBasis::Incomplete => (
+            CondState::Unobservable,
+            format!(
+                "the presence read ended at its timeout, possibly incomplete (spec §8.1): an \
+                 address under {pattern} it did not show is unobservable, not gone; re-reading"
+            ),
+        ),
+        PresenceBasis::Unseeded => (
+            CondState::Unobservable,
+            format!("presence under {pattern} has not been read yet: nothing is established"),
+        ),
+    };
+    Eval { state, evidence }
 }
 
-/// What one read of an address's instance tokens found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InstanceRead {
-    /// The instance keys holding a token, base-relative.
-    pub instances: Vec<String>,
-    /// `false` when the read ended at its timeout: an instance it did not
-    /// see may be there.
-    pub complete: bool,
-}
-
-/// One tick's instance asks: one liveliness read per distinct address, on a
-/// session in the namespace, through the crate's chokepoint (§8.1).
-pub(crate) async fn tick_instances(
-    bus: Option<&DoctorBus>,
-    addresses: &[String],
-    timeout: Duration,
-) -> Vec<InstanceAsk> {
-    let mut out = Vec::with_capacity(addresses.len());
-    for address in addresses {
-        let outcome = match bus {
-            None => Err("no session in the deployment's namespace was given".to_owned()),
-            Some(bus) => {
-                let selector = format!("zk2/{address}/@zk/instance/*");
-                crate::bus::presence::liveliness_read(&bus.session, &selector, timeout)
-                    .await
-                    .map(|r| InstanceRead {
-                        instances: r.keys,
-                        complete: r.complete,
-                    })
-                    .map_err(|e| crate::one_line(&e))
-            }
-        };
-        out.push(InstanceAsk {
-            address: address.clone(),
-            outcome,
-        });
-    }
-    out
-}
-
-/// Judge one `instance-gone` rule against this tick's presence asks — total.
-pub fn judge_instance_gone(address: &str, asks: Option<&[InstanceAsk]>) -> Eval {
-    let Some(asks) = asks else {
+/// Judge one `instance-gone` rule — total — from its per-address reading
+/// of the live presence projection (#747, [`AddressWatch`]), the reading
+/// zenwatch notifies from address by address, folded into the one state a
+/// watchdog rule takes: **firing** while any address it watches is gone,
+/// the evidence naming each; else **unobservable** while the projection
+/// cannot see ([`presence_observer`]), or is not running; else **ok**.
+///
+/// An address gone stays firing across a loss until a complete re-read
+/// says otherwise, and an address whose going was hidden in the loss is
+/// found by that re-read and fires then. Under a wildcard, a pattern that
+/// never matched is ok, not firing: nothing can be gone that was never
+/// seen held. An exact address is watched from the start.
+pub fn judge_instance_gone(watch: Option<&AddressWatch>, presence: Option<&LivePresence>) -> Eval {
+    let Some(watch) = watch else {
         return Eval {
             state: CondState::Unobservable,
-            evidence: "presence was not read this tick".into(),
+            evidence: "this rule's per-address reading of presence was not given".into(),
         };
     };
-    let Some(ask) = asks.iter().find(|a| a.address == address) else {
+    let pattern = &watch.target().address;
+    let gone: Vec<String> = watch.gone().map(ToString::to_string).collect();
+    if !gone.is_empty() {
         return Eval {
-            state: CondState::Unobservable,
-            evidence: format!("no presence read ran for {address} this tick"),
-        };
-    };
-    match &ask.outcome {
-        Err(e) => Eval {
-            state: CondState::Unobservable,
-            evidence: format!("the presence read could not be made: {e}"),
-        },
-        Ok(r) if !r.instances.is_empty() => Eval {
-            state: CondState::Ok,
-            evidence: format!(
-                "{address} holds {} instance token(s) (spec §8.1)",
-                r.instances.len()
-            ),
-        },
-        Ok(r) if !r.complete => Eval {
-            state: CondState::Unobservable,
-            evidence: format!(
-                "the presence read ended at its timeout and saw no instance of {address}: \
-                 possibly incomplete (spec §8.1)"
-            ),
-        },
-        Ok(_) => Eval {
             state: CondState::Firing,
             evidence: format!(
-                "no instance token of {address} visible to this reader, in a complete read \
-                 (spec §8.1; a refused read is empty too)"
+                "gone: {} — no instance token visible to this reader, a complete read behind \
+                 it (spec §8.1; a refused read is empty too){}",
+                gone.join(", "),
+                if watch.is_exact() {
+                    String::new()
+                } else {
+                    format!(
+                        "; {} other address(es) under {pattern} hold",
+                        watch.held().count()
+                    )
+                }
+            ),
+        };
+    }
+    let Some(presence) = presence else {
+        return Eval {
+            state: CondState::Unobservable,
+            evidence: "the live presence projection is not running: no session in the \
+                       deployment's namespace, or its monitor stopped"
+                .into(),
+        };
+    };
+    let sight = presence_observer(presence.basis(), pattern);
+    if sight.state != CondState::Ok {
+        return sight;
+    }
+    let held = watch.held().count();
+    Eval {
+        state: CondState::Ok,
+        evidence: match (watch.is_exact(), held) {
+            (true, _) => {
+                format!("{pattern} holds an instance token, a complete read behind it (spec §8.1)")
+            }
+            (false, 0) => format!(
+                "no address matches {pattern} yet: nothing can be gone that was never seen \
+                 held, so the first one to appear is the first one watched"
+            ),
+            (false, n) => format!(
+                "{n} address(es) under {pattern} hold an instance token, and none seen held has \
+                 gone (spec §8.1)"
             ),
         },
+    }
+}
+
+/// The `instance-gone` rules' presence (#747): the live projection over the
+/// scope their patterns cover ([`RuleSet::presence_scope`]), kept current
+/// by its own monitor on the session in the namespace — a flood of samples
+/// on the raw session must not make presence unobservable — and seeded and
+/// looked at once ([`RuleSet::first_look`]) before the first window.
+pub(crate) struct RulePresence {
+    monitor: crate::Monitor,
+    pub(crate) feed: PresenceFeed,
+    /// Whether the feed still runs: its monitor's broadcast closing ends it,
+    /// and the rules read unobservable from then on.
+    pub(crate) running: bool,
+}
+
+impl RulePresence {
+    /// Opens it for `rules` when one of them reads presence.
+    pub(crate) async fn open(
+        session: &zenoh::Session,
+        rules: &mut RuleSet,
+        timeout: Duration,
+    ) -> Result<Option<RulePresence>> {
+        if !rules.wants_presence() {
+            return Ok(None);
+        }
+        let scope = rules.presence_scope();
+        let spec = crate::MonitorSpec {
+            // A stats tick would only wake the feed, which folds tokens.
+            stats_tick: Duration::from_secs(3600),
+            ..crate::MonitorSpec::default()
+        }
+        .with_presence("", &scope);
+        let monitor = crate::Monitor::start(session, spec).await?;
+        let mut live = LivePresence::new(scope);
+        rules.track_presence(&mut live, SystemTime::now());
+        let (feed, _seeded) = PresenceFeed::open(session, monitor.events(), live, timeout).await;
+        rules.first_look(feed.presence());
+        Ok(Some(RulePresence {
+            monitor,
+            feed,
+            running: true,
+        }))
+    }
+
+    /// The projection, while the feed runs.
+    pub(crate) fn presence(&self) -> Option<&LivePresence> {
+        self.running.then(|| self.feed.presence())
+    }
+
+    /// Its monitor's acknowledged teardown (#207/#336).
+    pub(crate) async fn shutdown(self) -> Result<()> {
+        self.monitor.shutdown().await
     }
 }
 
@@ -888,28 +971,33 @@ struct RuleRuntime {
     keyexpr: Option<zenoh::key_expr::KeyExpr<'static>>,
     counters: TickCounters,
     last_sample: Option<tokio::time::Instant>,
+    /// An `instance-gone` rule's per-address reading of presence (#747).
+    addresses: Option<AddressWatch>,
     state: RuleState,
 }
 
-/// The sweep a tick ran beside its drain, as the rules see it: the doctor
-/// run and the presence asks, each `None` when no rule wanted it — which is
+/// What a tick judges beside its drain, as the rules see it: the doctor
+/// run, and the live presence projection the `instance-gone` rules read,
+/// each `None` when no rule wanted it or none could run — which is
 /// *unobservable* for the rules that would have needed it (#352).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SweepOutcome<'e> {
     pub doctor: Option<Result<&'e DoctorReport, &'e str>>,
-    pub instances: Option<&'e [InstanceAsk]>,
+    pub presence: Option<&'e LivePresence>,
 }
 
 /// A set of rules judged tick by tick over **one** event stream — the
 /// watchdog's per-tick body, lifted out of [`watchdog`] so a second driver
 /// can run it (#218).
 ///
-/// The driver owns the stream, the drain loop, the sweep and the lens; this
-/// owns everything the rules know: per-rule counters, the last sample and
-/// drop instants, the per-tick check budget, and the transition detectors.
-/// Feed it every sample ([`observe_sample`](Self::observe_sample)) through
-/// the lens the driver holds, every drop
-/// ([`observe_drop`](Self::observe_drop)), then
+/// The driver owns the stream, the drain loop, the sweep, the lens and the
+/// presence projection; this owns everything the rules know: per-rule
+/// counters, the last sample and drop instants, the per-tick check budget,
+/// each `instance-gone` rule's per-address reading, and the transition
+/// detectors. Feed it every sample
+/// ([`observe_sample`](Self::observe_sample)) through the lens the driver
+/// holds, every drop ([`observe_drop`](Self::observe_drop)), every batch of
+/// presence moves ([`observe_presence`](Self::observe_presence)), then
 /// [`evaluate`](Self::evaluate) once per tick and get back only what
 /// changed.
 ///
@@ -963,6 +1051,12 @@ impl RuleSet {
                         .transpose()?,
                     counters: TickCounters::default(),
                     last_sample: None,
+                    addresses: match rule {
+                        Condition::InstanceGone { address } => {
+                            Some(AddressWatch::new(Target::parse(address)?))
+                        }
+                        _ => None,
+                    },
                     state: RuleState::new(rule.clone()),
                 })
             })
@@ -1027,18 +1121,47 @@ impl RuleSet {
         spec
     }
 
-    /// The distinct `instance-gone` addresses, in rule order — what the
-    /// driver reads each tick. Empty when no rule wants presence.
-    pub fn instance_addresses(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for r in &self.rules {
-            if let Condition::InstanceGone { address } = &r.rule
-                && !out.iter().any(|a| a == address)
-            {
-                out.push(address.clone());
-            }
+    /// Some rule reads the live presence projection (`instance-gone`), so
+    /// the driver owes one: tracked ([`track_presence`](Self::track_presence)),
+    /// seeded and looked at once ([`first_look`](Self::first_look)) before
+    /// the first window, then each batch of its moves
+    /// ([`observe_presence`](Self::observe_presence)).
+    pub fn wants_presence(&self) -> bool {
+        self.rules.iter().any(|r| r.addresses.is_some())
+    }
+
+    /// The narrowest presence scope covering every `instance-gone` pattern:
+    /// what the projection is read over.
+    pub fn presence_scope(&self) -> Scope {
+        covering_scope(
+            self.rules
+                .iter()
+                .filter_map(|r| r.addresses.as_ref().map(AddressWatch::target)),
+        )
+    }
+
+    /// Track every `instance-gone` pattern on `presence`, before it is
+    /// seeded: an exact address is then watched from the start.
+    pub fn track_presence(&self, presence: &mut LivePresence, at: SystemTime) {
+        for watch in self.rules.iter().filter_map(|r| r.addresses.as_ref()) {
+            watch.track(presence, at);
         }
-        out
+    }
+
+    /// The first look at the seeded projection, for every `instance-gone`
+    /// rule ([`AddressWatch::first_look`]).
+    pub fn first_look(&mut self, presence: &LivePresence) {
+        for watch in self.rules.iter_mut().filter_map(|r| r.addresses.as_mut()) {
+            watch.first_look(presence);
+        }
+    }
+
+    /// Fold one batch of the projection's moves into every `instance-gone`
+    /// rule's reading, as they arrive: the tick judges where each stands.
+    pub fn observe_presence(&mut self, moved: &[PresenceTransition]) {
+        for watch in self.rules.iter_mut().filter_map(|r| r.addresses.as_mut()) {
+            watch.fold(moved);
+        }
     }
 
     /// Some rule reads what a key *is* — its contract, its declared QoS —
@@ -1182,7 +1305,8 @@ impl RuleSet {
                 window: &window,
                 examples: &rt.counters.examples,
                 doctor: sweep.doctor,
-                instances: sweep.instances,
+                presence: sweep.presence,
+                addresses: rt.addresses.as_ref(),
             });
             if let Some(transition) = rt.state.observe(eval, at) {
                 out.push(transition);
@@ -1265,11 +1389,14 @@ fn qos(s: &SampleView, lens: &Lens<'_>) -> std::result::Result<Option<String>, S
 /// Watch the rules and yield one [`Transition`] per genuine change, none per
 /// unchanged tick. The subscriber set is declared before the first window
 /// opens (O4); every selector rule is judged per tick over the measured
-/// window, doctor and `instance-gone` rules by one ask per tick each.
+/// window, doctor rules by one run per tick, and `instance-gone` rules at
+/// each tick from where their per-address reading of the live presence
+/// projection stands (#747), its moves folded as they arrive.
 ///
 /// The selectors are wire keys, watched on `bus.raw` (no namespace); the
-/// lens, the presence asks and the doctor read through `bus.session`, in
-/// the namespace (#612, FJ8b). Revisions in `offline` are never retrieved;
+/// lens, the presence projection (its own monitor, seeded before the first
+/// window) and the doctor read through `bus.session`, in the namespace
+/// (#612, FJ8b). Revisions in `offline` are never retrieved;
 /// every other revision a descriptor names is retrieved into `store`.
 ///
 /// A [`Straw`] rather than a `Stream` (#397), because a watchdog run is a
@@ -1297,7 +1424,6 @@ pub fn watchdog<'a>(
         // down (#336).
         let mut rules = RuleSet::new(&spec.rules)?;
         let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
-        let addresses = rules.instance_addresses();
         let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
 
         // The lens before the first window (#337's rule, kept): a check
@@ -1311,6 +1437,11 @@ pub fn watchdog<'a>(
         } else {
             None
         };
+
+        // Presence before the first window too (#747): the `instance-gone`
+        // rules read the live projection per address, seeded here and fed
+        // beside the drain.
+        let mut presence = RulePresence::open(&bus.session, &mut rules, spec.timeout).await?;
 
         // Declared before the window opens — not-asked must never read as "no".
         let monitor = crate::Monitor::start(&bus.raw, crate::MonitorSpec::default()).await?;
@@ -1330,11 +1461,6 @@ pub fn watchdog<'a>(
                 } else {
                     None
                 };
-                let instances = if addresses.is_empty() {
-                    None
-                } else {
-                    Some(tick_instances(Some(bus), &addresses, spec.timeout).await)
-                };
                 let lens = if wants_lens {
                     crate::bus::lens::read(&bus.session, store, spec.timeout)
                         .await
@@ -1342,7 +1468,7 @@ pub fn watchdog<'a>(
                 } else {
                     None
                 };
-                (doctor, instances, lens)
+                (doctor, lens)
             };
             let mut sweep = std::pin::pin!(sweep);
             let mut swept = None;
@@ -1350,15 +1476,31 @@ pub fn watchdog<'a>(
             let tick_over = tokio::time::sleep_until(deadline);
             tokio::pin!(tick_over);
             while !closed {
+                let running = presence.as_ref().is_some_and(|p| p.running);
                 let item = tokio::select! {
                     item = events.recv() => item,
+                    // Presence moves fold as they arrive, so each rule's
+                    // per-address reading sees every one in order.
+                    moved = async { presence.as_mut().expect("guarded").feed.next().await },
+                        if running =>
+                    {
+                        match moved {
+                            Some(moved) => rules.observe_presence(&moved),
+                            None => {
+                                if let Some(p) = presence.as_mut() {
+                                    p.running = false;
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     // The tick cannot close before its own sweep has landed,
                     // and the drain keeps running until it does.
-                    (doctor, instances, lens) = &mut sweep, if swept.is_none() => {
+                    (doctor, lens) = &mut sweep, if swept.is_none() => {
                         if let Some(c) = lens {
                             catalog = Some(c);
                         }
-                        swept = Some((doctor, instances));
+                        swept = Some(doctor);
                         continue;
                     }
                     () = &mut tick_over, if swept.is_some() => break,
@@ -1375,14 +1517,14 @@ pub fn watchdog<'a>(
                 }
             }
 
-            let (doctor_outcome, instance_asks) = match swept {
+            let doctor_outcome = match swept {
                 Some(outcome) => outcome,
                 None => {
-                    let (doctor, instances, lens) = sweep.await;
+                    let (doctor, lens) = sweep.await;
                     if let Some(c) = lens {
                         catalog = Some(c);
                     }
-                    (doctor, instances)
+                    doctor
                 }
             };
             let now = tokio::time::Instant::now();
@@ -1394,7 +1536,7 @@ pub fn watchdog<'a>(
                     doctor: doctor_outcome
                         .as_ref()
                         .map(|o| o.as_ref().map_err(String::as_str)),
-                    instances: instance_asks.as_deref(),
+                    presence: presence.as_ref().and_then(RulePresence::presence),
                 },
             );
             for transition in transitions {
@@ -1409,6 +1551,9 @@ pub fn watchdog<'a>(
             }
         }
         monitor.shutdown().await?;
+        if let Some(p) = presence {
+            p.shutdown().await?;
+        }
         let (firing, unobservable) = rules.standing();
         Ok(WatchdogSummary {
             ticks: rules.ticks(),
@@ -1642,50 +1787,221 @@ mod tests {
         }
     }
 
-    /// `instance-gone`: an instance holds `ok`, a complete empty read is
-    /// firing worded as what this reader could see, an incomplete one and a
-    /// failed one are unobservable, and a tick that did not ask is too.
+    /// The projection's fixtures (#747): keys through the grammar's own
+    /// builders, a seed, and a watch looked at once after it.
+    mod presence {
+        use super::super::*;
+        use std::time::Duration;
+        use zenkey_model::grammar::{Addr, InstanceId, instance_key};
+
+        pub fn at(s: u64) -> SystemTime {
+            SystemTime::UNIX_EPOCH + Duration::from_secs(s)
+        }
+
+        pub fn instance(a: &str, i: u64) -> String {
+            let a: Addr = a.parse().expect("an address");
+            instance_key(&a, &InstanceId::from_u64(i))
+                .expect("a key")
+                .as_str()
+                .to_owned()
+        }
+
+        pub fn seed(keys: &[String], complete: bool) -> crate::model::catalog::Observed {
+            crate::model::catalog::Observed::from_keys(Scope::all().selector(), keys, complete)
+        }
+
+        /// A projection seeded with `keys`, and a watch of `pattern` that
+        /// tracked it first and looked once after.
+        pub fn watched(
+            pattern: &str,
+            keys: &[String],
+            complete: bool,
+        ) -> (LivePresence, AddressWatch) {
+            let mut p = LivePresence::new(Scope::all());
+            let mut w = AddressWatch::new(Target::parse(pattern).expect("a pattern"));
+            w.track(&mut p, at(0));
+            p.seed(&seed(keys, complete), at(1));
+            w.first_look(&p);
+            (p, w)
+        }
+    }
+
+    /// `instance-gone` on the live projection (#747), the poles of an exact
+    /// address: held is ok; its going under a complete read is firing,
+    /// worded as what this reader could see and naming it; absent from the
+    /// first complete read is firing from the start (the dead-man's
+    /// switch); a read that ended at its timeout, and a `Dropped(n)`, are
+    /// unobservable — never ok, never firing on their own; an evaluation
+    /// given no reading, or no projection, is unobservable too.
     #[test]
-    fn instance_gone_reads_presence_three_ways() {
-        let ask = |instances: Vec<String>, complete: bool| InstanceAsk {
-            address: "host-a/tc".into(),
-            outcome: Ok(InstanceRead {
-                instances,
-                complete,
-            }),
-        };
-        let up = [ask(
-            vec!["zk2/host-a/tc/@zk/instance/8f3a5c2e9b1d4f70".into()],
-            true,
-        )];
-        assert_eq!(
-            judge_instance_gone("host-a/tc", Some(&up)).state,
-            CondState::Ok
-        );
-        let gone = [ask(vec![], true)];
-        let e = judge_instance_gone("host-a/tc", Some(&gone));
-        assert_eq!(e.state, CondState::Firing);
+    fn instance_gone_reads_the_projection_three_ways() {
+        use presence::*;
+        let judge = |w: &AddressWatch, p: &LivePresence| judge_instance_gone(Some(w), Some(p));
+
+        let (mut p, mut w) = watched("host-a/tc", &[instance("host-a/tc", 1)], true);
+        let e = judge(&w, &p);
+        assert_eq!(e.state, CondState::Ok, "{}", e.evidence);
         assert!(
-            e.evidence.contains("visible to this reader"),
+            e.evidence.contains("holds an instance token"),
             "{}",
             e.evidence
         );
-        let partial = [ask(vec![], false)];
+        let t = p.token(&instance("host-a/tc", 1), false, at(2));
+        w.fold(&t);
+        let e = judge(&w, &p);
+        assert_eq!(e.state, CondState::Firing);
+        assert!(
+            e.evidence.contains("gone: host-a/tc") && e.evidence.contains("visible to this reader"),
+            "{}",
+            e.evidence
+        );
+
+        let (p, w) = watched("host-a/tc", &[], true);
         assert_eq!(
-            judge_instance_gone("host-a/tc", Some(&partial)).state,
+            judge(&w, &p).state,
+            CondState::Firing,
+            "absent from the start"
+        );
+
+        let (p, w) = watched("host-a/tc", &[], false);
+        let e = judge(&w, &p);
+        assert_eq!(e.state, CondState::Unobservable);
+        assert!(
+            e.evidence.contains("ended at its timeout"),
+            "{}",
+            e.evidence
+        );
+
+        let (mut p, mut w) = watched("host-a/tc", &[instance("host-a/tc", 1)], true);
+        let t = p.dropped(3, at(2));
+        w.fold(&t);
+        let e = judge(&w, &p);
+        assert_eq!(e.state, CondState::Unobservable);
+        assert!(e.evidence.contains("lost 3"), "{}", e.evidence);
+
+        assert_eq!(
+            judge_instance_gone(None, Some(&p)).state,
             CondState::Unobservable
         );
-        let failed = [InstanceAsk {
-            address: "host-a/tc".into(),
-            outcome: Err("no session".into()),
-        }];
-        assert_eq!(
-            judge_instance_gone("host-a/tc", Some(&failed)).state,
-            CondState::Unobservable
+        let e = judge_instance_gone(Some(&w), None);
+        assert_eq!(e.state, CondState::Unobservable);
+        assert!(e.evidence.contains("not running"), "{}", e.evidence);
+    }
+
+    /// Under a wildcard (#747): one of two addresses gone fires, naming it,
+    /// while the other holds; a pattern that never matched fires nothing,
+    /// even under a complete read — nothing seen is nothing gone.
+    #[test]
+    fn a_wildcard_fires_per_address_and_never_on_nothing_seen() {
+        use presence::*;
+        let both = [instance("h1/tc", 1), instance("h2/tc", 2)];
+        let (mut p, mut w) = watched("*/tc", &both, true);
+        let e = judge_instance_gone(Some(&w), Some(&p));
+        assert_eq!(e.state, CondState::Ok, "{}", e.evidence);
+        assert!(
+            e.evidence.contains("2 address(es) under */tc"),
+            "{}",
+            e.evidence
         );
+        let t = p.token(&instance("h2/tc", 2), false, at(2));
+        w.fold(&t);
+        let e = judge_instance_gone(Some(&w), Some(&p));
+        assert_eq!(e.state, CondState::Firing);
+        assert!(
+            e.evidence.contains("gone: h2/tc") && e.evidence.contains("1 other address(es)"),
+            "{}",
+            e.evidence
+        );
+
+        let (p, w) = watched("*/tc", &[instance("h1/gui", 1)], true);
+        let e = judge_instance_gone(Some(&w), Some(&p));
+        assert_eq!(e.state, CondState::Ok);
+        assert!(
+            e.evidence.contains("no address matches */tc yet"),
+            "{}",
+            e.evidence
+        );
+    }
+
+    /// The fold of the per-address states into the rule's one state:
+    /// firing while any address is gone — across a loss, until a complete
+    /// re-read says otherwise — else unobservable while the observer is,
+    /// else ok.
+    #[test]
+    fn the_fold_is_firing_then_unobservable_then_ok() {
+        use presence::*;
+        let both = [instance("h1/tc", 1), instance("h2/tc", 2)];
+        let (mut p, mut w) = watched("*/tc", &both, true);
+        let state =
+            |w: &AddressWatch, p: &LivePresence| judge_instance_gone(Some(w), Some(p)).state;
+        w.fold(&p.token(&instance("h2/tc", 2), false, at(2)));
+        assert_eq!(state(&w, &p), CondState::Firing);
+        w.fold(&p.dropped(5, at(3)));
         assert_eq!(
-            judge_instance_gone("host-a/tc", None).state,
-            CondState::Unobservable
+            state(&w, &p),
+            CondState::Firing,
+            "gone outranks unobservable"
+        );
+        // The re-read: h2/tc is back, so nothing is gone and the observer
+        // sees again.
+        let both = [instance("h1/tc", 1), instance("h2/tc", 3)];
+        w.fold(&p.seed(&seed(&both, true), at(4)));
+        assert_eq!(state(&w, &p), CondState::Ok);
+        w.fold(&p.dropped(1, at(5)));
+        assert_eq!(
+            state(&w, &p),
+            CondState::Unobservable,
+            "nothing gone, nothing seen"
+        );
+    }
+
+    /// The rule set carries one reading per `instance-gone` rule (#747):
+    /// it says it wants presence, over the narrowest scope covering them,
+    /// tracks each pattern before the seed, looks once after it, folds each
+    /// batch of moves, and judges each rule from its own reading at the
+    /// tick; what is gone stays gone on a tick given no projection.
+    #[test]
+    fn the_rule_set_judges_instance_gone_on_the_projection() {
+        use presence::*;
+        let mut rules = RuleSet::new(&[
+            Condition::parse("instance-gone host-a/tc").expect("rule"),
+            Condition::parse("instance-gone host-a/*").expect("rule"),
+            Condition::parse("dropped").expect("rule"),
+        ])
+        .expect("compiles");
+        assert!(rules.wants_presence());
+        assert_eq!(rules.presence_scope().selector(), "zk2/host-a/*/@zk/**");
+        let mut p = LivePresence::new(rules.presence_scope());
+        rules.track_presence(&mut p, at(0));
+        p.seed(&seed(&[instance("host-a/gui", 1)], true), at(1));
+        rules.first_look(&p);
+        let now = tokio::time::Instant::now();
+        let to = |t: &[Transition], rule: &str| t.iter().find(|t| t.rule == rule).map(|t| t.to);
+        let sweep = SweepOutcome {
+            doctor: None,
+            presence: Some(&p),
+        };
+        let t = rules.evaluate(now, "t0", sweep);
+        assert_eq!(to(&t, "instance-gone host-a/tc"), Some(CondState::Firing));
+        assert_eq!(to(&t, "instance-gone host-a/*"), Some(CondState::Ok));
+        rules.observe_presence(&p.token(&instance("host-a/gui", 1), false, at(2)));
+        let sweep = SweepOutcome {
+            doctor: None,
+            presence: Some(&p),
+        };
+        let t = rules.evaluate(now, "t1", sweep);
+        assert_eq!(to(&t, "instance-gone host-a/*"), Some(CondState::Firing));
+        assert_eq!(to(&t, "instance-gone host-a/tc"), None, "unchanged");
+        let t = rules.evaluate(now, "t2", SweepOutcome::default());
+        assert_eq!(
+            to(&t, "instance-gone host-a/*"),
+            None,
+            "still firing: what is gone stays gone"
+        );
+        assert!(
+            !RuleSet::new(&[Condition::Dropped])
+                .expect("compiles")
+                .wants_presence()
         );
     }
 

@@ -746,7 +746,7 @@ Options:
           [default: 0]
 
       --on <RULE>
-          Arm instead of record (#218): write a file only when this rule transitions to `firing`, with `--pre` seconds of retained traffic before it. Repeatable; the watchdog's vocabulary — `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `instance-gone <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `dropped` — the rules that read the deployment reading it in the namespace. The file carries a state preamble (the owners' own answer, spec §4.2 S4), the pre-roll, the trigger record where it fired, then `--post` seconds more
+          Arm instead of record (#218): write a file only when this rule transitions to `firing`, with `--pre` seconds of retained traffic before it. Repeatable; the watchdog's vocabulary — `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>`, `qos-mismatch <SEL>`, `instance-gone <SYSTEM/SERVICE>`, `doctor <CHECK-ID>`, `dropped` — the rules that read the deployment reading it in the namespace, `instance-gone` per address on the live presence projection, as the watchdog's and zenwatch's (#747). The file carries a state preamble (the owners' own answer, spec §4.2 S4), the pre-roll, the trigger record where it fired, then `--post` seconds more
 
       --pre <SECS>
           Seconds of traffic to retain before the trigger — the ring's age budget. The pre-roll covers only the watched selectors (O5), and the header says how much of it the ring could give (O6)
@@ -1430,7 +1430,7 @@ Usage: zenctl watchdog [OPTIONS] --rule <RULE>
 
 Options:
       --rule <RULE>
-          One rule (repeatable): `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>` (a payload that does not decode as its declared type, or fails its JSON Schema), `qos-mismatch <SEL>` (a sample whose priority, congestion control or express differs from its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (no instance token visible to this reader, §8.1 — v1's origin-down), `doctor <CHECK-ID>`, `dropped`. Selectors are wire keys (this session is in no namespace); the rules that read the deployment read it through a second session in its namespace (`--namespace`), once per tick, beside the drain
+          One rule (repeatable): `rate-above <SEL> <HZ>`, `rate-below <SEL> <HZ>`, `silent-for <SEL> <SECS>`, `invalid-payload <SEL>` (a payload that does not decode as its declared type, or fails its JSON Schema), `qos-mismatch <SEL>` (a sample whose priority, congestion control or express differs from its resource's, spec §2.4), `instance-gone <SYSTEM/SERVICE>` (`*` in either position: each address the pattern matches is up while an instance token is held, and gone when none is with a complete read behind it, read from the live presence projection, §8.1 — under a wildcard only an address seen held can go, and an exact address is watched from the start; the rule fires while any address is gone, zenwatch's rule notifying per address from the same reading; v1's origin-down), `doctor <CHECK-ID>`, `dropped`. Selectors are wire keys (this session is in no namespace); the rules that read the deployment read it through a second session in its namespace (`--namespace`): the lens and the doctor once per tick, beside the drain, presence as it moves
 
       --every <SECS>
           Seconds between evaluations — the one period flag (#307)

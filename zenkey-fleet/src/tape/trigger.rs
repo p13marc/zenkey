@@ -38,10 +38,12 @@
 //! **zk2** (#612, FJ8a, FJ8b). The capture is a `.zrec` version 3 (the
 //! tooling guide's §5): the header's base is the namespace the operator
 //! stated, and it says what the watched selectors exclude (O5). The rules
-//! are the watchdog's zk2 vocabulary whole — `invalid-payload`,
-//! `qos-mismatch` and `instance-gone` read the deployment through a lens
-//! and a session in its namespace ([`TriggerSpec::deployment`]), refreshed
-//! beside the drain like every other sweep. The preamble is the owners' own
+//! are the watchdog's zk2 vocabulary whole — `invalid-payload` and
+//! `qos-mismatch` read the deployment through a lens and a session in its
+//! namespace ([`TriggerSpec::deployment`]), refreshed beside the drain like
+//! every other sweep, and `instance-gone` reads the live presence
+//! projection through that session per address, as the watchdog's does
+//! (#747). The preamble is the owners' own
 //! answer (S4: target `All`, consolidation `Latest`, R6's discard) on the
 //! plain-`state` projection of the watched selectors
 //! ([`state_projection`]), never a storage's.
@@ -56,7 +58,7 @@ use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::SampleKind;
 
 use crate::bus::monitor::{FleetEvent, SampleView, StreamItem};
-use crate::judge::condition::{Condition, RuleSet, SweepOutcome};
+use crate::judge::condition::{Condition, RulePresence, RuleSet, SweepOutcome};
 use crate::model::catalog::{Catalog, ContractSet};
 use crate::model::lens::Lens;
 use crate::model::retain::RetentionBudget;
@@ -304,7 +306,6 @@ where
     let mut rules = RuleSet::new(&spec.rules)?;
     let watched = watch_cover(spec.selectors.iter().chain(rules.watched()));
     let (wants_doctor, wants_lens) = (rules.wants_doctor(), rules.wants_lens());
-    let addresses = rules.instance_addresses();
     // The doctor rules' doctor (#612, FJ6): only the checks they name, one
     // contract store for the capture, seeded with what `--contracts` holds.
     let doctor_spec = rules.doctor_spec(spec.timeout, spec.clocks_synced);
@@ -318,6 +319,13 @@ where
             .await
             .ok(),
         _ => None,
+    };
+    // Presence before the first window too (#747): the `instance-gone`
+    // rules read the live projection per address, as the watchdog's do,
+    // through the deployment's session; with none, they read unobservable.
+    let mut presence = match deployment {
+        Some(bus) => RulePresence::open(&bus.session, &mut rules, spec.timeout).await?,
+        None => None,
     };
 
     // The ring is budgeted to the pre-roll **before** anything is watched:
@@ -342,21 +350,14 @@ where
     // ── armed: judge tick by tick, write nothing ──────────────────────────
     let fired: Option<Transition> = 'armed: loop {
         let deadline = rules.last_eval() + spec.tick;
-        // The sweep asks what the rules need, beside the drain: the doctor,
-        // the instance tokens, a fresh lens.
+        // The sweep asks what the rules need, beside the drain: the doctor
+        // and a fresh lens. Presence is a feed of its own, folded as it
+        // moves.
         let sweep = async {
             let doctor = if wants_doctor {
                 Some(crate::judge::condition::tick_doctor(deployment, &bundles, &doctor_spec).await)
             } else {
                 None
-            };
-            let instances = if addresses.is_empty() {
-                None
-            } else {
-                Some(
-                    crate::judge::condition::tick_instances(deployment, &addresses, spec.timeout)
-                        .await,
-                )
             };
             let lens = match (wants_lens, deployment) {
                 (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
@@ -364,7 +365,7 @@ where
                     .ok(),
                 _ => None,
             };
-            (doctor, instances, lens)
+            (doctor, lens)
         };
         let mut sweep = std::pin::pin!(sweep);
         let mut swept = None;
@@ -380,13 +381,28 @@ where
         let mut closed = false;
         let mut gave_up = false;
         while !closed {
+            let running = presence.as_ref().is_some_and(|p| p.running);
             let item = tokio::select! {
                 item = events.recv() => item,
-                (doctor, instances, lens) = &mut sweep, if swept.is_none() => {
+                // Presence moves fold as they arrive (#747).
+                moved = async { presence.as_mut().expect("guarded").feed.next().await },
+                    if running =>
+                {
+                    match moved {
+                        Some(moved) => rules.observe_presence(&moved),
+                        None => {
+                            if let Some(p) = presence.as_mut() {
+                                p.running = false;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                (doctor, lens) = &mut sweep, if swept.is_none() => {
                     if let Some(c) = lens {
                         catalog = Some(c);
                     }
-                    swept = Some((doctor, instances));
+                    swept = Some(doctor);
                     continue;
                 }
                 () = &mut tick_over, if swept.is_some() => break,
@@ -414,14 +430,14 @@ where
             // stream that is gone, and nothing was written.
             break 'armed None;
         }
-        let (doctor_outcome, instance_asks) = match swept {
+        let doctor_outcome = match swept {
             Some(outcome) => outcome,
             None => {
-                let (doctor, instances, lens) = sweep.await;
+                let (doctor, lens) = sweep.await;
                 if let Some(c) = lens {
                     catalog = Some(c);
                 }
-                (doctor, instances)
+                doctor
             }
         };
         let now = tokio::time::Instant::now();
@@ -433,7 +449,7 @@ where
                 doctor: doctor_outcome
                     .as_ref()
                     .map(|o| o.as_ref().map_err(String::as_str)),
-                instances: instance_asks.as_deref(),
+                presence: presence.as_ref().and_then(RulePresence::presence),
             },
         );
         for t in transitions {
@@ -443,6 +459,14 @@ where
             }
         }
     };
+
+    // The rules are done judging, fired or not: presence goes first. A
+    // capture that fired is kept whatever its teardown says.
+    if let Some(p) = presence
+        && let Err(e) = p.shutdown().await
+    {
+        tracing::warn!("the presence monitor's teardown: {e}");
+    }
 
     let Some(trigger) = fired else {
         monitor.shutdown().await?;
@@ -766,7 +790,8 @@ mod tests {
         .collect();
         let set = RuleSet::new(&rules).expect("they compile");
         assert!(set.wants_lens());
-        assert_eq!(set.instance_addresses(), ["host-a/tc"]);
+        assert!(set.wants_presence());
+        assert_eq!(set.presence_scope().selector(), "zk2/host-a/tc/@zk/**");
         let e = Condition::parse("alert-firing zk2/**").unwrap_err();
         assert!(e.is_unaskable() && e.to_string().contains("#613"), "{e}");
     }

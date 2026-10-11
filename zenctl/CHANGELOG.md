@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `instance-gone` per address, one meaning with zenwatch (#747)
+
+`instance-gone` reads the same in `zenctl watchdog`, `record --on` and
+zenwatch: per address, on the live presence projection (FL1), by one
+reading in the engine (`zenkey_fleet::AddressWatch`). zenwatch notifies
+from it address by address; the watchdog folds it into its rule's one
+state.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watchdog --rule 'instance-gone <PATTERN>'`: one liveliness read of the pattern per tick; firing when a complete read found no instance token under it, ok while any matched | per address the pattern matches, on the live presence projection (seeded before the first window, then fed by liveliness events): an address is gone when none of its instances holds a token and a complete read stands behind it. The rule is **firing while any address is gone**, the evidence naming each; else **unobservable** while the projection cannot see; else ok | Under a wildcard an address seen held that goes fires, even while others hold: `instance-gone */tc` fires when `h2/tc` goes and `h1/tc` stays. A read that ended at its timeout, and events lost to a `Dropped(n)`, are unobservable, never ok; an address gone stays firing across a loss until a complete re-read says otherwise, and one whose going the loss hid fires when the re-read finds it |
+| `instance-gone */tc` with nothing under it in a complete read: firing | ok, "no address matches */tc yet": nothing can be gone that was never seen held | **The dead-man's switch is an exact address.** `instance-gone host-a/tc` is watched from the start, so absent from the first complete read it fires, as before. A wildcard that should fire when everything under it is gone names the addresses it needs, one rule each |
+| `record --on 'instance-gone …'` | the same reading, through the deployment's session | Without one, the rule is unobservable and never fires the capture |
+| presence read with one GET per rule address per tick | one projection over the narrowest scope covering every `instance-gone` pattern (one service, one system, or all), its own monitor on the session in the namespace, its moves folded as they arrive | The tick judges where each rule's reading stands then: an address gone and back inside one tick is two zenwatch notifications and no watchdog transition. Engine side: `InstanceAsk`/`InstanceRead` are gone, `SweepOutcome` and `TickEvidence` carry the projection, and `judge_instance_gone` takes the rule's `AddressWatch` |
+
 ## Unreleased (`main`, zk2) — `gen` keeps an event's declared rate (#744)
 
 Core §2.7's rate binds each event member within any period of its own
