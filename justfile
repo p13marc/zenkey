@@ -267,6 +267,15 @@ py-budget *ARGS:
     ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
         target/py-venv/bin/python -m zk2py.budget_scenarios {{ARGS}}
 
+# The Python implementation's state scenarios (spec/scenarios/state.md §10,
+# a late joiner's seed, 0.26) against zk2py's owner. No Rust build.
+py-state:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    protoc="$(python3 impl/python/bootstrap.py target/py-venv | tail -n 1)"
+    ZK2PY_PROTOC="$protoc" PYTHONPATH=impl/python \
+        target/py-venv/bin/python -m zk2py.state_scenarios
+
 # The Python implementation's health.v1 scenarios (spec/profiles/health/
 # scenarios.md §1–§8), on in-process zenoh-python routers: no Rust build.
 # §2, §4 and §8 wait out the 60 s horizon, so it takes about 8 minutes.
