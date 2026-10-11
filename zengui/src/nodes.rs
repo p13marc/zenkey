@@ -53,8 +53,10 @@ pub struct NodeRoster {
 }
 
 impl NodeRoster {
-    /// Seed from a one-shot liveliness roster (`build_skeleton`'s GET):
-    /// everything listed is alive; a re-seen origin recovers from suspect.
+    /// Seed from a one-shot v1 liveliness roster: everything listed is
+    /// alive; a re-seen origin recovers from suspect. The window itself no
+    /// longer seeds it — the skeleton build that read the roster is zk2's
+    /// since #614 (FL6b), and the nodes pane reads zk2 presence from FL9.
     pub fn seed(&mut self, roster: &BTreeMap<String, Vec<String>>) {
         self.seeded = true;
         for (origin, producers) in roster {
