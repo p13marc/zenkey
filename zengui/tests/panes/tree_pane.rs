@@ -512,3 +512,208 @@ fn the_tree_badges_the_budget_join() {
         "a rest-variable family is exempt and says so, never a silent pass"
     );
 }
+
+/// Every path the world's contracts declare for its addresses, as the
+/// skeleton spells them (`{param}` symbolic, an event's occurrence a leaf of
+/// its own), with the resource's kind.
+fn declared_paths() -> Vec<(String, zenkey_model::authoring::Kind)> {
+    let set = common::contracts();
+    let mut out = Vec::new();
+    for (address, iface) in common::World::ADDRESSES {
+        let id: zenkey_model::grammar::IfaceId = iface.parse().expect("an interface");
+        let revision = set.set.of_iface(&id).next().expect("held");
+        for r in &revision.contract().resources {
+            let mut path = format!("zk2/{address}/{iface}/{}/{}", r.token.as_str(), r.template);
+            if r.token == zenkey_model::grammar::KindToken::Events {
+                path.push_str("/{occurrence}");
+            }
+            out.push((path, r.kind));
+        }
+    }
+    out
+}
+
+/// #614 (FL6b): the tree starts from zk2's contract skeleton. Every resource
+/// of every address the world's presence names is a node before a byte of
+/// it arrives — declared, and placed — and reads "declared" while nothing
+/// watches it; a declared operation's leaf is marked as one, and nothing
+/// else is.
+#[test]
+fn the_tree_shows_the_contract_skeleton() {
+    use zenkey_fleet::NodeStatus;
+
+    let world = common::World::new();
+    let skel = world.skeleton();
+    let paths = declared_paths();
+    assert!(paths.len() >= 10, "both interfaces declare resources");
+    assert_eq!(skel.coverage.revisions, 2);
+    assert_eq!(skel.coverage.addresses, 2);
+    assert_eq!(skel.coverage.unheld, 0);
+    assert_eq!(skel.coverage.admin_entities, None, "admin not asked (O4)");
+
+    // Nothing observed, nothing watched: every declared node reads declared.
+    let merged = zenkey_fleet::merge_skeleton(&skel, &KeyTreeSnapshot::default(), &[]);
+    let keys: Vec<&str> = paths.iter().map(|(p, _)| p.as_str()).collect();
+    let flat = tree::flatten(&merged, "", &expand_all(&keys), 500, Instant::now());
+    for (path, kind) in &paths {
+        let i = flat
+            .rows
+            .iter()
+            .position(|r| flat.arena.display(r.path) == *path)
+            .unwrap_or_else(|| panic!("no declared node at {path}"));
+        let row = flat.row(i);
+        let NodeStatus::DeclaredOnly(e) = row.status else {
+            panic!("{path} is not declared-only: {:?}", row.status)
+        };
+        assert!(e.declared && e.present, "{path}: declared and placed");
+        assert_eq!(
+            row.operation,
+            *kind == zenkey_model::authoring::Kind::Operation,
+            "{path}: only an operation's leaf is marked as one"
+        );
+        assert!(row.decl_type.is_some(), "{path} carries its declared type");
+    }
+    assert!(
+        paths
+            .iter()
+            .any(|(p, k)| p.contains("/@op/") && *k == zenkey_model::authoring::Kind::Operation),
+        "the fixture declares operations"
+    );
+}
+
+/// #614 (FL6b): `**` never crosses a verbatim chunk (core §1.3), so under an
+/// ambient watch an explicit `@stream` or `@state` leaf stays declared-only
+/// — the truth about what that watch can see — while a plain resource beside
+/// it is watched and quiet.
+#[test]
+fn explicit_leaves_stay_declared_only_under_an_ambient_watch() {
+    use zenkey_fleet::NodeStatus;
+
+    let loaded = zenkey_model::contract::load_str(SENSOR, std::path::Path::new("."), None);
+    let contract = loaded
+        .contract
+        .unwrap_or_else(|| panic!("does not load:\n{}", loaded.report));
+    let mut set = zenkey_fleet::ContractSet::new();
+    set.insert(zenkey_fleet::Revision::from_contract(
+        contract,
+        zenkey_fleet::report::ContractSource::File,
+    ));
+    // No presence read: the revision sits under a symbolic address.
+    let lens = zenkey_fleet::Lens::new("", None, &set).offline(&set);
+    let skel = zenkey_fleet::Skeleton::build(&lens, None);
+    let merged =
+        zenkey_fleet::merge_skeleton(&skel, &KeyTreeSnapshot::default(), &["**".to_string()]);
+    let base = "zk2/{system}/{service}/sensor.v1";
+    let frames = format!("{base}/@stream/frames");
+    let calibration = format!("{base}/@state/calibration/{{axis}}");
+    let reading = format!("{base}/stream/reading");
+    let flat = tree::flatten(
+        &merged,
+        "",
+        &expand_all(&[frames.as_str(), calibration.as_str(), reading.as_str()]),
+        500,
+        Instant::now(),
+    );
+    let status = |path: &str| {
+        let i = flat
+            .rows
+            .iter()
+            .position(|r| flat.arena.display(r.path) == path)
+            .unwrap_or_else(|| panic!("no node at {path}"));
+        flat.row(i).status
+    };
+    for explicit in [&frames, &calibration] {
+        assert!(
+            matches!(status(explicit), NodeStatus::DeclaredOnly(_)),
+            "{explicit}: `**` cannot reach it, so no watch covers it"
+        );
+    }
+    assert!(
+        matches!(status(&reading), NodeStatus::WatchedQuiet(_)),
+        "a plain resource is covered by `**`, and quiet is an observation"
+    );
+}
+
+/// A contract with an explicit stream and an explicit state beside a plain
+/// stream: what no example the world loads declares.
+const SENSOR: &str = r#"
+[interface]
+name = "sensor"
+major = 1
+
+[resources.reading]
+kind = "stream"
+type = { raw = "application/octet-stream" }
+
+[resources.frames]
+kind = "stream"
+explicit = true
+type = { raw = "application/octet-stream" }
+
+[resources."calibration/{axis}"]
+kind = "state"
+explicit = true
+type = { raw = "application/octet-stream" }
+params = { axis = "string" }
+cardinality = 3
+"#;
+
+/// #614 (FL6b): a declared operation's row offers no watch control — a
+/// queryable carries no samples, and a watch on it would read "quiet" about
+/// nothing. Pinned on the open eye a held watch draws: put the operation's
+/// path among this app's watches, and no eye appears; put a stream's there,
+/// and one does.
+#[test]
+fn an_operation_leaf_offers_no_watch_control() {
+    use zengui::view::kit::Icon;
+
+    let world = common::World::new();
+    let merged = zenkey_fleet::merge_skeleton(&world.skeleton(), &KeyTreeSnapshot::default(), &[]);
+    let nav = "zk2/robot1/nav/nav.v2";
+    let reset = format!("{nav}/@op/reset");
+    let position = format!("{nav}/stream/position");
+    let flat = tree::flatten(
+        &merged,
+        "",
+        &expand_all(&[reset.as_str(), position.as_str()]),
+        500,
+        Instant::now(),
+    );
+    let facts = FactsIndex::default();
+    let verdicts = zengui::verdict::VerdictCache::default();
+    let seeding = BTreeSet::new();
+    let eye = Icon::Watched.codepoint().to_string();
+    fn draw<'a>(
+        flat: &'a tree::Flattened,
+        facts: &'a FactsIndex,
+        verdicts: &'a zengui::verdict::VerdictCache,
+        mine: &'a BTreeSet<String>,
+        seeding: &'a BTreeSet<String>,
+    ) -> iced_test::Simulator<'a, Message> {
+        simulator::<Message, _, _>(tree::pane(tree::TreeData {
+            flat,
+            pivot: tree::Pivot::Chunks,
+            search: "",
+            viewport: Default::default(),
+            facts,
+            verdicts,
+            budgets: None,
+            watches: tree::Watches { mine, seeding },
+            selected: None,
+            sp: sp(),
+        }))
+    }
+    let held_on_reset = BTreeSet::from([reset.clone()]);
+    let mut ui = draw(&flat, &facts, &verdicts, &held_on_reset, &seeding);
+    assert!(ui.find("reset").is_ok(), "the operation's leaf is drawn");
+    assert!(
+        ui.find(eye.as_str()).is_err(),
+        "an operation's row has no watch control to show a watch in"
+    );
+    let held_on_position = BTreeSet::from([position.clone()]);
+    let mut ui = draw(&flat, &facts, &verdicts, &held_on_position, &seeding);
+    assert!(
+        ui.find(eye.as_str()).is_ok(),
+        "a stream's row does, and shows the watch held"
+    );
+}

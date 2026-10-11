@@ -29,8 +29,12 @@ pub(crate) fn apply_tick(
     // The verdict cache's logical clock (#164): one advance per tick —
     // replayed ticks included, harmlessly (revalidation staleness only).
     work.verdicts.payloads.advance();
-    // Decided *before* the fields below are overwritten (#177).
-    let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched);
+    // Decided *before* the fields below are overwritten (#177). A third
+    // rung beside `shape_held`'s two (#614, FL6b): the skeleton the shape
+    // was merged from — a declared-only node is shape, and a lens move
+    // rebuilds the skeleton without moving a single key.
+    let held = shape_held((&*obs).into(), tick.into(), &obs.watched, &tick.watched)
+        && tree.merged_from(dep.skeleton.as_ref());
     // Per tick, not per frame: one bounded lock per *slot* for its key's
     // latency summary (#119, #257 — the fan-out is bounded by the pin
     // count, not the bus). None when unselected, unobserved, or unstamped.
@@ -74,9 +78,7 @@ pub(crate) fn apply_tick(
             if let Some(path) = path {
                 obs.seeding_paths.remove(&path);
             }
-            obs.seed_totals.history += coverage.history.get().map_or(0, |l| l.replies);
-            obs.seed_totals.storage += coverage.state.get().map_or(0, |l| l.replies);
-            obs.seed_totals.superseded += coverage.superseded;
+            obs.seed_totals.add(coverage);
             obs.seeded_watches += 1;
         }
     }
@@ -207,7 +209,7 @@ pub(crate) fn update(
                 contexts,
                 start_monitor(dep),
                 start_presence(dep, obs),
-                build_skeleton(dep),
+                read_declared(dep),
                 load_contracts(dep),
             ])
         }
@@ -233,6 +235,7 @@ pub(crate) fn update(
             }
             dep.session = Some(session);
             dep.reseed_store();
+            tree.reflatten(dep, obs);
             start_presence(dep, obs)
         }
         BusMsg::NamespacedOpened(namespace, Err(e)) => {
@@ -269,8 +272,10 @@ pub(crate) fn update(
             let catalog = update.catalog.clone();
             let generation = update.generation;
             dep.presence = Some(update);
-            if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
-                adopt_lens(dep, work, catalog, generation);
+            if (generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog))
+                && adopt_lens(dep, work, catalog, generation)
+            {
+                tree.reflatten(dep, obs);
             }
             Task::none()
         }
@@ -292,13 +297,18 @@ pub(crate) fn update(
             obs.link = LinkState::Failed(e);
             Task::none()
         }
-        BusMsg::SkeletonBuilt(Ok(skeleton)) => {
-            dep.skeleton = Some(skeleton);
-            tree.reflatten(dep, obs);
+        BusMsg::DeclaredRead(Ok(declared)) => {
+            dep.admin_declared = declared;
+            if dep.refresh_skeleton() {
+                tree.reflatten(dep, obs);
+            }
             Task::none()
         }
-        BusMsg::SkeletonBuilt(Err(e)) => {
-            tracing::warn!("skeleton build failed: {e}");
+        BusMsg::DeclaredRead(Err(e)) => {
+            // Not an empty admin space: the skeleton keeps saying "admin
+            // n/a" (O4), and the tree is the lens's declared keyspace and
+            // what was observed.
+            tracing::warn!("admin space read failed: {e}");
             Task::none()
         }
         BusMsg::NamespacesListed(Ok(listing)) => {
@@ -329,6 +339,8 @@ pub(crate) fn update(
             }
             dep.reseed_store();
             forget_judgements(obs, work);
+            // The skeleton moved with the contracts (`reseed_store`).
+            tree.reflatten(dep, obs);
             // The lens feed retrieves into the store it was opened on: the
             // presence link restarts over the new one.
             restart_presence(obs);
@@ -446,16 +458,20 @@ fn same_catalog(
 /// Every identity and every verdict judged before is due again — the
 /// identity cache sees the generation itself, and the verdict cache keeps
 /// each badge on screen as the last true reading until its recheck lands.
+/// The skeleton is rebuilt from the moved lens (FL6b) — the one door it is
+/// rebuilt through besides the contracts and the admin space — and `true`
+/// says it was, so a landing that no tick follows can redraw the tree.
 fn adopt_lens(
     dep: &mut Deployment,
     work: &mut Workspace,
     catalog: Option<Arc<zenkey_fleet::Catalog>>,
     generation: u64,
-) {
+) -> bool {
     dep.catalog = catalog;
     dep.lens_generation = generation;
     work.verdicts.payloads.invalidate();
     dep.recount_contracts();
+    dep.refresh_skeleton()
 }
 
 /// Each tick, ask the lens feed whether it moved without presence moving
@@ -468,6 +484,8 @@ fn poll_lens(dep: &mut Deployment, work: &mut Workspace) {
     let catalog = feed.0.catalog();
     let generation = feed.0.generation();
     if generation != dep.lens_generation || !same_catalog(&catalog, &dep.catalog) {
+        // The tree follows in this tick's `apply_tick`: the skeleton rung of
+        // its shape check sees the rebuilt skeleton.
         adopt_lens(dep, work, catalog, generation);
     }
 }
@@ -501,13 +519,13 @@ pub(crate) fn restart_presence(obs: &mut Observation) {
     }
 }
 
-/// (Re)build the skeleton (#614, FL6a: from no slices, the admin space's
-/// declared entities alone, until FL6b builds zk2's from the lens).
-pub(crate) fn build_skeleton(dep: &Deployment) -> Task<Message> {
+/// Ask the admin space what sessions declared (#614, FL6b): the
+/// skeleton's one input that costs a query, on the session in no namespace.
+pub(crate) fn read_declared(dep: &Deployment) -> Task<Message> {
     let Some(raw) = dep.raw.clone() else {
         return Task::none();
     };
-    services::sweep::skeleton(raw, dep.namespace().to_string(), dep.timeout())
+    services::sweep::declared(raw, dep.timeout())
 }
 
 /// Load the contracts the settings name (#614, FL6a) — off the update

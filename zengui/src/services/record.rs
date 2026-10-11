@@ -322,10 +322,17 @@ mod tests {
                 received: epoch + Duration::from_millis(t_ms),
             })
         };
-        let rows = vec![
-            view(0, "v1/h-0123456789ab/state/p/a", b"1"),
-            view(1500, "v1/h-0123456789ab/state/p/b", b"2"),
-        ];
+        // A row on non-default wire axes: `.zrec` v3 carries them as
+        // `qos_axes` (#614, FL6b), and the replay shows what was on the wire.
+        let mut fast = view(1500, "v1/h-0123456789ab/state/p/b", b"2");
+        {
+            let fast = Arc::get_mut(&mut fast).expect("one owner");
+            fast.priority = zenoh::qos::Priority::RealTime;
+            fast.congestion_control = zenoh::qos::CongestionControl::Drop;
+            fast.reliability = zenoh::qos::Reliability::BestEffort;
+            fast.express = true;
+        }
+        let rows = vec![view(0, "v1/h-0123456789ab/state/p/a", b"1"), fast];
         let mut bytes = Vec::new();
         let written = write_window(
             &rows,
@@ -347,9 +354,31 @@ mod tests {
         assert_eq!(state.rows[1].view.key, "v1/h-0123456789ab/state/p/b");
         assert_eq!(state.malformed, 0);
         assert_eq!(state.capture_dropped, 0);
+        let back = &state.rows[1].view;
+        assert_eq!(
+            (
+                back.priority,
+                back.congestion_control,
+                back.reliability,
+                back.express
+            ),
+            (
+                zenoh::qos::Priority::RealTime,
+                zenoh::qos::CongestionControl::Drop,
+                zenoh::qos::Reliability::BestEffort,
+                true
+            ),
+            "the row's wire axes survive the file"
+        );
         let crate::replay::ReplaySource::File { header, .. } = &state.source else {
             panic!("a loaded file is a file");
         };
         assert_eq!(header.selectors, vec!["v1/**".to_string()]);
+        assert_eq!(header.zrec, 3, "a window saves as `.zrec` version 3");
+        assert_eq!(
+            header.excluded.as_deref(),
+            Some(&zenkey_fleet::VERBATIM.map(String::from)[..]),
+            "`v1/**` names no verbatim chunk, and the file says it holds none (O5)"
+        );
     }
 }

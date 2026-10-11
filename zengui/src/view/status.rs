@@ -147,8 +147,7 @@ pub struct Status<'a> {
     pub seeding: usize,
     /// Seed phases that have completed since connect.
     pub seeded_watches: usize,
-    /// Cumulative seed coverage since connect: (cache replies, storage
-    /// replies, superseded).
+    /// Cumulative seed coverage since connect, leg by leg (#614, FL6b).
     pub seed_totals: crate::state::observation::SeedTotals,
     pub unreachable: bool,
     /// Why the persisted preferences are not in force, when a file could not
@@ -247,6 +246,27 @@ pub fn skeleton_text(skeleton: Option<&zenkey_fleet::SkeletonCoverage>) -> Strin
         Some(n) => text.push_str(&n.to_string()),
     }
     text
+}
+
+/// The seed summary (#92; zk2's late joiner since #614, FL6b): each leg's
+/// replies by the leg's own name — the `@adv` history and S4's state GET,
+/// never a storage — what the merge superseded, and, only when one ran
+/// short, how many legs reached their timeout.
+pub fn seed_text(seeded: usize, t: crate::state::observation::SeedTotals) -> String {
+    let mut label = format!(
+        "seeded {}: {} history · {} state · {} superseded",
+        kit::plural(seeded, "watch"),
+        t.history,
+        t.state,
+        t.superseded
+    );
+    if t.incomplete > 0 {
+        label.push_str(&format!(
+            " · {} possibly incomplete (a GET reached its timeout)",
+            kit::plural(t.incomplete, "leg")
+        ));
+    }
+    label
 }
 
 /// The key count, and — if the table has evicted — what that count omits.
@@ -375,16 +395,14 @@ pub fn strip<'a>(s: Status<'a>) -> Element<'a, Message> {
             kit::plural(s.seeding, "watch")
         )));
     } else if s.seeded_watches > 0 {
-        // `history` is the cache: same fact, the word the user reads.
-        let crate::state::observation::SeedTotals {
-            history: cache,
-            storage,
-            superseded,
-        } = s.seed_totals;
-        r = r.push(kit::muted(format!(
-            "seeded {}: {cache} cache · {storage} storage · {superseded} superseded",
-            kit::plural(s.seeded_watches, "watch")
-        )));
+        let label = seed_text(s.seeded_watches, s.seed_totals);
+        // A leg that ran to its timeout seeded possibly incompletely: a
+        // caution, never folded into the counts as if they were whole.
+        r = r.push(if s.seed_totals.incomplete > 0 {
+            kit::status_chip(Tone::Caution, label)
+        } else {
+            kit::muted(label)
+        });
     }
     if s.keys_unwatched > 0 {
         r = r.push(kit::muted(format!(
@@ -657,6 +675,90 @@ mod tests {
 
     /// RFC 09 §5.1 O6: a bounded observer reports what its bound cost. Without
     /// this, a key count that stops growing looks like a bus that went quiet.
+    /// #614 (FL6b): the seed summary names zk2's two legs — the `@adv`
+    /// history and S4's state GET — and never a storage; every boundary's
+    /// coverage folds in by leg, a leg switched off adds nothing, and a leg
+    /// that ran to its timeout is said, never folded into the counts as if
+    /// they were whole.
+    #[test]
+    fn the_seed_summary_names_the_history_and_state_legs() {
+        use crate::state::observation::SeedTotals;
+        use zenkey_fleet::report::{Asked, SeedLeg};
+
+        let mut totals = SeedTotals::default();
+        totals.add(&zenkey_fleet::SeedCoverage {
+            history: Asked::Asked(SeedLeg {
+                replies: 2,
+                complete: true,
+            }),
+            state: Asked::Asked(SeedLeg {
+                replies: 5,
+                complete: true,
+            }),
+            superseded: 1,
+        });
+        totals.add(&zenkey_fleet::SeedCoverage {
+            history: Asked::NotAsked,
+            state: Asked::Asked(SeedLeg {
+                replies: 0,
+                complete: true,
+            }),
+            superseded: 0,
+        });
+        assert_eq!(
+            seed_text(2, totals),
+            "seeded 2 watches: 2 history · 5 state · 1 superseded"
+        );
+
+        totals.add(&zenkey_fleet::SeedCoverage {
+            history: Asked::Asked(SeedLeg {
+                replies: 0,
+                complete: false,
+            }),
+            state: Asked::Asked(SeedLeg {
+                replies: 3,
+                complete: true,
+            }),
+            superseded: 0,
+        });
+        assert_eq!(totals.incomplete, 1);
+        assert_eq!(
+            seed_text(3, totals),
+            "seeded 3 watches: 2 history · 8 state · 1 superseded · 1 leg possibly \
+             incomplete (a GET reached its timeout)"
+        );
+    }
+
+    /// #614 (FL6b): the skeleton cell states what the declared keyspace was
+    /// built from — revisions placed, addresses presence named, what was
+    /// named and not held — and keeps "no presence read" and "admin n/a"
+    /// apart from zeros (O4).
+    #[test]
+    fn the_skeleton_cell_states_what_fed_it() {
+        let none = zenkey_fleet::ContractSet::new();
+        let empty = zenkey_fleet::Skeleton::build(&zenkey_fleet::Lens::new("", None, &none), None);
+        assert_eq!(skeleton_text(None), "skeleton: not built");
+        assert_eq!(
+            skeleton_text(Some(&empty.coverage)),
+            "skeleton: 0 revisions · no presence read · admin n/a"
+        );
+        let mut c = empty.coverage.clone();
+        c.revisions = 2;
+        c.addresses = 1;
+        c.unheld = 1;
+        c.admin_entities = Some(0);
+        c.presence = Some(zenkey_fleet::report::LensPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: false,
+            services: 1,
+        });
+        assert_eq!(
+            skeleton_text(Some(&c)),
+            "skeleton: 2 revisions · 1 address (presence possibly incomplete) · 1 not held \
+             · admin 0"
+        );
+    }
+
     #[test]
     fn the_key_count_discloses_eviction() {
         assert_eq!(keys_text(120, 0), "120 keys");

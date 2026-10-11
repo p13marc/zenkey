@@ -16,14 +16,14 @@ mod admin;
 mod blob;
 mod budget;
 mod consumers;
+mod declared;
 mod doctor;
 mod nodes;
-mod registry;
 
 pub use admin::admin;
 pub use blob::{BlobFetch, blob_fetch, blob_probe, blob_tree};
 pub use budget::budget;
 pub use consumers::consumers_of;
+pub use declared::declared;
 pub use doctor::doctor;
 pub use nodes::node_info;
-pub use registry::skeleton;

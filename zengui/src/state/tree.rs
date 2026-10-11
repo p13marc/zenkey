@@ -98,6 +98,19 @@ impl Default for TreeState {
 }
 
 impl TreeState {
+    /// Whether the last merge was made from `skeleton` — by identity, like
+    /// the cache's own check (#614, FL6b). A tree that never merged was
+    /// made from nothing, so it answers `false`.
+    pub(crate) fn merged_from(&self, skeleton: Option<&Arc<Skeleton>>) -> bool {
+        self.merged_cache
+            .as_ref()
+            .is_some_and(|c| match (&c.skeleton, skeleton) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            })
+    }
+
     /// The merged declared-∪-observed tree, from cache when its inputs have
     /// not moved (#177).
     pub(crate) fn merged(&mut self, dep: &Deployment, obs: &Observation) -> Arc<MergedNode> {

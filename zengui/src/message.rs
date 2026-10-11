@@ -72,7 +72,7 @@ impl SlotId {
 /// `yield` landing. A message lives where its failure is displayed, and every
 /// failure here reaches the status strip rather than a pane —
 /// `SessionsOpened(Err)` and `MonitorStarted(Err)` write `link`, and
-/// `SkeletonBuilt(Err)` is a `tracing::warn!` nobody's pane shows.
+/// `DeclaredRead(Err)` is a `tracing::warn!` nobody's pane shows.
 ///
 /// `ContractsLoaded` is here rather than under `Deployment` for the same
 /// reason: a contracts load is a *landing*, like `NamespacesListed`.
@@ -97,9 +97,15 @@ pub enum BusMsg {
     ),
     /// The monitor started (lazily — no data-plane watches yet unless eager).
     MonitorStarted(Result<Arc<Monitor>, crate::services::ServiceError>),
-    /// The declared-keyspace skeleton was (re)built (#614: zk2's, from the
-    /// admin space's declared entities alone until the lens feeds it).
-    SkeletonBuilt(Result<Arc<zenkey_fleet::Skeleton>, crate::services::ServiceError>),
+    /// The admin space's declared entities, read on the session in no
+    /// namespace (#614, FL6b): the skeleton's admin evidence. `Ok(None)` is
+    /// an admin space that did not answer — not asked, never "nothing
+    /// declared" (O4). The skeleton itself is built on the update thread
+    /// from the lens's inputs (`Deployment::refresh_skeleton`); this is the
+    /// one input that costs a query.
+    DeclaredRead(
+        Result<Option<Arc<zenkey_fleet::DeclaredEntities>>, crate::services::ServiceError>,
+    ),
     /// The namespace listing landed (#614, FL6a): which namespaces hold
     /// zk2 instance tokens, read on the session in no namespace. An empty
     /// list is *not* a verdict (RFC 05 §3.1), and a read that ran to its

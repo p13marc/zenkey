@@ -2,8 +2,8 @@
 //!
 //! **Lazy by default** (issue #85): connecting opens two sessions (one in the
 //! deployment's namespace, one in none, #614), loads the contracts, builds the
-//! *skeleton* — the
-//! declared keyspace (admin metadata until FL6b) — and starts
+//! *skeleton* — the declared keyspace, zk2's contract skeleton from the lens
+//! (FL6b) — and starts
 //! a monitor with **zero data-plane watches**. Observation is opt-in per
 //! subtree (the tree's watch toggles) or per scope (the location bar's
 //! "observe scope" toggle — the old eager mode made explicit); a selection fetches one

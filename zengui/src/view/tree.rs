@@ -171,6 +171,10 @@ pub struct RowShape {
     /// The registry-declared payload type, when the skeleton knows one.
     /// Interned like a chunk: type names repeat across every row of a slice.
     pub decl_type: Option<ChunkId>,
+    /// A declared operation's leaf (`…/@op/<name>`, #614, FL6b): a
+    /// queryable, which no subscription observes — so the row offers no
+    /// watch control. Structural: it comes off the skeleton's `DeclRef`.
+    pub operation: bool,
 }
 
 /// Where a drawn row's numbers come from (#177).
@@ -231,6 +235,9 @@ pub struct TreeRow {
     pub role: Option<Role>,
     /// The registry-declared payload type, when the skeleton knows one.
     pub decl_type: Option<String>,
+    /// A declared operation's leaf: no watch control (see
+    /// [`RowShape::operation`]).
+    pub operation: bool,
 }
 
 /// The flattened tree, plus what was left out.
@@ -317,6 +324,7 @@ impl Flattened {
             age_s: age_of(stats.as_ref(), self.now),
             role: shape.role,
             decl_type: shape.decl_type.map(|t| self.arena.chunk_str(t).to_string()),
+            operation: shape.operation,
         }
     }
 
@@ -510,6 +518,7 @@ fn walk(
                 is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
+                operation: is_operation(child.decl.as_ref()),
             });
             ctx.stats.push(stats);
             if expanded {
@@ -524,6 +533,12 @@ fn walk(
         }
         ctx.probe.truncate(probe_len);
     }
+}
+
+/// Whether a skeleton leaf declares an operation (#614, FL6b): a queryable,
+/// which a frontend offers no watch on (`zenkey_fleet::DeclRef::kind`).
+fn is_operation(decl: Option<&DeclRef>) -> bool {
+    decl.is_some_and(|d| d.kind == zenkey_model::authoring::Kind::Operation)
 }
 
 fn count_entries(node: &MergedNode, total: &mut usize) {
@@ -770,6 +785,7 @@ fn search_emit(
                 is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
+                operation: is_operation(child.decl.as_ref()),
             });
             ctx.stats.push(child.stats);
         }
@@ -1191,6 +1207,7 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, parent: Option<PathId>, d
                 .as_ref()
                 .and_then(|(_, _, d)| d.as_ref())
                 .map(|d| ctx.emit.arena.chunk(&d.type_name)),
+            operation: is_operation(child.leaf.as_ref().and_then(|(_, _, d)| d.as_ref())),
         });
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,
@@ -1805,9 +1822,11 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
 
     // Observation is opt-in, per subtree (issue #85). The toggle reflects
     // *this app's* watches, not global coverage — and only rows standing for
-    // a real wire subtree offer it (pivot groups are synthetic).
+    // a real wire subtree offer it (pivot groups are synthetic), and none
+    // standing for a declared operation (#614, FL6b): a queryable carries no
+    // samples, so a watch on it would observe nothing and say "quiet".
     let watch: Element<'a, Message> = match r.target {
-        Some(t) => {
+        Some(t) if !r.operation => {
             // Two shapes, not one shape in two colours (#193): the open eye
             // is a watch this app holds, the struck one is none — and the
             // struck one no longer shares a glyph with the Unregistered
@@ -1826,7 +1845,7 @@ fn row_view<'a>(shape: &RowShape, r: TreeRow, cx: RowContext<'a>) -> Element<'a,
                 .on_press(Message::Subject(SubjectMsg::WatchToggled(t)))
                 .into()
         }
-        None => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
+        _ => iced::widget::Space::new().width(Length::Fixed(18.0)).into(),
     };
 
     // The hover wash is what makes a 40k-row list trackable with the mouse

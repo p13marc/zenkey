@@ -20,22 +20,48 @@ use zenkey_fleet::{KeyTreeSnapshot, Monitor, WatchId};
 
 use crate::message::LinkState;
 
-/// What every seed boundary this session has closed contributed.
+/// What every seed boundary this session has closed contributed — zk2's
+/// late joiner (core §4.2; #614, FL6b), leg by leg.
 ///
 /// Named fields, because as `(usize, usize, u64)` the first two were written
 /// as `history_replies`/`storage_replies` and read as `cache`/`storage` — two
 /// `usize`s whose names already disagreed at the two ends, so a transposition
-/// compiled and misreported coverage (#357).
+/// compiled and misreported coverage (#357). The names are now the legs'
+/// own, at both ends: `SeedCoverage { history, state, superseded }` in, the
+/// strip's "h history · s state · k superseded" out.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SeedTotals {
-    /// Replies from the publisher-side cache. Rendered as "cache", which is
-    /// the user-facing word for the same fact: these come from
-    /// `cache_selector`, the advanced publisher's history.
+    /// Replies from the history leg: the `@adv` caches of the advanced
+    /// publishers present (core §2.5).
     pub history: usize,
-    /// Replies from a latest-value storage.
-    pub storage: usize,
-    /// Samples a later value superseded during the merge.
+    /// Replies from the state leg: S4's GET on the watched selector, target
+    /// `All` and consolidation `Latest` — answered by each key's owner, and
+    /// for a foreign key by whatever holds it. Never a storage read: a
+    /// storage on an owner's state is a deployment fault (S4).
+    pub state: usize,
+    /// Seed legs that did not run to their final reply — a GET that reached
+    /// its timeout (`SeedLeg::complete`), so what it seeded is possibly
+    /// incomplete (core §4.2, §8.1). Zero is "every leg ran to its end".
+    pub incomplete: usize,
+    /// Samples a newer stamp superseded during the merge.
     pub superseded: u64,
+}
+
+impl SeedTotals {
+    /// Fold one seed boundary's coverage in: each leg that ran adds its
+    /// replies, and is counted when it ran short of its final reply; a leg
+    /// switched off adds nothing (it was not asked).
+    pub fn add(&mut self, coverage: &zenkey_fleet::SeedCoverage) {
+        if let Some(leg) = coverage.history.get() {
+            self.history += leg.replies;
+            self.incomplete += usize::from(!leg.complete);
+        }
+        if let Some(leg) = coverage.state.get() {
+            self.state += leg.replies;
+            self.incomplete += usize::from(!leg.complete);
+        }
+        self.superseded += coverage.superseded;
+    }
 }
 
 sub_state! {
@@ -70,8 +96,8 @@ sub_state! {
         pub(crate) seeding: HashMap<WatchId, Option<String>>,
         /// The same tree paths as a set, for the tree's "seeding…" badges.
         pub(crate) seeding_paths: BTreeSet<String>,
-        /// Cumulative seed coverage since connect: (cache replies, storage
-        /// replies, superseded) — zeros are observations (O4).
+        /// Cumulative seed coverage since connect, leg by leg — zeros are
+        /// observations (O4).
         pub(crate) seed_totals: SeedTotals,
         /// Seed phases completed since connect.
         pub(crate) seeded_watches: usize,

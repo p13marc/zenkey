@@ -59,9 +59,10 @@ fn switching_base_keeps_what_the_user_typed() {
 /// The proof for a deleted line.
 ///
 /// `forget_deployment` used to reset `merged_cache`, and that line was
-/// dead: `merged`'s validity check compares the skeleton `Option`s, and
-/// after a forget the cached `Some` cannot match the new `None`. If both
-/// were already `None`, all three merge inputs are identical and reuse is
+/// dead: `merged`'s validity check compares the skeletons by identity, and
+/// after a forget the cached one cannot match the new one — `None` until
+/// #614, a fresh skeleton built from the contracts since FL6b. If both were
+/// already `None`, all three merge inputs are identical and reuse is
 /// *correct*. Deleting a line needs the same evidence as adding one.
 #[test]
 fn a_forgotten_deployment_needs_no_merge_cache_reset() {
@@ -83,6 +84,89 @@ fn a_forgotten_deployment_needs_no_merge_cache_reset() {
         !Arc::ptr_eq(&with_skeleton, &after),
         "a forgotten skeleton must not be served from cache"
     );
+}
+
+/// #614 (FL6b): the skeleton is zk2's, built from the lens's own inputs, and
+/// rebuilt when the lens moves — and only then. Ticks move nothing; a
+/// presence landing at the generation already held moves nothing; the next
+/// generation rebuilds it, and the tree's shape follows even when no key
+/// moved (the skeleton rung of the tick's shape check).
+#[test]
+fn the_skeleton_rebuilds_on_a_lens_move_and_only_then() {
+    use crate::message::BusMsg;
+    use crate::presence_link::PresenceUpdate;
+
+    let mut app = test_app();
+    let watched: Arc<[String]> = Arc::from(["**".to_string()]);
+    let walkthrough =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/walkthrough");
+    let loaded = Arc::new(crate::services::contracts::load_all(&[walkthrough]));
+    let _ = app.update(Message::Bus(BusMsg::ContractsLoaded(loaded)));
+    let first = app
+        .dep
+        .skeleton
+        .clone()
+        .expect("built when the contracts land");
+    assert!(
+        first
+            .root
+            .node(&["zk2", "{system}", "{service}", "nav.v2", "@op", "reset"])
+            .is_some(),
+        "no presence read: every revision held, under a symbolic address"
+    );
+    assert_eq!(first.coverage.presence, None);
+    let same = |app: &Zengui| Arc::ptr_eq(&first, app.dep.skeleton.as_ref().expect("built"));
+
+    for _ in 0..5 {
+        tick_into(&mut app, &tick(7, 0, 0, &watched));
+    }
+    assert!(same(&app), "a tick is not a lens move");
+
+    let landing = |generation| {
+        Arc::new(PresenceUpdate {
+            presence: Arc::new(zenkey_fleet::LivePresence::new(
+                zenkey_fleet::PresenceScope::all(),
+            )),
+            moved: Vec::new(),
+            catalog: None,
+            generation,
+            seed: zenkey_fleet::SeedOutcome::Complete,
+        })
+    };
+    let epoch = app.obs.presence_epoch;
+    let held = app.dep.lens_generation;
+    let _ = app.update(Message::Bus(BusMsg::Presence(epoch, landing(held))));
+    assert!(same(&app), "presence at the generation held is not a move");
+
+    let _ = app.update(Message::Bus(BusMsg::Presence(epoch, landing(held + 1))));
+    assert!(!same(&app), "the next generation rebuilds the skeleton");
+    assert!(
+        app.tree.merged_from(app.dep.skeleton.as_ref()),
+        "and the landing redraws the tree from it"
+    );
+    let second = app.dep.skeleton.clone().expect("built");
+    for _ in 0..5 {
+        tick_into(&mut app, &tick(7, 0, 0, &watched));
+    }
+    assert!(Arc::ptr_eq(
+        &second,
+        app.dep.skeleton.as_ref().expect("built")
+    ));
+
+    // A lens the tick polls moved (a background re-read): the skeleton is
+    // rebuilt with no key, eviction or watch moving — and the tick's shape
+    // check sees it, rather than retargeting a shape merged from the old.
+    app.dep.lens_generation += 1;
+    assert!(app.dep.refresh_skeleton());
+    assert!(!app.dep.refresh_skeleton(), "nothing moved since");
+    let before = app.tree.shape_rebuilt;
+    tick_into(&mut app, &tick(7, 0, 0, &watched));
+    assert_eq!(
+        app.tree.shape_rebuilt,
+        before + 1,
+        "a rebuilt skeleton rebuilds the shape"
+    );
+    assert!(app.tree.merged_from(app.dep.skeleton.as_ref()));
 }
 
 /// #177's whole claim, and the thing criterion cannot say because it

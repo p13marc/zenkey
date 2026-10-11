@@ -18,7 +18,9 @@
 //! is blind to — and presence, descriptors and contracts are read on a
 //! session **in** the deployment's namespace, the way the deployment's own
 //! consumers read them. The namespace is `--namespace` (`--base` its alias),
-//! and a namespace switch reopens only the second session.
+//! and a namespace switch reopens only the second session. Since FL6b the
+//! pump is zk2's monitor, and the tree starts from zk2's contract skeleton,
+//! built from the same lens the window resolves keys through.
 //!
 //! # The Elm loop, in four places
 //!

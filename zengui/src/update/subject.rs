@@ -191,8 +191,12 @@ fn select(
     };
     match &sub.current {
         // Lazy value-on-demand: one fetch per subject, nothing ambient
-        // (issue #85). Symbolic skeleton paths have no concrete value.
-        Subject::Key(key) if !key.contains('{') => services::value::fetch(session, key.clone()),
+        // (issue #85). Symbolic skeleton paths have no concrete value, and
+        // an operation's key has none either (#614, FL6b): a GET on it is a
+        // call (spec §5), so selecting a declared `@op` leaf asks nothing.
+        Subject::Key(key) if !key.contains('{') && !is_operation_key(key) => {
+            services::value::fetch(session, key.clone())
+        }
         // The nodes pane's one data-plane cost, paid on selection.
         Subject::Origin(origin) => {
             work.verdicts.node_detail = view::nodes::DetailState::Loading(origin.clone());
@@ -206,6 +210,14 @@ fn select(
         // A prefix is not a key, and neither is nothing.
         _ => Task::none(),
     }
+}
+
+/// Whether a wire key sits under an `@op` chunk — an operation's key, whose
+/// only GET is a call (spec §5). The chunk is verbatim (core §1.3), so no
+/// other key can carry it by accident.
+pub(crate) fn is_operation_key(key: &str) -> bool {
+    key.split('/')
+        .any(|c| c == zenkey_model::grammar::KindToken::Op.as_str())
 }
 
 fn toggle_watch(dep: &Deployment, obs: &mut Observation, path: String) -> Task<Message> {

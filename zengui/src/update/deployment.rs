@@ -203,7 +203,12 @@ pub(crate) fn update(
             // (its projection, the lens, the store): the link restarts over
             // the same presence monitor, reseeded.
             super::bus::restart_presence(obs);
-            super::bus::start_monitor(dep)
+            // The admin space's answer went with the forget, and the
+            // skeleton says "admin n/a" until it is asked again.
+            Task::batch([
+                super::bus::start_monitor(dep),
+                super::bus::read_declared(dep),
+            ])
         }
     }
 }
@@ -252,7 +257,7 @@ fn repoint(
     Task::batch([
         presence,
         super::bus::start_monitor(dep),
-        super::bus::build_skeleton(dep),
+        super::bus::read_declared(dep),
         reopen,
     ])
 }

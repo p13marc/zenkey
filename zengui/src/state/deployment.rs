@@ -25,13 +25,49 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use zenkey_fleet::Skeleton;
-use zenkey_fleet::{BundleStore, Catalog, IdentityCache, NamespaceListing};
+use zenkey_fleet::{
+    BundleStore, Catalog, ContractSet, DeclaredEntities, IdentityCache, NamespaceListing, Skeleton,
+};
 
 use crate::config::{NamespaceChoice, Settings};
 use crate::presence_link::{LensHandle, PresenceUpdate};
 use crate::services::contracts::LoadedContracts;
 use crate::services::value::LensInputs;
+
+/// What a skeleton was built from (#614, FL6b), held so a refresh can ask
+/// whether any of it moved: the namespace and the lens's generation by
+/// value, the catalog, the contracts and the admin answer by identity.
+///
+/// The `Arc`s are held, not their addresses: a held allocation cannot be
+/// freed and reused by a different value, so pointer equality here is
+/// exact. The contract store is not among them — it moves only with the
+/// generation, and without a catalog the skeleton places the offline set
+/// alone and never consults it.
+#[derive(Debug, Clone)]
+pub(crate) struct SkeletonInputs {
+    namespace: String,
+    generation: u64,
+    catalog: Option<Arc<Catalog>>,
+    contracts: Option<Arc<ContractSet>>,
+    admin: Option<Arc<DeclaredEntities>>,
+}
+
+impl PartialEq for SkeletonInputs {
+    fn eq(&self, other: &SkeletonInputs) -> bool {
+        fn same<T>(a: &Option<Arc<T>>, b: &Option<Arc<T>>) -> bool {
+            match (a, b) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+        }
+        self.namespace == other.namespace
+            && self.generation == other.generation
+            && same(&self.catalog, &other.catalog)
+            && same(&self.contracts, &other.contracts)
+            && same(&self.admin, &other.admin)
+    }
+}
 
 /// What the contract store holds, counted when it can change rather than per
 /// frame — the status strip's contracts cell (#614, FL6a).
@@ -61,7 +97,21 @@ sub_state! {
         /// panes still alive — why, fields, the request scaffold and the
         /// doctor's re-ask — until FL8, FL9 and FL10 move them.
         pub(crate) schema_store: Option<Arc<zenkey_fleet_v1::SchemaStore>>,
+        /// The declared keyspace the tree starts from (#614, FL6b): zk2's
+        /// contract skeleton, built from the lens's own inputs — the
+        /// namespace, the catalog, the store and the contracts held offline
+        /// — and the admin space's declared entities. Session-free, so it is
+        /// built here on the update thread, and rebuilt only when what it
+        /// was built from moved ([`Deployment::refresh_skeleton`]). `None` =
+        /// not built yet.
         pub(crate) skeleton: Option<Arc<Skeleton>>,
+        /// What [`Self::skeleton`] was built from, compared by identity on
+        /// every refresh: the one test of "the lens moved".
+        pub(crate) skeleton_inputs: Option<SkeletonInputs>,
+        /// The admin space's declared entities, read on the session in no
+        /// namespace (`services::sweep::declared`). `None` = not asked yet,
+        /// or no admin space answered — never "nothing declared" (O4).
+        pub(crate) admin_declared: Option<Arc<DeclaredEntities>>,
         /// The contracts held offline, as the last load gave them (#614,
         /// FL6a). `None` until a load lands, which is "not loaded" — never
         /// "none". User input, not evidence: kept across a namespace
@@ -119,6 +169,8 @@ impl Deployment {
             session: None,
             schema_store: None,
             skeleton: None,
+            skeleton_inputs: None,
+            admin_declared: None,
             contracts: None,
             store: BundleStore::new(timeout),
             contract_counts: ContractCounts::default(),
@@ -188,6 +240,36 @@ impl Deployment {
         self.lens_feed = None;
         self.catalog = None;
         self.recount_contracts();
+        // The lens's inputs moved — no catalog, maybe other contracts — and
+        // the declared keyspace is built from exactly those.
+        self.refresh_skeleton();
+    }
+
+    /// Rebuild the skeleton when what it is built from moved (#614, FL6b):
+    /// the namespace, the lens's generation, its catalog, the contracts
+    /// held offline, or the admin space's answer. `true` when it rebuilt.
+    ///
+    /// The one place the skeleton is built, and the reason it is not a
+    /// task: `Skeleton::build` is session-free and costs one walk over the
+    /// revisions placed — the same order of work as one flatten, paid on a
+    /// lens move rather than per tick — so the tree never shows a skeleton
+    /// built under one lens beside identities resolved under another.
+    pub(crate) fn refresh_skeleton(&mut self) -> bool {
+        let inputs = SkeletonInputs {
+            namespace: self.settings.namespace.clone(),
+            generation: self.lens_generation,
+            catalog: self.catalog.clone(),
+            contracts: self.contracts.as_ref().map(|c| Arc::clone(&c.set)),
+            admin: self.admin_declared.clone(),
+        };
+        if self.skeleton.is_some() && self.skeleton_inputs.as_ref() == Some(&inputs) {
+            return false;
+        }
+        let lens = self.lens_inputs();
+        let skeleton = Skeleton::build(&lens.lens(), self.admin_declared.as_deref());
+        self.skeleton = Some(Arc::new(skeleton));
+        self.skeleton_inputs = Some(inputs);
+        true
     }
 
     /// Count what the store holds, for the strip. Cheap enough per change
