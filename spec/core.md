@@ -895,8 +895,9 @@ from S4's GET and follows a subscription.
   - Two samples with equal stamps are the same mutation, kept once.
   - Stamps compare as `Latest` compares replies (§4.1), and within one
     timestamp id that is by time (§4.3). Two ids for one key within one
-    seed are a new epoch whose old values are still in transit, which is
-    §4.3's residual risk.
+    seed mean the owner started a new epoch inside the seed's window: a
+    value of the old epoch that arrives after one of the new is §4.3's
+    residual risk.
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
   when each key it matches has one owner (P3, §6): `Latest` then
