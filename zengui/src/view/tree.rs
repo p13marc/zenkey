@@ -171,9 +171,11 @@ pub struct RowShape {
     /// The registry-declared payload type, when the skeleton knows one.
     /// Interned like a chunk: type names repeat across every row of a slice.
     pub decl_type: Option<ChunkId>,
-    /// A declared operation's leaf (`…/@op/<name>`, #614, FL6b): a
-    /// queryable, which no subscription observes — so the row offers no
-    /// watch control. Structural: it comes off the skeleton's `DeclRef`.
+    /// A declared operation's leaf (`…/@op/<name>`), or a row under an `@op`
+    /// chunk (#614, FL6b): a queryable carries no samples, and a watch's
+    /// seed would GET it — a GET on an operation's key is a call (spec §5)
+    /// — so the row offers no watch control. Structural: it comes off the
+    /// skeleton's `DeclRef` and the path's own chunks.
     pub operation: bool,
 }
 
@@ -518,7 +520,7 @@ fn walk(
                 is_leaf: stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
-                operation: is_operation(child.decl.as_ref()),
+                operation: is_operation(child.decl.as_ref(), ctx.arena, path),
             });
             ctx.stats.push(stats);
             if expanded {
@@ -535,10 +537,13 @@ fn walk(
     }
 }
 
-/// Whether a skeleton leaf declares an operation (#614, FL6b): a queryable,
-/// which a frontend offers no watch on (`zenkey_fleet::DeclRef::kind`).
-fn is_operation(decl: Option<&DeclRef>) -> bool {
+/// Whether a row stands for an operation (#614, FL6b): a skeleton leaf
+/// that declares one (`zenkey_fleet::DeclRef::kind`), or any row whose real
+/// path crosses the `@op` chunk — verbatim (core §1.3), so nothing else
+/// lives under it. A frontend offers no watch on either.
+fn is_operation(decl: Option<&DeclRef>, arena: &PathArena, real: PathId) -> bool {
     decl.is_some_and(|d| d.kind == zenkey_model::authoring::Kind::Operation)
+        || arena.contains_chunk(real, zenkey_model::grammar::KindToken::Op.as_str())
 }
 
 fn count_entries(node: &MergedNode, total: &mut usize) {
@@ -785,7 +790,7 @@ fn search_emit(
                 is_leaf: child.stats.map(|s| s.count > 0).unwrap_or(false),
                 role,
                 decl_type: child.decl.as_ref().map(|d| ctx.arena.chunk(&d.type_name)),
-                operation: is_operation(child.decl.as_ref()),
+                operation: is_operation(child.decl.as_ref(), ctx.arena, path),
             });
             ctx.stats.push(child.stats);
         }
@@ -1207,7 +1212,16 @@ fn flatten_pnode(node: &PNode, ctx: &mut PivotCtx<'_>, parent: Option<PathId>, d
                 .as_ref()
                 .and_then(|(_, _, d)| d.as_ref())
                 .map(|d| ctx.emit.arena.chunk(&d.type_name)),
-            operation: is_operation(child.leaf.as_ref().and_then(|(_, _, d)| d.as_ref())),
+            operation: is_operation(
+                child.leaf.as_ref().and_then(|(_, _, d)| d.as_ref()),
+                ctx.emit.arena,
+                child
+                    .leaf
+                    .as_ref()
+                    .map(|(p, _, _)| *p)
+                    .or(child.target)
+                    .unwrap_or(child_path),
+            ),
         });
         // The row's own numbers are the group's *aggregates*, which is why
         // these can never be retargeted: `agg_*` sums a synthetic membership,

@@ -139,6 +139,18 @@ pub fn scope(
         async move {
             let mut ids = Vec::new();
             for sel in &selectors {
+                // A selector that names `@op` (a custom scope can) is
+                // watched, and never seeded (#614, FL6b): both seed legs
+                // GET it, and a GET on an operation's key is a call.
+                let policy = if crate::scope::names_operation(sel) {
+                    zenkey_fleet::SeedPolicy {
+                        history: false,
+                        state: false,
+                        ..policy
+                    }
+                } else {
+                    policy
+                };
                 match monitor.watch_seeded(sel, policy).await {
                     Ok(id) => ids.push(id),
                     Err(e) => tracing::warn!("scope watch {sel}: {e}"),

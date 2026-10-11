@@ -141,6 +141,24 @@ impl PathArena {
         out
     }
 
+    /// Whether any chunk of the path spells `s` — one interned-id lookup,
+    /// then a walk up the parent links comparing ids, with no allocation.
+    /// What the tree asks of a verbatim chunk (`@op`, #614 FL6b).
+    pub fn contains_chunk(&self, id: PathId, s: &str) -> bool {
+        let Some(&want) = self.index.get(s) else {
+            return false;
+        };
+        let mut cur = Some(id);
+        while let Some(c) = cur {
+            let node = self.nodes[c.0 as usize];
+            if node.chunk == want {
+                return true;
+            }
+            cur = node.parent;
+        }
+        false
+    }
+
     /// Root-first chunk spellings — what `KeyTreeSnapshot::node` takes.
     /// Replaces the `split('/')` that re-derived them from a display string.
     pub fn chunks_of(&self, id: PathId) -> Vec<&str> {

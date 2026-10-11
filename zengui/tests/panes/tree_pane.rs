@@ -658,13 +658,14 @@ params = { axis = "string" }
 cardinality = 3
 "#;
 
-/// #614 (FL6b): a declared operation's row offers no watch control — a
-/// queryable carries no samples, and a watch on it would read "quiet" about
-/// nothing. Pinned on the open eye a held watch draws: put the operation's
-/// path among this app's watches, and no eye appears; put a stream's there,
-/// and one does.
+/// #614 (FL6b): a declared operation's row offers no watch control, and
+/// neither does the `@op` row holding it — a queryable carries no samples,
+/// and a watch's seed would GET it, which is a call. Pinned on the open eye
+/// a held watch draws: put the operation's path (or its `@op` parent) among
+/// this app's watches, and no eye appears; put a stream's there, and one
+/// does.
 #[test]
-fn an_operation_leaf_offers_no_watch_control() {
+fn an_operation_row_offers_no_watch_control() {
     use zengui::view::kit::Icon;
 
     let world = common::World::new();
@@ -703,13 +704,21 @@ fn an_operation_leaf_offers_no_watch_control() {
             sp: sp(),
         }))
     }
-    let held_on_reset = BTreeSet::from([reset.clone()]);
+    let held_on_reset = BTreeSet::from([reset.clone(), format!("{nav}/@op")]);
     let mut ui = draw(&flat, &facts, &verdicts, &held_on_reset, &seeding);
     assert!(ui.find("reset").is_ok(), "the operation's leaf is drawn");
     assert!(
         ui.find(eye.as_str()).is_err(),
-        "an operation's row has no watch control to show a watch in"
+        "an operation's rows have no watch control to show a watch in"
     );
+    for (i, r) in flat.rows.iter().enumerate() {
+        let path = flat.arena.display(r.path);
+        assert_eq!(
+            flat.row(i).operation,
+            path.split('/').any(|c| c == "@op"),
+            "{path}: marked exactly when it stands under `@op`"
+        );
+    }
     let held_on_position = BTreeSet::from([position.clone()]);
     let mut ui = draw(&flat, &facts, &verdicts, &held_on_position, &seeding);
     assert!(
