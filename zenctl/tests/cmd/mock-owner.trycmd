@@ -29,6 +29,30 @@ synthetic members stand in where --member named none: <param>-1, <param>-2
 
 ```
 
+An event keeps its declared rate whatever `--rate` asks: the runtime's
+event writer refuses an occurrence beyond it (spec §2.7), so the plan holds
+the event to it and says so once, on its entry, naming the rate. Its
+occurrences are capped over the run and paced within the rate's window,
+whatever `--pattern`. `tc.netem.v1`'s `applied` is `low`, one a minute.
+
+```console
+$ zenctl gen host-a/tc tc.netem.v1 --contracts ../examples/zk2/tcgui/tc.netem.v1.toml --member 'config/{ns}/{iface}=default/eth0' --member 'plug/{ns}/{iface}=default/eth0' --member 'qdisc/{ns}/{iface}=default/eth0' --rate 10 --duration 300 --dry-run --format table --color never
+plan: a mock owner at host-a/tc implementing tc.netem.v1@sha256:30b491116ef6a534…, for 300s (seed 42)
+  zk2/host-a/tc/tc.netem.v1/@op/config/*/*/set [json:TcResponse, application/json] answers calls
+    ↳ answers each call with one synthesized response; served over its whole template
+  zk2/host-a/tc/tc.netem.v1/@op/plug/*/*/set [json:PlugResponse, application/json] answers calls
+    ↳ answers each call with one synthesized response; served over its whole template
+  zk2/host-a/tc/tc.netem.v1/events/applied [json:TcAppliedEvent, application/json] 0.02 Hz, qos data/block/reliable, at most 5 occurrence(s)
+    ↳ --rate 10 Hz is above its declared rate low (at most 1 per minute): it keeps its declared rate (core §2.7)
+  zk2/host-a/tc/tc.netem.v1/state/config/default/eth0 [json:TcConfigUpdate, application/json] 10.00 Hz, qos data/block/reliable
+  zk2/host-a/tc/tc.netem.v1/state/plug/default/eth0 [json:PlugState, application/json] 10.00 Hz, qos data/block/reliable
+  zk2/host-a/tc/tc.netem.v1/stream/qdisc/default/eth0 [json:TcStatisticsUpdate, application/json] 10.00 Hz, qos data/drop/best_effort
+plan: 6 entr(y|ies) at host-a/tc, every sample through the runtime's writers — the contract's QoS and Encoding, the owner's stamp on state, a fresh ULID per event (spec §2.4, §4.2 S1, §2.6)
+the descriptor's meta carries the synthetic marker {"seed":42,"synthetic":true,"tool":"zenctl gen"}: one writer per key makes it a statement about every sample on these keys (spec §3.3, §6)
+--dry-run: nothing brought up
+
+```
+
 A `--member` is the template's values in order, joined by `/`: one that does
 not fit the template is refused by name, and so is one for an operation,
 which a mock serves over its whole template.

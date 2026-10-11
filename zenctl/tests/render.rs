@@ -1601,6 +1601,7 @@ plan: a mock owner at host-a/tc implementing tc.netif.v1@sha256:4f4f4f4f4f4f4f4f
         sent: 240,
         calls: 3,
         failed: 2,
+        refused: 0,
         first_errors: vec!["zk2/host-a/tc/tc.netif.v1/state/namespaces: clock ahead".into()],
     };
     assert_data_eq!(
@@ -1612,6 +1613,31 @@ host-a/tc as instance 0123456789abcdef: sent 240 sample(s) over 5.0s across 12 e
 "#]]
     );
     assert!(notes(&report).contains("counted, never skipped"));
+    assert!(
+        !notes(&report).contains("refused"),
+        "no refusal, no word of one"
+    );
+    // A write the runtime's budget refused is its own count (#744).
+    let refused = zenkey_fleet::report::GenReport {
+        failed: 0,
+        refused: 1,
+        first_errors: vec!["zk2/host-a/tc/tc.netem.v1/events/applied: refused (core §2.7)".into()],
+        ..report
+    };
+    assert_data_eq!(
+        table(&refused),
+        str![[r#"
+host-a/tc as instance 0123456789abcdef: sent 240 sample(s) over 5.0s across 12 entr(y|ies), answered 3 call(s); 0 not sent, 1 refused by the runtime's budget
+  ✗  zk2/host-a/tc/tc.netem.v1/events/applied: refused (core §2.7)
+
+"#]]
+    );
+    let n = notes(&refused);
+    assert!(
+        n.contains("1 write(s) refused by the runtime's own budget"),
+        "{n}"
+    );
+    assert!(!n.contains("not sent —"), "{n}");
 }
 
 /// Every `Render` impl is drawn somewhere in this file — the mechanical floor

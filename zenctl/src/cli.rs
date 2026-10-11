@@ -205,8 +205,9 @@ pub(crate) struct GenArgs {
     #[arg(long = "bind", value_name = "ROLE=PROVIDERS")]
     pub(crate) binds: Vec<String>,
     /// Override every stream's and state's rate (Hz). Default: 1 Hz for a
-    /// stream, a state re-put every 2 s; an event stays within its
-    /// declared rate whatever this says (spec §2.6).
+    /// stream, a state re-put every 2 s; an event keeps its declared rate
+    /// whatever this says, and the plan says so where this asks for more
+    /// (spec §2.7).
     #[arg(long, value_name = "HZ")]
     pub(crate) rate: Option<f64>,
     /// Send-timing shape (all deterministic under --seed).

@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `gen` keeps an event's declared rate (#744)
+
+Core §2.7's rate binds each event member within any period of its own
+length, and the runtime's event writer refuses an occurrence beyond it.
+`gen --rate` above an event's rate ran into those refusals and counted
+each one as a failure (590 in a 125 s run of `tc.netem.v1` at
+`--rate 10`, exit 1).
+
+| Before | Now | Notes |
+|---|---|---|
+| `gen --rate <HZ>` above an event's declared rate: the event put at `<HZ>`, each occurrence past the rate refused and counted in `failed`, exit 1 | the event keeps its declared rate, and its plan entry says so once: `--rate 10 Hz is above its declared rate low (at most 1 per minute): it keeps its declared rate (core §2.7)` | Streams and states take `--rate` as given. The event's `rate_hz` in the plan is its declared rate's (one a minute for `low`, one an hour for `rare`, n an hour for `burst(n/h)`); its `events_cap` is unchanged |
+| `--pattern jitter` and `burst`: an event's occurrences paced by the pattern alone | and never before the runtime's window on its rate would admit them | A steady run without `--rate` is unchanged: its rate was already within the declared one. Jitter's shortened intervals and burst's 1 s ones had the runtime refuse `low` events too, with no `--rate` at all |
+| `gen`'s report: `failed` counted both a put that failed and a write the runtime refused | `refused`: the writes the runtime's budget refused (core §2.7), apart from `failed`, always present | Zero while every event keeps its rate. Exit 1 on either. The table says `N refused by the runtime's budget` only when there is one, with a note |
+
 ## Unreleased (`main`, zk2) — a stalled reader, and a tool's inspection (#753, #748)
 
 Core 0.27 (spec §2.7) has a window's reader watch itself: a router that

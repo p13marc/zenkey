@@ -68,6 +68,8 @@ pub struct GenPlanEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qos: Option<QosView>,
     /// Samples per second; absent for an operation, which answers calls.
+    /// An event's never asks more than its declared rate (core §2.7): a
+    /// `--rate` above it is held back, and `note` says so (#744).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_hz: Option<f64>,
     /// An event's cap on occurrences in the run: its declared rate, over
@@ -121,8 +123,15 @@ pub struct GenReport {
     /// Calls answered, every operation together.
     pub calls: u64,
     /// Samples not sent: a value the synthesizer could not make valid, or
-    /// a put the runtime refused. Counted, never skipped.
+    /// a put that failed. Counted, never skipped.
     pub failed: u64,
+    /// Writes the runtime refused under its own budget, nothing published
+    /// (core §2.7: an occurrence beyond its event's rate, a member beyond
+    /// its resource's bound). Counted apart from `failed`, never silently:
+    /// `gen` paces every event within its declared rate (#744), so a
+    /// refusal here is a write it should not have attempted.
+    pub refused: u64,
+    /// The first few of either, each naming its key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub first_errors: Vec<String>,
 }
@@ -320,13 +329,27 @@ mod tests {
             sent: 9,
             calls: 1,
             failed: 0,
+            refused: 0,
             first_errors: vec![],
         };
         assert_eq!(
             serde_json::to_value(&r).unwrap(),
             json!({"address": "host-a/tc", "instance": "0123456789abcdef", "duration_s": 2.0,
-                   "entries": 3, "sent": 9, "calls": 1, "failed": 0})
+                   "entries": 3, "sent": 9, "calls": 1, "failed": 0, "refused": 0})
         );
+        // A refusal by the runtime's budget is its own count, beside the
+        // failures, with its example among the first errors (#744).
+        let refused = GenReport {
+            refused: 2,
+            first_errors: vec!["zk2/host-a/tc/tc.netem.v1/events/applied: refused".into()],
+            ..r
+        };
+        let v = serde_json::to_value(&refused).unwrap();
+        assert_eq!(
+            (v["failed"].clone(), v["refused"].clone()),
+            (json!(0), json!(2))
+        );
+        assert_eq!(v["first_errors"].as_array().map(Vec::len), Some(1));
     }
 
     /// A served call: the key, what it binds, the request rendered, the

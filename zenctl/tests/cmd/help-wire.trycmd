@@ -1271,7 +1271,7 @@ Options:
           A role binding, `ROLE=SYSTEM/SERVICE[,…]`, repeatable (R1): a contract's required role must be bound, or a service does not start
 
       --rate <HZ>
-          Override every stream's and state's rate (Hz). Default: 1 Hz for a stream, a state re-put every 2 s; an event stays within its declared rate whatever this says (spec §2.6)
+          Override every stream's and state's rate (Hz). Default: 1 Hz for a stream, a state re-put every 2 s; an event keeps its declared rate whatever this says, and the plan says so where this asks for more (spec §2.7)
 
       --pattern <PATTERN>
           Send-timing shape (all deterministic under --seed)

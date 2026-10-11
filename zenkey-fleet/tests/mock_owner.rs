@@ -165,6 +165,48 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     assert_eq!(report.failed, 0, "{report:?}");
 }
 
+/// #744: a `--rate` above an event's declared rate (`tc.netem.v1`'s
+/// `events/applied`, `low`) runs, and holds the event to its rate: the plan
+/// says so on the entry, and the run ends with nothing failed and nothing
+/// the runtime's budget refused, the streams and states at the rate asked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_holds_an_event_to_its_declared_rate_and_says_so() {
+    let (_router, ep) = router(None).await;
+    let owners = client(&ep).await;
+    let spec = GenSpec {
+        address: addr("host-b/tc"),
+        revisions: vec![revision("tcgui/tc.netem.v1")],
+        members: vec![],
+        bindings: BTreeMap::new(),
+        rate_hz: Some(10.0),
+        pattern: GenPattern::Steady,
+        duration: Duration::from_secs(3),
+        seed: 7,
+        tool: "mock_owner test".into(),
+    };
+    let plan = gen_plan(&spec).unwrap();
+    let applied = plan
+        .entries
+        .iter()
+        .find(|e| e.resource == "events/applied")
+        .expect("the event's entry");
+    assert_eq!(applied.rate_hz, Some(1.0 / 60.0));
+    assert!(
+        applied
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("above its declared rate low")
+                && n.contains("it keeps its declared rate")),
+        "{applied:?}"
+    );
+    let report = run_gen(&owners, &spec, &plan, |_| {}).await.unwrap();
+    assert_eq!((report.failed, report.refused), (0, 0), "{report:?}");
+    assert!(
+        report.sent > 10,
+        "the streams and states at 10 Hz: {report:?}"
+    );
+}
+
 /// `serve` answers one operation with its fixed reply and logs each call
 /// with its request decoded and its claimed metadata (O7); every other
 /// operation is answered too — an optional one `unavailable`, a required
