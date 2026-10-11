@@ -163,9 +163,11 @@ pub struct ArchiveSpec {
     pub peers: Vec<String>,
 }
 
-/// A tool: bindings and calls, and no address of its own. A tool appears
-/// in no binding graph (it holds no instance token), and `self.system` /
-/// `self.service` mean nothing to it (R2).
+/// A tool: bindings, calls and inspected services, and no address of its
+/// own. A tool appears in no binding graph (it holds no instance token),
+/// and `self.system` / `self.service` mean nothing to it (R2). "Tool" is a
+/// role a principal plays (§11.1, 0.27): a principal that runs services
+/// may run a tool too, and holds both sets of grants.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolSpec {
@@ -180,6 +182,13 @@ pub struct ToolSpec {
     pub bindings: BTreeMap<String, BindingSpec>,
     #[serde(default)]
     pub calls: Vec<CallsSpec>,
+    /// The services it inspects without binding or calling them (§11.1,
+    /// 0.27): presence alone — liveliness reads and the descriptor, on each
+    /// one's `…/@zk/**` — and none of their data. Service addresses, exact
+    /// or wildcard, as a binding's providers: a doctor or `zenctl service
+    /// list` reads `*/*`.
+    #[serde(default)]
+    pub inspects: Vec<String>,
 }
 
 /// One role's binding (R1, R2).
@@ -389,7 +398,8 @@ pub enum AclGrantKind {
     /// (§2.5, §11.1).
     History,
     /// Consume and Call (0.8): liveliness reads on the `@zk` subtree of each
-    /// service named (§8.1).
+    /// service named (§8.1), and the descriptor (0.14); a tool's inspected
+    /// services hold this alone (0.27).
     Presence,
     /// Call (§11.1): query on specific `…/@op/<op>` keys.
     Call,

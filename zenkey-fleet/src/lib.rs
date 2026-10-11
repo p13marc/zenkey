@@ -45,13 +45,16 @@
 //!
 //! * **[`bus`]** — everything whose job needs a live session. `session`,
 //!   `query`, `monitor`, `write`, `serve`, `admin`, `scout`, `seed` (a late
-//!   joiner's: subscribe, then S4's GET, merged by stamp, core §4.2 0.26),
+//!   joiner's: subscribe, then S4's GET, merged by stamp, core §4.2 0.26,
+//!   by `zenkey_model::seed` since 0.27),
 //!   and zk2's `presence` (its `PresenceFeed` keeps `model::presence_live`
 //!   current from a monitor, #614), `contracts`, `operation`, `consume`,
 //!   `lens` (its `LensFeed` follows presence moves and re-reads when
 //!   nudged, #614 FL4), `why`
 //!   (the reads a silence is explained from, #702), `conform` (a
-//!   service's suite, #703) and `health` (a `health.v1` reading, #721). The
+//!   service's suite, #703), `stall` (what a window's reader sees of its
+//!   own receive path: its transports and a ticker, core §2.7 0.27) and
+//!   `health` (a `health.v1` reading, #721). The
 //!   RFC 05 §2.1 fan-in discipline lives here exactly once, in
 //!   [`bus::query::fleet_get`], and everything in the layer that asks a raw
 //!   question goes through it. Every liveliness GET goes through

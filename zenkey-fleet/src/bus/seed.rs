@@ -221,30 +221,43 @@ impl futures_core::Stream for SeededSubscriber {
     }
 }
 
-/// The late joiner's merge (core §4.2, 0.26): one entry per key, and a
-/// sample is admitted only when its stamp is newer than the one held,
-/// whichever path — reply or live — brought either.
+/// The late joiner's merge (core §4.2, 0.26; 0.27, #752): one entry per
+/// key, and a sample is admitted only when its stamp is newer than the one
+/// held, whichever path — reply or live — brought either. The decision is
+/// `zenkey_model::seed::admits`, the pure function
+/// `spec/conformance/seed/merge.json` pins:
 ///
 /// - Stamps compare as zenoh's `Latest` compares replies (§4.1): by time,
-///   which within one timestamp id is the owner's order (§4.3). Two ids for
-///   one key inside one seed are §4.3's residual risk, not resolved here.
+///   which within one timestamp id is the owner's order (§4.3); on equal
+///   times by the id's bytes, little-endian, as zenoh's `Timestamp`
+///   compares them ([`stamp_of`]). Two ids for one key inside one seed are
+///   §4.3's residual risk, not resolved here.
 /// - Equal stamps are one mutation: the second copy is suppressed.
 /// - A deletion (a live delete, or a `reply_del` with the deletion's stamp,
 ///   S3) is a sample like any other, and merges the same way: never
 ///   dropped, never mistaken for an absence.
-/// - Stamped beats unstamped; unstamped against unstamped passes through.
-///   An owner stamps every mutation (S1), so an unstamped sample is no
-///   conforming owner's: a foreign key's, on a deployment without
-///   timestamping that has opted out of last-writer-wins, where
-///   suppressing would be guessing.
+/// - Stamped beats unstamped; unstamped against unstamped passes through,
+///   the later arrival replacing the earlier. An owner stamps every
+///   mutation (S1), so an unstamped sample is no conforming owner's: a
+///   foreign key's, from a session with no HLC through no router that
+///   stamps, ranked below every stamp as `Latest` ranks an unstamped reply.
 ///
 /// Every suppression is counted ([`SeedCoverage::superseded`]).
 ///
 /// `pub(crate)`: [`crate::Monitor::watch_seeded`] runs the same merge over
 /// its seed phase (issue #92) — one discipline, not two.
 pub(crate) struct Merge {
-    latest: Mutex<HashMap<String, Option<zenoh::time::Timestamp>>>,
+    latest: Mutex<HashMap<String, zenkey_model::seed::Held>>,
     superseded: std::sync::atomic::AtomicU64,
+}
+
+/// A zenoh timestamp as the merge compares it: its NTP64 time, and its id's
+/// 128-bit value (`zenkey_model::seed::Stamp`, whose order is zenoh's).
+pub(crate) fn stamp_of(ts: &zenoh::time::Timestamp) -> zenkey_model::seed::Stamp {
+    zenkey_model::seed::Stamp {
+        time: ts.get_time().as_u64(),
+        id: u128::from_le_bytes(ts.get_id().to_le_bytes()),
+    }
 }
 
 impl Merge {
@@ -261,16 +274,11 @@ impl Merge {
 
     pub(crate) fn admit(&self, view: &SampleView) -> bool {
         let mut latest = self.latest.lock().expect("merge lock");
-        let entry = latest.entry(view.key.clone()).or_insert(None);
-        let admit = match (&entry, &view.timestamp) {
-            (None, _) => true,
-            (Some(_), None) => false, // stamped state beats an unstamped echo
-            (Some(prev), Some(ts)) => ts > prev,
-        };
+        let held = latest.entry(view.key.clone()).or_default();
+        let incoming = view.timestamp.as_ref().map(stamp_of);
+        let admit = zenkey_model::seed::admits(*held, incoming);
         if admit {
-            if view.timestamp.is_some() || entry.is_none() {
-                *entry = view.timestamp;
-            }
+            *held = held.after(incoming);
         } else {
             self.superseded
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -455,6 +463,45 @@ mod tests {
             source: None,
             received: std::time::Instant::now(),
         }
+    }
+
+    /// The merge's order is zenoh's (core §4.2, 0.27, #752): for every pair
+    /// of stamps, `zenkey_model::seed::Stamp` compares as zenoh's
+    /// `Timestamp` does — time, then the id's little-endian bytes — and
+    /// spells itself as zenoh does. Ids whose integer order and byte order
+    /// disagree are among them (`2` and `100`, two real zids).
+    #[test]
+    fn the_merge_orders_stamps_as_zenoh_does() {
+        use zenoh::time::{NTP64, Timestamp, TimestampId};
+        let ids = [
+            "1",
+            "2",
+            "ff",
+            "100",
+            "1ff",
+            "2fe",
+            "a1b2",
+            "a2b2",
+            "7db42403f70edc0d9e28614c0eeeb1b1",
+            "4baa50f80d37a5dda951691aac616ef2",
+            "10000000000000000000000000000000",
+        ];
+        let stamps: Vec<Timestamp> = [5u64, 6, 7_386_690_599_959_157_260]
+            .into_iter()
+            .flat_map(|t| {
+                ids.iter().map(move |id| {
+                    Timestamp::new(NTP64(t), id.parse::<TimestampId>().expect("an id"))
+                })
+            })
+            .collect();
+        for a in &stamps {
+            assert_eq!(stamp_of(a).to_string(), a.to_string());
+            for b in &stamps {
+                assert_eq!(stamp_of(a).cmp(&stamp_of(b)), a.cmp(b), "{a} against {b}");
+            }
+        }
+        let low = |id: &str| Timestamp::new(NTP64(5), id.parse::<TimestampId>().unwrap());
+        assert!(low("100") < low("2"), "zenoh: the low byte decides");
     }
 
     /// Deep-review D5: the seed channel is bounded, and what the bound

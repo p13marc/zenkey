@@ -120,7 +120,8 @@ providers = ["vehicle-01/*"]
 # ── the vehicle's notifier ─────────────────────────────────────────────────
 #
 # zenwatch (#614, FL3) is one principal that runs a service and inspects the
-# others. As the service `vehicle-01/zenwatch` it owns its prefix
+# others, two roles one principal plays (core §11.1, 0.27). As the service
+# `vehicle-01/zenwatch` it owns its prefix
 # (zenwatch.v1, and health.v1 through the runtime). As the tool `zenwatch`
 # it reads what its rules and its scheduled doctor read: every service's
 # presence and health.v1 state, on the doctor's own selectors
@@ -192,11 +193,19 @@ records = ["zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*"]
 # The operators' console: it reads the vehicle's navigation and thrusters,
 # and calls what it may: the thrusters' arm and disarm, navigation's
 # set_origin. Nothing else on the vehicle is callable from the ground.
+# `ground` runs services and this tool: the shapes compose per principal
+# (core §11.1, 0.27), and its writes stay under its own prefixes.
 [[tool]]
 name = "ops"
 # Reads the routers' admin space, for S4's check and the doctor (core
 # §4.2, §11.1 Tool, 0.15): under deny, no other grant reaches it.
 admin = true
+# Inspects every service without binding or calling it (core §11.1, 0.27):
+# the doctor and `zenctl service list` read presence and descriptors on
+# `zk2/*/*/@zk/**`, and access control works by inclusion (§11.3), so a
+# grant narrower than that selector refuses the whole read, complete and
+# empty (§8.1). Presence alone: none of their data.
+inspects = ["*/*"]
 
 [tool.bindings.nav]
 interface = "nav.v2"

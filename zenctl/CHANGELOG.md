@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a stalled reader, and a tool's inspection (#753, #748)
+
+Core 0.27 (spec §2.7) has a window's reader watch itself: a router that
+gives up on a stalled reader drops what it queued for it, and the reader
+may never see the owner's token withdrawn. Spec §11.1 makes a tool a role
+a principal plays, with services it inspects.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`'s `budget-window` and `rate`: lossless when this run lost nothing and the resource is reliable with `block` | and this run's own receive path never stalled, over the window and the watch after it | A transport of the run's own session that closed, or a stall of its process longer than the bound, leaves the window unobservable, exit 2, the reason naming which. A passing reason now reads "nothing lost by this run, which never stalled" |
+| — | `check conform --wait-before-close <SECS>`, default 5, zenoh's | The routers' `wait_before_close`, which is the deployment's and not on the bus. The stall bound is it, or `--lease` less one keep-alive (a quarter of it) when that is shorter: 0.75 s at `--lease 1` |
+| `acl gen`: a `[[tool]]` reads presence only where it binds or calls | `inspects = ["<system>/<service>", …]`, exact or wildcard: presence alone, no data | What a doctor or `service list` reads without binding the services. The walkthrough's `ops` inspects `*/*` |
+| a provider's egress grant: the consumer and caller selectors over what it serves | and every wildcard presence selector over its `@zk/**`, as `fan-in-presence:<address>` | A descriptor read travels to the provider, unlike a liveliness read; without it a wildcard descriptor read was refused under `deny`. No reply rule: a descriptor is a value reply, checked by its own key |
+
 ## Unreleased (`main`, zk2) — "lost no delivery" established (#740)
 
 Core 0.25 (spec §2.7) establishes a window's "lost no delivery" from what

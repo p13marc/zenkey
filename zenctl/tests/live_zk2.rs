@@ -5163,7 +5163,7 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
     assert!(
         w["verdict"]["reason"]
             .to_string()
-            .contains("reliable with block and nothing lost by this run; the owner present throughout and a lease after"),
+            .contains("reliable with block and nothing lost by this run, which never stalled; the owner present throughout and a lease after"),
         "{run}"
     );
     // Half a second into the window, the owner closes: its token goes. The
@@ -5199,6 +5199,143 @@ async fn check_conform_passes_a_complete_window_and_not_an_absent_owner() {
         w["verdict"]["reason"]
             .to_string()
             .contains("not present throughout"),
+        "{run}"
+    );
+}
+
+/// A TCP proxy in front of `upstream` (`tcp/127.0.0.1:<port>`) that a case
+/// can cut: every forwarded connection closed at once, new ones forwarded
+/// again. What zenctl connects through when a case closes its own
+/// transport (core §2.7, 0.27).
+struct Proxy {
+    endpoint: String,
+    conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>>,
+    _accept: Task,
+}
+
+impl Proxy {
+    async fn to(upstream: &str) -> Proxy {
+        let target = upstream.trim_start_matches("tcp/").to_owned();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a proxy port");
+        let endpoint = format!("tcp/{}", listener.local_addr().expect("its address"));
+        let conns: Arc<std::sync::Mutex<Vec<tokio::task::AbortHandle>>> = Arc::default();
+        let held = Arc::clone(&conns);
+        let accept = tokio::spawn(async move {
+            while let Ok((mut down, _)) = listener.accept().await {
+                let Ok(mut up) = tokio::net::TcpStream::connect(&target).await else {
+                    continue;
+                };
+                let pump = tokio::spawn(async move {
+                    let _ = tokio::io::copy_bidirectional(&mut down, &mut up).await;
+                });
+                held.lock().expect("not poisoned").push(pump.abort_handle());
+            }
+        });
+        Proxy {
+            endpoint,
+            conns,
+            _accept: Task(accept),
+        }
+    }
+
+    /// Closes every connection forwarded so far.
+    fn cut(&self) {
+        for c in self.conns.lock().expect("not poisoned").drain(..) {
+            c.abort();
+        }
+    }
+}
+
+/// Core §2.7 (0.27, #753): a stalled reader's window reads unobservable.
+/// The clean window above — two sources every 200 ms, within the bound,
+/// over a counted span longer than the retention, the owner present a
+/// lease and the timeout after — read by a zenctl whose own transport
+/// closes mid-window: zenctl connects through a proxy, which the case cuts
+/// once the window has opened. What the router held for zenctl went with
+/// the transport, so the window is not lossless whatever it heard, and the
+/// case says so; zenctl's session saw its transport close, which is what a
+/// router giving up on a stalled reader looks like at the reader.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_reads_a_window_unobservable_when_its_own_transport_closes() {
+    let mut bus = Bus::admin(None).await;
+    let id = iface("pulse.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("host-a/pulse".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(pulses()))
+        .expect("implement");
+    let writers: Vec<_> = ["a", "b"]
+        .into_iter()
+        .map(|src| {
+            let v: Bindings = [("src".to_owned(), vec![src.to_owned()])].into();
+            b.event_writer(&id, "events/pulses/{src}", &v)
+                .expect("an event writer")
+        })
+        .collect();
+    let _owner = b.start().await.expect("start");
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            for w in &writers {
+                let _ = w.put("pulse").await;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })));
+    wait_for(&bus, &["host-a/pulse"]).await;
+    let proxy = Proxy::to(&bus.endpoint).await;
+    let events = "events/pulses/{src}";
+    let mut argv: Vec<String> = [
+        "check",
+        "conform",
+        "host-a/pulse",
+        "pulse.v1",
+        "--for",
+        "4",
+        "--timeout",
+        "1",
+        "--lease",
+        "1",
+        "--format",
+        "json",
+        "-c",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    argv.push(proxy.endpoint.clone());
+    // The window has opened once zenctl's subscription matches a probe
+    // publisher on the event's keys.
+    let probe = bus
+        .owners
+        .declare_publisher(
+            "zk2/host-a/pulse/pulse.v1/events/pulses/probe/01hzzzzzzzzzzzzzzzzzzzzzzz",
+        )
+        .await
+        .expect("a probe publisher");
+    let deadline = Instant::now() + SETTLE;
+    while probe.matching_status().await.expect("matching").matching() {
+        assert!(Instant::now() < deadline, "a subscription is left over");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let home = bus.home.clone();
+    let pending = tokio::task::spawn_blocking(move || run(&argv, &home, None, None));
+    while !probe.matching_status().await.expect("matching").matching() {
+        assert!(Instant::now() < deadline, "zenctl's window never opened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    proxy.cut();
+    let run = pending.await.expect("the zenctl runner");
+    let doc = run.json();
+    let w = conform_case(&doc, "budget-window", events);
+    assert_eq!(w["verdict"]["answer"], "unobservable", "{run}");
+    let reason = w["verdict"]["reason"].to_string();
+    assert!(
+        reason.contains("not shown to have lost no delivery")
+            && reason.contains("of its own transport(s) close"),
         "{run}"
     );
 }

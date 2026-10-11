@@ -53,6 +53,11 @@
 //! - [`freshness`]: `freshness.v1`'s horizon and its pure judgement of a
 //!   member's freshness (`spec/profiles/freshness/v1.md`, #720). The
 //!   owner's re-puts are the runtime's.
+//! - [`seed`]: a late joiner's merge (core §4.2, 0.26; 0.27, #752): per
+//!   key, which arriving sample replaces what is held, by the stamp — an
+//!   unstamped sample ranked below every stamped one, equal times ordered
+//!   by the id as zenoh orders it. The GET and the subscription are the
+//!   tools'.
 //! - [`health`]: `health.v1`'s levels, fault codes, and its pure judgement
 //!   of one reading of a service, on top of [`freshness`]
 //!   (`spec/profiles/health/v1.md`, #721). The owner's puts and its
@@ -78,6 +83,7 @@ pub mod health;
 pub mod history;
 pub mod hostid;
 pub mod schema;
+pub mod seed;
 pub mod slug;
 mod strict;
 pub mod template;

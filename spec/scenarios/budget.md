@@ -41,25 +41,46 @@ retention = "2s"
 
 **Setup.** R2 → R1, **each a process of its own**. An owner, a client of
 R2, holds an instance token. A consumer, a client of R1, subscribes to the
-owner's key, holds a liveliness subscriber on the owner's instance tokens,
-and takes 2 ms over each sample in its callback.
+owner's key and takes 2 ms over each sample in its callback. Beside it, it
+holds a liveliness subscriber on the owner's instance tokens, watches its
+own session's transport events, and runs a ticker on a thread of its own
+(0.27).
 
 **Steps.** The owner puts 1,000 numbered samples of 16 KiB as fast as its
 publisher lets it:
 1. reliable, `block`;
 2. best effort, `drop`;
-3. reliable, `block`, the consumer stuck for 7 s on the 100th.
+3. reliable, `block`, the consumer's callback stuck for 7 s on the 100th;
+4. reliable, `block`, the consumer in a process of its own, and that
+   process stopped (SIGSTOP) for 7 s at the 100th, then continued. The
+   owner's token reaches the consumer before the samples start (0.27).
 
 **Expected.**
 1. All 1,000 arrive, in order, and the owner's token is never withdrawn.
    The owner's put waits for the path.
 2. Some never arrive, and nothing the consumer receives says so.
 3. The consumer's router gives up on it after `wait_before_close` (5 s)
-   and closes its transport. Samples are lost, and the consumer sees the
-   owner's token withdrawn.
+   and closes its transport. Samples are lost. The consumer's session sees
+   its own transport close. It sees the owner's token withdrawn only if
+   the token had reached it before it stalled (0.27, correcting 0.25's
+   "the consumer sees the owner's token withdrawn"). Its ticker sees no
+   gap: only zenoh's receive thread was held.
+4. Samples are lost. The consumer's ticker sees a gap of at least 7 s on
+   its first tick after the stop. Its session sees its transport close,
+   and it sees the owner's token withdrawn.
 
-*Measured 2026-10-10: 1,000 of 1,000; 695–832 lost; 691–794 lost, the token
-withdrawn each time.*
+*Measured 2026-10-10: 1,000 of 1,000; 695–832 lost; 691–794 lost.
+Measured 2026-10-11 (0.27): step 3, 433–786 lost, the consumer's transport
+closed in 27 of 27 runs, the owner's token withdrawn in each of the 23
+where it had reached the consumer and in none of the 4 where it had not,
+the ticker's worst gap under 107 ms; step 4, 421–765 lost in 13 runs, the
+ticker's gap 7.0–7.1 s, the transport's close read 0.35–0.51 s after it
+(4 runs timed), the token withdrawn each time. Six earlier runs of step 3
+saw no withdrawal in 2 (#753).*
+
+The reference (`zenkey/tests/budget.rs`) asserts only the loss in step 3,
+and the loss and the ticker's gap in step 4, and reports the rest for the
+record.
 
 **Why each router has a process.** The sessions of one process share
 zenoh's receive threads, two by default. With both routers and the slow
@@ -69,6 +90,23 @@ runs lost 674–970 of 1,000 reliable, `block` samples, the routers' transport
 closes stalled, and no token was withdrawn while the run lasted. That is a
 measurement of the process, not of the path, and §2.7 names it as a
 premise a deployment provides.
+
+**A tool's window over a stalled reader** (0.27, core §2.7). The case
+§2.7's "its reader lost none" exists for, read by a tool.
+- *Setup.* An owner of an event of two sources at most, `reliable` with
+  `block` and a 2 s retention, publishing both every 200 ms, its instance
+  token held throughout. A tool reads its population over a 4 s window,
+  1 s reply timeout and 1 s lease, through a proxy it connects by.
+- *Steps.* Once the tool's subscription has reached the owner, the proxy
+  closes the tool's connection; the tool reconnects.
+- *Expected.* The window is not lossless: its population and its rate
+  are unobservable, the reason naming the tool's own transport closing,
+  whatever it heard. The same window with the connection left alone is
+  clean.
+
+*The reference runs it as `zenctl check conform`
+(`zenctl/tests/live_zk2.rs`,
+`check_conform_reads_a_window_unobservable_when_its_own_transport_closes`).*
 
 ## §2 A failed path withdraws the owner's token
 

@@ -883,20 +883,38 @@ fn budget_rates() {
     }
 }
 
-/// `spec/conformance/budget/lossless.json` (core §2.7, 0.25): a resource's
-/// declared QoS, the reader's own loss and miss detection → whether a
-/// window lost no delivery, and why. Written by hand from the text,
-/// checked, never blessed.
+/// `spec/conformance/budget/lossless.json` (core §2.7, 0.25, 0.27): a
+/// resource's declared QoS, the reader's own loss, what it saw of its own
+/// receive path, and miss detection → whether a window lost no delivery,
+/// and why; and the stall bound from the queue's `wait_before_close`, the
+/// lease and its keep-alive count. Written by hand from the text, checked,
+/// never blessed.
 #[test]
 fn budget_lossless() {
+    use std::time::Duration;
     use zenkey_model::authoring::{Congestion, Reliability};
-    use zenkey_model::budget::{Delivery, MissDetection, lossless};
+    use zenkey_model::budget::{Delivery, MissDetection, ReaderStall, lossless, stall_bound};
     let doc = read_json(&spec().join("conformance/budget/lossless.json"));
+    let ms = |v: &serde_json::Value, what: &str| {
+        Duration::from_millis(v.as_u64().unwrap_or_else(|| panic!("{what}")))
+    };
+    let bounds = doc["stall_bounds"].as_array().expect("stall_bounds");
+    assert!(!bounds.is_empty());
+    for case in bounds {
+        let keep_alive = case["keep_alive"].as_u64().expect("keep_alive");
+        let got = stall_bound(
+            ms(&case["wait_before_close_ms"], "wait_before_close_ms"),
+            ms(&case["lease_ms"], "lease_ms"),
+            u32::try_from(keep_alive).expect("a u32"),
+        );
+        assert_eq!(got, ms(&case["expect_ms"], "expect_ms"), "{}", case["note"]);
+    }
     let cases = doc["cases"].as_array().expect("cases");
     assert!(!cases.is_empty());
     for case in cases {
         let q = &case["qos"];
         let m = &case["miss_detection"];
+        let st = &case["reader_stall"];
         let d = Delivery {
             reliability: match q["reliability"].as_str().expect("reliability") {
                 "reliable" => Reliability::Reliable,
@@ -909,6 +927,11 @@ fn budget_lossless() {
                 other => panic!("congestion {other:?}"),
             },
             reader_lost: case["reader_lost"].as_u64().expect("reader_lost"),
+            stall: ReaderStall {
+                gap: ms(&st["gap_ms"], "gap_ms"),
+                bound: ms(&st["bound_ms"], "bound_ms"),
+                transport_closed: st["transport_closed"].as_bool().expect("transport_closed"),
+            },
             miss_detection: MissDetection {
                 declared: m["declared"].as_bool().expect("declared"),
                 used: m["used"].as_bool().expect("used"),
@@ -919,6 +942,60 @@ fn budget_lossless() {
         assert_eq!(
             case["expect"],
             json!({"lossless": why.is_lossless(), "reason": why.as_str()}),
+            "{}",
+            case["note"]
+        );
+    }
+}
+
+/// `spec/conformance/seed/merge.json` (core §4.2, 0.26; 0.27, #752): how
+/// two stamps compare — time, then the id's bytes as zenoh compares them —
+/// and which of one key's arrivals a late joiner keeps, unstamped ones
+/// ranked below every stamp. Written by hand from the text, checked, never
+/// blessed.
+#[test]
+fn seed_merge() {
+    use std::cmp::Ordering;
+    use zenkey_model::seed::{Stamp, merge};
+    let doc = read_json(&spec().join("conformance/seed/merge.json"));
+    let stamp = |v: &Value| -> Option<Stamp> {
+        if v.is_null() {
+            return None;
+        }
+        let time = v["time"].as_u64().expect("time");
+        let id = v["id"].as_str().expect("id");
+        Some(Stamp::parse(time, id).unwrap_or_else(|| panic!("{id:?} is an id")))
+    };
+    let order = doc["order"].as_array().expect("order");
+    assert!(!order.is_empty());
+    for case in order {
+        let (a, b) = (stamp(&case["a"]), stamp(&case["b"]));
+        let got = match a.expect("a").cmp(&b.expect("b")) {
+            Ordering::Less => "less",
+            Ordering::Equal => "equal",
+            Ordering::Greater => "greater",
+        };
+        assert_eq!(case["expect"], json!(got), "{}", case["note"]);
+    }
+    let cases = doc["cases"].as_array().expect("cases");
+    assert!(!cases.is_empty());
+    for case in cases {
+        let arrivals: Vec<Option<Stamp>> = case["arrivals"]
+            .as_array()
+            .expect("arrivals")
+            .iter()
+            .map(|a| {
+                assert!(
+                    matches!(a["kind"].as_str(), Some("put" | "delete")),
+                    "{}",
+                    case["note"]
+                );
+                stamp(&a["stamp"])
+            })
+            .collect();
+        assert_eq!(
+            case["expect"],
+            json!({"kept": merge(&arrivals)}),
             "{}",
             case["note"]
         );

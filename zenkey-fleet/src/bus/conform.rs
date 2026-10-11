@@ -29,14 +29,19 @@
 //!    subscriber on its instance tokens, then a read of them, before the
 //!    window opens, kept for the lease and the reply timeout after it
 //!    (0.25) — which a window needs to be a complete reading of a stream's
-//!    or an event's, and a rate window to be clean.
+//!    or an event's, and a rate window to be clean; and, over the same
+//!    span, what this run saw of its own receive path (0.27, #753): a
+//!    ticker's worst gap and its session's transports closed
+//!    ([`crate::bus::stall`]), without which no window is lossless.
 //!
 //! **What the subscriptions see of a loss** (0.25, #740). Each one is the
 //! runtime's consumer, a plain zenoh subscriber: it counts what this tool
 //! fell behind on ([`Heard::lagged`]) and what passed the arrival cap, and
 //! it detects no misses ([`Heard::misses_detected`] is `None`), even where
-//! a resource declares miss detection. Whether a window lost no delivery
-//! is the judge's, by `zenkey_model::budget::lossless`.
+//! a resource declares miss detection. What a router dropped when it gave
+//! up on this run is not in any of them: [`crate::bus::stall`] watches for
+//! that. Whether a window lost no delivery is the judge's, by
+//! `zenkey_model::budget::lossless`.
 //!
 //! Nothing is judged here: [`crate::judge::conform`] decides every case
 //! from the [`ConformObservation`] this returns.
@@ -112,9 +117,27 @@ pub struct ConformSpec {
     /// zenoh's default, `zenkey_model::budget::DEFAULT_LEASE`, unless the
     /// deployment lengthens it.
     pub lease: Duration,
+    /// The routers' `wait_before_close`: how long a router waits on this
+    /// run's full queue before it closes the transport, and with the lease
+    /// the longest this run may stall and still read a window lossless
+    /// (core §2.7, 0.27). zenoh's default,
+    /// `zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE`, unless the
+    /// deployment changes it.
+    pub wait_before_close: Duration,
 }
 
 impl ConformSpec {
+    /// The longest this run's reader may stall over a window and the lease
+    /// after it (core §2.7, 0.27): `wait_before_close`, or the lease less
+    /// one keep-alive interval (zenoh's default keep-alive) when shorter.
+    pub fn stall_bound(&self) -> Duration {
+        zenkey_model::budget::stall_bound(
+            self.wait_before_close,
+            self.lease,
+            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
+        )
+    }
+
     /// How long after a window's end the owner's instance tokens are
     /// watched: a lease, and the reply timeout for the withdrawal's
     /// transit (core §2.7, 0.25).
@@ -253,6 +276,11 @@ pub struct ConformObservation {
     /// `None` when no templated stream or event is exposed, so nothing
     /// needed it.
     pub window_presence: Option<std::result::Result<WindowPresence, String>>,
+    /// What this run's reader saw of its own receive path over the window
+    /// and the watch after it — its ticker's worst gap and its session's
+    /// transports closed (§2.7, 0.27); `None` when no templated stream or
+    /// event is exposed, as for [`Self::window_presence`].
+    pub reader_stall: Option<std::result::Result<crate::bus::stall::StallSeen, String>>,
     /// Each exposed operation.
     pub calls: BTreeMap<String, OpObserved>,
     /// The routers' admin space, read un-namespaced: an owner's own stamp
@@ -428,6 +456,7 @@ async fn suite(
         gets: BTreeMap::new(),
         gets_complete: BTreeMap::new(),
         window_presence: None,
+        reader_stall: None,
         calls: BTreeMap::new(),
         admin: Some(admin),
         read_at: None,
@@ -470,6 +499,14 @@ async fn suite(
         .any(|r| (r.kind == Kind::Stream && r.template.has_params()) || r.kind == Kind::Event);
     let presence_watch = if windowed {
         Some(watch_instances(session, &obs.address, t).await)
+    } else {
+        None
+    };
+    // 0.27: and only with this run's own receive path never stalled long
+    // enough for a router to give up on it — its ticker and its session's
+    // transport events, watched as long as the owner is.
+    let stall_watch = if windowed {
+        Some(crate::bus::stall::StallWatch::start(session).await)
     } else {
         None
     };
@@ -592,6 +629,7 @@ async fn suite(
             p
         })
     });
+    obs.reader_stall = stall_watch.map(|w| w.map(|w| w.read()));
     obs
 }
 

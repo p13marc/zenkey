@@ -940,3 +940,285 @@ async fn a_seeded_watch_seeds_from_a_zk2_owner() {
     monitor.shutdown().await.expect("shutdown");
     service.close().await.expect("close");
 }
+
+/// A foreign key's writer (`spec/scenarios/state.md` §11): a session with
+/// no HLC, so its puts arrive unstamped unless it sets a stamp, answering
+/// GETs on `foreign/**` as a storage would — every GET handed to the test,
+/// which answers when it chooses.
+struct Foreign {
+    session: zenoh::Session,
+    queries: tokio::sync::mpsc::UnboundedReceiver<zenoh::query::Query>,
+    _queryable: zenoh::query::Queryable<()>,
+    base: u64,
+}
+
+impl Foreign {
+    /// Declares the queryable, then waits until `joiner` reaches it.
+    async fn new(writer: &zenoh::Session, joiner: &zenoh::Session) -> Self {
+        let (tx, queries) = tokio::sync::mpsc::unbounded_channel();
+        let queryable = writer
+            .declare_queryable("foreign/**")
+            .callback(move |q| {
+                if q.key_expr().as_str() == "foreign/ready" {
+                    tokio::spawn(async move {
+                        q.reply("foreign/ready", "ok").await.ok();
+                    });
+                } else {
+                    let _ = tx.send(q);
+                }
+            })
+            .await
+            .expect("the writer's queryable");
+        let deadline = tokio::time::Instant::now() + util::SETTLE;
+        loop {
+            let replies = joiner
+                .get("foreign/ready")
+                .timeout(Duration::from_millis(300))
+                .await
+                .expect("probe get");
+            if replies.recv_async().await.is_ok() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "routing never converged"
+            );
+        }
+        Foreign {
+            session: writer.clone(),
+            queries,
+            _queryable: queryable,
+            base: writer.new_timestamp().get_time().as_u64(),
+        }
+    }
+
+    /// A stamp `n` ticks past the writer's clock, with the id `id` (hex).
+    fn stamp(&self, n: u64, id: &str) -> Timestamp {
+        Timestamp::new(NTP64(self.base + n), id.parse().expect("an id"))
+    }
+
+    async fn put(&self, key: &str, value: &str, stamp: Option<Timestamp>) {
+        let mut put = self.session.put(format!("foreign/{key}"), value.to_owned());
+        if let Some(ts) = stamp {
+            put = put.timestamp(ts);
+        }
+        put.await.expect("the writer's put");
+    }
+
+    /// Waits until a subscription on `foreign/**` reaches the writer.
+    async fn matched(&self) {
+        let publisher = self
+            .session
+            .declare_publisher("foreign/probe")
+            .await
+            .expect("publisher");
+        let deadline = tokio::time::Instant::now() + util::SETTLE;
+        while !publisher
+            .matching_status()
+            .await
+            .expect("matching status")
+            .matching()
+        {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the subscription never reached the writer"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn next_query(&mut self) -> zenoh::query::Query {
+        tokio::time::timeout(util::SETTLE, self.queries.recv())
+            .await
+            .expect("the GET reaches the writer")
+            .expect("queryable alive")
+    }
+}
+
+/// One admitted sample: its key's last chunk, kind, payload and stamp.
+type Admitted = (String, SampleKind, String, Option<Timestamp>);
+
+/// The next sample a seeded subscription admits.
+async fn next_admitted(sub: &mut zenkey_fleet::SeededSubscriber) -> Admitted {
+    loop {
+        let item = tokio::time::timeout(util::SETTLE, sub.recv())
+            .await
+            .expect("a sample")
+            .expect("stream alive");
+        match item {
+            SeedItem::Sample(v) => {
+                return (
+                    v.key.strip_prefix("foreign/").unwrap_or(&v.key).to_owned(),
+                    v.kind,
+                    String::from_utf8_lossy(&v.payload.to_bytes()).into_owned(),
+                    v.timestamp,
+                );
+            }
+            SeedItem::Dropped(n) => panic!("this fixture never outruns the channel ({n})"),
+            SeedItem::SeedComplete(_) => {}
+        }
+    }
+}
+
+/// `spec/scenarios/state.md` §11, steps 1–4: an unstamped sample ranks
+/// below every stamp (core §4.2, 0.27, #752). No zk2 owner: a foreign
+/// key's writer, which stamps only when it sets a stamp, answers the seed's
+/// GET. Expected: an unstamped live put on a key holding nothing is kept;
+/// two unstamped samples of a key have no order but their arrival, so the
+/// later is kept, even an older reply arriving last; a stamped reply
+/// replaces an unstamped live put; once a key holds a stamp, an unstamped
+/// put or delete is not kept, and counted, and a newer stamp still is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s11_an_unstamped_sample_ranks_below_every_stamp() {
+    let (writer, joiner) = util::peer_pair().await;
+    let mut w = Foreign::new(&writer, &joiner).await;
+    let mut sub = seed_subscribe(
+        &joiner,
+        "foreign/**",
+        SeedPolicy {
+            history: false,
+            state: true,
+            timeout: util::SETTLE,
+        },
+    )
+    .await
+    .expect("seed subscribe");
+    // 1. The writer takes the GET and holds it; three unstamped live puts.
+    let q = w.next_query().await;
+    w.matched().await;
+    w.put("a", "a-unstamped", None).await;
+    w.put("c", "c-1", None).await;
+    w.put("c", "c-2", None).await;
+    for want in ["a-unstamped", "c-1", "c-2"] {
+        let (_, _, value, stamp) = next_admitted(&mut sub).await;
+        assert_eq!((value.as_str(), stamp), (want, None), "kept as it arrived");
+    }
+    // 2. The answer: `a` stamped T1, `b` stamped T2, and an unstamped `c`
+    //    the writer held from before its live puts.
+    let t1 = w.stamp(1, "a1");
+    q.reply("foreign/a", "a-stamped")
+        .timestamp(t1)
+        .await
+        .expect("reply");
+    q.reply("foreign/b", "b-1")
+        .timestamp(w.stamp(2, "a1"))
+        .await
+        .expect("reply");
+    q.reply("foreign/c", "c-0").await.expect("reply");
+    drop(q);
+    let mut admitted = Vec::new();
+    for _ in 0..3 {
+        admitted.push(next_admitted(&mut sub).await);
+    }
+    admitted.sort_by(|x, y| x.0.cmp(&y.0));
+    assert_eq!(
+        admitted,
+        [
+            ("a".into(), SampleKind::Put, "a-stamped".into(), Some(t1)),
+            (
+                "b".into(),
+                SampleKind::Put,
+                "b-1".into(),
+                Some(w.stamp(2, "a1"))
+            ),
+            ("c".into(), SampleKind::Put, "c-0".into(), None),
+        ],
+        "a stamp replaces an unstamped sample; an unstamped one replaces another, by arrival"
+    );
+    // 3. Once a key holds a stamp: unstamped puts and deletes are not kept,
+    //    and a newer stamp is. A sentinel on a fresh key marks the end.
+    w.put("a", "a-unstamped-2", None).await;
+    writer.delete("foreign/b").await.expect("delete");
+    let t3 = w.stamp(3, "a1");
+    w.put("b", "b-2", Some(t3)).await;
+    w.put("z", "sentinel", None).await;
+    assert_eq!(
+        next_admitted(&mut sub).await,
+        ("b".into(), SampleKind::Put, "b-2".into(), Some(t3)),
+        "the unstamped put on a and delete on b were not kept"
+    );
+    assert_eq!(next_admitted(&mut sub).await.2, "sentinel");
+}
+
+/// `spec/scenarios/state.md` §11, step 5: two samples of one key at one
+/// time, under two ids, order as zenoh's `Timestamp` does — by the ids'
+/// little-endian bytes, the least significant first — and not as the ids'
+/// values: `100` (hex) is the lower id against `2`. So `2` then `100`
+/// keeps `2` alone, and `100` then `2` keeps both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s11_equal_times_order_by_the_id_as_zenoh_does() {
+    let (writer, joiner) = util::peer_pair().await;
+    let w = Foreign::new(&writer, &joiner).await;
+    let mut sub = seed_subscribe(
+        &joiner,
+        "foreign/**",
+        SeedPolicy {
+            history: false,
+            state: false,
+            timeout: util::SETTLE,
+        },
+    )
+    .await
+    .expect("seed subscribe");
+    w.matched().await;
+    let (hi, lo) = (w.stamp(9, "2"), w.stamp(9, "100"));
+    assert!(lo < hi, "zenoh's own order");
+    w.put("e", "e-2", Some(hi)).await;
+    w.put("e", "e-100", Some(lo)).await;
+    w.put("f", "f-100", Some(lo)).await;
+    w.put("f", "f-2", Some(hi)).await;
+    w.put("z", "sentinel", None).await;
+    let mut values = Vec::new();
+    loop {
+        let (_, _, value, _) = next_admitted(&mut sub).await;
+        if value == "sentinel" {
+            break;
+        }
+        values.push(value);
+    }
+    assert_eq!(values, ["e-2", "f-100", "f-2"], "e-100 is the lower stamp");
+}
+
+/// `spec/scenarios/state.md` §11, step 6: R6 binds a consumer; a tool's
+/// seed shows what arrived. A put on the wildcard key `foreign/*` reaches
+/// the seeded subscription under that key, kept apart from the concrete
+/// keys it covers: `foreign/g` at T2 is still kept after the wildcard's
+/// T3, which is not `g`'s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s11_a_tools_seed_keeps_a_key_that_is_not_concrete() {
+    let (writer, joiner) = util::peer_pair().await;
+    let w = Foreign::new(&writer, &joiner).await;
+    let mut sub = seed_subscribe(
+        &joiner,
+        "foreign/**",
+        SeedPolicy {
+            history: false,
+            state: false,
+            timeout: util::SETTLE,
+        },
+    )
+    .await
+    .expect("seed subscribe");
+    w.matched().await;
+    w.put("g", "g-1", Some(w.stamp(1, "a1"))).await;
+    w.put("*", "wild", Some(w.stamp(3, "a1"))).await;
+    w.put("g", "g-2", Some(w.stamp(2, "a1"))).await;
+    w.put("z", "sentinel", None).await;
+    let mut admitted = Vec::new();
+    loop {
+        let (key, _, value, _) = next_admitted(&mut sub).await;
+        if value == "sentinel" {
+            break;
+        }
+        admitted.push((key, value));
+    }
+    assert_eq!(
+        admitted,
+        [
+            ("g".into(), "g-1".into()),
+            ("*".into(), "wild".into()),
+            ("g".into(), "g-2".into()),
+        ],
+        "kept under its own key, never merged with g"
+    );
+}

@@ -21,8 +21,9 @@
 //! **"Lost no delivery" is established, never assumed** (0.25, #740): a
 //! reader can know that it lost a delivery, never that it lost none.
 //! [`lossless`] decides it from the resource's declared QoS, the reader's
-//! own loss and miss detection; a window's `lossless` and an occurrence
-//! set's are its answer.
+//! own loss, whether its receive path stalled (0.27, #753) and miss
+//! detection; a window's `lossless` and an occurrence set's are its
+//! answer.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -46,6 +47,33 @@ pub const STREAM_LIVENESS: Duration = Duration::from_secs(3600);
 /// a `wait_before_close` longer than its lease, lengthens it.
 pub const DEFAULT_LEASE: Duration = Duration::from_secs(10);
 
+/// zenoh's default keep-alive (`transport/link/tx/keep_alive`, 4): a
+/// session sends a keep-alive every lease ÷ 4 when it has nothing else to
+/// send, so a peer that stops hearing from it closes the transport once a
+/// lease passes (§2.7, 0.27).
+pub const DEFAULT_KEEP_ALIVE: u32 = 4;
+
+/// zenoh's default `wait_before_close`
+/// (`transport/link/tx/queue/congestion_control/block/wait_before_close`,
+/// 5 s): how long a router's push of a `reliable`, `block` sample waits for
+/// room in a reader's queue before it closes the transport (Appendix B).
+pub const DEFAULT_WAIT_BEFORE_CLOSE: Duration = Duration::from_secs(5);
+
+/// The longest a window's reader may stall without a router giving up on
+/// it (§2.7, 0.27): the transport's `wait_before_close`, or its lease less
+/// one keep-alive interval when that is shorter — the longest a router
+/// waits on the reader's full queue, and the longest it may hear nothing
+/// from the reader before its lease runs out. 5 s with zenoh's defaults
+/// (and 7.5 s for the lease). The interval is rounded up to a whole
+/// millisecond, which shortens the bound; a `keep_alive` of 0 is taken as
+/// 1.
+#[must_use]
+pub fn stall_bound(wait_before_close: Duration, lease: Duration, keep_alive: u32) -> Duration {
+    let interval = lease.as_millis().div_ceil(u128::from(keep_alive.max(1)));
+    let interval = Duration::from_millis(u64::try_from(interval).unwrap_or(u64::MAX));
+    wait_before_close.min(lease.saturating_sub(interval))
+}
+
 /// What a window's path declares and what its reader saw of it, for "lost
 /// no delivery" (§2.7, 0.25).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +85,40 @@ pub struct Delivery {
     /// Deliveries the window's own reader lost: its queue overflowed or
     /// fell behind, or a cap kept them out of its count.
     pub reader_lost: u64,
+    /// Whether the reader's receive path stopped long enough for a router
+    /// to give up on it, over the window and one lease after it (0.27).
+    pub stall: ReaderStall,
     pub miss_detection: MissDetection,
+}
+
+/// What a window's reader saw of its own receive path, over the window and
+/// one lease after it (§2.7, 0.27, #753). A reader stalled longer than the
+/// transport's `wait_before_close` loses what its router queued for it,
+/// and may never see the owner's token withdrawn: only a token it had
+/// received is withdrawn when its own transport closes (Appendix B).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReaderStall {
+    /// The greatest gap between two ticks of the reader's monotonic ticker,
+    /// the gap still open when it was read included: how long its process
+    /// stopped at most. A ticker on a thread of its own does not see
+    /// zenoh's receive threads blocked while the rest of the process runs.
+    pub gap: Duration,
+    /// The longest stall the window tolerates: [`stall_bound`].
+    pub bound: Duration,
+    /// Whether the reader's session saw one of its own transports close:
+    /// zenoh's transport events (unstable in 1.10.1). It sees a router
+    /// giving up on a reader whose receive threads were blocked, which no
+    /// ticker sees. `false` where the reader does not observe them.
+    pub transport_closed: bool,
+}
+
+impl ReaderStall {
+    /// Stalled: a transport of the reader's session closed, or its ticker
+    /// saw a gap longer than the bound. A gap of exactly the bound is not.
+    #[must_use]
+    pub fn stalled(&self) -> bool {
+        self.transport_closed || self.gap > self.bound
+    }
 }
 
 /// Miss detection over a window (§2.5, §2.7): counted only where the
@@ -79,6 +140,9 @@ pub struct MissDetection {
 pub enum LossReason {
     /// Not lossless: the reader itself lost deliveries.
     ReaderLost,
+    /// Not lossless: the reader's receive path stalled longer than its
+    /// router waits on it, or its own transport closed (0.27).
+    ReaderStalled,
     /// Not lossless: the subscription detected missed samples.
     MissesDetected,
     /// Not lossless: best effort, so a sample dropped anywhere on the path
@@ -98,6 +162,7 @@ impl LossReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ReaderLost => "reader_lost",
+            Self::ReaderStalled => "reader_stalled",
             Self::MissesDetected => "misses_detected",
             Self::BestEffort => "best_effort",
             Self::CongestionDrop => "congestion_drop",
@@ -119,20 +184,24 @@ impl fmt::Display for LossReason {
 }
 
 /// "Did this window lose no delivery?" (§2.7, 0.25), from what its reader
-/// can see. Lossless only when its reader lost none and the path could not
-/// drop one silently: the resource is `reliable` with `block`. A detected
-/// miss is a loss; none detected establishes nothing, since zenoh-ext
-/// takes a publisher's first sample heard as its start (Appendix B), and
-/// counts only where the resource declares miss detection and the
-/// subscription uses it.
+/// can see. Lossless only when its reader lost none — nothing lost in its
+/// own queue or past a cap, and its receive path not stalled (0.27) — and
+/// the path could not drop one silently: the resource is `reliable` with
+/// `block`. A detected miss is a loss; none detected establishes nothing,
+/// since zenoh-ext takes a publisher's first sample heard as its start
+/// (Appendix B), and counts only where the resource declares miss
+/// detection and the subscription uses it.
 ///
-/// The order a reason is chosen in: the reader's own loss; a miss detected;
-/// best effort; reliable with `drop`; else lossless, reliable with `block`.
+/// The order a reason is chosen in: the reader's own loss; the reader
+/// stalled; a miss detected; best effort; reliable with `drop`; else
+/// lossless, reliable with `block`.
 #[must_use]
 pub fn lossless(d: &Delivery) -> LossReason {
     let m = d.miss_detection;
     if d.reader_lost > 0 {
         LossReason::ReaderLost
+    } else if d.stall.stalled() {
+        LossReason::ReaderStalled
     } else if m.declared && m.used && m.misses > 0 {
         LossReason::MissesDetected
     } else if d.reliability == Reliability::BestEffort {
@@ -145,16 +214,22 @@ pub fn lossless(d: &Delivery) -> LossReason {
 }
 
 /// The [`Delivery`] of a stream, state or event resource, from its
-/// declared QoS and `history`, with what the reader lost and what its
-/// subscription detected (`misses`: `None` when it does not detect
-/// misses). `None` for an operation.
+/// declared QoS and `history`, with what the reader lost, what it saw of
+/// its own receive path, and what its subscription detected (`misses`:
+/// `None` when it does not detect misses). `None` for an operation.
 #[must_use]
-pub fn delivery_of(r: &Resource, reader_lost: u64, misses: Option<u64>) -> Option<Delivery> {
+pub fn delivery_of(
+    r: &Resource,
+    reader_lost: u64,
+    stall: ReaderStall,
+    misses: Option<u64>,
+) -> Option<Delivery> {
     match &r.body {
         Body::Data(d) => Some(Delivery {
             reliability: d.reliability,
             congestion: d.congestion,
             reader_lost,
+            stall,
             miss_detection: MissDetection {
                 declared: d
                     .history
@@ -742,12 +817,38 @@ mod tests {
     }
 
     #[test]
+    fn the_stall_bound_is_the_lesser_of_the_queue_and_the_lease() {
+        let s = Duration::from_secs;
+        assert_eq!(
+            stall_bound(DEFAULT_WAIT_BEFORE_CLOSE, DEFAULT_LEASE, DEFAULT_KEEP_ALIVE),
+            s(5),
+            "zenoh's defaults: 5 s, against 7.5 s for the lease"
+        );
+        assert_eq!(
+            stall_bound(DEFAULT_WAIT_BEFORE_CLOSE, s(1), DEFAULT_KEEP_ALIVE),
+            Duration::from_millis(750),
+            "a 1 s lease: its last keep-alive may be a quarter old"
+        );
+        assert_eq!(stall_bound(s(20), s(30), 3), s(20));
+        assert_eq!(
+            stall_bound(s(20), s(10), 0),
+            Duration::ZERO,
+            "keep_alive 0 as 1"
+        );
+    }
+
+    #[test]
     fn lossless_rests_on_the_reader_and_the_qos() {
         use LossReason as L;
         let d = |reliability, congestion, reader_lost, declared, used, misses| Delivery {
             reliability,
             congestion,
             reader_lost,
+            stall: ReaderStall {
+                gap: Duration::from_millis(50),
+                bound: DEFAULT_WAIT_BEFORE_CLOSE,
+                transport_closed: false,
+            },
             miss_detection: MissDetection {
                 declared,
                 used,
@@ -776,8 +877,36 @@ mod tests {
         assert_eq!(lossless(&d(re, block, 0, true, false, 3)), L::ReliableBlock);
         // The reader's own loss first.
         assert_eq!(lossless(&d(re, block, 2, true, true, 5)), L::ReaderLost);
+        // 0.27: a reader whose transport closed, or whose ticker stopped
+        // longer than the bound, lost what its router queued for it —
+        // after its own counted loss, before a miss and the QoS.
+        let stalled = |gap_ms, closed, base: Delivery| Delivery {
+            stall: ReaderStall {
+                gap: Duration::from_millis(gap_ms),
+                bound: DEFAULT_WAIT_BEFORE_CLOSE,
+                transport_closed: closed,
+            },
+            ..base
+        };
+        let clean = d(re, block, 0, false, false, 0);
+        assert_eq!(lossless(&stalled(50, true, clean)), L::ReaderStalled);
+        assert_eq!(lossless(&stalled(7000, false, clean)), L::ReaderStalled);
+        assert_eq!(lossless(&stalled(5000, false, clean)), L::ReliableBlock);
+        assert_eq!(
+            lossless(&stalled(7000, false, d(re, block, 1, false, false, 0))),
+            L::ReaderLost
+        );
+        assert_eq!(
+            lossless(&stalled(50, true, d(re, block, 0, true, true, 2))),
+            L::ReaderStalled
+        );
+        assert_eq!(
+            lossless(&stalled(50, true, d(be, drop, 0, false, false, 0))),
+            L::ReaderStalled
+        );
         for r in [
             L::ReaderLost,
+            L::ReaderStalled,
             L::MissesDetected,
             L::BestEffort,
             L::CongestionDrop,

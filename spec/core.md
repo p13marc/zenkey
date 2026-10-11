@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.26** (0.1 accepted on 2026-10-08, #606; amended the same day:
+**Version 0.27** (0.1 accepted on 2026-10-08, #606; amended the same day:
 U23 in 0.2, the classifier's rule set in 0.3, TOML 1.0 enforced in 0.4, the
 second implementation's findings in 0.5, its findings against 0.5 and the
 archive's gaps in 0.6, in 0.7 the findings of its live half, the
@@ -21,9 +21,10 @@ needed: a clock ahead reported by a stream, and the first standard
 contract a profile publishes, in 0.24 the population budget: what a
 member and a live member are, what `rate` bounds, and what a tool
 concludes, in 0.25 a window's "lost no delivery" established from
-what its reader can see, with the owner keeping its budget, and in 0.26
+what its reader can see, with the owner keeping its budget, in 0.26
 a late joiner's seed: subscribe, then S4's GET, merged by the owner's
-stamp).
+stamp, and in 0.27 a reader that stalls, a tool as a role with what it
+inspects, and the merge's unstamped samples and equal times).
 Every change goes through [`CHANGELOG.md`](CHANGELOG.md), amendment-style.
 
 This is the normative core of zk2, the keyspace and contract layer for
@@ -501,22 +502,60 @@ presence budget (§8.3) is another. `[F: budget/]`
   know that it lost a delivery, and never that it lost none: a sample a
   queue dropped leaves no trace at a subscriber (Appendix B). A window
   lost no delivery when both hold:
-  1. **Its reader lost none.** Its own queue neither overflowed nor fell
-     behind, and no delivery was kept out of its count by a cap.
+  1. **Its reader lost none.** Over the window and the watch after it
+     (one lease and the reply timeout, below):
+     - its own queue neither overflowed nor fell behind, and no delivery
+       was kept out of its count by a cap;
+     - **no transport of its session closed** (0.27). A router that gives
+       up on the reader closes the reader's own transport, and what it
+       held for the reader goes with it;
+     - **its process did not stall longer than the bound** (0.27): the
+       transport's `wait_before_close`, or its lease less one keep-alive
+       interval when that is shorter. With zenoh's defaults these are 5 s
+       and 7.5 s: a 10 s lease, with a keep-alive every quarter of it. A
+       reader stalled no longer than the bound is never given up on: its
+       router waits on its full queue for `wait_before_close`, and hears
+       from it within its lease.
   2. **The path could not drop one silently.** The resource declares
      `reliable` with congestion `block` (§2.4). A router's queue never
      drops such a sample: its push waits for room, and one it cannot queue
      within the transport's `wait_before_close` (5 s by default) closes
      the transport (Appendix B). So a reliable path loses a delivery only
-     by failing, and a failed path withdraws the owner's instance token at
-     the reader, which the presence premise reads.
+     by failing. A link that fails withdraws the owner's instance token at
+     the reader, which the presence premise reads. A reader that stalls
+     has its own transport closed, which rule 1 reads.
 
   Otherwise no window of the resource is lossless, whatever it heard, and
   a reading that needs one is unobservable. The reason names what failed:
-  the reader's own loss, a miss detected, or the QoS. At `best_effort`, a
-  sample dropped anywhere on the path leaves no trace; at `reliable` with
-  `drop`, a full queue drops one and leaves none.
+  the reader's own loss, its stall (0.27), a miss detected, or the QoS. At
+  `best_effort`, a sample dropped anywhere on the path leaves no trace; at
+  `reliable` with `drop`, a full queue drops one and leaves none.
   `[F: budget/lossless.json]` `[Sc: budget.md §1]`
+  - **Why the reader watches itself** (0.27, #753). 0.25 read a stalled
+    reader's loss from the owner's token. Measured, a reader stalled past
+    `wait_before_close` saw the token withdrawn only when the token had
+    reached it before it stalled. Its own transport closing withdraws
+    only the tokens it had received, and a declaration its router had
+    not yet sent it went with that router's queue. In 4 of 27 runs it had
+    not received the token, and saw no withdrawal. Its own transport's
+    close showed in every run (Appendix B).
+  - **How a tool establishes it.** It watches its own receive path from
+    before the window opens until the watch after it ends:
+    - **its transports**, from zenoh's transport events
+      (`Session::info().transport_events_listener()`, unstable in 1.10.1,
+      §0). A transport of its session that closed is a stall. This sees a
+      router giving up on a reader whose receive threads were blocked
+      while the rest of its process ran, which no ticker sees;
+    - **a monotonic ticker** on a thread of its own. The greatest gap
+      between two ticks, the gap still open when the tool reads it
+      included, longer than the bound is a stall. This sees a process
+      that did not run (stopped, starved, swapped out) on its first tick
+      after, before its session has read its transport's close.
+
+    A tool that cannot read transport events says so. It then rests that
+    half on a premise of its own: nothing in its process blocks zenoh's
+    receive threads, which its ticker cannot see (Appendix B).
+    `[F: budget/lossless.json]` `[Sc: budget.md §1]`
   - **Miss detection is evidence of a loss, never of none** (§2.5). A
     subscription that detects misses and detected one lost a delivery.
     One that detected none established nothing: zenoh-ext takes a
@@ -893,11 +932,35 @@ from S4's GET and follows a subscription.
   - A `reply_del` is a deletion with its stamp (S3), merged as a live
     delete is.
   - Two samples with equal stamps are the same mutation, kept once.
-  - Stamps compare as `Latest` compares replies (§4.1), and within one
-    timestamp id that is by time (§4.3). Two ids for one key within one
-    seed mean the owner started a new epoch inside the seed's window: a
-    value of the old epoch that arrives after one of the new is §4.3's
-    residual risk.
+  - **Stamps compare as `Latest` compares replies** (§4.1), which is
+    zenoh's timestamp order, spelled out in 0.27 (#752). First by time, an
+    unsigned 64-bit NTP64 value. On equal times, by id: each id's 128-bit
+    value written as 16 bytes little-endian, least significant byte first,
+    and the two compared byte by byte from the first. So the least
+    significant byte that differs decides, which is not the ids' order as
+    integers: at one time, id `100` (hex) is below id `2`.
+    `[F: seed/merge.json]` `[Sc: state.md §11]`
+    - Within one timestamp id, that is by time (§4.3). Two ids for one key
+      within one seed mean the owner started a new epoch inside the seed's
+      window: a value of the old epoch that arrives after one of the new
+      is §4.3's residual risk.
+  - **An unstamped sample** (0.27) ranks below every stamped one, as
+    `Latest` ranks an unstamped reply lowest (§4.1). It is no owner's
+    (S1): it is a foreign key's (§1.7), put by a session with no HLC
+    through no router that stamps.
+    - It is kept on a key that holds nothing, or only unstamped samples,
+      and never over a stamped one.
+    - Two unstamped samples of a key have no order but their arrival, so
+      the later replaces the earlier. That includes a reply that arrives
+      after a live sample.
+
+    `[F: seed/merge.json]` `[Sc: state.md §11]`
+- **R6 and a tool's seed** (0.27). R6 binds a consumer: a consumer that
+  seeds discards a reply or a sample whose key is not concrete, whichever
+  path brought it. A tool's seed shows what arrived, as its subscription
+  does. It keeps such a sample under the key it arrived on, merged with
+  that key alone, never with the concrete keys it covers.
+  `[Sc: state.md §11]`
 - **A selector over several owners.** A GET on a selector that matches
   several owners' keys is addressed to the owner's keys, as S4 requires,
   when each key it matches has one owner (P3, §6): `Latest` then
@@ -2693,7 +2756,8 @@ Ownership (§6) reduces access control to a few grant shapes.
 - each holder's bindings: role, interface, providers, resources,
   parameters (R2), and whether it reads with history;
 - each holder's calls: interface, providers, operations;
-- the services a tool inspects, and whether it reads the admin space;
+- the services a tool inspects without binding or calling them (0.27),
+  and whether it reads the admin space;
 - the archives: what each records, and its peers;
 - the namespace (§1.6).
 
@@ -2705,7 +2769,7 @@ The format is the generator's own. The reference reads an enrollment file
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (0.14, measured in spike S14). |
 | **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1, 0.8) and the descriptor's GET and subscription (§3.3, 0.14) on the `…/@zk/**` subtree of each provider they name. |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
-| **Tool** (0.14) | A principal with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. A tool drawing the graph (R3) reads descriptors through presence. A tool that checks S4 or runs a doctor (§4.2) also holds the **admin read** (0.15): `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
+| **Tool** (0.14, 0.27) | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data (0.27). A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4 or runs a doctor (§4.2) also holds the **admin read** (0.15): `query` on `@/*/router` and `@/*/router/**`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 
 - **Contract bundles are open:** any principal MAY hold or fetch
   `zk2/@zk/contract/**`, because the hash is the check.
@@ -2714,6 +2778,28 @@ The format is the generator's own. The reference reads an enrollment file
   `deny`, and denies it to every principal under `allow` (§4.2, "Who
   answered"). `[Sc: security.md §3]`
 - **There are no cross-principal write grants.**
+- **The shapes compose per principal** (0.27, #748). A principal holds
+  the union of the grants of everything it runs: a principal that runs
+  services may run a tool too, and holds the tool's grants beside its
+  Own, the admin read included. This is safe because no shape writes
+  beyond the writer's own prefix:
+  - Own stays scoped to the services the principal runs;
+  - a tool's grants read, and call specific operations: Consume, Call,
+    presence and the admin read write nothing;
+  - the admin read is a `query` on the routers' answers, and every
+    principal is still denied a queryable under `@/**`.
+
+  A principal's grants therefore never let it write what a service it
+  does not run owns, which is what §6 rests on. `[Sc: security.md §1]`
+- **Inspection travels to the provider** (0.27). A liveliness read is
+  answered by the routers and never reaches the provider, but the
+  descriptor's GET and subscription, which ride the same presence grant,
+  do. A wildcard presence selector, an inspection of `*/*` or a binding
+  over `vehicle-01/*`, therefore joins each provider's egress grant
+  (§11.2). It does not join the provider's ingress `reply`: a descriptor
+  is answered with a value, checked against its own key. Measured: without
+  it, a wildcard descriptor read is refused at the provider, while the
+  liveliness read still answers. `[Sc: security.md §1, §2]`
 - **An archive principal** has Own on its own prefix, plus Consume on what it
   records, on each peer archive's form of it (§4.4), and presence on the
   owners and peers it reads (0.14).
@@ -2746,6 +2832,11 @@ The format is the generator's own. The reference reads an enrollment file
 - **Egress is checked by inclusion** against the query's or subscription's
   own key expression. A generator MUST therefore add to a provider's egress
   grant every consumer selector that intersects what the provider serves.
+  A provider serves its descriptor, so this includes every presence
+  selector that intersects its `…/@zk/**` and that its Own grant does not
+  include: a reader's descriptor GET and subscription (0.27, above). Not
+  for the provider's ingress `reply`: no refusal answers a descriptor
+  read.
 - **A value reply is checked against its own key, an error reply against
   the query's** (0.14). This was measured on zenoh 1.10.1. S14's "a reply
   is checked against the query's key" holds only for refusals, which carry
@@ -2892,6 +2983,13 @@ Appendix B. These are the ones the rules above cite:
 - A zid is written in lowercase hexadecimal without leading zeros.
 - A timestamp carries its HLC's id, the zid. Its time is an NTP64 value,
   whose low 32 bits are a fraction of a second, so its unit is 2^−32 s.
+- Timestamps order by time, then by id. An id is stored as the 16 bytes
+  of its 128-bit value little-endian, and compared as that byte array
+  (uhlc 0.8's derived `Ord` on `Timestamp` and `ID`), so its least
+  significant byte decides first. `Latest` keeps the reply whose
+  timestamp is greatest in that order, an unstamped one lowest, and a
+  later one on a tie (`api/session.rs`, 0.27). Checked against zenoh's
+  own `Timestamp` by `zenkey-fleet`'s `bus::seed` tests.
 - A reply error carries a payload and an encoding, and no key expression.
   `Reply::replier_id` is behind the `unstable` feature. It names the session
   that sent the reply, whatever key the reply is on. §4.2's admin-space
@@ -2929,14 +3027,40 @@ Appendix B. These are the ones the rules above cite:
     put waited;
   - best effort, `drop`: 695–832 of 1,000 were lost, and nothing the
     reader received said so;
-  - reliable, `block`, the reader stuck for 7 s on one sample: 691–794
-    were lost, and each time the reader saw the owner's instance token
-    withdrawn.
+  - reliable, `block`, the reader's callback stuck for 7 s on one sample:
+    433–786 were lost in 27 runs that recorded what follows (0.27,
+    correcting 0.25's "each time"). The reader's own transport closed in
+    every one. It saw the owner's instance token withdrawn only when the
+    token had reached it before it stalled: in each of the 23 runs where
+    it had, never in the 4 where it had not. On 2026-10-11 six runs that
+    did not record it lost 661–792, and saw no withdrawal in 2 (#753). A ticker on a thread of the reader's own
+    process saw no gap above 107 ms meanwhile: only zenoh's receive
+    thread was held;
+  - reliable, `block`, the reader's whole process stopped (SIGSTOP) for
+    7 s, the owner's token received first (0.27): 421–765 were lost in 13
+    runs. Each time its ticker saw a gap of 7.0–7.1 s on its first tick
+    after, its session read its transport's close (0.35–0.51 s later in
+    the 4 runs that timed it), and it saw the token withdrawn.
 - A transport that closes withdraws the tokens learned through it, between
   routers and on a client's own link alike. The withdrawal reaches the
   reader within 1–2 ms when the link closes, and one lease after a link
   goes silent: 986–1,037 ms at a 1 s lease, 9,961–10,047 ms at the default
   10 s (spike S10). The samples put meanwhile are lost.
+- **Only a token the reader had received is withdrawn** (0.27, #753). A
+  router that gives up on a stalled reader closes the reader's transport
+  and discards its queue toward it. In the runs above with no
+  withdrawal, the reader read everything its router had sent before the
+  close, and the owner's token was not among it. Its session saw the
+  token only after it reconnected, as a new token. A run with more than
+  one withdrawal had another transport close beside the reader's: the
+  owner's own push had waited `wait_before_close` too, and its session
+  closed its transport to its router.
+- A session sees its own transports open and close through zenoh's
+  transport events (`Session::info().transport_events_listener()`,
+  unstable). A close is reported once the session's receive task has
+  read it, after a stalled callback returns (`unicast/universal/
+  transport.rs`, `delete`), and a link's removal as soon as its task
+  fails (`del_link`, `link.rs`).
 - A reliable sample takes any link when no reliable one is up: over a UDP
   link alone it travels best-effort (link selection in
   `unicast/universal/tx.rs`).
@@ -2962,10 +3086,11 @@ Appendix B. These are the ones the rules above cite:
 | `conformance/history/` | §9.7 |
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
 | `conformance/descriptors/` | §3.3 |
-| `conformance/budget/` | §2.7 (0.24; `lossless.json` 0.25) |
+| `conformance/budget/` | §2.7 (0.24; `lossless.json` 0.25, the reader's stall 0.27) |
+| `conformance/seed/` | §4.2 a late joiner's merge: the stamps' order and unstamped samples (0.27) |
 | `conformance/errors/` | §5.2 |
 | `scenarios/grammar.md` | §1.3, §1.6 |
-| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26) |
+| `scenarios/state.md` | §4; §10 a late joiner's seed (0.26); §11 its merge's open cases (0.27) |
 | `scenarios/operations.md` | §5, §6 |
 | `scenarios/presence.md` | §1.5, §3.2, §3.3, §8.1–§8.2 |
 | `scenarios/bindings.md` | §3.2 |
@@ -2973,7 +3098,7 @@ Appendix B. These are the ones the rules above cite:
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11 |
 | `scenarios/constrained.md` | §1.6, R7, §8.5, §12 |
-| `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7) (0.25); Appendix B |
+| `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7) (0.25); a stalled reader, and a tool's window over one (§1, 0.27); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead (0.21) |
 | `profiles/health/scenarios.md` §1, §4 | §8.2 a status before the tokens, §4.3 an owner ahead reported by a stream (0.23) |
@@ -3053,9 +3178,17 @@ brief:
   a rate's from the occurrences a window heard (`rate.json`). A window
   case gives how long it listened, whether it lost no delivery, and
   whether the owner was present throughout. Whether a window lost no
-  delivery comes from the resource's declared QoS, the reader's own loss
-  and miss detection (declared, used, misses detected) (`lossless.json`,
-  0.25). Each file's description states the order a reason is chosen in.
+  delivery comes from the resource's declared QoS, the reader's own loss,
+  what it saw of its own receive path (its ticker's greatest gap, the
+  bound, whether a transport of its session closed: 0.27) and miss
+  detection (declared, used, misses detected) (`lossless.json`, 0.25).
+  The bound comes from `wait_before_close`, the lease and the keep-alive
+  count (`lossless.json`'s `stall_bounds`, 0.27). Each file's
+  description states the order a reason is chosen in.
+- **`seed/`** (0.27): two stamps → their order (`merge.json`'s `order`),
+  and one key's arrivals, each a stamp or none and a kind → which are
+  kept (`cases`). A stamp is `{time, id}`, the id written as zenoh
+  writes it.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

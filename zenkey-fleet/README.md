@@ -62,7 +62,9 @@ deployment.
   `Dropped(n)`; render loops pull the immutable `KeyTreeSnapshot` on the
   stats tick, so a hot bus cannot melt a UI.
 - **`admin`** — raw `@/**` admin-space access: routers, the mesh graph, the
-  storages they run. Plus `session`, `serve`, `scout` and `seed`.
+  storages they run. Plus `session`, `serve`, `scout`, `seed` (a late
+  joiner's, merged by `zenkey_model::seed`) and `stall` (a window's reader
+  watching its own transports and a ticker, core §2.7 0.27).
 
 ## `model/` — meaning, without a session
 
