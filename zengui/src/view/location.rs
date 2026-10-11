@@ -14,7 +14,7 @@
 //!
 //! `bar` reads five of the six sub-states and moves none, like the toolbar
 //! before it. [`breadcrumb`] takes plain data ([`LocationData`]) so
-//! `tests/panes.rs` renders it headlessly, the same seam as
+//! `tests/panes/` renders it headlessly, the same seam as
 //! [`super::status::Status`].
 
 use iced::Element;

@@ -20,7 +20,7 @@
 //!
 //! The shots are not compared against stored images: a picture is for a
 //! reviewer's eyes, and pixel equality across font rasterizer versions is
-//! a flake with extra steps. What is asserted is what `panes.rs` asserts —
+//! a flake with extra steps. What is asserted is what `tests/panes/` asserts —
 //! the words on screen.
 
 mod common;

@@ -1,6 +1,6 @@
 //! Fixtures shared by the integration suites (#532).
 //!
-//! `panes.rs` renders surfaces one at a time; `shots.rs` renders the whole
+//! `tests/panes/` renders surfaces one at a time; `shots.rs` renders the whole
 //! window. Both need the same registry, and the window needs a bus that is
 //! not there — so the bus is a fixture too: [`World`] drives a bus-less
 //! [`Zengui`] through its public messages exactly as the link would, minus the

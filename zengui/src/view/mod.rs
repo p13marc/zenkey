@@ -2,7 +2,7 @@
 //!
 //! Each surface is a free `fn` taking plain data rather than being a method on
 //! the app. That is what lets a surface be rendered standalone in a test
-//! (zensight's `tests/ui_tests.rs` shape), which `tests/panes.rs` and its 44
+//! (zensight's `tests/ui_tests.rs` shape), which `tests/panes/` and its 44
 //! headless tests exist to do. **No function under `view/` names `Zengui`**,
 //! and that is the contract.
 //!

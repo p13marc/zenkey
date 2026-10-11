@@ -12,7 +12,7 @@
 //!
 //! So the widget-shaped half of #178 — `line_view`'s borrows, the toolbar's
 //! pickers, the media handle, the two `canvas::Cache`s — is **not** benched
-//! here. It is held by `tests/panes.rs`, which draws the same panes and fails
+//! here. It is held by `tests/panes/`, which draws the same panes and fails
 //! if a rendering changes, and by the compiler, which is what makes a borrow a
 //! borrow. Saying so is better than a bench that implies a measurement it did
 //! not take.
