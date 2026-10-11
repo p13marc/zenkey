@@ -113,21 +113,11 @@ ports it pane by pane, so the zk2 keys are unlabelled rather than mislabelled
 rows. `just smoke-spray` reads the same deployment through zenctl's `service
 list` and `doctor`.
 
-The v1 demo traffic the panes were built for is `spray_v1` (`just
-gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
+What else to look at:
 
-- Expand `v1` — chunks are labelled origin / class / producer / subject. The
-  window loads no v1 registry since FL6a, so the registration badges read
-  "not asked".
-- Expand `demo`, `two`, `v2`, `someotherbase` — foreign keys with real counts
-  and rates, deliberately *unlabelled* rather than mislabelled.
-  `someotherbase/…` is another deployment's traffic, visible because an
-  explorer runs un-namespaced (RFC 09 §5).
-- `@catalog` is invisible under the raw scope — `**` never crosses an `@` chunk;
-  a custom `v1/@catalog/state/**` selector shows it (the `deployment` scope is zk2's since FL6a).
 - `just gui-demo-bounded` trips both bounds immediately, so the status strip
   reads `N keys (+M retired — bound reached)` **and**
-  `facts: N cached (+M projections retired — cache bound reached)`. Two
+  `identities: N cached (+M retired — cache bound reached)`. Two
   bounds over two different populations, so two sentences (#107).
 - The **admin** tool (the Workbench dock, or the palette's "go to admin
   pane"). Against the demo's peer-only bus every section
@@ -138,8 +128,11 @@ gui-demo-v1`, `just spray-v1`; it goes at FL11). What to look at there:
 - `just gui-demo-no-contracts` holds nothing offline: the status strip counts
   every revision as retrieved from the spray's own holders (spec §8.4).
 
-The sprays exist because no conforming service can emit non-conforming
-traffic — that is the point of one — so they are the only way to exercise
+The v1 demo traffic (`spray_v1`) was deleted in #614 (FL11), with the
+Config tool, the blob browser and the media viewer it was kept for.
+
+The spray exists because no conforming service can emit non-conforming
+traffic — that is the point of one — so it is the only way to exercise
 the key-agnostic path for real.
 
 ## Development

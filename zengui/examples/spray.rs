@@ -65,7 +65,7 @@
 //! Today's zengui still reads v1 (#614 ports it pane by pane), so it shows
 //! every key here as a foreign key — counts, rates and structural payloads,
 //! unlabelled rather than mislabelled — which is the key-agnostic core's
-//! promise. The v1 demo traffic is `spray_v1`.
+//! promise.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
