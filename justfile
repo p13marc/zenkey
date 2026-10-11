@@ -3,7 +3,6 @@
 # traffic to look at.
 #
 #   just gui-demo     # the GUI, against the zk2 demo traffic. Start here.
-#   just gui-demo-v1  # the GUI, against the v1 demo traffic it was built for
 #   just ci           # everything CI runs, in the same order
 #
 # ── The demo traffic ─────────────────────────────────────────────────────
@@ -29,56 +28,15 @@
 #   just ctl doctor --namespace spray --deep --clocks-synced -c tcp/127.0.0.1:7449
 #   just smoke-spray  # both, headless, against a spray on a free port
 #
-# ── What to look at in the v1 demos ──────────────────────────────────────
+# ── Two more demos ───────────────────────────────────────────────────────
 #
-# `spray_v1` (`just gui-demo-v1`, `just spray-v1`; deleted at FL11)
-# publishes conforming v1 *and* deliberately non-conforming keys, because
-# the interesting half of zengui is what it does with traffic this
-# convention does not govern.
+# The v1 demo traffic (`spray_v1`) was deleted in #614 FL11, with the
+# Config tool, the blob browser and the media viewer it was kept for: no
+# zk2 profile serves configuration, blobs or media yet (#613).
 #
-#   * Expand `v1` — chunks are labelled origin / class / producer / subject.
-#     Since #614 FL6a the window loads no v1 registry, so the leaves'
-#     registration badges read "not asked", and their payloads are checked
-#     as what they now are to a zk2 window: not zk2 keys.
-#   * Expand `demo`, `two`, `v2`, `someotherbase` — foreign keys, carrying real
-#     counts and rates, deliberately *unlabelled* rather than mislabelled.
-#     `someotherbase/…` is another deployment's traffic, visible because an
-#     explorer runs un-namespaced (RFC 09 §5).
-#   * `@catalog` is invisible under `everything` because `**` never crosses an
-#     `@` chunk (RFC 03 §4 D2) — which is also why `**` cannot pull the
-#     `@media` frames spray publishes. (The `deployment` scope is zk2's
-#     ambient `zk2/**` since #614 FL6a; a custom `v1/@catalog/state/**`
-#     selector shows the v1 catalog.)
-#   * Select `…/telemetry/sysinfo/disk/var-log/used` and watch its subtree. The
-#     Inspector's `Series` section traces the wandering `value`; its `History`
-#     section fills, and clicking a row names the field that moved. Before
-#     the watch, both say *why* they are empty — an unwatched key records
-#     nothing, and that is not the same as a quiet one.
-#   * Select `…/state/sysinfo/health` and wait: every 20th sample is a
-#     tombstone. It renders as retirement, and the put after it as a new value
-#     rather than a change (RFC 04 §1.2).
-#   * `…/telemetry/probe/reading` moves too, but offers no chart: a protobuf
-#     leaf needs a schema decode, which must not sit on a render path.
-#   * Select a key on spray's `@blob` plane and the Inspector grows a Blobs
-#     section. Probe `01jqz3demo0001`: spray serves it from
-#     two origins at two different content roots, so the pane flags the
-#     disagreement rather than picking (RFC 07 §2.1). Fetch from the second
-#     with the first's root pinned and it aborts naming that origin, leaving
-#     no file — verification happens before disk, not after transfer.
-#   * Open the admin tool (the Workbench dock, or the palette's "go to admin
-#     pane"). Sweep it: against this demo's peer-only bus
-#     every section should say why it is empty, and the coverage table should
-#     read "coverage not judged" rather than "uncovered" — a registry that was
-#     never loaded has not told you a family is uncovered (RFC 09 §5.1 O4).
-#   * Open the config tool — the Workbench's "config", or "configure" on
-#     `probe` in the nodes pane. Read `wlan0`: spray serves the RFC 05 §5.1
-#     double, a group of each class. Change `queue` (hot) and it applies at
-#     once; change `link` (reach) and it leaves only with a window and a yes,
-#     then waits armed — confirm it, or let the window run out and watch the
-#     read-back roll it back. `transport` (contract) names the restart.
 #   * `just gui-demo-bounded` trips *both* bounds immediately: the status strip
 #     should read "N keys (+M retired — bound reached)" and, beside it,
-#     "facts: N cached (+M projections retired — cache bound reached)" — two
+#     "identities: N cached (+M retired — cache bound reached)" — two
 #     bounds over two populations, two sentences (RFC 09 §5.1 O6).
 #   * `just gui-demo-no-contracts` is the zk2 demo with nothing held offline:
 #     the contracts cell counts every revision as retrieved from the spray's
@@ -115,14 +73,8 @@ gui-demo port=port: (_demo port "spray" "--namespace spray --contracts examples/
 # The zk2 demo with no offline contracts: retrieval from the bus.
 gui-demo-no-contracts port=port: (_demo port "spray" "--namespace spray" "50000")
 
-# `spray_v1` keeps the blob, config and media demos until FL11. Since FL6a
-# the window loads no v1 registry, so its keys are foreign and their
-# registration badges read "not asked".
-# The GUI against the v1 demo traffic it was built for.
-gui-demo-v1 port=port: (_demo port "spray_v1" "" "50000")
-
-# The v1 demo with a key bound small enough to trip immediately.
-gui-demo-bounded port=port: (_demo port "spray_v1" "" "6")
+# The zk2 demo with a key bound small enough to trip immediately.
+gui-demo-bounded port=port: (_demo port "spray" "--namespace spray --contracts examples/zk2/.history" "6")
 
 _demo port example flags max_keys:
     #!/usr/bin/env bash
@@ -146,10 +98,6 @@ _demo port example flags max_keys:
 # Just the zk2 traffic: it listens as a router, so anything can connect to it.
 spray port=port:
     cargo run -p zengui --example spray -- -l tcp/127.0.0.1:{{port}}
-
-# Just the v1 traffic (`spray_v1`, until FL11): what `gui-demo-v1` runs.
-spray-v1 port=port:
-    cargo run -p zengui --example spray_v1 -- -l tcp/127.0.0.1:{{port}}
 
 # The spray runs on a free port. The doctor exits 1, and that is the point:
 # its findings (token-missing, state-stamp-foreign) are the spray's

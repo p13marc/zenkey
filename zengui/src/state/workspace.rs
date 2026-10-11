@@ -2,12 +2,12 @@
 //!
 //! Four sub-groups, split by what a base change owes each:
 //!
-//! - [`Verdicts`] — the nodes, doctor, blob and admin panes, whose content is
+//! - [`Verdicts`] — the nodes, doctor and admin panes, whose content is
 //!   *a verdict about a fleet*. They are dropped with it. (`nodes` lives here
 //!   rather than in [`super::observation`], which is the one placement worth
 //!   arguing about: its freshness join is fed by the tick, like the key tree.
-//!   But being fed by the tick is not a group — the tick also feeds
-//!   `media.viewing` and the subject\'s history — and the same state holds
+//!   But being fed by the tick is not a group — the tick also feeds the
+//!   echo ring and the subject\'s history — and the same state holds
 //!   the selected address's health reading, a verdict if anything is. The
 //!   address *selection* is not here at all — since #181 there is one
 //!   subject, and it is the user's, not this pane's.)
@@ -361,8 +361,6 @@ sub_state! {
         pub(crate) nodes: crate::nodes::NodesState,
         /// The doctor panel's run state (#71) — run-on-demand only.
         pub(crate) doctor: crate::doctor::DoctorState,
-        /// The blob browser's state (#68) — probe and fetch, both on demand.
-        pub(crate) blob: crate::blob::BlobState,
         /// The admin & storage panel's state (#70) — swept on demand.
         pub(crate) admin: crate::admin::AdminState,
         /// The payload-conformance verdict cache (#164): per-key verdicts of
@@ -376,15 +374,12 @@ sub_state! {
 impl Verdicts {
     /// Drop every verdict — deliberately **not** `Default::default()`.
     ///
-    /// `DoctorState::clear` keeps `deep` (user input, not a verdict),
-    /// `NodesState::clear` keeps the clock toggle (the operator's word), and
-    /// `BlobState::clear` cancels an in-flight transfer first. A blanket
-    /// default would abandon a running fetch and silently retype the
-    /// doctor\'s form.
+    /// `DoctorState::clear` keeps `deep` (user input, not a verdict) and
+    /// `NodesState::clear` keeps the clock toggle (the operator's word). A
+    /// blanket default would silently retype both.
     pub(crate) fn forget(&mut self) {
         self.nodes.clear();
         self.doctor.clear();
-        self.blob.clear();
         self.admin.clear();
         // The verdicts were judged under the old fleet's schemas (#164).
         self.payloads.clear();
@@ -409,13 +404,6 @@ sub_state! {
         /// than in the form because a `Publication` is a live bus declaration, not
         /// view state — dropping it undeclares.
         pub(crate) publication: Option<RepeatLoad>,
-        /// The media viewer's state (#69) — subscribes only on an explicit
-        /// view, never for opening the pane (the RFC 07 §1 plane deserves the
-        /// laziest posture in the app).
-        pub(crate) media: view::media::MediaState,
-        /// The Config tool's form (#481): the resource it addresses, the
-        /// last read-back, and the call in flight.
-        pub(crate) config_form: crate::configure::ConfigForm,
     }
 }
 

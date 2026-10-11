@@ -8,8 +8,7 @@
 //! has no contract to encode against, so a publish writes the bytes as
 //! typed, and a call's request was planned and encoded (`plan_call`,
 //! `encode_request`) before its task started — every refusal of the input
-//! is the form's, before anything is sent. The one v1 call left is the
-//! Config tool's ([`V1Call`]), which leaves with it in FL11.
+//! is the form's, before anything is sent.
 
 use std::sync::Arc;
 
@@ -64,69 +63,6 @@ pub fn call(c: Call) -> Task<Message> {
             .map_err(ServiceError::of)
         },
         |r| Message::Pane(PaneMsg::Send(SendMsg::Done(r))),
-    )
-}
-
-/// One v1 `@rpc` call, as the Config tool (#481) still makes it — the last
-/// v1 call in the window, and it leaves with that tool (FL11; config.v1
-/// does not exist, #613). The Send pane calls zk2 operations ([`Call`]).
-///
-/// A struct rather than ten positional parameters (#360): `base`, `target`,
-/// `producer` and `procedure` are four adjacent `String`s, and any permutation
-/// of them compiles into a call to the wrong thing.
-pub struct V1Call {
-    pub session: zenoh::Session,
-    pub base: String,
-    /// The call target, as typed — the engine parses it (a bad target is an
-    /// answer, not a panic).
-    pub target: String,
-    pub producer: String,
-    pub procedure: String,
-    pub params: Vec<String>,
-    pub body: Option<Vec<u8>>,
-    pub timeout: std::time::Duration,
-}
-
-/// One v1 call, landing wherever `land` says (#481: the Config tool's calls
-/// are answered into its own form).
-pub fn v1_call_then(
-    c: V1Call,
-    land: impl FnOnce(Result<Arc<zenkey_fleet_v1::report::CallReport>, ServiceError>) -> Message
-    + Send
-    + 'static,
-) -> Task<Message> {
-    Task::perform(
-        async move {
-            let V1Call {
-                session,
-                base,
-                target,
-                producer,
-                procedure,
-                params,
-                body,
-                timeout,
-            } = c;
-            let target = zenkey_fleet_v1::CallTarget::parse(&target).map_err(ServiceError::of)?;
-            zenkey_fleet_v1::call(
-                &zenkey_fleet_v1::Fleet::new(&session, &base),
-                zenkey_fleet_v1::CallSpec {
-                    target: &target,
-                    producer: &producer,
-                    procedure: &procedure,
-                    params: &params,
-                    body,
-                    attachment: None,
-                    timeout,
-                    slices: None,
-                    force: false,
-                },
-            )
-            .await
-            .map(Arc::new)
-            .map_err(ServiceError::of)
-        },
-        land,
     )
 }
 

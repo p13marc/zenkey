@@ -149,8 +149,9 @@ The **keyspace-v2 convention** for Zenoh keyspaces, in four parts:
   owners over `examples/zk2/walkthrough` and `tcgui`, a `health.v1`-only
   service, and deliberately non-conforming raw traffic the doctor finds:
   `token-missing`, `state-stamp-foreign`), smoked in process by
-  `tests/spray_smoke.rs`; `examples/spray_v1.rs` keeps the v1 demos and
-  the live tests until FL6b/FL11.
+  `tests/spray_smoke.rs`. The v1 spray went with the Config tool, the
+  Blob browser and the Media viewer, deleted in FL11a (no `config.v1`,
+  `blob.v1` or `media.v1` yet, #613).
 - `zenctl/` — the **bus explorer CLI** (Apache-2.0, **not published**:
   Forgejo release binaries via `release.yml` / `cargo install --git`; 0.1.x
   stays on crates.io un-yanked): app-neutral, and zk2's since FJ9 (#612),
@@ -541,8 +542,7 @@ Plain cargo is still the build system; the `justfile` only covers what needs
 more than one command — chiefly running the GUI against traffic to look at.
 The demo is self-contained (no `zenohd`): `spray` listens and zengui connects
 straight to it (`just --list` for the recipes). `just spray` and `just
-gui-demo` run the zk2 spray, which today's v1 zengui shows as foreign keys;
-`just spray-v1`, `just gui-demo-v1` and the other v1 demos run `spray_v1`.
+gui-demo` run the zk2 spray.
 `just shots` renders every zengui scene (`zengui/tests/common/scenes.rs`) to
 PNGs in both themes headlessly (#532) — the only way to *see* the GUI on a
 host with no display; `just shots-base main` draws the same scenes from `main`

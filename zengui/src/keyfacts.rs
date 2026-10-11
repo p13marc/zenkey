@@ -14,9 +14,9 @@
 //! vocabulary.
 //!
 //! **v1 keys are foreign** after the port: a `v1/…` key reads
-//! [`Rung::NotZk2`], with no v1 overlay. The panes still on v1 (send until
-//! FL10, the Config tool and the blob and media planes until FL11) take a
-//! v1 projection on demand ([`v1_facts`]), never from a cache.
+//! [`Rung::NotZk2`], with no v1 overlay. The one surface still on v1, the
+//! Inspector's type section until FL8, takes a v1 projection on demand
+//! ([`v1_facts`]), never from a cache.
 
 pub use zenkey_fleet::report::{KeyGroup, KeyIdentity, Unresolved};
 pub use zenkey_fleet::{IdentityCache, Resolution, Resolved};
@@ -183,9 +183,10 @@ pub fn badged(wire: &str, namespace: &str, identity: &KeyIdentity) -> Option<Run
 const V1_CHUNK: &str = "v1";
 
 /// A key's v1 projection, on demand (#614, FL7): the classification the
-/// v1 panes still read — the send form's facts (FL10), the Config tool's
-/// target and the blob and media planes (FL11). No slices since FL6a, so
-/// it costs a key parse; nothing caches it, since nothing zk2 needs it.
+/// Inspector's type section still reads, until FL8. Its other readers, the
+/// send form (FL10), the Config tool and the blob and media planes (FL11),
+/// are gone. No slices since FL6a, so it costs a key parse; nothing caches
+/// it, since nothing zk2 needs it.
 pub fn v1_facts(namespace: &str, key: &str) -> zenkey_fleet_v1::KeyFacts {
     zenkey_fleet_v1::describe_key(namespace, key, None).facts
 }

@@ -235,7 +235,6 @@ pub(crate) fn tool_icon(p: RightPane) -> kit::Icon {
         RightPane::Nodes => kit::Icon::Nodes,
         RightPane::Admin => kit::Icon::Admin,
         RightPane::Mesh => kit::Icon::Mesh,
-        RightPane::Config => kit::Icon::Config,
         RightPane::Inspector => kit::Icon::Inspector,
     }
 }
@@ -301,8 +300,8 @@ fn inspector<'a>(
                 .map_or(&dep.identity, |(cache, _)| cache)
                 .get(k)
         }),
-        // A key parse per frame, for the selected key alone: the v1 panes'
-        // classification, on demand (#614, FL7).
+        // A key parse per frame, for the selected key alone: the type
+        // section's v1 classification, on demand (#614, FL7), until FL8.
         v1: slot
             .current
             .key()
@@ -325,8 +324,6 @@ fn inspector<'a>(
         snapshot: work.replay.snapshot.as_deref(),
         compare_snapshot: slot.compare_snapshot,
         latency: slot.selected_latency.clone(),
-        blob: &work.verdicts.blob,
-        media: &work.bench.media,
         slices: None,
         presence: dep.presence.as_deref(),
         nodes: &work.verdicts.nodes,
@@ -434,16 +431,6 @@ fn workbench<'a>(
             view::admin::pane(&work.verdicts.admin, dep.admin_declared.as_deref(), sp)
         }
         RightPane::Mesh => view::mesh::pane(&work.verdicts.admin, sp),
-        RightPane::Config => {
-            let form = &work.bench.config_form;
-            view::configure::pane(view::configure::ConfigData {
-                form,
-                producers: crate::configure::producers(None),
-                origins: Vec::new(),
-                session: dep.raw.is_some(),
-                sp,
-            })
-        }
         // Unreachable by construction — `PaneSelected(Inspector)` restores
         // the Inspector dock instead of writing `right_pane`, and the
         // default is `Call` — but a match must say what it would mean, and

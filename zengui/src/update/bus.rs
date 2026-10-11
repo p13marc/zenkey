@@ -139,13 +139,6 @@ pub(crate) fn apply_tick(
                 rec.observe_qos(sample, qos_recorded);
             }
         }
-        // The media viewer's frames arrive on the exact key it watches
-        // (issue #69) — same pipeline, no extra subscription.
-        if let Some(v) = work.bench.media.viewing.as_mut()
-            && v.key == sample.key
-        {
-            v.on_frame(sample);
-        }
     }
     // The node dashboard (#61; zk2's since #614, FL9): the zero-cost
     // watched-freshness join, per address presence holds — on live ticks

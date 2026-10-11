@@ -460,7 +460,7 @@ pub enum ChromeMsg {
 ///
 /// One variant per surface, and **not** the `Pane(PaneId, PaneMsg)` pair
 /// #176 first sketched: that makes 121 states representable where eleven are
-/// legal — `Pane(PaneId::Call, PaneMsg::Blob(..))` would compile and mean
+/// legal — `Pane(PaneId::Call, PaneMsg::Mesh(..))` would compile and mean
 /// nothing. The pane identity is already the variant tag.
 ///
 /// `Pane(..)` is a **provenance** tag — which surface emitted the message — not
@@ -498,10 +498,6 @@ pub enum PaneMsg {
     /// Inspector detail-section interactions (issue #64): which numeric leaf
     /// is plotted, on the slot the emitting surface is bound to (#257).
     Detail(SlotId, crate::view::detail::DetailMsg),
-    /// Inspector `@blob`-section interactions (issue #68).
-    Blob(crate::view::blob::BlobMsg),
-    /// Inspector `@media`-section interactions (issue #69).
-    Media(crate::view::media::MediaMsg),
     /// Inspector Fields-section interactions (#223): the bounded field
     /// observation window on the slot's key (#257).
     Fields(SlotId, crate::view::fields::FieldsMsg),
@@ -515,8 +511,6 @@ pub enum PaneMsg {
     Admin(crate::view::admin::AdminMsg),
     /// Mesh tool interactions (#541).
     Mesh(crate::view::mesh::MeshMsg),
-    /// Config tool interactions (#481).
-    Config(crate::view::configure::ConfigMsg),
     /// Traffic tab interactions (#542) — a stream of the Activity dock.
     Traffic(crate::view::traffic::TrafficMsg),
     /// Echo pane interactions (issue #72, echo v2).
@@ -537,9 +531,10 @@ impl PaneMsg {
     /// so — the same shape as the palette's and the shortcut map's own coverage
     /// tests.
     ///
-    /// It is no longer a bijection, and #182 is why: `Detail`, `History`,
-    /// `Blob` and `Media` are four *sections* of one surface now, so four
-    /// variants map to `Inspector`. The relation the test still pins is
+    /// It is no longer a bijection, and #182 is why: `Detail` and `History`
+    /// are *sections* of one surface now, with the Fields, Why and Consumers
+    /// sections beside them, so several variants map to `Inspector`. The
+    /// relation the test still pins is
     /// coverage in both directions — every pane owes a message, every message
     /// names a pane — which is what it was for.
     pub fn pane(&self) -> Option<RightPane> {
@@ -547,15 +542,12 @@ impl PaneMsg {
             PaneMsg::Send(_) => RightPane::Send,
             PaneMsg::Detail(..)
             | PaneMsg::History(..)
-            | PaneMsg::Blob(_)
-            | PaneMsg::Media(_)
             | PaneMsg::Fields(..)
             | PaneMsg::Why(..)
             | PaneMsg::Consumers(..) => RightPane::Inspector,
             PaneMsg::Nodes(_) => RightPane::Nodes,
             PaneMsg::Admin(_) => RightPane::Admin,
             PaneMsg::Mesh(_) => RightPane::Mesh,
-            PaneMsg::Config(_) => RightPane::Config,
             // The Activity dock's streams (#183), and the Connect (#185),
             // Selectors (#187) and Settings (#188) overlays: regions of the
             // window, but not right-hand panes, and answering a pane for one
@@ -676,10 +668,9 @@ pub enum RightPane {
     /// Publish and call, one form with a mode toggle (#184).
     Send,
     /// One surface that follows the subject (#182): the key facts, the value
-    /// and its decode, the history diff, the chart — and the `@blob` or
-    /// `@media` sections when the key is on one of those planes.
+    /// and its decode, the history diff, the chart.
     ///
-    /// It replaces four tabs. `Detail`, `History`, `Blob` and `Media` each
+    /// It replaced four tabs. `Detail`, `History`, `Blob` and `Media` each
     /// answered part of one question about one thing, so switching between
     /// them was the user assembling by hand what the Inspector assembles.
     Inspector,
@@ -689,9 +680,6 @@ pub enum RightPane {
     /// The swept topology, drawn (#541) — a tool of its own, read from the
     /// admin sweep.
     Mesh,
-    /// A producer's configuration, read and changed through RFC 05 §5.1
-    /// (#481).
-    Config,
     // `Connect` is deliberately absent since #185: contexts and endpoints
     // (issue #67) are a session-scoped *overlay*
     // ([`Overlay::Connect`](crate::view::palette::Overlay)), reached from the
@@ -702,13 +690,12 @@ pub enum RightPane {
 impl RightPane {
     /// Every pane, in the old tab order — the palette and the workbench's
     /// tool strip iterate this, so a new variant cannot be forgotten.
-    pub const ALL: [RightPane; 6] = [
+    pub const ALL: [RightPane; 5] = [
         RightPane::Send,
         RightPane::Inspector,
         RightPane::Nodes,
         RightPane::Admin,
         RightPane::Mesh,
-        RightPane::Config,
     ];
 
     pub fn label(self) -> &'static str {
@@ -718,7 +705,6 @@ impl RightPane {
             RightPane::Nodes => "nodes",
             RightPane::Admin => "admin",
             RightPane::Mesh => "mesh",
-            RightPane::Config => "config",
         }
     }
 }
@@ -840,13 +826,10 @@ mod tests {
             PaneMsg::Nodes(view::nodes::NodesMsg::AskHealth),
             PaneMsg::Doctor(view::doctor::DoctorMsg::Run),
             PaneMsg::History(SlotId::FOLLOW, view::history::HistoryMsg::Clear),
-            PaneMsg::Blob(view::blob::BlobMsg::Probe),
-            PaneMsg::Media(view::media::MediaMsg::Stop),
             PaneMsg::Fields(SlotId::FOLLOW, view::fields::FieldsMsg::Run),
             PaneMsg::Why(SlotId::FOLLOW, view::why::WhyMsg::Run),
             PaneMsg::Admin(view::admin::AdminMsg::Run),
             PaneMsg::Mesh(view::mesh::MeshMsg::CopyDot),
-            PaneMsg::Config(view::configure::ConfigMsg::Read),
             PaneMsg::Traffic(view::traffic::TrafficMsg::Sort(
                 crate::traffic::TrafficSort::Rate,
             )),
@@ -855,8 +838,9 @@ mod tests {
             PaneMsg::Settings(view::settings::SettingsMsg::Apply),
         ];
         // Coverage in both directions, and neither a bijection nor total.
-        // #182 made four variants sections of the Inspector, so `Detail`,
-        // `History`, `Blob` and `Media` all name it; #183 moved Echo and
+        // #182 made variants sections of the Inspector, so `Detail` and
+        // `History` both name it (`Blob` and `Media` did too, until #614
+        // FL11 deleted them with their planes); #183 moved Echo and
         // Doctor into the Activity dock and #185 made Connect an overlay, so
         // those three name no right-hand pane at all. What must stay true is
         // that no pane in the strip is unreachable by message, and no message
@@ -871,9 +855,9 @@ mod tests {
             "every pane in the strip owes `PaneMsg` a variant, and vice versa"
         );
 
-        // And the two foldings are themselves claims. Six variants name the
-        // Inspector — the four tabs it replaced (#182) plus the Fields (#223)
-        // and Why (#214) sections; six name no pane at all — the two
+        // And the two foldings are themselves claims. Four variants name the
+        // Inspector — the two tabs it replaced that are left (#182) plus the
+        // Fields (#223) and Why (#214) sections; six name no pane at all — the two
         // streams that moved to the dock (#183), the Traffic stream (#542),
         // and the Connect (#185), Selectors (#187) and Settings (#188)
         // overlays. Without these, a
@@ -883,8 +867,8 @@ mod tests {
             .filter(|m| m.pane() == Some(RightPane::Inspector))
             .count();
         assert_eq!(
-            folded, 6,
-            "Detail, History, Blob, Media, Fields and Why are the Inspector's sections"
+            folded, 4,
+            "Detail, History, Fields and Why are the Inspector's sections"
         );
         let docked = one_per_pane.iter().filter(|m| m.pane().is_none()).count();
         assert_eq!(

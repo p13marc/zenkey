@@ -493,3 +493,55 @@ fn two_windows_render_independently() {
         "the torn window holds its dock and nothing else"
     );
 }
+
+/// A layout saved while the Config tool was open still loads (#614, FL11a
+/// deleted the tool). The named layout never named a tool: it names docks
+/// (#180), and which tool the Workbench shows is session state, Send at
+/// every launch. So the file an older build wrote with Config on screen
+/// comes back whole — the Workbench torn into its own window at its
+/// geometry, drawing the tools that are left — and a hand edit naming the
+/// tool is ignored like the retired `split`, never a refused launch.
+#[test]
+fn a_layout_saved_with_the_config_tool_open_loads_without_it() {
+    use crate::message::RightPane;
+    use crate::prefs::{DockRole, Prefs};
+    use iced_test::simulator;
+
+    let dir = std::env::temp_dir().join("zengui-prefs-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config-tool-layout.toml");
+    std::fs::write(
+        &path,
+        "theme = \"light\"\n\
+         right_pane = \"config\"\n\
+         [layout]\n\
+         [layout.root.split]\naxis = \"vertical\"\nratio = 0.3\n\
+         [layout.root.split.a]\ndock = \"locator\"\n\
+         [layout.root.split.b]\ndock = \"inspector\"\n\
+         [[layout.torn]]\nrole = \"workbench\"\nsize = [520.0, 700.0]\ntool = \"config\"\n",
+    )
+    .unwrap();
+    let (prefs, note) = Prefs::load_from(&path);
+    assert!(note.is_none(), "it loads, with no note: {note:?}");
+    assert_eq!(prefs.layout.torn.len(), 1, "the torn Workbench is kept");
+    assert_eq!(prefs.layout.torn[0].role, DockRole::Workbench);
+
+    let mut app = Zengui::with_prefs(crate::app::test_settings(), prefs, None).0;
+    let _ = app.open_windows();
+    let bench = app
+        .work
+        .windows
+        .window_of(DockRole::Workbench)
+        .expect("the Workbench reopens in its own window");
+    assert_eq!(
+        app.work.windows.torn[0].size,
+        Some((520.0, 700.0)),
+        "at the geometry it was saved with"
+    );
+    assert_eq!(app.work.right_pane, RightPane::Send, "the launch tool");
+    let mut ui = simulator::<Message, _, _>(app.view(bench));
+    for tool in ["send", "nodes", "admin", "mesh"] {
+        assert!(ui.find(tool).is_ok(), "the {tool} tool is on the strip");
+    }
+    assert!(ui.find("config").is_err(), "no tool answers to config");
+}

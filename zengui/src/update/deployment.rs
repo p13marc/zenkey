@@ -285,9 +285,9 @@ fn repoint(
 /// fetched value, the history recorder, and the call/publish forms —
 /// each keyed by a full wire key that names its own namespace, or user
 /// input rather than projected evidence. What cannot be cleared here — a
-/// task already in flight — is judged at its landing instead: doctor, blob
-/// probe/fetch and an address's health reading each carry the namespace
-/// they ran against.
+/// task already in flight — is judged at its landing instead: the doctor
+/// run and an address's health reading each carry the namespace they ran
+/// against.
 ///
 /// Four of the six sub-states, and that number is the finding: the issue
 /// assumed this could be one field replacement. Two of the four delegate,

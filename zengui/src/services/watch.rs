@@ -176,31 +176,3 @@ pub fn release_scope(monitor: Arc<Monitor>, ids: Vec<WatchId>) -> Task<Message> 
         |r| Message::Deployment(DeploymentMsg::ScopeWatchesReleased(r)),
     )
 }
-
-/// Watch one media key — a plain watch, not a seeded one: a media stream's
-/// past frames are not what the viewer asked for.
-pub fn media(monitor: Arc<Monitor>, key: String) -> Task<Message> {
-    Task::perform(
-        async move { monitor.watch(&key).await.map_err(ServiceError::of) },
-        |r| {
-            Message::Pane(crate::message::PaneMsg::Media(
-                crate::view::media::MediaMsg::Watched(r),
-            ))
-        },
-    )
-}
-
-/// Release the media watch — the "unviewed streams cost zero subscriptions"
-/// half of #69's contract.
-pub fn release_media(monitor: Arc<Monitor>, id: WatchId) -> Task<Message> {
-    Task::perform(
-        async move {
-            let _ = monitor.unwatch(id).await;
-        },
-        |()| {
-            Message::Pane(crate::message::PaneMsg::Media(
-                crate::view::media::MediaMsg::Stopped,
-            ))
-        },
-    )
-}

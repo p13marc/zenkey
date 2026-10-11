@@ -18,16 +18,15 @@
 //! scrollable is a layout bug, so exactly one caller owns the scroll — this
 //! one.
 //!
-//! ## Plane conditionality comes from the classification seam
+//! ## No plane sections
 //!
-//! Which plane a key sits on is read off its classification — a zk2 key's
-//! kind token, from its identity (#614, FL7), or a v1 key's [`ClassKind`],
-//! from its v1 facts projected on demand — never a `key.contains("@blob")`.
-//! `keyfacts` is the single seam where a key becomes convention-aware (this
-//! crate's whole key-agnostic-core claim), and a second, string-shaped
-//! classifier here would be the thing that claim forbids. The `@blob` and
-//! `@media` sections are v1's planes, foreign keys' since the port, until
-//! FL11 removes them: no zk2 kind token opens one.
+//! A key's plane once added sections: v1's `@blob` and `@media` planes, read
+//! off the key's classification and never off a `key.contains("@blob")`.
+//! They were deleted in #614 (FL11), because no zk2 profile serves either
+//! plane yet (#613), and no zk2 kind token opens a section: `@stream` and
+//! `@state` are read like any other stream and state. A plane section that
+//! comes back must be read from the classification seam, `keyfacts`, as
+//! these were.
 //!
 //! ## Three of the issue's six rows are not here
 //!
@@ -42,19 +41,17 @@ use iced::widget::{Column, column, scrollable};
 use iced::{Element, Length};
 use zenkey_fleet::LatencyReport;
 use zenkey_fleet_v1::SliceSet;
-use zenkey_fleet_v1::model::facts::{ClassKind, KeyFacts, KeyShape, Registration};
+use zenkey_fleet_v1::model::facts::{KeyFacts, Registration};
 
-use crate::keyfacts::{KeyGroup, Resolution};
+use crate::keyfacts::Resolution;
 
 use super::detail::{DetailData, Fetched, SeriesData};
 use super::history::HistoryData;
-use super::{blob, detail, history, kit, media, nodes};
-use crate::blob::BlobState;
+use super::{detail, history, kit, nodes};
 use crate::history::HistoryRecorder;
 use crate::message::{Message, SlotId, Subject};
 use crate::nodes::NodesState;
 use crate::presence_link::PresenceUpdate;
-use crate::view::media::MediaState;
 use crate::view::tokens::{Spacing, face};
 
 /// Everything the Inspector may show, for whatever the subject turns out to
@@ -73,12 +70,11 @@ pub struct InspectorData<'a> {
     pub slot: SlotId,
     pub subject: &'a Subject,
     /// The key subject's zk2 identity (#614, FL7): the identity line the
-    /// Detail section renders, and a zk2 key's plane.
+    /// Detail section renders.
     pub identity: Option<&'a Resolution>,
     /// The key subject's v1 facts, projected on demand
-    /// ([`crate::keyfacts::v1_facts`]): a v1 key's blob and media planes,
-    /// the Config tool's target and the registry's type vocabulary, until
-    /// FL11 removes them.
+    /// ([`crate::keyfacts::v1_facts`]): the registry's type vocabulary,
+    /// the type section's one input, until FL8 moves it.
     pub v1: Option<KeyFacts>,
     pub fetched: Fetched<'a>,
     pub decoded: Option<&'a crate::value::DecodedValue>,
@@ -95,8 +91,6 @@ pub struct InspectorData<'a> {
     /// Whether that comparison is showing, on this slot.
     pub compare_snapshot: bool,
     pub latency: Option<(LatencyReport, u64)>,
-    pub blob: &'a BlobState,
-    pub media: &'a MediaState,
     pub slices: Option<&'a SliceSet>,
     /// The presence link's last landing (#614, FL9): an address subject's
     /// status, since when, and its instances. `None` = not read (O4).
@@ -113,37 +107,6 @@ pub struct InspectorData<'a> {
     /// The dock's resolved spacing grid (#192) — Comfortable by default: a
     /// form wants air.
     pub sp: Spacing,
-}
-
-/// Which plane a key sits on, when it sits on one at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Plane {
-    /// A zk2 data key, placed by its kind token (#614, FL7). No kind token
-    /// opens a plane section: `@stream` and `@state` are read like any
-    /// other stream and state.
-    Zk2,
-    /// A v1 key's class — foreign since the port, and the only keys the
-    /// `@blob` and `@media` sections still read, until FL11.
-    V1(ClassKind),
-}
-
-/// Which plane a key sits on: a zk2 key's kind token first, else a v1
-/// key's class.
-///
-/// `None` for anything neither grammar placed: an unparsed key, a key
-/// outside the namespace, or no identity yet. "We have not classified it"
-/// and "it is on the ordinary planes" render the same way here, which is
-/// correct — neither adds a plane section.
-fn plane(identity: Option<&Resolution>, v1: Option<&KeyFacts>) -> Option<Plane> {
-    if let Some(KeyGroup::Resource { token, .. }) = identity.map(|r| &r.identity.group)
-        && token.parse::<zenkey_model::grammar::KindToken>().is_ok()
-    {
-        return Some(Plane::Zk2);
-    }
-    match &v1?.shape {
-        KeyShape::V1(f) => Some(Plane::V1(f.class_kind)),
-        _ => None,
-    }
 }
 
 pub fn pane<'a>(d: InspectorData<'a>) -> Element<'a, Message> {
@@ -199,7 +162,6 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
         slot: d.slot,
         key,
         identity: d.identity,
-        config: d.v1.as_ref().and_then(crate::configure::config_target),
         fetched: d.fetched,
         decoded: d.decoded,
         series: d.series,
@@ -213,18 +175,6 @@ fn key_sections<'a>(key: &'a str, d: &InspectorData<'a>) -> Column<'a, Message> 
     // type-subject arm the engine's interface projections answer.
     if let Some(section) = type_section(d) {
         col = col.push(section);
-    }
-
-    // The plane sections, when the key is on one. Order matters: the plane is
-    // the more specific fact, so it reads after the general one.
-    match plane(d.identity, d.v1.as_ref()) {
-        Some(Plane::V1(ClassKind::Blob)) => {
-            col = col.push(blob::section(d.blob, d.slices.is_some(), d.sp));
-        }
-        Some(Plane::V1(ClassKind::Media)) => {
-            col = col.push(media::section(d.media, d.slices, d.sp));
-        }
-        Some(Plane::Zk2 | Plane::V1(_)) | None => {}
     }
 
     // The bounded field observation (#223) and the why ladder (#214): both

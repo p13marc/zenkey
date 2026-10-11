@@ -13,7 +13,6 @@
 //! call site still says `services::sweep::<fn>`.
 
 mod admin;
-mod blob;
 mod budget;
 mod consumers;
 mod declared;
@@ -21,7 +20,6 @@ mod doctor;
 mod nodes;
 
 pub use admin::admin;
-pub use blob::{BlobFetch, blob_fetch, blob_probe, blob_tree};
 pub use budget::budget;
 pub use consumers::consumers_of;
 pub use declared::declared;

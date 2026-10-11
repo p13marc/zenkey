@@ -1,5 +1,5 @@
 //! The Inspector's value: decode provenance, superseded against never asked,
-//! the plane it follows, numeric plotting (#64), and the engine's
+//! the subject it follows, numeric plotting (#64), and the engine's
 //! projections consumed (#234).
 
 use super::*;
@@ -36,7 +36,6 @@ fn the_detail_pane_tags_decode_provenance() {
             sp: sp(),
             key,
             identity: Some(identity),
-            config: None,
             fetched: Fetched::Landed(Box::leak(Box::new(fetched.clone()))),
             decoded: Some(decoded),
             series: None,
@@ -112,7 +111,6 @@ fn the_detail_pane_tags_decode_provenance() {
         sp: sp(),
         key,
         identity: Some(identity),
-        config: None,
         fetched: Fetched::Landed(&none),
         decoded: None,
         series: None,
@@ -145,7 +143,6 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
         sp: sp(),
         key,
         identity: None,
-        config: None,
         fetched,
         decoded: None,
         series: None,
@@ -179,24 +176,15 @@ fn the_detail_pane_distinguishes_superseded_from_never_asked() {
     );
 }
 
-/// The Inspector dispatches on the subject, and the plane sections come from
-/// the classification seam (#182).
-///
-/// The load-bearing assertions are the *negative* ones. A `@blob` key must not
-/// grow a media viewer and an ordinary state key must not grow either, because
-/// the alternative — deciding from `key.contains("@blob")` — is the
-/// string-shaped classifier this crate's key-agnostic-core claim forbids.
+/// The Inspector dispatches on the subject (#182). The plane sections it
+/// once grew for v1's `@blob` and `@media` keys were deleted in #614 (FL11).
 #[test]
-fn the_inspector_follows_the_subject_and_its_plane() {
-    use zengui::blob::BlobState;
+fn the_inspector_follows_the_subject() {
     use zengui::message::Subject;
     use zengui::nodes::NodesState;
     use zengui::view::inspector::pane;
-    use zengui::view::media::MediaState;
 
     let slices = slices();
-    let blob = BlobState::default();
-    let media = MediaState::default();
     let nodes = NodesState::default();
 
     let facts_for = |key: &str| {
@@ -207,22 +195,20 @@ fn the_inspector_follows_the_subject_and_its_plane() {
 
     // Nothing selected: the Inspector holds nothing of its own and says so.
     let none = Subject::None;
-    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
-        &none, None, &slices, &blob, &media, &nodes,
-    )));
+    let mut ui =
+        simulator::<Message, _, _>(pane(projection_inspector(&none, None, &slices, &nodes)));
     assert!(ui.find("Nothing selected").is_ok());
     assert!(ui.find("Detail").is_err(), "no subject, no sections");
 
     // A prefix is a subtree, and the pane says that rather than reporting
     // "no value fetched" about a key that was never a key (#85).
     let prefix = Subject::Prefix("zk2/robot1/nav".into());
-    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
-        &prefix, None, &slices, &blob, &media, &nodes,
-    )));
+    let mut ui =
+        simulator::<Message, _, _>(pane(projection_inspector(&prefix, None, &slices, &nodes)));
     assert!(ui.find("A subtree, not a key").is_ok());
     assert!(ui.find("History").is_err(), "a subtree records nothing");
 
-    // An ordinary state key: detail and history, and neither plane section.
+    // An ordinary state key: detail and history.
     let state_key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
     let state_facts = facts_for(state_key);
     let key = Subject::Key(state_key.into());
@@ -230,8 +216,6 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         &key,
         Some(&state_facts),
         &slices,
-        &blob,
-        &media,
         &nodes,
     )));
     assert!(ui.find("Detail").is_ok());
@@ -239,33 +223,12 @@ fn the_inspector_follows_the_subject_and_its_plane() {
         ui.find("History").is_ok(),
         "the timeline is a section now, not another tab"
     );
-    assert!(ui.find("Blobs").is_err());
-    assert!(ui.find("Media").is_err());
-
-    // A `@blob` key grows the blob sections and only those.
-    let blob_key = "v1/h-3fa9c2d41b7e/@blob/artifact/abc123";
-    let blob_facts = facts_for(blob_key);
-    let key = Subject::Key(blob_key.into());
-    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
-        &key,
-        Some(&blob_facts),
-        &slices,
-        &blob,
-        &media,
-        &nodes,
-    )));
-    assert!(ui.find("Blobs").is_ok(), "the plane is read off ClassKind");
-    assert!(
-        ui.find("Media").is_err(),
-        "one plane, not every plane the key is not on"
-    );
 
     // An address subject (#614, FL9): presence and health, not a value —
     // and with no presence read, "not read", never "nobody there".
     let address = Subject::Address("robot1/nav".parse().expect("an address"));
-    let mut ui = simulator::<Message, _, _>(pane(projection_inspector(
-        &address, None, &slices, &blob, &media, &nodes,
-    )));
+    let mut ui =
+        simulator::<Message, _, _>(pane(projection_inspector(&address, None, &slices, &nodes)));
     assert!(ui.find("robot1/nav").is_ok(), "the subject, restated");
     assert!(ui.find("presence not read").is_ok());
     assert!(
@@ -291,10 +254,8 @@ fn the_inspector_shows_an_address_from_presence_and_its_descriptor() {
     let mut nodes = zengui::nodes::NodesState::default();
     nodes.describe(Some(&world.catalog()));
     let slices = slices();
-    let blob = zengui::blob::BlobState::default();
-    let media = zengui::view::media::MediaState::default();
     let subject = Subject::Address("robot1/nav".parse().expect("an address"));
-    let mut data = projection_inspector(&subject, None, &slices, &blob, &media, &nodes);
+    let mut data = projection_inspector(&subject, None, &slices, &nodes);
     data.presence = Some(&update);
     let mut ui = simulator::<Message, _, _>(pane(data));
     assert!(ui.find("robot1/nav: up").is_ok());
@@ -331,7 +292,6 @@ fn the_detail_pane_offers_no_chart_for_a_non_numeric_payload() {
         sp: sp(),
         key: FOREIGN,
         identity: None,
-        config: None,
         fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
@@ -377,7 +337,6 @@ fn the_detail_pane_labels_the_series_it_plots() {
         sp: sp(),
         key: REGISTERED,
         identity: None,
-        config: None,
         fetched: Fetched::NotAsked,
         decoded: None,
         series: Some(&series),
@@ -435,8 +394,6 @@ fn projection_inspector<'a>(
     subject: &'a zengui::message::Subject,
     facts: Option<&'a KeyFacts>,
     slices: &'a SliceSet,
-    blob: &'a zengui::blob::BlobState,
-    media: &'a zengui::view::media::MediaState,
     nodes: &'a zengui::nodes::NodesState,
 ) -> zengui::view::inspector::InspectorData<'a> {
     zengui::view::inspector::InspectorData {
@@ -453,8 +410,6 @@ fn projection_inspector<'a>(
         snapshot: None,
         compare_snapshot: false,
         latency: None,
-        blob,
-        media,
         slices: Some(slices),
         presence: None,
         nodes,
@@ -474,8 +429,6 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
     use zengui::message::Subject;
 
     let slices = projection_fixture();
-    let blob = zengui::blob::BlobState::default();
-    let media = zengui::view::media::MediaState::default();
     let nodes = zengui::nodes::NodesState::default();
 
     let key = "v1/h-3fa9c2d41b7e/state/sysinfo/health";
@@ -487,8 +440,6 @@ fn the_inspector_places_a_registered_type_in_the_vocabulary() {
         &subject,
         Some(&facts),
         &slices,
-        &blob,
-        &media,
         &nodes,
     )));
     assert!(ui.find("Type").is_ok());
@@ -538,7 +489,6 @@ fn the_decoded_pane_keeps_the_four_conformance_poles_apart() {
                 slot: zengui::message::SlotId::FOLLOW,
                 key,
                 identity: None,
-                config: None,
                 fetched: Fetched::Landed(fetched),
                 decoded: Some(decoded),
                 series: None,
@@ -629,7 +579,6 @@ fn the_detail_pane_states_a_keys_identity() {
             sp: sp(),
             key,
             identity: Some(identity),
-            config: None,
             fetched: Fetched::NotAsked,
             decoded: None,
             series: None,

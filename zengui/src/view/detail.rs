@@ -67,7 +67,7 @@ fn clamp_document(s: &str) -> (&str, usize) {
 /// The decode used to run over the *whole* attachment on every redraw, with
 /// no cap, beside a hex pane that deliberately clamps at 1 KiB. Two bounds
 /// now, both stated: nothing over [`crate::echo::DECODE_LIMIT`] is decoded at
-/// all — the same limit the echo line and the media viewer stop at — and what
+/// all — the same limit the echo line stops at — and what
 /// is decoded is drawn up to [`DOCUMENT_VIEW_CHARS`].
 fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.xs);
@@ -134,10 +134,6 @@ pub struct DetailData<'a> {
     /// The key's zk2 identity, as the identity cache holds it (#614, FL7);
     /// `None` until the key is observed live or selected.
     pub identity: Option<&'a Resolution>,
-    /// The Config tool's target, when the key is the v1 echo of a
-    /// configuration resource (#481) — read off its v1 facts on demand,
-    /// until FL11 removes the tool.
-    pub config: Option<crate::configure::ConfigTarget>,
     pub fetched: Fetched<'a>,
     /// The decode of the fetched value, when it has completed — the whole
     /// [`DecodedValue`]: rendering, verdict, the decode error behind an
@@ -359,7 +355,7 @@ pub fn section<'a>(data: DetailData<'a>) -> Column<'a, Message> {
             ));
         }
         Some(r) => {
-            col = col.push(identity_section(r, data.config.clone(), sp));
+            col = col.push(identity_section(r, sp));
         }
     }
     if let Some(qos) = qos_section(&data) {
@@ -557,11 +553,7 @@ fn series_section<'a>(
 /// gave it. A field appears only when its fact exists, so absent stays
 /// absent rather than becoming a blank box. v1's facts ladder stood here;
 /// a v1 key is foreign now, and reads "not zk2" like any other.
-pub(crate) fn identity_section(
-    resolution: &Resolution,
-    config: Option<crate::configure::ConfigTarget>,
-    sp: Spacing,
-) -> Element<'_, Message> {
+pub(crate) fn identity_section(resolution: &Resolution, sp: Spacing) -> Element<'_, Message> {
     let identity = &resolution.identity;
     let rung = Rung::of(identity);
     let mut col = Column::new().spacing(sp.sm);
@@ -598,19 +590,6 @@ pub(crate) fn identity_section(
             "REVISION",
             kit::mono(short_fingerprint(&r.revision.fingerprint().to_string())),
         ));
-    }
-    // The echo of a v1 configuration resource (RFC 05 §5.1): the form that
-    // reads and changes it is one click away (#481), until FL11.
-    if let Some(t) = config {
-        let label = format!("configure {}", t.resource);
-        grid.push(
-            kit::secondary(kit::labelled(kit::Icon::Config, label))
-                .padding([0.0, sp.xs])
-                .on_press(Message::Pane(PaneMsg::Config(
-                    crate::view::configure::ConfigMsg::Goto(t),
-                )))
-                .into(),
-        );
     }
     if !grid.is_empty() {
         col = col.push(kit::fields(grid));

@@ -284,7 +284,7 @@ mod tests {
                     // FL9: v1's roster and its `node_info` detail became one
                     // per-address model over presence — descriptors, the
                     // freshness join and the selected address's health.
-                    "nodes", "doctor", "blob", "admin", "payloads",
+                    "nodes", "doctor", "admin", "payloads",
                 ],
             ),
             (
@@ -301,12 +301,6 @@ mod tests {
                     "settings_form",
                     "send_form",
                     "publication",
-                    "media",
-                    // The Config tool (#481): what the user typed and the
-                    // read-back it asked for — and, once a change is armed,
-                    // the only surface that knows a rollback window is
-                    // running, so a base switch must not drop it.
-                    "config_form",
                 ],
             ),
             ("work.echo", &["echo", "echo_view", "echo_scroll"]),
@@ -387,7 +381,9 @@ mod tests {
         // went, the identity cache's epoch came, and the budget window's two
         // observations — 95; and the replay's namespace beside its
         // skeleton — 96. Then FL9: v1's roster and its `node_info` detail
-        // became the one per-address `nodes` — 95.
-        assert_eq!(leaves, 95, "the split must place every field exactly once");
+        // became the one per-address `nodes` — 95. Then FL11: the blob
+        // browser, the media viewer and the Config tool's form went with
+        // their surfaces — 92.
+        assert_eq!(leaves, 92, "the split must place every field exactly once");
     }
 }

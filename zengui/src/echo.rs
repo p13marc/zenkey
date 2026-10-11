@@ -21,12 +21,11 @@ use zenkey_fleet::SampleView;
 /// The app's **one** preview-decode bound (#345) — and the engine's, since
 /// #346: `zenkey_fleet::OBSERVE_LIMIT` bounds the field-intelligence drains
 /// for the same reason, and one limit answered twice is two answers waiting
-/// to diverge (the #353 lesson). The echo line here, the
-/// Inspector's attachment preview (`view::detail`) and the media viewer's
-/// metadata (`view::media`) all stop at it. Every one of them renders a
-/// summary of bytes nobody asked to see in full, every one of them sits on a
-/// path that runs per sample or per frame, and three different limits would
-/// be three different answers to one question. Past it the size is reported
+/// to diverge (the #353 lesson). The echo line here and the Inspector's
+/// attachment preview (`view::detail`) both stop at it. Each renders a
+/// summary of bytes nobody asked to see in full, each sits on a path that
+/// runs per sample or per frame, and two different limits would be two
+/// different answers to one question. Past it the size is reported
 /// and the decode is skipped — which is stated, never silently empty
 /// (RFC 13 §3 O6).
 pub const DECODE_LIMIT: usize = zenkey_fleet::OBSERVE_LIMIT;
